@@ -1,109 +1,128 @@
 """CLI for the first, deliberately read-only implementation increment."""
 from __future__ import annotations
 
-import argparse
 import json
+
 from pathlib import Path
 
 from .adapters import AdapterCapabilityError, adapter_for
-from .cleanup import execute_cleanup
-from .recovery import recover_local_mock
-from .operation_authority import AuthorizedAdapter
-from .execution_safety import require_execution_safe
-from .context import create_ephemeral_context, remove_ephemeral_context
-from .fixtures import apply_fixture_plan, build_fixture_plan
-from .local_fixtures import LocalFixtureError, FIXTURE_SETS
-from .local_role_identity import LocalRoleIdentityError
-from .trust_baseline import TrustBaselineError
-from .local_trust_api import LocalTrustApiError
-from .evidence import EvidenceError
-from .local_run import local_run
-from .local_cli import LocalCliError
-from .local_story_commands import (LOCAL_STORY_COMMANDS, dispatch_local_story_command,
-                                   register_local_story_commands)
-from .ledger import Ledger, LedgerError
-from .mock_state import MockStateError, validate_snapshot
-from .mock_cleanup import verify_snapshot_scope
-from .pilot import PilotError, run_case, run_pre01, run_pre02, run_pre03
-from .remote_observer import remote_dependencies
-from .remote_check import check_remote
-from .remote_run import remote_run
-from .workspace_cli_case_run import dual_workspace_cli_case_run
-from .workspace_cli_status_run import dual_workspace_cli_status_run
-from .workspace_group_case_run import dual_workspace_group_case_run
-from .workspace_story_case_run import dual_workspace_story_case_run
-from .session_cli_case_run import dual_session_cli_case_run
-from .session_public_case_run import dual_session_public_case_run
-from .session_file_core_case_run import dual_session_file_core_case_run
-from .session_service_cli_case_run import dual_session_service_case_run
-from .friend_cli_case_run import dual_friend_cli_case_run
-from .channel_cli_case_run import dual_channel_cli_case_run
-from .operator_cli_case_run import dual_operator_cli_case_run
-from .direct_chat_cli_case_run import dual_direct_chat_case_run
-from .delivery_policy_cli_case_run import dual_delivery_policy_case_run
-from .draft_delivery.dual_case_run import dual_draft_delivery_case_run
-from .service_policy.dual_case_run import dual_service_policy_case_run
-from .provider_publishes.dual_case_run import dual_provider_publishes_case_run
-from .slow_judge.dual_case_run import dual_slow_judge_case_run
-from .provider_owner_dual_case_run import dual_provider_owner_case_run
-from .session_owner.dual_case_run import dual_session_owner_case_run
+from .alisd_wire import AlisdWireError
 from .authority.dual_case_run import dual_authority_case_run
-from .provider_subbots_case_run import dual_provider_subbots_case_run
-from .collaboration_team_case_run import dual_collaboration_team_cli_case_run
-from .custom_collaboration_cli_case_run import dual_custom_collaboration_case_run
-from .group_context_case_run import dual_group_context_cli_case_run
+from .case_command_registration import CASE_COMMANDS
 from .channel_bindings_case_run import dual_channel_bindings_case_run
-from .network_register_case_run import dual_network_register_case_run
-from .network_status_case_run import dual_network_actor_status_case_run
-from .network_read_case_run import dual_network_read_case_run
-from .structured_core_case_run import dual_structured_core_case_run
-from .structured_templates_case_run import dual_structured_templates_case_run
-from .structured_density.dual_case_run import dual_structured_density_case_run
-from .dynamic_family.case_run import (dual_draft_group_case_run,
-                                       dual_fixed_loop_case_run,
-                                       dual_nested_fixed_loop_case_run,
-                                       dual_result_queue_case_run)
-from .workspace_field.dual_case_run import dual_workspace_field_command_handler
+from .channel_cli_case_run import dual_channel_cli_case_run
+from .cleanup import execute_cleanup
+from .collaboration_team_case_run import dual_collaboration_team_cli_case_run
+from .context import create_ephemeral_context, remove_ephemeral_context
+from .custom_collaboration_cli_case_run import dual_custom_collaboration_case_run
 from .delivery_density.reporting import dual_delivery_policy_density_case_run
-from .service_policy_density.reporting import dual_service_policy_density_case_run
-from .webhook_subscription_case_run import dual_webhook_subscription_case_run
-from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
-from .friend_public_accept_case_run import dual_friend_public_accept_case_run
+from .delivery_policy_check import policy_check
+from .delivery_policy_cli_case_run import dual_delivery_policy_case_run
+from .direct_chat_cli_case_run import dual_direct_chat_case_run
+from .docker_binding import review_docker_binding_file
+from .draft_delivery.dual_case_run import dual_draft_delivery_case_run
+from .dynamic_family.case_run import (
+    dual_draft_group_case_run,
+    dual_fixed_loop_case_run,
+    dual_nested_fixed_loop_case_run,
+    dual_result_queue_case_run,
+)
 from .edge_friend_mutation_case_run import dual_edge_friend_mutation_case_run
 from .edge_permission_backlog.case_run import dual_edge_permission_backlog_case_run
 from .edge_read_case_run import dual_edge_read_case_run
-from .case_command_registration import CASE_COMMANDS, register_case_commands
+from .effect_policy import policy_summary
+from .evidence import EvidenceError
+from .execution_safety import require_execution_safe
+from .fixture_cron_check import fixture_cron_check
+from .fixtures import apply_fixture_plan, build_fixture_plan
+from .friend_cli_case_run import dual_friend_cli_case_run
+from .friend_connection_decision_case_run import dual_friend_connection_decision_case_run
+from .friend_public_accept_case_run import dual_friend_public_accept_case_run
+from .group_context_case_run import dual_group_context_cli_case_run
+from .identity_binding import (
+    identity_request,
+    pilot_execution_blocker,
+    require_pilot_execution_binding,
+    human_actor_path,
+)
+from .inventory import current_manifest
+from .ledger import Ledger, LedgerError
+from .local_cli import LocalCliError
+from .local_fixtures import LocalFixtureError
+from .local_role_identity import LocalRoleIdentityError
+from .local_run import local_run
+from .local_story_commands import LOCAL_STORY_COMMANDS, dispatch_local_story_command
+from .local_trust_api import LocalTrustApiError
+from .metadata_probe import probe_db_metadata
+from .migration_inventory import migration_plan
+from .mock_cleanup import verify_snapshot_scope
+from .mock_state import MockStateError, validate_snapshot
+from .network_read_case_run import dual_network_read_case_run
+from .network_register_case_run import dual_network_register_case_run
+from .network_status_case_run import dual_network_actor_status_case_run
+from .observ_transport import observe_retained
+from .operation_authority import AuthorizedAdapter
+from .operator_cli_case_run import dual_operator_cli_case_run
+from .owned_bcs import local_runtime_smoke
+from .pilot import PilotError, run_case, run_pre01, run_pre02, run_pre03
+from .pilot import evaluate
+from .pool import (
+    PoolBusyError,
+    PoolLease,
+    PoolLeaseError,
+    bound_pool_path,
+    inspect_pool,
+    pool_path,
+    pool_scope,
+)
+from .prepare import prepare_run
+from .probe import http_probe, ws_probe
+from .profile import ConfigError, fingerprint, load, require_resolved
+from .provider_owner_dual_case_run import dual_provider_owner_case_run
+from .provider_publishes.dual_case_run import dual_provider_publishes_case_run
+from .provider_subbots_case_run import dual_provider_subbots_case_run
+from .recheck_review import recheck_plan
+from .recovery import recover_local_mock
+from .remote_check import check_remote
+from .remote_effects import remote_effect_admission
+from .remote_observer import remote_dependencies
 from .remote_reconcile import remote_reconcile
-from .delivery_policy_check import policy_check
-from .docker_binding import review_docker_binding_file
+from .remote_run import remote_run
+from .reporting import build_report, write_reports
 from .retained import retained_run
 from .retained_recheck import retained_recheck
-from .recheck_review import recheck_plan
+from .run_state import (
+    RunStateError,
+    read as read_state,
+    require_profile_binding,
+    write as write_state,
+)
+from .runtime import LocalSingleboxRuntime, RuntimeContractError, require_no_legacy_runtime
+from .service_policy.dual_case_run import dual_service_policy_case_run
+from .service_policy_density.reporting import dual_service_policy_density_case_run
+from .session_cli_case_run import dual_session_cli_case_run
+from .session_file_core_case_run import dual_session_file_core_case_run
+from .session_owner.dual_case_run import dual_session_owner_case_run
+from .session_public_case_run import dual_session_public_case_run
+from .session_service_cli_case_run import dual_session_service_case_run
+from .sessionless_run import sessionless_run
+from .slow_judge.dual_case_run import dual_slow_judge_case_run
+from .structured_core_case_run import dual_structured_core_case_run
+from .structured_density.dual_case_run import dual_structured_density_case_run
+from .structured_templates_case_run import dual_structured_templates_case_run
+from .transport import ObservationError, ReadClient
 from .transport_plan import transport_plan
 from .transport_projection import match_transport
-from .observ_transport import observe_retained
-from .fixture_cron_check import fixture_cron_check
-from .sessionless_run import sessionless_run
-from .owned_bcs import local_runtime_smoke
-from .pool import (PoolBusyError, PoolLease, PoolLeaseError, bound_pool_path,
-                    inspect_pool, pool_path, pool_scope)
-from .probe import http_probe, ws_probe
-from .metadata_probe import probe_db_metadata
-from .effect_policy import policy_summary
-from .remote_effects import remote_effect_admission
-from .identity_binding import (identity_request, pilot_execution_blocker, require_pilot_execution_binding,
-                               human_actor_path)
-from .inventory import current_manifest
-from .migration_inventory import migration_plan
-from .alisd_wire import AlisdWireError
-from .reporting import build_report, write_reports
-from .preflight import check
-from .prepare import prepare_run
-from .profile import ConfigError, fingerprint, load, require_resolved
-from .pilot import evaluate
-from .run_state import RunStateError, read as read_state, require_profile_binding, write as write_state
-from .runtime import LocalSingleboxRuntime, RuntimeContractError, require_no_legacy_runtime
-from .transport import ObservationError, ReadClient
+from .trust_baseline import TrustBaselineError
+from .webhook_subscription_case_run import dual_webhook_subscription_case_run
+from .workspace_cli_case_run import dual_workspace_cli_case_run
+from .workspace_cli_status_run import dual_workspace_cli_status_run
+from .workspace_field.dual_case_run import dual_workspace_field_command_handler
+from .workspace_group_case_run import dual_workspace_group_case_run
+from .workspace_story_case_run import dual_workspace_story_case_run
+
+from .cli_registration import build_cli_parser
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -142,247 +161,7 @@ def plan(profile: dict) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="BCS E2E pilot: offline plan and read-only discovery")
-    commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "check"):
-        cmd = commands.add_parser(name)
-        cmd.add_argument("--profile", type=Path, required=True)
-        if name == "check":
-            cmd.add_argument("--allow-read", action="store_true",
-                             help="Explicitly allow authenticated GETs to the profile origin")
-            cmd.add_argument("--observer-binding", type=Path, help="Read an operator-reviewed preprod mapping receipt")
-            cmd.add_argument("--mcporter-binary", type=Path)
-            cmd.add_argument("--allow-observer-read", action="store_true", help="Allow metadata only; no business rows")
-    cron = commands.add_parser('fixture-cron-check', help='Read exact fixture cron lists via the configured frontend; no absence/closure claim')
-    cron.add_argument('--profile', type=Path, required=True)
-    cron.add_argument('--allow-read', action='store_true')
-    cron.add_argument('--confirm-human-id', required=True)
-    cron.add_argument('--confirm-frontend-origin', required=True)
-    policy = commands.add_parser('policy-check', help='Explicit read-only native BCN effective-policy discovery; no admission or writes')
-    binding_review = commands.add_parser(
-        "docker-binding-review",
-        help="Offline 7.2 Aliyun target binding review; no container or network execution",
-    )
-    binding_review.add_argument("--binding", type=Path, required=True)
-    policy.add_argument('--profile', type=Path, required=True)
-    policy.add_argument('--review', type=Path, required=True)
-    policy.add_argument('--allow-read', action='store_true')
-    transport = commands.add_parser('retained-transport', help='Offline retained transport selectors or supplied-log matching; no network/credentials/release')
-    transport.add_argument('--profile', type=Path, required=True)
-    transport.add_argument('--state-dir', type=Path, required=True)
-    transport.add_argument('--run-id', required=True)
-    transport.add_argument('--case', choices=('RETAIN-GROUP-01', 'RETAIN-SESSION-01'), required=True)
-    transport.add_argument('--observation-id', required=True)
-    transport.add_argument('--start-epoch', type=int, required=True)
-    transport.add_argument('--end-epoch', type=int, required=True)
-    transport.add_argument('--projection', type=Path, help='Optional normalized log projection, not raw platform output')
-    transport = commands.add_parser('retained-observ-ws', help='Explicit bounded Observ WS reads with fresh instance discovery; no business writes/release')
-    transport.add_argument('--profile', type=Path, required=True)
-    transport.add_argument('--state-dir', type=Path, required=True)
-    transport.add_argument('--run-id', required=True)
-    transport.add_argument('--case', choices=('RETAIN-GROUP-01', 'RETAIN-SESSION-01'), required=True)
-    transport.add_argument('--observation-id', required=True)
-    transport.add_argument('--start-epoch', type=int, required=True)
-    transport.add_argument('--end-epoch', type=int, required=True)
-    transport.add_argument('--log-binding', type=Path, required=True)
-    transport.add_argument('--observ-binary', type=Path, required=True)
-    transport.add_argument('--output-dir', type=Path, required=True)
-    transport.add_argument('--allow-observer-read', action='store_true')
-    transport.add_argument('--confirm-run-id', required=True)
-    pool = commands.add_parser("pool", help="Inspect a local fixture-pool reservation without changing it")
-    pool_commands = pool.add_subparsers(dest="pool_action", required=True)
-    pool_inspect = pool_commands.add_parser("inspect")
-    pool_inspect.add_argument("--profile", type=Path, required=True)
-    prepare = commands.add_parser("prepare", help="Create a private local run ledger and fixture-pool lease")
-    prepare.add_argument("--profile", type=Path, required=True)
-    prepare.add_argument("--run-id", required=True)
-    prepare.add_argument("--state-dir", type=Path, required=True)
-    prepare.add_argument("--observer-binding", type=Path, help="Freeze a private operator-reviewed preprod mapping receipt")
-    release = commands.add_parser("release", help="Release only the matching local fixture-pool lease")
-    release.add_argument("--state-dir", type=Path, required=True)
-    run = commands.add_parser("run", help="Execute an explicitly allowed pilot Story")
-    run.add_argument("--profile", type=Path, required=True)
-    run.add_argument("--state-dir", type=Path, required=True)
-    run.add_argument("--run-id", required=True)
-    run.add_argument("--case", choices=("PRE-01", "PRE-02", "PRE-03"), required=True)
-    run.add_argument("--allow-write", action="store_true")
-    run.add_argument("--confirm-run-id", required=True)
-    run.add_argument("--mcporter-binary", type=Path, help="Explicit MCP executable for a reviewed preprod Run")
-    run.add_argument("--allow-observer-read", action="store_true", help="Allow MCP metadata and current-Case row queries")
-    retained = commands.add_parser("retained-run", help="Run one retained slice locally or through explicitly reviewed preprod attachment")
-    retained.add_argument("--profile", type=Path, required=True)
-    retained.add_argument("--state-dir", type=Path, required=True)
-    retained.add_argument("--run-id", required=True)
-    retained.add_argument("--case", choices=("RETAIN-GROUP-01", "RETAIN-SESSION-01", "RETAIN-FILE-01"), required=True)
-    retained.add_argument("--allow-write", action="store_true")
-    retained.add_argument("--confirm-run-id", required=True)
-    retained.add_argument("--retained-review", type=Path)
-    retained.add_argument("--observer-binding", type=Path)
-    retained.add_argument("--mcporter-binary", type=Path)
-    retained.add_argument("--allow-read", action="store_true")
-    retained.add_argument("--allow-observer-read", action="store_true")
-    retained.add_argument('--serial-preflight', action='store_true',
-                          help='Hold one trigger guard through fresh checks and execution; no historical closure prerequisite')
-    retained.add_argument('--previous-state-dir', type=Path,
-                          help='Exact prior retained Run for scheduling handoff, not cleanup or replay')
-    retained.add_argument('--previous-profile', type=Path, help='Exact old Profile for a reviewed storage-origin-only handoff')
-    retained.add_argument('--profile-transition-review', type=Path, help='Current Run-bound storage-origin transition receipt')
-    gate = commands.add_parser("gate", help="Evaluate full release qualification without releasing the pool")
-    gate.add_argument("--profile", type=Path, required=True)
-    gate.add_argument("--state-dir", type=Path, required=True)
-
-    report = commands.add_parser("report", help="Render JSON/JUnit/Markdown results for one Run")
-    report.add_argument("--profile", type=Path, required=True)
-    report.add_argument("--state-dir", type=Path, required=True)
-    report.add_argument("--output-dir", type=Path)
-    report.add_argument("--format", choices=("all", "json", "junit", "markdown"), default="all")
-    fixture = commands.add_parser("fixture", help="Plan or explicitly apply one-time fixture initialization")
-    fixture.add_argument("action", choices=("plan", "apply"))
-    fixture.add_argument("--profile", type=Path, required=True)
-    fixture.add_argument("--state-dir", type=Path, required=True)
-    fixture.add_argument("--run-id", default="fixture-plan")
-    fixture.add_argument("--allow-write", action="store_true")
-    fixture.add_argument("--confirm-run-id")
-    reconcile = commands.add_parser("remote-reconcile", help="Reconcile only a failed reviewed Run's exact live resources before standard cleanup")
-    reconcile.add_argument("--profile", type=Path, required=True)
-    reconcile.add_argument("--state-dir", type=Path, required=True)
-    reconcile.add_argument("--run-id", required=True)
-    reconcile.add_argument("--allow-read", action="store_true")
-    reconcile.add_argument("--allow-write", action="store_true")
-    reconcile.add_argument("--confirm-run-id", required=True)
-    cleanup = commands.add_parser("cleanup", help="Dry-run or execute exact current-Run resource cleanup")
-    cleanup.add_argument("--profile", type=Path, required=True)
-    cleanup.add_argument("--state-dir", type=Path, required=True)
-    cleanup.add_argument("--dry-run", action="store_true")
-    cleanup.add_argument("--allow-write", action="store_true")
-    cleanup.add_argument("--confirm-run-id")
-    recover = commands.add_parser("recover-local", help="Explicit local mock cleanup using existing terminal proof")
-    recover.add_argument("--profile", type=Path, required=True)
-    recover.add_argument("--state-dir", type=Path, required=True)
-    recover.add_argument("--allow-write", action="store_true")
-    recover.add_argument("--confirm-run-id", required=True)
-    recheck = commands.add_parser("retained-recheck", help="Read-only evidence for an existing quarantined retained Run; never replay or release")
-    recheck.add_argument("--profile", type=Path, required=True)
-    recheck.add_argument("--state-dir", type=Path, required=True)
-    recheck.add_argument("--run-id", required=True)
-    recheck.add_argument("--case", choices=("RETAIN-GROUP-01", "RETAIN-SESSION-01"), required=True)
-    recheck.add_argument("--dry-run", action="store_true", help="Offline source digests and non-authorizing review template")
-    recheck.add_argument("--review", "--read-plan", dest="review", type=Path)
-    recheck.add_argument("--mapping-confirmation", type=Path, help="Persistent environment facts for the separate v2 source-bound read plan")
-    recheck.add_argument("--observer-binding", type=Path)
-    recheck.add_argument("--mcporter-binary", type=Path)
-    recheck.add_argument("--allow-observer-read", action="store_true")
-    recheck.add_argument("--confirm-run-id")
-    context = commands.add_parser("context", help="Create or remove an isolated non-home runner context")
-    context_commands = context.add_subparsers(dest="context_action", required=True)
-    context_create = context_commands.add_parser("create")
-    context_create.add_argument("--profile", type=Path, required=True)
-    context_create.add_argument("--context-dir", type=Path, required=True)
-    context_remove = context_commands.add_parser("remove")
-    context_remove.add_argument("--context-dir", type=Path, required=True)
-    probe = commands.add_parser("probe", help="Run an explicit read-only transport probe")
-    probe_commands = probe.add_subparsers(dest="probe_action", required=True)
-    probe_metadata = probe_commands.add_parser("db-metadata", help="Read fixed DB/table/column metadata; never admit a remote environment")
-    probe_metadata.add_argument("--scope", choices=("pilot", "execution"), default="pilot",
-                                help="Select fixed resource or execution-state metadata; never query rows")
-    probe_metadata.add_argument("--server", required=True)
-    probe_metadata.add_argument("--database", required=True)
-    probe_metadata.add_argument("--mcporter-binary", type=Path, required=True)
-    probe_metadata.add_argument("--timeout-seconds", type=int, default=30)
-    probe_metadata.add_argument("--allow-read", action="store_true")
-    probe_http = probe_commands.add_parser("http")
-    probe_http.add_argument("--profile", type=Path, required=True)
-    probe_http.add_argument("--operation", choices=("environment.read", "identity.read", "bot.read"), required=True)
-    probe_http.add_argument("--bot-id")
-    probe_http.add_argument("--allow-read", action="store_true")
-    probe_ws = probe_commands.add_parser("ws")
-    probe_ws.add_argument("--profile", type=Path, required=True)
-    probe_ws.add_argument("--state-dir", type=Path, required=True)
-    probe_ws.add_argument("--run-id", required=True)
-    probe_ws.add_argument("--token-env", required=True)
-    probe_ws.add_argument("--group-id", required=True)
-    probe_ws.add_argument("--session-id", required=True)
-    probe_ws.add_argument("--allow-read", action="store_true")
-    runtime = commands.add_parser("runtime", help="Inspect LocalSinglebox boundaries or run an explicitly owned local smoke")
-    runtime.add_argument("action", choices=("check", "start", "stop", "status", "smoke", "fixture-smoke"))
-    runtime.add_argument("--profile", type=Path, required=True)
-    runtime.add_argument("--state-dir", type=Path, required=True)
-    runtime.add_argument("--runtime-dir", type=Path)
-    runtime.add_argument("--binary", type=Path)
-    runtime.add_argument("--binary-sha256")
-    runtime.add_argument("--run-id")
-    runtime.add_argument("--panel-asset", type=Path, help="Opt-in real local manifest bundle for owned smoke only")
-    runtime.add_argument("--panel-sha256", help="Approved panel artifact SHA256; paired with --panel-asset")
-    runtime.add_argument("--port", type=int, default=0)
-    runtime.add_argument("--allow-local-processes", action="store_true")
-    runtime.add_argument("--allow-fixture-write", action="store_true")
-    runtime.add_argument("--fixture-set", choices=tuple(FIXTURE_SETS), default="pilot",
-                         help="Owned-local fixture-smoke only; does not execute or admit a Story")
-    runtime.add_argument("--verify-bot-identities", action="store_true",
-                         help="Verify generated expanded-set Bot credentials using local read-only operations")
-    runtime.add_argument("--check-trust-baseline", action="store_true",
-                         help="Read-only relationship and visibility baseline for verified local trusted-team roles")
-    local = commands.add_parser("local-run", help="Run the three pilot Stories in a fresh owned local BCS; no profile required")
-    local.add_argument("--state-dir", type=Path, required=True)
-    local.add_argument("--binary", type=Path, required=True)
-    local.add_argument("--binary-sha256", required=True)
-    local.add_argument("--run-id", required=True)
-    local.add_argument("--local-logs", action="store_true", help="Collect optional request-log diagnostics from this owned runtime")
-    local.add_argument("--cli-binary", type=Path, help="Opt in to the separate local product CLI session-read check")
-    local.add_argument("--cli-binary-sha256", help="Approved product CLI SHA256; required with --cli-binary")
-    local.add_argument("--port", type=int, default=0)
-    local.add_argument("--allow-local-processes", action="store_true")
-    local.add_argument("--allow-fixture-write", action="store_true")
-    local.add_argument("--allow-write", action="store_true")
-    local.add_argument("--confirm-run-id", required=True)
-    register_case_commands(commands)
-    remote = commands.add_parser("remote-run", help="Check, prepare, execute and report the reviewed preprod pilot; never manage remote services")
-    remote.add_argument("--profile", type=Path, required=True)
-    remote.add_argument("--state-dir", type=Path, required=True)
-    remote.add_argument("--run-id", required=True)
-    remote.add_argument("--observer-binding", type=Path, required=True)
-    remote.add_argument("--mcporter-binary", type=Path, required=True)
-    remote.add_argument("--allow-read", action="store_true")
-    remote.add_argument("--allow-observer-read", action="store_true")
-    remote.add_argument("--allow-write", action="store_true")
-    remote.add_argument("--confirm-run-id", required=True)
-    trust = commands.add_parser('local-trust-run', help='Run the owned-local legacy friendship API slice; CLI parent remains unmigrated')
-    trust.add_argument('--state-dir', type=Path, required=True)
-    trust.add_argument('--binary', type=Path, required=True)
-    trust.add_argument('--binary-sha256', required=True)
-    trust.add_argument('--run-id', required=True)
-    trust.add_argument('--cli-binary', type=Path, help='Opt in to the actual trusted-team CLI friendship sequence')
-    trust.add_argument('--cli-binary-sha256', help='Explicit approved CLI binary SHA256')
-    trust.add_argument('--allow-local-processes', action='store_true')
-    trust.add_argument('--allow-fixture-write', action='store_true')
-    trust.add_argument('--allow-write', action='store_true')
-    trust.add_argument('--confirm-run-id', required=True)
-    file_setup = commands.add_parser(
-        'local-file-setup',
-        help='Create the owned PM/ENG group and two Sessions for the unfinished CLI-file Story')
-    file_setup.add_argument('--state-dir', type=Path, required=True)
-    file_setup.add_argument('--binary', type=Path, required=True)
-    file_setup.add_argument('--binary-sha256', required=True)
-    file_setup.add_argument('--cli-binary', type=Path, required=True)
-    file_setup.add_argument('--cli-binary-sha256', required=True)
-    file_setup.add_argument('--run-id', required=True)
-    file_setup.add_argument('--allow-local-processes', action='store_true')
-    file_setup.add_argument('--allow-fixture-write', action='store_true')
-    file_setup.add_argument('--allow-write', action='store_true')
-    file_setup.add_argument('--confirm-run-id', required=True)
-    register_local_story_commands(commands)
-    native = commands.add_parser("sessionless-run", help="Independent native group CRUD; not PRE-01/02/03")
-    native.add_argument("--profile", type=Path, required=True)
-    native.add_argument("--state-dir", type=Path, required=True)
-    native.add_argument("--run-id", required=True)
-    native.add_argument("--source-binding", type=Path, required=True)
-    native.add_argument("--source-review", type=Path, required=True)
-    native.add_argument("--observer-binding", type=Path, required=True)
-    native.add_argument("--mcporter-binary", type=Path, required=True)
-    native.add_argument("--allow-read", action="store_true")
-    native.add_argument("--allow-observer-read", action="store_true")
-    native.add_argument("--allow-write", action="store_true")
-    native.add_argument("--confirm-run-id", required=True)
+    parser = build_cli_parser()
     args = parser.parse_args(argv)
     try:
         profile = None
