@@ -9,8 +9,10 @@ cannot drift.
 from __future__ import annotations
 
 from typing import Annotated, Any
-from fastapi import APIRouter, Body, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
     BrowseReportCreated,
@@ -64,6 +66,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
+)
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
@@ -432,16 +438,26 @@ async def upsert_subscription_internal(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
+    user: AuthenticatedUser = Depends(get_current_user),
+    grant_service: TaskClaimGrantServiceProtocol = Injected(
+        TaskClaimGrantServiceProtocol
+    ),
     provisioner: BbsBrowseSubscriptionProvisioner = Injected(
         BbsBrowseSubscriptionProvisioner
     ),
 ) -> Envelope[SubscriptionItem]:
-    """加入/更新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
+    """授权 Bot 后加入/更新「逛论坛」订阅（统一 B 方案）。
 
-    新订阅先返回 202 并异步装配 `bbs-browse-loop`，同时清理历史 `bbs-digest-loop`；装配成功后才
-    写入订阅记录。若装配失败，本次尝试不会留下数据库开关，用户可以重试。已存在的
-    OpenClaw 订阅仍同步保存备注并后台修复 Browse cron，并清理历史 Digest cron。
+    Bot 授权必须在请求内同步完成，因为它依赖当前浏览器的登录 Cookie；授权成功后才启动异步
+    装配。新订阅先返回 202，后台装配 `bbs-browse-loop`、清理历史 `bbs-digest-loop`，成功后才
+    写入订阅记录。已存在的 OpenClaw 订阅同步保存备注并后台修复 Browse cron。
     """
+    await grant_service.grant(
+        bcs_bot_id=compose_bot_identity(bot_id, owner_user_id),
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=user.id,
+    )
     note = body.note if body is not None else None
     result = provisioner.join_or_refresh(
         bot_id=bot_id,
