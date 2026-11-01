@@ -8,7 +8,7 @@ from agentclaw.community.core.cron.errors import CronApiTimeoutError, CronRelayE
 from agentclaw.community.log import get_logger
 from agentclaw.community.adapters.http.openapi_v1.responses import trace_id
 
-from .mapping import _map_routine, _map_run, failed_targets, target_context, safe_reason
+from .converter import _map_routine, _map_run, failed_targets, target_context, safe_reason
 
 logger = get_logger()
 

@@ -23,7 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.routines.router import (
     run_routine,
     update_routine,
 )
-from agentclaw.community.adapters.http.openapi_v1.routines.mapping import _map_routine, _map_run
+from agentclaw.community.adapters.http.openapi_v1.routines.converter import _map_routine, _map_run
 from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     Routine,
     RoutineSpec,
