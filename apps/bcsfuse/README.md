@@ -187,6 +187,18 @@ export EMBEDDING_RETRY_BUDGET_MS="2000"
 # capacity advantage. Set it from the actual model quota; 0 disables admission.
 # EMBEDDING_QUOTA_PERIOD_SECONDS=60 defines the shared call window.
 
+Real-model validation requires search-visible workers. Workers created with
+`POST /v1/workers` default to `availability=private`, while public search and
+recommendation paths retain only `protected` or `public` workers. Before
+evaluating recall, fallback, or latency, explicitly publish each test worker:
+
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"availability":"public"}' \
+  http://localhost:8765/v1/workers/<worker_id>/availability
+```
 # Payload-only final fallback snapshot (runtime). The durable lease owner
 # publishes it atomically; read-only replicas only read it. Runtime requires an
 # absolute path on a mounted persistent volume; tmpfs and `/tmp` are rejected.
