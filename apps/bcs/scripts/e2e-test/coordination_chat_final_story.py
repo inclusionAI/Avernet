@@ -166,7 +166,7 @@ class ChatFinalStory:
                                        "session_id": self.session_id,
                                        "bot_id": "human_" + self.args.human,
                                        "message": "please coordinate the handover",
-                                       "mentions": [self.worker["bot_uuid"]],
+                                       "mentions": [self.manager["bot_uuid"]],
                                        "leaseId": lease["leaseId"],
                                        "leaseEpoch": lease["epoch"]}})
         admitted = socket_client.receive("cf-speak")
@@ -192,10 +192,13 @@ class ChatFinalStory:
         transport negotiation; the caller retries that explicit conflict."""
         response = None
         for _ in range(6):
+            # The provider callback wire shape (the same frame the caller
+            # story's answer_dispatch sends): message.text carries the
+            # reply — the CoordinationCall frame rides inside it.
             response = self.post("/bot/events", {
                 "run_id": run_id, "state": "final", "group_id": self.group_id,
                 "bcs_session_id": self.session_id,
-                "message": {"content": [{"type": "text", "text": text}]},
+                "message": {"text": text},
             }, headers={"X-BCN-Provider-Id": self.provider["provider_id"],
                         "Authorization": "Bearer " + self.manager["bot_runtime_token"]})
             if response.get("error") != "transport_conflict":
