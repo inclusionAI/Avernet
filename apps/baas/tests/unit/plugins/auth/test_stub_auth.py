@@ -1,8 +1,11 @@
 """Unit tests for plugins/auth/stub/_stub_auth.py — StubAuthPlugin."""
 
+from http.cookies import CookieError
+
 import pytest
 
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.auth.stub import _stub_auth as stub_auth_module
 from secbaas.community.spi.auth import AuthUser
 
 
@@ -39,6 +42,20 @@ class TestStubAuthPlugin:
     @pytest.mark.asyncio
     async def test_get_login_user_ignores_unrelated_cookie_and_referer(self):
         user = await self.plugin.get_login_user(cookie="any=value", referer="any")
+        assert user.staffId == "000001"
+
+    @pytest.mark.asyncio
+    async def test_get_login_user_falls_back_when_cookie_parsing_fails(
+        self, monkeypatch
+    ):
+        class InvalidCookie:
+            def load(self, cookie):
+                raise CookieError("invalid cookie")
+
+        monkeypatch.setattr(stub_auth_module, "SimpleCookie", InvalidCookie)
+
+        user = await self.plugin.get_login_user(cookie="malformed")
+
         assert user.staffId == "000001"
 
     def test_is_allowed_always_returns_true(self):
