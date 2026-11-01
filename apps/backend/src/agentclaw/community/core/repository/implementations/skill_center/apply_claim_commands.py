@@ -14,6 +14,8 @@ activation routes.
 
 from __future__ import annotations
 
+from agentclaw.community.core.mcp.config_intent import McpConfigDirective, McpConfigMutation
+
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.repository.capability_desired_state_types import (
@@ -216,12 +218,12 @@ class ApplyClaimCommands:
         bot_id: str,
         owner_id: str,
         server_code: str,
-        config: dict | None,
+        config: McpConfigMutation,
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """Install one Direct MCP server with its complete bot override; refuse one a Set supplies."""
+        """Claim Direct supply and preserve/clear/replace its override; refuse current Set supply."""
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             _skills, supplied = self._set_supply(
@@ -242,13 +244,16 @@ class ApplyClaimCommands:
                 env=get_current_env(),
                 server_code=server_code,
             )
-            override_changed = bot_mcp_configs.replace(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                server_code=server_code,
-                config=config,
+            override_changed = (
+                False if config is McpConfigDirective.PRESERVE else
+                bot_mcp_configs.replace(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_code=server_code,
+                    config=config,
+                )
             )
             session.flush()
             return DesiredStateMutation(

@@ -192,7 +192,7 @@ class PlatformBotStateReader(BotStateReader):
         codes = set(self._activation.list_installed_mcps(**who)) - set(supplied)
         servers = []
         for code in sorted(codes):
-            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
+            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.entity_id, server_code=code)
             servers.append(CapturedMcpServer(code, dict(override) if override else None))
         return tuple(servers)
 

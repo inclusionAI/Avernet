@@ -248,7 +248,8 @@ def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase
     assert report.status is ApplyStatus.SUCCEEDED
     assert [c.construct.value for c in report.categories] == ["mcp"]
     # The platform ports were used, the device ports were not.
-    assert platform_activation.configured == [("github", None)]
+    assert platform_activation.installed == {"github"}
+    assert platform_activation.configured == []
     assert device_activation.activated == []
     assert device_activation.configured == []
     # One closing redeliver, after the categories.
@@ -283,7 +284,8 @@ def test_the_device_shape_is_the_pre_w8_shape() -> None:
     assert pre.categories == ()  # mcp is not pre-container with the switch off
     on = _apply(service, _TECLAW_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == ["mcp"]
-    assert device_activation.configured == [("github", None)]
+    assert device_activation.installed == {"github"}
+    assert device_activation.configured == []
     assert platform_activation.activated == []
     assert platform_activation.configured == []
     assert calls == []
@@ -304,7 +306,8 @@ def test_arca_is_unaffected_by_the_deployments_teclaw_mode() -> None:
     assert pre.categories == ()
     on = _apply(service, _ARCA_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == ["mcp"]
-    assert device_activation.configured == [("github", None)]
+    assert device_activation.installed == {"github"}
+    assert device_activation.configured == []
     assert platform_activation.activated == []
     assert platform_activation.configured == []
     assert calls == []
@@ -343,7 +346,8 @@ def test_a_raising_closing_step_is_a_note_not_a_failure() -> None:
     )
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
-    assert platform_activation.configured == [("github", None)]
+    assert platform_activation.installed == {"github"}
+    assert platform_activation.configured == []
     assert report.notes == ("delivery could not be closed: ConnectionError",)
 
 

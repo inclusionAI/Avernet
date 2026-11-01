@@ -31,6 +31,7 @@ from agentclaw.community.core.workspace.protected_entries import protected_entry
 from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
 from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
+from agentclaw.community.core.mcp.config_intent import McpConfigDirective
 
 __all__ = [
     "CenterSkillByName",
@@ -351,7 +352,9 @@ class McpOverride:
 @dataclass(frozen=True)
 class DesiredMcpServer:
     server_code: str
-    override: McpOverride | None = None
+    # None is a complete-state declaration of no override (Genome); a
+    # Manifest may instead leave this independent configuration untouched.
+    override: McpOverride | None | McpConfigDirective = None
 
     def __post_init__(self) -> None:
         _require(bool(self.server_code), "an MCP server needs a server_code")

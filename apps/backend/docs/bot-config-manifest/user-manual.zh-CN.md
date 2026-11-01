@@ -899,10 +899,14 @@ mcp:
   容器级 mcporter `headerPolicies` 仍会按 host 动态生效，当前不能由单个 Manifest
   条目关闭。
 - LOCAL/stdio MCP 可以只写 `server_code`，但不能携带非空远程 `config`。
-- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
-  server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
-  在界面上手工开的），配置改变记 `updated`，已经一致的记 `unchanged`。安装关系与
-  Bot override 同事务保存，随后按既有 best-effort 语义投影。
+- 条目省略 `config` 时保留该 Bot 当前保存的 override，显式 `config: {}` 清除它，
+  非空 `config` 完整替换它。旧版本的 bare entry 曾清配置；需要重置的调用方应改为
+  显式空对象。没有保存 override 时使用继承配置；保存配置本身不启用 MCP。
+- apply 校验注册表、权限及实际保留/替换后的配置，再收敛 **Direct MCP 供应**。
+  当前 active 普通集、Default（扣除 exclusion）及对应平台默认供应不在范围内；
+  省略它们不操作，显式声明冲突项则整次 Apply 拒绝。管理范围内父条目被省略时，
+  撤销供应并清 override，包含无 Direct Installation 的暂存配置；整个 `mcp` 类别
+  缺席仍不操作。配置变化记 `updated`，一致记 `unchanged`，提交后仍 best-effort 投影。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
