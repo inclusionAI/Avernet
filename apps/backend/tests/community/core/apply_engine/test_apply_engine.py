@@ -1301,3 +1301,20 @@ async def test_the_compilers_resolutions_ride_into_the_report():
     # — same answer.
     bare = await _apply(engine, 'script:\n  body: "echo hi"\n')
     assert bare.as_payload()["sources"] == []
+
+
+def test_a_removal_that_landed_makes_an_otherwise_failed_apply_partial():
+    """Review finding: ``script: null`` deleting the script while the only declared entry failed read as FAILED,
+    so a genome promotion left the refs alone although the bot had changed."""
+    from agentclaw.community.core.apply_engine.outcomes import CategoryResult, EntryResult, derive_status
+
+    cleared = CategoryResult(construct=Section.SCRIPT, entries=(), removals=("script",), aborted=False)
+    failed = CategoryResult(
+        construct=Category.SKILLS,
+        entries=(EntryResult(Category.SKILLS, "refund-policy", EntryOutcome.FAILED, reason="not found"),),
+        removals=(),
+        aborted=True,
+    )
+    assert derive_status((cleared, failed)) is ApplyStatus.PARTIAL
+    assert derive_status((failed,)) is ApplyStatus.FAILED, "nothing landed: still FAILED"
+    assert derive_status((cleared,)) is ApplyStatus.SUCCEEDED
