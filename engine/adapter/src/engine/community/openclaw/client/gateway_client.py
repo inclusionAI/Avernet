@@ -23,7 +23,6 @@ import os
 import uuid
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Optional
 
-
 from engine.community.openclaw.protocol import (
     ErrorCodes,
     EventFrame,
@@ -33,6 +32,7 @@ from engine.community.openclaw.protocol import (
 from engine.community.openclaw.config import OpenClawConfig
 
 from engine.community.openclaw.client.gateway_connection import GatewayConnection
+from engine.community.openclaw.client.child_runs import ChildRuns, is_child_event, is_parent_continuation
 
 log = logging.getLogger("openclaw-client")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
@@ -241,6 +241,7 @@ class OpenClawGatewayClient(GatewayConnection):
                 and event_session
                 and event_session.strip().lower().removeprefix("agent:main:")
                 != session_key.strip().lower().removeprefix("agent:main:")
+                and not is_child_event(event.event, payload)
             ):
                 return True
             # COSEC: Bound uncorrelated events until the upstream run identity is known.
@@ -262,8 +263,9 @@ class OpenClawGatewayClient(GatewayConnection):
         filter_drop_count = 0
         pending_compaction_finals = 0
         suppressed_compaction_lifecycle_ends = 0
-        pending_announces = 0
+        children = ChildRuns(session_key)
         waiting_for_subagent_resume = False
+        resumed_parent_run_id: str | None = None
         approval_suffixes = ("approval.requested", "approval.resolved")
 
         def event_summary(event: EventFrame, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -282,7 +284,7 @@ class OpenClawGatewayClient(GatewayConnection):
                 "hasText": bool(payload.get("text")),
                 "expectedRunId": expected_run_id,
                 "currentRunId": run_id,
-                "pendingAnnounces": pending_announces,
+                "pendingAnnounces": children.pending_count,
                 "pendingCompactionFinals": pending_compaction_finals,
             }
 
@@ -329,24 +331,6 @@ class OpenClawGatewayClient(GatewayConnection):
             payload_session_key = payload.get("sessionKey")
             return isinstance(payload_session_key, str) and payload_session_key in trusted_parent_session_keys
 
-        def continuation_matches_parent_session(payload: Dict[str, Any]) -> bool:
-            payload_session_key = payload.get("sessionKey")
-            return isinstance(payload_session_key, str) and (
-                payload_session_key.strip().lower().removeprefix("agent:main:")
-                == session_key.strip().lower().removeprefix("agent:main:")
-            )
-
-        def is_parent_continuation(event: EventFrame, payload: Dict[str, Any]) -> bool:
-            data = payload.get("data")
-            stream = payload.get("stream")
-            return (event.event == "chat" and payload.get("state") == "delta") or (
-                event.event == "agent"
-                and (
-                    stream in {"assistant", "tool", "item"}
-                    or (stream == "lifecycle" and isinstance(data, dict) and data.get("phase") == "start")
-                )
-            )
-
         def matches_current_stream(event: EventFrame, payload: Dict[str, Any]) -> bool:
             payload_run_id = payload.get("runId")
             if isinstance(payload_run_id, str) and payload_run_id:
@@ -354,15 +338,22 @@ class OpenClawGatewayClient(GatewayConnection):
                     return True
                 if payload_run_id.startswith("inject-"):
                     return True
-                if is_announce_event(payload) and pending_announces > 0:
-                    return announce_matches_parent_session(payload)
-                if waiting_for_subagent_resume and continuation_matches_parent_session(payload):
+                if is_announce_event(payload):
                     return (
-                        is_parent_continuation(event, payload)
+                        announce_matches_parent_session(payload)
+                        and children.announce_child(payload_run_id) is not None
+                    )
+                if (
+                    waiting_for_subagent_resume
+                    and children.has_completed
+                    and children.matches_parent(payload)
+                ):
+                    return (
+                        is_parent_continuation(event.event, payload)
                         or event.event.endswith(approval_suffixes)
                         or payload.get("state") in {"error", "aborted"}
                     )
-                if pending_early_final is not None and payload.get("state") not in ("final", "error", "aborted"):
+                if pending_early_final is not None and not children.runs and payload.get("state") not in ("final", "error", "aborted"):
                     payload_session_key = payload.get("sessionKey")
                     # COSEC: Fold only the default-agent alias, preserving other agents' isolation.
                     return isinstance(payload_session_key, str) and (
@@ -376,32 +367,32 @@ class OpenClawGatewayClient(GatewayConnection):
                 return payload_session_key == session_key
             return True
 
-        def consume_parent_resume(event: EventFrame, payload: Dict[str, Any]) -> bool:
-            nonlocal pending_announces, waiting_for_subagent_resume
+        def authorize_parent_resume(event: EventFrame, payload: Dict[str, Any]) -> bool:
+            nonlocal waiting_for_subagent_resume, resumed_parent_run_id
             payload_run_id = payload.get("runId")
-            resumable = is_parent_continuation(event, payload) or event.event.endswith(approval_suffixes)
+            resumable = is_parent_continuation(event.event, payload) or event.event.endswith(approval_suffixes)
             if not (
                 waiting_for_subagent_resume
-                and pending_announces > 0
+                and children.has_completed
                 and resumable
                 and not is_announce_event(payload)
                 and isinstance(payload_run_id, str)
                 and payload_run_id
-                and continuation_matches_parent_session(payload)
+                and children.matches_parent(payload)
             ):
                 return False
             allowed_run_ids.add(payload_run_id)
-            pending_announces -= 1
+            resumed_parent_run_id = payload_run_id
             waiting_for_subagent_resume = False
             log.info(
                 "[chat_stream][subagent_parent_resumed] sessionKey=%s "
                 "runId=%s pendingAnnounces=%d",
-                payload.get("sessionKey"), payload_run_id, pending_announces,
+                payload.get("sessionKey"), payload_run_id, children.pending_count,
             )
             return True
 
         def on_chat_event(event: EventFrame) -> None:
-            nonlocal done, emitted_non_terminal, filter_drop_count, pending_announces
+            nonlocal done, emitted_non_terminal, filter_drop_count
             nonlocal pending_compaction_finals, pending_early_final
             nonlocal suppressed_compaction_lifecycle_ends, waiting_for_subagent_resume
             if done:
@@ -409,6 +400,8 @@ class OpenClawGatewayClient(GatewayConnection):
             if buffer_before_ack(on_chat_event, event):
                 return
             payload = event.payload or {}
+            if children.observe_event(event.event, payload):
+                return
             remember_trusted_parent_session(payload)
             if is_announce_event(payload) and not announce_matches_parent_session(payload):
                 # COSEC: Reject cross-session completion events before any
@@ -426,6 +419,9 @@ class OpenClawGatewayClient(GatewayConnection):
             data_phase = data.get("phase") if isinstance(data, dict) else None
             state = payload.get("state")
             payload_run_id = payload.get("runId")
+            if is_announce_event(payload) and state == "final":
+                if not children.complete_announce(payload_run_id):
+                    return
             is_foreground_run = isinstance(payload_run_id, str) and (
                 payload_run_id in allowed_run_ids or payload_run_id == run_id
             )
@@ -460,8 +456,8 @@ class OpenClawGatewayClient(GatewayConnection):
                 )
                 return
 
-            is_continuation_event = is_parent_continuation(event, payload)
-            if consume_parent_resume(event, payload):
+            is_continuation_event = is_parent_continuation(event.event, payload)
+            if authorize_parent_resume(event, payload):
                 is_foreground_run = True
             if (
                 is_foreground_run
@@ -497,11 +493,13 @@ class OpenClawGatewayClient(GatewayConnection):
                 and isinstance(spawn_details.get("runId"), str)
                 and bool(spawn_details.get("runId", "").strip())
             ):
-                pending_announces += 1
-                log.info(
-                    "[chat_stream][sessions_spawn_accepted] pendingAnnounces=%d",
-                    pending_announces,
-                )
+                child_run_id = spawn_details["runId"]
+                child_session_key = spawn_details["childSessionKey"]
+                # COSEC: Child identities must not alias an authorized parent.
+                if child_run_id in allowed_run_ids or child_session_key in trusted_parent_session_keys:
+                    log.info("[chat_stream][child_spawn_rejected] reason=parent_identity")
+                else:
+                    children.register(child_run_id, child_session_key)
             elif is_spawn_result:
                 log.info(
                     "[chat_stream][sessions_spawn_not_accepted] status=%s isError=%s",
@@ -510,7 +508,7 @@ class OpenClawGatewayClient(GatewayConnection):
                 )
 
             if (
-                pending_early_final is not None
+                pending_early_final is not None and not children.runs
                 and state not in ("final", "error", "aborted")
                 and isinstance(payload_run_id, str)
                 and payload_run_id
@@ -533,6 +531,11 @@ class OpenClawGatewayClient(GatewayConnection):
 
             elif state == "final":
                 payload_run_id = payload.get("runId", "")
+                if is_foreground_run and resumed_parent_run_id and payload_run_id != resumed_parent_run_id:
+                    log.info("[chat_stream][stale_parent_final] runId=%s", payload_run_id)
+                    return
+                if is_foreground_run and not pending_compaction_finals and not waiting_for_subagent_resume:
+                    children.cover_completed()
                 is_inject = isinstance(payload_run_id, str) and payload_run_id.startswith("inject-")
                 if is_inject:
                     payload["_source_event"] = event.event
@@ -551,25 +554,20 @@ class OpenClawGatewayClient(GatewayConnection):
                         payload_run_id,
                         pending_compaction_finals,
                     )
-                elif pending_announces > 0:
-                    is_announce = is_announce_event(payload)
-                    if is_announce:
-                        pending_announces -= 1
-                    if is_announce and pending_announces <= 0:
-                        payload["_source_event"] = event.event
-                        event_queue.put_nowait(event)
-                        done = True
-                        event_queue.put_nowait(None)
-                    else:
-                        if is_foreground_run:
-                            waiting_for_subagent_resume = True
-                        # Keep parent/intermediate announce finals internal.
-                        log.info(
-                            "[chat_stream][subagent_parent_final_deferred] "
-                            "pendingAnnounces=%d runId=%s",
-                            pending_announces,
-                            payload.get("runId", "")[:40],
-                        )
+                elif (
+                    (is_announce_event(payload) and children.unannounced_count > 0)
+                    or (is_foreground_run and children.pending_count > 0)
+                    or (is_foreground_run and waiting_for_subagent_resume)
+                ):
+                    if is_foreground_run:
+                        waiting_for_subagent_resume = True
+                    # Never flush this old final when a child later completes.
+                    log.info(
+                        "[chat_stream][subagent_parent_final_deferred] "
+                        "pendingAnnounces=%d runId=%s",
+                        children.pending_count,
+                        payload.get("runId", "")[:40],
+                    )
                 else:
                     payload["_source_event"] = event.event
                     if (
@@ -606,7 +604,7 @@ class OpenClawGatewayClient(GatewayConnection):
             payload.setdefault("sessionKey", session_key)
             if not matches_current_stream(event, payload):
                 return
-            consume_parent_resume(event, payload)
+            authorize_parent_resume(event, payload)
             payload.setdefault("state", state)
             payload["event"] = event.event
             payload["_source_event"] = event.event
@@ -782,8 +780,8 @@ class OpenClawGatewayClient(GatewayConnection):
                         reason = "no_event_received_from_upstream"
                     elif not emitted_non_terminal and filter_drop_count > 0:
                         reason = f"all_events_filtered_drop_count={filter_drop_count}"
-                    elif pending_announces > 0:
-                        reason = f"waiting_subagent_final_pending_announces={pending_announces}"
+                    elif children.pending_count > 0:
+                        reason = f"waiting_subagent_final_pending_announces={children.pending_count}"
                     elif pending_compaction_finals > 0:
                         reason = (
                             "waiting_compaction_retry_final_pending="
@@ -805,7 +803,7 @@ class OpenClawGatewayClient(GatewayConnection):
                         reason,
                         emitted_non_terminal,
                         filter_drop_count,
-                        pending_announces,
+                        children.pending_count,
                         pending_compaction_finals,
                         sorted(allowed_run_ids),
                         self._connected,

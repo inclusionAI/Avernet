@@ -107,7 +107,7 @@ def _text_message(text: str) -> Dict[str, Any]:
     }
 
 
-def _accepted_sessions_spawn_data() -> Dict[str, Any]:
+def _accepted_sessions_spawn_data(child: str = "1") -> Dict[str, Any]:
     return {
         "name": "sessions_spawn",
         "phase": "result",
@@ -115,8 +115,8 @@ def _accepted_sessions_spawn_data() -> Dict[str, Any]:
         "result": {
             "details": {
                 "status": "accepted",
-                "childSessionKey": "agent:main:subagent:child-1",
-                "runId": "child-run-1",
+                "childSessionKey": f"agent:main:subagent:child-{child}",
+                "runId": f"child-run-{child}",
             },
         },
     }
@@ -1135,6 +1135,10 @@ async def test_chat_stream_finishes_when_child_result_resumes_parent_session(
             "stream": "assistant",
             "data": {"delta": "foreign child result"},
         })
+        _fire_event(client, "chat", {
+            "sessionKey": "agent:main:subagent:child-1",
+            "runId": "child-run-1", "state": "final",
+        })
         _fire_event(client, "agent", {
             "sessionKey": canonical_session_key,
             "runId": "run-resumed",
@@ -1196,6 +1200,10 @@ async def test_direct_parent_resume_accepts_terminal_first_frame(
             "runId": "run-1",
             "state": "final",
         })
+        _fire_event(client, "chat", {
+            "sessionKey": "agent:main:subagent:child-1",
+            "runId": "child-run-1", "state": "final",
+        })
         _fire_event(client, "agent", {
             "sessionKey": session_key,
             "runId": "run-resumed",
@@ -1252,6 +1260,10 @@ async def test_direct_parent_resume_accepts_approval_first_frame_after_ack(
             "runId": "run-1",
             "state": "final",
         })
+        _fire_event(client, "chat", {
+            "sessionKey": "agent:main:subagent:child-1",
+            "runId": "child-run-1", "state": "final",
+        })
         _fire_event(client, approval_event, {
             "sessionKey": session_key,
             "runId": "run-resumed",
@@ -1283,25 +1295,30 @@ async def test_direct_parent_resume_accepts_approval_first_frame_after_ack(
 
 
 @pytest.mark.asyncio
-async def test_each_parent_resume_consumes_exactly_one_pending_child(monkeypatch):
+async def test_each_child_terminal_settles_its_registered_run(monkeypatch):
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
     session_key = "agent:main:gfr_sess-current"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
-        for _ in range(2):
+        for child in ("1", "2"):
             _fire_event(client, "chat", {
                 "sessionKey": session_key,
                 "runId": "run-1",
                 "state": "delta",
                 "stream": "tool",
-                "data": _accepted_sessions_spawn_data(),
+                "data": _accepted_sessions_spawn_data(child),
             })
         for run_id in ("run-resumed-1", "run-resumed-2"):
             _fire_event(client, "chat", {
                 "sessionKey": session_key,
                 "runId": "run-1" if run_id.endswith("1") else "run-resumed-1",
                 "state": "final",
+            })
+            child = run_id[-1]
+            _fire_event(client, "chat", {
+                "sessionKey": f"agent:main:subagent:child-{child}",
+                "runId": f"child-run-{child}", "state": "final",
             })
             _fire_event(client, "agent", {
                 "sessionKey": session_key,
@@ -1346,7 +1363,7 @@ async def test_chat_stream_drops_foreign_session_announce(
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
     canonical_session_key = "agent:main:gfr_sess-current"
-    own_announce_run_id = "announce:v1:child-current:child-run"
+    own_announce_run_id = "announce:v1:agent:main:subagent:child-1:child-run-1"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
         _fire_event(client, "chat", {
@@ -1401,7 +1418,7 @@ async def test_chat_stream_drops_announce_with_invalid_session_key(
 ):
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
-    own_announce_run_id = "announce:v1:child-current:child-run"
+    own_announce_run_id = "announce:v1:agent:main:subagent:child-1:child-run-1"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
         _fire_event(client, "chat", {
@@ -1441,7 +1458,7 @@ async def test_chat_stream_drops_announce_with_invalid_session_key(
 async def test_chat_stream_does_not_learn_parent_session_from_untrusted_run(monkeypatch):
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
-    own_announce_run_id = "announce:v1:child-current:child-run"
+    own_announce_run_id = "announce:v1:agent:main:subagent:child-1:child-run-1"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
         _fire_event(client, "chat", {
@@ -1520,7 +1537,7 @@ async def test_announce_prefixed_foreground_final_does_not_consume_pending_subag
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
     foreground_run_id = "announce:caller-controlled-foreground-run"
-    own_announce_run_id = "announce:v1:child-current:child-run"
+    own_announce_run_id = "announce:v1:agent:main:subagent:child-1:child-run-1"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
         _fire_event(client, "chat", {
@@ -1568,7 +1585,7 @@ async def test_chat_stream_accepts_current_session_announce_hard_stop(
 ):
     monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
     client = _make_client()
-    own_announce_run_id = "announce:v1:child-current:child-run"
+    own_announce_run_id = "announce:v1:agent:main:subagent:child-1:child-run-1"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
         _fire_event(client, "chat", {
@@ -1606,13 +1623,13 @@ async def test_announce_delta_does_not_consume_pending_child(monkeypatch):
     session_key = "agent:main:gfr_sess-current"
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
-        for _ in range(2):
+        for child in ("1", "2"):
             _fire_event(client, "chat", {
                 "sessionKey": session_key,
                 "runId": "run-1",
                 "state": "delta",
                 "stream": "tool",
-                "data": _accepted_sessions_spawn_data(),
+                "data": _accepted_sessions_spawn_data(child),
             })
         _fire_event(client, "chat", {
             "sessionKey": session_key,
@@ -1621,18 +1638,18 @@ async def test_announce_delta_does_not_consume_pending_child(monkeypatch):
         })
         _fire_event(client, "chat", {
             "sessionKey": session_key,
-            "runId": "announce:v1:child-1:run",
+            "runId": "announce:v1:agent:main:subagent:child-1:child-run-1",
             "state": "delta",
             "text": "first child partial",
         })
         _fire_event(client, "chat", {
             "sessionKey": session_key,
-            "runId": "announce:v1:child-1:run",
+            "runId": "announce:v1:agent:main:subagent:child-1:child-run-1",
             "state": "final",
         })
         _fire_event(client, "chat", {
             "sessionKey": session_key,
-            "runId": "announce:v1:child-2:run",
+            "runId": "announce:v1:agent:main:subagent:child-2:child-run-2",
             "state": "final",
             "text": "all children complete",
         })
@@ -1651,8 +1668,8 @@ async def test_announce_delta_does_not_consume_pending_child(monkeypatch):
     assert [event["runId"] for event in events] == [
         "run-1",
         "run-1",
-        "announce:v1:child-1:run",
-        "announce:v1:child-2:run",
+        "announce:v1:agent:main:subagent:child-1:child-run-1",
+        "announce:v1:agent:main:subagent:child-2:child-run-2",
     ]
     assert events[-1]["text"] == "all children complete"
 
@@ -1704,12 +1721,12 @@ async def test_chat_stream_isolates_concurrent_parent_sessions(monkeypatch):
 
     _fire_event(client, "chat", {
         "sessionKey": "agent:main:short-a",
-        "runId": "announce:v1:child-a:child-run",
+        "runId": "announce:v1:agent:main:subagent:child-1:child-run-1",
         "state": "final",
     })
     _fire_event(client, "chat", {
         "sessionKey": "agent:main:short-b",
-        "runId": "announce:v1:child-b:child-run",
+        "runId": "announce:v1:agent:main:subagent:child-1:child-run-1",
         "state": "final",
     })
 
@@ -1717,9 +1734,9 @@ async def test_chat_stream_isolates_concurrent_parent_sessions(monkeypatch):
 
     assert [event["runId"] for event in events_a] == [
         "run-a",
-        "announce:v1:child-a:child-run",
+        "announce:v1:agent:main:subagent:child-1:child-run-1",
     ]
     assert [event["runId"] for event in events_b] == [
         "run-b",
-        "announce:v1:child-b:child-run",
+        "announce:v1:agent:main:subagent:child-1:child-run-1",
     ]
