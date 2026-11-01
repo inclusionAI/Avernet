@@ -28,7 +28,7 @@ from agentclaw.community.di import Injected
 from .params import (
     RoutineActorDep, RuntimeStageQuery, DeviceUuidQuery, OperatorIdQuery, target_parameters,
 )
-from .mapping import _map_routine, failed_targets, map_operation_batch, map_runs, map_trigger
+from .converter import _map_routine, failed_targets, map_operation_batch, map_runs, map_trigger
 from .relay import call_cron
 
 from .schemas import (

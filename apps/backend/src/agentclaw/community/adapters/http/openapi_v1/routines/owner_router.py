@@ -37,7 +37,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
-from .mapping import _map_routine
+from .converter import _map_routine
 from .schemas import Routine
 from .params import RoutineActorDep
 
