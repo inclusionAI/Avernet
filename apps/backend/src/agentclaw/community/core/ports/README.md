@@ -50,6 +50,8 @@ Here, both sides can import it and neither owns it.
 
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
+- `mcp_config.py` — `McpConfigDirective` and `McpConfigMutation`: the shared
+  configuration actions a Direct MCP claim can preserve, clear or replace.
 - `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
   local skill package, without the directory-upload route's method.
 - `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
@@ -100,10 +102,19 @@ rather than binding the service raw:
 
 ## Context Boundary
 
+An MCP configuration claim preserves the current Bot override with
+`McpConfigDirective.PRESERVE`, clears it with `None`, or replaces it with a
+mapping. Preserve performs no configuration write and never replays a value
+read before another edit. Manifest compiles an absent `config` to preserve;
+Genome compiles an absent snapshot configuration to clear. These shared
+in-process actions add no YAML or Genome fields and import no domain package.
+
 ```yaml
 purpose: Outbound ports — the narrow contracts core states for what it calls out to, owned by the caller and published where both caller and implementer can reach them.
 provides:
   - ActivationPort
+  - McpConfigDirective
+  - McpConfigMutation
   - SkillPackageUploadPort
   - IdentityFilePort
   - ResourceFilePort
@@ -112,6 +123,5 @@ consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
   - "core/apply_engine (skills materialiser) — SharedSkillPort turns a desired Center or repository skill into the skill id it claims Direct"
-internal_dependencies:
-  - agentclaw.community.core.mcp.config_intent  # dependency-free MCP configuration command vocabulary
+internal_dependencies: []
 ```

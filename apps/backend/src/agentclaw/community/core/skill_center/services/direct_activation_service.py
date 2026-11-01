@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.mcp.config_intent import McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigMutation
 
 from injector import inject
 

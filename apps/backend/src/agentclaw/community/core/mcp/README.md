@@ -7,8 +7,6 @@ MCP (Model Context Protocol) domain — config, auth, and sync for MCP servers b
 ```yaml
 purpose: "MCP (Model Context Protocol) domain — config, auth, and sync for MCP servers bound to bots/devices."
 provides:
-  - "McpConfigDirective"
-  - "McpConfigMutation"
   - "EffectiveMCPStateReaderProtocol"
   - "MCPConfigService"
   - "MCPScopedConfigService"
@@ -80,13 +78,6 @@ internal_dependencies:
 ```
 
 ### Change impact
-
-Apply configuration commands distinguish preserving the current Bot override
-(`McpConfigDirective.PRESERVE`), clearing it (`None`), and replacing it (a
-mapping). Preserve performs no configuration write; it must never replay a
-configuration read before another edit. Manifest compiles an absent `config`
-to preserve, while Genome compiles an absent snapshot configuration to clear.
-These in-process actions are not additional YAML or Genome fields.
 
 MCP config changes resolve per Bot: explicit `ac_bot_mcp_config` fields override
 the owner's `ac_user_mcp_config`, then Center/default values fill the remainder.

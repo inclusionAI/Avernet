@@ -33,6 +33,7 @@ from .test_capability_full_replace_contract import _Audit, _Authorization, _Cent
 class Center(_Center):
     def __init__(self):
         self.on_detail = None
+        self.endpoint_envs = {}
 
     def get_mcp_detail(self, server_code):
         if self.on_detail is not None:
@@ -43,7 +44,7 @@ class Center(_Center):
             "endpoints": [
                 {"env": env, "transportProtocol": "STREAMABLE_HTTP", "networkType": "INTERNET",
                  "url": f"https://center.example/{env.lower()}/{server_code}"}
-                for env in ("PROD", "PRE")
+                for env in self.endpoint_envs.get(server_code, ("PROD", "PRE"))
             ],
         }
 
@@ -65,8 +66,9 @@ class McpWorld:
             capabilities=resolve_capabilities(active_engine=engine_type, bot_type=bot_type, is_teclaw=lambda e: e == "teclaw"),
         )
         self.desired = CapabilityDesiredStateRepository(self.db)
+        self.skills = SkillRepository(self.db)
         self.capabilities = BotCapabilityStateReader(
-            self.desired, self.bots, SkillRepository(self.db),
+            self.desired, self.bots, self.skills,
             SkillVersionResolver(SkillVersionRepository(self.db)),
         )
         self.overrides = BotMCPConfigRepository(self.db)
@@ -75,9 +77,10 @@ class McpWorld:
             UserMCPConfigRepository(self.db), self.overrides, self.center, self.bots,
             MagicMock(), McpRuntimeCredentialsConfig(), MagicMock(),
         )
+        self.policy = PlatformDefaultMcpPolicy(lambda _bot_id: {})
         self.direct = DirectActivationService(
             self.desired, self.bots, MagicMock(), runtime or _Runtime(), _Authorization(), _Audit(),
-            self.center, self.capabilities, PlatformDefaultMcpPolicy(lambda _bot_id: {}), MagicMock(),
+            self.center, self.capabilities, self.policy, MagicMock(),
         )
         self.activation = PlatformActivation(self.direct) if platform else DeviceActivation(self.direct)
         self.orchestrator = ApplyOrchestrator({
