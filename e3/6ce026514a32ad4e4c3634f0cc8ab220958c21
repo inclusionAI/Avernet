@@ -1,0 +1,23 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_profile.py
+  s_cecdc98e721f4b::t_85cd6194342815 1-253
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_runner.py
+  s_cecdc98e721f4b::t_8c35cf8a06f317 33,35-45
+apps/bcs/scripts/e2e-runner/tests/test_operator_cli_profile_split.py
+  s_cecdc98e721f4b::t_3b503c2aafb0e9 1-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e36ce026514a32ad4e4c3634f0cc8ab220958c21",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
