@@ -18,6 +18,9 @@
   and old-run finals cannot terminate an already authorized newer parent run.
 - Empty early-final fallback and run-ID promotion are disabled once children
   are registered; the child-aware continuation gate controls those runs.
+- Superseded allowed run IDs cannot reclaim the active parent resume cursor,
+  including through duplicate tool results. Both old-final rejection and valid
+  current-final completion have explicit regression assertions.
 
 ## Diagnostics and security
 
@@ -49,6 +52,6 @@ is no speculative completion or new polling/replay RPC. No deployments run.
 
 Baseline OpenClaw client suite before modification: 130 passed. Initial new
 36-test suite on the old implementation: 21 failed / 15 passed. Independent
-review's two additional mixed/early-final regressions: both RED, then fixed.
-Independent
+review's mixed/early-final and superseded-run regressions: four RED cases, then
+fixed. Final client regression: 178 passed, including 48 new cases. Independent
 review/regression and post-rebase evidence are recorded in 003/003b/009 reports.

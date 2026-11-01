@@ -416,6 +416,34 @@ async def test_stale_original_final_cannot_end_authorized_new_parent_run(monkeyp
     assert events[-1]["text"] == "fresh parent result"
 
 
+@pytest.mark.parametrize("send_old_final", [True, False], ids=["reject-old-final", "accept-current-final"])
+async def test_superseded_spawn_result_cannot_rewind_resumed_parent(
+    monkeypatch, send_old_final,
+):
+    async with _stream(monkeypatch) as stream:
+        for child in CHILDREN[:2]:
+            stream.spawn(child)
+        stream.parent_final("old root final")
+        stream.child_terminal(CHILDREN[0])
+        stream.continuation(run="resumed-parent")
+        stream.parent_final("B still pending", run="resumed-parent")
+        await stream.assert_open()
+        stream.child_terminal(CHILDREN[1])
+        stream.spawn(CHILDREN[0], run=PARENT_RUN)
+        if send_old_final:
+            stream.parent_final("superseded root final", run=PARENT_RUN)
+            await stream.assert_open()
+        stream.continuation(run="resumed-parent")
+        stream.parent_final(run="resumed-parent")
+        events = await stream.result()
+
+    assert [event.get("text") for event in events if event.get("state") == "final"] == [
+        "fresh parent result",
+    ]
+    assert events[-1]["state"] == "final"
+    assert events[-1]["runId"] == "resumed-parent"
+
+
 async def test_pre_ack_empty_final_cannot_authorize_unrelated_run_with_pending_child(
     monkeypatch,
 ):

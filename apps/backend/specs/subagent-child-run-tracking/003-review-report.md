@@ -138,3 +138,84 @@ COVERAGE_FILE=/tmp/child-run-independent-review.coverage \
 - 该次实现 SHA256：gateway `46ee33cf4056f41392ddadfe9613ca5d7fdb9dd995d4b55b73bdbeaddecd369f`；child_runs `43f1df89b7bb032bdd087dd17112ecd2846fd2efd6c1d42dc163298cbe3e3045`。
 - 用户已接受 F1/F2，计划先补 RED，再限制 waiting/compaction 状态下的 coverage 更新，并在 children.runs 非空时关闭 early-final fallback/promotion。尚未对该修复实现作 PASS 判断。
 - 保留本轮历史 **REJECT**；修复后的结果应在本文件追加 iteration 2，不覆盖本轮缺陷、复现或原始验证记录。用户提供的 ACLI exact-dev 基线失败不作为本轮新增 blocker；Linux 远端 CI 仍需独立验证。
+
+---
+
+## Iteration 2 独立复审（2026-11-01T09:11:26Z）
+
+**结论: REJECT。F1/F2 已修复；新增恢复游标存在一个剩余状态机缺陷 F3。** 本节为最新结论，保留上方 iteration 1 历史原文。
+
+### 复审快照与验证范围
+
+- 已完成 rebase 的分支: `rebase/subagent-child-runs-on-dev`。
+- Base: `6fb00420cf553fe36cde9f6eca4204a1f4d07200`；Head: `9425f65ad7faaae7b7ce7f7df404083bc17da146`。
+- 已核对 rebase 前后实现/测试 SHA256 相同：gateway `457ca0c5f178b0403a05aae095875a743d239d5efd925cb2daf352d568ace9a4`；child registry `d843c896c988c76ab40f87e96316974958e101b07f062b53cc30a175b3a02411`；child tests `92dd63cebd9651d618a5daf9bedeb907f89ee21075a76e10b1f5a095f2e9c88f`。
+- 复核三个 F1/F2 guards、`resumed_parent_run_id`、`ChildRuns.matches_parent`，以及 mixed announce/direct、child/parent compaction、审批首帧、same-original-run 与连续两个新 run 恢复。
+- 只追加本报告；未修改实现/测试或 Git 状态。按用户要求，本轮写入完成后停止报告写入，等待新的明确复审版本。
+
+### 原问题与固定维度
+
+| 项目 | 结论 | 证据 |
+|------|------|------|
+| F1 旧 final 更新 coverage | FIXED | `cover_completed` 现要求非 waiting、非 compaction；原反例保持流打开，A announce 后才结束。 |
+| F2 early-final 授权绕过 | FIXED | 匹配与 allowed-ID promotion 均要求 `not children.runs`；原反例及 8 种 pre-ACK 无关 assistant/delta/approval/final/abort 变体均被拒绝，真实 child 完成与有效 resume 后正常结束。 |
+| 新游标的普通旧 final 隔离 | PASS | 没有旧非终态插入时，连续两个新 resume 中的原 run/前一 run final 都被丢弃；同原 run 恢复仍正常。 |
+| 正确性/duplicate 隔离 | FAIL | F3：旧父 run 的重复 spawn 可以回退恢复游标。 |
+| 安全性、性能、范围/风格 | PASS | 未发现新增可确认安全漏洞或明显性能回归；无外部协议修改；gateway 为 998 行。 |
+| 测试覆盖 | FAIL（行为缺口） | 最新现有用例 176/176 通过，但未覆盖旧 run duplicate spawn 回退游标；独立探针仍可复现 F3。 |
+| 静态检查 | PASS | 同上 Ruff 规则在四个实现/测试文件实跑通过；`git diff --check` 通过。 |
+| 新增入站状态日志 | PASS（本次范围） | 保留 system/direction/operation/elapsedMs 和业务身份投影；没有新 RPC，未引入 message/tool 内容日志。 |
+| ACI | PENDING（远端） | 精确 base/head 的本地 focused 检查通过；不是全 Engine 或远端 job 的 PASS。 |
+
+### F3 [P1] 旧父 run 的重复 spawn 能把恢复游标切回旧 run
+
+- 文件: `engine/adapter/src/engine/community/openclaw/client/gateway_client.py:370`，特别是 `:385` 的游标赋值；相关 stale final guard 在 `:534`。
+- 严重程度: **必须修复**。
+- 原因: `authorize_parent_resume` 在 spawn 去重之前处理所有 tool continuation。已有新 run `resumed-parent`，其 final 因另一 child 未结束而再次进入 waiting 后，旧 `parent-run` 的重复 `sessions_spawn` result 仍满足 same-parent/has-completed/resumable 条件，先把 cursor 改回旧 run 并清除 waiting。稍后 `children.register` 才发现它只是重复注册，无法撤销已经发生的授权变化。
+- 独立内存探针通过真实 `chat_stream` 重现，使用现有 `_stream`/`CHILDREN`/`PARENT_RUN` helper，不编辑测试文件：
+
+```python
+async with _stream(monkeypatch) as stream:
+    for child in CHILDREN[:2]:
+        stream.spawn(child)
+    stream.parent_final("old root")
+    stream.child_terminal(CHILDREN[0])
+    stream.continuation(run="resumed-parent")
+    stream.parent_final("second child pending", run="resumed-parent")
+    await stream.assert_open()
+    stream.child_terminal(CHILDREN[1])
+    stream.spawn(CHILDREN[0], run=PARENT_RUN)  # 旧 run 重复原 accepted result
+    stream.continuation(run="resumed-parent")
+    stream.parent_final("fresh resumed result", run="resumed-parent")
+    events = await stream.result()
+```
+
+- **实际结果 A**: 最后是 `state=error, errorMessage=Chat stream timeout`。有效 resumed final 被新的 stale guard 丢弃；两个 child 均已完成，pending=0。
+- **实际结果 B**: 将上述最后的 continuation/final 改为 `stream.parent_final("stale root final", run=PARENT_RUN)`，立即输出旧 root final 并结束流。新游标 intended stale-final 隔离被同一重复事件绕过。
+- 预期: 已被新恢复 run 取代的旧 run duplicate 不改变 cursor、waiting、coverage 或最终结果归属；真实当前恢复 run 的 final 能结束流。
+- 最新 worker fixture 把重复 spawn 改为来自当前 `resumed-parent`，该正例通过；它不覆盖这里保留旧 `PARENT_RUN` 的重放反例。因此不把较早并发测试失败冒充最终 176 项中的失败，但也不能用 fixture 更新消除实际状态机问题。
+- 建议: 在授权/更新 cursor 之前区分已被取代的旧允许 run 与当前 run/新的候选 continuation，保证旧 run replay 或重复 tool result 不能回退 cursor。保留第一次同原 run 恢复和合法新 run 恢复；为以上 timeout 与旧 final 被转发两个分支增加断言。
+- 这不是“child 完成后无法区分未知同 parent run”的协议限制：这里有明确的旧 run 身份、当前恢复身份和重复的 accepted child identity，Adapter 已有足够状态识别。
+
+### 最终本地验证与 ACI 证据
+
+- 最新完整 client suite: **176/176 = 100%**，failed=0、skipped=0，1 条已有 pytest 插件弃用 warning。新 child testcase 文件为 46 个参数展开用例。F3 是另外的独立失败行为探针，不计入这组 pytest 分子/分母。
+- 局部 executable lineCoverage: **540/611 = 88.38%**（child_runs 110/110、gateway 430/501）。
+- 在 rebase 后的精确 base/head 上运行仓库 `singlebox/ci/report_check.py`：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 engine/adapter/.venv/bin/python \
+  singlebox/ci/report_check.py \
+  --junit /tmp/child-run-independent-review-iteration2.junit.xml \
+  --coverage /tmp/child-run-independent-review-iteration2.coverage.xml \
+  --source-root engine/adapter/src \
+  --base 6fb00420cf553fe36cde9f6eca4204a1f4d07200 \
+  --head 9425f65ad7faaae7b7ce7f7df404083bc17da146 \
+  --min-case-pass-rate 100 --min-line-coverage 70 \
+  --min-change-line-coverage 90
+```
+
+- 本地 focused 门禁命令 exit 0：casePassRate **176/176 = 100%**；lineCoverage **540/611 = 88.38%**；changeLineCoverage **169/171 = 98.83%**。三项阈值分别为 100%、70%、90%。覆盖率通过不能替代 F3 的业务断言。
+- 未覆盖变更行: gateway `:500`（parent identity spawn 拒绝路径）、`:784`（pending compaction timeout reason）；child registry 无缺失执行行。
+- 全 Engine 最终回归与远端 ACI job: **PENDING**。已证实的本地 ACLI exact-dev 基线失败不列为本轮新增 blocker，也不推断 Linux job 已通过。
+- **唯一剩余必须修复项: F3。Iteration 2 最终结论 REJECT。**

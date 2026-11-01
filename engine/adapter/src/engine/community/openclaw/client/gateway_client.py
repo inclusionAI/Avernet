@@ -378,6 +378,8 @@ class OpenClawGatewayClient(GatewayConnection):
                 and not is_announce_event(payload)
                 and isinstance(payload_run_id, str)
                 and payload_run_id
+                # A superseded foreground run cannot reclaim the resume cursor.
+                and not (resumed_parent_run_id and payload_run_id in allowed_run_ids and payload_run_id != resumed_parent_run_id)
                 and children.matches_parent(payload)
             ):
                 return False
