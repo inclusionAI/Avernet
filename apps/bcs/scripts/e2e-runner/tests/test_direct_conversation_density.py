@@ -717,7 +717,11 @@ class TestPackageDiscipline(unittest.TestCase):
     def test_flat_budget_intact_and_subpackage_is_new(self):
         flat = list((ROOT / "bcs_e2e").glob("*.py"))
         self.assertGreaterEqual(len(flat), 338)
-        self.assertLessEqual(len(flat), 340)
+        # Budget realigned to 343: the def7a8125 cut froze at 338, and the
+        # file-size-mandated plane splits added five flat modules (four in
+        # 66531f1b0, one in e36ce0265). Raise deliberately; further flat
+        # growth must update this tripwire consciously.
+        self.assertLessEqual(len(flat), 343)
         self.assertTrue((ROOT / "bcs_e2e" / "direct_conversation_density" / "contract.py").is_file())
         self.assertFalse((ROOT / "bcs_e2e" / "direct_conversation_density_flat_marker.py").exists())
 
