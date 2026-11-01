@@ -53,7 +53,7 @@ ALIYUN_ASSIGNMENT_RE = re.compile(
     r"(?:alibaba(?:[._-]?cloud)?|aliyun|oss)[a-z0-9._-]*"
     r"(?:access[._-]?key(?:[._-]?(?:id|secret))?|ak|sk)\b[\"']?"
     r"\s*(?:[:=]|=>)\s*"
-    r"(?:[\"'](?P<quoted>[^\"'\r\n]+)[\"']|(?P<bare>[^\s,;\"']+))"
+    r"(?:[\"'](?P<quoted>[^\"'\r\n]+)[\"']|(?P<bare>[^\s,;\"'`]+))"
 )
 
 ASSIGNMENT_RE = re.compile(
@@ -65,7 +65,7 @@ ASSIGNMENT_RE = re.compile(
     r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
     r"password|passwd|credential|token)\b[\"']?"
     r"\s*(?:[:=]|=>)\s*"
-    r"(?:[\"'](?P<quoted>[^\"'\r\n]+)[\"']|(?P<bare>[^\s,;\"']+))"
+    r"(?:[\"'](?P<quoted>[^\"'\r\n]+)[\"']|(?P<bare>[^\s,;\"'`]+))"
 )
 
 PLACEHOLDER_RE = re.compile(
@@ -76,7 +76,8 @@ PLACEHOLDER_RE = re.compile(
     r"mock|not[-_ ]?a[-_ ]?real(?:[-_ ]?token)?|placeholder|sample|test(?:[-_ ]?token)?|"
     r"your[-_ ]?(?:token|secret|key|password)|"
     r"generation[-_ ]?\d+|"
-    r"(?:dev|provider|bcs|baas|bot|gateway|openclaw|anthropic|e2e)[-_ ]?(?:test|token|secret|key)"
+    r"(?:dev|provider|bcs|baas|bot|gateway|openclaw|anthropic|e2e)[-_ ]?(?:test|token|secret|key)|"
+    r"e2e[-_ ]?(?:invalid|placeholder)[-_ ]?[a-z0-9-]*"
     r"))$")
 
 # Common variable indirections and explicit non-secret values must not be
@@ -116,6 +117,20 @@ ROSTER_MARKER_VALUE_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+_20\d{6}$")
 # path-scoped: the same shapes committed anywhere else stay flagged, and the
 # exemption is anchored by tests on both sides.
 SCANNER_SELF_TEST_PATH = "test_check_secrets.py"
+
+# URL template fragments ("/register?token=", "&name=x-probe") bind runtime
+# parameters; the shape is a format string, not a credential. Restricting the
+# shape to URL-safe characters and requiring a path/query separator keeps
+# KV-shaped payload values such as "authorization=user-secret" in scope.
+URL_TEMPLATE_VALUE_RE = re.compile(r"^[\w.?&=%/-]+$")
+URL_TEMPLATE_MARKER_RE = re.compile(r"[/?&%]")
+
+
+def _constant_is_suspicious(literal: str) -> bool:
+    return _looks_like_plaintext_value(literal) and not (
+        len(literal) <= 64 and URL_TEMPLATE_VALUE_RE.fullmatch(literal)
+        and URL_TEMPLATE_MARKER_RE.search(literal)
+    )
 
 # A bare RHS name is a variable reference, never a plaintext credential.
 PYTHON_NAME_RE = re.compile(r"^[A-Za-z_]\w*$")
@@ -237,12 +252,55 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
-def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
-    """Recognize expressions, not secrets, without evaluating Python source.
+_PYTHON_SAFE_NODE_KINDS = (
+    ast.Name,
+    ast.Attribute,
+    ast.Call,
+    ast.Subscript,
+    ast.List,
+    ast.Tuple,
+    ast.BoolOp,
+    ast.BinOp,
+    ast.IfExp,
+    ast.JoinedStr,
+    ast.UnaryOp,
+)
 
+
+def _iter_value_constants(node: ast.AST):
+    """Yield string/bytes constants in value positions of a parsed fragment.
+
+    Dictionary keys and subscript slices name fields or indexes; they are not
+    credential values. Everything else (call arguments, operands, elements)
+    is a value position and stays in scope.
+    """
+    if isinstance(node, ast.Dict):
+        for value in node.values:
+            yield from _iter_value_constants(value)
+        return
+    if isinstance(node, ast.Subscript):
+        yield from _iter_value_constants(node.value)
+        return
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+        yield node
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _iter_value_constants(child)
+
+
+def _classify_python_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, str | None]:
+    """Classify a Python RHS as (exempt runtime expression, suspicious literal).
+
+    Recognizes expressions, not secrets, without evaluating Python source.
     Calls are exempt only when their argument values contain no suspicious
     literals. Dictionary keys describe fields; values carry credentials.
     Unparseable diff fragments retain the conservative regex behavior.
+
+    Quoted captures are treated in two modes. A keyword in code position with
+    a quoted RHS is a real value and stays in scope. A keyword inside a
+    string template names a field; the quoted capture is then source code
+    after the template, parsed as a single fragment, and any suspicious
+    literal inside it - including one joined by concatenation - fails closed.
     """
     stripped = content.strip().rstrip(",")
     if stripped.startswith(("f\"", "f'", "F\"", "F'")):
@@ -252,21 +310,95 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             pass
         else:
             if isinstance(formatted, ast.JoinedStr):
-                return all(
+                return (all(
                     not isinstance(item, ast.FormattedValue)
                     or isinstance(item.value, (ast.Name, ast.Attribute))
                     for item in formatted.values
+                ), None)
+
+    def safe(value: ast.AST) -> bool:
+        if isinstance(value, ast.Name):
+            return True
+        if isinstance(value, ast.Attribute):
+            return safe(value.value)
+        if isinstance(value, ast.Subscript):
+            return safe(value.value) and safe(value.slice)
+        if isinstance(value, ast.UnaryOp):
+            return safe(value.operand)
+        if isinstance(value, ast.Slice):
+            return all(
+                safe(part) for part in (value.lower, value.upper, value.step)
+                if part is not None
+            )
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+            return safe(value.left) and safe(value.right)
+        if isinstance(value, ast.BoolOp):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, ast.IfExp):
+            return safe(value.body) and safe(value.orelse)
+        if isinstance(value, ast.JoinedStr):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, ast.FormattedValue):
+            return safe(value.value)
+        if isinstance(value, ast.Call):
+            return (safe(value.func) and all(safe(arg) for arg in value.args)
+                    and all(safe(arg.value) for arg in value.keywords))
+        if isinstance(value, ast.Dict):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, (ast.List, ast.Tuple)):
+            return all(safe(item) for item in value.elts)
+        if isinstance(value, ast.Constant):
+            return not (
+                isinstance(value.value, (str, bytes)) and _constant_is_suspicious(
+                    value.value.decode("utf-8", errors="replace")
+                    if isinstance(value.value, bytes) else value.value
                 )
-    if assignment.group("quoted") is not None:
+            )
         return False
+
+    def suspicious_literal(node: ast.AST) -> str | None:
+        for item in _iter_value_constants(node):
+            literal = (
+                item.value.decode("utf-8", errors="replace")
+                if isinstance(item.value, bytes) else item.value
+            )
+            if _constant_is_suspicious(literal):
+                return literal
+        return None
+
+    if assignment.group("quoted") is not None:
+        literal_end = _keyword_literal_end(content, assignment)
+        if literal_end < 0 or assignment.start("quoted") < literal_end:
+            # Keyword in code position: the quoted text is the assigned
+            # value, not a template fragment. Fail closed.
+            return False, None
+        fragment = content[assignment.start("quoted"):]
+        try:
+            node = ast.parse(fragment, mode="eval").body
+        except (SyntaxError, ValueError):
+            return False, None
+        suspicious = suspicious_literal(node)
+        if suspicious is not None:
+            return False, suspicious
+        return isinstance(node, _PYTHON_SAFE_NODE_KINDS) and safe(node), None
+
+    literal_end = _keyword_literal_end(content, assignment)
+    if assignment.group("bare") is not None and literal_end >= 0:
+        # The keyword names a field inside a string template
+        # ({"token": CONNECT_TOKEN} or "/bcn/register?token=..."). The bare
+        # capture is either the runtime reference beside the template or
+        # template text itself; neither is a plaintext credential.
+        return True, None
     # The regex bare capture truncates at the first comma/quote, which turns
-    # keyword arguments and index chains into unparseable fragments. Recover
-    # from the physical-line remainder at the RHS start, then retry on
-    # progressively shorter prefixes: cut at top-level commas, drop trailing
-    # structural junk, and finally grind through mid-junk characters, while
-    # the remaining prefix still fails to parse as an expression.
-    expressions = []
-    completion = None
+    # keyword arguments, annotations and index chains into unparseable
+    # fragments. Recover from the physical-line remainder at the RHS start,
+    # then retry on progressively shorter prefixes: cut at top-level commas,
+    # drop trailing structural junk, and finally grind through mid-junk
+    # characters, while the remaining prefix still fails to parse as an
+    # expression. Annotation forms such as "token: str = value" additionally
+    # contribute the RHS candidates after each top-level "=".
+    expressions: list[str] = []
+    completion: str | None = None
     remainder = ""
     if assignment.group("bare") is not None:
         remainder = content[assignment.start("bare"):].strip().rstrip(",")
@@ -274,13 +406,13 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if ";" in remainder:
             remainder = remainder.split(";")[0].strip()
         expressions.append(remainder)
-        # A truncated physical line often ends mid-call with unclosed
-        # brackets. Complete the bracket structure when the scan never
-        # dropped below zero balance and strings are closed, so the whole
-        # RHS parses as an expression instead of grinding into junk.
-        bracket_stack = []
+        for suffix in _split_top_level(remainder, "=")[1:]:
+            candidate = suffix.strip()
+            if candidate:
+                expressions.append(candidate)
+        bracket_stack: list[str] = []
         truncated = True
-        in_string = None
+        in_string: str | None = None
         escaped = False
         for index, char in enumerate(remainder):
             if in_string is not None:
@@ -310,7 +442,7 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
                 for opener in reversed(bracket_stack)
             )
     candidates = ([completion] if completion is not None else []) + expressions
-    node = None
+    node: ast.AST | None = None
     for expression in candidates:
         while expression:
             try:
@@ -325,46 +457,16 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if node is not None:
             break
     if node is None:
-        return False
+        return False, None
+    suspicious = suspicious_literal(node)
+    if suspicious is not None:
+        return False, suspicious
+    return isinstance(node, _PYTHON_SAFE_NODE_KINDS) and safe(node), None
 
 
-    def safe(value: ast.AST) -> bool:
-        if isinstance(value, ast.Name):
-            return True
-        if isinstance(value, ast.Attribute):
-            return safe(value.value)
-        if isinstance(value, ast.Subscript):
-            return safe(value.value) and safe(value.slice)
-        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
-            return safe(value.left) and safe(value.right)
-        if isinstance(value, ast.BoolOp):
-            return all(safe(item) for item in value.values)
-        if isinstance(value, ast.IfExp):
-            return safe(value.body) and safe(value.orelse)
-        if isinstance(value, ast.JoinedStr):
-            return all(safe(item) for item in value.values)
-        if isinstance(value, ast.FormattedValue):
-            return safe(value.value)
-        if isinstance(value, ast.Call):
-            return (safe(value.func) and all(safe(arg) for arg in value.args)
-                    and all(safe(arg.value) for arg in value.keywords))
-        if isinstance(value, ast.Dict):
-            return all(safe(item) for item in value.values)
-        if isinstance(value, (ast.List, ast.Tuple)):
-            return all(safe(item) for item in value.elts)
-        if isinstance(value, ast.Constant):
-            return not isinstance(value.value, (str, bytes)) or not (
-                _looks_like_plaintext_value(
-                    value.value.decode("utf-8", errors="replace")
-                    if isinstance(value.value, bytes) else value.value
-                )
-            )
-        return False
-
-    return isinstance(
-        node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.List, ast.Tuple, ast.BoolOp, ast.BinOp, ast.IfExp, ast.JoinedStr),
-    ) and safe(node)
+def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
+    """Backwards-compatible bool view of the assignment classifier."""
+    return _classify_python_assignment(content, assignment)[0]
 
 
 # Deliberately a small lexical recognizer, not a Rust parser. Unknown syntax
@@ -427,20 +529,13 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
 
 
 _STRING_LITERAL_SPAN_RE = re.compile(r'"(?:[^"\\\r\n]|\\.)*"|\'(?:[^\'\\\r\n]|\\.)*\'')
-_ASSIGNMENT_KEYWORD_TAIL_RE = re.compile(
-    r"(?i)(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
-    r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
-    r"password|passwd|credential|token)\s*$"
-)
+def _keyword_literal_end(content: str, assignment: re.Match[str]) -> int:
+    """End of the string literal containing the credential-named keyword.
 
-
-def _keyword_match_inside_string_literal(content: str, assignment: re.Match[str]) -> bool:
-    """True when the credential-named LHS sits inside a string literal.
-
-    URL templates such as ``"?token=" + register_token`` and payload keys
-    such as ``{"X-BCS-Bot-Token": driver_env}`` embed the keyword in string
-    text; they name fields, they do not assign a plaintext credential. Real
-    assignments keep the keyword in code position and stay in scope.
+    ``-1`` when the keyword sits in code position, i.e. a real assignment
+    LHS. URL templates such as ``"?token=" + register_token`` and payload
+    keys such as ``{"api_key": driver_env}`` embed the field name in string
+    text; genuine assignments keep the keyword in code position.
     """
     rhs_start = -1
     for group in ("quoted", "bare"):
@@ -448,24 +543,57 @@ def _keyword_match_inside_string_literal(content: str, assignment: re.Match[str]
         if start >= 0 and (rhs_start < 0 or start < rhs_start):
             rhs_start = start
     if rhs_start < 0:
-        return False
+        return -1
     lhs = content[assignment.start():rhs_start]
-    separator = re.search(r"\s*[\"']?\s*(?:[:=]|=>)\s*$", lhs)
-    if separator is None:
-        return False
     keyword = re.search(
         r"(?i)(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
         r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
-        r"password|passwd|credential|token)\s*[\"']?\s*$",
-        lhs[:separator.start()],
+        r"password|passwd|credential|token)",
+        lhs,
     )
     if keyword is None:
-        return False
+        return -1
     keyword_abs_start = assignment.start() + keyword.start()
+    keyword_abs_end = assignment.start() + keyword.end()
     for span in _STRING_LITERAL_SPAN_RE.finditer(content):
-        if span.start() <= keyword_abs_start < span.end():
-            return True
-    return False
+        if span.start() <= keyword_abs_start and keyword_abs_end <= span.end():
+            return span.end()
+    return -1
+
+
+def _keyword_match_inside_string_literal(content: str, assignment: re.Match[str]) -> bool:
+    """Backwards-compatible bool view of ``_keyword_literal_end``."""
+    return _keyword_literal_end(content, assignment) >= 0
+
+
+def _split_top_level(expression: str, separator: str) -> list[str]:
+    """Split on separator occurrences outside brackets and string literals."""
+    parts: list[str] = []
+    depth = 0
+    in_string: str | None = None
+    escaped = False
+    last = 0
+    for index, char in enumerate(expression):
+        if in_string is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == in_string:
+                in_string = None
+            continue
+        if char in "'\"":
+            in_string = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth:
+                depth -= 1
+        elif char == separator and depth == 0:
+            parts.append(expression[last:index])
+            last = index + 1
+    parts.append(expression[last:])
+    return parts
 
 
 def _findings(diff: str) -> list[Finding]:
@@ -485,19 +613,23 @@ def _findings(diff: str) -> list[Finding]:
             for rule, assignment_pattern in assignment_rules:
                 detected = False
                 for assignment in assignment_pattern.finditer(content):
-                    if _keyword_match_inside_string_literal(content, assignment) and not (
-                        assignment.group("quoted") is not None
-                        and _looks_like_plaintext_value(assignment.group("quoted"))
-                    ):
-                        continue
                     value = assignment.group("quoted") or assignment.group("bare") or ""
-                    if path.endswith(".py") and (
-                        _python_reference_is_safe(content, assignment)
-                        or (assignment.group("quoted") is None
-                            and (PYTHON_ATTRIBUTE_RE.fullmatch(value)
-                                 or PYTHON_NAME_RE.fullmatch(value)))
-                    ):
-                        continue
+                    if path.endswith(".py"):
+                        exempt, suspicious = _classify_python_assignment(content, assignment)
+                        if suspicious is not None:
+                            # A suspicious literal inside an otherwise exempt
+                            # expression ("token: str = value", concatenation
+                            # joins) fails closed before any shape exemption.
+                            findings.append(Finding(path, line, rule, _redact_content(content)))
+                            detected = True
+                            break
+                        if exempt:
+                            continue
+                        if assignment.group("quoted") is None and (
+                            PYTHON_ATTRIBUTE_RE.fullmatch(value)
+                            or PYTHON_NAME_RE.fullmatch(value)
+                        ):
+                            continue
                     rust_safe, rust_literal = (
                         _rust_assignment(content, assignment)
                         if path.endswith(".rs") else (False, False)

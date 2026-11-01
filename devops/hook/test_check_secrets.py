@@ -51,6 +51,23 @@ FALSE_POSITIVE_LINES = [
     '    token = token_data["token"] if isinstance(token_data, dict) else None',
     '    json.dumps({"secret": constants.secret()}),',
     '    raw = json.dumps({"token": CONNECT_TOKEN}).encode(), b"")',
+    # Annotation RHS: the bare capture stops at the annotation expression and
+    # the real value is a runtime reference recovered after the "=".
+    '    token:str=field(repr=False)',
+    # URL template joins: template text and quote() calls are source code
+    # fragments behind the template keyword, not credential values.
+    "        path='/onboard/url?token='+quote(token,safe='')+'&name=cli_e2e_bot_probe&summary=e2e%20throwaway'",
+    "        if op=='register-temporary-bot':return 'POST','/register?token='+quote(self._credentials['registration'],safe='')+'&bot-name='+quote(self.state['temporary_name'],safe=''),{},'HUMAN',(200,)",
+    'path="/onboard/url?token="+quote(token,safe="")+"&name=x-probe"',
+    # A sliced sha256 digest is runtime derivation, not a literal secret.
+    "    token = hashlib.sha256((run_id + '\\0' + legacy_id).encode()).hexdigest()[:24]",
+    # Header-name subscripts, redacted placeholders and template-adjacent
+    # bare references beside or inside URL template strings.
+    'token = self.headers["Authorization"]',
+    'self.assertIn("token=[REDACTED-register-token]", record["path"])',
+    "origin='http://127.0.0.1:45001';url=origin+'/bcn/register?token=private-token&name=x'",
+    "'Location: https://private-location.test/?token=private-token\\r\\n\\r\\n'.encode()",
+    "value = {'invite_token': driver_token, 'expires_at': 123,",
 ]
 
 
@@ -121,6 +138,13 @@ TRUE_POSITIVE_LINES = [
     "session_" + "secret" + ' = "aB3f9kQm2Xz8Lp4Rw"',
     "db_" + "password" + ' = "g7Kx9Lm2Qw8Rd5Zv"',
     "token" + ' = "private-12345678901234567"',
+    # Concatenation join: the template keyword stays in code position, so the
+    # joined literal is a real leak.
+    "token" + ' = "/register?token=" + "gHt9Km2Qx7Zw3Rd8Yv5"',
+    # Annotation form: the real RHS hides behind the annotation expression.
+    "token" + ': str = "gHt9Km2Qx7Zw3Rd8Yv5"',
+    # Immediate digest of a literal secret is still derived from it.
+    "token" + ' = hashlib.sha256(b"gHt9Km2Qx7Zw3Rd8Yv5").hexdigest()[:24]',
 ]
 
 
@@ -143,3 +167,18 @@ def test_string_keyed_plaintext_secret_values_stay_flagged() -> None:
     # Name references and URL templates behind the same string key stay exempt.
     assert _findings(_diff('payload = {"auth_token": driver_token}')) == []
     assert _findings(_diff('("GET", "/register?token={register_token}"))')) == []
+
+
+def test_markdown_url_template_sentinel_is_not_a_credential() -> None:
+    # Doc URL examples with an explicit invalid-preflight sentinel value are
+    # template text, not credentials (word-shape sentinel anchored by the
+    # markdown leak test below).
+    sentinel = "- " + "`" + "/api/v1/collaboration/sessions/shared-file/content?token=e2e-invalid-preflight" + "`;"
+    assert _findings(_diff(sentinel, path="example.md")) == []
+
+
+def test_markdown_plaintext_secret_in_url_stays_flagged() -> None:
+    leak = "- " + "`" + "/api/v1/collaboration/sessions/shared-file/content?token=gHt9Km2Qx7Zw3Rd8Yv5" + "`;"
+    findings = _findings(_diff(leak, path="example.md"))
+    assert len(findings) == 1
+    assert findings[0].rule == "credential-like assignment"
