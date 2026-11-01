@@ -1,166 +1,207 @@
-# Independent Engine regression: child run tracking
+# Engine regression report: child run tracking
 
-Date: 2026-11-01 (Asia/Shanghai). Status: initial run and latest focused run
-complete; final full regression awaits explicit stable notification after
-review fixes and rebase. No final full run has started.
+Date: 2026-11-01, Asia/Shanghai. **Final local verification complete.**
 
-Independent review subsequently identified F1 (a duplicated old parent final
-can cover a child and prematurely end mixed announce fan-in) and F2 (pre-ACK
-early-final fallback/promotion can bypass the child-completion guard). Main and
-the test worker own RED tests and fixes. The intermediate green suites below
-do not clear these findings; final verification must include their regressions.
+**Feature and nearby regression: PASS. Full Engine preflight: FAIL**, solely
+because the unchanged ACLI restart-process test fails in this environment and
+also fails on the exact GitHub dev baseline. No failure was deselected or
+removed from the pass-rate denominator. Remote CI is not certified here.
 
-## Scope and environment
+## Immutable source and execution
 
-- Shared checkout: `fix-subagent-final-state`; interpreter:
-  `engine/adapter/.venv/bin/python`, CPython 3.13.5 on macOS arm64.
-- Read the Engine child-completion spec, task review spec, project instructions,
-  regression registry/memory and relevant OPTIMIZE guidance.
-- Tests simulate actual Adapter `chat_stream` event boundaries. No Bot/ARCA
-  deployment, Gateway/model consumption claim, or unrelated Claude services.
-- Only this report and ignored `engine/adapter/pytest_report/child-runs-*`
-  artifacts were authored. No production/test edits or Git mutations.
-- Installed missing public CI dependency `socksio==1.0.0` in the supplied venv.
+- Branch: `rebase/subagent-child-runs-on-dev`.
+- Base / merge base: `6fb00420cf553fe36cde9f6eca4204a1f4d07200` (`github/dev`).
+- Tested HEAD: `50a78e1e28878c1ad8124c41f1ebbda39f19429b`.
+- Environment: macOS arm64, CPython 3.13.5,
+  `engine/adapter/.venv/bin/python`.
+- Full run: 17:15:35–17:18:20 +0800; pytest 162.43 seconds,
+  wrapper 163.71 seconds. The expected 60-second graceful polling-stop test ran.
+- HEAD before/after is identical. **All Engine Python source/test SHA256
+  fingerprints before/after are identical; changed_during_run=[]**.
+- Read the feature/review specs, project instructions, OPTIMIZE guidance and
+  regression registry/memory. Only this report and ignored report artifacts
+  were authored; no production/test edits, Git mutation, Bot/ARCA deployment,
+  Gateway/model calls or unrelated Claude services. Missing public CI dependency
+  `socksio==1.0.0` was installed in the supplied venv.
 
-## Initial broad run
+## Final results
 
-Executed `pytest src -q` with precisely the five community CI deselections in
-`engine/adapter/scripts/ci_test.sh`. ACLI process tests were included.
-Command, source hashes, stdout, JUnit, isolated coverage database, full-src XML
-and JSON are under:
-`engine/adapter/pytest_report/child-runs-initial-20261101/`.
+| Suite | Passed | Failed | Skipped | Deselected | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Full Engine `pytest src` | 4266 | 1 | 0 | 5 | FAIL; verified baseline failure |
+| Closest transport/ports/core/client directories | 976 | 0 | 0 | 0 | PASS |
+| OpenClaw client subset of nearby run | 178 | 0 | 0 | 0 | PASS |
+| Child-completion subset of client run | 48 | 0 | 0 | 0 | PASS |
+| New inbound child-tracking logging probe | — | 0 | — | — | PASS |
+| Project local SAST script; ruff F/E9 | — | 0 | — | — | PASS |
 
-| Measurement | Actual result |
-| --- | --- |
-| Window | 2026-11-01 16:58:30–17:01:04 +0800 |
-| HEAD | `f475365f56a39b30eb21ffd7dd76584e81d454b8` |
-| Observed github/dev | `6fb00420cf553fe36cde9f6eca4204a1f4d07200` |
-| Test outcome | **4125 passed, 1 failed, 0 skipped, 5 deselected** |
-| Passed / collected after deselections | 4125/4126 = **99.9758%** |
-| Runtime | pytest 152.64 seconds; wrapper 153.60 seconds |
-| Full-src measured line coverage | **56179/58937 = 95.3204%** |
-| Additional production-only line coverage | **22614/24860 = 90.9654%** |
-| Native `singlebox/ci/report_check.py` | **FAIL**, case pass rate below 100%; exits before coverage gates |
-
-The full-src denominator intentionally follows CI's `--cov=<adapter>/src` and
-includes executable test files. Production-only metrics exclude `test`/`tests`
-directories, `test_*.py` and `*_test.py`; no production exclusion rules added.
-
-**Snapshot limitation:** before/after SHA256 evidence records modifications to
-`gateway_client.py`, `child_runs.py`, and `test_child_run_completion.py` during
-the broad run. These results are initial evidence, not a clean final-version
-full-suite PASS or an authoritative final changed-line coverage measurement.
-
-The five deselections are the corp-only profile assertions in auth gate wiring,
-corp binding parity, notification wiring, profile modules and router collection.
-No additional failure was silently skipped or deselected.
-
-## Verified ACLI baseline failure
-
-Failing node:
-`src/engine/community/core/acli/tests/test_operations.py::test_a_restart_marks_running_operations_interrupted_and_kills_acli`.
-Its interrupted-state assertion succeeds; `leftover.wait(timeout=5)` raises
-`subprocess.TimeoutExpired` at test line 244.
-
-Independently materialized `engine/adapter/src` and `pyproject.toml` from exact
-GitHub dev SHA `6fb00420cf553fe36cde9f6eca4204a1f4d07200` with read-only
-`git archive`, under the ignored report directory. Ran the same test with the
-same venv and the materialized baseline src as PYTHONPATH. Result: **1 failed**
-in 5.09 seconds, same assertion and timeout. This proves baseline reproduction
-in this local environment; it does not establish an OS root cause or a remote
-Linux PASS. No ACLI source/test changes, Git worktrees or Git mutations used.
-
-Evidence: `baseline-acli-junit.xml`, `baseline-acli.log`,
-`baseline-acli-result.json`; baseline sources retained under `baseline/`.
-Recheck the baseline identity/files after main's rebase if GitHub dev advances.
-
-## Closest downstream regression and lint
-
-Independently ran these complete directories:
+Subset counts are not added to full-suite totals. The nearby run took 7.13
+seconds and independently retained identical before/after Python fingerprints.
+It included these complete directories:
 
 - `src/engine/community/api/tests/transport`
 - `src/engine/community/core/adapters/openclaw/tests`
 - `src/engine/community/plugins/openclaw/tests`
 - `src/engine/community/openclaw/client/tests`
 
-Result: **942 passed, 0 failed/skipped/deselected**, 5.58 seconds. Evidence:
-`transport-ports-junit.xml`, `transport-ports.log`,
-`transport-ports-result.json`. This includes transport ACK/resume/WebSocket,
-OpenClaw chat/approval/session ports and direct client regression coverage.
-This is an intermediate snapshot, not post-rebase verification.
+All three independently reviewed findings have regression assertions passing on
+the final source: F1 duplicated old parent final/mixed announce coverage; F2
+pre-ACK empty-final promotion while a child is pending; F3 superseded parent
+spawn-result cursor rewind, including both rejected-old-final and
+accepted-current-final cases. Stale original-parent final, child compaction
+before/after accepted spawn, bounded early-cache eviction, exact child identities,
+duplicates, ACK ordering, approvals, inject and downstream resume/port suites
+also pass. This is local event-driven Adapter verification, not proof of model
+consumption or deployed container behavior.
 
-Latest pre-rebase rerun at 17:04:24 +0800 on finalized constructor parent guard
-and child compaction tests: **948 passed, 0 failed/skipped/deselected**,
-8.91 seconds. Before/after hashes of all Python source files are identical.
-Its independent full-src XML/JSON and JUnit are in
-`engine/adapter/pytest_report/child-runs-latest-20261101/`. Production-only
-working-tree changed coverage against observed github/dev: **158/160 = 98.75%**;
-gateway client **56/58**, new child registry **102/102**. Uncovered changed
-gateway lines: 505 (partial clearing of compaction retries), 786 (timeout reason
-while compaction remains pending). These are pre-rebase metrics and precede
-main's subsequent logging change; they do not replace final verification.
+The full command follows `engine/adapter/scripts/ci_test.sh`: `pytest src -q`,
+the five standard community deselections, isolated coverage data,
+`--cov=<adapter>/src`, JUnit, full-src coverage XML/JSON and timing output.
+The exact executable argument list is preserved in `command.json`.
 
-Ruff `check --select F,E9` on both changed production files and both changed
-client test files: **PASS**. Production sizes at that check:
-gateway client 1000 lines, child registry 135 lines. This is local lint evidence,
-not an assertion that an unobserved remote SAST job passed.
+The only deselected nodes are the standard corp assertions:
+auth_gate_wiring/corp_profile_is_distinct,
+corp_binding_parity/corp_profile_wires_corp_services,
+notification_wiring/corp_profile_provides_dingtalk,
+profile_modules/corp_column_is_not_community_fallback, and
+router_collection/corp_preserves_internal_production_aicoding_routes.
+ACLI tests ran normally.
 
-## External boundary diagnostics
+## Coverage and actual preflight gates
 
-An ignored independent `boundary_probe.py` exercised accepted/duplicate/rejected
-spawn, wrong-session terminal, child error, duplicate terminal, deferred/resumed
-parent, successful final, and failed parent stream through public chat_stream.
-It captured 21 log records without writing raw fixture credentials to artifacts.
-Evidence is `boundary_probe.json`.
+| Metric | Numerator / denominator | Percent | Threshold | Result |
+| --- | ---: | ---: | ---: | --- |
+| casePassRate | 4266/4267 | 99.9766% | 100% | **FAIL** |
+| lineCoverage, CI full-src scope | 57545/60147 statements | 95.6739% | >=70% | PASS |
+| Additional production-only line coverage | 23042/25161 statements | 91.5782% | >=70% | PASS |
+| Production changeLineCoverage, github/dev..HEAD | 169/171 changed statements | 98.8304% | >=90% | PASS |
+| New child_runs.py | 110/110 statements | 100% | — | PASS |
+| Changed gateway_client.py | 59/61 changed statements | 96.7213% | — | Above change threshold |
 
-- Observed events: `sessions_spawn_accepted`, `child_spawn_duplicate`,
-  `child_terminal_rejected`, `child_terminal`,
-  `subagent_parent_final_deferred`, `subagent_parent_resumed`,
-  `sessions_spawn_not_accepted`, `terminal_recv`, `send_response`.
-- Parent/child business run/session IDs remain observable; event/state,
-  duplicate/match and pending-count fields provide transition evidence.
-- Nested synthetic token, Authorization, Cookie, password, secret, key,
-  credential and session values: **8/8 absent** from captured success/failure
-  logs. This verifies these payload paths, not a general recursive redactor.
-- Initial required external-boundary log gate: **FAIL / evidence incomplete**. No
-  `elapsedMs`, `elapsed_ms`, `durationMs` or `duration_ms` was observed. Current
-  diagnostics use formatted event summaries, not a demonstrated common
-  system/operation/status/duration schema. No production changes made to expand
-  this task's logging contract during this initial probe. An unchanged RPC error-response path was not
-  tested for arbitrary upstream error-message redaction by this probe.
+The actual project `singlebox/ci/report_check.py` was run with the original
+full-src JUnit/XML, exact base/head, and unchanged 100/70/90 thresholds.
+**Exit code 1: case pass rate 99.98% (4266/4267)**. The native checker exits at
+that failure before its coverage checks; it did not produce an overall PASS.
 
-Main subsequently added `system=openclaw direction=inbound
-operation=child_tracking elapsedMs parentSessionKey` context to the new tracker
-logs. The stable-production probe now **PASSES**, superseding the initial
-missing-duration finding. It captured 39 records overall, including 10 tracker
-records. Every tracker record contains system/direction/operation, normalized
-parent session correlation, child run correlation and nonnegative elapsed time;
-success and failure/rejection outcomes are present. Sensitive sentinel absence
-remains **8/8 PASS**, including nested spawn results and announce/failure payloads.
+Coverage was additionally calculated independently from the same complete
+coverage dataset. CI's full-src denominator includes executable test files.
+For the requested production changed-line metric, an explicit
+`coverage-production.xml` projection removes `test`/`tests` directories,
+`test_*.py` and `*_test.py`; the untouched full-src XML/JSON are retained.
+The project's own `check_change_coverage` function, using its actual
+`changed_lines(base, head)` and the production projection, independently reports
+**98.83% (169/171, required >=90%)**. No thresholds or source exclusion rules
+were changed. This matches the separate review's 169/171 measurement.
 
-Evidence: `engine/adapter/pytest_report/child-runs-boundary-20261101/`
-(`boundary_probe.json`, `probe.log`, `snapshot.json`). Both production files
-had identical hashes before/after the probe. The probe first required a fully
-prefixed parent session and incorrectly rejected the supported short alias;
-its assertion was corrected to the existing default-agent normalization rule.
-The original diagnostic JSON is retained as `boundary_probe-first.json`.
-This was a probe assertion correction, not a production failure or source fix.
+The committed diff and the working-tree measurement agree: both production
+files are committed and unchanged. The only uncovered changed statements are:
 
-Audit is scoped to the newly changed inbound child-tracking operation; no new
-outbound HTTP/RPC behavior was introduced. Unchanged chat.send plumbing is not
-required to adopt this new schema. A generic recursive redactor is not asserted
-or required by this payload-projection verification. Final rebase verification
-will compare the production hashes to this successful probe's snapshot.
+| File:line | Behavior not reached by final pytest coverage |
+| --- | --- |
+| gateway_client.py:502 | Diagnostic for rejecting a spawn identity that aliases an authorized parent |
+| gateway_client.py:786 | Timeout reason while an accepted child remains pending |
 
-## Coverage preflight and final status
+The separate logging probe exercises parent-identity rejection, but its
+execution was deliberately not merged into pytest coverage to inflate this
+metric. No additional tests were started after final full-suite completion.
 
-- Initial casePassRate gate: **FAIL**, verified baseline failure retained.
-- Initial lineCoverage numerical gate: above 70%, with mixed-snapshot limitation.
-- Final production-only changeLineCoverage against github/dev: **PENDING**;
-  include newly added/untracked child registry, exclude test files, and use the
-  finalized source rather than treating uncommitted changes as absent from HEAD.
-- Remote ACI: **NOT OBSERVED**; no actual PR/job result supplied or claimed.
-- Overall: **FAIL / final full verification pending**. Initial regression
-  cannot be reported as a final clean PASS. Baseline failure and diagnostic
-  history are explicit and are not hidden by deselections. The new child-tracking
-  diagnostic gate currently passes; no final full-suite PASS is claimed.
+## Baseline failures and historical results
+
+Baseline sources were independently materialized by read-only `git archive`
+from exact dev SHA `6fb00420cf553fe36cde9f6eca4204a1f4d07200`, with complete
+Engine src and its pyproject under an ignored artifact directory. Baseline runs
+used the same venv and the materialized src as PYTHONPATH. No new worktree or
+unrelated ACLI modification was used.
+
+| ACLI test in core/acli/tests/test_operations.py | Exact dev reproduction | Final 50a result |
+| --- | --- | --- |
+| test_a_restart_marks_running_operations_interrupted_and_kills_acli | FAIL, 5.09s; interrupted-state assertion succeeds, leftover.wait(timeout=5) raises TimeoutExpired at line 244 | **FAIL**, 5.017s, same timeout |
+| test_an_operation_over_its_limit_fails_with_timeout | FAIL, 0.70s, with coverage enabled; calls()[1] raises IndexError at line 213 | **PASS**, 0.508s |
+
+After rebase, dev remains that exact SHA. Current runner.py, operations.py,
+test_operations.py, conftest.py and fake_acli.py match baseline content byte for
+byte; evidence is in `baseline-file-parity.json`. This proves baseline
+reproduction in the local environment. It does not prove an OS-specific root
+cause, load causality, or an unobserved Linux CI PASS. The second failure was
+transient across runs and is not listed as a failure of the final run.
+
+| Historical snapshot | Outcome | Limitation |
+| --- | --- | --- |
+| Initial f475 working tree | 4125 passed, 1 failed, 5 deselected | Production/test changes during run |
+| Rebased 9425 | 4263 passed, 2 failed, 5 deselected | Test changes during run; superseded by F3 fix |
+| **Final 50a** | **4266 passed, 1 failed, 5 deselected** | **Stable source; authoritative local result** |
+
+Earlier artifacts remain intact; historical counts were not rewritten or
+combined into a fabricated final pass rate.
+
+## New child-tracking boundary logs
+
+Final SHA probe: **PASS**, 39 captured records overall, including 10 new
+`ChildRuns` transition records. Every new tracker record contains
+`system=openclaw direction=inbound operation=child_tracking`, normalized
+`parentSessionKey`, child/run correlation and nonnegative `elapsedMs`.
+Accepted/completed/duplicate/pending fields and event names identify successful,
+duplicate, rejected and failed transitions.
+
+Observed events include accepted/duplicate/rejected spawn, child terminal and
+wrong-session rejection, announce final/duplicate, deferred/resumed parent and
+successful/failed stream completion. Nested synthetic token, Authorization,
+Cookie, password, secret, key, credential and session values were absent from
+the captured success/failure logs: **8/8 PASS**. Only projected business IDs and
+status metadata were checked; no general recursive-redactor claim is made.
+
+Scope is the newly changed child-tracking inbound operation. No new outbound
+HTTP/RPC behavior was introduced, and unchanged chat.send plumbing is outside
+this new schema gate. The final production fingerprints remained unchanged
+during the probe. Historical missing-duration evidence was superseded by main's
+logging change. A temporary probe assertion that demanded a fully prefixed parent
+session was corrected to support the existing default-agent alias; its original
+JSON remains in historical artifacts and was not a production defect.
+
+## Lint, artifacts and handoff
+
+The project SAST script ran against `github/dev..HEAD` using the available
+flake8 fallback; no diagnostics. This verifies that local fallback, not
+unavailable enterprise-only FLA analyzers or remote SAST. Ruff F/E9 on the two
+production and two changed test files passed. Production sizes: gateway client
+**1000 lines**, child registry **179 lines**, within the 1000-line limit.
+
+All paths below are relative to `engine/adapter/pytest_report/` and ignored:
+
+- `child-runs-final-50a78e1e-20261101/`: authoritative `junit.xml`,
+  `coverage.xml`, `coverage.json`, `coverage-production.xml`, isolated
+  `.coverage`, `pytest.log`, `command.json`, source snapshots/result JSON,
+  `metrics.json`, `gates.json`, `report-check.log`,
+  `production-changed-line-gate.log`, boundary JSON/log/snapshot, acceptance
+  results, baseline parity, SAST and ruff logs.
+- `child-runs-final-50a78e1e-ports-20261101/`: final nearby suite JUnit,
+  stdout and unchanged-source evidence.
+- `child-runs-initial-20261101/`: initial broad run, complete materialized dev
+  baseline, `baseline-acli-junit.xml`, `baseline-acli.log`, baseline metadata.
+- `child-runs-final-20261101/`: historical 9425 full run and
+  `baseline-timeout-1-junit.xml`, `baseline-timeout-1.log`,
+  `baseline-timeout-results.json` proving the second baseline reproduction.
+
+Remote ACI was not independently queried by this regression worker. Main's
+subsequent verification of the exact source head is appended below.
+
+**Final conclusion: feature/nearby/logging/coverage checks PASS; overall local
+Engine preflight FAIL on the retained, verified baseline ACLI restart failure.**
+Report complete; no further test runs or report writes planned.
+
+## Main: verified remote Linux Engine evidence
+
+The exact final runtime/test head `50a78e1e28878c1ad8124c41f1ebbda39f19429b`
+passed the [remote Engine job](https://github.com/inclusionAI/Avernet/actions/runs/41292333281/job/124806102851).
+Main downloaded `engine-testresult` from that run into ignored
+`engine/adapter/pytest_report/remote-50a78e1e/` and independently ran the
+repository report gate using its JUnit/XML and exact base/head. Exit 0:
+
+- casePassRate: 4267/4267 = 100%.
+- Full-src lineCoverage: 95.68% (CI's denominator includes executable tests).
+- Full-diff changeLineCoverage: 791/795 = 99.50%.
+
+These remote results do not erase the local macOS baseline failure above.
+Production-only changed coverage remains separately measured at 169/171
+(98.83%). Backend/Singlebox and any subsequent documentation-only head must
+still be checked independently; this appendix does not claim all PR CI PASS.

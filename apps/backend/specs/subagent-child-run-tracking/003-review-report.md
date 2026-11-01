@@ -7,6 +7,9 @@ iteration: 1
 
 # 代码评审报告
 
+**当前最终结论：Iteration 3 PASS，代码提交 `50a78e1e`。** 下方保留前两轮
+REJECT 的反例及修复历史；最终验证与协议边界见文末 Iteration 3。
+
 **结论: REJECT。两个可复现的状态机问题仍需修复；child compaction 修复已复核，不重复列为阻塞项。**
 
 ## 评审范围
@@ -219,3 +222,73 @@ PYTHONDONTWRITEBYTECODE=1 engine/adapter/.venv/bin/python \
 - 未覆盖变更行: gateway `:500`（parent identity spawn 拒绝路径）、`:784`（pending compaction timeout reason）；child registry 无缺失执行行。
 - 全 Engine 最终回归与远端 ACI job: **PENDING**。已证实的本地 ACLI exact-dev 基线失败不列为本轮新增 blocker，也不推断 Linux job 已通过。
 - **唯一剩余必须修复项: F3。Iteration 2 最终结论 REJECT。**
+
+---
+
+## Iteration 3 最终独立复审（2026-11-01T09:15:14Z）
+
+**最新代码评审结论: PASS。F1/F2/F3 均已关闭；无剩余具体 blocker。远端 ACI PENDING。** 上方 iteration 1/2 的 REJECT、复现和测量保留为历史记录。
+
+### 最终提交与范围
+
+- 分支: `rebase/subagent-child-runs-on-dev`；目标 GitHub dev。
+- 精确 Base: `6fb00420cf553fe36cde9f6eca4204a1f4d07200`。
+- 精确 Head: **`50a78e1e28878c1ad8124c41f1ebbda39f19429b`**（F3 修复提交，PR #3403 待更新到此 head）。
+- 相对上一代码提交，本次实现增量仅为 `authorize_parent_resume` 中 superseded allowed-run guard 及其说明；另有两个参数化回归场景。没有新增 RPC 或协议变更。
+- Reviewer 独立运行测试时的源码/测试与该提交 SHA256 一致，提交后对应目录无未提交改动：gateway `e523170bdea2801b7023baf6643c27f6c132029cb8f504a481d318c6622dcdc9`；child registry `d843c896c988c76ab40f87e96316974958e101b07f062b53cc30a175b3a02411`；child tests `2ab042405a077ce6a176ed66b8f5fa8afedaef0796112a2aee1cd57317f51326`。
+- 本轮仅追加本报告；未修改实现、测试、Git、运行环境或远端状态。完成本节后停止报告写入。
+
+### 修复与固定维度结论
+
+| 项目 | 结论 | 独立验证 |
+|------|------|----------|
+| F1：旧 final 更新 child delivery coverage | FIXED | 重复旧 final 保持等待；后续实际 continuation/final 或匹配 announce 才完成。 |
+| F2：early-final fallback/promotion 绕过 child 前置条件 | FIXED | 保留双重 `not children.runs` guard；相关 pre-ACK/非零 grace 回归通过。 |
+| F3：旧 run duplicate spawn 回退恢复游标 | FIXED | 已有 cursor 时，已允许且不等于当前 cursor 的旧 run 不再获准 resume；两个原始反例均能正确收敛到当前 run final。 |
+| 正确性/Review Spec | PASS | 通过 child 身份/duplicate/foreign、early/provisional、mixed fan-in、old-final、child/parent compaction、error/abort、ACK/approval/inject/empty-final 的现有 client 回归及必要独立探针；未发现剩余可复现缺陷。 |
+| 新 guard 的兼容性 | PASS | 独立组合探针依次验证首次同原 run 恢复（cursor=None）、未知新 run 恢复、当前 run 再恢复；插入旧 run duplicate 与旧 final 后仍只有新鲜当前结果被输出。 |
+| 安全性、性能、范围/风格 | PASS | 状态保持在 Adapter 内；缓存与身份隔离逻辑保留，无新增可确认安全漏洞或明显性能回归；gateway 当前 1000 行。 |
+| 行为测试 | PASS | 完整 client **178/178**；新 child testcase 文件 **48** 个参数展开用例。 |
+| 静态检查 | PASS | 四个实现/测试文件 Ruff `--no-cache --preview --select F,E117,E203,E701,E702,E712,W291,W293,W605` 通过；`git diff --check` 通过。 |
+| 本次状态日志 | PASS | 复用本地 logger helper 的系统/方向/操作/耗时与业务身份字段；无 message/tool 正文新增日志，无新增外部调用。 |
+| 远端 ACI / 最终全 Engine 回归 | PENDING | 由独立回归与 PR 流程完成；本轮 scoped PASS 不替代远端或全量门禁。 |
+
+### RED → GREEN 与独立探针
+
+- Reviewer 在 F3 guard 应用前独立运行新参数化测试，**2 failed**：`reject-old-final` 提前收到旧 final；`accept-current-final` 因有效 final 被丢弃而超时。原始 RED JUnit 保存在 `/tmp/child-run-independent-review-iteration3-red.junit.xml`，没有被 GREEN 覆盖。
+- guard 应用后的完整 client 测试 **178 passed、0 failed、0 skipped**，1 条既有 pytest 插件弃用 warning。GREEN JUnit/coverage 使用独立 `/tmp/child-run-independent-review-iteration3.*` 路径。
+- 另外重跑两个 F3 原始内存探针：有/无插入旧 root final 均只输出 `fresh resumed`。三 child 组合探针确认 first same-original、unknown-new、current-run 三种合法授权保持有效，旧 run replay 不能夺回 cursor。
+- 本轮按用户边界在 scoped 正确性/静态检查通过后结束；未额外扩展模型消费验证、运行容器测试或远端 CI 等待。
+
+### 精确提交的 focused coverage 与 ACI 状态
+
+使用上述 GREEN JUnit 和两模块 XML，在最终精确 base/head 上独立执行仓库门禁命令：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 engine/adapter/.venv/bin/python \
+  singlebox/ci/report_check.py \
+  --junit /tmp/child-run-independent-review-iteration3.junit.xml \
+  --coverage /tmp/child-run-independent-review-iteration3.coverage.xml \
+  --source-root engine/adapter/src \
+  --base 6fb00420cf553fe36cde9f6eca4204a1f4d07200 \
+  --head 50a78e1e28878c1ad8124c41f1ebbda39f19429b \
+  --min-case-pass-rate 100 --min-line-coverage 70 \
+  --min-change-line-coverage 90
+```
+
+结果 **exit 0**：
+
+| 指标 | 精确分子/分母 | 实测 | 阈值 | 本地结论 |
+|------|---------------|------|------|----------|
+| casePassRate | **178/178**，skip=0、fail=0 | **100%** | 100% | PASS |
+| focused lineCoverage | **540/611** | **88.38%** | >=70% | PASS |
+| changeLineCoverage（生产两模块） | **169/171** | **98.83%** | >=90% | PASS |
+
+- child registry 变更行 **110/110**；gateway 变更行 **59/61**。未覆盖变更行仍为 gateway `:502`（parent identity spawn 拒绝路径）、`:786`（pending compaction timeout reason）；它们不涉及 F1/F2/F3 的关键行为断言，未降低阈值或新增忽略。
+- 540/611 仅为两模块 focused 总行覆盖率，不是全 Engine 覆盖率。正式远端 ACI job 的用例/全量行/变更行分子分母尚未提供，**ACI evidence PENDING，remote job PENDING**。
+
+### 已接受的协议限制与交接
+
+child terminal 证明执行结束，不证明父模型消费了所有结果。child 完成且父 final 延迟后，未知同 parent run 的真实因果归属仍无法由当前 WS 完全区分；这是已声明并接受的协议限制，不是本轮 blocker。已知 superseded run 的 replay 则已有足够身份状态拒绝，现由 F3 guard 正确处理。
+
+**Iteration 3 最终结论: PASS（代码评审）；远端 ACI PENDING。** 后续由主流程更新 PR #3403 并完成独立全 Engine/远端门禁。本 reviewer 不等待 CI，不执行部署或合并，不再写入本报告。
