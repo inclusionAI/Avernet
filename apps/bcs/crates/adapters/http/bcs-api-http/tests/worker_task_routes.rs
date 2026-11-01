@@ -8,8 +8,8 @@ use bcs_service_api::application::v1::{
     ApplicationError, BotRegistration, IssueRegisterToken, RegisterBot, RegisterService,
     RegisterTokenView,
 };
-use bcs_service_api::{
-    MessageFlowService, ServiceResult, TaskHandleStatus as S, TaskHandleView as View,
+use bcs_service_api::application::{
+    TaskHandleError, TaskHandleService, TaskHandleStatus as S, TaskHandleView as View,
 };
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -31,61 +31,22 @@ struct Flow {
     cancel_storage_failure: bool,
 }
 #[async_trait]
-impl MessageFlowService for Flow {
-    async fn handle_bot_event(
-        &self,
-        _: bcs_service_api::BotEventCommand,
-    ) -> ServiceResult<bcs_service_api::BotEventOutcome> {
-        unreachable!()
-    }
-    async fn handle_group_callback(
-        &self,
-        _: bcs_service_api::GroupCallbackCommand,
-    ) -> ServiceResult<bcs_service_api::GroupCallbackOutcome> {
-        unreachable!()
-    }
-    async fn handle_chat_abort(
-        &self,
-        _: bcs_service_api::ChatAbortCommand,
-    ) -> ServiceResult<bcs_service_api::ChatAbortOutcome> {
-        unreachable!()
-    }
-    async fn register_task_run_alias(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> ServiceResult<bcs_service_api::TaskRunAliasRegistration> {
-        unreachable!()
-    }
-    async fn handle_task_dispatch(
-        &self,
-        _: bcs_service_api::TaskDispatchCommand,
-    ) -> ServiceResult<bcs_service_api::TaskDispatchOutcome> {
-        unreachable!()
-    }
-    async fn handle_task_complete(
-        &self,
-        _: bcs_service_api::TaskCompleteCommand,
-    ) -> ServiceResult<bcs_service_api::TaskCompleteOutcome> {
-        unreachable!()
-    }
-    async fn handle_web_send(
-        &self,
-        _: bcs_service_api::WebSendCommand,
-    ) -> ServiceResult<bcs_service_api::WebSendOutcome> {
-        unreachable!()
-    }
-    async fn task_status(&self, refs: Vec<String>) -> ServiceResult<Vec<View>> {
+impl TaskHandleService for Flow {
+    async fn task_status(&self, refs: Vec<String>) -> Result<Vec<View>, TaskHandleError> {
+        if refs.is_empty() {
+            return Err(TaskHandleError::InvalidRequest);
+        }
         assert_eq!(refs, vec!["T-1234abcd"]);
         Ok(vec![View::new(refs[0].clone(), S::NotFound)])
     }
-    async fn cancel_task(&self, reference: String, reason: String) -> ServiceResult<View> {
+    async fn cancel_task(
+        &self,
+        reference: String,
+        reason: String,
+    ) -> Result<View, TaskHandleError> {
         assert_eq!(reason, "please stop");
         if self.cancel_storage_failure {
-            return Err(bcs_service_api::ServiceError::InternalError(
-                "task cancellation persistence failed".into(),
-            ));
+            return Err(TaskHandleError::Unavailable);
         }
         Ok(View::new(reference, S::Unknown))
     }
@@ -141,4 +102,22 @@ async fn cancel_keeps_uncertainty_and_storage_failures_distinct() {
     );
     let response = app(true).oneshot(request("cancel", true)).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn application_validation_errors_return_bad_request() {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/openapi/v1/collaboration/worker-tasks/status")
+        .header("x-test-auth", "yes")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"task_refs":[]}"#))
+        .unwrap();
+    let response = app(false).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+        serde_json::json!({"error":"task_handle_request_failed"})
+    );
 }

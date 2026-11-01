@@ -1,8 +1,20 @@
 //! Global retained-task handles. These are correlation identifiers, not credentials.
 use serde::{Deserialize, Serialize};
 
-/// Error contract for task-handle application operations.
-pub use crate::core::ServiceError as TaskHandleError;
+/// Transport-independent failure contract; no core error or diagnostic escapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TaskHandleError {
+    #[error("invalid task-handle request")]
+    InvalidRequest,
+    #[error("task-handle service unavailable")]
+    Unavailable,
+}
+
+#[async_trait::async_trait]
+pub trait TaskHandleService: Send + Sync {
+    async fn task_status(&self, refs: Vec<String>) -> Result<Vec<TaskHandleView>, TaskHandleError>;
+    async fn cancel_task(&self, reference: String, reason: String) -> Result<TaskHandleView, TaskHandleError>;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

@@ -114,3 +114,6 @@ mod caller_execution;
 mod task_handle;
 
 mod task_rejection;
+
+mod task_handle_application;
+pub use task_handle_application::TaskHandleApplicationService;

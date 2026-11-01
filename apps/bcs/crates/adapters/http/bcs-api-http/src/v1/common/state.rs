@@ -19,7 +19,7 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct ApiState {
-    pub worker_task_service: Option<Arc<dyn bcs_service_api::application::MessageFlowService>>,
+    pub worker_task_service: Option<Arc<dyn bcs_service_api::application::TaskHandleService>>,
     pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,

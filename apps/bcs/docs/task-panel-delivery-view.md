@@ -55,3 +55,10 @@ sampled runtime/activity; the frontend does not invent terminal timestamps.
 A confirmed response upgrades the original receipt rather than adding another
 row. Exact-task cancellation uses the complete intent when no delivery ID is
 available; it never falls back to a Bot-wide abort.
+
+
+The browser adapter depends on the application-owned `TaskHandleService` and
+`TaskHandleError` contracts. `TaskHandleApplicationService` translates core validation
+failures into `InvalidRequest` and all other core failures into `Unavailable` before
+returning to HTTP. Adapters map only those application categories to HTTP 400/503;
+core enum variants and diagnostics are not part of the public boundary.

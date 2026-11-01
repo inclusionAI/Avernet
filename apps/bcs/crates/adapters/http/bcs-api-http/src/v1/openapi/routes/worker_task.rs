@@ -9,7 +9,7 @@ use axum::{
     routing::post,
 };
 use bcs_service_api::application::v1::{AuthenticatedCaller, require_authenticated_user};
-use bcs_service_api::application::{MessageFlowService, TaskHandleError as ServiceError};
+use bcs_service_api::application::{TaskHandleError, TaskHandleService};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ pub fn router() -> Router<ApiState> {
 fn service(
     state: &ApiState,
     caller: &AuthenticatedCaller,
-) -> Result<Arc<dyn MessageFlowService>, Response> {
+) -> Result<Arc<dyn TaskHandleService>, Response> {
     if require_authenticated_user(caller).is_err() {
         return Err((
             StatusCode::FORBIDDEN,
@@ -50,11 +50,10 @@ fn service(
             .into_response()
     })
 }
-fn error(error: ServiceError) -> Response {
-    let status = if matches!(error, ServiceError::InvalidOperation { .. }) {
-        StatusCode::BAD_REQUEST
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
+fn error(error: TaskHandleError) -> Response {
+    let status = match error {
+        TaskHandleError::InvalidRequest => StatusCode::BAD_REQUEST,
+        TaskHandleError::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
     };
     (
         status,
