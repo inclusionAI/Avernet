@@ -1,0 +1,17 @@
+{
+  "flat_module_lower_bound": 338,
+  "flat_module_upper_bound": 343,
+  "audit": [
+    {
+      "upper_bound": 338,
+      "commit": "def7a8125",
+      "reason": "Flat-module budget frozen when the 14-obligation direct-conversation density roster landed."
+    },
+    {
+      "upper_bound": 343,
+      "commit": "b499175d5",
+      "reason": "File-size-mandated plane splits added five flat modules: four in 66531f1b0 (workspace/fixed-loop split) and one in e36ce0265 (operator-cli profile-validation plane split)."
+    }
+  ],
+  "policy": "Raising flat_module_upper_bound is deliberate: edit this latch in the same commit that adds flat modules and append an audit entry carrying the previous bound, the new bound, the commit and the reason. The density test verifies monotonicity and that the last audit entry matches the active upper bound."
+}

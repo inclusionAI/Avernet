@@ -714,16 +714,42 @@ class TestPackageDiscipline(unittest.TestCase):
                 for pattern in patterns:
                     self.assertIsNone(pattern.search(text), f"{path.name} tripped {pattern.pattern}")
 
+    @staticmethod
+    def _flat_module_budget() -> tuple[int, int]:
+        latch = json.loads(
+            (ROOT / "bcs_e2e" / "flat_module_budget.json").read_text(encoding="utf-8")
+        )
+        return int(latch["flat_module_lower_bound"]), int(latch["flat_module_upper_bound"])
+
+    @staticmethod
+    def _flat_module_budget_audit() -> list[dict]:
+        latch = json.loads(
+            (ROOT / "bcs_e2e" / "flat_module_budget.json").read_text(encoding="utf-8")
+        )
+        return [{"upper_bound": int(entry["upper_bound"]), "commit": str(entry["commit"])}
+                for entry in latch["audit"]]
+
     def test_flat_budget_intact_and_subpackage_is_new(self):
+        lower, upper = self._flat_module_budget()
         flat = list((ROOT / "bcs_e2e").glob("*.py"))
-        self.assertGreaterEqual(len(flat), 338)
-        # Budget realigned to 343: the def7a8125 cut froze at 338, and the
-        # file-size-mandated plane splits added five flat modules (four in
-        # 66531f1b0, one in e36ce0265). Raise deliberately; further flat
-        # growth must update this tripwire consciously.
-        self.assertLessEqual(len(flat), 343)
+        self.assertGreaterEqual(len(flat), lower)
+        # The latch file, not this test body, carries the deliberate bounds;
+        # raising the upper bound must go through its audit trail.
+        self.assertLessEqual(len(flat), upper)
         self.assertTrue((ROOT / "bcs_e2e" / "direct_conversation_density" / "contract.py").is_file())
         self.assertFalse((ROOT / "bcs_e2e" / "direct_conversation_density_flat_marker.py").exists())
+
+    def test_flat_module_budget_latch_keeps_a_monotonic_audit_trail(self):
+        lower, upper = self._flat_module_budget()
+        audit = self._flat_module_budget_audit()
+        self.assertTrue(audit)
+        uppers = [entry["upper_bound"] for entry in audit]
+        self.assertEqual(uppers, sorted(uppers))
+        self.assertLessEqual(lower, uppers[0])
+        # The active upper bound is always the latest audited raise.
+        self.assertEqual(uppers[-1], upper)
+        for entry in audit:
+            self.assertTrue(entry["commit"])
 
 
 class TestFamilyAlignment(unittest.TestCase):
