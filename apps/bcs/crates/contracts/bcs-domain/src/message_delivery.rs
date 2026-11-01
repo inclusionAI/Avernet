@@ -87,6 +87,15 @@ pub struct MessageDeliveryState {
     pub may_have_been_sent: bool,
 }
 
+impl MessageDeliveryState {
+    /// Terminal proof that this target never received the canonical message.
+    pub fn is_unsent_terminal(self) -> bool {
+        !self.may_have_been_sent && matches!(self.status,
+            MessageDeliveryStatus::Cancelled | MessageDeliveryStatus::Expired
+            | MessageDeliveryStatus::RejectedCapacity | MessageDeliveryStatus::DiscardedContext)
+    }
+}
+
 /// Durable delivery record. Canonical body and attachments live exclusively in
 /// bcs_messages. Optional run fields are absent for context-only Inject rows.
 #[derive(Debug, Clone, Serialize, Deserialize)]

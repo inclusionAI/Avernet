@@ -7,6 +7,8 @@ import { backendRequest } from '../httpClient';
  */
 export interface CancelDeliveryResult {
   delivery: DeliveryStatusView;
+  /** Stable client-side correlation ID for removing the optimistic user message. */
+  client_message_id?: string | null;
   error: string | null;
 }
 

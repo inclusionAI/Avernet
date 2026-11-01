@@ -162,3 +162,18 @@ legacy intents are bound once through a CTE and excluded before the candidate
 limit; over-budget lookups fail closed. Memory uses one snapshot per batch.
 A maximum 20-selector batch with 256 suppressions uses 696 bound parameters;
 output is bounded but matching index-range scan cost is data dependent.
+
+## Cancelled queued-message history
+
+Display queries hide a source only if at least one delivery is Cancelled and all
+of its deliveries are proven unsent terminal outcomes. Potentially sent, active,
+uncertain, or still-queued siblings keep the message visible. No-delivery legacy
+messages remain visible. Canonical ID lookup and stored content are unchanged.
+SQL applies one env/Session/source-indexed aggregate before pagination in the
+existing history SELECT, with no extra DB round trips; it must not scan the
+cross-message status index. Memory aggregates target states once per Session.
+Memory/SQLite conformance covers refresh, partial cancellation, send uncertainty,
+legacy rows, pagination, query count, index selection, and storage errors.
+Returned history rows are bounded by LIMIT; candidate/target scan work remains
+data-dependent for long cancellation-dense ranges. SQLite verifies source-index
+selection; remote MySQL/OceanBase execution plans need deployment verification.
