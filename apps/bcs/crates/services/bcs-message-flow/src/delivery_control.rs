@@ -569,9 +569,6 @@ pub async fn cancel(
         .lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone()))
         .await
         .map_err(|_| ServiceError::InternalError("delivery cancellation lookup failed".into()))?;
-    let mut current_rows = rows.iter()
-        .filter(|row| row.source_message_id == command.message_id)
-        .cloned().collect::<Vec<_>>();
     let mut results = Vec::new();
     for row in rows.into_iter().filter(|row| {
         row.source_message_id == command.message_id
@@ -602,9 +599,6 @@ pub async fn cancel(
             request_id: None, actor_id: Some(actor.clone()), reply: None, transport_context_json: None,
             deadline_at_ms: Some(now_ms.saturating_add(30_000)), caller_cancel: None, caller_terminal: None }).await {
             Ok(updated) => {
-                if let Some(current) = current_rows.iter_mut().find(|current| current.delivery_id == updated.delivery_id) {
-                    *current = updated.clone();
-                }
                 results.push(CancelMessageDeliveryResult {
                     delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)),
                     client_message_id: None,
@@ -623,12 +617,21 @@ pub async fn cancel(
             }
         }
     }
-    let removable = !current_rows.is_empty()
-        && current_rows.iter().all(|row| row.state.is_unsent_terminal());
-    if removable {
-        for result in &mut results {
-            if result.error.is_none() {
-                result.client_message_id = message.client_msg_id.clone();
+    if results.iter().any(|result| result.error.is_none()) {
+        // Another per-target cancellation may commit after our initial snapshot.
+        // Confirm once per request, not once per target, using persisted sibling states.
+        let current_rows = service
+            .lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone()))
+            .await
+            .map_err(|_| ServiceError::InternalError("delivery cancellation confirmation failed".into()))?
+            .into_iter().filter(|row| row.source_message_id == command.message_id).collect::<Vec<_>>();
+        let removable = !current_rows.is_empty()
+            && current_rows.iter().all(|row| row.state.is_unsent_terminal());
+        if removable {
+            for result in &mut results {
+                if result.error.is_none() {
+                    result.client_message_id = message.client_msg_id.clone();
+                }
             }
         }
     }
