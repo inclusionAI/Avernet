@@ -21,10 +21,19 @@ const TERMINAL_RETENTION_MS = 3_000;
  *   WS message.delivery.updated → provider.subscribeToDeliveryUpdates → upsertDelivery → store
  *   用户点击取消 → cancelDeliveryApi → WS 确认状态变更 → store 更新 → UI 刷新
  */
-export function useMessageDeliveries(provider: GroupChatProvider | null, sessionId: string | null) {
+export function useMessageDeliveries(
+  provider: GroupChatProvider | null,
+  sessionId: string | null,
+  onCancelledClientMessages?: (clientMessageIds: string[]) => void,
+) {
   const [cancellingDeliveryIds, setCancellingDeliveryIds] = useState<Set<string>>(() => new Set());
   const cancellingRef = useRef(new Set<string>());
   const terminalTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const scopeRef = useRef<object | null>(null);
+  useEffect(() => {
+    scopeRef.current = {};
+    return () => { scopeRef.current = null; };
+  }, [provider, sessionId]);
 
   // 订阅 WS delivery 事件
   useEffect(() => {
@@ -66,23 +75,30 @@ export function useMessageDeliveries(provider: GroupChatProvider | null, session
   const cancelDelivery = useCallback(
     async (messageId: string, deliveryId: string) => {
       if (!sessionId || cancellingRef.current.has(deliveryId)) return;
+      const scope = scopeRef.current;
       cancellingRef.current.add(deliveryId);
       setCancellingDeliveryIds(new Set(cancellingRef.current));
       try {
         // 取消经 messageDeliveryService（分层：Hook 不直连 API Controller）；
         // 接口裸返回结果数组，HTTP 失败抛错，单项失败经 firstError 返回。
         const outcome = await cancelQueuedDelivery(messageId, deliveryId, sessionId);
+        if (scope !== scopeRef.current) return;
+        if (outcome.clientMessageIds.length > 0) {
+          onCancelledClientMessages?.(outcome.clientMessageIds);
+        }
         if (outcome.firstError) {
           toast.error(outcome.firstError);
         }
       } catch {
-        toast.error('取消失败，请重试');
+        if (scope === scopeRef.current) toast.error('取消失败，请重试');
       } finally {
-        cancellingRef.current.delete(deliveryId);
-        setCancellingDeliveryIds(new Set(cancellingRef.current));
+        if (scope === scopeRef.current) {
+          cancellingRef.current.delete(deliveryId);
+          setCancellingDeliveryIds(new Set(cancellingRef.current));
+        }
       }
     },
-    [sessionId],
+    [onCancelledClientMessages, sessionId],
   );
 
   // 从 store 读取当前会话的投递状态

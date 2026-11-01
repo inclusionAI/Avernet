@@ -242,3 +242,33 @@ async fn missing_legacy_join_anchor_keeps_existing_behavior_without_window_read(
     }
     assert!(probe.calls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn cancellation_returns_exact_client_id_only_after_every_target_is_unsent_terminal() {
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let (flow, repo) = fixture().await;
+    let mut msg = message(20);
+    msg.client_msg_id = Some("exact-client-id".into());
+    flow.managed_deliveries.as_ref().unwrap().admit(AdmitMessageDeliveries {
+        display_message: None, message_id: "multi-target".into(), message: msg,
+        flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+        now_ms: 20, expire_at_ms: None, event: None,
+        targets: ["bot-driver", "bot-observer"].iter().map(|bot| DeliveryAdmissionTarget {
+            rejection: None, target_bot_id: (*bot).into(), kind: DeliveryType::Send,
+            max_queued: 100, semantic_projection_json: json!({"version":1}), run_id: None,
+        }).collect(),
+    }).await.unwrap();
+    let rows = repo.lookup(DeliveryLookup::Message("multi-target".into())).await.unwrap();
+    let cancel = |delivery_id| bcs_service_api::CancelMessageDeliveryCommand {
+        caller: human(), session_id: SESSION.into(), message_id: "multi-target".into(), delivery_id,
+    };
+    let first = flow.cancel_message_deliveries(cancel(Some(rows[0].delivery_id.clone()))).await.unwrap();
+    assert!(first[0].error.is_none());
+    assert!(first[0].client_message_id.is_none(), "the other Bot still has a queued delivery");
+    let last = flow.cancel_message_deliveries(cancel(Some(rows[1].delivery_id.clone()))).await.unwrap();
+    assert!(last[0].error.is_none());
+    assert_eq!(last[0].client_message_id.as_deref(), Some("exact-client-id"));
+    assert!(repo.get_message_by_id(SESSION, "multi-target").await.unwrap().is_some());
+    let page = repo.list_session_history(SESSION, bcs_domain::MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
+    assert!(!page.messages.iter().any(|m| m.message_id == "multi-target"));
+}

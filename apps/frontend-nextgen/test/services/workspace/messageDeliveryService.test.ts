@@ -26,6 +26,7 @@ describe('messageDeliveryService.cancelQueuedDelivery', () => {
     const outcome = await cancelQueuedDelivery('m1', 'd1', 's1');
 
     expect(outcome.firstError).toBeNull();
+    expect(outcome.clientMessageIds).toEqual([]);
   });
 
   it('接口异常向上抛出（由 Hook 统一 toast）', async () => {
@@ -33,4 +34,19 @@ describe('messageDeliveryService.cancelQueuedDelivery', () => {
 
     await expect(cancelQueuedDelivery('m1', 'd1', 's1')).rejects.toThrow('network');
   });
+  it('只汇总成功响应中的非空精确关联 ID，去重并兼容旧服务端', async () => {
+    const delivery = { delivery_id: 'd1' } as never;
+    mockedCancel.mockResolvedValue([
+      { delivery, error: null, client_message_id: 'client-1' },
+      { delivery, error: null, client_message_id: 'client-1' },
+      { delivery, error: 'delivery_state_changed', client_message_id: 'do-not-remove' },
+      { delivery, error: null, client_message_id: null },
+      { delivery, error: null, client_message_id: '' },
+      { delivery, error: null },
+    ]);
+    const outcome = await cancelQueuedDelivery('m1', 'd1', 's1');
+    expect(outcome.clientMessageIds).toEqual(['client-1']);
+    expect(outcome.firstError).toBe('delivery_state_changed');
+  });
+
 });
