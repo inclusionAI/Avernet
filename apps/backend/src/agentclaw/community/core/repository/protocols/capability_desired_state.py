@@ -17,13 +17,18 @@ if TYPE_CHECKING:
 
 
 class CapabilityDesiredStateRepositoryProtocol(Protocol):
-    """Tenant/env-scoped atomic SkillSet desired-state operations."""
+    """Tenant/env-scoped atomic SkillSet desired-state operations.
+
+    Membership, activation, Default exclusion, Installation reconciliation and
+    capability compensation preserve Bot MCP overrides. Explicit Direct MCP
+    uninstall, configuration replacement and Bot deletion own their cleanup.
+    """
 
     @abstractmethod
     def purge_bot_installations(
         self, *, bot_id: str, owner_id: str, env: str
     ) -> dict[str, int]:
-        """Remove both Installation tables during explicit Bot deletion."""
+        """Remove both Installation tables and Bot MCP overrides on Bot deletion."""
         ...
 
     @abstractmethod
@@ -381,4 +386,6 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         owner_id: str,
         state: CapabilityDesiredState,
         engine_type: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Restore capability facts without deleting or rolling back Bot overrides."""
+        ...
