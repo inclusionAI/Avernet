@@ -91,6 +91,19 @@ class QueuedMessageCancellationStory(ResultQueueStory):
     def history_contains(self, message_id: str) -> bool:
         return any(row["id"] == message_id for row in self.history())
 
+    def complete_dispatched_work(self) -> None:
+        # The Provider sink is shared by the full suite: unrelated Bots can
+        # continue sending after clear(). Scope callbacks to this Session and
+        # these Bots rather than assuming the capture buffer is exclusive.
+        bots = {bot["provider_bot_ref"]: bot for bot in self.bots}
+        for request in self.captured():
+            body = request["body"]
+            if body.get("method") != "chat.send" or body.get("session_id") != self.session_id:
+                continue
+            bot = bots.get(body.get("to_bot", {}).get("provider_bot_ref"))
+            if bot is not None:
+                self.callback(request, bot, "NO_REPLY")
+
     def exercise(self) -> None:
         group = self.post("/groups", {
             "driver_bot": self.args.driver, "label": "Queue cancellation E2E",
@@ -173,11 +186,7 @@ class QueuedMessageCancellationStory(ResultQueueStory):
 
             # Finish only actually dispatched work, without creating chat replies
             # or leaving busy lanes that could affect subsequent E2E stories.
-            for request in self.captured():
-                if request["body"].get("method") == "chat.send":
-                    bot = next(bot for bot in self.bots
-                               if bot["provider_bot_ref"] == request["body"]["to_bot"]["provider_bot_ref"])
-                    self.callback(request, bot, "NO_REPLY")
+            self.complete_dispatched_work()
             for retained_id in (neighbour_id, mixed_id):
                 self.wait("retained message work completes", lambda mid=retained_id: self.deliveries(mid),
                           lambda rows: bool(rows) and all(row["status"] in ("completed", "cancelled")

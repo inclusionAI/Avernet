@@ -697,7 +697,7 @@ mod tests {
             admission_error: None, delivery_id: "delivery".into(), message_id: "canonical".into(),
             target_bot_id: "bot".into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
             kind: bcs_domain::DeliveryType::Send, status: bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled,
-            state_version: 2, run_id: None, wait_reason: None, content_preview: None,
+            state_version: 2, run_id: None, wait_reason: None, content_preview: None, task: None,
         };
         let mut result = CancelMessageDeliveryResult { delivery, error: None, client_message_id: None };
         assert!(serde_json::to_value(&result).unwrap().get("client_message_id").is_none());
