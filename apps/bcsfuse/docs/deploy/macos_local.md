@@ -130,7 +130,8 @@ export LLM_AUTH_TOKEN="your_llm_token"
 # Embedding Configuration
 export EMBEDDING_BASE_URL="your_embedding_endpoint"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token"
-export EMBEDDING_DIMENSION="4096"  # CRITICAL: must be 4096
+export EMBEDDING_DIMENSION="1024"  # CRITICAL: must be 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 
 # Qdrant (auto-configured)
 export QDRANT_LOCAL_PATH=".runtime/data/qdrant"
@@ -138,7 +139,7 @@ export QDRANT_LOCAL_PATH=".runtime/data/qdrant"
 
 **Important:**
 - Replace `change_me` placeholders with real credentials
-- Ensure `EMBEDDING_DIMENSION="4096"` (for Qwen3-Embedding-8B)
+- Ensure `EMBEDDING_DIMENSION="1024"` (for Qwen3-Embedding-4B)
 
 ### 3. Initialize Storage
 
@@ -454,7 +455,7 @@ rm -f .runtime/data/qdrant/.lock
 **Symptom:**
 
 ```
-dimension error expected 4096 got 1024
+dimension error expected 1024 got 4096
 ```
 
 **Solution:**
@@ -463,8 +464,9 @@ dimension error expected 4096 got 1024
 # Edit env file
 vi .runtime/env/.env.local
 
-# Ensure EMBEDDING_DIMENSION="4096"
-export EMBEDDING_DIMENSION="4096"
+# Ensure EMBEDDING_DIMENSION="1024"
+export EMBEDDING_DIMENSION="1024"
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 ```
 
 #### 5. Runtime started but health check failed

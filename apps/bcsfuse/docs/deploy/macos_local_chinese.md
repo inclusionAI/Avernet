@@ -130,7 +130,8 @@ export LLM_AUTH_TOKEN="your_llm_token"
 # Embedding 配置
 export EMBEDDING_BASE_URL="your_embedding_endpoint"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token"
-export EMBEDDING_DIMENSION="4096"  # 关键：必须是 4096
+export EMBEDDING_DIMENSION="1024"  # 关键：必须是 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 
 # Qdrant（自动配置）
 export QDRANT_LOCAL_PATH=".runtime/data/qdrant"
@@ -138,7 +139,7 @@ export QDRANT_LOCAL_PATH=".runtime/data/qdrant"
 
 **重要提示：**
 - 替换 `change_me` 占位符为真实凭证
-- 确保 `EMBEDDING_DIMENSION="4096"`（用于 Qwen3-Embedding-8B）
+- 确保 `EMBEDDING_DIMENSION="1024"`（用于 Qwen3-Embedding-4B）
 
 ### 3. 初始化存储
 
@@ -454,7 +455,7 @@ rm -f .runtime/data/qdrant/.lock
 **症状：**
 
 ```
-dimension error expected 4096 got 1024
+dimension error expected 1024 got 4096
 ```
 
 **解决方案：**
@@ -463,8 +464,9 @@ dimension error expected 4096 got 1024
 # 编辑环境文件
 vi .runtime/env/.env.local
 
-# 确保 EMBEDDING_DIMENSION="4096"
-export EMBEDDING_DIMENSION="4096"
+# 确保 EMBEDDING_DIMENSION="1024"
+export EMBEDDING_DIMENSION="1024"
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 ```
 
 #### 5. 运行时启动但健康检查失败

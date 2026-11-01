@@ -61,7 +61,7 @@ BCSFuse Open-Core is a multi-bot AI workbench that enables:
 |-----------|---------|---------|
 | **Worker Registry** | Bot metadata and state management | MySQL 8.0+ |
 | **Vector Store** | Profile semantic search | Qdrant (local mode) |
-| **Embedding Service** | Text vectorization | External API (Qwen3-Embedding-8B) |
+| **Embedding Service** | Text vectorization | External API (Qwen3-Embedding-4B) |
 | **LLM Client** | Fusion and consultation | External API (GLM-4/5) |
 | **Profile Manager** | Bot capability descriptions | MySQL + Qdrant |
 
@@ -105,9 +105,9 @@ You need access to:
    - Base URL and auth token required
 
 2. **Embedding Service** (OpenAI-compatible API):
-   - Model: Qwen3-Embedding-8B (dimension: 4096)
+   - Model: Qwen3-Embedding-4B (dimension: 1024)
    - Base URL and auth token required
-   - ⚠️ **CRITICAL**: Must use 4096-dimensional embeddings
+   - ⚠️ **CRITICAL**: Must use 1024-dimensional embeddings
 
 ---
 
@@ -346,15 +346,16 @@ export EMBEDDING_BASE_URL="https://your-embedding-endpoint.com/v1"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token_here"
 
 # Model configuration
-export EMBEDDING_MODEL="Qwen3-Embedding-8B"
-export EMBEDDING_DIMENSION="4096"  # ⚠️ CRITICAL: Must be 4096
+export EMBEDDING_MODEL="Qwen3-Embedding-4B"
+export EMBEDDING_DIMENSION="1024"  # ⚠️ CRITICAL: Must be 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_TIMEOUT_MS="30000"
 ```
 
 **⚠️ CRITICAL: Embedding Dimension**
 
-- Qwen3-Embedding-8B produces 4096-dimensional vectors
-- DO NOT change `EMBEDDING_DIMENSION` to other values (1024, 768, etc.)
+- The selected Qwen3-Embedding-4B/1024 profile requires `EMBEDDING_REQUEST_DIMENSIONS=true`
+- DO NOT change `EMBEDDING_DIMENSION` without a complete vector reindex and quality/capacity regression
 - Mismatched dimensions will cause runtime errors
 
 **Test Embedding connectivity:**
@@ -368,11 +369,11 @@ curl -X POST "$EMBEDDING_BASE_URL/embeddings" \
   -H "Authorization: Bearer $EMBEDDING_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen3-Embedding-8B",
+    "model": "Qwen3-Embedding-4B",
     "input": "Hello, world!"
   }'
 
-# Verify dimension in response (should be 4096)
+# Verify dimension in response (should be 1024)
 ```
 
 #### 4.3 Verify Complete Configuration
@@ -400,7 +401,7 @@ echo "Embedding Configuration:"
 echo "  Enabled: $ENABLE_REAL_EMBEDDING"
 echo "  Base URL: $EMBEDDING_BASE_URL"
 echo "  Model: $EMBEDDING_MODEL"
-echo "  Dimension: $EMBEDDING_DIMENSION"  # Should be 4096
+echo "  Dimension: $EMBEDDING_DIMENSION"  # Should be 1024
 
 echo ""
 echo "Vector Store:"
@@ -694,8 +695,9 @@ export EMBEDDING_ENABLED="true"                  # Enable embedding
 export EMBEDDING_BASE_URL="https://your-embedding-endpoint.com/v1"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token_here"
 
-export EMBEDDING_MODEL="Qwen3-Embedding-8B"      # Model name
-export EMBEDDING_DIMENSION="4096"                # ⚠️ CRITICAL: Must be 4096
+export EMBEDDING_MODEL="Qwen3-Embedding-4B"      # Model name
+export EMBEDDING_DIMENSION="1024"                # ⚠️ CRITICAL: Must be 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_TIMEOUT_MS="30000"              # 30 seconds
 ```
 
@@ -762,8 +764,8 @@ if os.getenv('EMBEDDING_AUTH_TOKEN') == 'change_me':
     errors.append('EMBEDDING_AUTH_TOKEN not configured')
 
 # Check critical dimension
-if os.getenv('EMBEDDING_DIMENSION') != '4096':
-    errors.append('EMBEDDING_DIMENSION must be 4096')
+if os.getenv('EMBEDDING_DIMENSION') != '1024':
+    errors.append('EMBEDDING_DIMENSION must be 1024')
 
 if errors:
     print('❌ Configuration Errors:')
@@ -1185,7 +1187,7 @@ rm -f .runtime/data/qdrant/.lock
 **Symptom:**
 
 ```
-dimension error expected 4096 got 1024
+dimension error expected 1024 got 4096
 ```
 
 **Solution:**
@@ -1194,8 +1196,9 @@ dimension error expected 4096 got 1024
 # Edit environment
 vi .runtime/env/.env.local
 
-# Ensure EMBEDDING_DIMENSION is 4096
-export EMBEDDING_DIMENSION="4096"
+# Ensure EMBEDDING_DIMENSION is 1024
+export EMBEDDING_DIMENSION="1024"
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 
 # Restart runtime
 ./scripts/deploy/macos/restart_local.sh
@@ -1259,7 +1262,7 @@ curl -X POST "$LLM_BASE_URL/v1/messages" \
 curl -X POST "$EMBEDDING_BASE_URL/embeddings" \
   -H "Authorization: Bearer $EMBEDDING_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen3-Embedding-8B","input":"test"}'
+  -d '{"model":"Qwen3-Embedding-4B","input":"test"}'
 
 # Restart with debug logging
 export LOG_LEVEL=DEBUG
@@ -1542,8 +1545,8 @@ cat > SETUP_NOTES.md << 'EOF'
 
 ## Embedding Provider
 - Provider: [Your Provider]
-- Model: Qwen3-Embedding-8B
-- Dimension: 4096
+- Model: Qwen3-Embedding-4B
+- Dimension: 1024
 
 ## Custom Configurations
 - MYSQL_POOL_SIZE=30
@@ -1583,7 +1586,7 @@ Before starting, verify these are configured:
 
 ### Critical
 
-- [ ] `EMBEDDING_DIMENSION="4096"` (must be 4096)
+- [ ] `EMBEDDING_DIMENSION="1024"` (must be 1024)
 - [ ] `ENABLE_REAL_LLM="true"`
 - [ ] `ENABLE_REAL_EMBEDDING="true"`
 
@@ -1591,7 +1594,7 @@ Before starting, verify these are configured:
 
 - [ ] `LLM_FAST_MODEL` (e.g., GLM-4.7-Flash)
 - [ ] `LLM_REASONING_MODEL` (e.g., GLM-5)
-- [ ] `EMBEDDING_MODEL` (e.g., Qwen3-Embedding-8B)
+- [ ] `EMBEDDING_MODEL` (e.g., Qwen3-Embedding-4B)
 - [ ] `LOG_LEVEL` (INFO or DEBUG)
 
 ## Appendix C: Common Issues Quick Reference
@@ -1601,7 +1604,7 @@ Before starting, verify these are configured:
 | Port 8765 in use | `./scripts/deploy/macos/stop_local.sh` |
 | MySQL connection failed | Check MySQL is running, verify credentials |
 | Qdrant lock file | `rm -f .runtime/data/qdrant/.lock` |
-| Embedding dimension mismatch | Set `EMBEDDING_DIMENSION="4096"` |
+| Embedding dimension mismatch | Set `EMBEDDING_DIMENSION="1024"` |
 | LLM timeout | Increase `LLM_DEFAULT_TIMEOUT_MS` |
 | Module not found | `source .venv/bin/activate && uv sync` |
 | Permission denied | `chmod -R 755 .runtime/` |

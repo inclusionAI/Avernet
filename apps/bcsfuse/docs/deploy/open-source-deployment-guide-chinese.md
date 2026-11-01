@@ -61,7 +61,7 @@ BCSFuse Open-Core 是一个多机器人 AI 工作台，支持：
 |-----------|---------|---------|
 | **Worker Registry** | 机器人元数据和状态管理 | MySQL 8.0+ |
 | **Vector Store** | Profile 语义搜索 | Qdrant（本地模式） |
-| **Embedding Service** | 文本向量化 | 外部 API（Qwen3-Embedding-8B） |
+| **Embedding Service** | 文本向量化 | 外部 API（Qwen3-Embedding-4B） |
 | **LLM Client** | Fusion 和会诊 | 外部 API（GLM-4/5） |
 | **Profile Manager** | 机器人能力描述 | MySQL + Qdrant |
 
@@ -105,9 +105,9 @@ curl --version
    - 需要 Base URL 和 auth token
 
 2. **Embedding 服务**（兼容 OpenAI API）：
-   - 模型：Qwen3-Embedding-8B（维度：4096）
+   - 模型：Qwen3-Embedding-4B（维度：1024）
    - 需要 Base URL 和 auth token
-   - ⚠️ **关键**：必须使用 4096 维度的 embeddings
+   - ⚠️ **关键**：必须使用 1024 维度的 embeddings
 
 ---
 
@@ -346,15 +346,16 @@ export EMBEDDING_BASE_URL="https://your-embedding-endpoint.com/v1"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token_here"
 
 # 模型配置
-export EMBEDDING_MODEL="Qwen3-Embedding-8B"
-export EMBEDDING_DIMENSION="4096"  # ⚠️ 关键：必须是 4096
+export EMBEDDING_MODEL="Qwen3-Embedding-4B"
+export EMBEDDING_DIMENSION="1024"  # ⚠️ 关键：必须是 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_TIMEOUT_MS="30000"
 ```
 
 **⚠️ 关键：Embedding 维度**
 
-- Qwen3-Embedding-8B 生成 4096 维向量
-- **不要**更改 `EMBEDDING_DIMENSION` 为其他值（1024, 768 等）
+- 选定的 Qwen3-Embedding-4B/1024 配置要求 `EMBEDDING_REQUEST_DIMENSIONS=true`
+- 更改 `EMBEDDING_DIMENSION` 前必须完成全量向量重建以及质量/容量回归
 - 维度不匹配会导致运行时错误
 
 **测试 Embedding 连接：**
@@ -368,11 +369,11 @@ curl -X POST "$EMBEDDING_BASE_URL/embeddings" \
   -H "Authorization: Bearer $EMBEDDING_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen3-Embedding-8B",
+    "model": "Qwen3-Embedding-4B",
     "input": "Hello, world!"
   }'
 
-# 验证响应中的维度（应该是 4096）
+# 验证响应中的维度（应该是 1024）
 ```
 
 #### 4.3 验证完整配置
@@ -400,7 +401,7 @@ echo "Embedding 配置："
 echo "  Enabled: $ENABLE_REAL_EMBEDDING"
 echo "  Base URL: $EMBEDDING_BASE_URL"
 echo "  Model: $EMBEDDING_MODEL"
-echo "  Dimension: $EMBEDDING_DIMENSION"  # 应该是 4096
+echo "  Dimension: $EMBEDDING_DIMENSION"  # 应该是 1024
 
 echo ""
 echo "向量存储："
@@ -694,8 +695,9 @@ export EMBEDDING_ENABLED="true"                  # 启用 Embedding
 export EMBEDDING_BASE_URL="https://your-embedding-endpoint.com/v1"
 export EMBEDDING_AUTH_TOKEN="your_embedding_token_here"
 
-export EMBEDDING_MODEL="Qwen3-Embedding-8B"      # 模型名称
-export EMBEDDING_DIMENSION="4096"                # ⚠️ 关键：必须是 4096
+export EMBEDDING_MODEL="Qwen3-Embedding-4B"      # 模型名称
+export EMBEDDING_DIMENSION="1024"                # ⚠️ 关键：必须是 1024
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_TIMEOUT_MS="30000"              # 30 秒
 ```
 
@@ -762,8 +764,8 @@ if os.getenv('EMBEDDING_AUTH_TOKEN') == 'change_me':
     errors.append('EMBEDDING_AUTH_TOKEN 未配置')
 
 # 检查关键维度
-if os.getenv('EMBEDDING_DIMENSION') != '4096':
-    errors.append('EMBEDDING_DIMENSION 必须是 4096')
+if os.getenv('EMBEDDING_DIMENSION') != '1024':
+    errors.append('EMBEDDING_DIMENSION 必须是 1024')
 
 if errors:
     print('❌ 配置错误：')
@@ -1193,7 +1195,7 @@ rm -f .runtime/data/qdrant/.lock
 **症状：**
 
 ```
-dimension error expected 4096 got 1024
+dimension error expected 1024 got 4096
 ```
 
 **解决方案：**
@@ -1202,8 +1204,9 @@ dimension error expected 4096 got 1024
 # 编辑环境变量
 vi .runtime/env/.env.local
 
-# 确保 EMBEDDING_DIMENSION 是 4096
-export EMBEDDING_DIMENSION="4096"
+# 确保 EMBEDDING_DIMENSION 是 1024
+export EMBEDDING_DIMENSION="1024"
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 
 # 重启运行时
 ./scripts/deploy/macos/restart_local.sh
@@ -1267,7 +1270,7 @@ curl -X POST "$LLM_BASE_URL/v1/messages" \
 curl -X POST "$EMBEDDING_BASE_URL/embeddings" \
   -H "Authorization: Bearer $EMBEDDING_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen3-Embedding-8B","input":"test"}'
+  -d '{"model":"Qwen3-Embedding-4B","input":"test"}'
 
 # 使用调试日志重启
 export LOG_LEVEL=DEBUG
@@ -1546,8 +1549,8 @@ cat > SETUP_NOTES.md << 'EOF'
 
 ## Embedding 提供商
 - Provider: [您的提供商]
-- Model: Qwen3-Embedding-8B
-- Dimension: 4096
+- Model: Qwen3-Embedding-4B
+- Dimension: 1024
 
 ## 自定义配置
 - MYSQL_POOL_SIZE=30
@@ -1587,7 +1590,7 @@ EOF
 
 ### 关键项
 
-- [ ] `EMBEDDING_DIMENSION="4096"`（必须是 4096）
+- [ ] `EMBEDDING_DIMENSION="1024"`（必须是 1024）
 - [ ] `ENABLE_REAL_LLM="true"`
 - [ ] `ENABLE_REAL_EMBEDDING="true"`
 
@@ -1595,7 +1598,7 @@ EOF
 
 - [ ] `LLM_FAST_MODEL`（例如 GLM-4.7-Flash）
 - [ ] `LLM_REASONING_MODEL`（例如 GLM-5）
-- [ ] `EMBEDDING_MODEL`（例如 Qwen3-Embedding-8B）
+- [ ] `EMBEDDING_MODEL`（例如 Qwen3-Embedding-4B）
 - [ ] `LOG_LEVEL`（INFO 或 DEBUG）
 
 ## 附录 C：常见问题快速参考
@@ -1605,7 +1608,7 @@ EOF
 | 端口 8765 被占用 | `./scripts/deploy/macos/stop_local.sh` |
 | MySQL 连接失败 | 检查 MySQL 是否运行，验证凭据 |
 | Qdrant 锁文件 | `rm -f .runtime/data/qdrant/.lock` |
-| Embedding 维度不匹配 | 设置 `EMBEDDING_DIMENSION="4096"` |
+| Embedding 维度不匹配 | 设置 `EMBEDDING_DIMENSION="1024"` |
 | LLM 超时 | 增加 `LLM_DEFAULT_TIMEOUT_MS` |
 | 模块未找到 | `source .venv/bin/activate && uv sync` |
 | 权限被拒绝 | `chmod -R 755 .runtime/` |

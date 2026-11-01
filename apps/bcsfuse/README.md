@@ -169,11 +169,11 @@ export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
 # Embedding Provider (optional)
 export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
 export EMBEDDING_AUTH_TOKEN="your-embedding-token-here"
-export EMBEDDING_MODEL="text-embedding-3-small"
+export EMBEDDING_MODEL="Qwen3-Embedding-4B"
 export EMBEDDING_DIMENSION="1024"
-# Required for Qwen3 non-native dimensions; use native dimensions only with
-# services that do not implement the optional OpenAI dimensions parameter.
-# export EMBEDDING_REQUEST_DIMENSIONS="true"
+# Required for Qwen3 non-native dimensions; the runtime default selects the
+# efficient 4B/1024 profile.
+export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_MAX_RETRIES="1"
 export EMBEDDING_RETRY_BACKOFF_SECONDS="0.25"
 export EMBEDDING_RETRY_BUDGET_MS="2000"

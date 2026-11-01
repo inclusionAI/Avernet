@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from search_core.config.qdrant import QdrantConnection
 
+from app.bootstrap.embedding_defaults import resolve_embedding_runtime_defaults
+
 if TYPE_CHECKING:
     from app.bootstrap.provider_registry import ProviderRegistry
     from app.infra.public.config.yaml_env_config_provider import (
@@ -153,19 +155,10 @@ def register_runtime_service_providers(
         or config.get("embedding.base_url")
         or ""
     )
-    embedding_model = (
-        os.getenv("EMBEDDING_MODEL")
-        or config.get("embedding.model")
-        or "Qwen3-Embedding-8B"
-    )
-    embedding_dimension = int(
-        os.getenv("EMBEDDING_DIMENSION")
-        or config.get("embedding.dimension")
-        or 4096
-    )
-    embedding_request_dimensions = _config_bool(
-        config, "embedding.request_dimensions", False
-    )
+    embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
+    embedding_model = embedding_defaults.model
+    embedding_dimension = embedding_defaults.dimension
+    embedding_request_dimensions = embedding_defaults.request_dimensions
 
     logger.info(
         "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
@@ -450,6 +443,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
 
     # Qdrant + MySQL durable vector store
     # Qdrant is the rebuildable index; MySQL is the durable source of truth.
+    embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
     from app.infra.config.data_paths import resolve_data_path
     qdrant_path = os.getenv("QDRANT_LOCAL_PATH") or resolve_data_path("data/qdrant_storage")
     qdrant_connection = QdrantConnection.from_mapping(
@@ -462,7 +456,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         ),
         collection_name=config.get("vector.qdrant.collection", "bcsfuse_profiles"),
         qdrant_path=qdrant_path,
-        dimension=config.get_int("embedding.dimension", 4096),
+        dimension=embedding_defaults.dimension,
         distance=config.get("vector.qdrant.distance", "Cosine"),
         mysql_connection_pool=mysql_pool,
     )
@@ -473,16 +467,8 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
 
     collection_name = config.get("vector.qdrant.collection", "bcsfuse_profiles")
     lease_settings = resolve_index_lease_settings(config)
-    embedding_model = (
-        os.getenv("EMBEDDING_MODEL")
-        or config.get("embedding.model")
-        or "Qwen3-Embedding-8B"
-    )
-    embedding_dimension = int(
-        os.getenv("EMBEDDING_DIMENSION")
-        or config.get("embedding.dimension")
-        or 4096
-    )
+    embedding_model = embedding_defaults.model
+    embedding_dimension = embedding_defaults.dimension
     index_state_store = MySQLIndexStateStore(connection_pool=mysql_pool)
     vector_store = wrap_vector_store_with_index_state(
         vector_store,
@@ -555,6 +541,8 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     from app.infra.embedding.config.embedding_settings import EmbeddingSettings
     from app.infra.llm.config.llm_settings import LLMSettings
 
+    embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
+
     # SQLite stores - use env var if set, otherwise use config or default
     db_path = os.getenv("BCSFUSE_DATABASE_SQLITE_PATH") or config.get("database.sqlite.path", "data/bcsfuse.db")
 
@@ -586,7 +574,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
             os.environ, fallback=qdrant_connection
         ),
         collection_name=dev_collection_name,
-        dimension=config.get_int("embedding.dimension", 4096),
+        dimension=embedding_defaults.dimension,
         db_path=vector_db_path,
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
@@ -609,16 +597,8 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     )
     collection_pair_name = dev_collection_name
     dev_lease_settings = resolve_index_lease_settings(config)
-    embedding_model = (
-        os.getenv("EMBEDDING_MODEL")
-        or config.get("embedding.model")
-        or "Qwen3-Embedding-8B"
-    )
-    embedding_dimension = int(
-        os.getenv("EMBEDDING_DIMENSION")
-        or config.get("embedding.dimension")
-        or 4096
-    )
+    embedding_model = embedding_defaults.model
+    embedding_dimension = embedding_defaults.dimension
     index_state_store = SQLiteIndexStateStore(index_state_path)
     vector_store = wrap_vector_store_with_index_state(
         vector_store,
@@ -653,9 +633,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         os.getenv("EMBEDDING_AUTH_TOKEN")
         or config.get("embedding.auth_token")
     )
-    embedding_request_dimensions = _config_bool(
-        config, "embedding.request_dimensions", False
-    )
+    embedding_request_dimensions = embedding_defaults.request_dimensions
 
     from app.infra.public.stores.sqlite_embedding_capacity_store import (
         SQLiteEmbeddingCapacityStore,
@@ -833,6 +811,8 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
     from app.infra.public.reranker.noop_reranker import NoopReranker
     from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
 
+    embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
+
     # SQLite stores - use env var if set, otherwise use config or default
     db_path = os.getenv("BCSFUSE_DATABASE_SQLITE_PATH") or config.get("database.sqlite.path", "data/bcsfuse.db")
 
@@ -860,7 +840,7 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
         keyword_connection=QdrantConnection.keyword_from_mapping(
             os.environ, fallback=qdrant_connection
         ),
-        dimension=config.get_int("embedding.dimension", 4096),
+        dimension=embedding_defaults.dimension,
         db_path=vector_db_path,
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
@@ -876,7 +856,7 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
     ))
 
     # Fake embedding provider (deterministic, no HTTP)
-    embedding_provider = FakeEmbeddingProvider(dimension=config.get_int("embedding.dimension", 4096))
+    embedding_provider = FakeEmbeddingProvider(dimension=embedding_defaults.dimension)
     registry.register("embedding_provider", embedding_provider)
 
     # Noop reranker
@@ -902,6 +882,8 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
     from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
     from app.infra.public.profile_sources.mock_worker_profile_source import MockWorkerProfileSource
 
+    embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
+
     # InMemory stores
     worker_runtime_state_store = InMemoryWorkerRuntimeStateStore()
     registry.register("worker_runtime_state_store", worker_runtime_state_store)
@@ -923,7 +905,7 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
     registry.register("worker_audit_log_store", worker_audit_log_store)
 
     # InMemory vector store
-    vector_store = InMemoryVectorStore(dimension=config.get_int("embedding.dimension", 4096))
+    vector_store = InMemoryVectorStore(dimension=embedding_defaults.dimension)
     vector_store = _with_literal_fallback(
         vector_store,
         snapshot_store=_literal_fallback_snapshot_store(config, enabled=False),
@@ -931,7 +913,7 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
     registry.register("vector_store", vector_store)
 
     # Fake embedding provider
-    embedding_provider = FakeEmbeddingProvider(dimension=config.get_int("embedding.dimension", 4096))
+    embedding_provider = FakeEmbeddingProvider(dimension=embedding_defaults.dimension)
     registry.register("embedding_provider", embedding_provider)
 
     # Noop reranker

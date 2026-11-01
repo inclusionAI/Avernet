@@ -166,8 +166,12 @@ spec:
 关键的维度配置：
 
 ```yaml
+- name: EMBEDDING_MODEL
+  value: "Qwen3-Embedding-4B"
 - name: EMBEDDING_DIMENSION
-  value: "4096"        # 与模型输出维度一致，切勿随意改动
+  value: "1024"        # 与 Qdrant collection 维度和模型返回维度一致，切勿随意改动
+- name: EMBEDDING_REQUEST_DIMENSIONS
+  value: "true"      # 4B/1024 是非 native 维度，必须显式请求 dimensions
 ```
 
 ## 6. 域名与网关路由
@@ -245,8 +249,12 @@ spec:
             - name: EMBEDDING_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: { name: bcsfuse-embedding-secret, key: auth_token }
+            - name: EMBEDDING_MODEL
+              value: "Qwen3-Embedding-4B"
             - name: EMBEDDING_DIMENSION
-              value: "4096"
+              value: "1024"
+            - name: EMBEDDING_REQUEST_DIMENSIONS
+              value: "true"
           volumeMounts:
             - name: qdrant-data
               mountPath: /app/data/qdrant
@@ -317,7 +325,9 @@ podman run --rm -p 8765:8765 \
   -e LLM_AUTH_TOKEN=<...> \
   -e EMBEDDING_BASE_URL=<...> \
   -e EMBEDDING_AUTH_TOKEN=<...> \
-  -e EMBEDDING_DIMENSION=4096 \
+  -e EMBEDDING_MODEL=Qwen3-Embedding-4B \
+  -e EMBEDDING_DIMENSION=1024 \
+  -e EMBEDDING_REQUEST_DIMENSIONS=true \
   bcsfuse:local
 ```
 
