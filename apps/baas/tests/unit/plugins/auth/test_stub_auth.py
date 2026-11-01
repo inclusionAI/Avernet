@@ -26,8 +26,19 @@ class TestStubAuthPlugin:
         assert user.staffId == "999"
 
     @pytest.mark.asyncio
-    async def test_get_login_user_ignores_cookie_and_referer(self):
-        user = await self.plugin.get_login_user(cookie="any", referer="any")
+    @pytest.mark.parametrize("cookie_name", ["staff_id", "entity_id"])
+    async def test_get_login_user_uses_local_identity_cookie(self, cookie_name):
+        user = await self.plugin.get_login_user(
+            cookie=f"{cookie_name}=mock-user",
+            referer="http://localhost",
+        )
+        assert user.id == "mock-user"
+        assert user.operatorName == "mock-user"
+        assert user.staffId == "mock-user"
+
+    @pytest.mark.asyncio
+    async def test_get_login_user_ignores_unrelated_cookie_and_referer(self):
+        user = await self.plugin.get_login_user(cookie="any=value", referer="any")
         assert user.staffId == "000001"
 
     def test_is_allowed_always_returns_true(self):

@@ -374,6 +374,33 @@ class TestBotPermissions:
     """allowed-bots grant/revoke for app-type API keys."""
 
     @pytest.mark.asyncio
+    async def test_grant_allowed_bot_uses_local_identity_cookie(
+        self, api: APITestHelper, unique_id: str
+    ) -> None:
+        app_key_resp = await api.client.post(
+            api.api_key_url(action="app"),
+            params=api.params(),
+            json={
+                "app_id": f"e2e-local-cookie-app-{unique_id}",
+                "key_name": f"e2e-local-cookie-key-{unique_id}",
+            },
+        )
+        assert app_key_resp.status_code == 200
+        app_key_prefix = app_key_resp.json()["data"]["api_key_prefix"]
+        bot_app_id = f"e2e-local-cookie-bot-{unique_id}:mock-user"
+
+        grant_resp = await api.client.post(
+            api.api_key_url(app_key_prefix, action="allowed-bots/grant"),
+            params=api.params(),
+            headers={"cookie": "entity_id=mock-user"},
+            json={"bot_id": bot_app_id},
+        )
+
+        assert grant_resp.status_code == 200
+        policy = grant_resp.json()["data"].get("policy", "{}")
+        assert bot_app_id in policy
+
+    @pytest.mark.asyncio
     async def test_grant_allowed_bot_succeeds(
         self, api: APITestHelper, unique_id: str, created_bot: dict
     ) -> None:

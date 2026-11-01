@@ -680,6 +680,7 @@ SH
   demo_bbs_subscription_enable "bot-product" "product note"
   grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=mock-user'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription URL missing"
   grep -F 'x-user-id: mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription caller header missing"
+  grep -F 'Cookie: entity_id=mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription local auth cookie missing"
   jq -e '.note == "product note"' "$CURL_BODY_FILE" >/dev/null || fail "BBS subscription body mismatch"
 )
 

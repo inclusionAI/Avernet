@@ -124,3 +124,19 @@ class TestAuthServiceIntegration:
         assert ctx.env is not None, (
             "Expected env to be set (from env_utils.get_current_env())"
         )
+
+    def test_build_operation_context_uses_local_identity_cookie(
+        self,
+        bootstrap_init,
+    ):
+        """Use the Singlebox identity cookie as the operation owner."""
+
+        async def _run():
+            service = bootstrap_init.services.auth_service()
+            return await service.build_operation_context(
+                cookie="entity_id=mock-user",
+                referer="http://localhost:8888/",
+            )
+
+        ctx = asyncio.run(_run())
+        assert ctx.operator == "mock-user"

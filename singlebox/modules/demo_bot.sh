@@ -416,6 +416,7 @@ demo_bbs_subscription_enable() {
             -X POST "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription?owner_user_id=${DEMO_ENTITY_ID}" \
             -H "Content-Type: application/json" \
             -H "x-user-id: ${DEMO_ENTITY_ID}" \
+            -H "Cookie: entity_id=${DEMO_ENTITY_ID}" \
             -d "$payload" \
             2>>"${DEMO_BOT_LOG}" || true
     )"
