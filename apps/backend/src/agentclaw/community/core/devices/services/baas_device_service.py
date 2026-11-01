@@ -457,7 +457,8 @@ class BaasDeviceService(DeviceService):
                 # request_id 留底排障用,update 时复用同一个保持幂等不在本期范围
                 "create_request_id": request_id,
                 # passthrough envs for diagnostics
-                "envs": dict(extra_envs) if extra_envs else {},
+                "envs": {k: v for k, v in (extra_envs or {}).items()
+                         if k != "AGENTCLAW_NEW_BOT_MODEL_POLICY"},
                 "template_uid": template_uid,
                 "template_uuid": template_uuid,
             },

@@ -2849,7 +2849,7 @@ def test_handoff_binding_entity_is_not_owner_authority(actor, allowed, monkeypat
 
 
 @pytest.mark.parametrize("released", [False, True])
-def test_initial_model_intent_persists_but_released_reallocation_disables_it(released):
+def test_initial_model_intent_is_call_scoped_and_disabled_for_released_binding(released):
     repo = MagicMock()
     repo.exists_device_id.return_value = False
     repo.get_released_binding.return_value = (
@@ -2858,11 +2858,14 @@ def test_initial_model_intent_persists_but_released_reallocation_disables_it(rel
     repo.insert_binding.return_value = 5
     repo.get_by_id.return_value = _make_record(id=5)
     svc = _make_service(repo=repo)
+    svc._start_service = MagicMock(return_value=(True, "started"))
     with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"), patch(
         "agentclaw.community.core.devices.services.device_service.threading.Thread"
-    ):
+    ) as thread:
         svc.apply_device(apply_reason="create", entity_id="u001", entity_type="staff",
                          operator=_make_operator(), bot_id="bot1", engine="openclaw",
                          device_props_extra={"new_bot_model_policy": "pending"})
+        thread.call_args.kwargs["target"]()
     writer = repo.reuse_binding if released else repo.insert_binding
-    assert writer.call_args.kwargs["device_props"]["new_bot_model_policy"] == ("off" if released else "pending")
+    assert "new_bot_model_policy" not in writer.call_args.kwargs["device_props"]
+    assert svc._start_service.call_args.kwargs["device"].device_props["new_bot_model_policy"] == ("off" if released else "pending")

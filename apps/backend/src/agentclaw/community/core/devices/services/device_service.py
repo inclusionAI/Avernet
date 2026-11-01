@@ -699,10 +699,8 @@ class DeviceService:
             "symbol": json.dumps(symbol_json, ensure_ascii=False) if symbol else "[]",
             "entity_id": resolved_entity_id,
             "entity_type": resolved_entity_type,
-            **(device_props_extra or {}),
-            "new_bot_model_policy": new_bot_model_policy,
+            **{k: v for k, v in (device_props_extra or {}).items() if k != "new_bot_model_policy"},
         }
-        logger.info("[initial_model_policy] allocation bot_id=%s policy=%s", resolved_bot_id, new_bot_model_policy)
         # 4. Process database record
         status = DeviceBindingStatus.PENDING.value
         binding_id = None
@@ -794,7 +792,9 @@ class DeviceService:
                     device=AllocatedDevice(
                         device_id=allocated.device_id,
                         device_provider=allocated.device_provider,
-                        device_props=device_props,
+                        # Creation intent belongs to this allocation call, not
+                        # to the retained binding used by later restarts.
+                        device_props={**device_props, "new_bot_model_policy": new_bot_model_policy},
                     ),
                     nas_mappings=nas_mappings,
                     engine=resolved_engine,
