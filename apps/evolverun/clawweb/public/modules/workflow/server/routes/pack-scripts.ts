@@ -1,14 +1,19 @@
 import { Router, type Request } from 'express';
-import type { PackScriptSnapshot } from '../services/pack-script-snapshot.js';
+import type { PackScriptSnapshot, PackScriptVersion } from '../services/pack-script-snapshot.js';
 
 type PackScriptsDependencies = {
   enabled?: boolean;
   resolvePrincipal: (req: Request) => Promise<{ actorId: string } | null>;
   botPermRepo: { hasEditPermission(workflowId: string, actorId: string): Promise<boolean> } | null;
   workflowSpecRepo: { findByWorkflowId(workflowId: string): Promise<{ workflow_id: string; pack_id: string | null } | null> };
-  // Must authorize the entire Pack independently of an individual workflow ACL.
+  // Host policy must authorize the entire returned Pack; some hosts may grant this
+  // through workflow edit permission when the workflow version is the boundary.
   authorizePackRead?: (workflowId: string, packId: string, actorId: string) => Promise<boolean>;
-  readSnapshot: (workflowId: string, packId: string) => Promise<PackScriptSnapshot>;
+  // Declare only when readSnapshot honors the version and reports the actual ref.
+  supportsVersionedSnapshots?: boolean;
+  // Declare only when versioned reads resolve Pack identity from the selected commit.
+  supportsVersionedPackResolution?: boolean;
+  readSnapshot: (workflowId: string, packId: string, version?: PackScriptVersion) => Promise<PackScriptSnapshot>;
 };
 
 // Keep this aligned with the snapshot reader's Git ref and pack name rules.
@@ -29,6 +34,11 @@ export function createPackScriptsRouter(deps: PackScriptsDependencies): Router {
       }
       const workflowId = req.params.workflowId;
       if (!validId(workflowId)) { res.status(400).json({ error: 'Invalid workflow ID', code: 'INVALID_WORKFLOW_ID' }); return; }
+      const version = req.query.version;
+      if (version !== undefined && version !== 'current' && version !== 'draft') {
+        res.status(400).json({ error: 'Invalid snapshot version', code: 'INVALID_SNAPSHOT_VERSION' }); return;
+      }
+      const selectedVersion: PackScriptVersion | undefined = version === 'current' || version === 'draft' ? version : undefined;
       if (!deps.botPermRepo || typeof deps.botPermRepo.hasEditPermission !== 'function'
         || await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) !== true) {
         res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
@@ -39,14 +49,29 @@ export function createPackScriptsRouter(deps: PackScriptsDependencies): Router {
       if (row.workflow_id !== workflowId || !validId(row.workflow_id) || !validId(packId)) {
         res.status(503).json({ error: 'Snapshot unavailable', code: 'SERVICE_UNAVAILABLE' }); return;
       }
-      // A single-member manifest cannot prove that a Pack is not shared or that
-      // residual files belong to this workflow. No authoritative policy: no read.
+      // The host must provide an explicit policy for the entire returned Pack.
+      // An absent policy fails closed, even when workflow edit access is present.
       if (!deps.authorizePackRead) { res.status(503).json({ error: 'Pack authorization unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
-      if (await deps.authorizePackRead(row.workflow_id, packId, principal.actorId) !== true) {
+      if (selectedVersion === undefined && await deps.authorizePackRead(row.workflow_id, packId, principal.actorId) !== true) {
         res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
       }
+      if (selectedVersion !== undefined && (deps.supportsVersionedSnapshots !== true || deps.supportsVersionedPackResolution !== true)) {
+        res.status(503).json({ error: 'Snapshot unavailable', code: 'SERVICE_UNAVAILABLE' }); return;
+      }
       try {
-        res.json(await deps.readSnapshot(row.workflow_id, packId));
+        const snapshot = selectedVersion === undefined
+          ? await deps.readSnapshot(row.workflow_id, packId)
+          : await deps.readSnapshot(row.workflow_id, packId, selectedVersion);
+        const expectedRef = selectedVersion === 'current' ? `origin/wf/${row.workflow_id}` : `origin/saved/${row.workflow_id}`;
+        if (!snapshot || snapshot.workflowId !== row.workflow_id || !validId(snapshot.packId)
+          || (selectedVersion === undefined ? snapshot.packId !== packId : snapshot.baseRef !== expectedRef)) {
+          res.status(503).json({ error: 'Snapshot unavailable', code: 'SERVICE_UNAVAILABLE' }); return;
+        }
+        // Versioned Packs can have historical identities different from the DB row.
+        if (selectedVersion !== undefined && await deps.authorizePackRead(row.workflow_id, snapshot.packId, principal.actorId) !== true) {
+          res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
+        }
+        res.json(snapshot);
       } catch (error) {
         // Match only errors explicitly emitted by the snapshot reader. Never return or log details.
         const message = error instanceof Error ? error.message : '';

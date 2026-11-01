@@ -31,6 +31,17 @@ describe('readPackScriptsFromRemote', () => {
     expect(order).toEqual(['settings', 'operation', 'create', 'clone', 'read', 'remove', 'release']);
     expect(execution.withGitOperation).toHaveBeenCalledOnce();
   });
+  it.each(['current', 'draft'] as const)('passes %s through to the snapshot reader', async version => {
+    vi.spyOn(settings, 'resolveAutoHealGitSettings').mockResolvedValue({ gitConfig, gitAuthor });
+    vi.spyOn(client, 'createTempRepo').mockResolvedValue('/private/repo');
+    vi.spyOn(client, 'cloneClawflows').mockResolvedValue();
+    const read = vi.spyOn(snapshot, 'readPackScriptSnapshot').mockResolvedValue(result);
+    vi.spyOn(client, 'removeTempRepo').mockResolvedValue();
+    await readPackScriptsFromRemote({ ...input, version });
+    expect(read).toHaveBeenCalledExactlyOnceWith('/private/repo', 'flow', 'pack', version);
+    read.mockRejectedValue(new Error('Workflow snapshot not found'));
+    await expect(readPackScriptsFromRemote({ ...input, version })).rejects.toThrow('Workflow snapshot not found');
+  });
   it('resolves changed settings on each request', async () => {
     const resolver = vi.spyOn(settings, 'resolveAutoHealGitSettings')
       .mockResolvedValueOnce({ gitConfig, gitAuthor })
@@ -76,7 +87,7 @@ describe('readPackScriptsFromRemote', () => {
       put('pack/scripts/a.py', 'new\n'); put('pack/scripts/sub/b.sh', 'echo ok\n'); git(work, 'add', '.'); git(work, 'commit', '-qm', 'second'); const sha = git(work, 'rev-parse', 'HEAD'); git(work, 'branch', 'saved/flow');
       git(root, 'clone', '-q', '--bare', work, bare);
       vi.spyOn(settings, 'resolveAutoHealGitSettings').mockResolvedValue({ gitConfig: { ...gitConfig, remoteUrl: bare }, gitAuthor });
-      expect(await readPackScriptsFromRemote(input)).toEqual({ workflowId: 'flow', packId: 'pack', baseCommit: sha, baseRef: 'origin/saved/flow', files: [
+      expect(await readPackScriptsFromRemote(input)).toEqual({ workflowId: 'flow', packId: 'pack', baseCommit: sha, baseRef: 'origin/saved/flow', skippedFiles: { count: 0, paths: [], truncated: false }, files: [
         { path: 'scripts/a.py', content: 'new\n', mode: '100644' }, { path: 'scripts/sub/b.sh', content: 'echo ok\n', mode: '100644' },
       ] });
     } finally { rmSync(root, { recursive: true, force: true }); }

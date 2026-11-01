@@ -1,297 +1,107 @@
-/**
- * AutoHealDeployService — orchestrate the "deploy" stage of auto-heal.
- *
- * Flow:
- *   1. Re-read the latest spec from DB.
- *   2. Check edit permission.
- *   3. Compute version and deployNumber (MAX from DB and git tags + 1).
- *   4. Clone clawflows to a temp directory.
- *   5. Write the spec YAML + manifest.
- *   6. Commit + annotated tag + push to wf/{workflowId}.
- *   7. Insert/activate workflow_deploy_history.
- *   8. Optionally trigger a new flow run.
- *
- * The deploy writes an immutable git tag and a deploy_history row with
- * action="deploy", matching ClawMind semantics.
- */
-import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import { withGitOperation } from "@avernet/clawweb-shared/server/services/git-execution";
-import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
-import { stringify as stringifyYaml, parse as parseYaml } from "yaml";
-import { normalizeWorkflowSpec, validateWorkflowSemantics, type WorkflowSpec } from "../workflow.js";
-import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
-import { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
-import {
-  cloneClawflows,
-  commitAndPushDeploy,
-  createTempRepo,
-  ensurePackManifest,
-  getMaxDeployNumberFromGitTags,
-  prepareBranchBase,
-  pruneLegacyPackCopy,
-  removeTempRepo,
-  writeWorkflowSpecToRepo,
-  type ClawFlowsGitConfig,
-  type GitAuthor,
-} from "./clawflows-git-client.js";
+/** Publish an immutable saved Pack; ClawWeb operation state never enters public deployment history. */
+import { isDeepStrictEqual } from 'node:util';
+import { parse as parseYaml } from 'yaml';
+import { normalizeWorkflowSpec } from '../workflow.js';
+import { randomUUID } from 'node:crypto';
+import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
+import type { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
+import { WorkflowSpecRepository } from '../repositories/workflow-spec-repository.js';
+import { WorkflowDeployHistoryRepository } from '../repositories/workflow-deploy-history-repository.js';
+import { PackOperationRepository } from '../repositories/pack-operation-repository.js';
+import { cloneClawflows, createTempRepo, getMaxDeployNumberFromGitTags, removeTempRepo,
+  type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
+import { prepareDeployCandidate, pushPreparedDeployment, type PreparedDeployment } from './auto-heal-deploy-git.js';
+import { gitOidPattern, readPreparedRemoteRefs, validPackGitId } from './pack-git-prepared.js';
+import { candidateProjection, completePackOperation, operationHash, PackOperationError, remoteIdentity,
+  recordUnknown, requestIdentity, type OperationPayload } from './pack-operation-service.js';
 
-export type AutoHealDeployInput = {
-  workflowId: string;
-  packId?: string | null;
-  diagnosisId?: string | null;
-  /**
-   * Run being repaired. The post-deploy re-run must reach the Bot that ran this
-   * source, so the target Bot is read from it rather than from autoHeal config.
-   */
-  sourceFlowId?: string | null;
-  note?: string | null;
-  autoRun?: boolean;
-  actorId: string;
-};
-
-export type AutoHealDeployResult = {
-  ok: boolean;
-  deployed: boolean;
-  workflowId: string;
-  packId: string;
-  deployNumber: number;
-  version: number;
-  tagName: string;
-  /** BaaS message id from the post-deploy re-run, not a ClawMind flow id. */
-  messageId?: string | null;
-};
-
-function isReservedWorkflowId(id: string): boolean {
-  return /^__.+__$/.test(id);
-}
-
-/**
- * Deterministic git tag name for a deploy number.
- *
- * Must stay in sync with `commitAndPushDeploy` in clawflows-git-client.ts.
- * Used to satisfy the NOT NULL constraint on `workflow_deploy_history.tag_name`
- * when reserving the deploy row, before the git push reveals the real tag.
- */
-function buildDeployTagName(workflowId: string, deployNumber: number): string {
-  return `deploy/${workflowId}/#${deployNumber}`;
-}
-
-function makeError(status: number, error: string, message: string): Error & { status: number; error: string } {
-  const err = new Error(message) as Error & { status: number; error: string };
-  err.status = status;
-  err.error = error;
-  return err;
-}
+export type AutoHealDeployInput = { workflowId: string; actorId: string; candidateCommit?: string; requestId?: string;
+  packId?: string | null; diagnosisId?: string | null; sourceFlowId?: string | null; note?: string | null; autoRun?: boolean };
+export type AutoHealDeployResult = { ok: boolean; deployed: boolean; workflowId: string; packId: string; deployNumber: number;
+  version: number; tagName: string; requestId?: string; commit?: string; candidateCommit?: string; messageId?: string | null };
 
 export class AutoHealDeployService {
-  constructor(
-    private db: IDatabase,
-    private specRepo: WorkflowSpecRepository,
-    private deployHistoryRepo: WorkflowDeployHistoryRepository,
-    private botPermRepo: BotWorkflowPermissionRepository | null,
-    private gitConfig: ClawFlowsGitConfig,
-    private author: GitAuthor,
-    private triggerRun?: (
-      workflowId: string,
-      actorId: string,
-      sourceFlowId?: string | null,
-    ) => Promise<string | null>,
-  ) {}
+  constructor(private db: IDatabase, private specRepo: WorkflowSpecRepository, private deployHistoryRepo: WorkflowDeployHistoryRepository,
+    private botPermRepo: BotWorkflowPermissionRepository | null, private gitConfig: ClawFlowsGitConfig, private author: GitAuthor,
+    private triggerRun?: (workflowId: string, actorId: string, sourceFlowId?: string | null) => Promise<string | null>) {}
 
   async deploy(input: AutoHealDeployInput): Promise<AutoHealDeployResult> {
     const { workflowId, actorId } = input;
-
-    if (!workflowId) {
-      throw makeError(400, "Bad Request", "workflowId is required");
-    }
-    if (isReservedWorkflowId(workflowId)) {
-      throw makeError(400, "Bad Request", "workflowId uses a reserved prefix");
-    }
-
-    if (!this.botPermRepo) {
-      throw makeError(403, "Forbidden", "Permission service not available");
-    }
-    // Deploy (and optional auto-run) requires execute permission. Edit permission
-    // implies execute in the auto-heal context, so we accept either.
-    const [canExecute, canEdit] = await Promise.all([
-      this.botPermRepo.hasExecutePermission(workflowId, actorId),
-      this.botPermRepo.hasEditPermission(workflowId, actorId),
-    ]);
-    if (!canExecute && !canEdit) {
-      throw makeError(403, "Forbidden", "No execute permission for this workflow");
-    }
-
+    if (!validPackGitId(workflowId) || /^__.+__$/.test(workflowId)
+      || (input.candidateCommit !== undefined && !gitOidPattern.test(input.candidateCommit))) throw new PackOperationError(400, 'INVALID_REQUEST');
+    if (!actorId?.trim() || !this.botPermRepo) throw new PackOperationError(403, 'FORBIDDEN');
+    const [canExecute, canEdit] = await Promise.all([this.botPermRepo.hasExecutePermission(workflowId, actorId), this.botPermRepo.hasEditPermission(workflowId, actorId)]);
+    if (!canExecute && !canEdit) throw new PackOperationError(403, 'FORBIDDEN');
     const specRow = await this.specRepo.findByWorkflowId(workflowId);
-    if (!specRow) {
-      throw makeError(404, "Not Found", `Workflow "${workflowId}" not found`);
+    if (!specRow) throw new PackOperationError(404, 'WORKFLOW_NOT_FOUND');
+    const requestId = requestIdentity(input.requestId, randomUUID);
+    const repo = new PackOperationRepository(this.db);
+    const identity = { requestId, workflowId, actorId, kind: 'deploy' as const,
+      inputHash: operationHash({ workflowId, remote: remoteIdentity(this.gitConfig), candidateCommit: input.candidateCommit ?? null,
+        packId: input.packId ?? null, note: input.note ?? null, autoRun: input.autoRun ?? true, sourceFlowId: input.sourceFlowId ?? null }) };
+    let started = await repo.begin(identity);
+    if (!started.created && started.operation.phase === 'failed') started = await repo.restartFailed(identity, started.operation.attempt);
+    if (!started.created) {
+      if (started.operation.phase === 'completed') return JSON.parse(started.operation.resultJson!) as AutoHealDeployResult;
+      throw new PackOperationError(409, 'OPERATION_IN_PROGRESS', requestId);
     }
-
-    let spec: WorkflowSpec;
+    let pushing = false;
+    let prepared: PreparedDeployment | undefined;
+    let result: AutoHealDeployResult;
     try {
-      const parsed = JSON.parse(specRow.spec_json) as Record<string, unknown>;
-      const raw = typeof parsed.content === "string" ? parseYaml(parsed.content) : parsed;
-      spec = normalizeWorkflowSpec(raw);
-      validateWorkflowSemantics(spec);
-    } catch (parseErr) {
-      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      throw makeError(500, "Internal Server Error", `无法解析 workflow_specs 中的 YAML: ${msg}`);
-    }
-
-    if (spec.id !== workflowId) {
-      throw makeError(400, "Bad Request", `Spec ID '${spec.id}' does not match workflowId '${workflowId}'`);
-    }
-
-    const packId = input.packId ?? specRow.pack_id ?? workflowId;
-    // Reuse the canonical spec_json from workflow_specs; avoid a round-trip
-    // through normalize/stringify which could introduce drift.
-    const specJson = specRow.spec_json;
-
-    const currentMaxVersion = await this.deployHistoryRepo.getLatestVersion(workflowId);
-    const newVersion = currentMaxVersion + 1;
-
-    // Reserve the deploy record first so deploy_number is allocated under DB
-    // serialization. If git fails later we have an inactive orphan row that
-    // can be audited; if git succeeds we activate it. This prevents duplicate
-    // deploy numbers under concurrent requests and avoids pushing a git tag
-    // before the DB is updated.
-    let reservedDeployNumber = 0;
-    try {
-      reservedDeployNumber = await this.db.transaction(async (tx) => {
-        const txDeployRepo = new WorkflowDeployHistoryRepository(tx);
-        const dbMax = await txDeployRepo.getMaxDeployNumber(packId, workflowId);
-        const next = dbMax + 1;
-        await txDeployRepo.insert({
-          packId,
-          workflowId,
-          deployNumber: next,
-          version: newVersion,
-          // The real tag name is only known after the git push, but
-          // workflow_deploy_history.tag_name is NOT NULL on managed MySQL. Use
-          // the deterministic tag this deploy will produce; the activation step
-          // overwrites it with the authoritative value from gitResult.
-          tagName: buildDeployTagName(workflowId, next),
-          action: "deploy",
-          specJson,
-          note: input.note ?? "auto-heal deploy",
-          botId: actorId,
-          ownerId: actorId,
-          isActive: false,
-        });
-        return next;
+      result = await withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
+        const dir = await createTempRepo();
+        try {
+          await cloneClawflows(dir, this.gitConfig);
+          const savedRef = `refs/heads/saved/${workflowId}`, activeRef = `refs/heads/wf/${workflowId}`;
+          const refs = await readPreparedRemoteRefs(dir, [savedRef, activeRef]);
+          const savedHead = refs.get(savedRef) ?? null;
+          // Compatibility for legacy callers: capture saved once, never rebuild a release from mutable DB YAML.
+          const candidate = input.candidateCommit ?? savedHead;
+          if (!candidate) throw new PackOperationError(409, 'SAVE_REQUIRED', requestId);
+          if (candidate !== savedHead && !await repo.findSavedCandidate(workflowId, candidate)) {
+            throw new PackOperationError(409, 'CANDIDATE_NOT_SAVED', requestId);
+          }
+          const version = await this.deployHistoryRepo.getLatestVersion(workflowId) + 1;
+          const maxRows = await this.db.query<{ n: number | null }>('SELECT MAX(deploy_number) AS n FROM workflow_deploy_history WHERE workflow_id = ?', [workflowId]);
+          const deployNumber = Math.max(Number(maxRows[0]?.n ?? 0), await getMaxDeployNumberFromGitTags(dir, workflowId)) + 1;
+          prepared = await prepareDeployCandidate(dir, workflowId, candidate, refs.get(activeRef) ?? '', deployNumber, version, this.author);
+          if (input.packId && input.packId !== prepared.packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH', requestId);
+          const projection = candidateProjection(workflowId, prepared.content, prepared.manifestContent);
+          let matchesDraft = false;
+          try {
+            const draft = JSON.parse(started.operation.baseline.workflow.spec_json) as Record<string, unknown>;
+            matchesDraft = isDeepStrictEqual(normalizeWorkflowSpec(typeof draft.content === 'string' ? parseYaml(draft.content) : draft),
+              normalizeWorkflowSpec(parseYaml(prepared.content)));
+          } catch { /* Preserve an unparseable draft rather than replacing it with a release. */ }
+          const payload: OperationPayload = { git: prepared, ...projection, packId: prepared.packId,
+            remoteHash: remoteIdentity(this.gitConfig), version, note: input.note ?? 'auto-heal deploy', preserveDraft: savedHead !== candidate || !matchesDraft };
+          await repo.prepare(requestId, JSON.stringify(payload), started.operation.attempt);
+          // Best-effort preflight only: ownership can still change before completion.
+          for (const command of projection.facadeCommands ?? []) {
+            const owners = await this.db.query<{ workflow_id: string }>('SELECT workflow_id FROM facade_bindings WHERE command = ?', [command]);
+            if (owners.some(owner => owner.workflow_id !== workflowId)) throw new PackOperationError(409, 'FACADE_CONFLICT', requestId);
+          }
+          if (!(await repo.markPushing(requestId, started.operation.attempt)).claimed) throw new PackOperationError(409, 'OPERATION_IN_PROGRESS', requestId);
+          pushing = true;
+          await pushPreparedDeployment(dir, prepared);
+          return await completePackOperation(this.db, (await repo.get(requestId))!) as AutoHealDeployResult;
+        } finally { await removeTempRepo(dir); }
       });
-    } catch (dbErr) {
-      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-      throw makeError(500, "Internal Server Error", `无法预留部署记录: ${msg}`);
-    }
-
-    const gitResult = await withGitOperation({ workflowId, operation: 'autoheal_deploy' }, async () => {
-      let repoDir: string;
-      try {
-        repoDir = await createTempRepo();
-      } catch (mkErr) {
-        const msg = mkErr instanceof Error ? mkErr.message : String(mkErr);
-        throw makeError(500, "Internal Server Error", `无法创建临时 git 目录: ${msg}`);
+    } catch (error) {
+      if (pushing) {
+        await recordUnknown(this.db, requestId, started.operation.attempt);
+        throw new PackOperationError(503, 'DEPLOY_OUTCOME_UNKNOWN', requestId, prepared?.branch, prepared?.commit);
       }
-
-      let gitResult: { branch: string; tagName: string; commit: string; deployNumber: number } | undefined;
-      try {
-        await cloneClawflows(repoDir, this.gitConfig);
-        // Base the deploy on the previous deploy content so Pack scripts and assets
-        // are inherited instead of being dropped (see prepareBranchBase).
-        await prepareBranchBase(repoDir, `wf/${workflowId}`);
-        await writeWorkflowSpecToRepo(repoDir, packId, workflowId, spec);
-        await ensurePackManifest(repoDir, packId, workflowId);
-        await pruneLegacyPackCopy(repoDir, packId);
-
-        // Fall back to git tags if there are tags not yet reflected in the DB
-        // (e.g. manual/external deploys). This is a safety net, not the primary
-        // allocation mechanism. reservedDeployNumber is already dbMax + 1, so the
-        // common case (git max ≤ dbMax) reuses the reserved number and the
-        // activation below takes the single-row fast path; only a git max that is
-        // ahead of the DB bumps the number past the reservation.
-        const gitMaxDeployNumber = await getMaxDeployNumberFromGitTags(repoDir, workflowId);
-        const deployNumber = Math.max(reservedDeployNumber, gitMaxDeployNumber + 1);
-
-        gitResult = await commitAndPushDeploy(
-          repoDir,
-          workflowId,
-          deployNumber,
-          newVersion,
-          input.note ?? "auto-heal deploy",
-          this.author,
-        );
-      } finally {
-        await removeTempRepo(repoDir);
-      }
-      return gitResult;
-    });
-
-    if (!gitResult) {
-      throw makeError(500, "Internal Server Error", "Git deploy produced no result");
+      await repo.failBeforePush(requestId, JSON.stringify({ code: 'PREPARATION_FAILED' }), started.operation.attempt);
+      throw error;
     }
-
-    try {
-      await this.db.transaction(async (tx) => {
-        const txDeployRepo = new WorkflowDeployHistoryRepository(tx);
-        if (gitResult!.deployNumber === reservedDeployNumber) {
-          // Common path: the reserved number was usable. Activate it with the tag.
-          await tx.exec(
-            `UPDATE workflow_deploy_history
-             SET tag_name = ?, is_active = 1, gmt_modified = ?
-             WHERE workflow_id = ? AND version = ? AND deploy_number = ?`,
-            [gitResult!.tagName, tx.dialect.now(), workflowId, newVersion, reservedDeployNumber],
-          );
-        } else {
-          // Git had a newer max (e.g. external/manual deploy). Keep the reserved
-          // row as an inactive placeholder and insert the real active record.
-          await txDeployRepo.insert({
-            packId,
-            workflowId,
-            deployNumber: gitResult!.deployNumber,
-            version: newVersion,
-            tagName: gitResult!.tagName,
-            action: "deploy",
-            specJson,
-            note: input.note ?? "auto-heal deploy",
-            botId: actorId,
-            ownerId: actorId,
-            isActive: true,
-          });
-        }
-        await tx.exec(
-          `UPDATE workflow_deploy_history SET is_active = 0 WHERE workflow_id = ? AND is_active = 1 AND deploy_number <> ?`,
-          [workflowId, gitResult!.deployNumber],
-        );
-        await tx.exec(
-          "UPDATE workflow_specs SET version = ?, gmt_modified = ? WHERE workflow_id = ?",
-          [newVersion, tx.dialect.now(), workflowId],
-        );
-      });
-    } catch (dbErr) {
-      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-      console.error(`[auto-heal] deploy git tag ${gitResult.tagName} pushed but DB write failed for ${workflowId}: ${msg}`);
-      throw makeError(500, "Internal Server Error", `部署 tag 已推送，但部署记录写入失败: ${msg}`);
-    }
-
-    let messageId: string | null | undefined;
+    // Release completion is independent of the optional run. An idempotent replay does not send another run.
     if (input.autoRun !== false && this.triggerRun) {
-      try {
-        messageId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null);
-      } catch (runErr) {
-        const msg = runErr instanceof Error ? runErr.message : String(runErr);
-        console.warn(`[auto-heal] deploy succeeded but auto-run failed for ${workflowId}: ${msg}`);
-      }
+      try { result.messageId = await this.triggerRun(workflowId, actorId, input.sourceFlowId ?? null); }
+      catch { result.messageId = null; }
     }
-
-    return {
-      ok: true,
-      deployed: true,
-      workflowId,
-      packId,
-      deployNumber: gitResult.deployNumber,
-      version: newVersion,
-      tagName: gitResult.tagName,
-      messageId: messageId ?? null,
-    };
+    return result;
   }
 }

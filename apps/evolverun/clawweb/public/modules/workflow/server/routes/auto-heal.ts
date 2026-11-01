@@ -4,14 +4,13 @@
  *   POST /auto-heal/diagnose
  *   GET  /auto-heal/diagnoses/:diagnosisId
  *   POST /auto-heal/save      — save a fixed spec to git + DB (no deploy tag)
- *   POST /auto-heal/deploy    — deploy active spec from DB with git tag + history
+ *   POST /auto-heal/deploy    — deploy a confirmed saved candidate with git tag + history
  *   POST /auto-heal/apply     — DEPRECATED, returns 410 unless opt-in
  *   POST /auto-heal/run       — run on the source Bot and lifecycle stage
  */
 import { Router, type Request, type Response } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
 import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
@@ -20,11 +19,13 @@ import { createAutoHealRunRouter, type AutoHealRunSender } from "./auto-heal-run
 import { resolveAutoHealGitSettings } from "../config/auto-heal-git-config.js";
 import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
-import { AutoHealSaveService } from "../services/auto-heal-save-service.js";
 import { AutoHealDeployService } from "../services/auto-heal-deploy-service.js";
+import { AutoHealSaveService } from "../services/auto-heal-save-service.js";
 import type { ClawFlowsGitConfig, GitAuthor } from "../services/clawflows-git-client.js";
 
 export interface AutoHealRouteDependencies {
+  /** Host-verified identity; absence fails closed for save and deploy. */
+  resolvePrincipal?: (req: Request) => Promise<{ actorId: string } | null>;
   db: IDatabase;
   workflowSpecRepo: WorkflowSpecRepository;
   deployHistoryRepo: WorkflowDeployHistoryRepository;
@@ -39,8 +40,8 @@ export interface AutoHealRouteDependencies {
   triggerRun?: (workflowId: string, actorId: string) => Promise<string | null>;
 }
 
-function getActor(req: Request): string {
-  return resolveWorkflowActorId(req) || String(req.headers["x-user-id"] ?? "").trim() || "unknown";
+function safeStatus(status: unknown): number {
+  return typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
 }
 
 export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
@@ -56,8 +57,9 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     "/save",
     asyncHandler(async (req: Request, res: Response) => {
       try {
-        const { workflowId, spec, packId, diagnosisId, note } = req.body as {
+        const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead, createOnly } = req.body as {
           workflowId?: string;
+          createOnly?: boolean; requestId?: string; sourceCommit?: string; expectedSavedHead?: string | null;
           spec?: unknown;
           packId?: string | null;
           diagnosisId?: string | null;
@@ -67,8 +69,8 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(400).json({ error: "Bad Request", message: "workflowId and spec are required" });
           return;
         }
-        const actor = getActor(req);
-        if (!actor) {
+        const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+        if (!actor || actor === "unknown") {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
@@ -87,68 +89,32 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           packId: packId ?? null,
           diagnosisId: diagnosisId ?? null,
           note: note ?? null,
-          actorId: actor,
+          actorId: actor, requestId, sourceCommit, expectedSavedHead, createOnly,
         });
         res.status(200).json(result);
       } catch (err) {
-        const status = (err as { status?: number }).status ?? 500;
-        const error = (err as { error?: string }).error ?? "Internal Server Error";
-        const message = err instanceof Error ? err.message : String(err);
-        res.status(status).json({ error, message });
+        const failure = err as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string };
+        res.status(safeStatus(failure.status)).json({ error: "Save could not be completed", code: failure.code ?? "SAVE_FAILED",
+          requestId: failure.requestId, branch: failure.branch, commit: failure.commit });
       }
     }),
   );
 
-  router.post(
-    "/deploy",
-    asyncHandler(async (req: Request, res: Response) => {
-      try {
-        const { workflowId, packId, diagnosisId, sourceFlowId, note, autoRun } = req.body as {
-          workflowId?: string;
-          packId?: string | null;
-          diagnosisId?: string | null;
-          /** Source run whose Bot the post-deploy re-run must target. */
-          sourceFlowId?: string | null;
-          note?: string | null;
-          autoRun?: boolean;
-        };
-        if (!workflowId) {
-          res.status(400).json({ error: "Bad Request", message: "workflowId is required" });
-          return;
-        }
-        const actor = getActor(req);
-        if (!actor) {
-          res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
-          return;
-        }
-        const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
-        const deployService = new AutoHealDeployService(
-          deps.db,
-          deps.workflowSpecRepo,
-          deps.deployHistoryRepo,
-          deps.botPermRepo,
-          gitConfig,
-          gitAuthor,
-          deps.triggerRun,
-        );
-        const result = await deployService.deploy({
-          workflowId,
-          packId: packId ?? null,
-          diagnosisId: diagnosisId ?? null,
-          sourceFlowId: sourceFlowId ?? null,
-          note: note ?? null,
-          autoRun,
-          actorId: actor,
-        });
-        res.status(200).json(result);
-      } catch (err) {
-        const status = (err as { status?: number }).status ?? 500;
-        const error = (err as { error?: string }).error ?? "Internal Server Error";
-        const message = err instanceof Error ? err.message : String(err);
-        res.status(status).json({ error, message });
-      }
-    }),
-  );
+  router.post("/deploy", asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun } = req.body ?? {};
+      if (typeof workflowId !== "string" || !workflowId) { res.status(400).json({ error: "Bad Request", message: "workflowId is required" }); return; }
+      const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+      if (!actor || actor === "unknown") { res.status(401).json({ error: "Unauthorized" }); return; }
+      const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+      const service = new AutoHealDeployService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo,
+        deps.botPermRepo, gitConfig, gitAuthor, deps.triggerRun);
+      res.json(await service.deploy({ workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun, actorId: actor }));
+    } catch (error) {
+      const e = error as { status?: number; code?: string; requestId?: string };
+      res.status(safeStatus(e.status)).json({ error: "Deployment could not be completed", code: e.code ?? "DEPLOYMENT_FAILED", requestId: e.requestId });
+    }
+  }));
 
   /**
    * Deprecated direct-write apply path.

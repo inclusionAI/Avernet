@@ -1,82 +1,107 @@
-import { useEffect, useState } from 'react'
-import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
-import ScriptFilesPanel, { type ScriptFile } from './ScriptFilesPanel'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { sessionFor, publish, updateVersion, dirty, load, releaseCleanSession, observeReconciliationHead, cancelReconciliationHead, type Version } from '../editor/packVersionSession'
+import { packVersionWritesEnabled } from '../editor/packVersionWritePolicy'
+import FrozenPackVersionViewer, { downloadLocalBlob } from './FrozenPackVersionViewer'
+import PackVersionEditor from './PackVersionEditor'
+import { savePackVersion, retryPackVersionSave, reconcilePackVersionSave } from '../editor/packVersionSave'
 
-type Snapshot = {
-  workflowId: string
-  packId: string
-  baseRef: string
-  baseCommit: string
-  files: Array<{ path: string; content: string; mode: '100644' | '100755' }>
+
+type Props = { workflowId: string | null; onSave?: () => void; canvasDirty?: boolean }
+export default function ScriptFilesTab({ workflowId, onSave, canvasDirty = false }: Props) {
+  if (!workflowId) return <p className="p-5 text-sm text-muted-foreground">请先保存工作流，再查看版本文件。</p>
+  return <ScriptFilesForWorkflow key={workflowId} workflowId={workflowId} onSave={onSave} canvasDirty={canvasDirty} />
 }
-
-type State = { workflowId: string; loading: boolean; error: string | null; snapshot: Snapshot | null }
-const emptyState = (workflowId: string): State => ({ workflowId, loading: true, error: null, snapshot: null })
-
-// Only inspect known structured responses; never display server-provided text.
-function notFoundMessage(error: unknown): string {
-  const body = (error as { body?: unknown } | null)?.body
-  if (typeof body === 'string') {
-    try {
-      const value: unknown = JSON.parse(body)
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        const result = value as { code?: unknown; error?: unknown }
-        if (result.code === 'WORKFLOW_NOT_FOUND' || (result.code === undefined && result.error === 'Workflow not found')) return '未找到工作流。'
-        if (result.code === 'SNAPSHOT_NOT_FOUND' || (result.code === undefined && result.error === 'Snapshot not found')) return '未找到工作流的 Git 快照或 Pack 清单。'
-      }
-    } catch {
-      // Older hosts and proxies may return HTML or plain text instead of JSON.
-    }
-  }
-  return '接口或资源未找到，请检查服务版本和路由配置。'
-}
-
-function readError(error: unknown): string {
-  const status = (error as { status?: unknown } | null)?.status
-  switch (status) {
-    case 401: return '请先登录，再查看脚本。'
-    case 403: return '没有工作流编辑权限或 Pack 访问权限，无法查看脚本。'
-    case 404: return notFoundMessage(error)
-    case 409: return '脚本快照存在分支冲突或共享 Pack，暂无法安全读取。'
-    case 503: return '脚本服务暂不可用，请检查配置后重试。'
-    default: return '无法读取脚本，请稍后重试。'
-  }
-}
-
-/** Read-only until the complete Pack save and exact-candidate publication contract exists. */
-export default function ScriptFilesTab({ workflowId }: { workflowId: string | null }) {
-  const [state, setState] = useState<State>(() => emptyState(workflowId ?? ''))
-  const [selected, setSelected] = useState<string | null>(null)
-  const [retry, setRetry] = useState(0)
+function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty }: Props & { workflowId: string }) {
+  const session = sessionFor(workflowId)
+  const state = useSyncExternalStore(listener => { session.listeners.add(listener); return () => { session.listeners.delete(listener) } }, () => session.state, () => session.state)
+  const [downloadError, setDownloadError] = useState(false)
+  const version = state.version
+  const current = state.versions[version]
+  const hasChanges = Object.values(state.versions).some(dirty)
 
   useEffect(() => {
-    if (!workflowId) return
-    const controller = new AbortController()
-    setState(emptyState(workflowId))
-    setSelected(null)
-    void fetchJson<Snapshot>(`/api/workflows/${encodeURIComponent(workflowId)}/pack-scripts`, { signal: controller.signal })
-      .then(snapshot => {
-        if (controller.signal.aborted) return
-        if (snapshot.workflowId !== workflowId || !Array.isArray(snapshot.files) || !/^[0-9a-f]{40,64}$/.test(snapshot.baseCommit)) throw new Error('Invalid snapshot')
-        setState({ workflowId, loading: false, error: null, snapshot })
-        setSelected(snapshot.files[0]?.path ?? null)
+    if (!current.snapshot && !current.loading && !current.error) load(session, workflowId, version)
+  }, [session, workflowId, version, current.snapshot, current.loading, current.error])
+  useEffect(() => {
+    return () => {
+      cancelReconciliationHead(session)
+      // Defer eviction until React has finished unsubscribing (including Strict Mode re-mounts).
+      queueMicrotask(() => {
+        if (!session.listeners.size) {
+          for (const controller of Object.values(session.requests)) controller?.abort()
+          for (const key of ['current', 'draft'] as const) {
+            if (session.state.versions[key].loading) updateVersion(session, key, { loading: false })
+          }
+        }
+        releaseCleanSession(workflowId, session)
       })
-      .catch(error => {
-        if (!controller.signal.aborted) setState({ workflowId, loading: false, error: readError(error), snapshot: null })
-      })
-    return () => controller.abort()
-  }, [workflowId, retry])
+    }
+  }, [session, workflowId])
 
-  if (!workflowId) return <p className="p-5 text-sm text-muted-foreground">请先保存工作流，再查看脚本文件。</p>
-  const current = state.workflowId === workflowId ? state : emptyState(workflowId)
-  const files: ScriptFile[] = current.snapshot?.files.map(file => ({ path: file.path, content: file.content, savedContent: file.content, isNew: false })) ?? []
+  function switchVersion(next: Version) {
+    if (next === version || state.saving || state.uploading) return
+    if (canvasDirty) { window.alert('画布有未保存修改或未应用草稿，请先处理后切换 Git 版本。'); return }
+    publish(session, { ...session.state, version: next })
+  }
+  function retry() {
+    if (state.saving || state.uploading || state.reconciliation) return
+    if (canvasDirty) { window.alert('画布有未保存修改，不能重新读取并替换 Git 基线。'); return }
+    if (dirty(current) && !window.confirm('重新读取会丢弃此版本的未保存更改，确定继续？')) return
+    load(session, workflowId, version)
+  }
+  function save() {
+    if (onSave) onSave()
+    else void savePackVersion(session, workflowId, version)
+  }
+
   return <div className="h-full overflow-auto p-4">
-    <div className="mb-4 rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground" role="status">
-      脚本读取需通过 Pack 级授权；脚本编辑和发布暂不可用，需先完成完整 Pack 保存与精确版本部署。
-      {current.snapshot && <p className="mt-1 break-all">Pack：{current.snapshot.packId} · {current.snapshot.baseRef} · commit {current.snapshot.baseCommit}</p>}
+    <p className="mb-3 text-sm text-muted-foreground">{packVersionWritesEnabled(current.snapshot) ? '编辑完整 Pack 版本文件并保存到草稿；保存不会部署。' : 'Pack 版本文件写入尚未启用；本界面不能保存或部署。可以临时编辑，但更改仅留在本页面内存中。'}当前版（wf）是 Git 当前分支，不保证与生效 tag 一致。未保存更改在本页面会话中保留，刷新或关闭页面会丢失。</p>
+    <div role="group" aria-label="脚本版本" className="mb-4 flex gap-2 text-sm">
+      <button type="button" disabled={state.saving || state.uploading} aria-pressed={version === 'current'} onClick={() => switchVersion('current')}>当前版（wf）{dirty(state.versions.current) ? ' *' : ''}</button>
+      <button type="button" disabled={state.saving || state.uploading} aria-pressed={version === 'draft'} onClick={() => switchVersion('draft')}>草稿版（saved）{dirty(state.versions.draft) ? ' *' : ''}</button>
     </div>
-    {!current.loading && !current.error && files.length === 0 && <p className="mb-3 text-sm text-muted-foreground">当前快照没有脚本文件。</p>}
-    <ScriptFilesPanel files={files} selectedPath={selected} onSelect={setSelected}
-      readOnly loading={current.loading} error={current.error} onRetry={() => setRetry(value => value + 1)} />
+    {hasChanges && <p role="status">有未保存的更改。</p>}
+    {state.uploading && <p role="status">正在读取上传文件，请等待完成后再离开或保存。</p>}
+    {current.snapshot && <p className="break-all text-xs">Pack：{current.snapshot.packId} · {current.snapshot.baseRef} · commit {current.snapshot.baseCommit}</p>}
+    {state.reconciliation && <section aria-label="保存结果对账" className="mb-3 rounded border border-border p-3 text-sm">
+      <p>保存结果仍未知；查看当前 HEAD 不能证明候选是否曾经写入或已被后续提交覆盖。</p>
+      {state.reconciliation.identity
+        ? <p className="break-all">服务返回的待对账身份：分支 {state.reconciliation.identity.branch} · commit {state.reconciliation.identity.commit}。这不代表保存成功。</p>
+        : <p>没有可信的待对账分支和 commit，请勿推测候选身份。</p>}
+      {state.reconciliation.observation?.kind === 'head' && <p className="break-all">读取时的远端草稿 HEAD：{state.reconciliation.observation.commit}。{state.reconciliation.identity && (state.reconciliation.identity.commit === state.reconciliation.observation.commit ? '与待对账 commit 相同。' : '与待对账 commit 不同，远端可能已再次移动。')}</p>}
+      {state.reconciliation.observation?.kind === 'snapshot-not-found' && <p>服务报告未找到草稿快照或 Pack 清单。这不证明之前的写入失败或未曾发生，请在外部核对历史。</p>}
+      {state.reconciliation.checkError && <p>无法读取远端 HEAD，未清除对账状态或本地草稿。</p>}
+      <p>原始候选可导出为 JSON（包含路径、模式和 Base64 原始字节）；文件可能含敏感信息，请妥善保管。</p>
+      <button type="button" onClick={() => {
+        const attempt = session.state.reconciliation
+        if (!attempt) return
+        const json = JSON.stringify({ format: 'pack-version-candidate-v1', workflowId, sourceVersion: attempt.version, sourceCommit: attempt.sourceCommit, expectedSavedHead: attempt.expectedSavedHead, requestId: attempt.attempt.requestId, identity: attempt.identity, files: attempt.attemptedFiles })
+        setDownloadError(!downloadLocalBlob(new Blob([json], { type: 'application/json' }), 'pack-version-candidate.json'))
+      }}>下载原始尝试候选（JSON）</button>
+      {downloadError && <p role="alert">下载失败；候选仍保留在当前页面会话中。</p>}
+      <button type="button" disabled={state.reconciliation.checking || state.saving || state.uploading} onClick={() => void observeReconciliationHead(session, workflowId)}>{state.reconciliation.checking ? '正在读取远端 HEAD…' : '查看远端草稿 HEAD'}</button>
+      {state.reconciliation.operationState && <p>保存操作状态：{state.reconciliation.operationState}。只有 completed 结果才能确认保存。</p>}
+      <p className="break-all">requestId：{state.reconciliation.attempt.requestId}</p>
+      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void reconcilePackVersionSave(session, workflowId)}>查询保存操作</button>
+      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void reconcilePackVersionSave(session, workflowId, true)}>恢复保存操作</button>
+      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void retryPackVersionSave(session, workflowId)}>重试原始保存（同一 requestId）</button>
+    </section>}
+    {current.notice && <p role="status">{current.notice}</p>}
+    {current.error && <p role="alert">{current.error}</p>}
+    {current.loading && <p role="status">正在读取版本文件…</p>}
+    {(current.error || current.snapshot) && <button type="button" disabled={state.saving || state.uploading || !!state.reconciliation || current.loading} onClick={retry}>重新读取</button>}
+    {current.snapshot && <>
+      {state.reconciliation && <p>对账期间文件已锁定，原始尝试和其他版本的本地更改将保留到对账完成。</p>}
+      {state.reconciliation
+        ? <FrozenPackVersionViewer key={version} files={version === state.reconciliation.version ? state.reconciliation.attemptedFiles : current.files} />
+        : <fieldset disabled={state.saving || state.uploading || current.loading}>
+          <PackVersionEditor key={version} files={current.files} onUploadStateChange={uploading => {
+            publish(session, { ...session.state, uploading })
+          }} onChange={files => {
+            if (!session.state.saving && !session.state.reconciliation && !session.state.versions[version].loading) updateVersion(session, version, { files, notice: null })
+          }} />
+        </fieldset>}
+      <button type="button" disabled={!packVersionWritesEnabled(current.snapshot) || (!dirty(current) && !canvasDirty) || current.blocked || !!state.reconciliation || state.saving || state.uploading || !!state.deployment || current.loading} onClick={() => void save()}>{state.saving ? '正在保存…' : '保存到草稿'}</button>
+    </>}
   </div>
 }

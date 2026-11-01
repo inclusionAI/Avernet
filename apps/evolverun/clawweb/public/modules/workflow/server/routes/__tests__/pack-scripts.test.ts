@@ -16,11 +16,11 @@ function dependencies() {
 }
 let server: ReturnType<express.Application['listen']> | undefined;
 afterEach(async () => { if (server) await new Promise<void>((resolve, reject) => server!.close(err => err ? reject(err) : resolve())); server = undefined; });
-async function request(deps: Parameters<typeof createPackScriptsRouter>[0], path = 'wf-1', headers: Record<string, string> = {}) {
+async function request(deps: Parameters<typeof createPackScriptsRouter>[0], path = 'wf-1', headers: Record<string, string> = {}, query = '') {
   const app = express(); app.use('/api/workflows', createPackScriptsRouter(deps));
   server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('No address');
-  return fetch(`http://127.0.0.1:${address.port}/api/workflows/${path}/pack-scripts?packId=forged`, { headers });
+  return fetch(`http://127.0.0.1:${address.port}/api/workflows/${path}/pack-scripts?packId=forged${query}`, { headers });
 }
 describe('pack scripts read route', () => {
   it('does not expose a disabled host before identity or Git access', async () => {
@@ -66,8 +66,48 @@ describe('pack scripts read route', () => {
     expect(deps.botPermRepo.hasEditPermission.mock.invocationCallOrder[0]).toBeLessThan(deps.workflowSpecRepo.findByWorkflowId.mock.invocationCallOrder[0]);
     expect(deps.workflowSpecRepo.findByWorkflowId.mock.invocationCallOrder[0]).toBeLessThan(deps.readSnapshot.mock.invocationCallOrder[0]);
   });
+  it.each(['current', 'draft'])('fails closed for an old host that ignores the %s version', async version => {
+    const deps = dependencies();
+    const res = await request(deps, 'wf-1', {}, `&version=${version}`);
+    expect(res.status).toBe(503); expect(await res.json()).toEqual({ error: 'Snapshot unavailable', code: 'SERVICE_UNAVAILABLE' });
+    expect(deps.readSnapshot).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['current', 'origin/saved/wf-1'], ['draft', 'origin/wf/wf-1'],
+    ['current', 'origin/wf/other'], ['draft', 'refs/remotes/origin/saved/wf-1'],
+  ] as const)('rejects a mismatched %s response ref without exposing contents', async (version, baseRef) => {
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, baseRef });
+    const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, `&version=${version}`);
+    expect(deps.readSnapshot).toHaveBeenCalledWith('wf-1', 'pack-1', version);
+    expect(res.status).toBe(503); const body = await res.text();
+    expect(JSON.parse(body).code).toBe('SERVICE_UNAVAILABLE'); expect(body).not.toContain('print(1)'); expect(body).not.toContain(baseRef);
+  });
+  it.each([['current', 'origin/wf/wf-1'], ['draft', 'origin/saved/wf-1']] as const)('accepts a matching %s response ref from a capable host', async (version, baseRef) => {
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, baseRef });
+    const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, `&version=${version}`);
+    expect(res.status).toBe(200); expect(await res.json()).toEqual({ ...snapshot, baseRef });
+    expect(deps.readSnapshot).toHaveBeenCalledWith('wf-1', 'pack-1', version);
+  });
+  it('rejects a version-aware host that has not declared commit-local Pack resolution', async () => {
+    const deps = dependencies();
+    const res = await request({ ...deps, supportsVersionedSnapshots: true }, 'wf-1', {}, '&version=current');
+    expect(res.status).toBe(503); expect(deps.readSnapshot).not.toHaveBeenCalled();
+  });
+  it('authorizes the actual historical Pack before returning any contents', async () => {
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, packId: 'old-pack' });
+    deps.authorizePackRead.mockImplementation(async (_workflowId, packId) => packId !== 'old-pack');
+    const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, '&version=current');
+    expect(res.status).toBe(403); expect(await res.text()).not.toContain('print(1)');
+    expect(deps.authorizePackRead).toHaveBeenCalledExactlyOnceWith('wf-1', 'old-pack', 'trusted');
+  });
+  it('rejects a snapshot that claims another workflow', async () => {
+    const deps = dependencies(); deps.readSnapshot.mockResolvedValue({ ...snapshot, workflowId: 'other' });
+    const res = await request({ ...deps, supportsVersionedSnapshots: true, supportsVersionedPackResolution: true }, 'wf-1', {}, '&version=current');
+    expect(res.status).toBe(503); expect(await res.text()).not.toContain('print(1)');
+  });
   it('falls back to the database workflow ID when pack ID is null', async () => {
     const deps = dependencies(); deps.workflowSpecRepo.findByWorkflowId.mockResolvedValue({ workflow_id: 'wf-1', pack_id: null });
+    deps.readSnapshot.mockResolvedValue({ ...snapshot, packId: 'wf-1' });
     expect((await request(deps)).status).toBe(200); expect(deps.readSnapshot).toHaveBeenCalledWith('wf-1', 'wf-1');
   });
   it('rejects invalid path identifiers before Git', async () => {
