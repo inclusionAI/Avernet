@@ -401,6 +401,9 @@ pub enum ManagedDeliveryError {
 
 #[async_trait]
 pub trait ManagedMessageDeliveryService: Send + Sync {
+    /// Best-effort post-commit observations; status callers must re-read on lag.
+    fn subscribe_changes(&self) -> Option<tokio::sync::broadcast::Receiver<Vec<PersistedMessageDelivery>>> { None }
+
     async fn admit_batch(&self, _commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
         Err(ManagedDeliveryError::Conflict)
     }

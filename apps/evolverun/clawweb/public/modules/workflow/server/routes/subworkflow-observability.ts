@@ -1,7 +1,9 @@
 import { Router, type Request } from 'express';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { FlowRunLinkRepository } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
 import { productionRunSql } from '@avernet/clawweb-shared/server/services/run-purpose';
 import type { RepairAuthorize } from './repair-batches.js';
+import { createRunWorkflowSnapshotRouter } from './run-workflow-snapshot.js';
 
 // These are deliberately fixed: neither work nor response size is client-controlled.
 const EVENT_LIMIT = 200;
@@ -35,6 +37,7 @@ function childId(data: unknown): string | null {
 /** Host must inject the verified-login repair authorizer (whole-workflow view only). */
 export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: RepairAuthorize): Router {
   const router = Router();
+  router.use(createRunWorkflowSnapshotRouter(db, authorize));
   router.get('/:flowId/subworkflows', async (req: Request, res) => {
     res.set('Cache-Control', 'no-store');
     const flowId = req.params.flowId;
@@ -69,11 +72,19 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
         res.status(404).json({ error: 'Run not found', code: 'NOT_FOUND' });
         return;
       }
+      // Missing relation schema is an operational error, not evidence of no links.
+      const links = new FlowRunLinkRepository(db);
+      const stored = await links.listByParent(flowId, CHILD_LIMIT);
       const events = await db.query<Event>(
         `SELECT node_id, attempt, data_json FROM flow_events WHERE flow_id = ? AND workflow_id = ? AND event_type IN ('subworkflow_linked', 'subworkflow_finished') ORDER BY time DESC, id DESC LIMIT ${EVENT_LIMIT}`,
         [flowId, parent.workflow_id],
       );
-      const candidates = new Map<string, { parentNodeId: string | null; parentAttempt: number | null }>();
+      const candidates = new Map<string, { parentNodeId: string | null; parentAttempt: number | null; childWorkflowId?: string; stored: boolean }>();
+      for (const link of stored) {
+        if (!validId(link.childFlowId) || link.childFlowId === flowId || !validId(link.parentNodeId) || !validId(link.childWorkflowId)) continue;
+        candidates.set(link.childFlowId, { parentNodeId: link.parentNodeId, parentAttempt: link.parentAttempt,
+          childWorkflowId: link.childWorkflowId, stored: true });
+      }
       for (const event of events) {
         const id = childId(event.data_json);
         if (!id || id === flowId) continue;
@@ -83,16 +94,28 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
         if (candidate) {
           // A newer finish event can omit attempt. Earlier evidence is usable
           // only for the same known parent node, never from node state.
-          if (candidate.parentAttempt === null && candidate.parentNodeId !== null && candidate.parentNodeId === parentNodeId) candidate.parentAttempt = parentAttempt;
+          if (!candidate.stored && candidate.parentAttempt === null && candidate.parentNodeId !== null && candidate.parentNodeId === parentNodeId) candidate.parentAttempt = parentAttempt;
           continue;
         }
         if (candidates.size >= CHILD_LIMIT) continue;
-        candidates.set(id, { parentNodeId, parentAttempt });
+        candidates.set(id, { parentNodeId, parentAttempt, stored: false });
       }
       const items: Array<{ parentNodeId: string | null; parentAttempt: number | null; childFlowId: string; childWorkflowId: string; status: string; startedAt: number | null; completedAt: number | null; nodes: Array<{ nodeId: string; nodeTitle: string | null; status: string; attempt: number | null }> }> = [];
       for (const [id, candidate] of candidates) {
+        // A historical event cannot override an independently recorded relationship,
+        // including one pointing to a different parent.
+        if (!candidate.stored) {
+          const recorded = await links.findByChild(id);
+          if (recorded) {
+            if (recorded.parentFlowId !== flowId || !validId(recorded.parentNodeId) || !validId(recorded.childWorkflowId)) continue;
+            candidate.parentNodeId = recorded.parentNodeId;
+            candidate.parentAttempt = recorded.parentAttempt;
+            candidate.childWorkflowId = recorded.childWorkflowId;
+          }
+        }
         const child = await findRun(id);
         if (!child) continue; // Never disclose unknown, trial, or unauthorized identifiers.
+        if (candidate.childWorkflowId !== undefined && candidate.childWorkflowId !== child.workflow_id) continue;
         if (!validId(child.workflow_id)) throw new Error('Invalid stored workflow');
         if (!await permitted(child.workflow_id)) continue;
         const rows = await db.query<Node>(
@@ -105,7 +128,7 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
           status: status(row.status),
           attempt: typeof row.attempt === 'number' && Number.isSafeInteger(row.attempt) && row.attempt > 0 ? row.attempt : null,
         }));
-        items.push({ parentNodeId: candidate.parentNodeId, parentAttempt: candidate.parentAttempt, childFlowId: id,
+        items.push({ parentNodeId: candidate.parentNodeId, parentAttempt: typeof candidate.parentAttempt === 'number' && Number.isSafeInteger(candidate.parentAttempt) && candidate.parentAttempt > 0 ? candidate.parentAttempt : null, childFlowId: id,
           childWorkflowId: child.workflow_id, status: status(child.status), startedAt: timestamp(child.started_at),
           completedAt: timestamp(child.completed_at), nodes });
       }

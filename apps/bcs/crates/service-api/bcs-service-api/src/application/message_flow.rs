@@ -459,6 +459,12 @@ pub struct ConflictPosition {
 
 #[async_trait]
 pub trait MessageFlowService: Send + Sync {
+    async fn task_status(&self, _refs: Vec<String>) -> ServiceResult<Vec<super::TaskHandleView>> {
+        Err(service_not_configured("task status"))
+    }
+    async fn cancel_task(&self, _task_ref: String, _reason: String) -> ServiceResult<super::TaskHandleView> {
+        Err(service_not_configured("task cancellation"))
+    }
     async fn get_delivery_policy(&self, _caller: CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
         Err(service_not_configured("delivery policy management"))
     }

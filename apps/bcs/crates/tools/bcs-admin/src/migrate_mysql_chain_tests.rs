@@ -1,4 +1,8 @@
 #[cfg(test)]
+#[path = "migrate_task_handle_contract.rs"]
+mod task_handle_contract;
+
+#[cfg(test)]
 #[path = "migrate_group_notify_contract.rs"]
 mod group_notify_contract;
 
@@ -110,6 +114,7 @@ async fn sqlite_migration_chain_backs_the_group_notify_contract() -> Result<()> 
     migration_chain_migrations::run_sqlite_migrations(db.as_ref())
         .await
         .context("apply the sqlite migration chain")?;
+    task_handle_contract::verify(db.clone(), true).await?;
     group_notify_contract::verify(Arc::clone(&db), |db, env| {
         ChainMySqlGroupStore::sqlite(Arc::clone(db), env.to_string())
     })
@@ -130,14 +135,13 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        // 037_session_speaking_leases (renumbered 036 → 037 on the caller
-        // branch rebase) extends the MySQL chain to 37 entries.
-        assert!(report.contains("applied_versions=37\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=38\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=37).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=38).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
+        task_handle_contract::verify(migrated_db.clone(), false).await?;
         history_window_tests::verify_history_windows(global).await?;
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
@@ -180,9 +184,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        // 021..=037 = 17 entries after the v20 replay prefix (the chain tail
-        // beyond 037_session_speaking_leases shifted this count from 16).
-        assert!(report.contains("applied_versions=17\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=18\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);

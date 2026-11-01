@@ -345,6 +345,7 @@ pub(super) fn build_task_dispatch_frame(
     target_bot_name: &str,
     message: &str,
     task_id: &str,
+    assignment_intent_id: Option<&str>,
     manager_session_id: &str,
     tags: &[String],
     now_ms: u64,
@@ -381,13 +382,16 @@ pub(super) fn build_task_dispatch_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
+    let text = if group.group_strategy == GroupStrategy::ManagerWorker {
+        crate::task_presentation::dispatch(driver_name, assignment_intent_id, task_id, message)
+    } else { format!("[from:{}] {}", driver_name, message) };
     let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
         "message": {
             "role": "user",
-            "content": [{"type": "text", "text": format!("[from:{}] {}", driver_name, message)}],
+            "content": [{"type": "text", "text": text}],
             "timestamp": now_ms / 1000,
         },
         "channel": {

@@ -604,8 +604,9 @@ async fn manager_worker_task_result_retry_uses_only_successful_terminal_text() {
     assert!(retry.bot_deliveries[0].delivered);
     let frames = retry_delivery.frames().await;
     let params = request_params(frames.first().expect("expected retry task result frame"));
-    assert_eq!(params["message"]["content"][0]["text"], "[from:Worker] second");
-    assert_eq!(params["session_context"]["message"], "second");
+    let expected = "[任务完成] ref=T-taskresu | Worker：Worker | 任务：未记录任务摘要\n---\nsecond";
+    assert_eq!(params["message"]["content"][0]["text"], expected);
+    assert_eq!(params["session_context"]["message"], expected);
 
     let appended = repo.appended().await;
     assert_eq!(

@@ -70,12 +70,15 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
+pub(crate) const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
 
 fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -> Duration {
     let is_worker_task = row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task
         && matches!(crate::queued_task::intent(row), Ok(Some(task)) if task.leg == crate::queued_task::TaskLeg::Dispatch);
     if is_worker_task {
+        if let Ok(Some(task)) = crate::queued_task::intent(row) {
+            if let Some(seconds) = task.timeout_s { return Duration::from_secs(seconds); }
+        }
         provider_timeout.checked_sub(TASK_ABORT_RESERVE).filter(|time| !time.is_zero())
             .unwrap_or(provider_timeout / 2)
     } else {
@@ -702,7 +705,11 @@ impl DeliveryRuntime {
                         if row.abort_request_id.as_ref() != Some(&abort_request_id) { continue; }
                         let acknowledged = matches!(result, Some(Ok(ref r)) if r.target_bot_id == row.target_bot_id
                             && downstream_run_id.as_ref().is_some_and(|id| r.aborted_run_ids.len() == 1 && r.aborted_run_ids.contains(id)));
-                        storage!(self.transition(event(&row, if acknowledged { Event::Aborted } else { Event::AbortUnconfirmed })));
+                        let mut command = event(&row, if acknowledged { Event::Aborted } else { Event::AbortUnconfirmed });
+                        if matches!(result, Some(Err(bcs_service_api::ServiceError::BotMethodUnsupported { .. } | bcs_service_api::ServiceError::InvalidOperation { .. }))) {
+                            command.transport_context_json = Some(serde_json::json!({"task_cancel_rejected":true}));
+                        }
+                        storage!(self.transition(command.clone()));
                     }
                 }
             }

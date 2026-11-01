@@ -23,7 +23,7 @@ async fn provider_slug_upgrade_preserves_legacy_rows_and_migration_history() {
         ))
         .await
         .unwrap();
-    assert_eq!(history.len(), 37);
+    assert_eq!(history.len() as i64, bcs::migrations::sqlite_target_version());
     bcs::migrations::run_sqlite_migrations(&db).await.unwrap();
     assert_eq!(
         db.query(DbStatement::new(

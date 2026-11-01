@@ -19,6 +19,17 @@ pub(super) async fn handle_task_bot_event(
         return Ok(Vec::new());
     }
 
+    // A legacy Worker may acknowledge stop before BCS's synthetic callback.
+    // Preserve the accepted timeout/reason consistently in both result paths.
+    let terminal = (!entry.managed && cmd.state == ChatEventState::Aborted && entry.cancel_reason.is_some()
+        && (entry.cancel_reason.as_deref() == Some(crate::task_failure::TASK_TIMEOUT_REASON)
+            || cmd.event_payload.get("reason").and_then(Value::as_str).is_none())).then(|| {
+        let mut terminal = cmd.clone();
+        terminal.event_payload["reason"] = serde_json::json!(entry.cancel_reason);
+        terminal
+    });
+    let cmd = terminal.as_ref().unwrap_or(cmd);
+
     let response_text = if cmd.state == ChatEventState::Error {
         error_display_text(&cmd.event_payload)
     } else {
@@ -98,7 +109,17 @@ pub(super) async fn handle_task_bot_event(
         .target_bot_name
         .as_deref()
         .unwrap_or(entry.target_bot.as_str());
-    let manager_text = if cmd.state == ChatEventState::Final { response_text.clone() } else {
+    let manager_text = if group.as_ref().is_some_and(|g| g.group_strategy == GroupStrategy::ManagerWorker) {
+        let state = match cmd.state {
+            ChatEventState::Final => "completed",
+            ChatEventState::Aborted if crate::task_failure::is_timeout_callback(cmd) => "timed_out",
+            ChatEventState::Aborted => "cancelled",
+            _ => "failed",
+        };
+        let body = if cmd.state == ChatEventState::Final { response_text.clone() }
+            else { crate::task_failure::callback_body(cmd, !entry.response_content.is_empty()) };
+        crate::task_presentation::result(&crate::task_failure::entry_intent(&entry), state, &body)
+    } else if cmd.state == ChatEventState::Final { response_text.clone() } else {
         crate::task_failure::callback_text(&crate::task_failure::entry_intent(&entry), cmd, !entry.response_content.is_empty())
     };
     let result = async { if entry.terminal_result_delivered {

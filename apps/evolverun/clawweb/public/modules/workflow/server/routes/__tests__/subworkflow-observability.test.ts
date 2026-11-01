@@ -15,6 +15,7 @@ describe('subworkflow observability', () => {
   async function fixture() {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, workflow_id TEXT, status TEXT, started_at INTEGER, completed_at INTEGER, input_json TEXT, result_json TEXT);
+      CREATE TABLE flow_run_links (child_flow_id TEXT PRIMARY KEY, parent_flow_id TEXT, parent_node_id TEXT, parent_attempt INTEGER, child_workflow_id TEXT, gmt_create INTEGER DEFAULT 0);
       CREATE TABLE flow_events (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, event_type TEXT, attempt INTEGER, time INTEGER, data_json TEXT, error_text TEXT);
       CREATE INDEX event_flow ON flow_events(flow_id);
       CREATE TABLE node_executions (id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, node_title TEXT, status TEXT, attempt INTEGER, input_json TEXT, output_json TEXT, error_text TEXT);
@@ -172,6 +173,29 @@ describe('subworkflow observability', () => {
     expect(f.authorize.mock.calls.map(call => call[1]).sort()).toEqual(['child-wf', 'parent-wf', 'secret-wf']);
   });
 
+
+  it('prioritizes trusted rows, merges historical links, and suppresses conflicting or unauthorized links', async () => {
+    const f = await fixture();
+    for (const id of ['stored', 'legacy', 'other-parent', 'mismatch', 'denied']) f.run(id, id === 'denied' ? 'secret-wf' : 'child-wf');
+    const add = f.raw.prepare('INSERT INTO flow_run_links VALUES (?, ?, ?, ?, ?, ?)');
+    add.run('stored', 'parent', 'trusted-node', 3, 'child-wf', 4);
+    add.run('other-parent', 'another-parent', 'node', 1, 'child-wf', 3);
+    add.run('mismatch', 'parent', 'node', 1, 'wrong-wf', 2);
+    add.run('denied', 'parent', 'node', 1, 'secret-wf', 1);
+    for (const id of ['stored', 'legacy', 'other-parent', 'mismatch', 'denied']) f.event(id, 'subworkflow_linked', 'forged-node');
+    const result = await f.get();
+    expect(result.status).toBe(200);
+    expect(result.body.items.map((x: { childFlowId: string }) => x.childFlowId)).toEqual(['stored', 'legacy']);
+    expect(result.body.items[0]).toMatchObject({ parentNodeId: 'trusted-node', parentAttempt: 3 });
+    expect(JSON.stringify(result.body)).not.toMatch(/other-parent|mismatch|denied|secret-wf/);
+  });
+
+  it('fails closed when the independent relation table is absent', async () => {
+    const f = await fixture(); f.run('child'); f.event('child');
+    f.raw.exec('DROP TABLE flow_run_links');
+    expect(await f.get()).toMatchObject({ status: 503, body: { error: 'Observability unavailable', code: 'UNAVAILABLE' } });
+  });
+
   it('fails closed when a required real SQLite table is unavailable', async () => {
     const f = await fixture(); f.run('child'); f.event('child');
     f.raw.exec('DROP TABLE node_executions');
@@ -244,7 +268,7 @@ describe('subworkflow observability', () => {
     cleanup.unshift(() => new Promise<void>(resolve => server.close(() => resolve())));
     const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/parent/subworkflows`);
     expect(response.status).toBe(200); expect((await response.json()).items).toHaveLength(1);
-    expect(queries.map(q => q.params)).toEqual([['parent'], ['parent', 'parent-wf'], ['child'], ['child', 'child-wf']]);
+    expect(queries.map(q => q.params)).toEqual([['parent'], ['parent'], ['parent', 'parent-wf'], ['child'], ['child'], ['child', 'child-wf']]);
     expect(queries.every(q => !q.sql.includes('parent-wf') && !q.sql.includes('child-wf'))).toBe(true);
   });
 

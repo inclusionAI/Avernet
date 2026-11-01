@@ -85,7 +85,8 @@ impl CoordinationIntentPort for CoordinationCacheStore {
         if required.iter().any(|key| !p.arguments.get(*key).and_then(Value::as_str)
             .is_some_and(|v| !v.trim().is_empty()))
             || p.arguments.keys().any(|key| !required.contains(&key.as_str())
-                && !(tool == "bcs_assign_task" && key == "response_mode"))
+                && !(tool == "bcs_assign_task" && matches!(key.as_str(), "response_mode" | "timeout_s")))
+            || p.arguments.get("timeout_s").is_some_and(|v| v.as_u64().is_none_or(|n| n == 0))
             || p.arguments.get("response_mode").is_some_and(|v|
                 !matches!(v.as_str(), Some("full" | "after-last-tool-call"))) {
             return Err(error("invalid_coordination_arguments"));

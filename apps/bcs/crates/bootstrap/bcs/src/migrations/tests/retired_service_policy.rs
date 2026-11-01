@@ -7,7 +7,7 @@ async fn retired_service_policy_preserves_schema_and_history_across_restarts() -
     run_sqlite_bootstrap_tables(&db).await?;
     for migration in SQLITE_VERSIONED_MIGRATIONS
         .iter()
-        .filter(|m| m.version <= 37)
+        .filter(|m| m.version <= 38)
     {
         apply_sqlite_migration(&db, migration).await?;
     }

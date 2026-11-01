@@ -1,4 +1,7 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useId } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import { parseRunSnapshot } from './runSnapshot'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useFlowRun, useDbWorkflow, useEvolveDiagnoses, useEvolveSuggestions, useAnalyzeRun, useResetAnalysisRun, useAnalysisProgress, useRunEvolutionAnalysis } from '../api/hooks'
 import RunSummaryHeader from '../components/RunSummaryHeader'
@@ -13,7 +16,7 @@ import AnalyzeRunBotModal from '../components/AnalyzeRunBotModal'
 import RunEvolutionAnalysis from '../components/evolution/RunEvolutionAnalysis'
 import AggregationProgress from '../components/workflow-workspace/AggregationProgress'
 import type { RunEvolutionAnalysisResponse, WorkflowAnalysisProgressResponse } from '@avernet/clawweb-shared/web/api/client'
-import type { FlowRun, NodeExecution } from '@avernet/clawweb-shared/web/types'
+import type { FlowRun, NodeExecution, WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import RunArchivePanel from '../components/RunArchivePanel'
 import AutoHealPanel from '../components/AutoHealPanel'
 import ApprovalPanel from '../components/ApprovalPanel'
@@ -49,7 +52,30 @@ export default function RunDetail() {
   return <RunDetailContent key={flowId} flowId={flowId ?? ''} searchParams={searchParams} ancestors={flowId ? [flowId] : []} />
 }
 
-function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }: { flowId: string; searchParams: URLSearchParams; ancestors: string[]; readOnly?: boolean }) {
+type RunDetailProps = { flowId: string; searchParams: URLSearchParams; ancestors: string[] }
+type HistoricalSnapshot = { nodes: WorkflowNode[] | undefined; isError: boolean; flowId: string }
+
+function ChildRunDetailContent(props: RunDetailProps) {
+  const observerId = useId()
+  const client = useQueryClient()
+  const queryKey = ['child-run-workflow-snapshot', observerId, props.flowId] as const
+  useEffect(() => () => {
+    void client.cancelQueries({ queryKey, exact: true })
+    client.removeQueries({ queryKey, exact: true })
+  }, [client, observerId, props.flowId])
+  const query = useQuery({
+    queryKey,
+    enabled: !!props.flowId,
+    queryFn: async ({ signal }) => parseRunSnapshot(await fetchJson<unknown>(
+      `/api/runs/${encodeURIComponent(props.flowId)}/workflow-snapshot`, { signal },
+    )),
+    retry: false,
+    gcTime: 60_000,
+  })
+  return <RunDetailContent {...props} readOnly historicalSnapshot={{ nodes: query.isFetching ? undefined : query.data, isError: query.isError, flowId: props.flowId }} />
+}
+
+function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, historicalSnapshot }: RunDetailProps & { readOnly?: boolean; historicalSnapshot?: HistoricalSnapshot }) {
   const fromWorkspace = searchParams.get('from') === 'workspace'
   const workspaceView = searchParams.get('workspaceView')
   const [activeTab, setActiveTab] = useState<TabId>('nodes')
@@ -145,10 +171,11 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }:
     return { succeeded, failed, total }
   }, [nodes, run?.node_count])
 
-  // Fetch workflow spec for DAG: all nodes + dependency edges
-  const workflowQuery = useDbWorkflow(run?.workflow_id ?? '')
-
-  const specNodes = useMemo(() => workflowQuery.data?.nodes ?? [], [workflowQuery.data])
+  // Keep the main run's existing behavior; child views must never use the mutable spec.
+  const workflowQuery = useDbWorkflow(readOnly ? '' : run?.workflow_id ?? '')
+  const snapshotError = historicalSnapshot?.flowId !== flowId || !!historicalSnapshot?.isError
+  const workflowSpec = readOnly ? undefined : workflowQuery.data
+  const specNodes = readOnly ? (snapshotError ? undefined : historicalSnapshot?.nodes) : workflowSpec?.nodes
 
   const nodeStatusMap = useMemo(() => {
     const map: Record<string, { status: string; executorType?: string; progressMessage?: string | null }> = {}
@@ -279,7 +306,7 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }:
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}
                   selectedNodeId={selectedNodeId ?? undefined}
-                  workflowSpec={workflowQuery.data}
+                  workflowSpec={workflowSpec}
                   onAnalyze={handleAnalyze}
                   onApproval={(node) => {
                     const card = pendingApprovals.find((c) => c.nodeId === node.node_id)
@@ -288,13 +315,13 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }:
                   approvalNodeIds={pendingApprovalNodeIds}
                   renderSubworkflowLinks={(node) => <SubworkflowLinks
                     nodeId={node.node_id} ancestors={ancestors}
-                    renderRun={(childFlowId) => <RunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} readOnly />}
+                    renderRun={(childFlowId) => <ChildRunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} />}
                   />}
                 />
                 <UnattributedSubworkflowLinks
                   nodeIds={nodes.filter(node => node.executor_type === 'subworkflow').map(node => node.node_id)}
                   ancestors={ancestors}
-                  renderRun={(childFlowId) => <RunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} readOnly />}
+                  renderRun={(childFlowId) => <ChildRunDetailContent key={childFlowId} flowId={childFlowId} searchParams={new URLSearchParams()} ancestors={[...ancestors, childFlowId]} />}
                 />
                 </SubworkflowProvider>
               </div>
@@ -304,15 +331,24 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false }:
               <SimpleRunLogsPanel flowId={flowId ?? ''} nodes={nodes.map((n) => ({ node_id: n.node_id, node_title: n.node_title }))} />
             )}
 
-            {activeTab === 'dag' && (
-              <RunDagView
-                specNodes={specNodes}
-                nodeStatusMap={nodeStatusMap}
-                onNodeClick={(nodeId) => {
-                  setSelectedNodeId(nodeId)
-                  setActiveTab('nodes')
-                }}
-              />
+            {activeTab === 'dag' && readOnly && snapshotError && (
+              <p role="status" className="text-sm text-muted-foreground">无法确认本次运行的历史 DAG：可信运行快照不可用或无权访问。</p>
+            )}
+            {activeTab === 'dag' && readOnly && !snapshotError && !specNodes && (
+              <p role="status" className="text-sm text-muted-foreground">正在加载本次运行的静态 DAG 快照…</p>
+            )}
+            {activeTab === 'dag' && (!readOnly || (!snapshotError && !!specNodes)) && (
+              <>
+                {readOnly && <p className="mb-2 text-xs text-muted-foreground">静态 DAG，来自运行登记时绑定的快照，不含动态节点；尚未验证其与引擎实际执行配置一致。</p>}
+                <RunDagView
+                  specNodes={specNodes ?? []}
+                  nodeStatusMap={nodeStatusMap}
+                  onNodeClick={(nodeId) => {
+                    setSelectedNodeId(nodeId)
+                    setActiveTab('nodes')
+                  }}
+                />
+              </>
             )}
 
             {activeTab === 'archive' && (

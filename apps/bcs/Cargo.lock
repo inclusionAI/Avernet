@@ -1798,6 +1798,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "metrics",
  "regex",
  "serde",
  "serde_json",

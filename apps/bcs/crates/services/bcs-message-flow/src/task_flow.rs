@@ -372,6 +372,8 @@ pub async fn handle_task_message(
     flow: &BcsMessageFlow,
     cmd: TaskMessageCommand,
 ) -> ServiceResult<TaskMessageOutcome> {
+    tracing::warn!(target: "bcs_compat", "deprecated task.message received during compatibility drain");
+    metrics::counter!("bcs_deprecated_task_message_total").increment(1);
     let (group_id, manager_session_id) = task_dispatch_scope(&cmd.group_id, &cmd.payload);
     let manager_session_id = manager_session_id.ok_or_else(|| ServiceError::InvalidOperation {
         message: "task.message requires bcs_session_id".to_string(),
@@ -436,7 +438,7 @@ pub async fn handle_task_message(
         let intent = crate::queued_task::TaskIntent { leg:crate::queued_task::TaskLeg::Message,
             task_id:run_id, manager:manager.bot_uuid.clone(), worker:cmd.worker_bot_id.clone(),
             worker_name:worker_name.clone(), response_mode:ChatResponseMode::Full,
-            assignment_intent_id:None, summary:String::new() };
+            assignment_intent_id:None, summary:String::new(), timeout_s:None };
         let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &worker_name, drain).await?;
         crate::queued_task::admit(flow, admission).await?;

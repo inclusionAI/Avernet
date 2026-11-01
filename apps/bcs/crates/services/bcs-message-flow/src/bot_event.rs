@@ -66,6 +66,7 @@ pub async fn handle_bot_event(
     if let Some(canonical) = flow.message_tracker.canonical_output_run(&cmd.run_id, &scope).await? {
         cmd.run_id = canonical;
     }
+    flow.task_store.record_activity(&cmd.run_id, &cmd.bot_id).await;
     let task_intent_eligible = cmd
         .event_payload
         .as_object_mut()
@@ -82,17 +83,20 @@ pub async fn handle_bot_event(
         let lock_id = task_lock_id.map(|id| format!("task:{id}"))
             .or_else(|| managed.as_ref().map(|row| row.delivery_id.clone()))
             .unwrap_or_else(|| format!("run:{}", crate::run_reply::chat_key(&cmd)));
-        let lock = {
-            let mut locks = flow.delivery_event_locks.lock().await;
-            locks.retain(|_, lock| lock.strong_count() > 0);
-            let lock = locks.get(&lock_id).and_then(std::sync::Weak::upgrade)
-                .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
-            locks.insert(lock_id, std::sync::Arc::downgrade(&lock));
-            lock
-        };
-        lock.lock_owned().await
+        lock_event(flow, lock_id).await
     };
     let managed = if managed.is_some() { crate::queued_admission::find_managed_run(flow, &cmd).await? } else { None };
+    // Stop confirmation and terminal callbacks arbitrate under the same lock.
+    // Once stop won, a late Final cannot publish a contradictory completed result.
+    if managed.is_none() && cmd.state != ChatEventState::Aborted {
+        if let Some(id) = flow.task_store.resolve_task_id(&cmd.run_id).await {
+            if flow.task_store.get(&id).await.is_some_and(|task| task.stopped_confirmed) {
+                return Ok(BotEventOutcome { bot_deliveries:Vec::new(), frontend_deliveries:Vec::new(),
+                    unregistered_run_ids:Vec::new(), mentions:Vec::new(), delivered_count:0,
+                    failed_count:0, delivery_results:Vec::new() });
+            }
+        }
+    }
     // Admission at the whole event boundary, not just frontend publication.
     // Recheck under the per-Run lock: a concurrent final may have retired this
     // canonical Run while we waited. A cleaned alias has no binding either.
@@ -793,4 +797,18 @@ async fn persist_task_final_chat(
     response_text: String,
 ) -> ServiceResult<()> {
     persist_final_chat(flow, cmd, response_text).await
+}
+
+/// Shared by callbacks and reliable legacy stop confirmation. Never hold this
+/// guard while calling handle_bot_event again (terminal publication reacquires it).
+pub(crate) async fn lock_event(flow: &BcsMessageFlow, id: String) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = flow.delivery_event_locks.lock().await;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = locks.get(&id).and_then(std::sync::Weak::upgrade)
+            .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+        locks.insert(id, std::sync::Arc::downgrade(&lock));
+        lock
+    };
+    lock.lock_owned().await
 }

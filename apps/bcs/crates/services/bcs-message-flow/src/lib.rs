@@ -22,6 +22,7 @@ pub mod queued_system;
 mod queued_task;
 mod queued_task_terminal;
 mod task_failure;
+mod task_presentation;
 mod run_reply;
 mod reply_timing;
 mod storage_retry;
@@ -109,3 +110,7 @@ pub use tracked_run_context::TrackedBotRunContext;
 pub use run_context_redis::RedisBotRunContextStore;
 
 mod caller_execution;
+
+mod task_handle;
+
+mod task_rejection;

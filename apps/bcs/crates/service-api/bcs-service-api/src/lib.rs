@@ -352,3 +352,5 @@ pub use port::repo::{StateMachineTerminalImPayload, StateMachineTerminalImProgre
 pub use port::session_channel_outbound::StateMachineTerminalNotification;
 
 pub use port::repo::{FailStateMachineStartup, StateMachineMissingStartupFact, StateMachineStartupFailure, STATE_MACHINE_PREPARATION_GRACE_MS};
+
+pub use application::task_handle::{TaskHandleStatus, TaskHandleView};

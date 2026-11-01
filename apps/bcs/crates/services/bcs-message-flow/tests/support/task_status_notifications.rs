@@ -68,33 +68,35 @@ async fn non_callback_terminal_is_atomic_idempotent_and_can_wake_manager() {
         let source = f.repo.get_message_by_id(SESSION, &results[0].source_message_id).await.unwrap().unwrap();
         assert_eq!(source.message_id, format!("task-result:{task_id}"));
         let text = source.content["task_result_text"].as_str().unwrap();
-        assert!(text.contains("TASK_BODY") && text.contains("bcs_intent_assignment"));
+        assert!(text.starts_with("情况：") && !text.contains("派发引用"));
         if event == Event::CancelRequested { assert!(text.contains("开始执行前已取消")); }
         f.start(results[0]).await;
         let wire = serde_json::to_value(&f.support.bot_delivery.frames().await[0]).unwrap();
         assert_eq!(wire["method"], "chat.send");
         assert!(wire.to_string().contains(text.lines().next().unwrap()));
+        assert!(wire.to_string().contains(&format!("ref=T-{}", &task_id[..8])));
+        assert!(wire.to_string().contains("TASK_BODY"));
         // The existing assignment tool remains usable after the result Send.
         assert_eq!(f.flow.handle_task_dispatch(dispatch_command()).await.unwrap().status, "queued");
     }
 }
 
 #[tokio::test]
-async fn unknown_and_unconfirmed_abort_do_not_notify_until_confirmed() {
+async fn unknown_and_unconfirmed_abort_notify_uncertainty_once_then_terminal() {
     let f = Fixture::new().await;
     let (task_id, row) = f.dispatch().await;
     let row = f.start(&row).await;
     let row = f.transition(&row, Event::TransportUnknown).await;
-    assert_eq!(f.rows().await.len(), 1);
+    assert_eq!(f.rows().await.len(), 2);
     let row = f.transition(&row, Event::CancelRequested).await;
     let row = f.transition(&row, Event::AbortUnconfirmed).await;
     assert_eq!(row.state.status, Status::CancelUnknown);
-    assert_eq!(f.rows().await.len(), 1);
+    assert_eq!(f.rows().await.len(), 2);
     let row = f.transition(&row, Event::Aborted).await;
     let mut late = final_event(&row); late.state = ChatEventState::Aborted;
     f.flow.handle_bot_event(late.clone()).await.unwrap();
     f.flow.handle_bot_event(late).await.unwrap();
-    assert_eq!(f.rows().await.len(), 2);
+    assert_eq!(f.rows().await.len(), 3);
     assert_eq!(f.flow.task_store.get(&task_id).await.unwrap().status,
         bcs_message_flow::task_store::TaskLedgerStatus::Cancelled);
     let summary = f.flow.task_store.ledger_summary("group-1", Some(SESSION)).await;
@@ -123,8 +125,11 @@ async fn confirmed_timeout_admits_one_manager_task_result() {
     assert_eq!(results.len(), 1);
     let source = f.repo.get_message_by_id(SESSION, &format!("task-result:{task_id}")).await.unwrap().unwrap();
     assert_eq!(source.content["task_state"], "timed_out");
-    assert!(source.content["task_result_text"].as_str().unwrap().contains("[任务超时]"));
-    assert!(source.content["task_result_text"].as_str().unwrap().contains("bcs_intent_assignment"));
+    assert!(source.content["task_result_text"].as_str().unwrap().contains("超时"));
+    assert!(!source.content["task_result_text"].as_str().unwrap().contains("派发引用"));
+    f.start(results[0]).await;
+    let wire = serde_json::to_value(f.support.bot_delivery.frames().await.last().unwrap()).unwrap().to_string();
+    assert!(wire.contains(&format!("[任务超时] ref=T-{}", &task_id[..8])));
 }
 
 #[tokio::test]
@@ -156,13 +161,16 @@ async fn unconfirmed_timeout_atomically_queues_one_system_send_to_manager() {
     assert!(source.content["text"].as_str().unwrap().contains("旧任务可能仍在运行"));
     f.start(notice).await;
     let frames = f.support.bot_delivery.frames().await;
-    assert!(serde_json::to_string(&frames[1]).unwrap().contains("旧任务可能仍在运行"));
+    let wire = serde_json::to_string(&frames[1]).unwrap();
+    assert!(wire.contains("旧任务可能仍在运行"));
+    assert!(wire.contains(&format!("[任务超时，停止结果未确认] ref=T-{}", &task_id[..8])));
+    assert!(source.content["text"].as_str().unwrap().contains("派发引用：bcs_intent_assignment"), "human history remains unchanged");
 }
 
 #[tokio::test]
 async fn restarted_same_worker_tasks_keep_separate_assignment_references() {
     let mut f = Fixture::new().await;
-    for id in ["bcs_intent_first", "bcs_intent_second"] {
+    for id in ["bcs_intent_11111111000000000000000000000000", "bcs_intent_22222222000000000000000000000000"] {
         let mut cmd = dispatch_command(); cmd.payload["assignment_intent_id"] = json!(id);
         f.flow.handle_task_dispatch(cmd).await.unwrap();
     }
@@ -172,29 +180,38 @@ async fn restarted_same_worker_tasks_keep_separate_assignment_references() {
         assert_eq!(settled.state.status, Status::Cancelled);
         let task_id = row.semantic_projection_json["task"]["task_id"].as_str().unwrap();
         let result = f.repo.get_message_by_id(SESSION, &format!("task-result:{task_id}")).await.unwrap().unwrap();
-        assert!(result.content["task_result_text"].as_str().unwrap()
-            .contains(row.semantic_projection_json["task"]["assignment_intent_id"].as_str().unwrap()));
+        assert!(!result.content["task_result_text"].as_str().unwrap().contains("派发引用"));
+        let results = f.rows().await;
+        let delivery = results.iter().find(|r| r.source_message_id == result.message_id).unwrap();
+        let preparer = QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() };
+        let prepared = preparer.prepare(delivery).await.unwrap();
+        let wire = serde_json::to_string(&prepared.command.frame).unwrap();
+        let intent = row.semantic_projection_json["task"]["assignment_intent_id"].as_str().unwrap();
+        assert!(wire.contains(&format!("ref=T-{}", &intent[11..19])));
     }
     assert_eq!(f.rows().await.iter().filter(|r| r.semantic_projection_json["task"]["leg"] == "result").count(), 2);
 }
 
 #[tokio::test]
 async fn legacy_aborted_callback_uses_short_result_and_cancelled_ledger() {
+    for (reason, heading) in [("用户中断了本次执行。", "任务中断"),
+        ("任务运行已达到设定的超时期限，已按超时规则停止。", "任务超时")] {
     let f = Fixture::new().await;
     let mut policy = f.live.snapshot.read().await.policy.clone(); policy.flow_enabled.task = false;
     f.flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
     let task = f.flow.handle_task_dispatch(dispatch_command()).await.unwrap();
     let event = BotEventCommand { bot_id:"bot-observer".into(), run_id:task.task_id.clone(), group_id:"group-1".into(),
         bcs_session_id:Some(SESSION.into()), state:ChatEventState::Aborted, event_type:"chat.event".into(),
-        event_payload:json!({"reason":"用户中断了本次执行。"}) };
+        event_payload:json!({"reason":reason}) };
     f.flow.handle_bot_event(event.clone()).await.unwrap();
     f.flow.handle_bot_event(event).await.unwrap();
     let frames = f.support.bot_delivery.frames().await;
     assert_eq!(frames.len(), 2);
     let text = serde_json::to_value(&frames[1]).unwrap().to_string();
-    assert!(text.contains("[任务中断]") && text.contains("用户中断") && text.contains("bcs_intent_assignment"));
+    assert!(text.contains(&format!("[{heading}]")) && text.contains(reason) && text.contains(&format!("ref=T-{}", &task.task_id[..8])));
     assert_eq!(f.flow.task_store.get(&task.task_id).await.unwrap().status,
         bcs_message_flow::task_store::TaskLedgerStatus::Cancelled);
+    }
 }
 
 #[tokio::test]
@@ -289,4 +306,48 @@ async fn callback_and_control_race_commit_one_result() {
     let rows = f.rows().await;
     assert_eq!(rows.iter().filter(|r| r.semantic_projection_json["task"]["leg"] == "result").count(), 1);
     assert!(matches!(rows.iter().find(|r| r.delivery_id == row.delivery_id).unwrap().state.status, Status::Completed | Status::Cancelled));
+}
+
+#[tokio::test]
+async fn intent_reference_is_identical_on_dispatch_and_result_in_both_paths() {
+    for queued in [true, false] {
+        let f = Fixture::new().await;
+        if !queued {
+            let mut policy = f.live.snapshot.read().await.policy.clone();
+            policy.flow_enabled.task = false;
+            f.flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
+        }
+        let mut command = dispatch_command();
+        command.payload["assignment_intent_id"] = json!("bcs_intent_3fa9c1d2000000000000000000000000");
+        let outcome = f.flow.handle_task_dispatch(command).await.unwrap();
+        let event = if queued {
+            let rows = f.rows().await;
+            let row = rows.iter().find(|r| r.semantic_projection_json["task"]["task_id"] == outcome.task_id).unwrap();
+            final_event(&f.start(row).await)
+        } else {
+            BotEventCommand { bot_id:"bot-observer".into(), run_id:outcome.task_id,
+                group_id:"group-1".into(), bcs_session_id:Some(SESSION.into()),
+                state:ChatEventState::Final, event_type:"chat.event".into(),
+                event_payload:json!({"message":{"content":[{"type":"text","text":"WORKER_RESULT"}]}}) }
+        };
+        f.flow.handle_bot_event(event).await.unwrap();
+        if queued {
+            let rows = f.rows().await;
+            let result = rows.iter().find(|r| r.semantic_projection_json["task"]["leg"] == "result").unwrap();
+            let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
+            assert_eq!(source.content["task_result_text"], "WORKER_RESULT");
+            f.start(result).await;
+        }
+        let frames = f.support.bot_delivery.frames().await;
+        assert_eq!(frames.len(), 2);
+        let dispatch = serde_json::to_value(&frames[0]).unwrap();
+        let result = serde_json::to_value(&frames[1]).unwrap();
+        let dispatch_text = dispatch["params"]["message"]["content"][0]["text"].as_str().unwrap();
+        let result_text = result["params"]["message"]["content"][0]["text"].as_str().unwrap();
+        assert!(dispatch_text.starts_with("[来自 ") && dispatch_text.contains("的任务 ref=T-3fa9c1d2]") && dispatch_text.contains("TASK_BODY"));
+        assert!(result_text.contains("[任务完成] ref=T-3fa9c1d2 | Worker："));
+        assert!(result_text.ends_with("---\nWORKER_RESULT"));
+        assert!(!dispatch_text.contains("bcs_intent_"));
+        assert!(!result_text.contains("bcs_intent_"));
+    }
 }
