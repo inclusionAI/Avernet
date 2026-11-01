@@ -91,7 +91,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | Local Skill 安全观察身份与上传历史 | 单表 `ac_local_skill_security_observation` 保存 `tc:<uuid>`、上传顺序、快照、扫描和同步状态；Local 上传不读写 `ac_skill.skill_uuid`，扫描表中的删除墓碑区分后续新身份，协作日志不承担上传审计 |
 | 异步市场引用 | `community/core/models/skill_center_reference.py` 的 batch/item 两张表 |
 | Bot 生效身份 | `ac_bot_skill_installation`、`ac_bot_mcp_installation`；行存在表示 active，不能当作“安装过但停用”的历史记录 |
-| Bot MCP 显式覆盖 | `ac_bot_mcp_config`；仅保存 Manifest 显式字段，缺失字段继续继承 user config / Center default |
+| Bot MCP 显式覆盖 | `ac_bot_mcp_config`；按 Bot/MCP 独立保存显式连接配置，缺失字段继续继承 user config / Center default；配置存在不表示有效供应 |
 | Set、成员和 Default exclusion | 组织/规则事实，由 UoW 物化到 Installation；不是第二套有效态读取算法 |
 | Runtime 文件、软链、MCP 配置 | 设备投影结果，不是 DB Desired State；存储内容存在也不等于 Skill 已激活 |
 
@@ -103,6 +103,7 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 - `CapabilityDesiredStateRepository` 是 Set state、membership、Default exclusion 与 Skill/MCP Installation 的事务写入入口；表级 SQL owner 使用同一个事务 Session。
 - 普通 Set 新建默认 `is_active=True`。active Set 增删成员同步维护 Installation；inactive Set 编辑不要求 Runtime 投影。
+- Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。

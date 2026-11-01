@@ -954,7 +954,7 @@ def test_direct_mcp_uninstall_removes_the_bot_override():
     assert result.updated_mcp_codes == frozenset({"mcp.weather"})
 
 
-def test_deactivating_a_set_removes_its_mcp_override_with_installation():
+def test_deactivating_a_set_preserves_its_mcp_override_without_installation():
     db = _Database()
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(
@@ -1001,10 +1001,15 @@ def test_deactivating_a_set_removes_its_mcp_override_with_installation():
 
     with db.orm_session() as session:
         assert session.query(BotMCPInstallation).count() == 0
-        assert session.query(BotMCPConfig).count() == 0
+        assert session.query(BotMCPConfig).count() == 1
 
 
-def test_flush_removes_override_for_an_inactive_set_member():
+    assert CapabilityDesiredStateRepository(db).get_mcp_overrides(
+        bot_id="bot", owner_id="owner"
+    ) == {"mcp.owned": {"headers": {"X-Test": "1"}}}
+
+
+def test_flush_preserves_override_for_an_inactive_set_member():
     db = _Database()
     with db.transactional_orm_session() as session:
         skill_set = SkillSet(
@@ -1050,7 +1055,12 @@ def test_flush_removes_override_for_an_inactive_set_member():
 
     with db.orm_session() as session:
         assert session.query(BotMCPInstallation).count() == 0
-        assert session.query(BotMCPConfig).count() == 0
+        assert session.query(BotMCPConfig).count() == 1
+
+
+    assert CapabilityDesiredStateRepository(db).get_mcp_overrides(
+        bot_id="bot", owner_id="owner"
+    ) == {"mcp.stale": {"url": "https://stale.example/mcp"}}
 
 
 def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
