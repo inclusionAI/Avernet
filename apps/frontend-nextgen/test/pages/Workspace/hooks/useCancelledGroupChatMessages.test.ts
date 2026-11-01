@@ -17,9 +17,24 @@ describe('useCancelledGroupChatMessages', () => {
       const [messages, setMessages] = useState(initial);
       return { messages, cancel: useCancelledGroupChatMessages(setMessages) };
     });
-    act(() => result.current.cancel(['client-1']));
+    act(() => result.current.cancel(['client-1'], []));
     expect(result.current.messages.map((m) => m.id)).toEqual(['local-2', 'reply', 'history']);
-    act(() => result.current.cancel(['missing']));
+    act(() => result.current.cancel(['missing'], []));
     expect(result.current.messages.map((m) => m.id)).toEqual(['local-2', 'reply', 'history']);
+  });
+
+  it('matches canonical history IDs and client correlations without deleting assistant messages', () => {
+    const initial = [
+      { id: 'canonical-1', role: 'user', content: 'same', status: 'history' },
+      { id: 'canonical-2', role: 'user', content: 'same', status: 'history' },
+      { id: 'local-1', role: 'user', content: 'same', extra: { clientMessageId: 'client-1' } },
+      { id: 'canonical-1', role: 'assistant', extra: { clientMessageId: 'client-1' } },
+    ] as ChatMessage[];
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = useState(initial);
+      return { messages, cancel: useCancelledGroupChatMessages(setMessages) };
+    });
+    act(() => result.current.cancel(['client-1'], ['canonical-1']));
+    expect(result.current.messages).toEqual([initial[1], initial[3]]);
   });
 });

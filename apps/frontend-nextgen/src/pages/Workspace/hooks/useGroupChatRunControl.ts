@@ -9,14 +9,14 @@ import { useMessageDeliveries } from './useMessageDeliveries';
 export function useGroupChatRunControl(
   provider: GroupChatProvider | null,
   sessionId: string | null,
-  onCancelledClientMessages?: (clientMessageIds: string[]) => void,
+  onCancelledMessages?: (clientMessageIds: string[], canonicalMessageIds: string[]) => void,
 ) {
   const { abortBot, abortingBotIds, unsupportedAbortBotId, dismissAbortUnsupported } = useGroupChatAbort(
     provider,
     sessionId,
   );
   const { activeDeliveries, queuedDeliveries, processingDeliveries, cancelDelivery, cancellingDeliveryIds } =
-    useMessageDeliveries(provider, sessionId, onCancelledClientMessages);
+    useMessageDeliveries(provider, sessionId, onCancelledMessages);
 
   return {
     abortBot,
