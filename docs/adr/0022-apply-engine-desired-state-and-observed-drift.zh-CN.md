@@ -4,7 +4,7 @@
 
 状态：accepted（2026-10-23；RSI-04 之前的重构，在 PR #3083 上与 issue 负责人共同决定）。负责人：@totalfrank，已签字确认。
 
-MCP 配置等价性由 [ADR 0023](0023-decouple-bot-mcp-overrides-from-skillset-lifecycle.md) 细化：Manifest 省略配置表示保持，Genome 省略配置表示目标无 override。MCP 因而比较 apply/capture/restore 后的结果等价；其他构造继续保留结构比较。
+MCP 配置等价性由 [ADR 0023](0023-bot-mcp-config-lifecycle.md) 细化：Manifest 省略配置表示保持，Genome 省略配置表示目标无 override。MCP 因而比较 apply/capture/restore 后的结果等价；其他构造继续保留结构比较。
 
 ## 决策
 
