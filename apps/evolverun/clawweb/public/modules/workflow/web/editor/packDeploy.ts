@@ -27,7 +27,7 @@ async function run(session: Session, attempt: DeployAttempt, action: () => Promi
     return result
   } catch {
     if (session.deployRequest === token) publish(session, { ...session.state, deployment: { ...attempt, pending: false,
-      error: '部署结果尚未确认；保留原 candidateCommit 和 requestId，请查询或恢复操作后再部署。' } })
+      error: '部署结果尚未确认；请先人工核对 Git 分支、tag 和数据库部署历史，不要盲目重试。' } })
     return null
   } finally {
     clearTimeout(timer)
@@ -37,6 +37,7 @@ async function run(session: Session, attempt: DeployAttempt, action: () => Promi
 export function deployPackCandidate(session: Session, id: string, packId: string, commit: string,
   transport: (input: AutoHealDeployRequest) => Promise<AutoHealDeployResult>) {
   const existing = session.state.deployment
+  if (existing && !existing.pending) throw new Error('上次部署结果未知，必须先人工核对 Git 与数据库，不能自动重试。')
   if (existing && (existing.input.candidateCommit !== commit || existing.input.packId !== packId || existing.input.workflowId !== id)) {
     throw new Error('上次部署未完成，不能分配新 requestId 或替换候选。')
   }

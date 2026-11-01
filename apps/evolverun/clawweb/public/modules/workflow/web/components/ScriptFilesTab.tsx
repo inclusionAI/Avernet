@@ -3,7 +3,7 @@ import { sessionFor, publish, updateVersion, dirty, load, releaseCleanSession, o
 import { packVersionWritesEnabled } from '../editor/packVersionWritePolicy'
 import FrozenPackVersionViewer, { downloadLocalBlob } from './FrozenPackVersionViewer'
 import PackVersionEditor from './PackVersionEditor'
-import { savePackVersion, retryPackVersionSave, reconcilePackVersionSave } from '../editor/packVersionSave'
+import { savePackVersion } from '../editor/packVersionSave'
 
 
 type Props = { workflowId: string | null; onSave?: () => void; canvasDirty?: boolean }
@@ -82,9 +82,7 @@ function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty }: Props & { w
       <button type="button" disabled={state.reconciliation.checking || state.saving || state.uploading} onClick={() => void observeReconciliationHead(session, workflowId)}>{state.reconciliation.checking ? '正在读取远端 HEAD…' : '查看远端草稿 HEAD'}</button>
       {state.reconciliation.operationState && <p>保存操作状态：{state.reconciliation.operationState}。只有 completed 结果才能确认保存。</p>}
       <p className="break-all">requestId：{state.reconciliation.attempt.requestId}</p>
-      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void reconcilePackVersionSave(session, workflowId)}>查询保存操作</button>
-      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void reconcilePackVersionSave(session, workflowId, true)}>恢复保存操作</button>
-      <button type="button" disabled={state.reconciliation.checking || state.saving} onClick={() => void retryPackVersionSave(session, workflowId)}>重试原始保存（同一 requestId）</button>
+      <p role="alert">系统不保存操作日志，无法自动恢复或安全重试。请先人工核对 Git 的 saved 分支与候选，再重新打开页面。</p>
     </section>}
     {current.notice && <p role="status">{current.notice}</p>}
     {current.error && <p role="alert">{current.error}</p>}

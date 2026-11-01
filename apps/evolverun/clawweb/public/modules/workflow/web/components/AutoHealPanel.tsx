@@ -1,3 +1,4 @@
+import { assertDeploymentAvailable, clearConfirmedDeployment, markDeploymentPending } from '../editor/deploymentGuard'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
 import { useAutoHealSourceRun } from '../api/useAutoHealSourceRun'
@@ -47,7 +48,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   const [errorChainExpanded, setErrorChainExpanded] = useState(true)
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(true)
   const [autoRun, setAutoRun] = useState(true)
-  const [saveResult, setSaveResult] = useState<{ packId: string; commit: string } | null>(null)
+  const [saveResult, setSaveResult] = useState<{ workflowId: string; packId: string } | null>(null)
 
   const diagnoseMutation = useAutoHealDiagnose()
   const saveMutation = useAutoHealSave()
@@ -112,6 +113,10 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
 
   const handleSave = useCallback(() => {
     if (!diagnosisResult?.fixedSpec || legacyBlocked) return
+    if (diagnosisResult.workflowId !== run.workflow_id) { setPhase('error'); setErrorMessage('诊断工作流不匹配，无法保存。'); return }
+    try { assertDeploymentAvailable(diagnosisResult.workflowId) } catch (err) {
+      setLegacyBlocked(true); setPhase('error'); setErrorMessage(extractErrorMessage(err, '无法访问浏览器核对标记。')); return
+    }
 
     setPhase('saving')
     setErrorMessage(null)
@@ -126,12 +131,12 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
       },
       {
         onSuccess: (result) => {
-          if (!result.saved || !/^[0-9a-f]{40,64}$/i.test(result.commit ?? '')) {
+          if (!result || result.ok !== true || result.saved !== true || result.workflowId !== diagnosisResult.workflowId || typeof result.packId !== 'string' || !result.packId.trim()) {
             setPhase('error')
-            setErrorMessage('保存结果缺少有效的候选 commit，无法确认部署版本。请先核对草稿。')
+            setErrorMessage('保存结果无效或工作流不匹配，无法部署。请先核对草稿。')
             return
           }
-          setSaveResult({ packId: result.packId, commit: result.commit })
+          setSaveResult({ workflowId: result.workflowId, packId: result.packId })
           setPhase('saved')
         },
         onError: (err) => {
@@ -140,7 +145,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
         },
       },
     )
-  }, [diagnosisResult, saveMutation, legacyBlocked])
+  }, [diagnosisResult, saveMutation, legacyBlocked, run.workflow_id])
 
   const handleRerun = useCallback(() => {
     if (!diagnosisResult || runInFlight.current) return
@@ -176,30 +181,52 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   const handleDeploy = useCallback(() => {
     if (!diagnosisResult || !saveResult || deployInFlight.current || legacyBlocked) return
 
+    // Persist only a non-sensitive uncertainty marker before sending. Without a
+    // server journal, a reload after lost acknowledgement must not silently retry.
+    try { markDeploymentPending(saveResult.workflowId) } catch (err) {
+      setLegacyBlocked(true)
+      setPhase('error')
+      setErrorMessage(extractErrorMessage(err, '无法记录待核对标记，部署未发送；请检查浏览器存储。'))
+      return
+    }
     deployInFlight.current = true
     setPhase('deploying')
     setErrorMessage(null)
 
     deployMutation.mutate(
       {
-        workflowId: diagnosisResult.workflowId,
+        workflowId: saveResult.workflowId,
         packId: saveResult.packId,
-        candidateCommit: saveResult.commit,
         diagnosisId: diagnosisResult.diagnosisId,
         note: 'auto-heal deploy',
         // The legacy server callback cannot resolve the original run's bot/lifecycle.
         autoRun: false,
       },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           deployInFlight.current = false
+          if (!result || result.ok !== true || result.deployed !== true || result.workflowId !== saveResult.workflowId || result.packId !== saveResult.packId
+            || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
+            || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()) {
+            setLegacyBlocked(true)
+            setPhase('error')
+            setErrorMessage('部署结果无法确认；请先人工核对 Git 和数据库，勿重试。')
+            return
+          }
+          try { clearConfirmedDeployment(saveResult.workflowId) } catch (err) {
+            setLegacyBlocked(true)
+            setPhase('error')
+            setErrorMessage(extractErrorMessage(err, '无法清除浏览器核对标记。'))
+            return
+          }
           setPhase('deployed')
           if (autoRun) handleRerun()
         },
         onError: (err) => {
           deployInFlight.current = false
+          setLegacyBlocked(true)
           setPhase('error')
-          setErrorMessage(extractErrorMessage(err, '部署修复失败'))
+          setErrorMessage(`${extractErrorMessage(err, '部署修复失败')}；结果可能未知，请先人工核对 Git 和数据库，勿重试。`)
         },
       },
     )
@@ -229,7 +256,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {legacyBlocked && <div role="alert" className="rounded border border-amber-300 p-3 text-sm">
-            旧版恢复记录可能涉及未确认的操作。敏感本地记录已尝试清除；为防止重复写入，请联系管理员核对操作后处理，暂不能保存或部署。
+            存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请联系管理员核对 Git 和数据库后处理，暂不能保存或部署。
           </div>}
           {/* Error */}
           {(phase === 'error' || phase === 'run-error') && errorMessage && (
@@ -278,7 +305,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在保存修复…</p>
-              <p className="text-xs">git commit + push saved/分支</p>
+              <p className="text-xs">正在将工作流保存到数据库，保存不会部署</p>
             </div>
           )}
 
@@ -288,7 +315,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
               <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
                 <h3 className="font-semibold text-blue-800">修复已保存</h3>
                 <p className="mt-1 text-blue-700 text-sm">
-                  工作流已保存到 git 的 <code className="rounded bg-blue-100 px-1">saved/{diagnosisResult?.workflowId}</code> 分支。确认部署的 commit：<code>{saveResult?.commit}</code>。
+                  修复后的工作流已保存到数据库，尚未部署。部署时将发布当前保存的工作流。
                 </p>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
@@ -313,7 +340,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在部署修复…</p>
-              <p className="text-xs">git tag + push wf/分支</p>
+              <p className="text-xs">正在发布已保存的工作流</p>
             </div>
           )}
 

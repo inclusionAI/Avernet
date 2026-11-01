@@ -18,6 +18,8 @@ export type SavePackCandidateInput = {
   expectedSavedHead: string | null;
   config: ClawFlowsGitConfig;
   changes: PackCandidateChange[];
+  /** Keep the selected workflow content in the DB; permit byte-identical structural moves. */
+  preserveWorkflowContent?: boolean;
 };
 export type SavePackCandidateResult = { branch: string; commit: string };
 /** Persist this entire server-owned object before push. It contains repository history
@@ -34,6 +36,10 @@ export type PreparedPackCandidate = PreparedPackMetadata & Readonly<{
 }>;
 export class PackCandidateConflictError extends Error {
   constructor() { super('Workflow version or saved head changed'); this.name = 'PackCandidateConflictError'; }
+}
+
+export class PackWorkflowContentChangedError extends Error {
+  constructor() { super('Selected workflow YAML content requires a database save'); this.name = 'PackWorkflowContentChangedError'; }
 }
 
 /** A push was attempted but its outcome cannot safely be inferred from an error or a later ref read. */
@@ -164,8 +170,8 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
           return value as Record<string, unknown>;
         } catch { throw new Error('Invalid manifest or workflow YAML'); }
       };
-      const locate = async (): Promise<{ root: string; id: string }> => {
-        let found: { root: string; id: string } | undefined;
+      const locate = async (): Promise<{ root: string; id: string; workflow: string; entry: Entry }> => {
+        let found: { root: string; id: string; workflow: string; entry: Entry } | undefined;
         for (const [file, entry] of entries) {
           if (!isCandidate(file)) continue;
           const manifest = await yamlObject(entry);
@@ -179,7 +185,7 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
           if (workflow === 'workflow.pack.yaml') throw new Error('Workflow conflicts with manifest');
           const spec = await yamlObject(entries.get(root + workflow));
           if (spec.id !== input.workflowId) throw new Error('Workflow identity mismatch');
-          found = { root, id: manifest.id };
+          found = { root, id: manifest.id, workflow, entry: entries.get(root + workflow)! };
         }
         if (!found) throw new Error('Pack manifest not found');
         return found;
@@ -190,7 +196,8 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
         }
       };
       rejectMixedRootLayout();
-      let pack = await locate();
+      const sourcePack = await locate();
+      let pack: { root: string; id: string } = sourcePack;
       const rejectOverlappingPacks = () => {
         for (const name of entries.keys()) {
           if (name !== 'workflow.pack.yaml' && !name.endsWith('/workflow.pack.yaml')) continue;
@@ -233,6 +240,25 @@ export async function withPreparedPackCandidate<T>(input: SavePackCandidateInput
         if (!oidPattern.test(oid)) throw new Error('Invalid blob id');
         await git(['update-index', '--add', '--cacheinfo', change.mode, oid, full]);
         entries.set(full, { mode: change.mode, type: 'blob', oid, size: change.bytes!.length });
+      }
+      if (input.preserveWorkflowContent) {
+        // Check the old path as well as the path selected by the new manifest.
+        // Otherwise a manifest move could leave a modified old YAML in Git, or
+        // point to a different pre-existing blob without mentioning it in changes.
+        const original = await git(['cat-file', 'blob', sourcePack.entry.oid], maxBlob + 1);
+        const requireOriginalBytes = async (entry: Entry | undefined) => {
+          if (!entry || entry.type !== 'blob' || !['100644', '100755'].includes(entry.mode)) return;
+          if (entry.size === null || entry.size > maxBlob
+            || !original.equals(await git(['cat-file', 'blob', entry.oid], maxBlob + 1))) {
+            throw new PackWorkflowContentChangedError();
+          }
+        };
+        await requireOriginalBytes(entries.get(sourcePack.root + sourcePack.workflow));
+        const manifest = await yamlObject(entries.get(`${pack.root}workflow.pack.yaml`));
+        if (!Array.isArray(manifest.workflows)) throw new Error('Invalid pack manifest workflows');
+        const matches = manifest.workflows.filter(item => itemId(item) === input.workflowId);
+        if (matches.length !== 1) throw new Error('Pack manifest identity conflict');
+        await requireOriginalBytes(entries.get(pack.root + workflowFile(matches[0])));
       }
       rejectMixedRootLayout();
       rejectOverlappingPacks();

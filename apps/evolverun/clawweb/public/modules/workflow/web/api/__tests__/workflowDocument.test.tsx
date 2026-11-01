@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { PropsWithChildren } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { parse, stringify } from 'yaml'
+import { stringify } from 'yaml'
 import { createWorkflowsRouter } from '../../../server/routes/workflows'
 import { readWorkflowDocument, normalizeWorkflowDocument } from '../workflowDocument'
 import { useEditorWorkflowDocument, useDbWorkflow, useAutoHealSave } from '../hooks'
@@ -50,9 +50,11 @@ function fixture(doc: WorkflowSpec, storage: 'projection' | 'wrapper' | 'json') 
     if (input === `/api/workflows/${doc.id}`) return route('/:workflowId')
     if (input === `/api/workflows/${doc.id}/export`) return route('/:workflowId/export')
     if (input.includes('/pack-version') && !init?.method) return new Response(JSON.stringify(snapshot))
-    if (init?.method === 'PUT') {
-      const body = await readBlob(init.body as Blob)
-      return new Response(JSON.stringify({ branch: `saved/${doc.id}`, packId: 'pack', commit: 'b'.repeat(40), requestId: JSON.parse(body).requestId, version: 20 }))
+    if (input === '/api/auto-heal/save' && init?.method === 'POST') {
+      const body = JSON.parse(await readBlob(init.body as Blob))
+      const yaml = stringify(body.spec)
+      row.spec_json = JSON.stringify(storage === 'projection' ? { ...body.spec, content: yaml } : storage === 'wrapper' ? { content: yaml } : body.spec)
+      return new Response(JSON.stringify({ ok: true, saved: true, workflowId: doc.id, packId: 'pack' }))
     }
     throw new Error(`Unexpected request ${input}`)
   })
@@ -81,12 +83,16 @@ it.each(['projection', 'wrapper', 'json'] as const)('normalizes actual GET %s re
   expect(canvas.current.error).toBeNull(); expect(useEditorStore.getState().positions.done).toEqual({ x: 301, y: 201 })
   act(() => useEditorStore.getState().updateSpecField('title', 'Edited title'))
   await act(async () => { await canvas.current.save() })
-  const write = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!
-  const body = JSON.parse(await readBlob(write[1]!.body as Blob))
-  const submitted = parse(atob(body.changes[0].contentBase64))
+  const writes = fetchMock.mock.calls.filter(([url, init]) => url === '/api/auto-heal/save' && init?.method === 'POST')
+  expect(writes).toHaveLength(1)
+  expect(writes[0][1]!.headers).toMatchObject({ 'X-Pack-Version-CSRF': '1' })
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  const body = JSON.parse(await readBlob(writes[0][1]!.body as Blob))
+  const submitted = body.spec
   expect(submitted).toMatchObject({ version: '2.7.0', title: 'Edited title', facade: doc.facade, custom: doc.custom })
   expect(submitted).not.toHaveProperty('content'); expect(submitted).not.toHaveProperty('updatedAt')
-  expect(body).toMatchObject({ sourceCommit: A, expectedSavedHead: null })
+  expect(body.workflowId).toBe(doc.id)
+  expect(useEditorStore.getState()._savedSpec).toEqual(submitted)
 })
 
 it.each(['projection', 'wrapper', 'json'] as const)('does not strip genuinely authored content/metadata fields from %s', async storage => {

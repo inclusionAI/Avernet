@@ -64,7 +64,7 @@ it('maps conflicts and sanitizes operational failures', async () => {
   const d = deps(); const url = await fixture(d);
   d.saveCandidate.mockRejectedValueOnce(new PackCandidateConflictError()).mockRejectedValueOnce(new PackCandidateOutcomeUnknownError('saved/flow', sha)).mockRejectedValueOnce(new Error('secret URL/token'));
   expect((await put(url, input)).status).toBe(409);
-  const unknown = await put(url, input); expect(unknown.status).toBe(503); expect(await unknown.json()).toEqual({ error: 'Save outcome unknown; reconcile before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: 'saved/flow', commit: sha });
+  const unknown = await put(url, input); expect(unknown.status).toBe(503); expect(await unknown.json()).toEqual({ error: 'Save outcome unknown; inspect the Git branch manually before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: 'saved/flow', commit: sha });
   const r = await put(url, input); expect(r.status).toBe(503); expect(await r.text()).not.toContain('secret');
 });
 it('fails closed when the host does not wire saving', async () => {

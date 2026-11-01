@@ -107,7 +107,7 @@ describe('standalone editor workflow transition', () => {
     const inputs = screen.getAllByPlaceholderText('我的工作流')
     fireEvent.change(inputs[0], { target: { value: 'new' } }); fireEvent.change(inputs[1], { target: { value: 'New' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(state().spec).toMatchObject({ id: 'new', title: 'New', nodes: [] })
+    expect(state().spec).toMatchObject({ id: 'new', title: 'New', nodes: [{ id: 'new_start', title: '开始', phase: 'execute', executor: { type: 'done' } }] })
     expect(state().isDirty).toBe(true); expect(state().sessionId).toBe(session + 1)
     expect(readDraft(session, 'yaml')).toBeUndefined(); expect(window.confirm).toHaveBeenCalledTimes(1)
     expect(mocks.get).not.toHaveBeenCalled()

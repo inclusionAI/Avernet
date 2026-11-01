@@ -11,8 +11,6 @@ export function useCreateWorkflow() {
       facade?: { command?: string; remark?: string }; botOwnerId?: string; botId?: string }) => {
       if (spec.id !== workflowId) throw new Error('新建工作流身份不匹配')
       const candidate = { ...spec, ...(facade ? { facade } : {}) }
-      // A deliberate modal retry resends the immutable createOnly body with its
-      // original requestId, including when the first POST never reached the server.
       const result = await createWorkflowPack(candidate)
       if (!sameExecutionSpec(candidate, result.requestedSpec)) throw new Error('原始新建请求已完成，但当前表单内容已变化；当前草稿仍保留，请处理已创建的版本。')
       return result
