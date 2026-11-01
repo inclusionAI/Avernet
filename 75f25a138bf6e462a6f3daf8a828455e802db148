@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/package-lock.json
+  h_b601d8706f5d44 427-428
+apps/evolverun/clawweb/internal/modules/ais/server/aistudio-service.ts
+  h_b601d8706f5d44 1,77,79-85,88-89,92,94,96-106
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/repair-execution.ts
+  h_b601d8706f5d44 13,136
+apps/evolverun/clawweb/internal/modules/ais/package.json
+  h_b601d8706f5d44 18-19
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/repair-execution.test.ts
+  h_b601d8706f5d44 48-49
+apps/evolverun/clawweb/internal/modules/ais/server/__tests__/aistudio-service.test.ts
+  h_b601d8706f5d44 70,75-77,82-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75f25a138bf6e462a6f3daf8a828455e802db148",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
