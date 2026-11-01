@@ -22,7 +22,8 @@ vi.mock('@avernet/clawweb-shared/server/services/git-execution', async original 
     let actualArgs = args;
     if (hooks.bridge && (args[0] === 'ls-remote' || args[0] === 'fetch')) {
       const filled = runGit(String(options?.cwd), ['credential', 'fill'], credentialInput(hooks.auth));
-      if (!filled.includes(`password=${hooks.secret}`)) throw new Error('Credential helper unavailable');
+      const entries = filled.split('\n').map(line => { const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)]; });
+      expect(Object.fromEntries(entries)).toHaveProperty('password', hooks.secret);
       actualArgs = args.map(arg => arg === 'origin' ? hooks.bridge : arg);
     }
     const result = await actual.executeGit(actualArgs, options);
@@ -106,7 +107,7 @@ it.each(['update', 'delete', 'create'])('detects ref %s after fetching even if t
 });
 
 it.each(['explicit token', 'embedded password'])('reuses scoped HTTPS credential helpers with %s without exposing credentials', async source => {
-  hooks.bridge = bare; hooks.auth = 'https://git.example.invalid/team/repo.git'; hooks.secret = 'fixture-secret-123';
+  hooks.bridge = bare; hooks.auth = 'https://git.example.invalid/team/repo.git'; hooks.secret = 'test-token';
   const url = new URL(hooks.auth);
   if (source === 'embedded password') { url.username = 'fixture'; url.password = hooks.secret; }
   const config = { ...cfg(), remoteUrl: url.href, token: source === 'explicit token' ? hooks.secret : undefined };
@@ -174,7 +175,7 @@ it('GET returns the existing 404 for absent selected refs', async () => {
 it('sanitizes Git failures and removes temporary HTTPS credentials', async () => {
   const { readPackVersionFromRemote } = await import('../pack-version-remote.js');
   const { credentialFiles } = await import('./clawflows-git-client-fixture.js');
-  hooks.secret = 'fixture-failure-secret'; hooks.failRemote = true;
+  hooks.secret = 'test-token'; hooks.failRemote = true;
   vi.stubEnv('CLAWWEB_TEMP_DIR', root);
   let caught: unknown;
   try {
