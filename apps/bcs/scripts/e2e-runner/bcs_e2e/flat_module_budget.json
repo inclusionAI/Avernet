@@ -1,6 +1,6 @@
 {
   "flat_module_lower_bound": 338,
-  "flat_module_upper_bound": 348,
+  "flat_module_upper_bound": 349,
   "audit": [
     {
       "upper_bound": 338,
@@ -21,6 +21,11 @@
       "upper_bound": 348,
       "commit": "ed3b4fb73",
       "reason": "File-size-mandated plane split of the 1,194-line local_story_commands.py (ed3b4fb73) moves the command roster, the parser registration and the offline evidence probes into one new flat module, local_story_catalog.py; the slim local_story_commands.py keeps dispatch and the owned-local executors behind a re-export facade. artifact.py allowance moved 348 -> 349 in the same split commit."
+    },
+    {
+      "upper_bound": 349,
+      "commit": "b2d64a75f",
+      "reason": "File-size-mandated plane split of the 1,190-line cli.py (b2d64a75f) moves the argparse wiring into one new flat module, cli_registration.py; cli.py keeps plan() and the dispatch chain bound for the test patch surface. artifact.py allowance moved 349 -> 350 in the same split commit."
     }
   ],
   "policy": "Raising flat_module_upper_bound is deliberate: edit this latch in the same commit that adds flat modules and append an audit entry carrying the previous bound, the new bound, the commit and the reason. The density test verifies monotonicity and that the last audit entry matches the active upper bound."
