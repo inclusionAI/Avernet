@@ -807,7 +807,8 @@ class TestRegistrationProposal(unittest.TestCase):
         self.assertEqual(row["executor_migration"]["preprod_verdict"], "PASS")
         self.assertEqual(
             row["executor_migration"]["notes"],
-            [registration_proposal_module.WAVE_TOKEN])
+            [registration_proposal_module.WAVE_TOKEN,
+             "R28FIX_PROVIDER_PUBLISHES_V2_LIVE_ADMISSION_SEAM_PENDING: fresh fix leg in run 20261101-regression-r28fix-provider-publishes (evidence leaf ~/.codex/bcs-e2e/preprod-live-evidence/20261101-regression-r28fix-provider-publishes/; landed local commit 467c6bc4a retargets the v2 admission profile to the bcs-direct station face after bulk leg 60 of run 20261101-regression-r28-bulk head ef6114af0 rc=2 case DUAL-PROVIDER-PUBLISHES-01 BLOCKED at the gateway public identity admission probe with HTTP 404) run_id 20261101-regression-r28fix-provider-publishes-provider-publishes-v2-fix rc=2 verdict BLOCKED: live admission probes 3/3 PASS HTTP 200 (environment.read /api/v1/collaboration/manifest, identity.read /auth/user, bot.read /bots/20261026_xq102n2b%3A39464; request ids echoed; credentials ADMITTED by name only with BCS_E2E_DRIVER_TOKEN and BCS_E2E_HUMAN_COOKIE resolved from the process environment and never stored), the frozen journey child fail-closes at reason class PREPROD_PROVIDER_PUBLISHES_JOURNEY_SEAM_PENDING with all 98 obligations NOT_RUN (baseline 42 plus 56 field obligations), full_release_status NOT_QUALIFIED, resource_disposition NO_REMOTE_RESOURCES_CREATED, named gaps PREPROD_PROVIDER_ADMIN_WRITE_FACE_ABSENT PREPROD_PROVIDER_JOURNEY_CHILD_UNPUBLISHED PREPROD_PROVIDER_REGISTRATION_PRECONDITIONS_PENDING; row verdict stays DUAL/PASS on the landed density face with notes 1 to 2; remote_validation=NOT_RUN grants_release_credit=false"])
 
     def test_describe_only_fragment_and_drop_dead_checks(self):
         fragment = describe_only_mainline_fragment()

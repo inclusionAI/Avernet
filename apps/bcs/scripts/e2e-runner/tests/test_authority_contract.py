@@ -168,9 +168,10 @@ class AuthorityContractTests(unittest.TestCase):
         self.assertIn(contract.PARENT, {row['id'] for row in reviewed})
         self.assertNotIn(contract.PARENT, KNOWN_UNMAPPED_LEGACY_IDS)
         self.assertEqual(load_executor_migration()[contract.PARENT],
-                         {'mode': 'DUAL', 'preprod_verdict': 'NOT_RUN',
+                         {'mode': 'DUAL', 'preprod_verdict': 'BLOCKED_INVENTORIED',
                           'gates': [],
-                          'notes': ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031']})
+                          'notes': ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031',
+                                    "R28_FRESH_AUTHORITY_JOURNEY_LEG54_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-authority leg 54 run_id 20261101-regression-r28-wp2-authority-authority rc=2 verdict BLOCKED case DUAL-AUTHORITY-JOURNEY-01 0/42 steps NOT_RUN with first step AUTHORITY-JOURNEY.owner-ownership-read-status err token PREPROD_AUTHORITY_ADMISSION_BLOCKED (all 42 obligations fail-close NOT_RUN); the row stays inside the reviewed release denominator with its REMOTE_ADMISSION_GATED_READ_ONLY posture unchanged; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"]})
         legacy_ids = [row['id'] for row in current_manifest()['legacy_inventory']]
         self.assertEqual(legacy_ids.count(contract.PARENT), 1)
 

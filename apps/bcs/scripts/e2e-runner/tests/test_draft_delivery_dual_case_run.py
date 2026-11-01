@@ -661,7 +661,7 @@ class DraftDeliveryDualTests(unittest.TestCase):
         self.assertIn('dual-draft-delivery-run', CASE_COMMANDS)
         executor = load_executor_migration()[PARENT]
         self.assertEqual(executor['mode'], 'DUAL')
-        self.assertEqual(executor['preprod_verdict'], 'NOT_RUN')
+        self.assertEqual(executor['preprod_verdict'], 'BLOCKED_INVENTORIED')
         plan = migration_plan()
         row = next(row for row in plan['local_backlog_case_slices']
                    if row['case_id'] == 'LOCAL-DRAFT-DELIVERY-01')

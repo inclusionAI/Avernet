@@ -50,6 +50,18 @@ from bcs_e2e.fixed_loop_density.registration_proposal import (  # noqa: E402
 
 OWNER_ISOLATION_PROVIDER_NOTE = "row #35 story_provider_owner_isolation: register the 24 source-anchored obligation roster (PROVIDER-OWNER.*; contract provider_owner_contract.py; upstream provider_scope_story.py frozen at f181ba448a8bd5844c9517d8543ff3b6bb9d66bb with story_checks=45; shell step map provider-owner-isolation-migration-contract.json; known-unmapped backlog parent outside the reviewed release denominator); r2 owned-local live leg rid 20261031-owner-isolation-local-live-r2-provider-owner receipt ~/.codex/bcs-e2e/20261031-owner-isolation-local-live-r2/provider-owner-stdout.json status=BLOCKED completed 0/24 error_type=LOCAL_PROVIDER_OWNER_BLOCKED (tier=local entrypoint=owned-local credential_kind=owned_local_ephemeral_principal case DUAL-PROVIDER-OWNER-01 contract dual-provider-owner-case-run-v1 all 24 steps NOT_RUN): the story child registers provider prv_59ca9519 and bot bot_e38133ac, bootstraps the foreign Human, POST /providers/{id}/bots answers 200, then story request 8 PUT /bots/bot_09741ff7/visibility expects 200 and receives 403, the child raises AssertionError at provider_scope_story.py L117 and exits 1, the executor fail-closes at 0/24, and the full stderr traceback is retained as bounded evidence while the receipt error_detail stays null by design; this is the contract-frozen drift gap OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT (provider registration records created_by but mints no bcs-edge-permission authority edges on the owned-local runtime; the story frozen at f181ba44 predates the bot-authority model c6f001209 #2625; poolab preprod green there because the preprod runtime seeds the edges; story source apps/bcs/scripts/e2e-test/provider_scope_story.py exists locally and not on upstream dev; the BLOCKED receipt is the contract expectation, not a regression); preprod stays REMOTE_UNSUPPORTED by design (PREPROD_PROVIDER_ADMIN_FACE_ABSENT, WORKBENCH_WS_MOCK_ADMISSION) and the wp2 preprod disclosure verdict ~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation-preprod/provider-owner/20261031-migration-wp2-provider-owner-preprod-disclosure-verdict.json stays BLOCKED (PREPROD_PROVIDER_OWNER_FULL_STORY_NOT_EXECUTED, credential_admission BLOCKED PREPROD_PROVIDER_OWNER_CREDENTIALS_UNAVAILABLE); the r1 root holds no provider-owner local leg receipt; notes-only integration, the dual-provider-owner-run envelope stays untouched; committed verdict stays DUAL/NOT_RUN with notes 0 to 1; remote_validation=NOT_RUN and grants_release_credit=false"
 OWNER_ISOLATION_SESSION_NOTE = "row #36 story_session_owner_permissions: register the 9 source-anchored obligation roster (SESSION-OWNER.*; contract session_owner/session_owner_contract.py; story_checks=60 plus cleanup_checks=4, frozen required assertion inventory 78 = run_http 60 + cleanup_http 4 + shell 1 + structural_python 13; shell step map session-owner-permissions-migration-contract.json; known-unmapped backlog parent outside the reviewed release denominator); r1 receipt ~/.codex/bcs-e2e/20261031-owner-isolation-local-live-r1/session-owner-stdout.json is the preprod-tier probe leg and is NOT a local live leg (tier=preprod id=dual-session-owner-preprod-r7 entrypoint=gateway api_face=public-v1 credential_kind=preprod_human_cookie_route_probe run_id 20261031-owner-isolation-local-live-r1-session-owner): status=BLOCKED completed 0/9 error PREPROD_SESSION_OWNER_FULL_STORY_NOT_EXECUTED, preprod probe BLOCKED PREPROD_PROBE_BASELINE_UNEXPECTED, four named gaps PREPROD_STATION_BOOTSTRAP_FACE_ABSENT PREPROD_HUMAN_PRINCIPAL_FAMILY_SINGLE PREPROD_PRINCIPAL_MINTING_OPERATOR_KEY PREPROD_PARTICIPANT_ROUTES_UNBOUND, mirrored by wp2 verdict ~/.codex/bcs-e2e/20261031-migration-wp2-owner-isolation-preprod/session-owner/20261031-owner-isolation-local-live-r1-session-owner-verdict.json (BLOCKED, remote_validation=NOT_RUN, grants_release_credit=false); r2 owned-local live leg rid 20261031-owner-isolation-local-live-r2-session-owner receipt ~/.codex/bcs-e2e/20261031-owner-isolation-local-live-r2/session-owner-stdout.json status=PASS completed 9/9 LOCAL_SESSION_OWNER_PASS (tier=local entrypoint=owned-local credential_kind=owned_local_ephemeral_gateway_principals case DUAL-SESSION-OWNER-01 contract dual-session-owner-case-run-v1): journal observed_assertion_count=64 against the frozen required inventory 78 (run_http 60 + cleanup_http 4 + shell 1 + structural_python 13 per contract UPSTREAM_ASSERTIONS), requirement_statuses 9/9 PASS, cleanup disposition SESSION_GROUP_AND_OWNED_BOTS_DELETED with zero process leak; notes-only integration, the dual-session-owner-run envelope stays untouched; committed verdict stays DUAL/NOT_RUN with notes 0 to 1 (preprod verdict stays NOT_RUN honestly; neither leg grants release credit); remote_validation=NOT_RUN and grants_release_credit=false"
+R28_FRESH_OPERATOR_CLI_LEG49_DUAL_PASS = "R28_FRESH_OPERATOR_CLI_LEG49_DUAL_PASS: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0; bulk evidence leaf ~/.codex/bcs-e2e/preprod-live-evidence/20261101-regression-r28-bulk/) family operator-cli leg 49 run_id 20261101-regression-r28-operator-cli-operator-cli rc=0 verdict PASS case DUAL-OPERATOR-CLI-01 13/13 steps PASS (OPERATOR-CLI.health/list/get/discover/visibility/connect/onboard-web/direct-onboard/update-status/create-group/chat/list-groups/friend-list); supersedes the row #9 DUAL/BLOCKED_INVENTORIED face (r5 five-bot health leg BLOCKED lineage and the four named PREPROD_* gaps stay on file as superseded history); the OPERATOR-CLI density note stays registered as notes element 1; committed verdict flips to DUAL/PASS; remote_validation=PREPROD_LIVE grants_release_credit=true"
+R28_FRESH_SERVICE_POLICY_LEG59_DUAL_PASS = "R28_FRESH_SERVICE_POLICY_LEG59_DUAL_PASS: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family service-policy leg 59 run_id 20261101-regression-r28-service-policy-service-policy rc=0 verdict PASS case DUAL-SERVICE-POLICY-01 8/8 steps PASS (SERVICE-POLICY.mock-human-bootstrap/provider-free-bot-registration/legacy-encoding-ignored/retired-settings-gone/invocation-lifecycle/running-reactivation-denied/chat-session-guard/cleanup-disposition); supersedes r8 PREPROD_SERVICE_POLICY_STORY_BLOCKED and the row #39 DUAL/NOT_RUN face; the two SERVICE_POLICY_DENSITY notes stay registered; committed verdict flips to DUAL/PASS; remote_validation=PREPROD_LIVE grants_release_credit=true"
+R28_FRESH_PROVIDER_OWNER_LEG56_BLOCKED = "R28_FRESH_PROVIDER_OWNER_LEG56_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-provider-owner leg 56 run_id 20261101-regression-r28-wp2-provider-owner-provider-owner rc=2 verdict BLOCKED case DUAL-PROVIDER-OWNER-01 0/24 steps NOT_RUN with first step PROVIDER-OWNER.mock-human-bootstrap err token PREPROD_PROVIDER_OWNER_FULL_STORY_NOT_EXECUTED (all 24 obligations fail-close NOT_RUN); the owned-local r2 drift gap OWNED_LOCAL_PROVIDER_BOT_OWNER_EDGE_DRIFT stays on file unchanged; the row stays a KNOWN_UNMAPPED backlog parent outside the reviewed release denominator; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+R28_FRESH_SESSION_OWNER_LEG55_BLOCKED = "R28_FRESH_SESSION_OWNER_LEG55_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-session-owner leg 55 run_id 20261101-regression-r28-wp2-session-owner-session-owner rc=2 verdict BLOCKED case DUAL-SESSION-OWNER-01 0/9 steps NOT_RUN with first step SESSION-OWNER.bootstrap-ownership err token PREPROD_SESSION_OWNER_FULL_STORY_NOT_EXECUTED (all 9 obligations fail-close NOT_RUN); the row stays a KNOWN_UNMAPPED backlog parent outside the reviewed release denominator; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+R28_FRESH_DRAFT_DELIVERY_LEG57_BLOCKED = "R28_FRESH_DRAFT_DELIVERY_LEG57_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-draft-delivery leg 57 run_id 20261101-regression-r28-wp2-draft-delivery-draft-delivery rc=2 verdict BLOCKED case DUAL-DRAFT-DELIVERY-01 0/32 steps NOT_RUN with first step DRAFT-DELIVERY.offline-preview-schema1-snapshot err token PREPROD_DRAFT_DELIVERY_STORY_BLOCKED (all 32 obligations fail-close NOT_RUN); the row stays a KNOWN_UNMAPPED backlog parent outside the reviewed release denominator; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+R28_FRESH_AUTHORITY_JOURNEY_LEG54_BLOCKED = "R28_FRESH_AUTHORITY_JOURNEY_LEG54_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-authority leg 54 run_id 20261101-regression-r28-wp2-authority-authority rc=2 verdict BLOCKED case DUAL-AUTHORITY-JOURNEY-01 0/42 steps NOT_RUN with first step AUTHORITY-JOURNEY.owner-ownership-read-status err token PREPROD_AUTHORITY_ADMISSION_BLOCKED (all 42 obligations fail-close NOT_RUN); the row stays inside the reviewed release denominator with its REMOTE_ADMISSION_GATED_READ_ONLY posture unchanged; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+R28_FRESH_PROVIDER_SUBBOTS_LEG58_BLOCKED = "R28_FRESH_PROVIDER_SUBBOTS_LEG58_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-provider-subbots leg 58 run_id 20261101-regression-r28-wp2-provider-subbots-provider-subbots rc=2 verdict BLOCKED case DUAL-PROVIDER-SUBBOTS-01 0/15 steps NOT_RUN (every step err token None; the named gap PREPROD_PROVIDER_CONTROL_PLANE_ABSENT covers the missing provider control-plane materials) and the 131 story-checks density projection caliber stays unchanged; the row stays a KNOWN_UNMAPPED backlog parent outside the reviewed release denominator; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+R28FIX_PROVIDER_PUBLISHES_V2_LIVE_ADMISSION_SEAM_PENDING = "R28FIX_PROVIDER_PUBLISHES_V2_LIVE_ADMISSION_SEAM_PENDING: fresh fix leg in run 20261101-regression-r28fix-provider-publishes (evidence leaf ~/.codex/bcs-e2e/preprod-live-evidence/20261101-regression-r28fix-provider-publishes/; landed local commit 467c6bc4a retargets the v2 admission profile to the bcs-direct station face after bulk leg 60 of run 20261101-regression-r28-bulk head ef6114af0 rc=2 case DUAL-PROVIDER-PUBLISHES-01 BLOCKED at the gateway public identity admission probe with HTTP 404) run_id 20261101-regression-r28fix-provider-publishes-provider-publishes-v2-fix rc=2 verdict BLOCKED: live admission probes 3/3 PASS HTTP 200 (environment.read /api/v1/collaboration/manifest, identity.read /auth/user, bot.read /bots/20261026_xq102n2b%3A39464; request ids echoed; credentials ADMITTED by name only with BCS_E2E_DRIVER_TOKEN and BCS_E2E_HUMAN_COOKIE resolved from the process environment and never stored), the frozen journey child fail-closes at reason class PREPROD_PROVIDER_PUBLISHES_JOURNEY_SEAM_PENDING with all 98 obligations NOT_RUN (baseline 42 plus 56 field obligations), full_release_status NOT_QUALIFIED, resource_disposition NO_REMOTE_RESOURCES_CREATED, named gaps PREPROD_PROVIDER_ADMIN_WRITE_FACE_ABSENT PREPROD_PROVIDER_JOURNEY_CHILD_UNPUBLISHED PREPROD_PROVIDER_REGISTRATION_PRECONDITIONS_PENDING; row verdict stays DUAL/PASS on the landed density face with notes 1 to 2; remote_validation=NOT_RUN grants_release_credit=false"
+R28_SESSION_PUBLIC_GATEWAY_EFFECT_BLOCKED_LEG53 = "R28_SESSION_PUBLIC_GATEWAY_EFFECT_BLOCKED_LEG53: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family session-public leg 53 run_id 20261101-regression-r28-session-public-session-public rc=2 verdict BLOCKED case PUBLIC-SESSION-JWT-WS-01 with zero executed steps; re-confirms the GATEWAY_EFFECT_BLOCKED disclosure (a normal-group bootstrap can drive Bot execution and public relationship edges with no pilot-reviewed suppression or termination evidence, so execution stays NOT_RUN by fail-close design); notes-only disclosure on the DUAL/PASS row, verdict unchanged, no release credit; remote_validation=NOT_RUN grants_release_credit=false"
+R28_FRIEND_CLI_GATEWAY_FRIENDS_REQUESTS_404_LEG48 = "R28_FRIEND_CLI_GATEWAY_FRIENDS_REQUESTS_404_LEG48: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family cli-defects friend-cli leg 48 run_id 20261101-regression-r28-cli-defects-friend-cli rc=2 verdict BLOCKED case DUAL-FRIEND-CLI-ACCEPT-01 1/1 step NOT_RUN with first step FRIEND.cli-accept err token FriendCliRunnerError (the friendship product CLI exits nonzero because the site-internal gateway public face route /friends/requests is absent with HTTP 404; route attribution audit retained at ~/.codex/bcs-e2e/friend-cli-404-route-audit-20261031.md); notes-only disclosure on the DUAL/PASS trusted-team row, verdict unchanged; remote_validation=NOT_RUN grants_release_credit=false"
+R28_CHANNEL_CLI_DISABLED_BRIDGE_DIVERGENCE_RECONFIRMED_LEG47 = "R28_CHANNEL_CLI_DISABLED_BRIDGE_DIVERGENCE_RECONFIRMED_LEG47: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family cli-defects channel-cli leg 47 run_id 20261101-regression-r28-cli-defects-channel-cli rc=2 verdict BLOCKED case DUAL-CHANNEL-CLI-01 0/9 steps NOT_RUN with first step CHANNEL-CLI.bind-redacted err token ChannelCliRunnerError (channel bind under the disabled bridge must fail nonzero but the station answers success; the bridge-disabled contract divergence is re-confirmed as a registered business judgment on the row, not a harness defect); committed verdict stays DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"
+
 
 
 class MigrationInventoryTests(unittest.TestCase):
@@ -644,9 +656,9 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in legacy)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 19,
-            ('DUAL', 'BLOCKED_INVENTORIED'): 11,
-            ('DUAL', 'NOT_RUN'): 10,
+            ('DUAL', 'PASS'): 21,
+            ('DUAL', 'BLOCKED_INVENTORIED'): 15,
+            ('DUAL', 'NOT_RUN'): 4,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
         gated = {
@@ -663,7 +675,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              'STRUCTURED_COLLAB_DENSITY_26_OBLIGATIONS_20261031'])
         self.assertEqual(
             rows['story_user_builds_trusted_team']['notes'],
-            ['FRESH_FIXTURE_R5G'])
+            ['FRESH_FIXTURE_R5G',
+             R28_FRIEND_CLI_GATEWAY_FRIENDS_REQUESTS_404_LEG48])
         self.assertEqual(
             rows['story_cli_operator_manages_group_context']['notes'],
             ['ROSTER_LAG', 'GROUP_CONTEXT_DENSITY_9_OBLIGATIONS_20261031'])
@@ -675,23 +688,26 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         })
         self.assertEqual(rows['story_provider_operator_manages_subbots'], {
             'mode': 'DUAL',
-            'preprod_verdict': 'NOT_RUN',
+            'preprod_verdict': 'BLOCKED_INVENTORIED',
             'gates': [],
-            'notes': ['DUAL_SUBBOTS_DENSITY_D4_131_LEAVES'],
+            'notes': ['DUAL_SUBBOTS_DENSITY_D4_131_LEAVES',
+                      R28_FRESH_PROVIDER_SUBBOTS_LEG58_BLOCKED],
         })
         self.assertEqual(rows['story_collaboration_draft_delivery'], {
             'mode': 'DUAL',
-            'preprod_verdict': 'NOT_RUN',
+            'preprod_verdict': 'BLOCKED_INVENTORIED',
             'gates': [],
-            'notes': ['DRAFT_DELIVERY_DENSITY_24_OBLIGATIONS_20261031'],
+            'notes': ['DRAFT_DELIVERY_DENSITY_24_OBLIGATIONS_20261031',
+                      R28_FRESH_DRAFT_DELIVERY_LEG57_BLOCKED],
         })
         self.assertEqual(rows['story_retired_service_policy'], {
             'mode': 'DUAL',
-            'preprod_verdict': 'NOT_RUN',
+            'preprod_verdict': 'PASS',
             'gates': [],
             'notes': [
                 'SERVICE_POLICY_DENSITY_R1_PROJECTED_20261031',
                 'SERVICE_POLICY_DENSITY_15_OBLIGATIONS_20261031',
+                R28_FRESH_SERVICE_POLICY_LEG59_DUAL_PASS,
             ],
         })
         self.assertEqual(rows['story_cli_operator_builds_collaboration_team'], {
@@ -707,13 +723,15 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(rows['test_ep_friend_connections_mutual_auto_approve']['notes'], ['Wave-D3 密度叠加层 dual-edge-permission-density-v1 离线闭合：Frozen 1 义务 + 7 密度叶 == parsed 8（dual-edge-permission-density-v1）；r5 与 r6 双腿收据 20261031-regression-r5-edge-mutation/ 与 20261031-regression-r6-edge-mutation/ 下 mutual-auto-approve-stdout.json（双轮 status=PASS，remote_validation=NOT_RUN；r5/r6 peer bot 不同，口径 一致）；wpc 本地轮 junit 行 LOCAL-EDGE-FRIEND-MUTUAL-AUTO-APPROVE-01 PASS 1/1；身份交叉核对 member=20261010_gekng5hk:39464 出现在双轮 admissions 方向键；22 叶族内 ENROLLMENT=NOT_ENROLLED fail-close，本行不获得任何密度执行信用；committed verdict 维持 PASS 现状不变，笔记增量仅补水注记；⏳pending-landing'])
         self.assertEqual(
             rows['story_authority_user_journey']['notes'],
-            ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031'])
+            ['AUTHORITY_DENSITY_42_OBLIGATIONS_20261031',
+             R28_FRESH_AUTHORITY_JOURNEY_LEG54_BLOCKED])
         self.assertEqual(
             rows['story_user_validates_external_channel_setup']['notes'],
             ['row #10 story_user_validates_external_channel_setup: register 7 source-anchored density obligations under the retained CHANNEL.* parent envelope (13 parsed = 6 legacy parents + 7 atoms; residual_count_gap=0); notes-only integration, the dual-channel-bindings-run envelope and its r8 conclusions stay untouched'])
         self.assertEqual(
             rows['story_cli_operator_validates_channel_management']['notes'],
-            ['row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false'])
+            ['row #11 story_cli_operator_validates_channel_management: register 7 source-anchored density obligations under the retained CHANNEL-CLI.* parent envelope (16 parsed = 9 legacy parents + 7 atoms; residual_count_gap=0); preprod keeps BLOCKED_INVENTORIED with the disabled-bridge divergence registered as a true business judgment (not a defect) and the sim DingTalk design red disclosed; remote_validation=NOT_RUN and grants_release_credit=false',
+             R28_CHANNEL_CLI_DISABLED_BRIDGE_DIVERGENCE_RECONFIRMED_LEG47])
 
     def test_density_closures_lock_rows_1_and_7_face_notes(self):
         from bcs_e2e.delivery_density.registration_proposal import (
@@ -738,9 +756,9 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
              row['executor_migration']['preprod_verdict'])
             for row in reviewed)
         self.assertEqual(counts, Counter({
-            ('DUAL', 'PASS'): 18,
+            ('DUAL', 'PASS'): 20,
             ('DUAL', 'BLOCKED_INVENTORIED'): 8,
-            ('DUAL', 'NOT_RUN'): 4,
+            ('DUAL', 'NOT_RUN'): 2,
             ('EDGE_OBLIGATION_IN_FAMILY', 'NOT_APPLICABLE'): 1,
         }))
         ids = {row['id'] for row in reviewed}
@@ -785,20 +803,20 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         statuses = load_executor_migration()
         locks = (
             ('story_user_runs_and_shares_sessions',
-             'WPB_SESSION_SHARING_87_OBLIGATIONS_20261031'),
+             'WPB_SESSION_SHARING_87_OBLIGATIONS_20261031', 2),
             ('story_cli_operator_runs_sessions_and_services',
-             'WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031'),
+             'WPB_SESSION_SERVICE_44_OBLIGATIONS_20261031', 1),
             ('story_session_file_workspace',
-             'WPB_SESSION_FILE_12_REQUIREMENTS_20261031'),
+             'WPB_SESSION_FILE_12_REQUIREMENTS_20261031', 1),
         )
-        for story_id, token in locks:
+        for story_id, token, notes_len in locks:
             with self.subTest(story_id=story_id):
                 self.assertIn(story_id, statuses)
                 row = statuses[story_id]
                 self.assertEqual(row['mode'], 'DUAL')
                 self.assertEqual(row['preprod_verdict'], 'PASS')
                 self.assertIn(token, row['notes'])
-                self.assertEqual(len(row['notes']), 1)
+                self.assertEqual(len(row['notes']), notes_len)
 
     def test_wpb2_edge_family_face_notes_lock_rows(self):
         statuses = load_executor_migration()
@@ -833,7 +851,8 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         self.assertEqual(row['gates'], [])
         self.assertEqual(
             row['notes'],
-            ['PROVIDER_PUBLISHES_DENSITY_98_OBLIGATIONS_20261031'])
+            ['PROVIDER_PUBLISHES_DENSITY_98_OBLIGATIONS_20261031',
+             R28FIX_PROVIDER_PUBLISHES_V2_LIVE_ADMISSION_SEAM_PENDING])
 
 
     def test_result_queue_density_locks_row_20_face_note(self):
@@ -875,12 +894,13 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
                       for row in face['rows']}
         row = statuses['story_operator_coordinates_with_cli']
         self.assertEqual(row['mode'], 'DUAL')
-        self.assertEqual(row['preprod_verdict'], 'BLOCKED_INVENTORIED')
+        self.assertEqual(row['preprod_verdict'], 'PASS')
         self.assertEqual(row['gates'], [])
-        self.assertEqual(row['notes'], [OPERATOR_CLI_DENSITY_NOTE])
+        self.assertEqual(row['notes'], [OPERATOR_CLI_DENSITY_NOTE,
+                                        R28_FRESH_OPERATOR_CLI_LEG49_DUAL_PASS])
         self.assertEqual(
             face_by_id['story_operator_coordinates_with_cli']['notes'],
-            [OPERATOR_CLI_DENSITY_NOTE])
+            [OPERATOR_CLI_DENSITY_NOTE, R28_FRESH_OPERATOR_CLI_LEG49_DUAL_PASS])
 
     def test_operator_cli_density_note_closes_the_inventory_fail_close_fence(self):
         from bcs_e2e import inventory as inventory_module
@@ -923,18 +943,20 @@ class ExecutorMigrationInventoryTests(unittest.TestCase):
         face_by_id = {row['id']: row['executor_migration']
                       for row in face['rows']}
         locks = (
-            ('story_provider_owner_isolation', OWNER_ISOLATION_PROVIDER_NOTE),
-            ('story_session_owner_permissions', OWNER_ISOLATION_SESSION_NOTE),
+            ('story_provider_owner_isolation', OWNER_ISOLATION_PROVIDER_NOTE,
+             R28_FRESH_PROVIDER_OWNER_LEG56_BLOCKED),
+            ('story_session_owner_permissions', OWNER_ISOLATION_SESSION_NOTE,
+             R28_FRESH_SESSION_OWNER_LEG55_BLOCKED),
         )
-        for story_id, note in locks:
+        for story_id, note, leg_note in locks:
             with self.subTest(story_id=story_id):
                 row = statuses[story_id]
                 self.assertEqual(row['mode'], 'DUAL')
-                self.assertEqual(row['preprod_verdict'], 'NOT_RUN')
+                self.assertEqual(row['preprod_verdict'], 'BLOCKED_INVENTORIED')
                 self.assertEqual(row['gates'], [])
-                self.assertEqual(len(row['notes']), 1)
-                self.assertEqual(row['notes'], [note])
-                self.assertEqual(face_by_id[story_id]['notes'], [note])
+                self.assertEqual(len(row['notes']), 2)
+                self.assertEqual(row['notes'], [note, leg_note])
+                self.assertEqual(face_by_id[story_id]['notes'], [note, leg_note])
 
     def test_owner_isolation_notes_close_the_inventory_fail_close_fence(self):
         from bcs_e2e import inventory as inventory_module

@@ -1028,7 +1028,7 @@ class ServicePolicyDualCaseRunTests(unittest.TestCase):
         self.assertIn('dual-service-policy-run', CASE_COMMANDS)
         row = load_executor_migration()[dual.PARENT]
         self.assertEqual(row['mode'], 'DUAL')
-        self.assertEqual(row['preprod_verdict'], 'NOT_RUN')
+        self.assertEqual(row['preprod_verdict'], 'PASS')
         plan = migration_plan()
         slice_row = next(item for item in plan['local_backlog_case_slices']
                          if item['case_id'] == CASE_ID)

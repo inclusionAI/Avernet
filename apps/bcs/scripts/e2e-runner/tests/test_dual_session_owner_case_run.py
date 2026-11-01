@@ -577,7 +577,7 @@ class SessionOwnerDualTests(unittest.TestCase):
         executor_rows = json.loads((ROOT / 'executor-migration.json').read_text(encoding='utf-8'))['rows']
         migrated = next(item for item in executor_rows if item['id'] == 'story_session_owner_permissions')
         self.assertEqual(migrated['executor_migration']['mode'], 'DUAL')
-        self.assertEqual(migrated['executor_migration']['preprod_verdict'], 'NOT_RUN')
+        self.assertEqual(migrated['executor_migration']['preprod_verdict'], 'BLOCKED_INVENTORIED')
         command = dual_session_owner_case_command()
         self.assertEqual(command['command'], COMMAND)
         self.assertEqual(command['required_binary_pairs']['server'],

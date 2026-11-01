@@ -728,8 +728,8 @@ class ResultQueueDensityRegistrationProposalTests(unittest.TestCase):
                           "this_family_delta": 1})
         self.assertIn(NOTE, live_counts)
         self.assertEqual(increment["unchanged"]["state_counts"],
-                         {"DUAL/PASS": 19, "DUAL/BLOCKED_INVENTORIED": 11,
-                          "DUAL/NOT_RUN": 10,
+                         {"DUAL/PASS": 21, "DUAL/BLOCKED_INVENTORIED": 15,
+                          "DUAL/NOT_RUN": 4,
                           "EDGE_OBLIGATION_IN_FAMILY/NOT_APPLICABLE": 1})
         expected_states = {
             f"{mode}/{verdict}": count

@@ -329,9 +329,10 @@ class ProviderSubbotsDualTests(unittest.TestCase):
         status = load_executor_migration()[PARENT]
         self.assertEqual(status, {
             "mode": "DUAL",
-            "preprod_verdict": "NOT_RUN",
+            "preprod_verdict": "BLOCKED_INVENTORIED",
             "gates": [],
-            "notes": ["DUAL_SUBBOTS_DENSITY_D4_131_LEAVES"],
+            "notes": ["DUAL_SUBBOTS_DENSITY_D4_131_LEAVES",
+                      "R28_FRESH_PROVIDER_SUBBOTS_LEG58_BLOCKED: fresh preprod leg in run 20261101-regression-r28-bulk (bulk head ef6114af0) family wp2-provider-subbots leg 58 run_id 20261101-regression-r28-wp2-provider-subbots-provider-subbots rc=2 verdict BLOCKED case DUAL-PROVIDER-SUBBOTS-01 0/15 steps NOT_RUN (every step err token None; the named gap PREPROD_PROVIDER_CONTROL_PLANE_ABSENT covers the missing provider control-plane materials) and the 131 story-checks density projection caliber stays unchanged; the row stays a KNOWN_UNMAPPED backlog parent outside the reviewed release denominator; committed verdict flips DUAL/NOT_RUN to DUAL/BLOCKED_INVENTORIED; remote_validation=NOT_RUN grants_release_credit=false"],
         })
 
         profile_path = self._write_profile(provider_profile(), "cli")
