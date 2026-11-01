@@ -214,7 +214,8 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
     ) -> CategoryPlan:
         """Classify against Direct names and include inactive Local cleanup."""
         supplied = self._set_supplied(ctx)
-        area = _without(self._area(ctx), supplied)
+        whole_area = self._area(ctx)
+        area = _without(whole_area, supplied)
         # A package a set references — an inactive set's too — is that set's to keep: never cleaned up here.
         referenced = self._set_referenced_ids(ctx)
         local_assets = {
@@ -245,8 +246,10 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
         retained_local = [
             local_assets[name] for name in declared if name in local_assets
         ]
+        # Set-supplied skills are never touched here, so their dependencies survive the apply too.
+        retained_set = [asset for name, asset in whole_area.items() if name in supplied]
         ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
-            retained_local
+            retained_local + retained_set
         )
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
