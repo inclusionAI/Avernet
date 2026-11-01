@@ -25,6 +25,9 @@ pub struct DeliveryStatusView {
     /// 消息正文预览（截断至前 200 字符），供前端排队列表展示。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_preview: Option<String>,
+    /// Safe task-panel projection; absent for ordinary and result deliveries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<super::task_delivery::TaskDeliveryView>,
 }
 
 impl From<&PersistedMessageDelivery> for DeliveryStatusView {
@@ -42,6 +45,7 @@ impl From<&PersistedMessageDelivery> for DeliveryStatusView {
             run_id: row.run_id.clone(),
             wait_reason: row.wait_reason,
             content_preview: None,
+            task: super::task_delivery::TaskDeliveryView::from_delivery(row),
         }
     }
 }
@@ -613,6 +617,7 @@ mod tests {
             run_id: None,
             wait_reason: None,
             content_preview: None,
+            task: None,
         };
         let view = view.with_content_preview(Some(&content));
         assert_eq!(view.content_preview.as_deref(), Some("hello world"));
@@ -634,6 +639,7 @@ mod tests {
             run_id: None,
             wait_reason: None,
             content_preview: None,
+            task: None,
         };
         let view = view.with_content_preview(Some(&content));
         let preview = view.content_preview.as_deref().unwrap();
@@ -656,6 +662,7 @@ mod tests {
             run_id: None,
             wait_reason: None,
             content_preview: None,
+            task: None,
         };
         let view = view.with_content_preview(Some(&content));
         assert!(view.content_preview.is_none());
@@ -675,6 +682,7 @@ mod tests {
             run_id: None,
             wait_reason: None,
             content_preview: None,
+            task: None,
         };
         let view = view.with_content_preview(None);
         assert!(view.content_preview.is_none());

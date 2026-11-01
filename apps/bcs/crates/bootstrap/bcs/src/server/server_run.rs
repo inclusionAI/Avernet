@@ -142,6 +142,7 @@ impl BcsServer {
                 self.state.services.registry.clone(),
             )));
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
+        openapi_v1.worker_task_service = Some(self.state.services.message_flow.clone());
         let mut browser_v1 = openapi_v1.clone();
         browser_v1.principal_verifier = Arc::new(crate::browser_principal::BrowserPrincipalVerifier(
             self.state.auth_chain.clone(),

@@ -1,6 +1,9 @@
 //! Global retained-task handles. These are correlation identifiers, not credentials.
 use serde::{Deserialize, Serialize};
 
+/// Error contract for task-handle application operations.
+pub use crate::core::ServiceError as TaskHandleError;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskHandleStatus {
