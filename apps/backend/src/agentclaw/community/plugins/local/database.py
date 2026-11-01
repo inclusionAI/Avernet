@@ -44,9 +44,10 @@ def _make_engine_and_session():
     ``check_same_thread=False`` permits FastAPI's threaded request
     handling to share the connection.
     """
+    # A real outer transaction must exist before any SAVEPOINT.
     engine = create_engine(
         _DATABASE_URL,
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "autocommit": False},
         poolclass=StaticPool,
     )
 
@@ -59,9 +60,13 @@ def _make_engine_and_session():
     # SQLite too, giving true prod parity without an extra statement.
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragma(dbapi_conn, _conn_record):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        # PRAGMA foreign_keys only takes effect outside a transaction.
+        previous_autocommit = dbapi_conn.autocommit
+        dbapi_conn.autocommit = True
+        try:
+            dbapi_conn.execute("PRAGMA foreign_keys=ON").close()
+        finally:
+            dbapi_conn.autocommit = previous_autocommit
 
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return engine, session_factory

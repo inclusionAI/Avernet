@@ -94,13 +94,20 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
             # request handling, and a per-connection ``PRAGMA foreign_keys=ON``
             # so ``ON DELETE CASCADE`` fires (parity with prod and the local
             # impl — SQLite does not enforce FKs otherwise).
-            engine = create_engine(url, connect_args={"check_same_thread": False})
+            # A real outer transaction must exist before any SAVEPOINT.
+            engine = create_engine(
+                url, connect_args={"check_same_thread": False, "autocommit": False}
+            )
 
             @event.listens_for(engine, "connect")
             def _set_sqlite_pragma(dbapi_conn, _conn_record):
-                cursor = dbapi_conn.cursor()
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.close()
+                # PRAGMA foreign_keys only takes effect outside a transaction.
+                previous_autocommit = dbapi_conn.autocommit
+                dbapi_conn.autocommit = True
+                try:
+                    dbapi_conn.execute("PRAGMA foreign_keys=ON").close()
+                finally:
+                    dbapi_conn.autocommit = previous_autocommit
 
             return engine
 
