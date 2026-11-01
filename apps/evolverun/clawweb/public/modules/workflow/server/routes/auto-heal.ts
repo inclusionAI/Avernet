@@ -3,7 +3,7 @@
  *
  *   POST /auto-heal/diagnose
  *   GET  /auto-heal/diagnoses/:diagnosisId
- *   POST /auto-heal/save      — save a fixed spec to git + DB (no deploy tag)
+ *   POST /auto-heal/save      — save a fixed spec to the workflow database
  *   POST /auto-heal/deploy    — deploy a confirmed saved candidate with git tag + history
  *   POST /auto-heal/apply     — DEPRECATED, returns 410 unless opt-in
  *   POST /auto-heal/run       — run on the source Bot and lifecycle stage
@@ -74,14 +74,18 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
-        const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+        // Existing documents save to the database even without Git settings.
+        // Creating a Pack initializes saved/<id>, so resolve Git only then.
+        const settings = createOnly === true
+          ? await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor)
+          : undefined;
         const saveService = new AutoHealSaveService(
           deps.db,
           deps.workflowSpecRepo,
           deps.deployHistoryRepo,
           deps.botPermRepo,
-          gitConfig,
-          gitAuthor,
+          settings?.gitConfig,
+          settings?.gitAuthor,
         );
         const result = await saveService.save({
           workflowId,
@@ -111,8 +115,11 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
         deps.botPermRepo, gitConfig, gitAuthor, deps.triggerRun);
       res.json(await service.deploy({ workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun, actorId: actor }));
     } catch (error) {
-      const e = error as { status?: number; code?: string; requestId?: string };
-      res.status(safeStatus(e.status)).json({ error: "Deployment could not be completed", code: e.code ?? "DEPLOYMENT_FAILED", requestId: e.requestId });
+      const e = error as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string; tagName?: string };
+      const branch = typeof e.branch === "string" && /^wf\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(e.branch) && !e.branch.includes("..") ? e.branch : undefined;
+      const commit = typeof e.commit === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(e.commit) ? e.commit : undefined;
+      const tagName = typeof e.tagName === "string" && /^deploy\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\/#\d+$/.test(e.tagName) && !e.tagName.includes("..") ? e.tagName : undefined;
+      res.status(safeStatus(e.status)).json({ error: "Deployment could not be completed", code: e.code ?? "DEPLOYMENT_FAILED", requestId: e.requestId, branch, commit, tagName });
     }
   }));
 

@@ -6,15 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { packOperationDdl } from '@avernet/clawweb-shared/server/schema-pack-operations';
-import { sqliteDialect } from '@avernet/clawweb-shared/server/db/dialect';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
 import { stringify } from 'yaml';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import { AutoHealDeployService } from '../auto-heal-deploy-service.js';
-import { AutoHealSaveService } from '../auto-heal-save-service.js';
-import { reconcilePackOperation } from '../pack-operation-service.js';
 import { cloneClawflows } from '../clawflows-git-client.js';
 import * as deployGit from '../auto-heal-deploy-git.js';
 import { inspectDeployCandidate, pushDeployCandidate } from '../auto-heal-deploy-git.js';
@@ -28,7 +24,7 @@ const spec = { id: 'wf-test', title: 'Candidate', nodes: [
 const author = { name: 'Tester', email: 'test@example.com' };
 const git = (dir: string, ...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-describe('exact saved candidate deployment', () => {
+describe('database workflow and saved Pack deployment', () => {
   let root: string, remote: string, work: string, candidate: string;
   let raw: Database.Database, db: SqliteDatabase, service: AutoHealDeployService;
   beforeEach(() => {
@@ -49,7 +45,6 @@ describe('exact saved candidate deployment', () => {
     raw.exec(`CREATE TABLE workflow_specs (id INTEGER PRIMARY KEY, workflow_id TEXT UNIQUE, pack_id TEXT, spec_json TEXT, gmt_create INTEGER DEFAULT 0, gmt_modified INTEGER DEFAULT 0, title TEXT, version INTEGER, owner_id TEXT);
       CREATE TABLE workflow_deploy_history (id INTEGER PRIMARY KEY, pack_id TEXT, workflow_id TEXT, deploy_number INTEGER, version INTEGER, tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT, owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER);
       CREATE TABLE facade_bindings (command TEXT PRIMARY KEY, workflow_id TEXT, pack_id TEXT, remark TEXT, gmt_create INTEGER, gmt_modified INTEGER);`);
-    for (const ddl of packOperationDdl) raw.exec(sqliteDialect.renderDdl(ddl));
     raw.prepare('INSERT INTO workflow_specs (workflow_id, pack_id, spec_json) VALUES (?, ?, ?)').run('wf-test', 'pack-1', JSON.stringify(spec));
     db = new SqliteDatabase(raw);
     const history = new WorkflowDeployHistoryRepository(db);
@@ -57,12 +52,10 @@ describe('exact saved candidate deployment', () => {
       { hasExecutePermission: async () => true, hasEditPermission: async () => true } as never,
       { remoteUrl: remote, username: author.name, email: author.email }, author);
   });
-  afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true }); });
-  const unknown = () => expect(raw.prepare("SELECT phase, lock_workflow_id FROM clawweb_pack_operations WHERE phase = 'unknown'").all())
-    .toEqual([{ phase: 'unknown', lock_workflow_id: (raw.prepare('SELECT id FROM workflow_specs WHERE workflow_id = ?').get('wf-test') as { id: number }).id }]);
+  afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
   const deploy = () => service.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: candidate, autoRun: false });
 
-  it('publishes precisely the saved tree, including scripts and assets, and binds history and tag', async () => {
+  it('publishes the overlaid tree, including scripts and assets, and binds history and tag', async () => {
     writeFileSync(path.join(work, 'scripts/run.sh'), 'old deployed script\n');
     writeFileSync(path.join(work, 'old-only.txt'), 'must disappear\n');
     git(work, 'add', '.'); git(work, 'commit', '-m', 'old deployment');
@@ -74,7 +67,9 @@ describe('exact saved candidate deployment', () => {
     expect(git(root, '--git-dir', remote, 'show', `${branch}:scripts/run.sh`)).toBe('saved script');
     expect(git(root, '--git-dir', remote, 'show', `${branch}:asset.txt`)).toBe('saved asset');
     expect(git(root, '--git-dir', remote, 'ls-tree', '--name-only', branch)).not.toContain('old-only.txt');
-    expect(git(root, '--git-dir', remote, 'cat-file', '-p', `refs/tags/${result.tagName}`)).toContain(`candidateCommit=${candidate}`);
+    const overlaid = git(root, '--git-dir', remote, 'rev-parse', `${branch}^`);
+    expect(git(root, '--git-dir', remote, 'rev-parse', `${overlaid}^`)).toBe(candidate);
+    expect(git(root, '--git-dir', remote, 'cat-file', '-p', `refs/tags/${result.tagName}`)).toContain(`candidateCommit=${overlaid}`);
     const row = raw.prepare('SELECT * FROM workflow_deploy_history').get() as { spec_json: string; is_active: number; action: string };
     expect(row.action).toBe('deploy'); expect(row.is_active).toBe(1);
     expect(JSON.parse(row.spec_json).content).toBe(stringify(spec));
@@ -100,7 +95,6 @@ describe('exact saved candidate deployment', () => {
     expect(git(root, '--git-dir', remote, 'tag', '-l')).toBe('');
     expect(raw.prepare('SELECT command, workflow_id, pack_id FROM facade_bindings').all()).toEqual([{ command, workflow_id: 'other', pack_id: 'other-pack' }]);
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
-    expect(raw.prepare('SELECT phase, lock_workflow_id FROM clawweb_pack_operations').all()).toEqual([{ phase: 'failed', lock_workflow_id: null }]);
   });
 
   it('permits existing same-workflow facade ownership and publishes both commands', async () => {
@@ -121,23 +115,21 @@ describe('exact saved candidate deployment', () => {
     await expect(service.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: 'a'.repeat(40) }))
       .rejects.toMatchObject({ status: 409, code: 'CANDIDATE_NOT_SAVED' });
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
-    expect(raw.prepare('SELECT phase FROM clawweb_pack_operations').all()).toEqual([{ phase: 'failed' }, { phase: 'failed' }]);
   });
-  it('captures saved once for a legacy omitted candidate without requiring DB equality or overwriting a different draft', async () => {
+  it('overlays the database draft on saved when the candidate is omitted', async () => {
     raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ ...spec, title: 'stale DB' }));
     const result = await service.deploy({ workflowId: 'wf-test', actorId: 'actor', autoRun: false });
     expect(result.candidateCommit).toBe(candidate);
     const row = raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string };
     expect(JSON.parse(row.spec_json).title).toBe('stale DB');
     const published = raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string };
-    expect(JSON.parse(published.spec_json)).toMatchObject({ title: 'Candidate', content: stringify(spec) });
+    expect(JSON.parse(published.spec_json).title).toBe('stale DB');
   });
   it('reports a Git-success DB-failure without activating history', async () => {
     raw.exec(`CREATE TRIGGER fail_activation BEFORE UPDATE ON workflow_specs BEGIN SELECT RAISE(IGNORE); END`);
-    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN' });
+    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN' });
     expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/tags/deploy/wf-test/#1^{commit}')).toBeTruthy();
     expect(raw.prepare('SELECT action, is_active FROM workflow_deploy_history').all()).toEqual([]);
-    unknown();
   });
   it('rejects a stale deployment branch lease without creating its tag', async () => {
     const clone = path.join(root, 'clone'); mkdirSync(clone);
@@ -177,9 +169,8 @@ describe('exact saved candidate deployment', () => {
       raw.prepare('UPDATE workflow_specs SET spec_json = ?').run(JSON.stringify({ ...spec, title: 'newer' }));
       return result;
     });
-    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN' });
+    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN' });
     expect(raw.prepare('SELECT action, is_active FROM workflow_deploy_history').all()).toEqual([]);
-    unknown();
     expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/tags/deploy/wf-test/#1^{commit}')).toBeTruthy();
   });
 
@@ -194,35 +185,7 @@ describe('exact saved candidate deployment', () => {
     expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test')).toBe(secondCommit);
   });
 
-  it('fences a second same-service deployment while the first is between Git and DB', async () => {
-    let resume!: () => void;
-    let pushed!: () => void;
-    const paused = new Promise<void>(resolve => { resume = resolve; });
-    const atPush = new Promise<void>(resolve => { pushed = resolve; });
-    const realPush = deployGit.pushPreparedDeployment;
-    vi.spyOn(deployGit, 'pushPreparedDeployment').mockImplementationOnce(async (...args) => {
-      const result = await realPush(...args);
-      pushed();
-      await paused;
-      return result;
-    });
-    const otherDb = new SqliteDatabase(new Database(path.join(root, 'workflow.sqlite')));
-    const otherHistory = new WorkflowDeployHistoryRepository(otherDb);
-    const otherService = new AutoHealDeployService(otherDb, new WorkflowSpecRepository(otherDb, otherHistory), otherHistory,
-      { hasExecutePermission: async () => true, hasEditPermission: async () => true } as never,
-      { remoteUrl: remote, username: author.name, email: author.email }, author);
-    const first = deploy();
-    try {
-      await atPush;
-      await expect(otherService.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: candidate, autoRun: false }))
-        .rejects.toMatchObject({ status: 409, code: 'WORKFLOW_BUSY' });
-    } finally { resume(); await otherDb.close(); }
-    const result = await first;
-    expect(raw.prepare('SELECT action, is_active FROM workflow_deploy_history').all()).toEqual([{ action: 'deploy', is_active: 1 }]);
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test'))
-      .toBe(git(root, '--git-dir', remote, 'rev-parse', `refs/tags/${result.tagName}^{commit}`));
-  });
-  it('does not overwrite an active history change made after reservation', async () => {
+  it('does not overwrite an active history change made after reading the baseline', async () => {
     const insert = raw.prepare(`INSERT INTO workflow_deploy_history (pack_id, workflow_id, deploy_number, version, tag_name, action, spec_json, is_active)
       VALUES ('pack-1', 'wf-test', ?, ?, ?, 'deploy', '{}', ?)`);
     insert.run(8, 8, 'old', 1); insert.run(9, 9, 'concurrent', 0);
@@ -232,44 +195,9 @@ describe('exact saved candidate deployment', () => {
       expect(await new WorkflowDeployHistoryRepository(db).setActive('wf-test', 9)).toBe(true);
       return result;
     });
-    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN' });
+    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN' });
     expect(raw.prepare('SELECT deploy_number FROM workflow_deploy_history WHERE is_active = 1').all()).toEqual([{ deploy_number: 9 }]);
     expect(raw.prepare("SELECT action, is_active FROM workflow_deploy_history WHERE action = 'pending'").all()).toEqual([]);
-    unknown();
-  });
-  it('keeps an ambiguous private operation as a durable fence on later attempts', async () => {
-    vi.spyOn(deployGit, 'pushPreparedDeployment').mockRejectedValueOnce(new Error('push acknowledgement lost'));
-    await expect(deploy()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN' });
-    await expect(deploy()).rejects.toMatchObject({ status: 409, code: 'WORKFLOW_BUSY' });
-    expect(raw.prepare('SELECT count(*) AS count FROM workflow_deploy_history').get()).toEqual({ count: 0 });
-    unknown();
-  });
-  it('retains a private unknown fence when a real successful push loses its acknowledgement', async () => {
-    const realGit = gitExecution.executeGit;
-    let pushCompleted = false;
-    vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
-      const result = await realGit(args, options);
-      if (args[0] === 'push' && args.includes('--atomic')) {
-        pushCompleted = true;
-        throw new Error('simulated transport loss after remote accepted push');
-      }
-      return result;
-    });
-    const rerun = vi.fn(async () => 'must-not-run');
-    const history = new WorkflowDeployHistoryRepository(db);
-    const withRerun = new AutoHealDeployService(db, new WorkflowSpecRepository(db, history), history,
-      { hasExecutePermission: async () => true, hasEditPermission: async () => true } as never,
-      { remoteUrl: remote, username: author.name, email: author.email }, author, rerun);
-    const attempt = () => withRerun.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: candidate, autoRun: true });
-    await expect(attempt()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN' });
-    expect(pushCompleted).toBe(true);
-    const remoteBranch = git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test');
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/tags/deploy/wf-test/#1^{commit}')).toBe(remoteBranch);
-    expect(git(root, '--git-dir', remote, 'rev-parse', `${remoteBranch}^{tree}`)).toBe(git(work, 'rev-parse', `${candidate}^{tree}`));
-    expect(raw.prepare('SELECT action, is_active FROM workflow_deploy_history').all()).toEqual([]);
-    unknown();
-    expect(rerun).not.toHaveBeenCalled();
-    await expect(attempt()).rejects.toMatchObject({ status: 409, code: 'WORKFLOW_BUSY' });
   });
   it('allocates past existing Git tags without adding any public reservation', async () => {
     git(work, 'tag', '-a', 'deploy/wf-test/#5', '-m', 'external');
@@ -298,7 +226,7 @@ describe('exact saved candidate deployment', () => {
     expect(git(root, '--git-dir', remote, 'rev-parse', `${published.commit}^{tree}`)).toBe(git(work, 'rev-parse', `${candidate}^{tree}`));
   });
 
-  it('publishes exact Git-only edited workflow YAML without overwriting an unrelated DB draft', async () => {
+  it('overlays the DB draft instead of trusting Git-only workflow YAML', async () => {
     const content = stringify({ ...spec, title: 'Edited candidate' });
     writeFileSync(path.join(work, 'workflows/wf-test.yaml'), content);
     git(work, 'add', '.'); git(work, 'commit', '-m', 'edit candidate YAML only');
@@ -308,47 +236,51 @@ describe('exact saved candidate deployment', () => {
     const row = raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string };
     expect(JSON.parse(row.spec_json).title).toBe('Candidate');
     const published = raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string };
-    expect(JSON.parse(published.spec_json)).toMatchObject({ title: 'Edited candidate', content });
+    expect(JSON.parse(published.spec_json)).toMatchObject({ title: 'Candidate', content: stringify(spec) });
     expect(raw.prepare('SELECT action, is_active FROM workflow_deploy_history').all()).toEqual([{ action: 'deploy', is_active: 1 }]);
     expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test')).toBe(result.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', `${result.commit}^{tree}`)).toBe(git(work, 'rev-parse', `${candidate}^{tree}`));
+    expect(git(root, '--git-dir', remote, 'show', `${result.commit}:workflows/wf-test.yaml`)).toBe(stringify(spec).trim());
+    expect(git(root, '--git-dir', remote, 'rev-parse', `${result.commit}:asset.txt`)).toBe(git(work, 'rev-parse', `${candidate}:asset.txt`));
   });
 
-  it('deploys a previously journaled S after saved advances to S2, preserving the newer draft', async () => {
-    const history = new WorkflowDeployHistoryRepository(db);
-    const saver = new AutoHealSaveService(db, new WorkflowSpecRepository(db, history), history,
-      { hasEditPermission: async () => true } as never,
-      { remoteUrl: remote, username: author.name, email: author.email }, author);
-    const first = await saver.save({ workflowId: 'wf-test', actorId: 'actor', spec: { ...spec, title: 'Saved S' }, requestId: 'save-first-0001' });
-    const second = await saver.save({ workflowId: 'wf-test', actorId: 'actor', spec: { ...spec, title: 'Saved S2' }, requestId: 'save-next-0002' });
-    candidate = first.commit;
-    const result = await deploy();
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/saved/wf-test')).toBe(second.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', `${result.commit}^{tree}`)).toBe(git(root, '--git-dir', remote, 'rev-parse', `${first.commit}^{tree}`));
-    const draft = raw.prepare('SELECT spec_json FROM workflow_specs').get() as { spec_json: string };
-    const published = raw.prepare('SELECT spec_json FROM workflow_deploy_history').get() as { spec_json: string };
-    expect(JSON.parse(draft.spec_json).title).toBe('Saved S2');
-    expect(JSON.parse(published.spec_json).title).toBe('Saved S');
-  });
 
-  it('reconciles a lost acknowledgement with the same request, release objects and deploy number', async () => {
-    const requestId = 'deploy-recovery-0001';
-    const realGit = gitExecution.executeGit; let pushes = 0;
+  it('reports a lost deployment acknowledgement after a real atomic push without running or recording a release', async () => {
+    const execute = gitExecution.executeGit;
+    let pushed = false;
     vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
-      const result = await realGit(args, options);
-      if (args[0] === 'push') { pushes++; throw new Error('acknowledgement lost'); }
+      const result = await execute(args, options);
+      if (args[0] === 'push' && args.includes('--atomic')) { pushed = true; throw new Error('lost acknowledgement'); }
       return result;
     });
-    const attempt = () => service.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: candidate, autoRun: false, requestId });
-    await expect(attempt()).rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN', requestId });
-    const commit = git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test');
-    const receipt = await reconcilePackOperation(db, { remoteUrl: remote, username: author.name, email: author.email }, requestId, 'wf-test', 'actor');
-    expect(receipt).toMatchObject({ requestId, state: 'completed', result: { commit, deployNumber: 1 } });
-    expect((await attempt()).commit).toBe(commit);
-    expect(pushes).toBe(1);
-    expect(raw.prepare('SELECT action, is_active, deploy_number FROM workflow_deploy_history').all())
-      .toEqual([{ action: 'deploy', is_active: 1, deploy_number: 1 }]);
-    expect(raw.prepare('SELECT phase, lock_workflow_id FROM clawweb_pack_operations').all())
-      .toEqual([{ phase: 'completed', lock_workflow_id: null }]);
+    const run = vi.fn(async () => 'not-run');
+    const history = new WorkflowDeployHistoryRepository(db);
+    const withRun = new AutoHealDeployService(db, new WorkflowSpecRepository(db, history), history,
+      { hasExecutePermission: async () => true, hasEditPermission: async () => true } as never,
+      { remoteUrl: remote, username: author.name, email: author.email }, author, run);
+    await expect(withRun.deploy({ workflowId: 'wf-test', actorId: 'actor', candidateCommit: candidate, autoRun: true, requestId: 'deploy-unknown-001' }))
+      .rejects.toMatchObject({ status: 503, code: 'DEPLOY_OUTCOME_UNKNOWN', requestId: 'deploy-unknown-001', tagName: 'deploy/wf-test/#1' });
+    expect(pushed).toBe(true);
+    const branch = git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/wf-test');
+    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/tags/deploy/wf-test/#1^{commit}')).toBe(branch);
+    expect(git(root, '--git-dir', remote, 'rev-parse', `${branch}^{tree}`)).toBe(git(work, 'rev-parse', `${candidate}^{tree}`));
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
+    expect(run).not.toHaveBeenCalled();
   });
+
+  it('uses the selected saved Pack when its ref advances immediately before deployment push', async () => {
+    const push = deployGit.pushPreparedDeployment;
+    writeFileSync(path.join(work, 'asset.txt'), 'later saved asset');
+    git(work, 'add', '.'); git(work, 'commit', '-m', 'later save');
+    const newer = git(work, 'rev-parse', 'HEAD');
+    vi.spyOn(deployGit, 'pushPreparedDeployment').mockImplementationOnce(async (...args) => {
+      git(work, 'push', 'origin', 'HEAD:refs/heads/saved/wf-test');
+      return push(...args);
+    });
+    const result = await deploy();
+    expect(result.candidateCommit).toBe(candidate);
+    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/saved/wf-test')).toBe(newer);
+    expect(git(root, '--git-dir', remote, 'show', `${result.commit}:asset.txt`)).toBe('saved asset');
+    expect(git(root, '--git-dir', remote, 'show', `${newer}:asset.txt`)).toBe('later saved asset');
+  });
+
 });

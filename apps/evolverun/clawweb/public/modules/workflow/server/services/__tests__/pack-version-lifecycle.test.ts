@@ -7,16 +7,11 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { stringify } from 'yaml';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { packOperationDdl } from '@avernet/clawweb-shared/server/schema-pack-operations';
 import { WorkflowSpecRepository } from '../../repositories/workflow-spec-repository.js';
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
 import { savePackVersionToRemote, reconcilePackOperationFromRemote, readPackOperationFromRemote } from '../pack-version-remote.js';
 import { AutoHealSaveService } from '../auto-heal-save-service.js';
-import * as gitClient from '../clawflows-git-client.js';
-import { PackOperationRepository } from '../../repositories/pack-operation-repository.js';
-import { prepareDeployCandidate } from '../auto-heal-deploy-git.js';
-import { candidateProjection, operationHash, remoteIdentity } from '../pack-operation-service.js';
 import { AutoHealDeployService } from '../auto-heal-deploy-service.js';
 
 const spec = { id: 'flow', title: 'Original', nodes: [
@@ -34,7 +29,6 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
   let raw: Database.Database, db: SqliteDatabase;
   const config = () => ({ remoteUrl: remote, username: author.name, email: author.email, token: '' });
   const changedFiles = () => [
-    { path: 'workflows/flow.yaml', operation: 'replace' as const, contentBase64: Buffer.from(stringify(edited)).toString('base64'), mode: '100644' as const },
     { path: 'scripts/run.sh', operation: 'replace' as const, contentBase64: Buffer.from('echo edited\n').toString('base64'), mode: '100755' as const },
     { path: 'asset.bin', operation: 'create' as const, contentBase64: 'AP8B', mode: '100644' as const },
   ];
@@ -62,187 +56,130 @@ describe('ClawWeb complete Pack save and deployment lifecycle', () => {
       CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY,config_key TEXT,config_yaml TEXT,version INTEGER,enabled INTEGER,description TEXT,updated_by TEXT,gmt_create INTEGER,gmt_modified INTEGER);
       CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY,bot_id TEXT,bot_owner_id TEXT,workflow_id TEXT,env TEXT,can_view INTEGER,can_execute INTEGER,can_edit INTEGER,gmt_create INTEGER,gmt_modified INTEGER);
       CREATE TABLE facade_bindings (command TEXT PRIMARY KEY,workflow_id TEXT,pack_id TEXT,remark TEXT,gmt_create INTEGER,gmt_modified INTEGER);`);
-    for (const ddl of packOperationDdl) raw.exec(ddl);
     raw.prepare('INSERT INTO workflow_specs(workflow_id,pack_id,spec_json,title,owner_id) VALUES (?,?,?,?,?)').run('flow','pack',JSON.stringify(spec),spec.title,'editor');
     db = new SqliteDatabase(raw);
   });
-  afterEach(async () => { vi.restoreAllMocks(); if (db) await db.close(); if (root) rmSync(root, { recursive: true, force: true }); });
+  afterEach(async () => { vi.restoreAllMocks(); if (db) await db.close(); if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
 
-  it('saves complete content only to saved, then deploys its exact tree and DB snapshot', async () => {
+  const saveWorkflow = (actor = 'editor') => {
+    const history = new WorkflowDeployHistoryRepository(db);
+    return new AutoHealSaveService(db, new WorkflowSpecRepository(db, history), history,
+      { hasEditPermission: async (_workflow: string, user: string) => user === 'editor' } as never, config(), author)
+      .save({ workflowId: 'flow', actorId: actor, spec: edited, requestId: saveId });
+  };
+  const remoteGit = (...args: string[]) => git(root, '--git-dir', remote, ...args);
+  const draftTitle = async () => JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title;
+
+  it('saves workflow and Pack files separately, then deploys their combined content', async () => {
+    expect(await saveWorkflow()).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'pack' });
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
     const saved = await save();
     expect(saved.branch).toBe('saved/flow');
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(original);
-    expect(git(root, '--git-dir', remote, 'tag', '--list')).toBe('');
-    expect(JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title).toBe(edited.title);
+    expect(remoteGit('show', `${saved.commit}:workflows/flow.yaml`)).toBe(stringify(spec).trim());
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('tag', '--list')).toBe('');
     const released = await deploy(saved.commit);
     expect(released).toMatchObject({ ok: true, deployed: true, version: 1, deployNumber: 1, tagName: 'deploy/flow/#1' });
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow^{tree}')).toBe(git(root, '--git-dir', remote, 'rev-parse', `${saved.commit}^{tree}`));
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/tags/deploy/flow/#1^{commit}')).toBe(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow'));
-    expect(git(root, '--git-dir', remote, 'show', 'refs/heads/wf/flow:keep.txt')).toBe('untouched');
-    expect(git(root, '--git-dir', remote, 'ls-tree', 'refs/heads/wf/flow', 'scripts/run.sh')).toMatch(/^100755/);
-    const rows = raw.prepare('SELECT * FROM workflow_deploy_history').all() as Array<{action:string;spec_json:string;is_active:number}>;
-    expect(rows).toHaveLength(1); expect(rows[0].action).toBe('deploy'); expect(rows[0].is_active).toBe(1);
+    expect(remoteGit('rev-parse', 'refs/tags/deploy/flow/#1^{commit}')).toBe(released.commit);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(released.commit);
+    expect(remoteGit('show', `${released.commit}:workflows/flow.yaml`)).toBe(stringify(edited).trim());
+    expect(remoteGit('show', `${released.commit}:keep.txt`)).toBe('untouched');
+    expect(remoteGit('rev-parse', `${released.commit}:asset.bin`)).toBe(remoteGit('rev-parse', `${saved.commit}:asset.bin`));
+    expect(remoteGit('ls-tree', released.commit!, 'scripts/run.sh')).toMatch(/^100755/);
+    const rows = raw.prepare('SELECT action,spec_json,is_active FROM workflow_deploy_history').all() as Array<{action:string;spec_json:string;is_active:number}>;
+    expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ action: 'deploy', is_active: 1 });
     expect(JSON.parse(rows[0].spec_json).title).toBe(edited.title);
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE name = 'clawweb_pack_operations'").get()).toBeUndefined();
   });
 
-  it('same request IDs replay confirmed results without new commits or deployment numbers', async () => {
-    const first = await save(); expect(await save()).toEqual(first);
-    const published = await deploy(first.commit); expect(await deploy(first.commit)).toEqual(published);
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 1 });
+  it('rejects workflow YAML changes through Pack-file save', async () => {
+    await expect(savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
+      sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null,
+      changes: [{ path: 'workflows/flow.yaml', operation: 'replace', contentBase64: Buffer.from(stringify(edited)).toString('base64'), mode: '100644' }] }))
+      .rejects.toMatchObject({ code: 'WORKFLOW_YAML_REQUIRES_DB_SAVE' });
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
+    expect(await draftTitle()).toBe(spec.title);
   });
 
-  it('rejects a different payload reusing a save request ID', async () => {
-    await save();
-    await expect(savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor', requestId: saveId,
-      sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null, changes: [] })).rejects.toMatchObject({ status: 409 });
+  it('denies an unauthorized workflow save without changing DB or Git', async () => {
+    await expect(saveWorkflow('intruder')).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    expect(await draftTitle()).toBe(spec.title);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
   });
 
-  it('deploys confirmed S even when a later saved S2 exists, never substituting S2', async () => {
-    const saved = await save();
+  it.each(['../escape', '.git/config', 'scripts/../../escape'])('rejects unsafe path %s before pushing', async file => {
+    await expect(savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
+      sourceVersion: 'current', sourceCommit: original, expectedSavedHead: null,
+      changes: [{ path: file, operation: 'create', contentBase64: 'YQ==', mode: '100644' }] })).rejects.toThrow();
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+  });
+
+  it('retains a completed DB draft when the separate Pack save conflicts', async () => {
+    await saveWorkflow();
+    git(work, 'push', 'origin', 'HEAD:refs/heads/saved/flow');
+    await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
+    expect(await draftTitle()).toBe(edited.title);
+    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(original);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('tag', '--list')).toBe('');
+  });
+
+  it('does not treat a repeated request ID as an idempotent replay', async () => {
+    const first = await save();
+    await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
+    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(first.commit);
+    const one = await deploy(first.commit); const two = await deploy(first.commit);
+    expect(two.deployNumber).toBe(one.deployNumber + 1);
+    expect(two.commit).not.toBe(one.commit);
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 2 });
+  });
+
+  it('rejects an older candidate after a later saved head exists', async () => {
+    const first = await save();
     const next = await savePackVersionToRemote({ db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor',
-      requestId: '33333333-3333-4333-8333-333333333333', sourceVersion: 'draft', sourceCommit: saved.commit, expectedSavedHead: saved.commit,
+      requestId: '33333333-3333-4333-8333-333333333333', sourceVersion: 'draft', sourceCommit: first.commit, expectedSavedHead: first.commit,
       changes: [{ path: 'keep.txt', operation: 'replace', contentBase64: Buffer.from('new draft').toString('base64'), mode: '100644' }] });
-    await deploy(saved.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/saved/flow')).toBe(next.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow^{tree}')).toBe(git(root, '--git-dir', remote, 'rev-parse', `${saved.commit}^{tree}`));
+    await expect(deploy(first.commit)).rejects.toMatchObject({ status: 409, code: 'CANDIDATE_NOT_SAVED' });
+    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(next.commit);
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    expect(remoteGit('tag', '--list')).toBe('');
   });
 
-  it('keeps legacy deployment requests working by capturing saved once', async () => {
-    const saved = await save(); await deploy();
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow^{tree}')).toBe(git(root, '--git-dir', remote, 'rev-parse', `${saved.commit}^{tree}`));
-  });
-  const reconcile = (requestId: string) => reconcilePackOperationFromRemote({ db, gitConfig: config(), gitAuthor: author,
-    workflowId: 'flow', actorId: 'editor', requestId });
-
-  it('recovers a real successful save after its Git acknowledgement is lost, without creating another candidate', async () => {
+  it('exposes a real saved ref after a lost acknowledgement without claiming recovery', async () => {
     const execute = gitExecution.executeGit;
-    let lost = false, pushes = 0;
     vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (...args) => {
       const result = await execute(...args);
-      if (args[0][0] === 'push') { pushes++; if (!lost) { lost = true; throw new Error('connection lost'); } }
+      if (args[0][0] === 'push') throw new Error('connection lost after push');
       return result;
     });
-    await expect(save()).rejects.toMatchObject({ code: 'SAVE_OUTCOME_UNKNOWN', requestId: saveId });
-    const saved = git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/saved/flow');
-    expect(JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title).toBe(spec.title);
-    const receipt = await reconcile(saveId);
-    expect(receipt.state).toBe('completed'); expect(receipt.result).toMatchObject({ commit: saved }); expect(pushes).toBe(1);
-    expect(await save()).toEqual(receipt.result);
+    await expect(save()).rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'saved/flow', commit: expect.any(String) });
+    const actual = remoteGit('rev-parse', 'refs/heads/saved/flow');
+    expect(actual).not.toBe(original);
+    expect(remoteGit('show', `${actual}:scripts/run.sh`)).toBe('echo edited');
+    expect(remoteGit('rev-parse', 'refs/heads/wf/flow')).toBe(original);
+    await expect(save()).rejects.toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
+    const input = { db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', actorId: 'editor', requestId: saveId };
+    await expect(readPackOperationFromRemote(input)).rejects.toMatchObject({ status: 503, code: 'OPERATION_RECOVERY_UNAVAILABLE' });
+    await expect(reconcilePackOperationFromRemote(input)).rejects.toMatchObject({ status: 503, code: 'OPERATION_RECOVERY_UNAVAILABLE' });
   });
 
-  it('rolls back DB writes on save projection failure and restores them from the same saved candidate', async () => {
-    raw.exec("CREATE TRIGGER fail_draft BEFORE UPDATE ON workflow_specs BEGIN SELECT RAISE(ABORT, 'injected DB failure'); END");
-    await expect(save()).rejects.toMatchObject({ code: 'SAVE_OUTCOME_UNKNOWN' });
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
-    raw.exec('DROP TRIGGER fail_draft');
-    const receipt = await reconcile(saveId);
-    expect(receipt.state).toBe('completed');
-    expect(JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title).toBe(edited.title);
-  });
-
-  it('recovers a publish with successful refs but failed DB insert without another tag or number', async () => {
-    const saved = await save();
+  it('reports Git-success DB-failure without claiming activation or rolling back the remote', async () => {
+    await saveWorkflow(); const saved = await save();
     raw.exec("CREATE TRIGGER fail_release BEFORE INSERT ON workflow_deploy_history BEGIN SELECT RAISE(ABORT, 'injected DB failure'); END");
-    await expect(deploy(saved.commit)).rejects.toMatchObject({ code: 'DEPLOY_OUTCOME_UNKNOWN', requestId: deployId });
+    await expect(deploy(saved.commit)).rejects.toMatchObject({ code: 'DEPLOY_GIT_SUCCEEDED_DB_OUTCOME_UNKNOWN', requestId: deployId, cause: expect.any(Error) });
     expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
-    expect(git(root, '--git-dir', remote, 'tag', '--list')).toBe('deploy/flow/#1');
-    raw.exec('DROP TRIGGER fail_release');
-    expect((await reconcile(deployId)).state).toBe('completed');
-    expect(await deploy(saved.commit)).toMatchObject({ deployNumber: 1, version: 1 });
-    expect(raw.prepare('SELECT action,is_active FROM workflow_deploy_history').all()).toEqual([{ action: 'deploy', is_active: 1 }]);
+    expect(remoteGit('tag', '--list')).toBe('deploy/flow/#1');
+    expect(remoteGit('rev-parse', 'refs/tags/deploy/flow/#1^{commit}')).toBe(remoteGit('rev-parse', 'refs/heads/wf/flow'));
+    expect(remoteGit('rev-parse', 'refs/heads/saved/flow')).toBe(saved.commit);
+    expect(await draftTitle()).toBe(edited.title);
   });
 
-  it('keeps recovery payload private and rejects another actor reading an operation', async () => {
-    await save();
-    const input = { db, gitConfig: config(), gitAuthor: author, workflowId: 'flow', requestId: saveId };
-    const receipt = await readPackOperationFromRemote({ ...input, actorId: 'editor' });
-    expect(JSON.stringify(receipt)).not.toMatch(/bundleBase64|specJson|baseline|gitConfig/);
-    await expect(readPackOperationFromRemote({ ...input, actorId: 'another' })).rejects.toMatchObject({ status: 404 });
-  });
-
-  it('does not overwrite a newer DB draft during reconciliation', async () => {
+  it('rolls back a failed database save without creating a Git candidate', async () => {
     raw.exec("CREATE TRIGGER fail_draft BEFORE UPDATE ON workflow_specs BEGIN SELECT RAISE(ABORT, 'injected DB failure'); END");
-    await expect(save()).rejects.toMatchObject({ code: 'SAVE_OUTCOME_UNKNOWN' }); raw.exec('DROP TRIGGER fail_draft');
-    raw.prepare('UPDATE workflow_specs SET spec_json = ? WHERE workflow_id = ?').run(JSON.stringify({ ...spec, title: 'external newer' }), 'flow');
-    await expect(reconcile(saveId)).rejects.toMatchObject({ status: 409 });
-    expect(JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title).toBe('external newer');
+    await expect(saveWorkflow()).rejects.toThrow('injected DB failure');
+    expect(await draftTitle()).toBe(spec.title);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
+    expect(remoteGit('tag', '--list')).toBe('');
   });
-
-  it('preserves a DB-only draft that existed before accepting a release', async () => {
-    const saved = await save();
-    raw.prepare('UPDATE workflow_specs SET spec_json = ? WHERE workflow_id = ?').run(JSON.stringify({ ...spec, title: 'DB-only draft' }), 'flow');
-    await deploy(saved.commit);
-    expect(JSON.parse((await new WorkflowSpecRepository(db).findByWorkflowId('flow'))!.spec_json).title).toBe('DB-only draft');
-    const history = raw.prepare('SELECT spec_json FROM workflow_deploy_history WHERE is_active = 1').get() as {spec_json:string};
-    expect(JSON.parse(history.spec_json).title).toBe(edited.title);
-  });
-
-  it('retries createOnly with the same request ID after a proven pre-push preparation failure', async () => {
-    raw.exec('DELETE FROM workflow_specs');
-    const history = new WorkflowDeployHistoryRepository(db);
-    const service = new AutoHealSaveService(db, new WorkflowSpecRepository(db), history,
-      { hasEditPermission: async () => true } as never, config(), author);
-    const create = () => service.save({ workflowId: 'flow', actorId: 'editor', packId: 'pack', spec, createOnly: true, requestId: saveId });
-    vi.spyOn(gitClient, 'cloneClawflows').mockRejectedValueOnce(new Error('preparation unavailable'));
-    await expect(create()).rejects.toThrow('preparation unavailable');
-    expect(raw.prepare('SELECT phase FROM clawweb_pack_operations').get()).toEqual({ phase: 'failed' });
-    const saved = await create();
-    expect(saved.branch).toBe('saved/flow'); expect(await create()).toEqual(saved);
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_specs').get()).toEqual({ n: 1 });
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM bot_workflow_permissions').get()).toEqual({ n: 1 });
-  });
-
-  it('does not create an operation or leave a workflow when creator permission insertion is ignored', async () => {
-    raw.exec('DELETE FROM workflow_specs');
-    raw.exec('CREATE TRIGGER ignore_grant BEFORE INSERT ON bot_workflow_permissions BEGIN SELECT RAISE(IGNORE); END');
-    const service = new AutoHealSaveService(db, new WorkflowSpecRepository(db), new WorkflowDeployHistoryRepository(db),
-      { hasEditPermission: async () => true } as never, config(), author);
-    await expect(service.save({ workflowId: 'flow', actorId: 'editor', packId: 'pack', spec, createOnly: true, requestId: saveId })).rejects.toThrow('permission');
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM workflow_specs').get()).toEqual({ n: 0 });
-    expect(raw.prepare('SELECT COUNT(*) AS n FROM clawweb_pack_operations').get()).toEqual({ n: 0 });
-  });
-
-  it('does not replay a not-yet-applied remote deployment after its DB baseline changed', async () => {
-    const saved = await save();
-    const execute = gitExecution.executeGit;
-    vi.spyOn(gitExecution, 'executeGit').mockImplementationOnce(async (...args) => execute(...args));
-    const mock = vi.spyOn(await import('../auto-heal-deploy-git.js'), 'pushPreparedDeployment').mockRejectedValueOnce(new Error('transport failed before push'));
-    await expect(deploy(saved.commit)).rejects.toMatchObject({ code: 'DEPLOY_OUTCOME_UNKNOWN' }); mock.mockRestore();
-    raw.prepare('UPDATE workflow_specs SET spec_json = ? WHERE workflow_id = ?').run(JSON.stringify({ ...spec, title: 'new baseline' }), 'flow');
-    await expect(reconcile(deployId)).rejects.toMatchObject({ status: 409 });
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(original);
-    expect(git(root, '--git-dir', remote, 'tag', '--list')).toBe('');
-  });
-
-  it('fences a stale recovery worker when the same request failed and restarted with another prepared target', async () => {
-    const saved = await save();
-    const dir = path.join(root, 'recovery-clone'); mkdirSync(dir); await gitClient.cloneClawflows(dir, config());
-    const p1 = await prepareDeployCandidate(dir, 'flow', saved.commit, original, 1, 1, author);
-    const p2 = await prepareDeployCandidate(dir, 'flow', saved.commit, original, 1, 1, author);
-    expect(p1.commit).not.toBe(p2.commit);
-    const repo = new PackOperationRepository(db);
-    const input = { requestId: deployId, workflowId: 'flow', actorId: 'editor', kind: 'deploy' as const, inputHash: operationHash('fixed-aba-request') };
-    const started = await repo.begin(input);
-    const payload = (prepared: typeof p1) => JSON.stringify({ git: prepared,
-      ...candidateProjection('flow', prepared.content, prepared.manifestContent), packId: 'pack', remoteHash: remoteIdentity(config()),
-      version: 1, note: null, preserveDraft: false });
-    await repo.prepare(deployId, payload(p1), started.operation.attempt);
-    const originalClaim = PackOperationRepository.prototype.markPushing;
-    vi.spyOn(PackOperationRepository.prototype, 'markPushing').mockImplementationOnce(async function (requestId, expectedAttempt) {
-      await repo.failBeforePush(requestId, JSON.stringify({ code: 'CANCELLED_BEFORE_PUSH' }), expectedAttempt);
-      const restarted = await repo.restartFailed(input, expectedAttempt);
-      await repo.prepare(requestId, payload(p2), restarted.operation.attempt);
-      return originalClaim.call(this, requestId, expectedAttempt);
-    });
-    await expect(reconcile(deployId)).rejects.toMatchObject({ status: 503 });
-    const pending = (await repo.get(deployId))!;
-    expect(pending.attempt).toBe(2); expect(pending.phase).toBe('prepared'); expect(pending.resultJson).toBeNull();
-    expect(JSON.parse(pending.payloadJson!).git.commit).toBe(p2.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(original);
-    expect(git(root, '--git-dir', remote, 'tag', '--list')).toBe('');
-    const recovered = await reconcile(deployId);
-    expect(recovered.state).toBe('completed'); expect(recovered.result.commit).toBe(p2.commit);
-    expect(git(root, '--git-dir', remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(p2.commit);
-  });
-
 });

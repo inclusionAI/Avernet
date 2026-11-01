@@ -20,7 +20,7 @@ afterEach(async () => {
   if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()))
   server = undefined
   vi.restoreAllMocks()
-  if (root) rmSync(root, { recursive: true, force: true })
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   root = ''
 })
 

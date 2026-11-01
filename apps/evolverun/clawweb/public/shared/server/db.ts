@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { getCurrentEnv } from "./env.js";
 import { migrations, sqliteTriggers, type DbType } from "./schema.js";
 import { workflowSnapshotMigrations } from "./schema-workflow-snapshot.js";
-import { packOperationMigrations, assertPackOperationSchema, renderPackOperationDdl } from "./schema-pack-operations.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
   type ResolvedDbConfig, type YamlAntLogsConfig } from "./db/config.js";
@@ -202,13 +201,13 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     // migration ledger exists or contains rows. Do not read or write the
     // ledger or replay ordinary migrations here; only explicitly marked,
     // idempotent self-healing repairs are attempted.
-    console.warn("[clawweb] DDL denied — ordinary migrations skipped; ClawWeb pack operations require manually applied v149");
+    console.warn("[clawweb] DDL denied — ordinary migrations skipped");
   }
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
 
-  // v146 automation-history DDL is retired; reserve that version and keep existing schemas untouched.
-  for (const migration of [...migrations, ...workflowSnapshotMigrations, ...packOperationMigrations]) {
+  // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
+  for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.
     if (!migration.selfHealing && migration.version <= current) continue;
@@ -217,8 +216,7 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     if (migration.migrate) await migration.migrate(db);
     for (const ddl of migration.sql) {
       try {
-        await db.exec(packOperationMigrations.includes(migration)
-          ? renderPackOperationDdl(db, ddl) : db.dialect.renderDdl(ddl));
+        await db.exec(db.dialect.renderDdl(ddl));
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         const lower = msg.toLowerCase();
@@ -243,7 +241,6 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         }
       }
     }
-    if (packOperationMigrations.includes(migration)) await assertPackOperationSchema(db);
     if (canDdl) {
       await db.exec(
         "INSERT INTO schema_version (version, description) VALUES (?, ?)",
@@ -252,10 +249,6 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     }
     console.log(`[clawweb] Migration v${migration.version}: ${migration.description}`);
   }
-
-  // Managed accounts cannot apply v149: require its manually provisioned table
-  // rather than claiming an unapplied recovery journal is ready. No ledger writes.
-  if (!canDdl || current >= packOperationMigrations[0].version) await assertPackOperationSchema(db);
 
   // Apply SQLite AFTER UPDATE triggers for gmt_modified auto-update
   if (dbType === "sqlite") {

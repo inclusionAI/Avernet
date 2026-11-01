@@ -1,124 +1,168 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import { readWorkflowDocument } from '../../api/workflowDocument'
 import { sessionFor } from '../packVersionSession'
-import { createWorkflowPack, reconcileNewWorkflow, CREATE_WORKFLOW_TIMEOUT_MS } from '../newWorkflowSave'
+import { createWorkflowPack, CREATE_WORKFLOW_TIMEOUT_MS } from '../newWorkflowSave'
 
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: vi.fn() }))
+vi.mock('../../api/workflowDocument', () => ({ readWorkflowDocument: vi.fn() }))
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks() })
 const B = 'b'.repeat(40), C = 'c'.repeat(40)
 let seq = 0
-const spec = () => ({ id: `creation-${++seq}`, version: '1', title: 'New', nodes: [] })
-const readBlob = (blob: Blob): Promise<string> => new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob) })
-function saved(workflowId: string, requestId: string) { return { branch: `saved/${workflowId}`, commit: B, requestId, version: 1, packId: workflowId } }
+const spec = () => ({ id: `safe-new-${++seq}`, version: '1', title: 'New', nodes: [] })
+const readBlob = (blob: Blob): Promise<string> => new Promise(resolve => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.readAsText(blob) })
+function saved(id: string) { return { ok: true, saved: true, workflowId: id, packId: id, branch: `saved/${id}`, commit: B } }
 function snapshot(value: ReturnType<typeof spec>, commit = B) {
-  return { workflowId: value.id, packId: value.id, canWrite: true, baseRef: `origin/saved/${value.id}`, baseCommit: commit, draftHead: commit,
+  return { workflowId: value.id, packId: value.id, baseRef: `origin/saved/${value.id}`, baseCommit: commit, draftHead: commit,
     versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: value.id, workflows: [value.id] })), mode: '100644' },
       { path: `workflows/${value.id}.yaml`, contentBase64: btoa(stringify(value)), mode: '100644' }] }
 }
-it('atomically creates via createOnly and seeds the exact saved snapshot without a legacy DB write', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockImplementation(async (url, init) => {
-    if (url === '/api/auto-heal/save') {
-      const input = JSON.parse(await readBlob(init!.body as Blob))
-      expect(input).toMatchObject({ workflowId: value.id, packId: value.id, spec: value, createOnly: true, expectedSavedHead: null, requestId: expect.stringMatching(/^[\da-f-]{36}$/) })
-      expect(input).not.toHaveProperty('sourceCommit')
-      return saved(value.id, input.requestId)
-    }
-    expect(url).toBe(`/api/workflows/${value.id}/pack-version?version=draft`)
-    return snapshot(value)
-  })
+it('creates only once and verifies the acknowledged saved commit and DB content', async () => {
+  const value = spec(); vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockResolvedValueOnce(snapshot(value))
+  vi.mocked(readWorkflowDocument).mockResolvedValueOnce(value)
   const result = await createWorkflowPack(value)
-  expect(result.snapshot.baseCommit).toBe(B)
-  expect(sessionFor(value.id).state.creation!.phase).toBe('completed')
-  expect(sessionFor(value.id).state.versions.draft.snapshot!.baseCommit).toBe(B)
+  const [url, init] = vi.mocked(fetchJson).mock.calls[0]
+  expect(url).toBe('/api/auto-heal/save')
+  expect(init?.headers).toEqual({ 'X-Pack-Version-CSRF': '1' })
+  expect(JSON.parse(await readBlob(init!.body as Blob))).toMatchObject({ workflowId: value.id, packId: value.id, spec: value, createOnly: true, expectedSavedHead: null, requestId: expect.any(String) })
+  expect(result.result.commit).toBe(B); expect(result.snapshot.baseCommit).toBe(B)
+  expect(sessionFor(value.id).state.creation?.phase).toBe('completed')
+  await expect(createWorkflowPack(value)).rejects.toThrow('请勿重复创建')
   expect(fetchJson).toHaveBeenCalledTimes(2)
-  expect(vi.mocked(fetchJson).mock.calls.some(([url]) => url === '/api/workflows/save')).toBe(false)
 })
-it('fails on duplicate ID with no upsert fallback or automatic new UUID', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockRejectedValueOnce({ status: 409, body: '{"code":"WORKFLOW_ALREADY_EXISTS"}' })
-  await expect(createWorkflowPack(value)).rejects.toThrow('未覆盖原工作流')
-  const attempt = sessionFor(value.id).state.creation!
-  await expect(createWorkflowPack({ ...value, title: 'Updated' })).rejects.toThrow('请更换新 ID')
+it.each([
+  ['network', new TypeError('lost')],
+  ['unknown server error', { status: 503, body: '{"code":"CREATE_OUTCOME_UNKNOWN"}' }],
+  ['generic 409', { status: 409, body: 'bad gateway' }],
+  ['generic 500', { status: 500, body: '{"code":"SAVE_FAILED"}' }],
+])('fails closed on %s and never retries or queries a journal', async (_name, failure) => {
+  const value = spec(); vi.mocked(fetchJson).mockRejectedValueOnce(failure)
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
+  await expect(createWorkflowPack({ ...value, title: 'Later' })).rejects.toThrow('勿重试创建')
+  expect(sessionFor(value.id).state.creation?.input.spec).toEqual(value)
   expect(fetchJson).toHaveBeenCalledTimes(1)
-  expect(sessionFor(value.id).state.creation!.input.requestId).toBe(attempt.input.requestId)
-  expect(attempt.input.spec).toEqual(value)
 })
-it('retries an unknown creation with exactly the original bytes and requestId even if the user kept editing', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockRejectedValueOnce(new TypeError('lost'))
-  await expect(createWorkflowPack(value)).rejects.toThrow('数据库可能已创建而 Git 待保存')
-  const attempt = sessionFor(value.id).state.creation!
-  vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id, attempt.input.requestId)).mockResolvedValueOnce(snapshot(value))
-  const created = await createWorkflowPack({ ...value, title: 'Later local edit' })
-  expect(created.requestedSpec.title).toBe('New')
-  expect(await readBlob(vi.mocked(fetchJson).mock.calls[0][1]!.body as Blob)).toBe(await readBlob(vi.mocked(fetchJson).mock.calls[1][1]!.body as Blob))
+it('recognizes only the explicit conflict and never resubmits', async () => {
+  const value = spec(); vi.mocked(fetchJson).mockRejectedValueOnce({ status: 409, body: '{"code":"WORKFLOW_ALREADY_EXISTS"}' })
+  await expect(createWorkflowPack(value)).rejects.toThrow('未覆盖')
+  await expect(createWorkflowPack(value)).rejects.toThrow('更换 ID')
+  expect(fetchJson).toHaveBeenCalledTimes(1)
 })
-it('does not claim a pre-push failure is a saved workflow, and retains the draft for recovery', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockRejectedValueOnce(new TypeError('lost'))
-  await expect(createWorkflowPack(value)).rejects.toThrow()
-  const attempt = sessionFor(value.id).state.creation!
-  vi.mocked(fetchJson).mockResolvedValueOnce({ requestId: attempt.input.requestId, kind: 'save', state: 'failed' })
-  await expect(reconcileNewWorkflow(value.id)).rejects.toThrow('数据库工作流已创建，Git 初始化在推送前失败')
-  expect(sessionFor(value.id).state.creation!.phase).toBe('failed')
-  expect(sessionFor(value.id).state.creation!.input).toEqual(attempt.input)
-  expect(sessionFor(value.id).state.versions.draft.snapshot).toBeNull()
-  expect(vi.mocked(fetchJson).mock.calls[1][1]).not.toHaveProperty('method')
+it('allows a corrected retry only after an explicit pre-write rejection', async () => {
+  const value = spec(); vi.mocked(fetchJson).mockRejectedValueOnce({ status: 400, body: '{"code":"INVALID_WORKFLOW"}' })
+  await expect(createWorkflowPack(value)).rejects.toThrow('未执行创建')
+  const original = sessionFor(value.id).state.creation!.input.requestId
+  const corrected = { ...value, title: 'Corrected' }
+  vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockResolvedValueOnce(snapshot(corrected))
+  vi.mocked(readWorkflowDocument).mockResolvedValueOnce(corrected)
+  await createWorkflowPack(corrected)
+  expect(sessionFor(value.id).state.creation!.input.requestId).not.toBe(original)
 })
-it('recovers via explicit POST and only then loads the confirmed commit', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockRejectedValueOnce(new TypeError('lost'))
-  await expect(createWorkflowPack(value)).rejects.toThrow()
-  const requestId = sessionFor(value.id).state.creation!.input.requestId
-  vi.mocked(fetchJson).mockResolvedValueOnce({ requestId, kind: 'save', state: 'completed', result: saved(value.id, requestId) }).mockResolvedValueOnce(snapshot(value))
-  await reconcileNewWorkflow(value.id, true)
-  expect(vi.mocked(fetchJson).mock.calls[1]).toEqual([`/api/workflows/${value.id}/pack-operations/${requestId}/reconcile`, expect.objectContaining({ method: 'POST', headers: { 'X-Pack-Version-CSRF': '1' } })])
-  expect(sessionFor(value.id).state.creation!.phase).toBe('completed')
+it.each(['missing commit', 'wrong branch', 'wrong identity', 'invalid commit'])('rejects a malformed acknowledgement: %s', async kind => {
+  const value = spec(), response: Record<string, unknown> = saved(value.id)
+  if (kind === 'missing commit') delete response.commit
+  if (kind === 'wrong branch') response.branch = 'saved/other'
+  if (kind === 'wrong identity') response.workflowId = 'other'
+  if (kind === 'invalid commit') response.commit = 'not-a-commit'
+  vi.mocked(fetchJson).mockResolvedValueOnce(response)
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
+  expect(fetchJson).toHaveBeenCalledTimes(1)
 })
-it('never adopts a newer saved head; snapshot retry cannot reissue the create operation', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockImplementationOnce(async (_url, init) => saved(value.id, JSON.parse(await readBlob(init!.body as Blob)).requestId)).mockResolvedValueOnce(snapshot(value, C))
-  await expect(createWorkflowPack(value)).rejects.toThrow('不能替换原始保存基线')
-  expect(sessionFor(value.id).state.creation!.phase).toBe('saved')
-  expect(sessionFor(value.id).state.versions.draft.snapshot).toBeNull()
-  vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(value))
+it('does not adopt a moved head and only rereads after the acknowledged create', async () => {
+  const value = spec(); vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockResolvedValueOnce(snapshot(value, C))
+  await expect(createWorkflowPack(value)).rejects.toThrow('saved 已移动')
+  expect(sessionFor(value.id).state.creation?.phase).toBe('saved')
+  vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(value)); vi.mocked(readWorkflowDocument).mockResolvedValueOnce(value)
   await createWorkflowPack(value)
   expect(vi.mocked(fetchJson).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
 })
-it('bounds an unresponsive creation and ignores its late result without reading a new baseline', async () => {
-  const value = spec()
-  let resolve!: (result: unknown) => void
-  const late = new Promise(r => { resolve = r })
-  vi.useFakeTimers(); vi.mocked(fetchJson).mockReturnValueOnce(late)
-  const pending = expect(createWorkflowPack(value)).rejects.toThrow('新建保存结果尚未确认')
-  const requestId = sessionFor(value.id).state.creation!.input.requestId
+it('keeps the draft if DB content differs and never resends the create', async () => {
+  const value = spec(); vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockResolvedValueOnce(snapshot(value))
+  vi.mocked(readWorkflowDocument).mockResolvedValueOnce({ ...value, title: 'Other' })
+  await expect(createWorkflowPack(value)).rejects.toThrow('数据库内容与提交草稿不一致')
+  expect(sessionFor(value.id).state.creation?.phase).toBe('saved')
+  expect(sessionFor(value.id).state.versions.draft.snapshot).toBeNull()
+})
+it('times out and ignores late acknowledgements without retrying', async () => {
+  const value = spec(); let resolve!: (value: unknown) => void
+  const late = new Promise(r => { resolve = r }); vi.useFakeTimers(); vi.mocked(fetchJson).mockReturnValueOnce(late)
+  const pending = expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
   await vi.advanceTimersByTimeAsync(CREATE_WORKFLOW_TIMEOUT_MS); await pending
-  resolve(saved(value.id, requestId)); await late
-  expect(sessionFor(value.id).state.creation!.phase).toBe('unknown')
+  resolve(saved(value.id)); await late; await Promise.resolve()
+  expect(sessionFor(value.id).state.creation?.phase).toBe('unknown')
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
   expect(fetchJson).toHaveBeenCalledTimes(1)
 })
-it('resumes a confirmed pre-push failure with the same createOnly request, not a new DB upsert or UUID', async () => {
-  const value = spec()
-  vi.mocked(fetchJson).mockRejectedValueOnce(new TypeError('lost'))
-  await expect(createWorkflowPack(value)).rejects.toThrow()
-  const attempt = sessionFor(value.id).state.creation!
-  vi.mocked(fetchJson).mockResolvedValueOnce({ requestId: attempt.input.requestId, kind: 'save', state: 'failed' })
-  await expect(reconcileNewWorkflow(value.id)).rejects.toThrow('推送前失败')
-  vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id, attempt.input.requestId)).mockResolvedValueOnce(snapshot(value))
-  await createWorkflowPack(value)
-  expect(await readBlob(vi.mocked(fetchJson).mock.calls[2][1]!.body as Blob)).toEqual(await readBlob(vi.mocked(fetchJson).mock.calls[0][1]!.body as Blob))
-  expect(sessionFor(value.id).state.creation!.phase).toBe('completed')
+it('does not overwrite version file edits made while verifying creation', async () => {
+  const value = spec(); let resolve!: (value: unknown) => void
+  vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockReturnValueOnce(new Promise(r => { resolve = r }))
+  const pending = expect(createWorkflowPack(value)).rejects.toThrow('版本文件状态已变化')
+  await vi.waitFor(() => expect(fetchJson).toHaveBeenCalledTimes(2))
+  const session = sessionFor(value.id)
+  const { publish } = await import('../packVersionSession')
+  publish(session, { ...session.state, versions: { ...session.state.versions, draft: { ...session.state.versions.draft, blocked: true } } })
+  vi.mocked(readWorkflowDocument).mockResolvedValueOnce(value); resolve(snapshot(value)); await pending
+  expect(session.state.versions.draft.blocked).toBe(true)
+  expect(session.state.creation?.phase).toBe('saved')
+  await expect(createWorkflowPack(value)).rejects.toThrow('已有版本文件草稿')
+  expect(fetchJson).toHaveBeenCalledTimes(2)
 })
-it('preserves a confirmed Git result when snapshot read returns a duplicate-like conflict and retries only the snapshot', async () => {
+
+it.each([40, 64])('shows validated %i-character attempted identity without implying success or retrying', async length => {
+  const value = spec(), commit = 'a'.repeat(length), branch = `saved/${value.id}`
+  vi.mocked(fetchJson).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'CREATE_OUTCOME_UNKNOWN', branch, commit, detail: 'do-not-display' }) })
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
+  const creation = sessionFor(value.id).state.creation!
+  expect(creation.phase).toBe('unknown')
+  expect(creation.error).toContain(`尝试推送的分支：${branch}`)
+  expect(creation.error).toContain(`尝试的 commit：${commit}`)
+  expect(creation.error).toContain('不证明推送或创建成功')
+  expect(creation.error).not.toContain('do-not-display')
+  await expect(createWorkflowPack(value)).rejects.toThrow(branch)
+  expect(fetchJson).toHaveBeenCalledTimes(1)
+})
+it.each([
+  ['wrong status', 500, 'CREATE_OUTCOME_UNKNOWN', 'valid', 'valid'],
+  ['wrong code', 503, 'OTHER', 'valid', 'valid'],
+  ['different branch', 503, 'CREATE_OUTCOME_UNKNOWN', 'saved/secret-value', 'valid'],
+  ['branch newline', 503, 'CREATE_OUTCOME_UNKNOWN', 'newline', 'valid'],
+  ['invalid commit', 503, 'CREATE_OUTCOME_UNKNOWN', 'valid', 'secret-value'],
+  ['missing commit', 503, 'CREATE_OUTCOME_UNKNOWN', 'valid', undefined],
+  ['uppercase commit', 503, 'CREATE_OUTCOME_UNKNOWN', 'valid', 'A'.repeat(40)],
+  ['commit with newline', 503, 'CREATE_OUTCOME_UNKNOWN', 'valid', 'a'.repeat(40) + '\nsecret-value'],
+  ['commit with trailing newline', 503, 'CREATE_OUTCOME_UNKNOWN', 'valid', 'a'.repeat(40) + '\n'],
+])('does not expose untrusted identity for %s', async (_label, status, code, branchValue, commitValue) => {
+  const value = spec(), branch = branchValue === 'valid' ? `saved/${value.id}` : branchValue === 'newline' ? `saved/${value.id}\nsecret-value` : branchValue
+  const commit = commitValue === 'valid' ? B : commitValue
+  vi.mocked(fetchJson).mockRejectedValueOnce({ status, body: JSON.stringify({ code, branch, commit, message: 'secret-value' }) })
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
+  const message = sessionFor(value.id).state.creation!.error!
+  expect(message).not.toContain('secret-value')
+  expect(message).not.toContain('尝试推送的分支')
+  expect(message).not.toContain(B)
+  expect(fetchJson).toHaveBeenCalledTimes(1)
+})
+it('does not expose raw API errors after an acknowledged create', async () => {
   const value = spec()
-  vi.mocked(fetchJson).mockImplementationOnce(async (_url, init) => saved(value.id, JSON.parse(await readBlob(init!.body as Blob)).requestId))
-    .mockRejectedValueOnce({ status: 409, body: '{"code":"WORKFLOW_ALREADY_EXISTS"}' })
-  await expect(createWorkflowPack(value)).rejects.toThrow('新建已保存到 Git')
+  vi.mocked(fetchJson).mockResolvedValueOnce(saved(value.id)).mockRejectedValueOnce(new Error('API 503: secret-value'))
+  await expect(createWorkflowPack(value)).rejects.toThrow('saved 快照尚未校验')
+  expect(sessionFor(value.id).state.creation!.error).not.toContain('secret-value')
   expect(sessionFor(value.id).state.creation!.phase).toBe('saved')
-  vi.mocked(fetchJson).mockResolvedValueOnce(snapshot(value))
-  await reconcileNewWorkflow(value.id, true)
-  expect(sessionFor(value.id).state.creation!.phase).toBe('completed')
-  expect(vi.mocked(fetchJson).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+})
+
+it('does not display an attempted branch containing an unsafe workflow ID', async () => {
+  const value = { ...spec(), id: 'bad-id\n' }
+  vi.mocked(fetchJson).mockRejectedValueOnce({ status: 503, body: JSON.stringify({ code: 'CREATE_OUTCOME_UNKNOWN', branch: `saved/${value.id}`, commit: B }) })
+  await expect(createWorkflowPack(value)).rejects.toThrow('勿重试创建')
+  expect(sessionFor(value.id).state.creation!.error).not.toContain('尝试推送的分支')
+})
+it('does not leak an obsolete request error', async () => {
+  const value = spec(); let reject!: (cause: unknown) => void
+  vi.mocked(fetchJson).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail }))
+  const pending = createWorkflowPack(value)
+  sessionFor(value.id).createRequest = {}
+  reject(new Error('secret-value'))
+  await expect(pending).rejects.toThrow('新建响应已过期')
+  await expect(pending).rejects.not.toThrow('secret-value')
 })

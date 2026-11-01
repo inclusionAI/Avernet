@@ -76,7 +76,7 @@ export function createPackVersionRouter(deps: Dependencies): Router {
       const savedHead: string | null = typeof expectedSavedHead === 'string' ? expectedSavedHead : null;
       res.json(await deps.saveCandidate({ actorId: principal.actorId, ...(typeof b.requestId === 'string' ? { requestId: b.requestId } : {}), workflowId, sourceVersion: b.sourceVersion, sourceCommit: b.sourceCommit, expectedSavedHead: savedHead, changes: b.changes }));
     } catch (error) {
-      if (error instanceof PackCandidateOutcomeUnknownError) { res.status(503).json({ error: 'Save outcome unknown; reconcile before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: error.branch, commit: error.commit }); return; }
+      if (error instanceof PackCandidateOutcomeUnknownError) { res.status(503).json({ error: 'Save outcome unknown; inspect the Git branch manually before retrying', code: 'SAVE_OUTCOME_UNKNOWN', branch: error.branch, commit: error.commit }); return; }
       if (error instanceof PackCandidateConflictError) { res.status(409).json({ error: 'Version conflict', code: 'VERSION_CONFLICT' }); return; }
       if (operationError(res, error)) return;
       const message = error instanceof Error ? error.message : '';

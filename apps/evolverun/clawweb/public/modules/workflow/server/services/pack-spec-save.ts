@@ -2,7 +2,8 @@
  * The caller authorizes the write and durably journals prepared before push.
  * All Git publication uses the same CAS/recovery primitive as binary Pack edits.
  */
-import { stat, readFile } from 'node:fs/promises';
+import { stat, lstat, readFile, writeFile } from 'node:fs/promises';
+import { stringify as stringifyYaml } from 'yaml';
 import path from 'node:path';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import type { WorkflowSpec } from '../workflow.js';
@@ -19,6 +20,8 @@ export type PrepareWorkflowSpecInput = {
   spec: WorkflowSpec;
   config: ClawFlowsGitConfig;
   author: GitAuthor;
+  /** New identities may not adopt any existing workflow ref or default-branch Pack. */
+  createOnly?: boolean;
   /** Omission captures the observed remote saved head; null requires absence. */
   expectedSavedHead?: string | null;
   /** If supplied, must match the selected saved, wf, or default-HEAD base. */
@@ -46,6 +49,7 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
       const expectedSavedHead = refs.get(savedRef) ?? null;
       if (input.expectedSavedHead !== undefined && input.expectedSavedHead !== expectedSavedHead) throw new PackCandidateConflictError();
       const wf = refs.get(wfRef) ?? null;
+      if (input.createOnly && (expectedSavedHead !== null || wf !== null)) throw new PackCandidateConflictError();
       let sourceCommit = expectedSavedHead ?? wf;
       const sourceVersion = expectedSavedHead ? 'draft' : wf ? 'current' : 'initial';
       if (sourceCommit === null) {
@@ -68,8 +72,21 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
         await text(['checkout', '--quiet', '--detach', sourceCommit]);
         await text(['read-tree', sourceCommit]);
       } else await text(['read-tree', '--empty']);
+      if (input.createOnly) {
+        // A default-branch Pack or orphan spec is not evidence of ownership. The
+        // normal writer separately discovers all other manifests and refuses an
+        // ID collision before writing; these checks also forbid adopting a Pack.
+        const paths = resolvePackPaths(dir, input.packId, input.workflowId);
+        for (const file of [paths.manifestPath, paths.specPath]) {
+          try { await lstat(file); throw new PackCandidateConflictError(); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        }
+      }
       await writeWorkflowSpecToRepo(dir, input.packId, input.workflowId, input.spec);
       const previousPaths = resolvePackPaths(dir, input.packId, input.workflowId);
+      // The legacy writer normalizes on write. A new workflow must preserve the
+      // validated submitted document exactly, including numeric/absent version.
+      if (input.createOnly) await writeFile(previousPaths.specPath, stringifyYaml(input.spec, { lineWidth: 0 }));
       let previousManifest: Buffer | undefined;
       try {
         if ((await stat(previousPaths.manifestPath)).size > 1024 * 1024) throw new Error('Manifest or workflow too large');
@@ -77,6 +94,11 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await ensurePackManifest(dir, input.packId, input.workflowId);
       const paths = resolvePackPaths(dir, input.packId, input.workflowId);
+      // A new workflow owns a new Pack, not the default branch's unrelated
+      // working tree. Its parent retains history, but its saved tree contains
+      // only this Pack so a root-layout default branch cannot create an invalid
+      // mixed root/nested snapshot.
+      if (input.createOnly) await text(['read-tree', '--empty']);
       // Stage only the two owned files, directly from bytes. git add . would
       // apply filters and could accidentally rewrite inherited binary resources.
       for (const file of [paths.specPath, paths.manifestPath]) {

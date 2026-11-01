@@ -1,15 +1,54 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { useEditorStore } from './store'
-import { sessionFor, load, releaseCleanSession, publish, dirty, type Snapshot, type Version } from './packVersionSession'
+import { sessionFor, load, releaseCleanSession, publish, dirty, diff, updateVersion, type Version, type Session } from './packVersionSession'
 import { packVersionWritesEnabled } from './packVersionWritePolicy'
-import { mergeCanvasFiles, packWorkflow, sameExecutionSpec } from './packCanvas'
 import { savePackVersion } from './packVersionSave'
+import { packWorkflow } from './packCanvas'
+import { normalizationChanges } from './yamlDraft'
+import { readWorkflowDocument } from '../api/workflowDocument'
 
-type Binding = { sessionId: number; version: Version; snapshot: Snapshot; baseline: WorkflowSpec }
+// A split identity write requires explicit manual reconciliation before another save.
+// This guard is deliberately session-local, not a durable recovery journal.
+const uncertainRenames = new WeakMap<Session, string>()
 
-/** Capture at read time, never fetch/rebase during save. This consumer keeps the session alive across tabs. */
-export function usePackCanvasSession(id: string | null, databaseSpec?: WorkflowSpec) {
+type IdentityWrite = { newPackId: string; onStart: () => void; onResponse: (packId: string) => void }
+/** The save response contains no document; read the DB rather than guessing what was stored. */
+async function saveVerifiedDocument(id: string, baseline: WorkflowSpec, requestSpec: WorkflowSpec, isCurrent: () => boolean, packId?: string, identityWrite?: IdentityWrite): Promise<WorkflowSpec> {
+  let before: WorkflowSpec
+  try { before = await readWorkflowDocument(id) }
+  catch { throw new Error('无法核对数据库草稿，未发送保存；本地画布和文件仍保留。') }
+  if (normalizationChanges(baseline, before).length) throw new Error('数据库草稿自读取后已变化；未发送保存，请先核对并合并，本地草稿仍保留。')
+  if (!isCurrent()) throw new Error('核对数据库期间编辑内容或会话已变化；未发送保存，本地草稿仍保留。')
+  let result: { ok?: boolean; saved?: boolean; workflowId?: string; packId?: string }
+  try {
+    identityWrite?.onStart()
+    result = await fetchJson('/api/auto-heal/save', {
+      method: 'POST', headers: { 'X-Pack-Version-CSRF': '1' },
+      // Only an explicit Pack rename changes the DB identity.
+      body: new Blob([JSON.stringify({ workflowId: id, spec: requestSpec, ...(identityWrite ? { packId: identityWrite.newPackId } : {}) })], { type: 'application/json' }),
+    })
+  } catch (cause) {
+    const detail = cause instanceof Error ? `（${cause.message}）` : ''
+    throw new Error(`数据库保存失败或结果未知${detail}；Git 文件未保存，本地草稿仍保留，请先核对数据库，不要盲目重试。`)
+  }
+  if (!result || result.ok !== true || result.saved !== true || result.workflowId !== id
+    || typeof result.packId !== 'string' || !result.packId) {
+    throw new Error('数据库保存响应无法验证，结果未知；请核对数据库后再试。')
+  }
+  identityWrite?.onResponse(result.packId)
+  if (packId && result.packId !== packId) throw new Error('部分成功：数据库报告已保存，但 Pack 身份与 Git 基线不一致；文件未保存，本地草稿仍保留，请核对。')
+  let stored: WorkflowSpec
+  try { stored = await readWorkflowDocument(id) }
+  catch { throw new Error('数据库已报告保存成功，但无法重新读取核对；本地草稿仍保留，文件未保存，请先核对数据库。') }
+  const changed = normalizationChanges(requestSpec, stored)
+  if (changed.length) throw new Error(`数据库已报告保存成功，但保存内容与请求不同（字段：${changed.slice(0, 5).join('、')}${changed.length > 5 ? '等' : ''}）；本地草稿仍保留，文件未保存，请核对规范化或并发更改。`)
+  return stored
+}
+
+/** DB owns the workflow document; Git owns the other Pack files. */
+export function usePackCanvasSession(id: string | null, _databaseSpec?: WorkflowSpec) {
   const session = id ? sessionFor(id) : null
   const state = useSyncExternalStore(listener => {
     session?.listeners.add(listener)
@@ -20,76 +59,154 @@ export function usePackCanvasSession(id: string | null, databaseSpec?: WorkflowS
   const version = state?.version ?? 'current'
   const current = state?.versions[version]
   const snapshot = current?.snapshot
-  const binding = useRef<Binding | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const busy = useRef(false)
 
   useEffect(() => {
     if (session && id && !current?.snapshot && !current?.loading && !current?.error) load(session, id, version)
   }, [session, id, version, current?.snapshot, current?.loading, current?.error])
   useEffect(() => () => { if (session && id) queueMicrotask(() => releaseCleanSession(id, session)) }, [session, id])
   useEffect(() => {
-    const live = useEditorStore.getState()
-    if (!id || !snapshot || live.spec?.id !== id) { binding.current = null; setError(null); return }
-    if (!session!.canvasInitialized) {
-      session!.canvasInitialized = true
-      if (version === 'current' && snapshot.draftHead !== null && snapshot.draftHead !== snapshot.baseCommit
-        && !live.isDirty && !Object.keys(live.pendingEdits ?? {}).length && !dirty(current!) && !state?.reconciliation) {
-        publish(session!, { ...session!.state, version: 'draft' })
-        return
-      }
-    }
-    const previous = binding.current
-    if (previous?.sessionId === live.sessionId && previous.snapshot === snapshot && previous.version === version) return
-    try {
-      const baseline = live._savedSpec ?? databaseSpec
-      if (!baseline || baseline.id !== id) throw new Error('缺少读取时的数据库文档基线，无法安全保存。')
-      if (previous?.sessionId === live.sessionId && live.isDirty
-        && (previous.snapshot.baseCommit !== snapshot.baseCommit || previous.version !== version)) {
-        throw new Error('保存冲突：画布仍基于先前 Git 版本，请先处理本地画布修改，不能替换保存基线。')
-      }
-      const git = packWorkflow(snapshot.versionFiles, id, snapshot.packId)
-      if (!sameExecutionSpec(git.spec, baseline)) throw new Error('保存冲突：数据库初始文档与 Git 基线不一致。原布局和草稿仍保留，请明确选择 Git 版本。')
-      binding.current = { sessionId: live.sessionId, version, snapshot, baseline: structuredClone(baseline) }
-      setError(null)
-    } catch (cause) {
-      binding.current = null
-      setError(cause instanceof Error ? cause.message : '无法校验画布与 Git 基线。')
-    }
-  }, [id, snapshot, version, editor.sessionId, databaseSpec])
+    if (!session || !snapshot || session.canvasInitialized) return
+    session.canvasInitialized = true
+    if (version === 'current' && snapshot.draftHead !== null && snapshot.draftHead !== snapshot.baseCommit
+      && !dirty(current!) && !state?.reconciliation) publish(session, { ...session.state, version: 'draft' })
+  }, [session, snapshot, version, current, state?.reconciliation])
 
   async function save() {
     const live = useEditorStore.getState()
-    if (!id || !session) throw new Error('新建草稿已保留；首次保存需要服务端创建 Pack、manifest 和首个 Git snapshot 的接口，不能退回无并发保护的数据库保存。')
-    if (Object.keys(live.pendingEdits ?? {}).length) throw new Error('存在未应用的配置草稿；请先应用或放弃，再保存完整版本。')
-    if (session.state.deployment) throw new Error('上次部署结果尚未确认，请先查询或恢复部署操作。')
-    if (session.state.uploading || session.state.saving || session.state.reconciliation) throw new Error('文件正在上传、保存或保存结果未知；请先完成当前操作。')
+    if (!id || !session) throw new Error('首次新建尚无法安全初始化 Git saved 分支；本地草稿仍保留，请先导出备份。')
+    const uncertainRename = uncertainRenames.get(session)
+    if (uncertainRename) throw new Error(uncertainRename)
+    if (busy.current || session.state.saving || session.state.uploading || session.state.reconciliation || session.state.deployment) throw new Error('保存、上传或部署状态未完成；本地草稿仍保留。')
+    if (Object.keys(live.pendingEdits ?? {}).length) throw new Error('存在未应用的配置草稿；请先应用或放弃，再保存。')
     if (live.validationErrors?.length) throw new Error(`保存前请修复验证错误：${live.validationErrors[0].message}`)
-    const captured = binding.current
-    const source = session.state.versions[session.state.version]
-    if (!captured || captured.sessionId !== live.sessionId || captured.snapshot !== source.snapshot || captured.version !== session.state.version || live.spec?.id !== id) {
-      throw new Error(error ?? 'Git 基线尚未读取或已经变化，请先校验画布与版本文件。')
+    if (!live.spec || live.spec.id !== id || !live._savedSpec) throw new Error('缺少数据库文档基线；本地草稿仍保留。')
+    const selected: Version = session.state.version
+    const source = session.state.versions[selected]
+    const base = source.snapshot
+    const isCurrent = () => {
+      const now = useEditorStore.getState(), currentSource = session.state.versions[selected]
+      return now.sessionId === live.sessionId && !!now.spec && !!now._savedSpec
+        && !normalizationChanges(live.spec, now.spec).length && !normalizationChanges(live._savedSpec, now._savedSpec).length
+        && !Object.keys(now.pendingEdits ?? {}).length && !now.validationErrors.length && !session.state.uploading
+        && session.state.version === selected && currentSource.snapshot === base && !diff(source.files, currentSource.files).length
+        && !Object.entries(session.state.versions).some(([key, value]) => key !== selected && dirty(value))
     }
-    if (!packVersionWritesEnabled(source.snapshot)) throw new Error('此宿主未授予版本写入权限（canWrite），本地草稿仍保留。')
-    if (source.blocked || source.loading) throw new Error(source.error ?? 'Git 基线不可用，请先处理冲突。')
-    const requestSpec = structuredClone(live.spec)
-    const files = mergeCanvasFiles(captured.snapshot, source.files, captured.baseline, requestSpec)
-    const savedSpec = packWorkflow(files, id).spec
-    let ownedCompletion = false
-    const result = await savePackVersion(session, id, captured.version, files, result => {
-      const latest = useEditorStore.getState()
-      if (latest.sessionId !== captured.sessionId || latest.spec?.id !== id) return
-      ownedCompletion = true
-      if (sameExecutionSpec(savedSpec, requestSpec)) {
-        latest.completeSave(requestSpec, requestSpec, captured.sessionId)
-      } else if (!latest.isDirty && !Object.keys(latest.pendingEdits ?? {}).length) {
-        latest.loadSpec(savedSpec)
+    if (!base || (!dirty(source) && !source.blocked && !source.loading)) {
+      if (source.blocked || Object.values(session.state.versions).some(dirty)) throw new Error('文件草稿尚未处理；本地修改仍保留。')
+      if (!live.isDirty) return { dbSaved: false, commit: null as string | null }
+      const requestSpec = structuredClone(live.spec), sessionId = live.sessionId
+      busy.current = true
+      publish(session, { ...session.state, saving: true })
+      try {
+        const stored = await saveVerifiedDocument(id, live._savedSpec, requestSpec, isCurrent)
+        const latest = useEditorStore.getState()
+        if (latest.sessionId === sessionId && latest.spec?.id === id) latest.completeSave(stored, requestSpec, sessionId)
+        return { dbSaved: true, commit: null as string | null }
+      } finally {
+        busy.current = false
+        publish(session, { ...session.state, saving: false })
       }
-      const now = useEditorStore.getState()
-      // The next snapshot arrives in the same synchronous completion, after this callback.
-      binding.current = { sessionId: now.sessionId, version: 'draft',
-        snapshot: { ...captured.snapshot, packId: result.packId, baseCommit: result.commit }, baseline: structuredClone(now._savedSpec ?? savedSpec) }
-    })
-    return ownedCompletion ? result : null
+    }
+    if (source.loading || source.blocked) throw new Error(source.error ?? 'Git 版本尚未读取或不可用；本地草稿仍保留。')
+    const original = packWorkflow(base.versionFiles, id, base.packId)
+    const candidate = packWorkflow(source.files, id)
+    const renaming = candidate.packId !== base.packId
+    const originalFile = base.versionFiles.find(f => f.path === original.path)!
+    const candidateFile = source.files.find(f => f.path === candidate.path)!
+    // A retained old path is no longer the selected workflow. Do not silently
+    // commit edits to its former YAML or discard them as part of the move.
+    const retainedOldFile = candidate.path === original.path ? undefined : source.files.find(f => f.path === original.path)
+    if (retainedOldFile && retainedOldFile.contentBase64 !== originalFile.contentBase64) {
+      throw new Error('移动工作流路径时旧路径的 YAML 也已修改；请先恢复或删除旧文件，本地草稿仍保留。')
+    }
+    const fileChanged = candidateFile.contentBase64 !== originalFile.contentBase64
+    const canvasChanged = normalizationChanges(live.spec, live._savedSpec).length > 0
+    if (fileChanged && canvasChanged && normalizationChanges(candidate.spec, live.spec).length > 0) throw new Error('画布和文件同时修改了工作流 YAML，请先统一内容；所有草稿仍保留。')
+    if (fileChanged && normalizationChanges(original.spec, live._savedSpec).length > 0 && normalizationChanges(candidate.spec, live._savedSpec).length > 0) {
+      const dbPaths = normalizationChanges(original.spec, live._savedSpec)
+      const candidatePaths = normalizationChanges(live._savedSpec, candidate.spec)
+      const describe = (paths: string[]) => `${paths.slice(0, 5).join('、')}${paths.length > 5 ? '等' : ''}`
+      const capturedState = session.state
+      if (!window.confirm(`文件 YAML 基于较旧的 Git 版本，数据库草稿已有不同内容（字段：${describe(dbPaths)}）。继续将用文件候选完整替换数据库草稿，候选与数据库不同的字段：${describe(candidatePaths)}。这不是自动合并，可能丢失数据库修改。确定替换？取消可保留两份草稿并先手动合并。`)) {
+        throw new Error('已取消替换数据库草稿；画布和文件修改均保留，请先手动合并。')
+      }
+      if (useEditorStore.getState() !== live || session.state !== capturedState) throw new Error('确认期间编辑内容已变化；未保存，请重新核对。')
+    }
+    const requestSpec = structuredClone(fileChanged && !canvasChanged ? candidate.spec : live.spec)
+    const dbChanged = fileChanged || live.isDirty || renaming
+    // Git stores the old source bytes at the selected path; edited YAML belongs
+    // to the DB. Preserve the candidate path, mode and all unrelated files.
+    const files = source.files.map(f => f.path === candidate.path ? { ...f, contentBase64: originalFile.contentBase64 } : f)
+    const changes = diff(base.versionFiles, files)
+    if (changes.length && !packVersionWritesEnabled(base)) throw new Error('此宿主未授予版本文件写入权限；所有草稿仍保留。')
+    const sessionId = live.sessionId
+    let dbSaved = false
+    let renameDbState = '未发送'
+    let gitStarted = false
+    busy.current = true
+    publish(session, { ...session.state, saving: true })
+    try {
+      if (dbChanged) {
+        const stored = await saveVerifiedDocument(id, live._savedSpec, requestSpec, isCurrent, candidate.packId, renaming ? {
+          newPackId: candidate.packId,
+          onStart: () => { renameDbState = '已发送，结果未知' },
+          onResponse: returned => { renameDbState = `服务报告已保存 Pack ID ${returned}，文档尚未核对` },
+        } : undefined)
+        dbSaved = true
+        if (renaming) renameDbState = `已确认 Pack ID ${candidate.packId}，文档已核对`
+        const latest = useEditorStore.getState()
+        if (fileChanged && (latest.sessionId !== sessionId || !latest.spec || latest.spec.id !== id
+          || normalizationChanges(live.spec, latest.spec).length || Object.keys(latest.pendingEdits ?? {}).length
+          || session.state.version !== selected || session.state.versions[selected].snapshot !== base
+          || diff(source.files, session.state.versions[selected].files).length)) {
+          throw new Error('部分成功：数据库已保存，但保存期间画布或文件已变化；当前画布、未应用草稿和文件候选仍保留，请核对。')
+        }
+        if (latest.sessionId === sessionId && latest.spec?.id === id) {
+          if (fileChanged && !canvasChanged && !latest.isDirty) {
+            latest.importYaml(stored)
+            useEditorStore.getState().completeSave(stored, requestSpec, sessionId)
+          } else latest.completeSave(stored, requestSpec, sessionId)
+        }
+        // Remove only the workflow-file edit already saved to DB. Keep all other bytes.
+        const latestFiles = session.state.versions[selected].files
+        if (diff(source.files, latestFiles).length) throw new Error('部分成功：数据库已保存，但保存期间文件已变化；所有当前文件仍保留，请核对后重新保存。')
+        if (fileChanged) updateVersion(session, selected, { files })
+      }
+      if (!changes.length) return { dbSaved, commit: null as string | null }
+      // The shared helper owns the Git CAS and its unknown-outcome guard.
+      publish(session, { ...session.state, saving: false })
+      let result: Awaited<ReturnType<typeof savePackVersion>>
+      try {
+        const pending = savePackVersion(session, id, selected, files)
+        gitStarted = !!session.saveRequest
+        result = await pending
+      }
+      catch (cause) {
+        const detail = cause instanceof Error ? cause.message : '文件保存结果未知。'
+        throw new Error(`${dbSaved ? '部分成功：工作流已保存到数据库；' : ''}${detail} 文件仍保留；请勿盲目重试。`)
+      }
+      if (!result) {
+        const detail = session.state.versions[selected].error ?? '文件保存未完成或已取消。'
+        throw new Error(`${dbSaved ? '部分成功：工作流已保存到数据库；' : ''}${detail} 文件仍保留；请勿盲目重试。`)
+      }
+      return { dbSaved, commit: result.commit }
+
+    } catch (cause) {
+      if (renaming && renameDbState !== '未发送') {
+        const detail = cause instanceof Error ? cause.message : '操作失败。'
+        const gitState = gitStarted ? 'Git 保存已发起，结果未确认；请核对 saved 分支和完整候选' : 'Git 保存未发起'
+        const message = `Pack 重命名 ${base.packId} → ${candidate.packId} 未完整完成：数据库${renameDbState}；${gitState}。${detail} 请先人工核对数据库和 Git，不能自动重试。本页会话已锁定；刷新会丢失本地草稿和此锁定状态。`
+        uncertainRenames.set(session, message)
+        for (const key of ['current', 'draft'] as const) updateVersion(session, key, { blocked: true, error: message })
+        throw new Error(message)
+      }
+      throw cause
+    } finally {
+      busy.current = false
+      publish(session, { ...session.state, saving: false })
+    }
   }
 
   function adoptGit() {
@@ -97,11 +214,9 @@ export function usePackCanvasSession(id: string | null, databaseSpec?: WorkflowS
     try {
       const incoming = packWorkflow(snapshot.versionFiles, id, snapshot.packId).spec
       const live = useEditorStore.getState()
-      if (live.isDirty || Object.keys(live.pendingEdits ?? {}).length) {
-        if (!window.confirm('以此 Git 基线替换画布并放弃画布草稿？Pack 文件编辑不会丢弃。')) return
-        if (!live.replaceSession(incoming, live, false)) throw new Error('编辑内容已变化，未替换画布。')
-      } else live.loadSpec(incoming) // Retains same-workflow DB layout.
-      binding.current = null
+      if (!window.confirm('以 Git 中的工作流 YAML 替换画布？数据库草稿不会被修改，替换后需保存。')) return
+      live.importYaml(incoming)
+      setError(null)
     } catch (cause) { setError(cause instanceof Error ? cause.message : '无法加载 Git 工作流。') }
   }
   return { save, adoptGit, error: error ?? current?.error ?? null, loading: !!current?.loading,

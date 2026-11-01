@@ -8,7 +8,11 @@ import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execu
 import { writePackScripts } from '../pack-script-write.js';
 
 let root: string, repo: string, remote: string, base: string;
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const git = (cwd: string, ...args: string[]) => {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' });
+  return execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+};
 const author = { name: 'Tester', email: 'tester@example.invalid' };
 const input = () => ({ repoDir: repo, workflowId: 'flow', packId: 'pack', baseCommit: base, targetBranch: 'wf/flow', basePackPath: 'packs/pack', author });
 beforeEach(() => {
@@ -25,7 +29,7 @@ beforeEach(() => {
   git(repo, 'add', '.'); git(repo, 'commit', '-m', 'base'); base = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'push', 'origin', `HEAD:refs/heads/wf/flow`);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 it('changes only requested scripts, preserving files and executable mode', async () => {
   const { commit } = await writePackScripts({ ...input(), changes: [
     { path: 'scripts/edit.sh', content: '你好\n' }, { path: 'scripts/new.py', content: 'print(1)\n' }, { path: 'scripts/delete.sh', content: null },
@@ -120,9 +124,33 @@ it('rejects unsupported extension and final aggregate size and count', async () 
   await expect(writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] })).rejects.toThrow();
 });
 it('does not push unrelated annotated tags when push.followTags is enabled', async () => {
-  git(repo, 'tag', '-a', 'unrelated', '-m', 'tag', base); git(repo, 'config', 'push.followTags', 'true');
-  await writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] });
-  expect(git(repo, 'ls-remote', '--tags', 'origin', 'refs/tags/unrelated')).toBe('');
+  git(repo, 'tag', '-a', 'existing', '-m', 'existing', base);
+  git(repo, 'push', 'origin', 'refs/tags/existing:refs/tags/existing');
+  const existingTag = git(remote, 'rev-parse', 'refs/tags/existing');
+  git(repo, 'tag', '-a', 'unrelated', '-m', 'tag', base);
+  git(repo, 'config', 'push.followTags', 'true');
+  expect(git(remote, 'for-each-ref', '--format=%(refname)', 'refs/tags')).toBe('refs/tags/existing');
+
+  const { commit } = await writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] });
+  expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(commit);
+  expect(git(remote, 'rev-parse', 'refs/tags/existing')).toBe(existingTag);
+  expect(git(remote, 'for-each-ref', '--format=%(refname)', 'refs/tags')).toBe('refs/tags/existing');
+
+  // Positive control: the same local config and reachable tag really do cause
+  // an ordinary push to publish the tag, even when the branch is up to date.
+  git(repo, 'push', 'origin', `${commit}:refs/heads/wf/flow`);
+  expect(git(remote, 'rev-parse', 'refs/tags/unrelated')).toBe(git(repo, 'rev-parse', 'refs/tags/unrelated'));
+});
+it('ignores inherited Git config injection during a script write', async () => {
+  git(repo, 'tag', '-a', 'unrelated', '-m', 'tag', base);
+  vi.stubEnv('GIT_CONFIG_COUNT', '1');
+  vi.stubEnv('GIT_CONFIG_KEY_0', 'push.followTags');
+  vi.stubEnv('GIT_CONFIG_VALUE_0', 'true');
+  try {
+    const { commit } = await writePackScripts({ ...input(), changes: [{ path: 'scripts/new.py', content: 'x' }] });
+    expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).toBe(commit);
+    expect(git(remote, 'for-each-ref', '--format=%(refname)', 'refs/tags')).toBe('');
+  } finally { vi.unstubAllEnvs(); }
 });
 it('validates custom workflow paths and selected pack layout', async () => {
   writeFileSync(path.join(repo, 'packs/pack/workflow.pack.yaml'), 'id: pack\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n');

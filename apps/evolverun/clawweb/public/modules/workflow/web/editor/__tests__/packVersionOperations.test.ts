@@ -55,7 +55,7 @@ it.each([
   expect(session.state.reconciliation!.checkError).toBe(true)
 })
 
-it('bounds a hung save, reuses exact request bytes and UUID, and ignores the original late completion', async () => {
+it('bounds a hung save, forbids retry, and ignores the original late completion', async () => {
   const { id, session } = setup(), old = deferred<SaveResult>(), onSaved = vi.fn()
   vi.useFakeTimers()
   vi.mocked(fetchJson).mockImplementationOnce(() => old.promise)
@@ -63,13 +63,13 @@ it('bounds a hung save, reuses exact request bytes and UUID, and ignores the ori
   await vi.advanceTimersByTimeAsync(PACK_SAVE_TIMEOUT_MS)
   await saving
   const attempt = session.state.reconciliation!.attempt
-  vi.mocked(fetchJson).mockResolvedValueOnce(result(id, attempt.requestId, C))
-  await retryPackVersionSave(session, id)
+  await expect(retryPackVersionSave(session, id)).rejects.toThrow('无法安全自动重试')
   old.resolve(result(id, attempt.requestId, B)); await old.promise
-  expect(session.state.versions.draft.snapshot!.baseCommit).toBe(C)
-  expect(onSaved).toHaveBeenCalledTimes(1)
-  vi.useRealTimers()
-  expect(await readBlob(vi.mocked(fetchJson).mock.calls[0][1]!.body as Blob)).toBe(await readBlob(vi.mocked(fetchJson).mock.calls[1][1]!.body as Blob))
+  expect(session.state.reconciliation!.attempt).toBe(attempt)
+  expect(session.state.versions.current.blocked).toBe(true)
+  expect(session.state.versions.draft.snapshot).toBeNull()
+  expect(onSaved).not.toHaveBeenCalled()
+  expect(fetchJson).toHaveBeenCalledTimes(1)
 })
 
 it('retains conflict edits and never retries against a newly fetched head', async () => {
@@ -115,15 +115,15 @@ it.each([undefined, false, 'true', 1])('does not write unless the snapshot expli
 })
 
 const deployed = (id: string) => ({ ok: true, deployed: true, workflowId: id, packId: 'pack', deployNumber: 3, version: 4, tagName: 'deploy/3' })
-it('keeps deploy commit/requestId after failure and retries without double assigning a key', async () => {
+it('keeps deploy commit/requestId after failure and forbids both old and new candidate retries', async () => {
   const { id, session } = setup(), transport = vi.fn().mockRejectedValueOnce(new TypeError('lost')).mockResolvedValueOnce(deployed(id))
   await deployPackCandidate(session, id, 'pack', B, transport)
   const attempt = session.state.deployment!
   expect(attempt.pending).toBe(false)
-  expect(() => deployPackCandidate(session, id, 'pack', C, transport)).toThrow('不能分配新 requestId')
-  await deployPackCandidate(session, id, 'pack', B, transport)
-  expect(transport.mock.calls[1][0]).toEqual(transport.mock.calls[0][0])
-  expect(session.state.deployment).toBeNull()
+  expect(() => deployPackCandidate(session, id, 'pack', C, transport)).toThrow('不能自动重试')
+  expect(() => deployPackCandidate(session, id, 'pack', B, transport)).toThrow('不能自动重试')
+  expect(transport).toHaveBeenCalledTimes(1)
+  expect(session.state.deployment).toEqual(attempt)
 })
 it('queries deploy without side effects and restores only a verified completed result via explicit POST', async () => {
   const { id, session } = setup(), transport = vi.fn().mockRejectedValue(new TypeError('lost'))
@@ -147,7 +147,7 @@ it('times out deployment without assigning a new request ID or accepting a late 
   old.resolve(deployed(id)); await old.promise
   expect(session.state.deployment!.input.requestId).toBe(requestId)
 })
-it('reconciles a rename only against its submitted identity and preserves it across retry', async () => {
+it('preserves a renamed candidate when a mismatched receipt cannot be verified and retry is forbidden', async () => {
   const { id, session, candidate } = setup()
   const renamed = candidate.map(file => file.path === 'workflow.pack.yaml'
     ? { ...file, contentBase64: btoa(JSON.stringify({ id: 'renamed', workflows: [id] })) } : file)
@@ -160,12 +160,11 @@ it('reconciles a rename only against its submitted identity and preserves it acr
   await reconcilePackVersionSave(session, id)
   expect(session.state.reconciliation!.checkError).toBe(true)
   expect(session.state.versions.draft.snapshot).toBeNull()
-  vi.mocked(fetchJson).mockResolvedValueOnce({ ...result(id, pending.attempt.requestId), packId: 'renamed' })
-  await retryPackVersionSave(session, id)
-  expect(session.state.reconciliation).toBeNull()
-  expect(session.state.versions.draft.snapshot!.packId).toBe('renamed')
-  expect(session.state.versions.draft.files).toEqual(renamed)
-  expect(await readBlob(vi.mocked(fetchJson).mock.calls[0][1]!.body as Blob)).toBe(await readBlob(vi.mocked(fetchJson).mock.calls[2][1]!.body as Blob))
+  await expect(retryPackVersionSave(session, id)).rejects.toThrow('无法安全自动重试')
+  expect(session.state.reconciliation!.attempt).toBe(pending.attempt)
+  expect(session.state.versions.current.files).toEqual(renamed)
+  expect(session.state.versions.current.blocked).toBe(true)
+  expect(fetchJson).toHaveBeenCalledTimes(2)
 })
 it('accepts a correctly identified renamed candidate from completed operation recovery', async () => {
   const { id, session, candidate } = setup()

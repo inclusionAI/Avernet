@@ -48,8 +48,8 @@ async function submit(session: Session, id: string, attempt: SaveAttempt): Promi
     const version = attempt.input.sourceVersion
     const errorMessage = failure.preOperationConflict ? '保存未开始：服务端检测到并发请求。当前候选仍保留，请修改后使用新的 requestId 重试。'
       : failure.conflict ? '保存冲突：远端版本已变化。更改仍在本地，请重新读取后处理。'
-      : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请使用同一 requestId 重试原始候选。'
-      : '保存结果无法确认，可能已部分完成；更改仍在本地，请先对账或重试原始请求。'
+      : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请先人工核对 Git 的 saved 分支，不要盲目重试。'
+      : '保存结果无法确认，可能已部分完成；更改仍在本地，请先人工核对 Git 分支。'
     if (failure.preOperationConflict) {
       // The server did not create this operation, so there is nothing safe to
       // GET/reconcile. Keep the candidate editable; the next save allocates a
@@ -110,11 +110,9 @@ export async function savePackVersion(session: Session, id: string, version: Ver
     input: { sourceVersion: version, sourceCommit: snapshot.baseCommit, expectedSavedHead: snapshot.draftHead, changes, requestId } })
 }
 
-/** No new baseline, bytes or request ID may be substituted for an uncertain attempt. */
-export async function retryPackVersionSave(session: Session, id: string): Promise<SaveResult | null> {
-  const pending = session.state.reconciliation
-  if (!pending || pending.checking || session.state.saving || session.state.uploading) return null
-  return submit(session, id, pending.attempt)
+/** Without a durable journal a retry may perform a second write. */
+export async function retryPackVersionSave(_session: Session, _id: string): Promise<SaveResult | null> {
+  throw new Error('未配置持久操作日志，无法安全自动重试；请先人工核对 saved 分支。')
 }
 
 /** GET is observation-only; recovery is always an explicit CSRF-guarded POST. */

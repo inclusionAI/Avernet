@@ -90,6 +90,6 @@ describe('readPackScriptsFromRemote', () => {
       expect(await readPackScriptsFromRemote(input)).toEqual({ workflowId: 'flow', packId: 'pack', baseCommit: sha, baseRef: 'origin/saved/flow', skippedFiles: { count: 0, paths: [], truncated: false }, files: [
         { path: 'scripts/a.py', content: 'new\n', mode: '100644' }, { path: 'scripts/sub/b.sh', content: 'echo ok\n', mode: '100644' },
       ] });
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
   });
 });

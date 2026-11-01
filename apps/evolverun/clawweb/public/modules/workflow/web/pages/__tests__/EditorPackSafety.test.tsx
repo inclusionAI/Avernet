@@ -3,14 +3,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { BrowserRouter, MemoryRouter, Link, Route, Routes, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ id: '', fetchJson: vi.fn(), deploy: vi.fn(), saveDb: vi.fn(), gitSave: vi.fn(), completeSave: vi.fn(), history: vi.fn() }))
+const mocks = vi.hoisted(() => ({ id: '', fetchJson: vi.fn(), deploy: vi.fn(), saveDb: vi.fn(), gitSave: vi.fn(), get: vi.fn(), completeSave: vi.fn(), history: vi.fn() }))
 vi.mock('../../api/hooks', () => ({
   useEditorWorkflowDocument: () => ({ data: { id: mocks.id, title: 'Flow', version: '1', nodes: [] }, isLoading: false }),
   useSaveWorkflowToDb: () => ({ mutateAsync: mocks.saveDb, isPending: false }), useFacadeBindings: () => ({ data: [] }),
   useAutoHealSave: () => ({ mutateAsync: mocks.gitSave, isPending: false }), useAutoHealDeploy: () => ({ mutateAsync: mocks.deploy, isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'user' }) }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: mocks.fetchJson, api: { workflows: { getHistory: mocks.history, getDeploySnapshot: vi.fn() } } }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: mocks.fetchJson, api: { workflows: { getHistory: mocks.history, get: mocks.get, getDeploySnapshot: vi.fn() } } }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/WorkflowPackSidebar', () => ({ default: () => null }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
@@ -34,6 +34,7 @@ beforeEach(() => {
   useEditorStore.getState().reset({ force: true })
   useEditorStore.getState().loadSpec({ id: mocks.id, title: 'Flow', version: '1', nodes: [] })
   mocks.history.mockResolvedValue({ history: [], active: null })
+  mocks.get.mockImplementation(async () => ({ id: mocks.id, title: 'Flow', version: '1', nodes: [] }))
   mocks.fetchJson.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob) })
@@ -55,7 +56,7 @@ describe('Editor and Pack candidate isolation', () => {
     expect(screen.queryByText(/工作流保存已阻止/)).not.toBeInTheDocument()
     expect(mocks.saveDb).not.toHaveBeenCalled(); expect(mocks.gitSave).not.toHaveBeenCalled(); expect(useEditorStore.getState().isDirty).toBe(false)
   })
-  it('blocks deploy and canvas save with a dirty candidate even after switching tabs', async () => {
+  it('blocks deploy with a dirty file candidate even after switching tabs', async () => {
     mount(); await openFile(); fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'dirty' } })
     fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
     expect(screen.getByText(/切换标签后仍保留/)).toBeInTheDocument()
@@ -74,7 +75,7 @@ describe('Editor and Pack candidate isolation', () => {
     fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); fireEvent.click(screen.getByRole('button', { name: 'scripts/test' }))
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'late change' } })
     await act(async () => { pending.resolve(snapshot('draft')); await pending.promise })
-    expect(screen.getByText(/读取期间编辑内容已变化/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
+    expect(screen.getByText(/读取期间编辑内容或数据库草稿已变化/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
   })
   it('does not deploy after an unsuccessful Pack save and retains the file', async () => {
     mount(); await openFile(); fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'unsaved' } })
@@ -125,7 +126,7 @@ describe('Editor and Pack candidate isolation', () => {
     await waitFor(() => expect(screen.queryByText('正在读取完整 Git 基线…')).not.toBeInTheDocument())
     mocks.fetchJson.mockResolvedValueOnce({ ...snapshot('draft'), baseCommit: B, draftHead: B })
     fireEvent.click(screen.getByRole('button', { name: '部署' }))
-    expect(await screen.findByText(/部署候选与当前已读取基线或画布不一致/)).toBeInTheDocument()
+    expect(await screen.findByText(/saved\s*文件快照与已读取基线不一致/)).toBeInTheDocument()
     expect(mocks.deploy).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '确认部署' })).not.toBeInTheDocument()
   })

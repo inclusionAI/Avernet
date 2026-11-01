@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import type { Request, Response, Router } from "express";
 import { stringify as stringifyYaml } from "yaml";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import { packOperationDdl } from "@avernet/clawweb-shared/server/schema-pack-operations";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { parse as parseYaml } from "yaml";
+import { runGit } from "../../services/__tests__/clawflows-git-client-fixture.js";
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createAutoHealConfigTestDb, fallbackAuthor, fallbackGitConfig } from "../../config/__tests__/auto-heal-git-fixtures.js";
 import { AppConfigRepository } from "../../repositories/app-config-repository.js";
@@ -14,21 +18,16 @@ import { AutoHealDeployService } from "../../services/auto-heal-deploy-service.j
 import * as gitClient from "../../services/clawflows-git-client.js";
 import * as deployGit from "../../services/auto-heal-deploy-git.js";
 import * as specGit from "../../services/pack-spec-save.js";
-import * as preparedGit from "../../services/pack-git-prepared.js";
 import type { WorkflowSpec } from "../../workflow.js";
 import { createAutoHealRouter, type AutoHealRouteDependencies } from "../auto-heal.js";
 
-const candidate = "a".repeat(40), savedCommit = "b".repeat(40), releaseCommit = "c".repeat(40);
 const spec: WorkflowSpec = {
   id: "wf-git-settings", version: "1.0.0", title: "Git settings regression", nodes: [
     { id: "start", type: "start", title: "Start", config: {}, executor: { type: "start" }, dependsOn: [] },
     { id: "end", type: "end", title: "End", config: {}, executor: { type: "end" }, dependsOn: ["start"] },
   ],
 };
-const metadata = { packId: "pack-1", packPath: "", workflowFile: `workflows/${spec.id}.yaml`, content: stringifyYaml(spec),
-  manifestContent: stringifyYaml({ id: "pack-1", workflows: [{ id: spec.id, file: `workflows/${spec.id}.yaml` }] }) };
-
-// Exercise the real Express handlers and real SQL journal without opening a listening socket.
+// Real route handlers and SQLite, with a local Git remote and no journal table.
 function post(router: Router, endpoint: string, body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { "x-user-id": "operator" };
@@ -45,13 +44,13 @@ function post(router: Router, endpoint: string, body: unknown): Promise<{ status
 
 describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint => {
   let db: IDatabase, repo: AppConfigRepository, deps: AutoHealRouteDependencies;
-  let pushSaved: ReturnType<typeof vi.fn>;
-  const requestBody = { workflowId: spec.id, spec, packId: "pack-1", autoRun: true, candidateCommit: candidate };
+  let root: string, remote: string, candidate: string;
+  const requestBody = () => ({ workflowId: spec.id, spec: { ...spec, title: "DB draft" }, packId: "pack-1", autoRun: true, candidateCommit: candidate });
+  const remoteGit = (...args: string[]) => runGit(root, ["--git-dir", remote, ...args]);
+  const noJournal = async () => expect(await db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'clawweb_pack_operations'")).toEqual([]);
   const configQueries = (query: MockInstance<IDatabase["query"]>) => query.mock.calls.filter(([sql]) => sql.includes("cm_app_config"));
-  const writes = () => endpoint === "save" ? vi.mocked(specGit.withPreparedWorkflowSpec).mock.calls.map(([input]) => input.config)
-    : vi.mocked(gitClient.cloneClawflows).mock.calls.map(([, config]) => config);
-  const authors = () => endpoint === "save" ? vi.mocked(specGit.withPreparedWorkflowSpec).mock.calls.map(([input]) => input.author)
-    : vi.mocked(deployGit.prepareDeployCandidate).mock.calls.map(call => call[6]);
+  const writes = () => vi.mocked(gitClient.cloneClawflows).mock.calls.map(([, config]) => config);
+  const authors = () => vi.mocked(deployGit.prepareDeployCandidate).mock.calls.map(call => call[6]);
 
   beforeEach(async () => {
     db = createAutoHealConfigTestDb(); repo = new AppConfigRepository(db);
@@ -75,7 +74,7 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
         gmt_create INTEGER NOT NULL, gmt_modified INTEGER NOT NULL
       );
     `);
-    for (const ddl of packOperationDdl) await db.exec(ddl);
+    await db.exec("CREATE TABLE facade_bindings (command TEXT PRIMARY KEY, workflow_id TEXT, pack_id TEXT, remark TEXT, gmt_create INTEGER, gmt_modified INTEGER)");
     const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
     const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
     const botPermRepo = new BotWorkflowPermissionRepository(db);
@@ -83,43 +82,50 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     await botPermRepo.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id, can_view: 1, can_execute: 1, can_edit: 1 });
     deps = { resolvePrincipal: async () => ({ actorId: "operator" }), db, workflowSpecRepo, deployHistoryRepo, botPermRepo, gitConfig: { ...fallbackGitConfig },
       gitAuthor: { ...fallbackAuthor }, triggerRun: vi.fn().mockResolvedValue("run-1") };
-    pushSaved = vi.fn().mockResolvedValue({ branch: `saved/${spec.id}`, commit: savedCommit });
-    // Only replace Git preparation/publication. Permissions, journal transactions and completion are real.
-    vi.spyOn(specGit, "withPreparedWorkflowSpec").mockImplementation(async (input, callback) => callback({
-      ...metadata, content: stringifyYaml(input.spec), workflowId: input.workflowId, branch: `saved/${input.workflowId}`,
-      commit: savedCommit, sourceVersion: "current", sourceCommit: candidate, expectedSavedHead: null,
-      bundleBase64: Buffer.from("mocked Git bundle, never replayed in this fixture").toString("base64"),
-    }, pushSaved));
-    vi.spyOn(gitClient, "createTempRepo").mockResolvedValue("/tmp/auto-heal-git-settings-fixture");
-    vi.spyOn(gitClient, "removeTempRepo").mockResolvedValue();
-    vi.spyOn(gitClient, "cloneClawflows").mockResolvedValue();
-    vi.spyOn(gitClient, "getMaxDeployNumberFromGitTags").mockResolvedValue(0);
-    vi.spyOn(preparedGit, "readPreparedRemoteRefs").mockResolvedValue(new Map([
-      [`refs/heads/saved/${spec.id}`, candidate], [`refs/heads/wf/${spec.id}`, null],
-    ]));
-    vi.spyOn(deployGit, "prepareDeployCandidate").mockImplementation(async (_dir, workflowId, candidateCommit, previousCommit, deployNumber, version) => ({
-      ...metadata, workflowId, candidateCommit, previousCommit, deployNumber, version, branch: `wf/${workflowId}`,
-      tagName: `deploy/${workflowId}/#${deployNumber}`, commit: releaseCommit, releaseCommit, tagObject: "d".repeat(40),
-      bundleBase64: Buffer.from("mocked deployment bundle").toString("base64"),
-    }));
-    vi.spyOn(deployGit, "pushPreparedDeployment").mockImplementation(async (_dir, prepared) => ({
-      branch: prepared.branch, tagName: prepared.tagName, commit: prepared.commit, deployNumber: prepared.deployNumber,
-    }));
+    root = mkdtempSync(path.join(tmpdir(), "auto-heal-settings-"));
+    remote = path.join(root, "remote.git"); const seed = path.join(root, "seed");
+    runGit(root, ["init", "--bare", "--initial-branch=main", remote]);
+    runGit(root, ["init", "--initial-branch=main", seed]);
+    runGit(seed, ["config", "user.name", "Fixture Author"]); runGit(seed, ["config", "user.email", "fixture@example.invalid"]);
+    mkdirSync(path.join(seed, "workflows"));
+    writeFileSync(path.join(seed, "workflow.pack.yaml"), stringifyYaml({ id: "pack-1", version: "1.0.0", workflows: [{ id: spec.id, file: `workflows/${spec.id}.yaml` }] }));
+    writeFileSync(path.join(seed, "workflows", `${spec.id}.yaml`), stringifyYaml(spec));
+    writeFileSync(path.join(seed, "asset.txt"), "saved asset\n");
+    runGit(seed, ["add", "."]); runGit(seed, ["commit", "-m", "saved pack"]);
+    candidate = runGit(seed, ["rev-parse", "HEAD"]);
+    runGit(seed, ["push", remote, "HEAD:refs/heads/main", `HEAD:refs/heads/saved/${spec.id}`]);
+    const clone = gitClient.cloneClawflows;
+    vi.spyOn(gitClient, "cloneClawflows").mockImplementation((dir, config) => clone(dir, { ...config, remoteUrl: remote }));
+    vi.spyOn(gitClient, "createTempRepo"); vi.spyOn(specGit, "withPreparedWorkflowSpec");
+    vi.spyOn(deployGit, "prepareDeployCandidate"); vi.spyOn(deployGit, "pushPreparedDeployment");
   });
-  afterEach(async () => { vi.restoreAllMocks(); await db.close(); });
+  afterEach(async () => { vi.restoreAllMocks(); await db.close(); rmSync(root, { recursive: true, force: true }); });
+
+  it("resolves configured Git only for create-only save", async () => {
+    if (endpoint !== "save") return;
+    await repo.create({ config_key: "git", config_yaml: stringifyYaml({ remoteUrl: remote }) });
+    const create = vi.spyOn(AutoHealSaveService.prototype, "save").mockResolvedValue({ ok: true, saved: true,
+      workflowId: "new-flow", packId: "new-flow", branch: "saved/new-flow", commit: "a".repeat(40) });
+    const query = vi.spyOn(db, "query");
+    const result = await post(createAutoHealRouter(deps), "save", { workflowId: "new-flow", spec: { ...spec, id: "new-flow" }, createOnly: true });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ branch: "saved/new-flow", commit: "a".repeat(40) });
+    expect(configQueries(query)).toHaveLength(1);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ createOnly: true, actorId: "operator" }));
+  });
 
   it("rejects unverified header identities when no trusted principal is supplied", async () => {
     deps.resolvePrincipal = undefined;
-    const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody, createOnly: true, workflowId: "new-workflow" });
+    const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody(), createOnly: true, workflowId: "new-workflow" });
     expect(response.status).toBe(401);
     expect(writes()).toHaveLength(0);
     expect(await db.query("SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?", ["new-workflow"])).toEqual([]);
   });
 
-  it("never treats a Git process exit status as an HTTP informational status", async () => {
-    if (endpoint === "save") vi.mocked(specGit.withPreparedWorkflowSpec).mockRejectedValueOnce(Object.assign(new Error("git failed"), { status: 128 }));
+  it("never treats a process exit status as an HTTP informational status", async () => {
+    if (endpoint === "save") vi.spyOn(AutoHealSaveService.prototype, "save").mockRejectedValueOnce(Object.assign(new Error("database failed"), { status: 128 }));
     else vi.mocked(gitClient.cloneClawflows).mockRejectedValueOnce(Object.assign(new Error("git failed"), { status: 128 }));
-    expect((await post(createAutoHealRouter(deps), endpoint, requestBody)).status).toBe(500);
+    expect((await post(createAutoHealRouter(deps), endpoint, requestBody())).status).toBe(500);
   });
 
   it("reloads DB URL, credentials, and author between two requests on the same router", async () => {
@@ -129,84 +135,99 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
     }) });
     const query = vi.spyOn(db, "query"), router = createAutoHealRouter(deps);
     expect(query).not.toHaveBeenCalled();
-    expect(await post(router, endpoint, requestBody)).toMatchObject({ status: 200, body: { ok: true } });
-    expect(configQueries(query)).toHaveLength(1);
+    expect(await post(router, endpoint, requestBody())).toMatchObject({ status: 200, body: { ok: true } });
+    expect(configQueries(query)).toHaveLength(endpoint === "save" ? 0 : 1);
     await repo.update("git", { config_yaml: stringifyYaml({
       remoteUrl: "https://git.example.com/second.git", username: "second-user", email: "second@example.invalid",
       token: " second-token ", authorName: "Second Author", authorEmail: "second@example.invalid",
     }) });
     query.mockClear();
-    expect(await post(router, endpoint, requestBody)).toMatchObject({ status: 200, body: { ok: true } });
-    expect(configQueries(query)).toHaveLength(1);
-    expect(writes()).toEqual([
-      { remoteUrl: "https://git.example.com/first.git", username: "first-user", email: "first@example.invalid", token: " first-token " },
-      { remoteUrl: "https://git.example.com/second.git", username: "second-user", email: "second@example.invalid", token: " second-token " },
-    ]);
-    expect(authors()).toEqual([{ name: "First Author", email: "first@example.invalid" }, { name: "Second Author", email: "second@example.invalid" }]);
+    expect(await post(router, endpoint, requestBody())).toMatchObject({ status: 200, body: { ok: true } });
+    expect(configQueries(query)).toHaveLength(endpoint === "save" ? 0 : 1);
     expect(deps.gitConfig).toEqual(fallbackGitConfig); expect(deps.gitAuthor).toEqual(fallbackAuthor);
+    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled();
     if (endpoint === "save") {
-      expect(pushSaved).toHaveBeenCalledTimes(2);
+      expect(writes()).toEqual([]); expect(authors()).toEqual([]);
+      expect(JSON.parse((await deps.workflowSpecRepo.findByWorkflowId(spec.id))!.spec_json).title).toBe("DB draft");
       expect(await db.query("SELECT * FROM workflow_deploy_history")).toEqual([]);
       expect(deployGit.pushPreparedDeployment).not.toHaveBeenCalled(); expect(deps.triggerRun).not.toHaveBeenCalled();
+      expect(remoteGit("rev-parse", `refs/heads/saved/${spec.id}`)).toBe(candidate);
+      expect(remoteGit("branch", "--list", `wf/${spec.id}`)).toBe("");
     } else {
+      expect(writes()).toEqual([
+        { remoteUrl: "https://git.example.com/first.git", username: "first-user", email: "first@example.invalid", token: " first-token " },
+        { remoteUrl: "https://git.example.com/second.git", username: "second-user", email: "second@example.invalid", token: " second-token " },
+      ]);
+      expect(authors()).toEqual([{ name: "First Author", email: "first@example.invalid" }, { name: "Second Author", email: "second@example.invalid" }]);
       expect(deployGit.pushPreparedDeployment).toHaveBeenCalledTimes(2);
       expect(await db.query("SELECT deploy_number, action, is_active FROM workflow_deploy_history ORDER BY deploy_number"))
         .toEqual([{ deploy_number: 1, action: "deploy", is_active: 0 }, { deploy_number: 2, action: "deploy", is_active: 1 }]);
       expect(deps.triggerRun).toHaveBeenCalledTimes(2);
     }
+    await noJournal();
   });
 
   it("uses fallbacks after the DB row is disabled on the same router", async () => {
     await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "https://git.example.com/database.git"' });
     const router = createAutoHealRouter(deps);
-    expect((await post(router, endpoint, requestBody)).status).toBe(200);
+    expect((await post(router, endpoint, requestBody())).status).toBe(200);
     await repo.update("git", { enabled: 0 });
-    expect((await post(router, endpoint, requestBody)).status).toBe(200);
-    expect(writes()[1]).toEqual(fallbackGitConfig); expect(authors()[1]).toEqual(fallbackAuthor);
+    expect((await post(router, endpoint, requestBody())).status).toBe(200);
+    if (endpoint === "deploy") { expect(writes()[1]).toEqual(fallbackGitConfig); expect(authors()[1]).toEqual(fallbackAuthor); }
+    else { expect(writes()).toEqual([]); expect(authors()).toEqual([]); }
   });
 
-  it.each(["absent", "whitespace"])("returns 503 before any side effects for %s remote settings", async state => {
+  it.each(["absent", "whitespace"])("handles %s remote settings according to the endpoint contract", async state => {
     deps.gitConfig.remoteUrl = " \t\n ";
     if (state === "whitespace") await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "  "' });
     const save = vi.spyOn(AutoHealSaveService.prototype, "save"), deploy = vi.spyOn(AutoHealDeployService.prototype, "deploy");
     const write = vi.spyOn(db, "exec"), transaction = vi.spyOn(db, "transaction");
-    const result = await post(createAutoHealRouter(deps), endpoint, requestBody);
-    expect(result.status).toBe(503);
-    expect(result.body).toMatchObject(endpoint === "save"
-      ? { error: "Save could not be completed", code: "SAVE_FAILED" }
-      : { error: "Deployment could not be completed", code: "DEPLOYMENT_FAILED" });
-    expect(save).not.toHaveBeenCalled(); expect(deploy).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled(); expect(transaction).not.toHaveBeenCalled();
-    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled(); expect(pushSaved).not.toHaveBeenCalled();
+    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    if (endpoint === "save") {
+      expect(result).toMatchObject({ status: 200, body: { ok: true, saved: true } }); expect(save).toHaveBeenCalledOnce();
+      expect(JSON.parse((await deps.workflowSpecRepo.findByWorkflowId(spec.id))!.spec_json).title).toBe("DB draft");
+    } else {
+      expect(result).toMatchObject({ status: 503, body: { error: "Deployment could not be completed", code: "DEPLOYMENT_FAILED" } });
+      expect(save).not.toHaveBeenCalled(); expect(deploy).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled(); expect(transaction).not.toHaveBeenCalled();
+      expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
+    }
+    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled();
     expect(gitClient.createTempRepo).not.toHaveBeenCalled(); expect(gitClient.cloneClawflows).not.toHaveBeenCalled();
     expect(deployGit.prepareDeployCandidate).not.toHaveBeenCalled(); expect(deployGit.pushPreparedDeployment).not.toHaveBeenCalled();
-    expect(deps.triggerRun).not.toHaveBeenCalled();
-    expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
-    expect(await db.query("SELECT request_id FROM clawweb_pack_operations")).toEqual([]);
-    expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
+    expect(deps.triggerRun).not.toHaveBeenCalled(); expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
+    await noJournal();
   });
 
   it("recovers from missing remote settings on the next request without rebuilding the router", async () => {
     deps.gitConfig.remoteUrl = "";
     const router = createAutoHealRouter(deps);
-    expect((await post(router, endpoint, requestBody)).status).toBe(503);
+    expect((await post(router, endpoint, requestBody())).status).toBe(endpoint === "save" ? 200 : 503);
     await repo.create({ config_key: "git", config_yaml: 'remoteUrl: "https://git.example.com/configured.git"' });
-    expect((await post(router, endpoint, requestBody)).status).toBe(200);
-    expect(writes()).toEqual([{ ...fallbackGitConfig, remoteUrl: "https://git.example.com/configured.git" }]);
+    expect((await post(router, endpoint, requestBody())).status).toBe(200);
+    expect(writes()).toEqual(endpoint === "save" ? [] : [{ ...fallbackGitConfig, remoteUrl: "https://git.example.com/configured.git" }]);
   });
 
-  it("handles query failure inside the route without invoking either service", async () => {
-    vi.spyOn(db, "query").mockRejectedValue(new Error("database unavailable"));
+  it("handles Git config query failure without leaking details; save does not query Git config", async () => {
+    const query = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation((sql, params) => sql.includes("cm_app_config") ? Promise.reject(new Error("database unavailable")) : query(sql, params));
     const save = vi.spyOn(AutoHealSaveService.prototype, "save"), deploy = vi.spyOn(AutoHealDeployService.prototype, "deploy");
+    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    if (endpoint === "save") { expect(result.status).toBe(200); expect(save).toHaveBeenCalledOnce(); }
+    else { expect(result).toMatchObject({ status: 500, body: { code: "DEPLOYMENT_FAILED" } }); expect(save).not.toHaveBeenCalled(); }
+    expect(deploy).not.toHaveBeenCalled(); expect(JSON.stringify(result.body)).not.toContain("database unavailable");
+    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled(); expect(gitClient.createTempRepo).not.toHaveBeenCalled(); expect(deps.triggerRun).not.toHaveBeenCalled();
+  });
+
+  it("handles database query failure without leaking details or writing", async () => {
+    vi.spyOn(db, "query").mockRejectedValue(new Error("database unavailable"));
     const transaction = vi.spyOn(db, "transaction"), write = vi.spyOn(db, "exec");
-    const result = await post(createAutoHealRouter(deps), endpoint, requestBody);
-    expect(result.status).toBe(500);
-    expect(result.body).toMatchObject({ code: endpoint === "save" ? "SAVE_FAILED" : "DEPLOYMENT_FAILED" });
+    const result = await post(createAutoHealRouter(deps), endpoint, requestBody());
+    expect(result).toMatchObject({ status: 500, body: { code: endpoint === "save" ? "SAVE_FAILED" : "DEPLOYMENT_FAILED" } });
     expect(JSON.stringify(result.body)).not.toContain("database unavailable");
-    expect(save).not.toHaveBeenCalled(); expect(deploy).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled();
-    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled();
-    expect(gitClient.createTempRepo).not.toHaveBeenCalled(); expect(deps.triggerRun).not.toHaveBeenCalled();
+    expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled(); expect(gitClient.createTempRepo).not.toHaveBeenCalled();
+    expect(deps.triggerRun).not.toHaveBeenCalled();
   });
 
   it("preserves basic request validation before querying Git configuration", async () => {
@@ -219,35 +240,67 @@ describe.each(["save", "deploy"] as const)("AutoHeal /%s Git settings", endpoint
   it("checks permissions before preparing or pushing a private operation", async () => {
     await deps.botPermRepo!.upsert({ bot_id: null, bot_owner_id: "operator", workflow_id: spec.id,
       can_view: 1, can_execute: 0, can_edit: 0 });
-    expect((await post(createAutoHealRouter(deps), endpoint, requestBody)).status).toBe(403);
+    expect((await post(createAutoHealRouter(deps), endpoint, requestBody())).status).toBe(403);
     expect(specGit.withPreparedWorkflowSpec).not.toHaveBeenCalled(); expect(gitClient.cloneClawflows).not.toHaveBeenCalled();
-    expect(await db.query("SELECT request_id FROM clawweb_pack_operations")).toEqual([]);
+    await noJournal();
     expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
     expect(deps.triggerRun).not.toHaveBeenCalled();
   });
 
-  it("returns explicit unknown and never reruns after a failed Git publication", async () => {
-    if (endpoint === "save") pushSaved.mockRejectedValueOnce(new Error("git failed"));
-    else vi.mocked(deployGit.pushPreparedDeployment).mockRejectedValueOnce(new Error("git failed"));
-    const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody, requestId: "git-failed-request" });
-    expect(response.status).toBe(503);
-    expect(response.body).toMatchObject({ code: `${endpoint.toUpperCase()}_OUTCOME_UNKNOWN`, requestId: "git-failed-request" });
-    expect(await db.query("SELECT phase, lock_workflow_id FROM clawweb_pack_operations"))
-      .toEqual([{ phase: "unknown", lock_workflow_id: (await deps.workflowSpecRepo.findByWorkflowId(spec.id))!.id }]);
-    expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]);
-    expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
-    expect(deps.triggerRun).not.toHaveBeenCalled();
-  });
+  if (endpoint === "save") {
+    it("creates a workflow through the real route with the resolved Git remote", async () => {
+      await repo.create({ config_key: "git", config_yaml: stringifyYaml({ remoteUrl: remote }) });
+      const newSpec = { ...spec, id: "new-flow", title: "Created" };
+      const response = await post(createAutoHealRouter(deps), "save", {
+        workflowId: "new-flow", packId: "new-flow", spec: newSpec, createOnly: true, expectedSavedHead: null, requestId: "create-route-001",
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ ok: true, saved: true, workflowId: "new-flow", packId: "new-flow", branch: "saved/new-flow" });
+      expect(remoteGit("rev-parse", "refs/heads/saved/new-flow")).toBe(response.body.commit);
+      expect(remoteGit("ls-tree", "--name-only", "refs/heads/saved/new-flow").split("\n")).toEqual(["packs"]);
+      expect(await deps.botPermRepo!.hasEditPermission("new-flow", "operator")).toBe(true);
+      expect(JSON.parse((await deps.workflowSpecRepo.findByWorkflowId("new-flow"))!.spec_json)).toEqual(newSpec);
+      expect(remoteGit("branch", "--list", "wf/new-flow")).toBe("");
+      await noJournal();
+    });
+    it("reports a DB write failure without publishing or changing the draft", async () => {
+      vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("database unavailable"));
+      const response = await post(createAutoHealRouter(deps), endpoint, requestBody());
+      expect(response).toMatchObject({ status: 500, body: { code: "SAVE_FAILED" } });
+      expect(JSON.stringify(response.body)).not.toContain("database unavailable");
+      expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
+      expect(gitClient.cloneClawflows).not.toHaveBeenCalled(); expect(deps.triggerRun).not.toHaveBeenCalled();
+      expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]); await noJournal();
+    });
+  } else {
+    it("returns explicit unknown after a failed Git publication without a journal or run", async () => {
+      vi.mocked(deployGit.pushPreparedDeployment).mockRejectedValueOnce(new Error("git failed"));
+      const response = await post(createAutoHealRouter(deps), endpoint, { ...requestBody(), requestId: "git-failed-request" });
+      expect(response).toMatchObject({ status: 503, body: { code: "DEPLOY_OUTCOME_UNKNOWN", requestId: "git-failed-request", branch: `wf/${spec.id}`, tagName: `deploy/${spec.id}/#1` } });
+      expect(response.body.commit).toMatch(/^[a-f0-9]{40,64}$/);
+      expect(await db.query("SELECT id FROM workflow_deploy_history")).toEqual([]); await noJournal();
+      expect((await deps.workflowSpecRepo.findByWorkflowId(spec.id))?.spec_json).toBe(JSON.stringify(spec));
+      expect(remoteGit("branch", "--list", `wf/${spec.id}`)).toBe(""); expect(remoteGit("tag", "-l")).toBe("");
+      expect(deps.triggerRun).not.toHaveBeenCalled();
+    });
+  }
 
   if (endpoint === "deploy") {
-    it.each([
-      { workflowId: spec.id, candidateCommit: candidate, packId: "pack-1", autoRun: true },
-      { workflowId: spec.id },
-    ])("publishes valid explicit and legacy deployment requests instead of disabling the route: %j", async body => {
+    it.each([true, false])("publishes explicit and legacy deployment requests (explicit=%s)", async explicit => {
+      await deps.workflowSpecRepo.upsert(spec.id, "pack-1", JSON.stringify({ ...spec, title: "DB draft" }), "operator");
+      const body = explicit ? { workflowId: spec.id, candidateCommit: candidate, packId: "pack-1", autoRun: true } : { workflowId: spec.id };
       const result = await post(createAutoHealRouter(deps), endpoint, body);
       expect(result).toMatchObject({ status: 200, body: { ok: true, deployed: true, candidateCommit: candidate } });
-      expect(deployGit.prepareDeployCandidate).toHaveBeenCalledWith(expect.any(String), spec.id, candidate, "", 1, 1, fallbackAuthor);
+      expect(deployGit.prepareDeployCandidate).toHaveBeenCalledWith(expect.any(String), spec.id, expect.stringMatching(/^[a-f0-9]{40,64}$/), "", 1, 1, fallbackAuthor);
       expect(deployGit.pushPreparedDeployment).toHaveBeenCalledOnce(); expect(deps.triggerRun).toHaveBeenCalledOnce();
+      const release = String(result.body.commit);
+      expect(remoteGit("rev-parse", `refs/heads/wf/${spec.id}`)).toBe(release);
+      expect(remoteGit("rev-parse", `refs/tags/deploy/${spec.id}/#1^{}`)).toBe(release);
+      expect(remoteGit("rev-parse", `refs/heads/saved/${spec.id}`)).toBe(candidate);
+      expect(parseYaml(remoteGit("show", `${release}:workflows/${spec.id}.yaml`)).title).toBe("DB draft");
+      expect(remoteGit("show", `${release}:asset.txt`)).toBe("saved asset");
+      expect(await db.query("SELECT deploy_number, action, is_active FROM workflow_deploy_history")).toEqual([{ deploy_number: 1, action: "deploy", is_active: 1 }]);
+      await noJournal();
     });
 
     it("rejects an unproven 64-character candidate without pushing or creating public history", async () => {

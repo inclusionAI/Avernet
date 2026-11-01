@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse, stringify } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ db: null as WorkflowSpec | null, fetchJson: vi.fn(), deploy: vi.fn(), history: vi.fn(), saveDb: vi.fn(), gitSave: vi.fn() }))
+const mocks = vi.hoisted(() => ({ db: null as WorkflowSpec | null, fetchJson: vi.fn(), deploy: vi.fn(), history: vi.fn(), saveDb: vi.fn(), gitSave: vi.fn(), get: vi.fn() }))
 vi.mock('../../api/hooks', () => ({
   useEditorWorkflowDocument: () => ({ data: mocks.db, isLoading: false }),
   useAutoHealDeploy: () => ({ mutateAsync: mocks.deploy, isPending: false }),
@@ -11,7 +11,7 @@ vi.mock('../../api/hooks', () => ({
   useFacadeBindings: () => ({ data: [] }),
 }))
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: mocks.fetchJson,
-  api: { workflows: { getHistory: mocks.history, getDeploySnapshot: vi.fn() } } }))
+  api: { workflows: { getHistory: mocks.history, get: mocks.get, getDeploySnapshot: vi.fn() } } }))
 vi.mock('../../components/WorkflowPackSidebar', () => ({ default: () => null }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
@@ -21,7 +21,7 @@ vi.mock('../../components/YamlEditor', () => ({ default: () => null }))
 vi.mock('../../components/WorkflowHistoryPanel', () => ({ default: () => null }))
 import Editor from '../Editor'
 import { useEditorStore } from '../../editor/store'
-import { sessionFor, type Snapshot } from '../../editor/packVersionSession'
+import { sessionFor, updateVersion, type Snapshot } from '../../editor/packVersionSession'
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40)
 let sequence = 0
@@ -50,8 +50,14 @@ beforeEach(() => {
   state().loadSpec(mocks.db)
   current = snapshot('current'); saved = snapshot('draft')
   mocks.history.mockResolvedValue({ history: [], active: null })
+  mocks.get.mockImplementation(async () => mocks.db)
   mocks.deploy.mockImplementation(async input => ({ ok: true, deployed: true, workflowId: input.workflowId, packId: input.packId, deployNumber: 2, version: 3, tagName: 'deploy/test/2' }))
   mocks.fetchJson.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url === '/api/auto-heal/save') {
+      const input = JSON.parse(await readBlob(init!.body as Blob))
+      mocks.db = input.spec
+      return { ok: true, saved: true, workflowId: input.workflowId, packId: input.packId ?? 'pack' }
+    }
     if (init?.method === 'PUT') {
       const input = JSON.parse(await readBlob(init.body as Blob))
       const byPath = new Map((input.sourceVersion === 'draft' ? saved : current).versionFiles.map(item => [item.path, item]))
@@ -68,224 +74,202 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); state().reset({ force: true }); vi.restoreAllMocks() })
 
-describe('Editor full Pack snapshot save and confirmed deployment', () => {
-  it('merges canvas YAML at the manifest path and file edits against the captured read baseline', async () => {
-    await mount()
-    act(() => state().updateSpecField('title', 'Canvas edit'))
-    await editFile('scripts/run', 'new script')
-    click('保存到草稿')
-    await screen.findByText(new RegExp(`已保存到草稿 commit ${B}`))
-    expect(putCalls()).toHaveLength(1)
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
+describe('Editor DB workflow and saved Pack files', () => {
+  it('saves canvas to DB and file edits to Git separately, then deploys the saved candidate', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'Canvas edit'))
+    await editFile('scripts/run', 'new script'); click('保存到草稿')
+    await screen.findByText(new RegExp(`文件已保存到 saved commit ${B}`))
+    const writes = mocks.fetchJson.mock.calls.filter(([, init]) => init?.method)
+    expect(writes.map(([, init]) => init.method)).toEqual(['POST', 'PUT'])
+    const dbInput = JSON.parse(await readBlob(writes[0][1].body))
+    expect(dbInput).toMatchObject({ workflowId: mocks.db!.id, spec: { title: 'Canvas edit' } })
+    expect(dbInput).not.toHaveProperty('packId')
+    const input = JSON.parse(await readBlob(writes[1][1].body))
     expect(input).toMatchObject({ sourceVersion: 'current', sourceCommit: A, expectedSavedHead: null, requestId: expect.stringMatching(/^[\da-f-]{36}$/) })
-    expect(input.changes).toHaveLength(2)
-    const yaml = input.changes.find((change: { path: string }) => change.path === 'flows/custom.yaml')
-    expect(parse(atob(yaml.contentBase64))).toMatchObject({ title: 'Canvas edit' })
-    expect(input.changes.find((change: { path: string }) => change.path === 'scripts/run')).toMatchObject({ mode: '100755', contentBase64: btoa('new script') })
+    expect(input.changes).toEqual([expect.objectContaining({ path: 'scripts/run', mode: '100755', contentBase64: btoa('new script') })])
     expect(saved.versionFiles.find(item => item.path === 'assets/raw')).toEqual(current.versionFiles.find(item => item.path === 'assets/raw'))
-    expect(mocks.fetchJson.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(1)
+    expect(saved.versionFiles.find(item => item.path === 'flows/custom.yaml')).toEqual(current.versionFiles.find(item => item.path === 'flows/custom.yaml'))
     expect(state().isDirty).toBe(false)
-    expect(mocks.saveDb).not.toHaveBeenCalled(); expect(mocks.gitSave).not.toHaveBeenCalled()
-    click('部署工作流')
-    expect(await screen.findByText(/草稿 commit：/)).toHaveTextContent(B)
-    click('确认部署')
+    click('部署工作流'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署')
     await screen.findByText(/部署成功/)
-    expect(mocks.deploy).toHaveBeenCalledWith(expect.objectContaining({ workflowId: mocks.db!.id, packId: 'pack', candidateCommit: B, requestId: expect.stringMatching(/^[\da-f-]{36}$/) }))
+    expect(mocks.deploy).toHaveBeenCalledWith(expect.objectContaining({ workflowId: mocks.db!.id, packId: 'pack', candidateCommit: B }))
   })
-  it.each([false, true])('binds a legal Pack rename with canvas edits=%s and deploys the new identity', async editCanvas => {
-    await mount()
-    if (editCanvas) act(() => state().updateSpecField('title', 'Canvas plus rename'))
-    await editFile('workflow.pack.yaml', stringify({ id: 'renamed-pack', workflows: [{ id: mocks.db!.id, file: 'flows/custom.yaml' }] }))
-    await editFile('scripts/run', 'renamed script')
-    click('保存到草稿'); await screen.findByText(new RegExp(`已保存到草稿 commit ${B}`))
-    expect(state().isDirty).toBe(false)
-    expect(state().spec!.id).toBe(mocks.db!.id)
-    expect(state().spec!.title).toBe(editCanvas ? 'Canvas plus rename' : 'Original')
-    const session = sessionFor(mocks.db!.id)
-    expect(session.state.versions.draft.snapshot!.packId).toBe('renamed-pack')
-    expect(session.state.versions.draft.snapshot!.baseCommit).toBe(B)
+  it.each(['identity', 'path'] as const)('saves a Pack %s change with canvas edits and deploys the resulting candidate', async change => {
+    await mount(); act(() => state().updateSpecField('title', 'Keep canvas'))
+    const packId = change === 'identity' ? 'renamed-pack' : 'pack'
+    const path = change === 'path' ? 'flows/other.yaml' : 'flows/custom.yaml'
+    const originalFile = current.versionFiles.find(item => item.path === 'flows/custom.yaml')!
+    if (change === 'path') {
+      const session = sessionFor(mocks.db!.id)
+      act(() => updateVersion(session, 'current', { files: session.state.versions.current.files.map(item =>
+        item.path === 'flows/custom.yaml' ? { ...item, path } : item) }))
+    }
+    await editFile('workflow.pack.yaml', stringify({ id: packId, workflows: [{ id: mocks.db!.id, file: path }] }))
+    click('保存到草稿'); await screen.findByText(new RegExp(`文件已保存到 saved commit ${B}`))
+    const writes = mocks.fetchJson.mock.calls.filter(([, init]) => init?.method)
+    expect(writes.map(([, init]) => init.method)).toEqual(['POST', 'PUT'])
+    const dbInput = JSON.parse(await readBlob(writes[0][1].body))
+    expect(dbInput).toMatchObject({ workflowId: mocks.db!.id, spec: { title: 'Keep canvas' } })
+    if (change === 'identity') expect(dbInput.packId).toBe(packId)
+    else expect(dbInput).not.toHaveProperty('packId')
+    const gitInput = JSON.parse(await readBlob(writes[1][1].body))
+    expect(gitInput).toMatchObject({ sourceVersion: 'current', sourceCommit: A, expectedSavedHead: null })
+    const manifestChange = gitInput.changes.find((item: { path: string }) => item.path === 'workflow.pack.yaml')
+    expect(parse(atob(manifestChange.contentBase64))).toMatchObject({ id: packId, workflows: [{ id: mocks.db!.id, file: path }] })
+    if (change === 'path') {
+      expect(gitInput.changes).toContainEqual({ path: 'flows/custom.yaml', operation: 'delete' })
+      expect(gitInput.changes).toContainEqual({ ...originalFile, path, operation: 'create' })
+      expect(saved.versionFiles.some(item => item.path === 'flows/custom.yaml')).toBe(false)
+    }
+    expect(saved.versionFiles.find(item => item.path === path)).toEqual({ ...originalFile, path })
     expect(saved.versionFiles.find(item => item.path === 'assets/raw')).toEqual(current.versionFiles.find(item => item.path === 'assets/raw'))
-    expect(saved.versionFiles.find(item => item.path === 'scripts/run')).toMatchObject({ mode: '100755', contentBase64: btoa('renamed script') })
-    expect(mocks.fetchJson.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(1)
-    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
-    act(() => state().updateSpecField('title', 'Next canvas edit'))
-    click('保存'); await waitFor(() => expect(state().isDirty).toBe(false))
-    expect(putCalls()).toHaveLength(2)
-    expect(JSON.parse(await readBlob(putCalls()[1][1].body))).toMatchObject({ sourceVersion: 'draft', sourceCommit: B, expectedSavedHead: B })
-    expect(screen.queryByText(/数据库初始文档与 Git 基线不一致/)).not.toBeInTheDocument()
-    click('部署'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署')
+    expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).toMatchObject({ packId, baseCommit: B })
+    expect(state().spec!.title).toBe('Keep canvas'); expect(state().isDirty).toBe(false)
+    click('部署工作流'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署')
     await screen.findByText(/部署成功/)
-    expect(mocks.deploy).toHaveBeenCalledWith(expect.objectContaining({ workflowId: mocks.db!.id, packId: 'renamed-pack', candidateCommit: B }))
+    expect(mocks.deploy).toHaveBeenCalledWith(expect.objectContaining({ workflowId: mocks.db!.id, packId, candidateCommit: B }))
   })
-  it('does not clean a renamed canvas candidate when the server returns the previous Pack ID', async () => {
+  it('retains edits and blocks Git when a Pack rename is acknowledged with the wrong identity', async () => {
     await mount(); act(() => state().updateSpecField('title', 'Keep canvas'))
     await editFile('workflow.pack.yaml', stringify({ id: 'renamed-pack', workflows: [{ id: mocks.db!.id, file: 'flows/custom.yaml' }] }))
-    mocks.fetchJson.mockImplementationOnce(async (_url, init) => ({ branch: `saved/${mocks.db!.id}`, commit: B,
-      requestId: JSON.parse(await readBlob(init!.body as Blob)).requestId, version: 2, packId: 'pack' }))
-    click('保存到草稿'); await screen.findByRole('region', { name: '保存结果对账' })
+    mocks.fetchJson.mockResolvedValueOnce({ ok: true, saved: true, workflowId: mocks.db!.id, packId: 'pack' })
+    click('保存到草稿'); expect(await screen.findAllByText(/Git 保存未发起/)).not.toHaveLength(0)
     expect(state().isDirty).toBe(true); expect(state().spec!.title).toBe('Keep canvas')
-    expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).toBeNull()
-    expect(sessionFor(mocks.db!.id).state.reconciliation!.attempt.expectedPackId).toBe('renamed-pack')
-  })
-  it('keeps the DB initial positions after verifying the Git execution spec', async () => {
-    mocks.db!.nodes = [{ id: 'done', title: 'Done', phase: 'execute', executor: { type: 'done' }, _x: 501, _y: 202 }]
-    state().reset({ force: true }); state().loadSpec(mocks.db!)
-    const gitSpec = { ...mocks.db!, nodes: mocks.db!.nodes.map(({ _x, _y, ...node }) => node) }
-    current = snapshot('current', gitSpec)
-    await mount()
-    expect(state().positions.done).toEqual({ x: 501, y: 202 })
-    expect(screen.queryByText(/数据库初始文档与 Git 基线不一致/)).not.toBeInTheDocument()
-    act(() => state().updateSpecField('title', 'Updated'))
-    click('保存'); await screen.findByText(/完整版本已保存/)
-    expect(state().positions.done).toEqual({ x: 501, y: 202 })
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
-    expect(parse(atob(input.changes[0].contentBase64)).nodes[0]).not.toHaveProperty('_x')
-  })
-  it('reports DB/Git mismatch explicitly and permits selecting Git instead of silently rebasing', async () => {
-    current = snapshot('current', { ...mocks.db!, title: 'Git version' })
-    await mount()
-    expect(screen.getByText(/数据库初始文档与 Git 基线不一致/)).toBeInTheDocument()
-    click('保存'); await waitFor(() => expect(putCalls()).toHaveLength(0))
-    click('以此 Git 基线加载画布')
-    await waitFor(() => expect(state().spec!.title).toBe('Git version'))
-    act(() => state().updateSpecField('title', 'Updated'))
-    click('保存'); await screen.findByText(/完整版本已保存/)
-  })
-  it('rejects divergent canvas/file changes to the same YAML without losing either edit', async () => {
-    await mount(); act(() => state().updateSpecField('title', 'Canvas'))
-    await editFile('flows/custom.yaml', stringify({ ...mocks.db!, title: 'Files' }))
-    click('保存到草稿')
-    await screen.findByText(/画布和文件编辑同时修改/)
-    expect(state().spec!.title).toBe('Canvas'); expect((screen.getByLabelText('文件内容') as HTMLTextAreaElement).value).toContain('Files')
+    expect((screen.getByLabelText('文件内容') as HTMLTextAreaElement).value).toContain('renamed-pack')
     expect(putCalls()).toHaveLength(0)
+    expect(sessionFor(mocks.db!.id).state.versions.current.blocked).toBe(true)
   })
-  it('adopts file-only workflow changes after save without a stale canvas overwriting them', async () => {
+  it('saves DB layout and leaves Git untouched for canvas-only edits', async () => {
+    mocks.db!.nodes = [{ id: 'done', title: 'Done', phase: 'execute', executor: { type: 'done' }, _x: 501, _y: 202 }]
+    state().reset({ force: true }); state().loadSpec(mocks.db!); current = snapshot('current', { ...mocks.db!, nodes: mocks.db!.nodes.map(({ _x, _y, ...node }) => node) })
+    await mount(); act(() => state().updateSpecField('title', 'Updated')); click('保存')
+    await screen.findByText(/工作流已保存到数据库/)
+    expect(state().positions.done).toEqual({ x: 501, y: 202 }); expect(putCalls()).toHaveLength(0)
+  })
+  it('does not replace the DB draft merely because Git YAML differs', async () => {
+    current = snapshot('current', { ...mocks.db!, title: 'Git version' }); await mount()
+    expect(state().spec!.title).toBe('Original')
+    act(() => state().updateSpecField('title', 'DB edit')); click('保存'); await screen.findByText(/工作流已保存到数据库/)
+    expect(mocks.db!.title).toBe('DB edit'); expect(putCalls()).toHaveLength(0)
+  })
+  it('rejects divergent canvas and workflow-file edits without losing either', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'Canvas'))
+    await editFile('flows/custom.yaml', stringify({ ...mocks.db!, title: 'Files' })); click('保存到草稿')
+    await screen.findByText(/画布和文件同时修改/)
+    expect(state().spec!.title).toBe('Canvas'); expect((screen.getByLabelText('文件内容') as HTMLTextAreaElement).value).toContain('Files')
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0)
+  })
+  it('routes a file-only workflow YAML edit to DB and adopts it on canvas', async () => {
     await mount(); await editFile('flows/custom.yaml', stringify({ ...mocks.db!, title: 'File edit' }))
-    click('保存到草稿'); await screen.findByText(/完整版本已保存/)
-    expect(state().spec!.title).toBe('File edit'); expect(state().isDirty).toBe(false)
-    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); click('保存')
-    expect(putCalls()).toHaveLength(1)
+    click('保存到草稿'); await screen.findByText(/工作流已保存到数据库/)
+    expect(state().spec!.title).toBe('File edit'); expect(state().isDirty).toBe(false); expect(putCalls()).toHaveLength(0)
+    expect(sessionFor(mocks.db!.id).state.versions.current.files).toEqual(current.versionFiles)
   })
-  it('preserves merged YAML on CAS conflict and never fetches a new baseline at save time', async () => {
-    await mount(); act(() => state().updateSpecField('title', 'Keep local'))
-    mocks.fetchJson.mockRejectedValueOnce({ status: 409, body: '{"code":"VERSION_CONFLICT"}' })
-    click('保存'); await screen.findAllByText(/保存冲突/)
-    expect(state().isDirty).toBe(true)
-    const session = sessionFor(mocks.db!.id)
-    expect(session.state.versions.current.snapshot?.baseCommit).toBe(A)
-    expect(parse(atob(session.state.versions.current.files.find(item => item.path === 'flows/custom.yaml')!.contentBase64)).title).toBe('Keep local')
-    expect(mocks.fetchJson).toHaveBeenCalledTimes(2)
-    click('部署'); expect(mocks.deploy).not.toHaveBeenCalled()
+  it('reports partial success on Git conflict after DB save, preserving files and blocking deploy', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'Saved DB'))
+    await editFile('scripts/run', 'Keep local')
+    const original = mocks.fetchJson.getMockImplementation()!
+    mocks.fetchJson.mockImplementation((url, init) => init?.method === 'PUT' ? Promise.reject({ status: 409, body: '{"code":"VERSION_CONFLICT"}' }) : original(url, init))
+    click('保存到草稿'); await screen.findByText(/部分成功：工作流已保存到数据库/)
+    expect(state().isDirty).toBe(false); expect(mocks.db!.title).toBe('Saved DB')
+    const version = sessionFor(mocks.db!.id).state.versions.current
+    expect(version.snapshot?.baseCommit).toBe(A); expect(version.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('Keep local'))
+    expect(putCalls()).toHaveLength(1); click('部署工作流'); expect(mocks.deploy).not.toHaveBeenCalled()
   })
-  it('blocks a public host lacking canWrite without globally disabling the editor', async () => {
-    delete current.canWrite; await mount(); act(() => state().updateSpecField('title', 'Local'))
-    click('保存'); await screen.findByText(/未授予版本写入权限/)
-    expect(putCalls()).toHaveLength(0); expect(state().isDirty).toBe(true)
+  it('retains both edits and makes no Git write when DB save fails', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'Keep canvas')); await editFile('scripts/run', 'Keep file')
+    mocks.fetchJson.mockRejectedValueOnce(new Error('DB offline')); click('保存到草稿'); await screen.findByText(/DB offline/)
+    expect(state().isDirty).toBe(true); expect(screen.getByLabelText('文件内容')).toHaveValue('Keep file'); expect(putCalls()).toHaveLength(0)
+  })
+  it('blocks file writes without canWrite but allows a DB-only save', async () => {
+    delete current.canWrite; await mount(); act(() => state().updateSpecField('title', 'DB only')); click('保存')
+    await screen.findByText(/工作流已保存到数据库/); expect(putCalls()).toHaveLength(0)
+    await editFile('scripts/run', 'local'); expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
+    expect(state().spec!.title).toBe('DB only')
   })
   it('keeps pending drafts and Ctrl-S cannot bypass the apply boundary', async () => {
     await mount(); act(() => state().setPendingEdit('yaml', 'unapplied'))
-    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
-    await screen.findByText(/存在未应用的配置草稿/)
-    expect(putCalls()).toHaveLength(0); expect(state().pendingEdits).toEqual({ yaml: 'unapplied' })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true }); await screen.findByText(/存在未应用的配置草稿/)
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0); expect(state().pendingEdits).toEqual({ yaml: 'unapplied' })
     click('部署'); expect(mocks.deploy).not.toHaveBeenCalled()
   })
-  it('does not mark edits made while a save is in flight clean', async () => {
+  it('does not mark edits made during DB save clean', async () => {
     await mount(); act(() => state().updateSpecField('title', 'First'))
     const pending = deferred<unknown>(); mocks.fetchJson.mockImplementationOnce(() => pending.promise)
     click('保存'); act(() => state().updateSpecField('title', 'Later'))
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
-    await act(async () => { pending.resolve({ branch: `saved/${mocks.db!.id}`, commit: B, requestId: input.requestId, version: 2, packId: 'pack' }); await pending.promise })
+    await act(async () => { pending.resolve({ ok: true, saved: true, workflowId: mocks.db!.id, packId: 'pack' }); await pending.promise })
     expect(state().spec!.title).toBe('Later'); expect(state().isDirty).toBe(true)
   })
-  it('ignores a late save completion for a replaced canvas lifetime', async () => {
+  it('ignores late DB save completion for a replaced canvas lifetime', async () => {
     await mount(); act(() => state().updateSpecField('title', 'First'))
-    const pending = deferred<unknown>(); mocks.fetchJson.mockImplementationOnce(() => pending.promise)
-    click('保存'); const input = JSON.parse(await readBlob(putCalls()[0][1].body))
+    const pending = deferred<unknown>(); mocks.fetchJson.mockImplementationOnce(() => pending.promise); click('保存')
     act(() => { state().reset({ force: true }); state().loadSpec({ ...mocks.db!, title: 'Different lifetime' }) })
-    await act(async () => { pending.resolve({ branch: `saved/${mocks.db!.id}`, commit: B, requestId: input.requestId, version: 2, packId: 'pack' }); await pending.promise })
+    await act(async () => { pending.resolve({ ok: true, saved: true, workflowId: mocks.db!.id, packId: 'pack' }); await pending.promise })
     expect(state().spec!.title).toBe('Different lifetime')
   })
-  it('rejects a deployment confirmation if edits happen after opening it', async () => {
-    await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）'); await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).not.toBeNull()); fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); click('部署'); await screen.findByRole('button', { name: '确认部署' })
-    act(() => state().updateSpecField('title', 'Later'))
-    click('确认部署'); expect(screen.getByText(/确认期间编辑内容已变化/)).toBeInTheDocument()
-    expect(mocks.deploy).not.toHaveBeenCalled()
+  it('rejects deployment confirmation if canvas edits happen after opening it', async () => {
+    await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）')
+    await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).not.toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); click('部署'); await screen.findByRole('button', { name: '确认部署' })
+    act(() => state().updateSpecField('title', 'Later')); click('确认部署')
+    expect(screen.getByText(/确认期间编辑内容已变化/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
   })
-  it('retains the original Git baseline through a dirty canvas unmount/remount', async () => {
+  it('uses captured Git baseline after a dirty file session unmount/remount', async () => {
     const view = render(<Editor embedded initialWorkflowId={mocks.db!.id} />)
     await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.current.loading).toBe(false))
-    act(() => state().updateSpecField('title', 'Persist local'))
-    view.unmount()
-    current = { ...current, baseCommit: 'c'.repeat(40) }
-    render(<Editor embedded initialWorkflowId={mocks.db!.id} />)
-    click('保存'); await screen.findByText(/完整版本已保存/)
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
-    expect(input.sourceCommit).toBe(A)
-    expect(mocks.fetchJson.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(1)
+    await editFile('scripts/run', 'Persist local'); view.unmount(); current = { ...current, baseCommit: 'c'.repeat(40) }
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} />); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('保存到草稿')
+    await screen.findByText(/文件已保存到 saved commit/)
+    expect(JSON.parse(await readBlob(putCalls()[0][1].body)).sourceCommit).toBe(A)
   })
-  it('prefers the existing saved snapshot on a clean open and validates the database against it', async () => {
-    current = { ...current, draftHead: B, versionFiles: snapshot('current', { ...mocks.db!, title: 'Older current' }).versionFiles }
-    await mount()
-    await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot?.baseCommit).toBe(B))
-    act(() => state().updateSpecField('title', 'Edit saved'))
-    click('保存'); await screen.findByText(/完整版本已保存/)
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
-    expect(input).toMatchObject({ sourceVersion: 'draft', sourceCommit: B, expectedSavedHead: B })
-  })
-  it('can explicitly edit current after a newer saved exists, confirming its captured saved head', async () => {
-    current = { ...current, draftHead: B }
-    saved = snapshot('draft', { ...mocks.db!, title: 'Saved work' })
-    await mount()
-    await waitFor(() => expect(sessionFor(mocks.db!.id).state.version).toBe('draft'))
-    fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
-    fireEvent.click(screen.getByRole('button', { name: /当前版/ }))
-    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
-    act(() => state().updateSpecField('title', 'Current after publication'))
-    click('保存'); await screen.findByText(/完整版本已保存/)
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining(B))
-    const input = JSON.parse(await readBlob(putCalls()[0][1].body))
-    expect(input).toMatchObject({ sourceVersion: 'current', sourceCommit: A, expectedSavedHead: B })
-  })
-  it('creates with createOnly + requestId, then edits the captured saved snapshot without any DB-first upsert', async () => {
-    mocks.db = null
-    state().reset({ force: true })
-    render(<Editor />)
+  it('retains a new draft and refuses a blind retry when creation is unknown', async () => {
+    mocks.db = null; state().reset({ force: true }); mocks.fetchJson.mockRejectedValue(new TypeError('lost')); render(<Editor />)
     click('更多操作'); fireEvent.click(screen.getByRole('menuitem', { name: '新建工作流' }))
-    fireEvent.change(screen.getByLabelText('标识'), { target: { value: 'brand-new' } })
-    fireEvent.change(screen.getByLabelText('标题'), { target: { value: 'New' } })
-    click('Create')
-    expect(state().spec?.id).toBe('brand-new'); expect(state().isDirty).toBe(true)
-    mocks.fetchJson.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === '/api/auto-heal/save') {
-        const input = JSON.parse(await readBlob(init!.body as Blob))
-        mocks.db = input.spec
-        saved = { ...snapshot('draft', input.spec), packId: input.packId,
-          versionFiles: [file('workflow.pack.yaml', stringify({ id: input.packId, workflows: [{ id: input.workflowId, file: 'flows/custom.yaml' }] })), file('flows/custom.yaml', stringify(input.spec))] }
-        return { branch: `saved/${input.workflowId}`, commit: B, requestId: input.requestId, version: 1, packId: input.packId }
-      }
-      if (init?.method === 'PUT') {
-        const input = JSON.parse(await readBlob(init.body as Blob))
-        return { branch: 'saved/brand-new', commit: 'c'.repeat(40), requestId: input.requestId, version: 2, packId: 'brand-new' }
-      }
-      return saved
-    })
-    click('保存'); await screen.findByText(/新建完整版本已保存/)
-    const createCall = mocks.fetchJson.mock.calls.find(([url]) => url === '/api/auto-heal/save')!
-    expect(JSON.parse(await readBlob(createCall[1].body))).toMatchObject({ workflowId: 'brand-new', createOnly: true, expectedSavedHead: null, requestId: expect.stringMatching(/^[\da-f-]{36}$/) })
-    expect(state().isDirty).toBe(false)
-    act(() => state().updateSpecField('title', 'New edit'))
-    click('保存'); await screen.findByText(/完整版本已保存到 saved commit c/)
-    expect(JSON.parse(await readBlob(putCalls()[0][1].body))).toMatchObject({ sourceVersion: 'draft', sourceCommit: B, expectedSavedHead: B })
-    expect(mocks.fetchJson.mock.calls.some(([url]) => url === '/api/workflows/save')).toBe(false)
-    expect(mocks.saveDb).not.toHaveBeenCalled(); expect(mocks.gitSave).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('标识'), { target: { value: 'brand-new' } }); fireEvent.change(screen.getByLabelText('标题'), { target: { value: 'New' } }); click('Create'); click('保存')
+    await screen.findByText(/新建结果尚未确认/); expect(state().spec?.id).toBe('brand-new'); expect(state().isDirty).toBe(true)
+    click('保存'); await screen.findByText(/勿重试创建/)
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
-  it('retains the deployment request ID after an unknown result and retries the exact candidate', async () => {
-    await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）'); await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).not.toBeNull()); fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); mocks.deploy.mockRejectedValueOnce(new TypeError('network'))
-    click('部署'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署')
-    await screen.findByText(/部署结果尚未确认/)
-    const first = mocks.deploy.mock.calls[0][0]
-    click('部署'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署')
-    await screen.findByText(/部署成功/)
-    expect(mocks.deploy.mock.calls[1][0]).toEqual(first)
+  it('does not retry an unknown deployment without a journal', async () => {
+    await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）')
+    await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).not.toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); mocks.deploy.mockRejectedValueOnce(new TypeError('network'))
+    click('部署'); await screen.findByRole('button', { name: '确认部署' }); click('确认部署'); await screen.findByText(/没有日志恢复或安全自动重试/)
+    click('部署'); expect(mocks.deploy).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchJson.mock.calls.every(([url]) => !url.includes('pack-operations'))).toBe(true)
   })
+  it('holds an unverifiable Git result as unknown without cleaning or retrying the candidate', async () => {
+    await mount(); await editFile('scripts/run', 'uncertain')
+    mocks.fetchJson.mockImplementationOnce(async () => ({ branch: `saved/${mocks.db!.id}`, commit: B, requestId: 'wrong', version: 2, packId: 'pack' }))
+    click('保存到草稿'); await screen.findByRole('region', { name: '保存结果对账' })
+    const session = sessionFor(mocks.db!.id)
+    expect(session.state.reconciliation?.attempt.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('uncertain'))
+    expect(session.state.versions.current.blocked).toBe(true)
+    expect(screen.queryByRole('button', { name: /重试原始/ })).not.toBeInTheDocument()
+    click('部署工作流'); expect(mocks.deploy).not.toHaveBeenCalled(); expect(putCalls()).toHaveLength(1)
+  })
+  it('blocks confirmation if the database changes after the dialog opens', async () => {
+    await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）')
+    await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.draft.snapshot).not.toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' })); click('部署'); await screen.findByRole('button', { name: '确认部署' })
+    mocks.get.mockResolvedValue({ ...mocks.db!, title: 'External change' }); click('确认部署')
+    await screen.findByText(/数据库草稿或本地编辑已变化/); expect(mocks.deploy).not.toHaveBeenCalled()
+  })
+
+  it('confirms and uses the captured saved head when editing current files', async () => {
+    current = { ...current, draftHead: B }; await mount()
+    await waitFor(() => expect(sessionFor(mocks.db!.id).state.version).toBe('draft'))
+    fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('当前版（wf）'); click('scripts/run')
+    fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'current edit' } }); click('保存到草稿')
+    await screen.findByText(/文件已保存到 saved commit/)
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining(B))
+    expect(JSON.parse(await readBlob(putCalls()[0][1].body))).toMatchObject({ sourceVersion: 'current', sourceCommit: A, expectedSavedHead: B })
+  })
+  it('does not accept an unverifiable DB response or start a Git write', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'Keep canvas')); await editFile('scripts/run', 'Keep file')
+    mocks.fetchJson.mockResolvedValueOnce({ ok: true, saved: true, workflowId: 'wrong', packId: 'pack' })
+    click('保存到草稿'); await screen.findByText(/数据库保存响应无法验证/)
+    expect(state().isDirty).toBe(true); expect(screen.getByLabelText('文件内容')).toHaveValue('Keep file'); expect(putCalls()).toHaveLength(0)
+  })
+
 })

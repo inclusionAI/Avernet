@@ -12,7 +12,7 @@ function put(file: string, content: string | Buffer) { const target = path.join(
 function commit(): string { git('add', '-A'); git('commit', '-qm', 'fixture'); return git('rev-parse', 'HEAD'); }
 function ref(name: string, sha: string) { git('update-ref', `refs/remotes/origin/${name}/flow`, sha); }
 beforeEach(() => { repo = mkdtempSync(path.join(tmpdir(), 'pack-snapshot-')); git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid'); put('pack/workflow.pack.yaml', 'id: pack\nversion: 1\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n'); put('pack/workflows/flow.yaml', 'id: flow\nnodes: []\n'); put('pack/scripts/a.py', 'print(1)\r\n'); put('pack/scripts/sub/empty.sh', ''); commit(); });
-afterEach(() => { vi.restoreAllMocks(); rmSync(repo, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
 describe('readPackScriptSnapshot', () => {
   it('reads identical refs preserving bytes, empty files and executable mode', async () => {
     git('update-index', '--chmod=+x', 'pack/scripts/sub/empty.sh'); git('commit', '-qm', 'executable'); const sha = git('rev-parse', 'HEAD'); ref('wf', sha); ref('saved', sha);
