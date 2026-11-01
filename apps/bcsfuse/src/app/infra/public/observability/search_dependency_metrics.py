@@ -2,140 +2,173 @@
 
 from __future__ import annotations
 
+import prometheus_client
+
 from contextlib import contextmanager
+from threading import Lock
 from time import perf_counter
 from typing import Any, Iterator
 
 
 _METRICS: dict[str, Any] | None = None
+_METRICS_LOCK = Lock()
 
 
 def _get_metrics() -> dict[str, Any]:
+    """Return one process-wide metric set and safely own one-time registration."""
     global _METRICS
     if _METRICS is not None:
         return _METRICS
 
-    from prometheus_client import Counter, Gauge, Histogram
+    with _METRICS_LOCK:
+        if _METRICS is not None:
+            return _METRICS
 
-    qdrant_labels = ["operation", "mode", "outcome"]
-    lock_labels = ["operation", "mode"]
-    _METRICS = {
-        "qdrant_duration": Histogram(
-            "bcsfuse_qdrant_search_duration_seconds",
-            "Dense and keyword searches in the Qdrant-backed vector store",
-            qdrant_labels,
-            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
-        ),
-        "qdrant_lock_wait": Histogram(
-            "bcsfuse_qdrant_lock_wait_seconds",
-            "Time spent waiting for the vector index lock before a search",
-            lock_labels,
-            buckets=(0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1),
-        ),
-        "qdrant_errors": Counter(
-            "bcsfuse_qdrant_errors_total",
-            "Failed dense or keyword searches in the Qdrant-backed vector store",
-            ["operation", "mode"],
-        ),
-        "rerank_calls": Counter(
-            "bcsfuse_rerank_calls_total",
-            "External reranker provider invocations",
-            ["outcome"],
-        ),
-        "rerank_duration": Histogram(
-            "bcsfuse_rerank_duration_seconds",
-            "External reranker provider latency",
-            ["outcome"],
-            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
-        ),
-        "search_fallback_unavailable": Counter(
-            "bcsfuse_search_fallback_unavailable_total",
-            "Terminal search or recommendation fallback envelopes by reason",
-            ["operation", "reason_code"],
-        ),
-        "agent_search_last_known_good_stores": Counter(
-            "bcsfuse_search_last_known_good_stores_total",
-            "Successful search outcomes stored as last-known-good candidates",
-        ),
-        "agent_search_last_known_good_hits": Counter(
-            "bcsfuse_search_last_known_good_hits_total",
-            "Dependency-degraded requests served by explicit last-known-good data",
-        ),
-        "agent_search_negative_cache_stores": Counter(
-            "bcsfuse_search_negative_cache_stores_total",
-            "Terminal fallback outcomes stored in the short-lived negative cache",
-        ),
-        "agent_search_negative_cache_hits": Counter(
-            "bcsfuse_search_negative_cache_hits_total",
-            "Requests answered by the short-lived negative cache during an outage",
-        ),
-        "embedding_calls": Counter(
-            "bcsfuse_embedding_calls_total",
-            "External embedding provider invocations",
-            ["model", "outcome"],
-        ),
-        "embedding_duration": Histogram(
-            "bcsfuse_embedding_duration_seconds",
-            "External embedding provider latency",
-            ["model", "outcome"],
-            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
-        ),
-        "embedding_errors": Counter(
-            "bcsfuse_embedding_errors_total",
-            "Failed external embedding provider calls after retries",
-            ["model"],
-        ),
-        "embedding_wire_responses": Counter(
-            "bcsfuse_embedding_wire_responses_total",
-            "External embedding responses by negotiated transport protocol",
-            ["model", "protocol"],
-        ),
-        "embedding_dimension_contract_violations": Counter(
-            "bcsfuse_embedding_dimension_contract_violations_total",
-            "Embedding responses that violated the configured dimension contract",
-            ["model", "protocol", "expected_dimension", "actual_dimensions"],
-        ),
-        "embedding_quota_rejected": Counter(
-            "bcsfuse_embedding_quota_rejected_total",
-            "Requests rejected by the shared model-capacity state",
-            ["model", "reason"],
-        ),
-        "embedding_capacity_store_errors": Counter(
-            "bcsfuse_embedding_capacity_store_errors_total",
-            "Failures while reading or writing shared embedding capacity state",
-            ["model", "operation"],
-        ),
-        "rerank_circuit_open": Gauge(
-            "bcsfuse_rerank_circuit_open",
-            "Whether the process-local reranker circuit is open or probing",
-            ["model"],
-        ),
-        "rerank_circuit_rejected": Counter(
-            "bcsfuse_rerank_circuit_rejected_total",
-            "Reranker calls rejected while the circuit was open",
-            ["model"],
-        ),
-        "rerank_circuit_transitions": Counter(
-            "bcsfuse_rerank_circuit_transitions_total",
-            "Reranker circuit state transitions",
-            ["model", "from_state", "to_state"],
-        ),
-        "embedding_circuit_open": Gauge(
-            "bcsfuse_embedding_circuit_open",
-            "Whether the process-local embedding circuit is open or probing",
-            ["model"],
-        ),
-        "embedding_circuit_rejected": Counter(
-            "bcsfuse_embedding_circuit_rejected_total",
-            "Embedding calls rejected while the circuit was open",
-            ["model"],
-        ),
-        "embedding_circuit_transitions": Counter(
-            "bcsfuse_embedding_circuit_transitions_total",
-            "Embedding circuit state transitions",
-            ["model", "from_state", "to_state"],
-        ),
-    }
+        from prometheus_client import Counter, Gauge, Histogram
+        registry = prometheus_client.REGISTRY
+
+        qdrant_labels = ["operation", "mode", "outcome"]
+        lock_labels = ["operation", "mode"]
+        _METRICS = {
+            "qdrant_duration": Histogram(
+                "bcsfuse_qdrant_search_duration_seconds",
+                "Dense and keyword searches in the Qdrant-backed vector store",
+                qdrant_labels,
+                buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+                registry=registry,
+            ),
+            "qdrant_lock_wait": Histogram(
+                "bcsfuse_qdrant_lock_wait_seconds",
+                "Time spent waiting for the vector index lock before a search",
+                lock_labels,
+                buckets=(0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1),
+                registry=registry,
+            ),
+            "qdrant_errors": Counter(
+                "bcsfuse_qdrant_errors_total",
+                "Failed dense or keyword searches in the Qdrant-backed vector store",
+                ["operation", "mode"],
+                registry=registry,
+            ),
+            "rerank_calls": Counter(
+                "bcsfuse_rerank_calls_total",
+                "External reranker provider invocations",
+                ["outcome"],
+                registry=registry,
+            ),
+            "rerank_duration": Histogram(
+                "bcsfuse_rerank_duration_seconds",
+                "External reranker provider latency",
+                ["outcome"],
+                buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+                registry=registry,
+            ),
+            "search_fallback_unavailable": Counter(
+                "bcsfuse_search_fallback_unavailable_total",
+                "Terminal search or recommendation fallback envelopes by reason",
+                ["operation", "reason_code"],
+                registry=registry,
+            ),
+            "agent_search_last_known_good_stores": Counter(
+                "bcsfuse_search_last_known_good_stores_total",
+                "Successful search outcomes stored as last-known-good candidates",
+                registry=registry,
+            ),
+            "agent_search_last_known_good_hits": Counter(
+                "bcsfuse_search_last_known_good_hits_total",
+                "Dependency-degraded requests served by explicit last-known-good data",
+                registry=registry,
+            ),
+            "agent_search_negative_cache_stores": Counter(
+                "bcsfuse_search_negative_cache_stores_total",
+                "Terminal fallback outcomes stored in the short-lived negative cache",
+                registry=registry,
+            ),
+            "agent_search_negative_cache_hits": Counter(
+                "bcsfuse_search_negative_cache_hits_total",
+                "Requests answered by the short-lived negative cache during an outage",
+                registry=registry,
+            ),
+            "embedding_calls": Counter(
+                "bcsfuse_embedding_calls_total",
+                "External embedding provider invocations",
+                ["model", "outcome"],
+                registry=registry,
+            ),
+            "embedding_duration": Histogram(
+                "bcsfuse_embedding_duration_seconds",
+                "External embedding provider latency",
+                ["model", "outcome"],
+                buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+                registry=registry,
+            ),
+            "embedding_errors": Counter(
+                "bcsfuse_embedding_errors_total",
+                "Failed external embedding provider calls after retries",
+                ["model"],
+                registry=registry,
+            ),
+            "embedding_wire_responses": Counter(
+                "bcsfuse_embedding_wire_responses_total",
+                "External embedding responses by negotiated transport protocol",
+                ["model", "protocol"],
+                registry=registry,
+            ),
+            "embedding_dimension_contract_violations": Counter(
+                "bcsfuse_embedding_dimension_contract_violations_total",
+                "Embedding responses that violated the configured dimension contract",
+                ["model", "protocol", "expected_dimension", "actual_dimensions"],
+                registry=registry,
+            ),
+            "embedding_quota_rejected": Counter(
+                "bcsfuse_embedding_quota_rejected_total",
+                "Requests rejected by the shared model-capacity state",
+                ["model", "reason"],
+                registry=registry,
+            ),
+            "embedding_capacity_store_errors": Counter(
+                "bcsfuse_embedding_capacity_store_errors_total",
+                "Failures while reading or writing shared embedding capacity state",
+                ["model", "operation"],
+                registry=registry,
+            ),
+            "rerank_circuit_open": Gauge(
+                "bcsfuse_rerank_circuit_open",
+                "Whether the process-local reranker circuit is open or probing",
+                ["model"],
+                registry=registry,
+            ),
+            "rerank_circuit_rejected": Counter(
+                "bcsfuse_rerank_circuit_rejected_total",
+                "Reranker calls rejected while the circuit was open",
+                ["model"],
+                registry=registry,
+            ),
+            "rerank_circuit_transitions": Counter(
+                "bcsfuse_rerank_circuit_transitions_total",
+                "Reranker circuit state transitions",
+                ["model", "from_state", "to_state"],
+                registry=registry,
+            ),
+            "embedding_circuit_open": Gauge(
+                "bcsfuse_embedding_circuit_open",
+                "Whether the process-local embedding circuit is open or probing",
+                ["model"],
+                registry=registry,
+            ),
+            "embedding_circuit_rejected": Counter(
+                "bcsfuse_embedding_circuit_rejected_total",
+                "Embedding calls rejected while the circuit was open",
+                ["model"],
+                registry=registry,
+            ),
+            "embedding_circuit_transitions": Counter(
+                "bcsfuse_embedding_circuit_transitions_total",
+                "Embedding circuit state transitions",
+                ["model", "from_state", "to_state"],
+                registry=registry,
+            ),
+        }
     return _METRICS
 
 

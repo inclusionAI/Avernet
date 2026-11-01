@@ -369,10 +369,10 @@ file; `/ready` remains HTTP 200 but reports `degraded=true`,
 
 Execution budgets are selected from the `config` provider:
 
-- `search.execution.embedding_timeout_seconds` (default 0.50);
-- `search.execution.retrieval_timeout_seconds` (default 0.25);
-- `search.execution.local_snapshot_timeout_seconds` (default 0.05);
-- `search.execution.total_timeout_seconds` (default 1.00).
+- `search.execution.embedding_timeout_seconds` (default 1.50);
+- `search.execution.retrieval_timeout_seconds` (default 3.00);
+- `search.execution.local_snapshot_timeout_seconds` (default 0.50);
+- `search.execution.total_timeout_seconds` (default 5.00).
 
 The runtime shared MySQL pool is bounded per Pod through `MYSQL_POOL_SIZE`
 (default 8, maximum 64). This prevents horizontal Pod scaling from immediately

@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 0.500
-DEFAULT_RETRIEVAL_TIMEOUT_SECONDS = 0.250
-DEFAULT_LOCAL_SNAPSHOT_TIMEOUT_SECONDS = 0.050
-DEFAULT_TOTAL_TIMEOUT_SECONDS = 1.000
+DEFAULT_EMBEDDING_TIMEOUT_SECONDS = 1.500
+DEFAULT_RETRIEVAL_TIMEOUT_SECONDS = 3.000
+DEFAULT_LOCAL_SNAPSHOT_TIMEOUT_SECONDS = 0.500
+DEFAULT_TOTAL_TIMEOUT_SECONDS = 5.000
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,10 +20,10 @@ class AgentSearchExecutionBudget:
     limits are disabled or local fallback work is unexpectedly slow.
     """
 
-    embedding_timeout_seconds: float = 0.500
-    retrieval_timeout_seconds: float = 0.250
-    local_snapshot_timeout_seconds: float = 0.050
-    total_timeout_seconds: float = 1.000
+    embedding_timeout_seconds: float = 1.500
+    retrieval_timeout_seconds: float = 3.000
+    local_snapshot_timeout_seconds: float = 0.500
+    total_timeout_seconds: float = 5.000
 
     def __post_init__(self) -> None:
         for name in (

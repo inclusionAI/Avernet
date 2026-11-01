@@ -166,10 +166,10 @@ search:
     max_entries: 10000
     ttl_seconds: 60
   execution:
-    embedding_timeout_seconds: 0.50
-    retrieval_timeout_seconds: 0.25
-    local_snapshot_timeout_seconds: 0.05
-    total_timeout_seconds: 1.00
+    embedding_timeout_seconds: 1.50
+    retrieval_timeout_seconds: 3.00
+    local_snapshot_timeout_seconds: 0.50
+    total_timeout_seconds: 5.00
   resilience:
     enabled: true
     max_entries: 10000
