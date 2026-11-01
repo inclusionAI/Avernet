@@ -1,0 +1,60 @@
+# Bot MCP override lifecycle and Manifest configuration intent
+
+Status: implementation in progress. Base: dev with #3220 merged. Target: dev.
+
+## Contract
+
+Bot overrides belong to the Bot and MCP identity, independently of SkillSet membership and effective supply. SkillSet activation/deactivation, membership changes, deletion, Default exclusion, Installation reconciliation and capability compensation preserve overrides. Re-enabling reads the current saved override, with existing permission, Center and engine validation. Preserving configuration does not enable a capability.
+
+Explicit Direct uninstall and Bot deletion retain their existing cleanup contract.
+
+Manifest configuration intent is layered:
+
+| Declaration | Effect |
+| --- | --- |
+| MCP category absent | Leave supply and configuration unchanged. |
+| MCP entry present, config absent | Preserve its current Bot override. |
+| Explicit empty config object | Clear the override and inherit existing configuration sources. |
+| Nonempty config object | Replace the complete override. |
+| MCP parent removed by Replace | Remove managed supply and its override. |
+
+Parent cleanup retains scheme A and the Direct-only scope merged in #3220. Current Set supply is outside the declaration: omission leaves it untouched, explicit overlap refuses the whole Apply before writes. Transactional claim/remove supply guards remain mandatory. Non-Set override-only entries remain cleanup candidates.
+
+Genome is a complete snapshot of the existing Direct capture scope: absent override still means clear. It is not a backup of every dormant override. Manifest preserve must not change Genome restoration or expand capture/drift scope.
+
+## Implementation boundaries
+
+Remove only implicit lifecycle cleanup. Carry explicit configuration intent through compiler, desired-state model, validation, planning and transactional claims. Preserve performs no configuration write and does not replay a previously read value. Keep existing single-MCP transactions, runtime best-effort delivery and failure reporting.
+
+No database migration, new configuration CRUD, SkillSet configuration snapshot or public YAML shape is needed. Header merging, custom-URL credential isolation, authorization and source exclusivity remain unchanged. Callers that used a bare MCP entry to reset configuration must send an explicit empty config object after this change.
+
+## Validation
+
+Use existing service/Apply Engine entry points, real persistence and existing Runtime/Center ports. Validate compiler effects against Genome restoration results rather than equating preserve and clear structures. Verify Direct-only whole-Apply conflict handling and transactional supply checks. Validate actual whole-artifact contents, not only delivery calls.
+
+Enterprise validation uses matching OCB simulator sources and records the running image/source identity. OCB integration tests must preserve Set/default supply after Direct Replace; a temporary source override does not replace a recorded gitlink update. Enterprise mirror synchronization is manual, so its integration PR remains WIP until available.
+
+## Acceptance matrix
+
+| 编号 | 场景 | 必须成立 |
+| --- | --- | --- |
+| AC01 | 停用普通集，重复对账，再启用 | override 保留且重启后仍在；Membership/Installation 各按合同变化；未供应期间不可调用，启用读取当前值。 |
+| AC02 | 从 active/inactive 集移除 MCP，或停用后删除集 | override 不丢失；删除集不恢复或清理无关配置。 |
+| AC03 | 停用期间通过已有配置入口更新，再启用 | 新保存值生效；无旧快照回写；保存本身不启用能力。 |
+| AC04 | Default exclusion/unexclude | 配置保留，来源冲突规则有效；无其他来源时 scope 撤销，有其他来源时仍按实际供应可用。 |
+| AC05 | 同一码兼有显式集供应与 Skill dependency，撤销前者 | 有效依赖继续使用保存 override；不静默退回继承配置。 |
+| AC06 | 能力事务失败及既有 restore 补偿 | 能力事实按原合同回滚/恢复；独立配置不被清理或旧快照覆盖。 |
+| AC07 | Direct 显式卸载、Bot 删除 | 继续清配置；必要写入失败不返回虚假成功。 |
+| AC08 | Manifest 类别缺席、条目 config 缺席、空对象、非空对象 | 分别满足不操作、保持、清除、完整替换；重复应用有正确幂等报告。 |
+| AC09 | 保存 override 与继承配置的有效性不同，再应用 bare entry | 校验保存 override；覆盖“保存值有效/继承值无效”和反向组合，避免误拒绝或误放过。 |
+| AC10 | Manifest 移除 MCP 父条目或 mcp: [] | 按 Direct 与非 Set override 候选级联清理，包括 override-only、纯 dependency 仍供应场景；后者能力保留且报告反映配置更新，不伪报能力移除。 |
+| AC11 | 集停用保留 override 后，显式 Manifest Replace 清理，再启用 | 被明确重置的值不恢复；未重新配置时按当前继承来源处理。 |
+| AC12 | Genome 恢复无 override 快照 | 能清除后来新增 override；恢复有 override 快照仍完整替换。 |
+| AC13 | 当前权限拒绝、Center 元数据/协议/引擎失效 | 区分提交前拒绝与提交后未收敛；无配置静默丢弃、默认回退或 scope 越权。 |
+| AC14 | 另一 Bot、另一隔离作用域及用户级配置 | 全部不受目标 Bot 配置保留/清除影响。 |
+| AC15 | 省略活跃普通 Set、Default、平台默认供应的 MCP | 供应、成员关系、exclusion、override 均不变；企业默认能力仍在设备与 allow-list 中。 |
+| AC16 | 显式声明当前 Set 供应的 MCP，或非空能力声明的 Set 冲突预检查不可可靠完成 | 包括 bare/空 config/非空 config；整次 Apply 在任何类别写入前拒绝，无 script、资源等其他类别副作用。 |
+| AC17 | 预检后 Set 开始供应，随后 claim/remove | 既有事务内持锁复核拒绝当前单 MCP 操作，不抢占或清其配置；按原部分提交合同报告，不承诺全 Apply 回滚。 |
+| AC18 | Manifest → capture → Genome restore 的结果等价 | 初始有/无 override 均覆盖；bare Manifest 保留真实值，capture 记录 Direct 的实际值，扰动后恢复到捕获状态；不抹平 preserve/clear 意图。 |
+| AC19 | 停用集留下暂存配置 → capture → 修改该值 → drift → Apply | 暂存值不成为 Direct、不进入 capture、不单独触发 drift；完整 Apply 按非 Set 候选清理，且不恢复被明确重置的值。 |
+| AC20 | Teclaw 首次 artifact 与后续 redeliver | 验证实际 artifact：preserve 使用当前值、clear 使用继承值、replace 使用新值，未供应暂存配置不泄漏进 artifact；活动供应范围符合 Direct-only Replace 后的全量有效集合。 |
