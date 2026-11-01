@@ -177,7 +177,7 @@ async def test_target_error_status_is_preserved(handler, method, code):
 
 
 def test_parent_run_target_cannot_be_overridden_by_engine_row():
-    from agentclaw.community.adapters.http.openapi_v1.routines.mapping import _map_run, map_operation_batch
+    from agentclaw.community.adapters.http.openapi_v1.routines.converter import _map_run, map_operation_batch
     context = {"bot_id": "trusted", "device_uuid": "trusted-device", "operator_id": "trusted-user"}
     forged = {"job_id": "job", "bot_id": "forged", "device_uuid": "forged", "operator_id": "forged"}
     row = _map_run(forged, "job", context)
