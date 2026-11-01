@@ -10,7 +10,7 @@ const cancel = jest.mocked(cancelQueuedDelivery);
 beforeEach(() => { jest.resetAllMocks(); });
 
 type Outcome = Awaited<ReturnType<typeof cancelQueuedDelivery>>;
-const emptyOutcome: Outcome = { results: [], firstError: null, clientMessageIds: [] };
+const emptyOutcome: Outcome = { results: [], firstError: null, clientMessageIds: [], canonicalMessageIds: [] };
 const provider = () => ({ subscribeToDeliveryUpdates: () => () => {} }) as unknown as GroupChatProvider;
 function deferredCancellation() {
   let resolve!: (outcome: Outcome) => void;
@@ -21,17 +21,17 @@ function deferredCancellation() {
 
 describe('useMessageDeliveries cancellation', () => {
   it('向当前会话回传服务端确认的关联 ID', async () => {
-    cancel.mockResolvedValue({ results: [], firstError: null, clientMessageIds: ['client-1'] });
+    cancel.mockResolvedValue({ results: [], firstError: null, clientMessageIds: ['client-1'], canonicalMessageIds: ['canonical-1'] });
     const remove = jest.fn();
     const { result } = renderHook(() => useMessageDeliveries(null, 'session-1', remove));
     await act(async () => { await result.current.cancelDelivery('message-1', 'delivery-1'); });
     expect(cancel).toHaveBeenCalledWith('message-1', 'delivery-1', 'session-1');
-    expect(remove).toHaveBeenCalledWith(['client-1']);
+    expect(remove).toHaveBeenCalledWith(['client-1'], ['canonical-1']);
     expect(result.current.cancellingDeliveryIds.size).toBe(0);
   });
 
   it('旧服务端没有关联 ID 时不按文本猜测删除', async () => {
-    cancel.mockResolvedValue({ results: [], firstError: null, clientMessageIds: [] });
+    cancel.mockResolvedValue({ results: [], firstError: null, clientMessageIds: [], canonicalMessageIds: [] });
     const remove = jest.fn();
     const { result } = renderHook(() => useMessageDeliveries(null, 'session-1', remove));
     await act(async () => { await result.current.cancelDelivery('message-1', 'delivery-1'); });
@@ -49,7 +49,7 @@ describe('useMessageDeliveries cancellation', () => {
     act(() => { pending = result.current.cancelDelivery('message-1', 'delivery-1'); });
     rerender({ session: 'session-2' });
     await act(async () => {
-      resolve({ results: [], firstError: null, clientMessageIds: ['client-1'] });
+      resolve({ results: [], firstError: null, clientMessageIds: ['client-1'], canonicalMessageIds: ['canonical-1'] });
       await pending;
     });
     expect(remove).not.toHaveBeenCalled();
@@ -89,17 +89,17 @@ describe('useMessageDeliveries cancellation', () => {
     act(() => { newPending = result.current.cancelDelivery('message-1', 'delivery-1'); });
     expect(cancel).toHaveBeenCalledTimes(2);
     await act(async () => {
-      first.resolve({ ...emptyOutcome, clientMessageIds: ['old-client'] });
+      first.resolve({ ...emptyOutcome, clientMessageIds: ['old-client'], canonicalMessageIds: ['old-canonical'] });
       await oldPending;
     });
     expect(remove).not.toHaveBeenCalled();
     expect(result.current.cancellingDeliveryIds.has('delivery-1')).toBe(true);
     await act(async () => {
-      second.resolve({ ...emptyOutcome, clientMessageIds: ['current-client'] });
+      second.resolve({ ...emptyOutcome, clientMessageIds: ['current-client'], canonicalMessageIds: ['current-canonical'] });
       await newPending;
     });
     expect(remove).toHaveBeenCalledTimes(1);
-    expect(remove).toHaveBeenCalledWith(['current-client']);
+    expect(remove).toHaveBeenCalledWith(['current-client'], ['current-canonical']);
     expect(result.current.cancellingDeliveryIds.size).toBe(0);
   });
 

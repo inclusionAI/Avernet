@@ -24,7 +24,7 @@ const TERMINAL_RETENTION_MS = 3_000;
 export function useMessageDeliveries(
   provider: GroupChatProvider | null,
   sessionId: string | null,
-  onCancelledClientMessages?: (clientMessageIds: string[]) => void,
+  onCancelledMessages?: (clientMessageIds: string[], canonicalMessageIds: string[]) => void,
 ) {
   const [cancellingDeliveryIds, setCancellingDeliveryIds] = useState<Set<string>>(() => new Set());
   const cancellingRef = useRef(new Set<string>());
@@ -87,7 +87,7 @@ export function useMessageDeliveries(
         const outcome = await cancelQueuedDelivery(messageId, deliveryId, sessionId);
         if (scope !== scopeRef.current) return;
         if (outcome.clientMessageIds.length > 0) {
-          onCancelledClientMessages?.(outcome.clientMessageIds);
+          onCancelledMessages?.(outcome.clientMessageIds, outcome.canonicalMessageIds);
         }
         if (outcome.firstError) {
           toast.error(outcome.firstError);
@@ -101,7 +101,7 @@ export function useMessageDeliveries(
         }
       }
     },
-    [onCancelledClientMessages, sessionId],
+    [onCancelledMessages, sessionId],
   );
 
   // 从 store 读取当前会话的投递状态

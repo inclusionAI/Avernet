@@ -410,7 +410,10 @@ never sent and are in `cancelled`, `expired`, `rejected_capacity`, or
 sibling prevents removal, even when cancellation of the selected target succeeds.
 Errors do not authorize frontend message removal. Older clients may ignore the
 additive field, and clients talking to older servers must not guess a match by
-content or timestamps.
+content or timestamps. For a successful result carrying this correlation, clients
+may match optimistic user messages by their client key and history-loaded user
+messages by the **same result's** `delivery.message_id`. A canonical ID or a
+single target's cancelled status alone does not authorize removal.
 
 History queries omit a canonical message only if at least one delivery is
 `cancelled` and every delivery meets the unsent-terminal condition above.
