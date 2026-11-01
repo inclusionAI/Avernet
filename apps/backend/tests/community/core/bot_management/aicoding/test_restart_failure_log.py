@@ -10,7 +10,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.restart_backup imp
 )
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartSuperseded
 from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
-from tests.community.core.bot_management.aicoding.test_restart_fastdisk import committed, executor
+from tests.community.core.bot_management.aicoding.test_restart_fastdisk import committed, executor, strict_strategy
 
 
 @pytest.mark.parametrize(('target', 'sandbox', 'expected'), [
@@ -40,7 +40,7 @@ def test_strict_backup_alarm_includes_exact_container_and_failure_stage(
     with pytest.raises(backup.RestartBackupBlocked):
         verify = backup._attempt_backup(
             execute=execute, operation_id=OPERATION, bot_id='b',
-            target_id=target, sandbox_id=sandbox,
+            target_id=target, sandbox_id=sandbox, blocking_enabled=lambda: True,
         )
         verify()
     alarms = [r for r in caplog.records if MARKER in r.getMessage()]
@@ -100,7 +100,7 @@ def test_timeout_has_container_elapsed_time_and_last_helper_status(caplog):
          patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
         with pytest.raises(backup.RestartBackupBlocked):
             backup._attempt_backup(execute=execute, operation_id=OPERATION,
-                                   bot_id='b', target_id='ARCA-SANDBOX-abc@8')
+                                   bot_id='b', target_id='ARCA-SANDBOX-abc@8', blocking_enabled=lambda: True)
     line = next(r.getMessage() for r in caplog.records if MARKER in r.getMessage())
     assert 'reason=timeout' in line
     assert 'arca_id=ARCA-SANDBOX-abc@8 ' in line
@@ -114,7 +114,6 @@ def test_inventory_verification_failure_retains_resolved_arca_owner_and_env(capl
     from unittest.mock import Mock
 
     from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
-    from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
     from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 
     monkeypatch.setenv('SERVER_ENV', 'pre')
@@ -128,7 +127,7 @@ def test_inventory_verification_failure_retains_resolved_arca_owner_and_env(capl
     execute = executor([committed()] * replicas)
     runtime.post_bots_api.side_effect = lambda **kw: execute(kw['payload']['cmd'])
     ctx = BotProvisioningContext(bot_id='b', owner_id='owner', bot_type='personal', active_engine='aicoding')
-    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+    verify = strict_strategy('aicoding')._prepare_restart(
         ctx, device_id='BOT-logical', operation_id=OPERATION,
         restart_dependencies=RestartBackupDependencies.for_instance(runtime),
     )

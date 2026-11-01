@@ -3,7 +3,7 @@
 ## Confirmed-fastdisk policy (2026-10-30)
 
 Backend sends the embedded publication detector. Unknown/failed initial detection
-uses the best-effort policy below; with blocking enabled (default), a positively
+uses the best-effort policy below; with blocking explicitly enabled, a positively
 confirmed fastdisk target requires
 a successful, complete backup receipt within 300 seconds. Failure, partial backup,
 missing capability or unconfirmed result blocks replacement. Ordinary durable
@@ -32,22 +32,27 @@ Use the existing `ac_common_config` record (no schema or frontend change):
 | Field | Value |
 | --- | --- |
 | `business_code` | `aicoding` |
-| `param_code` | `fastdisk_fail_open` |
+| `param_code` | `fastdisk_fail_block` |
 | `enable` | `"1"` (configuration record is active) |
-| `param_value` | JSON boolean `false` (default) to block, `true` to warn and continue |
+| `param_value` | JSON boolean `false` (default) to warn and continue, `true` to block |
 | `env` | Chosen by the backend environment, not by the request body |
 
 Missing or disabled records, invalid values and configuration read errors retain
-fail-open `false` (blocking). In particular, `enable="0"` disables the configuration record and restores
-the **blocking default**; use `param_value=true` to allow continuation after backup failure. Read errors
-log only the error type, never raw exception text. Only a confirmed fastdisk
-attempt reads the setting. Each backup precondition snapshots it once across all
-replicas and final receipt checks; changing the record affects later attempts,
-not a backup already using its snapshot. Already-terminal failed tasks remain
-failed; the switch does not revive them.
+blocking `false` (warn and continue). `enable="0"` disables the configuration
+record and also restores this non-blocking default. To enable blocking, use both
+`enable="1"` and `param_value=true`. Read errors log only the error type, never raw
+exception text. Only a confirmed fastdisk attempt reads the setting. Each backup
+precondition snapshots it once across all replicas and final receipt checks;
+changes affect later attempts, not a backup already using its snapshot.
+Already-terminal failed tasks remain failed; the switch does not revive them.
+
+The old `fastdisk_fail_open` key is no longer read. Do not invert an existing row's
+value under the old name. Insert the new `fastdisk_fail_block` key in the target
+environment; existing old-key rows alone leave blocking disabled. No database
+configuration is automatically written or migrated by this code change.
 
 Both values still attempt the same helper and retain the fastdisk 300-second
-wait budget. With `true`, backup-only failures use the existing sanitized
+wait budget. With `false`, backup-only failures use the existing sanitized
 `action=continue_restart data_loss_risk=true` warning with bot/ARCA/owner/env
 correlation fields; they do not produce the restart-failed marker. A failed
 backup is not reported as successful. Binding changes, ownership/CAS failures
@@ -73,14 +78,15 @@ curl --fail-with-body --request POST \
   --data-raw '{
     "business_code": "aicoding",
     "business_name": "AICoding",
-    "param_code": "fastdisk_fail_open",
-    "param_name": "快盘备份失败允许继续重启",
+    "param_code": "fastdisk_fail_block",
+    "param_name": "快盘备份失败阻断重启",
     "param_value": false,
     "enable": "1"
   }'
 ```
 
-Keep `enable="1"` and set only `param_value` to `true` to allow continuation.
+Keep `enable="1"` and set `param_value` to `true` to block after backup failure.
+The example uses the default `false`, which allows continuation after backup failure.
 Confirm the response body's `success` is `true` (HTTP 200 alone is insufficient).
 The existing `POST /api/v1/common-config/get` accepts the same `business_code` and
 `param_code` for readback; its returned `env` identifies the effective environment.

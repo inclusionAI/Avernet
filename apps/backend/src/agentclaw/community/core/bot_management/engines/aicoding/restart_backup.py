@@ -1,8 +1,8 @@
-"""Coding restart backup: confirmed fastdisk is strict unless explicitly disabled.
+"""Coding restart backup: confirmed fastdisk is strict only when explicitly enabled.
 
 Backend sends the same read-only detector as publication. Detection failures keep
-legacy behavior, but a confirmed fastdisk target cannot downgrade after backup
-failure. Binding checks and durable mutation fences always remain mandatory.
+legacy behavior. When enabled, a confirmed fastdisk target cannot downgrade
+after backup failure. Binding checks and durable mutation fences always remain mandatory.
 """
 from __future__ import annotations
 
@@ -399,7 +399,7 @@ def _confirmed_targets():
         raise RestartBackupBlocked('confirmation_unavailable') from error
 
 
-def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: True, **kwargs):
+def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **kwargs):
     from .restart_state import current_restart
 
     identity = {key: kwargs[key] for key in ('bot_id', 'target_id', 'operation_id')}
@@ -660,22 +660,22 @@ class AicodingRestartBackupMixin:
         return await runner.acquire_workflow(op, guarded_issue)
 
     def _fastdisk_backup_blocking(self) -> bool:
-        """Only an explicit enabled boolean true may allow backup failure."""
+        """Only an explicit enabled boolean true may block on backup failure."""
         if self._common_config_provider is None:
-            return True
+            return False
         try:
             value = self._common_config_provider().get_value(
-                business_code="aicoding", param_code="fastdisk_fail_open",
+                business_code="aicoding", param_code="fastdisk_fail_block",
                 env=get_current_env(), default=False, only_enabled=True,
             )
         except Exception as error:
             logger.warning(
                 "event=aicoding_restart_backup phase=config reason=config_unavailable "
-                "action=keep_blocking env=%s error_type=%s",
+                "action=keep_nonblocking env=%s error_type=%s",
                 get_current_env(), type(error).__name__,
             )
-            return True
-        return value is not True
+            return False
+        return value is True
 
     def prepare_restart(self, ctx, *, device_service_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.

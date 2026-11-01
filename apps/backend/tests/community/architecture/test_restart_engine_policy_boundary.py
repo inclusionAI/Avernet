@@ -16,7 +16,7 @@ _SHARED_PATHS = (
     'bot_management/engines/restart_contract.py',
 )
 _POLICY_KEYS = {'guard', 'precondition_error', 'fastdisk_targets', 'coding_restart',
-                'fastdisk_fail_open'}
+                'fastdisk_fail_block'}
 _POLICY_ERRORS = {'RestartPreconditionError', 'RestartBackupBlocked', 'RestartBackupError'}
 _ENGINES = {'aicoding', 'claude_code'}
 

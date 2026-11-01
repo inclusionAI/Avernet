@@ -181,7 +181,7 @@ pending-cutover marker semantics. A ready marker alone is not proof of a live
 mount. **Initial detection failure is treated as non-fastdisk** for restart
 compatibility; publication/restore still fail closed on detection errors.
 
-With the guard enabled (the default), the confirmed fastdisk target
+With the guard explicitly enabled, the confirmed fastdisk target
 must return `committed` from `/opt/agentclaw/bin/restart_backup start/status`
 with a matching operation, boot identity, generation and
 successful backup receipt. `partial_success`, degraded completeness, failure,
@@ -192,17 +192,17 @@ checked again before mutation. Non-fastdisk/unknown detection retains the
 existing best-effort backup behavior and its original budget. Binding checks,
 restart locks and mutation fences remain mandatory in either case.
 
-The existing `ac_common_config` key `aicoding / fastdisk_fail_open`
-controls only fastdisk backup vetoes. Fail-open defaults to `false`; only an enabled
-row with JSON boolean `true`
-allows backup failures to warn and continue; missing, disabled, invalid or unreadable
-configuration retains blocking. The strategy lazily reads configuration only for
-confirmed fastdisk and snapshots the value across its backup/receipt precondition.
-The composition root supplies the config-service factory, without doing I/O at
-import time. No per-engine logic is added to the shared restart flow. Disabled
-guards still run backup and retain the 300-second fastdisk budget; binding checks
-and mutation fences remain blocking. See `engines/aicoding/restart-backup.md` for
-the operator curl and data-loss warning.
+The existing `ac_common_config` key `aicoding / fastdisk_fail_block`
+controls only fastdisk backup vetoes. Blocking defaults to `false`; only an enabled
+row with JSON boolean `true` blocks after backup failure. Missing, disabled,
+invalid or unreadable configuration remains non-blocking. The strategy lazily reads
+configuration only for confirmed fastdisk and snapshots the value across its
+backup/receipt precondition. The composition root supplies the config-service
+factory without doing I/O at import time. No per-engine logic is added to the
+shared restart flow. Both settings still run backup and retain the 300-second
+fastdisk budget; binding checks and mutation fences remain blocking. The previous
+`fastdisk_fail_open` key is no longer read and is not interpreted in reverse.
+See `engines/aicoding/restart-backup.md` for the operator curl and data-loss warning.
 
 With blocking enabled, ordinary durable restarts persist positive target confirmations monotonically in
 `ext.coding_restart.fastdisk_targets`, so redelivery cannot downgrade them. A

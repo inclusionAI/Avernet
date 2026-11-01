@@ -17,7 +17,13 @@ from tests.community.core.service_bot.services.test_publish_crash_windows import
 
 
 @pytest.fixture(params=['aicoding', 'claude_code'])
-def published(request):
+def published(request, monkeypatch):
+    from agentclaw.community.core.bot_management.engines.registry import get_engine_provisioning_registry
+
+    config = Mock()
+    config.get_value.return_value = True
+    strategy = get_engine_provisioning_registry().resolve(request.param)
+    monkeypatch.setattr(strategy, "_common_config_provider", lambda: config)
     ledger, baas, build = _ledger(), FakeBaas(), Mock()
     record = _record(PublishStatus.SUCCESS.value)
     record.ext.update(binding={'online': 42}, unrelated={'keep': True})

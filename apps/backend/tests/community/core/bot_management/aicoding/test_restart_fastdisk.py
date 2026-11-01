@@ -14,6 +14,23 @@ from agentclaw.community.core.bot_management.engines.registry import prepare_ins
 from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
 
 
+def strict_strategy(engine='aicoding'):
+    config = Mock()
+    config.get_value.return_value = True
+    return AicodingProvisioningStrategy(engine, common_config_provider=lambda: config)
+
+
+@pytest.fixture
+def enabled_guard(monkeypatch):
+    from agentclaw.community.core.bot_management.engines.registry import get_engine_provisioning_registry
+
+    registry = get_engine_provisioning_registry()
+    for engine in ('aicoding', 'claude_code'):
+        config = Mock()
+        config.get_value.return_value = True
+        monkeypatch.setattr(registry.resolve(engine), '_common_config_provider', lambda config=config: config)
+
+
 def detection(status='run'):
     return SimpleNamespace(exit_code=0, stdout=json.dumps({
         'status': status, 'storage': '/opt/.aicoding', 'home': '/home/admin/.aicoding',
@@ -43,7 +60,7 @@ def executor(results, detected=None):
 def attempt(execute):
     with patch.object(backup.time, 'sleep'):
         return backup._attempt_backup(execute=execute, operation_id=OPERATION,
-                                      bot_id='b', target_id='physical')
+                                      bot_id='b', target_id='physical', blocking_enabled=lambda: True)
 
 
 @pytest.mark.parametrize('failure', [
@@ -106,7 +123,7 @@ def test_confirmed_fastdisk_poll_timeout_blocks():
          patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
          patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
         with pytest.raises(backup.RestartBackupError) as raised:
-            backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p')
+            backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p', blocking_enabled=lambda: True)
     assert raised.value.reason == 'timeout'
 
 
@@ -124,7 +141,7 @@ def test_nested_baas_compatibility_catch_does_not_swallow_strict_failure(engine)
     devices.get_device.return_value = dict(device_id='old', device_provider='baas')
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine=engine)
     with pytest.raises(backup.RestartBackupError):
-        AicodingProvisioningStrategy(engine)._prepare_restart(
+        strict_strategy(engine)._prepare_restart(
             ctx, binding_id=7, device_service=devices, bot_repository=Mock(),
             restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
         )
@@ -137,7 +154,7 @@ def test_inventory_recheck_cannot_bypass_a_confirmed_fastdisk(inventory):
     runtime = runtime_with(execute)
     runtime.list_devices_by_bot_uuid.side_effect = [runtime.list_devices_by_bot_uuid.return_value, inventory]
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
-    check = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+    check = strict_strategy('aicoding')._prepare_restart(
         ctx, device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
     with pytest.raises(backup.RestartBackupError):
         check()
@@ -145,7 +162,7 @@ def test_inventory_recheck_cannot_bypass_a_confirmed_fastdisk(inventory):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
-async def test_instance_restart_uses_the_same_strict_strategy(engine):
+async def test_instance_restart_uses_the_same_strict_strategy(engine, enabled_guard):
     runtime = runtime_with(executor([response('failed')]))
     with pytest.raises(backup.RestartBackupError):
         await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
@@ -173,7 +190,7 @@ from tests.community.core.bot_management.aicoding.test_restart_service import li
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['baas', 'arca'])
 @pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy', 'not_mounted'])
-async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_target(lifecycle, provider, outcome, caplog, monkeypatch):
+async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_target(lifecycle, provider, outcome, caplog, monkeypatch, enabled_guard):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import TASK_TYPE, task_key, journal
     from agentclaw.community.core.task_queue.types import Fail
@@ -241,7 +258,7 @@ def test_redelivery_inventory_failure_keeps_confirmed_fastdisk_guard():
     runtime.list_devices_by_bot_uuid.side_effect = ConnectionError('unknown inventory')
     try:
         with pytest.raises(backup.RestartBackupError):
-            AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            strict_strategy('aicoding')._prepare_restart(
                 BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
                 device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
     finally:
@@ -261,7 +278,7 @@ def test_positive_detection_write_failure_blocks_before_start():
     devices.get_device.return_value = dict(device_id='old', device_provider='baas')
     try:
         with pytest.raises(backup.RestartBackupBlocked, match='结果无法确认'):
-            AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            strict_strategy('aicoding')._prepare_restart(
                 BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
                 binding_id=7, device_service=devices, bot_repository=Mock(),
                 restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
@@ -280,7 +297,7 @@ def test_redelivery_dependency_failure_cannot_bypass_positive_confirmation():
     devices.get_device.return_value = dict(device_id='old', device_provider='baas')
     try:
         with pytest.raises(backup.RestartBackupBlocked):
-            AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            strict_strategy('aicoding')._prepare_restart(
                 BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
                 binding_id=7, device_service=devices,
                 restart_dependencies=RestartBackupDependencies(baas_runtime=Mock(side_effect=RuntimeError('DI failure'))),
@@ -298,7 +315,7 @@ def test_mixed_replicas_cannot_hide_failed_fastdisk_behind_nonfastdisk():
     runtime.post_bots_api.side_effect = lambda **kw: (
         plain if '/plain/' in kw['path'] else fast)(kw['payload']['cmd'])
     with pytest.raises(backup.RestartBackupBlocked, match='不完整'):
-        AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        strict_strategy('aicoding')._prepare_restart(
             BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
             device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
     assert plain.call_count == fast.call_count == 2
@@ -310,14 +327,14 @@ def test_confirmed_fastdisk_uses_five_minute_budget_not_legacy_25_minutes():
     with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
          patch.object(backup.time, 'sleep', side_effect=lambda delay: now.__setitem__(0, now[0] + delay)):
         with pytest.raises(backup.RestartBackupBlocked) as raised:
-            backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p')
+            backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p', blocking_enabled=lambda: True)
     assert raised.value.reason == 'timeout'
     assert now[0] == backup.FASTDISK_TIMEOUT == 300
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('final_failure', [False, True])
-async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_failure):
+async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_failure, enabled_guard):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import TASK_TYPE, task_key
     from agentclaw.community.core.task_queue.types import Fail, Reschedule
 
@@ -353,25 +370,25 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
 
 
 @pytest.mark.parametrize('value, expected', [
-    (True, False), (False, True), (None, True), ('true', True), (1, True), ({}, True),
+    (True, True), (False, False), (None, False), ('true', False), (1, False), ({}, False),
 ])
-def test_restart_config_requires_explicit_boolean_true_to_fail_open(value, expected, monkeypatch):
+def test_restart_config_requires_explicit_boolean_true_to_block(value, expected, monkeypatch):
     monkeypatch.setenv('SERVER_ENV', 'pre')
     config = Mock()
     config.get_value.return_value = value
     strategy = AicodingProvisioningStrategy('aicoding', common_config_provider=lambda: config)
     assert strategy._fastdisk_backup_blocking() is expected
     config.get_value.assert_called_once_with(
-        business_code='aicoding', param_code='fastdisk_fail_open',
+        business_code='aicoding', param_code='fastdisk_fail_block',
         env='pre', default=False, only_enabled=True,
     )
 
 
-def test_restart_blocking_config_read_failure_preserves_guard(caplog):
+def test_restart_blocking_config_read_failure_keeps_nonblocking(caplog):
     strategy = AicodingProvisioningStrategy(
         'aicoding', common_config_provider=Mock(side_effect=RuntimeError('private credential')),
     )
-    assert strategy._fastdisk_backup_blocking() is True
+    assert strategy._fastdisk_backup_blocking() is False
     assert 'private credential' not in caplog.text
     assert 'config_unavailable' in caplog.text
 
@@ -424,7 +441,7 @@ def test_nonfastdisk_never_reads_blocking_config(detected):
 
 def test_guard_config_is_snapshotted_across_replicas_and_verification():
     config = Mock()
-    config.get_value.side_effect = [True, False]
+    config.get_value.side_effect = [False, True]
     strategy = AicodingProvisioningStrategy('aicoding', common_config_provider=lambda: config)
     runtime = runtime_with(executor([committed(), committed(), response('failed'), response('failed')]))
     runtime.list_devices_by_bot_uuid.return_value = [
@@ -437,8 +454,8 @@ def test_guard_config_is_snapshotted_across_replicas_and_verification():
 
 
 @pytest.mark.parametrize('enabled, stored, expected', [
-    ('1', 'false', True), ('1', 'true', False), ('0', 'true', True),
-    ('1', 'null', True), ('1', 'garbage', True),
+    ('1', 'false', False), ('1', 'true', True), ('0', 'true', False),
+    ('1', 'null', False), ('1', 'garbage', False),
 ])
 def test_common_config_storage_semantics(enabled, stored, expected):
     from agentclaw.community.core.common_config.service import CommonConfigService
@@ -450,7 +467,7 @@ def test_common_config_storage_semantics(enabled, stored, expected):
     )
     assert strategy._fastdisk_backup_blocking() is expected
     repository.get_by_biz_param.return_value = None
-    assert strategy._fastdisk_backup_blocking() is True
+    assert strategy._fastdisk_backup_blocking() is False
 
 
 @pytest.mark.asyncio
@@ -464,7 +481,7 @@ async def test_disabled_guard_allows_durable_restart_after_backup_failure(lifecy
 
     s = lifecycle
     config = Mock()
-    config.get_value.return_value = True
+    config.get_value.return_value = False
     _, strategy = resolve_restart_strategy(s.repo.bot)
     monkeypatch.setattr(strategy, '_common_config_provider', lambda: config)
     s.binding.update(device_provider=provider, device_props={'sandbox_id': 'old-sandbox@8'})
@@ -514,7 +531,7 @@ def test_disabled_guard_still_blocks_arca_binding_change():
 
     args = binding_args('arca')
     config = Mock()
-    config.get_value.return_value = True
+    config.get_value.return_value = False
     strategy = AicodingProvisioningStrategy('aicoding', common_config_provider=lambda: config)
     execute = executor([response('failed')])
     verify = strategy.prepare_restart(context('aicoding'), **args, restart_dependencies=RestartBackupDependencies(
@@ -523,3 +540,36 @@ def test_disabled_guard_still_blocks_arca_binding_change():
     args['device_service_provider']().get_device.return_value.device_props = {'sandbox_id': 'changed'}
     with pytest.raises(RestartBackupTargetChanged):
         verify()
+
+
+@pytest.mark.parametrize('configuration', ['missing', 'disabled', 'unavailable', 'no_provider', 'old_key'])
+def test_unconfigured_or_unavailable_guard_does_not_block_fastdisk_failure(configuration, caplog):
+    from agentclaw.community.core.common_config.service import CommonConfigService
+
+    repository = Mock()
+    if configuration == 'disabled':
+        repository.get_by_biz_param.return_value = SimpleNamespace(enable='0', param_value='true')
+    elif configuration == 'unavailable':
+        repository.get_by_biz_param.side_effect = RuntimeError('private config error')
+    elif configuration == 'old_key':
+        repository.get_by_biz_param.side_effect = lambda **kw: (
+            SimpleNamespace(enable='1', param_value='false') if kw['param_code'] == 'fastdisk_fail_open' else None)
+    else:
+        repository.get_by_biz_param.return_value = None
+    config = CommonConfigService(repository)
+    strategy = AicodingProvisioningStrategy(
+        'aicoding', common_config_provider=None if configuration == 'no_provider' else lambda: config,
+    )
+    execute = executor([response('failed')])
+    runtime = runtime_with(execute)
+    strategy._prepare_restart(
+        BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
+        device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime),
+        operation_id=OPERATION,
+    )()
+    assert execute.call_count == 2
+    assert 'action=continue_restart' in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
+    assert 'private config error' not in caplog.text
+    if configuration == 'unavailable':
+        assert 'action=keep_nonblocking' in caplog.text
