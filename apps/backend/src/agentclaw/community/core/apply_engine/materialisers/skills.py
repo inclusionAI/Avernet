@@ -246,10 +246,18 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
         retained_local = [
             local_assets[name] for name in declared if name in local_assets
         ]
+        # A declared shared skill already active as the same asset keeps its row, dependencies included.
+        retained_shared = [
+            area[intent.identity]
+            for intent in intents
+            if isinstance(intent.value, _SharedSkill)
+            and intent.identity in area
+            and str(area[intent.identity].skill_id) == str(intent.value.skill_id)
+        ]
         # Set-supplied skills are never touched here, so their dependencies survive the apply too.
         retained_set = [asset for name, asset in whole_area.items() if name in supplied]
         ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
-            retained_local + retained_set
+            retained_local + retained_shared + retained_set
         )
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
