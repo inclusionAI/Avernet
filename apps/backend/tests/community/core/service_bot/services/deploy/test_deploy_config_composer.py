@@ -263,3 +263,19 @@ class TestAckComposer:
         assert storage.storage_id == "b1"
         assert storage.quota == "1Gi"
         assert storage.permission == "0777"
+
+
+@pytest.mark.parametrize("stage", [None, "draft", "verify", "online"])
+@pytest.mark.parametrize("requested", [False, True])
+def test_initial_model_policy_only_passes_trusted_create_request(stage, requested):
+    composer = _StubComposer()
+    service = _make_service(composer)
+    _build_payload(service, stage=stage, migration_path="", new_bot_model_policy=requested)
+    expected = requested and stage in {None, "draft"}
+    assert all(ctx.new_bot_model_policy is expected for ctx in composer.contexts)
+
+
+def test_initial_model_policy_is_disabled_during_data_restore():
+    composer = _StubComposer()
+    _build_payload(_make_service(composer), migration_path="/previous", new_bot_model_policy=True)
+    assert all(not ctx.new_bot_model_policy for ctx in composer.contexts)

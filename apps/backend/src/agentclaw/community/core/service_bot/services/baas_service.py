@@ -680,6 +680,7 @@ class BaasService:  # pragma: no cover
         startup_script: str | None = None,
         storage_type: StorageType | None = None,
         in_place: bool = False,
+        new_bot_model_policy: bool = False,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -757,6 +758,7 @@ class BaasService:  # pragma: no cover
         # 一次成形，三个 composer 方法共用：同一个容器的同一份描述。
         deploy_ctx = BotDeployContext(
             in_place=in_place,
+            new_bot_model_policy=new_bot_model_policy is True and stage in {None, "draft"} and not migration_path,
             bot_id=bot_id,
             owner_id=owner_id,
             entity_id=entity_id,

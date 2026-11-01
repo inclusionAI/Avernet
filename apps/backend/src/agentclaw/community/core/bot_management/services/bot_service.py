@@ -2033,6 +2033,11 @@ class BotService(BotServiceProtocol):
                         ),
                     }
 
+                # This method only provisions a newly recorded logical Bot.
+                # Replacement/restart allocation uses _allocate_device_async.
+                if resolved_active_engine == "openclaw":
+                    extra_envs = {**(extra_envs or {}), "AGENTCLAW_NEW_BOT_MODEL_POLICY": "pending"}
+
                 create_kwargs = dict(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
                     entity_id=resolved_entity_id,
@@ -2048,6 +2053,8 @@ class BotService(BotServiceProtocol):
                     admins=None,  # 新建 bot 还未添加协作者
                     template_type=template_type,
                     template_config=device_template_config,
+                    device_props_extra={"new_bot_model_policy": "pending"}
+                    if resolved_active_engine == "openclaw" else None,
                 )
 
                 # 存储业务组件决定接入范围，只返回原申请参数覆写，不创建设备。

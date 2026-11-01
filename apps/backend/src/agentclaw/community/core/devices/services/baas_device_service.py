@@ -391,7 +391,9 @@ class BaasDeviceService(DeviceService):
                 "migration_path": "",
                 "template_uuid": template_uuid,
                 "auto_approve_publish": True,
-                "extra_envs": extra_envs,
+                "extra_envs": {k: v for k, v in (extra_envs or {}).items()
+                               if k != "AGENTCLAW_NEW_BOT_MODEL_POLICY"},
+                "new_bot_model_policy": (extra_envs or {}).get("AGENTCLAW_NEW_BOT_MODEL_POLICY") == "pending",
                 "template_config": template_config,
                 # 个人 Bot / 服务 Bot 草稿共用 home 挂载路径，类型由存储策略选择。
                 "mount_home_dir_storage": True,

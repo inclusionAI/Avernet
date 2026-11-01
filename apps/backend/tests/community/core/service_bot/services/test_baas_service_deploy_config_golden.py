@@ -236,3 +236,16 @@ def test_golden_config_is_json_serializable():
     """The payload is posted as JSON — a non-serializable value fails at the
     wire, far from whatever put it there."""
     json.dumps(_deploy_config(home_dir_whitelist=False))
+
+
+@pytest.mark.parametrize("stage", [None, "draft", "online"])
+def test_initial_model_policy_flag_reaches_real_managed_startup(stage):
+    service = _make_service(home_dir_whitelist=True)
+    payload = service._build_create_bot_payload(
+        bot={"bot_id": "b1", "entity_id": "447172", "entity_type": "staff",
+             "bot_type": "service" if stage else "personal", "active_engine": "openclaw"},
+        owner_id="447172", request_id="initial-model-test", device_count=1,
+        migration_path="", stage=stage, new_bot_model_policy=True,
+    )
+    hook = payload["config"]["deploy_config"]["after_create_cmd_hook"]
+    assert ("--new_bot_model_policy pending" in hook) is (stage in {None, "draft"})
