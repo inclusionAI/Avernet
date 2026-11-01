@@ -19,6 +19,7 @@ class RunRecoveryTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.base = json.loads((Path(__file__).parent / "fixtures/flow_baseline.json").read_text())[0]["state"]
+        self.base["pending_ping"] = None
         self.session = self.base["session_id"]
         self.facts = {}
         self.submissions = []
@@ -163,6 +164,113 @@ class RunRecoveryTest(unittest.TestCase):
             uc.recovery().inspect(self.session, "unrelated-run")
         self.assertEqual(uc.load_state(self.session)["recovery"]["current"]["state"], "uncertain")
         self.assertEqual(self.submissions, [])
+
+    def status(self, failed_run=None):
+        with patch.object(uc, "bcs_cli", side_effect=self.cli) as cli, patch.object(uc, "emit") as emit:
+            uc.cmd_status(argparse.Namespace(session=self.session, full=False, failed_run=failed_run))
+        return emit.call_args.args[0], cli.call_count
+
+    def test_ordinary_status_detects_failure_and_returns_executable_recovery_without_writing(self):
+        import shlex
+        for kind in ("speak", "vote"):
+            for pk in (False, True):
+                with self.subTest(kind=kind, pk=pk):
+                    self.prepare(kind, pk)
+                    before = uc.state_path(self.session).read_bytes()
+                    ordinary, calls = self.status()
+                    explicit, explicit_calls = self.status("old-run")
+                    self.assertEqual(calls, 1)
+                    self.assertEqual(explicit_calls, 1)
+                    self.assertEqual(ordinary, explicit)
+                    self.assertEqual(ordinary["run_result_action"]["action"], "retry-" + kind)
+                    self.assertIn(ordinary["command"], ordinary["next_action"])
+                    argv = shlex.split(ordinary["command"])
+                    self.assertEqual(argv[1], "open-round" if kind == "speak" else "open-vote")
+                    self.assertEqual(argv[argv.index("--failed-run") + 1], "old-run")
+                    self.assertIn("--retry", argv)
+                    self.assertEqual(uc.state_path(self.session).read_bytes(), before)
+                    self.assertEqual(self.submissions, [])
+                    for secret in self.base["words"].values():
+                        self.assertNotIn(secret, json.dumps(ordinary, ensure_ascii=False))
+
+    def test_status_running_and_completed_preserve_normal_handoff(self):
+        for status in ("running", "completed"):
+            self.prepare("speak")
+            self.record("old-run", status, None)
+            result, calls = self.status()
+            self.assertEqual(calls, 1)
+            self.assertNotIn("command", result)
+            self.assertEqual(result["next_action"], uc.NEXT_ACTION["SPEAK_RUNNING"])
+            self.assertEqual(self.submissions, [])
+
+    def test_status_stops_for_abort_exhaustion_and_uncertainty_without_writing(self):
+        for case in ("abort", "exhausted", "uncertain"):
+            key = self.prepare("speak")
+            state = uc.load_state(self.session)
+            if case == "abort":
+                self.record("old-run", "aborted", "user_aborted")
+            elif case == "exhausted":
+                state["recovery"]["retries"][key] = 2
+            else:
+                state["recovery"]["current"].update(state="uncertain", run_id=None)
+            uc.save_state(state)
+            before = uc.state_path(self.session).read_bytes()
+            result, calls = self.status()
+            self.assertEqual(result["run_result_action"]["action"], "stopped" if case == "abort" else case)
+            self.assertEqual(calls, 0 if case == "uncertain" else 1)
+            self.assertNotIn("command", result)
+            self.assertNotEqual(result["next_action"], uc.NEXT_ACTION["SPEAK_RUNNING"])
+            self.assertEqual(uc.state_path(self.session).read_bytes(), before)
+
+    def test_query_failure_does_not_emit_local_wait_or_write_state(self):
+        self.prepare("speak")
+        before = uc.state_path(self.session).read_bytes()
+        with patch.object(uc, "bcs_cli", return_value=(1, "private raw error", "")), \
+             patch.object(uc, "emit") as emit, self.assertRaises(SystemExit):
+            uc.cmd_status(argparse.Namespace(session=self.session, full=False))
+        emit.assert_not_called()
+        self.assertEqual(uc.state_path(self.session).read_bytes(), before)
+
+    def test_status_without_submission_or_finished_does_not_query(self):
+        for phase in ("AWAIT_START", "FINISHED"):
+            state = copy.deepcopy(self.base)
+            state["phase"] = phase
+            uc.save_state(state)
+            result, calls = self.status()
+            self.assertEqual(calls, 0)
+            self.assertNotIn("command", result)
+
+    def test_open_rechecks_server_after_status_and_never_reopens_an_active_run(self):
+        self.prepare("speak")
+        self.assertEqual(self.status()[0]["run_result_action"]["action"], "retry-speak")
+        self.record("old-run", "running", None)
+        with self.assertRaises(SystemExit):
+            self.invoke("speak", "old-run")
+        self.assertEqual(self.submissions, [])
+
+    def test_open_rechecks_round_after_status(self):
+        self.prepare("speak")
+        self.status()
+        state = uc.load_state(self.session)
+        state["round"] += 1
+        uc.save_state(state)
+        self.assertEqual(self.invoke("speak", "old-run")["action"], "stale")
+        self.assertEqual(self.submissions, [])
+
+    def test_concurrent_duplicate_recovery_submits_only_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.prepare("speak")
+        args = argparse.Namespace(session=self.session, retry=True, failed_run="old-run")
+        with patch.object(uc, "bcs_cli", side_effect=self.cli), patch.object(uc, "require_run_slot"), \
+             patch.object(uc, "submit_run", side_effect=self.submit), patch.object(uc, "emit"), \
+             ThreadPoolExecutor(max_workers=2) as workers:
+            results = [workers.submit(uc.cmd_open_round, args) for _ in range(2)]
+            for result in results:
+                result.result(timeout=10)
+        self.assertEqual(len(self.submissions), 1)
+        saved = uc.load_state(self.session)["recovery"]
+        self.assertEqual(list(saved["retries"].values()), [1])
+        self.assertEqual(list(saved["processed"]), ["old-run"])
 
 
 if __name__ == "__main__":
