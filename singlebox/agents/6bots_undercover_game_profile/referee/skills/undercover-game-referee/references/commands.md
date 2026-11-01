@@ -1,6 +1,6 @@
 # 脚本命令参考
 
-`scripts/undercover.py` 是本局事实层的全部实现。所有命令都输出 JSON，第一个字段是 `ok`。
+`scripts/undercover.py` 是本局事实层的 CLI 入口，规则、运行渲染、命令处理及恢复由同目录模块实现。所有命令都输出 JSON，第一个字段是 `ok`。
 
 ```bash
 SKILL_DIR="skills/undercover-game-referee"
@@ -18,7 +18,7 @@ GroupContext 里抄。
 | 命令 | `--session` |
 | --- | --- |
 | `status` `begin` `init` `reveal` `finish` `my-word` | **必须给。** 它们是一局的入口和出口，也是新会话里第一条会被调用的命令 |
-| 其余（`open-*`、`*-set`、`render-*`、`mask`、`parse-vote`） | 可以省，脚本只落到**本机唯一一局还没结束**的游戏上；有两局同时在跑就报 `AMBIGUOUS_SESSION` |
+| 其余（`open-*`、`*-set`、`render-*`、`mask`、`parse-vote`） | 主持人同样必须显式给。CLI 仅为维护者保留单局省略兼容；有多局时报 `AMBIGUOUS_SESSION`，不能用于主持人猜测会话 |
 
 `--group` 一律可以省：取会话 ID 冒号前面那一段（`bcs_grp_xxxx:yyyy` → `bcs_grp_xxxx`）。
 只有 `begin` 和 `init` 有这个参数。
@@ -26,22 +26,16 @@ GroupContext 里抄。
 参数写错时返回的是脚本自己的 JSON（`error: BAD_ARGS`），里面带 `usage`。
 **不要为了查参数去跑 `--help`**，照这份文档抄就行。
 
-### 这两档为什么不一样
+### CLI 兼容与主持人的会话约束
 
-同一个来源的两次事故，方向刚好相反：
-
-- 模型会在读完文档之前就抢跑一条命令——实测开局连着两次，一次漏了 `--session`、一次漏了
-  `--group`，两次 argparse 的 usage 转储都被转发进了群里。所以要能省的尽量省、报错要能直接
-  照着改。
-- 但"省掉会话 ID"在同一个群开第二局时是致命的：新会话还没有自己的状态文件，磁盘上"唯一
-  那一局"恰恰是上一局。实测主持人因此在新会话里读到上一局的 `FINISHED`、`reveal` 出上一局
-  的词和身份、还调 `bcs_task_complete` 把刚建的会话关掉了。所以入口和出口那几条不许猜。
+CLI 为维护者保留部分命令的单局省略兼容；主持人不使用该兼容，所有命令均从本次
+GroupContext 获取并显式传入会话 ID。新会话没有状态文件时，也不能选择上一局的状态。
 
 **命令的输出也是公开的。** 我的每一次工具调用和它的输出都会被转发成群里的事件，
 所以默认输出都压成了一行、只留必要字段。要详细的再加 `--full`。同理，能一条命令
 做完的就别拆成三条——每多一个来回，人类就多看到一堆跟游戏无关的东西。
 
-## 三条复合命令（日常只用这三条）
+## 四条复合命令
 
 | 命令 | 顶掉了什么 | 用在哪 |
 | --- | --- | --- |
@@ -116,7 +110,7 @@ uc init --session S --referee-uuid R --human human_123 \
 不要念稿、不要 `reveal`、不要结束会话。
 
 `--full` 额外给 `eliminated`、`human_seat`、`renders`、`result`。`renders` 是本轮各运行渲染
-过几次，例如 `{"speak": 1, "vote": 2}` 表示投票重开过一次——只在卡住诊断时需要。
+过几次，例如 `{"speak": 1, "vote": 2}` 表示投票重开过一次——供 SX 核对当前运行尝试使用。
 
 ### `open-round`
 
@@ -168,7 +162,7 @@ uc render-speak-run --session S [--retry]
 返回 `yaml_path`、`input_path`、`binding_args`、`attempt`，以及一条拼好的 `run_command`。
 **仅供维护者测试；主持人不能用它绕过 open-round 失败。**
 
-`--retry` 用来重开当前这一轮：只能在 `SPEAK_RUNNING` 且本轮发言还没收齐时调，**轮次不推进、本轮记录不重建**，只是把同一份 YAML 重渲染一次。上一次提交的运行已被服务端确认失败时才用；失败结果唤醒后按 SX 自动恢复，“卡住了”仅为最后兜底。
+`--retry` 用来重开当前这一轮：只能在 `SPEAK_RUNNING` / `PK_SPEAK_RUNNING` 且当前阶段发言还没收齐时调，**轮次不推进、本轮记录不重建**，只是把同一份 YAML 重渲染一次。上一次提交的运行已被服务端确认失败时才用；失败结果唤醒后按 SX 自动恢复，“卡住了”仅为最后兜底。
 
 ### `speeches-set`
 
@@ -200,7 +194,7 @@ uc render-vote-run --session S [--retry]
 可在 `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` 调，同样渲染即推进，到对应的 `VOTE_RUNNING` / `PK_VOTE_RUNNING`。返回字段同
 `render-speak-run`。**仅供维护者测试；主持人不能用它绕过 open-vote 失败。**
 
-`--retry` 用来重开当前这一轮的投票，只能在 `VOTE_RUNNING` 调。**没有它，卡住诊断走不通**——不带 `--retry` 时阶段卫兵只认 `AWAIT_VOTE_START`，而这时 phase 早就是 `VOTE_RUNNING` 了。重开后之前投过的票作废，要向人类说明。
+`--retry` 用来重开当前这一轮的投票，只能在 `VOTE_RUNNING` / `PK_VOTE_RUNNING` 调，且服务端已确认当前 run 失败。SX 根据当前常规/PK 阶段返回恢复动作；不带 `--retry` 的正常开投仅用于等待开投阶段。重开后之前投过的票作废，要向人类说明。
 
 ### `votes-set`
 

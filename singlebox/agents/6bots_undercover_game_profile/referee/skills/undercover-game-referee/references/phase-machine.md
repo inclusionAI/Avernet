@@ -2,18 +2,22 @@
 
 `uc status` 给出 `phase`，唤醒类型给出这一次是谁把我叫醒的。两者一查就知道该做什么。
 
+实际 RUN_RESULT 唤醒先走 [SX](#sx-自动恢复与最后兜底)。其他非节点唤醒先查 status；
+若返回可信恢复 command，先按 SX 执行。下表的等待和普通交接只适用于没有恢复动作时。
+
 | phase | 唤醒类型 | 执行 |
 | --- | --- | --- |
+| 当前局任意非终局阶段 | `RUN_RESULT` | [SX 自动恢复](#sx-自动恢复与最后兜底)，以服务端事实和恢复 command 为准 |
 | `NO_GAME`（还没开局） | `SESSION_START` | [S0 开局](#s0-开局) |
 | `FINISHED` **但这次是新会话把我叫醒的** | 任意 | 会话 ID 传错了。停下核对 `--session`，**不念稿、不 reveal、不结束会话** |
 | `NO_GAME`（还没开局） | `HUMAN_MSG` | 先做 S0；如果人类这句话就是要开始，紧接着做 S1 |
 | `AWAIT_START` | `HUMAN_MSG` | [S1 发牌并开第一轮](#s1-发牌并开第一轮) |
 | `SPEAK_RUNNING` | `NODE_TASK`（本轮发言汇总） | [S2 念发言](#s2-念发言) |
-| `SPEAK_RUNNING` | `HUMAN_MSG` | 人类在催或在闲聊：回一句现在等谁；说"卡住了"就走 [SX](#sx-卡住诊断) |
+| `SPEAK_RUNNING` | `HUMAN_MSG` | 人类在催或在闲聊：回一句现在等谁；说"卡住了"就走 [SX](#sx-自动恢复与最后兜底) |
 | `AWAIT_VOTE_START` | `NODE_TASK`（本轮发言汇总——`speeches-set` 把 phase 推过来了，但我还在同一次激活里） | 念完汇总稿**结束激活**，**绝不 `open-vote`**：我此刻占着协作槽位，在这里开投必然死锁。见 [S2](#s2-念发言) |
 | `AWAIT_VOTE_START` | 其余（`ECHO` / `HUMAN_MSG` / `WORKER_MSG`） | [S3 开投](#s3-开投)。转述稿的回灌就是开投的信号，不用等人类说话 |
 | `VOTE_RUNNING` | `NODE_TASK`（开票） | [S4 开票](#s4-开票) |
-| `VOTE_RUNNING` | `HUMAN_MSG` | 回一句还在等谁投；说"卡住了"就走 [SX](#sx-卡住诊断) |
+| `VOTE_RUNNING` | `HUMAN_MSG` | 回一句还在等谁投；说"卡住了"就走 [SX](#sx-自动恢复与最后兜底) |
 | `AWAIT_PK_SPEAK_START` | `NODE_TASK`（常规开票尚未结束） | 只报 PK 名单后结束；不启动运行 |
 | `AWAIT_PK_SPEAK_START` | `ECHO` / `HUMAN_MSG` | `uc open-round` 开同轮 PK 发言 |
 | `PK_SPEAK_RUNNING` | `NODE_TASK`（PK 汇总） | 按节点固定的 --round/--stage/--attempt 调 speeches-set，汇总后结束 |
@@ -24,17 +28,18 @@
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 非空**（有 Bot 出局，要念遗言） | 其余（`ECHO` / `HUMAN_MSG`） | [S4b 派遗言任务](#s4b-派遗言任务) |
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 为空**（PK 无人出局、常规零有效票或出局的是人类） | 其余（`ECHO` / `HUMAN_MSG`） | [S4c 直接开下一轮](#s4c-直接开下一轮) |
 | `AWAIT_NEXT_ROUND` | `HUMAN_MSG` 说"继续" | 跳过遗言，直接做 S5 的第 2 步 |
-| `FINISHED` | 任意 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
+| `FINISHED` | 维护者确认修复并明确要求重试关闭当前会话 | 仅按 SKILL.md 的关闭失败恢复调用 finish；不重复 reveal |
+| `FINISHED` | 其余 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
 
-任何格子里没写的组合：说清当前进行到哪、人类可以做什么，**不推进**。
+先处理经 status 核验的恢复动作；其余格子里没写的组合，说清当前进行到哪、人类可以做什么，**不推进**。
 
-`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。
+`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 按迟到回执处理，不根据其文本写入或重开。只允许先查 status；若服务端核验出当前 run 的恢复 command，则按 SX 执行，否则结束。
 
 **节点唤醒按节点正文执行，写入命令由脚本校验当前阶段。** 运行失败之后，失败前派出去的节点仍可能迟到几十秒才把产物送回来。命令报告阶段不符就只回一句"这条是迟到的回执，已忽略"，不继续写入、不念稿——照着它往下走会让人类以为一切正常。
 
 **`AWAIT_VOTE_START` 这两行的差别是本文件里最要紧的一条。** `speeches-set` 一跑完 phase 就是 `AWAIT_VOTE_START` 了，但那一刻我还在发言运行的末节点里、还占着协作槽位——那个运行要等我这次激活结束才算完成。在那里 `open-vote` 会 `RUN_SLOT_BUSY`，而重试、`sleep`、轮询只会让这次激活不结束，于是运行永远完不成、槽位永远不放，整局死在这一步（2026-08-30 第 2 轮实际发生过）。**判据是「这次激活是被什么叫醒的」，不是 phase。**
 
-**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START`、`AWAIT_PK_SPEAK_START`、`AWAIT_PK_VOTE_START` 和 `AWAIT_NEXT_ROUND` 要做事，其余一律直接结束激活，不输出、不调脚本：
+**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START`、`AWAIT_PK_SPEAK_START`、`AWAIT_PK_VOTE_START` 和 `AWAIT_NEXT_ROUND` 要做事，没有恢复动作时，其余直接结束激活，不输出、不追加脚本调用：
 
 - `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` → S3 开投。
 - `AWAIT_PK_SPEAK_START` → open-round 开同轮 PK 发言。

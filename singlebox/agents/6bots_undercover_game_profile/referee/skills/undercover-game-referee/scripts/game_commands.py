@@ -339,8 +339,8 @@ def prepare_vote_run(api, session_id: str, retry: bool) -> dict[str, Any]:
     with api.locked(session_id):
         state = api.load_state(session_id)
         if retry:
-            # 投票运行失败不会唤醒裁判，phase 却已经推到 VOTE_RUNNING 了。
-            # 没有这条路，卡住诊断走到重开那一步就会被阶段卫兵拦死。
+            # 恢复前已核验服务端失败；本地仍保留当前投票阶段。
+            # 允许按 SX 重开当前尝试，同时保留常规/PK 阶段边界。
             api.require_phase(state, "VOTE_RUNNING", "PK_VOTE_RUNNING")
         else:
             api.require_phase(state, "AWAIT_VOTE_START", "AWAIT_PK_VOTE_START")
