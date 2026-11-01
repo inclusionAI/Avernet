@@ -28,9 +28,25 @@ Remove only implicit lifecycle cleanup. Carry explicit configuration intent thro
 
 No database migration, new configuration CRUD, SkillSet configuration snapshot or public YAML shape is needed. Header merging, custom-URL credential isolation, authorization and source exclusivity remain unchanged. Callers that used a bare MCP entry to reset configuration must send an explicit empty config object after this change.
 
+### Required SQLite transaction assembly correction
+
+The Direct MCP claim's Installation and explicit configuration write must roll
+back together on a persistence failure. Real failure injection exposed Python
+SQLite's legacy transaction mode releasing an Installation SAVEPOINT before
+an outer transaction had begun, leaving that Installation committed after a
+later configuration INSERT failed. Both community and local SQLite engine
+assembly now use `autocommit=False`; foreign keys are enabled outside the
+transaction so their existing enforcement remains active. The MySQL assembly
+is unchanged. This restores the existing UoW atomicity guarantee without a
+database schema, Service API or Manifest input change.
+
 ## Validation
 
 Use existing service/Apply Engine entry points, real persistence and existing Runtime/Center ports. Validate compiler effects against Genome restoration results rather than equating preserve and clear structures. Verify Direct-only whole-Apply conflict handling and transactional supply checks. Validate actual whole-artifact contents, not only delivery calls.
+
+SQLite regressions exercise the actual database plugins as well as the MCP
+claim seam: inject a configuration write failure, verify both writes roll
+back, and retain nested-savepoint recovery and foreign-key enforcement.
 
 Enterprise validation uses matching OCB simulator sources and records the running image/source identity. OCB integration tests must preserve Set/default supply after Direct Replace; a temporary source override does not replace a recorded gitlink update. Enterprise mirror synchronization is manual, so its integration PR remains WIP until available.
 
