@@ -135,8 +135,9 @@ class DesiredStateCompiler(Protocol):
 
         Synchronous and cheap: the Manifest compiler re-validates the stored
         document (the engine may have changed since it was accepted), the
-        genome compiler checks the promotion is there to deliver and still
-        current — the one its ref points at, in a status it knows. Raises
+        genome compiler checks the promotion is there to deliver and that
+        ``active`` still names the revision it moves from. The run service
+        calls it under the bot's apply lock, before enqueueing. Raises
         the compiler's own domain error (the one its HTTP surface maps); the
         same refusal from ``compile``, later, is ``CompileRefused``. Returns
         ``None`` when nothing stands in the way. Fetches nothing. What

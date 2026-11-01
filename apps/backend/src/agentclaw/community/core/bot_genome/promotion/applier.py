@@ -1,12 +1,13 @@
-"""The delivery seam: ``RevisionApplier`` and this item's only implementation.
+"""The delivery seam: ``RevisionApplier``.
 
 A promotion compiles a revision into the apply engine's desired state and
-hands it to an applier. ``preflight`` runs before any ref moves and refuses what cannot be
-delivered; ``start`` runs after the refs moved and the promotion row exists,
-and answers with the applier's handle. RSI-04 (direct delivery) binds its
-applier in place of :class:`PendingDeliveryApplier` in
-``di/modules/bot_genome_module.py``, and nothing else on the promotion path
-changes.
+asks an applier two things. ``preflight`` runs before anything is written and
+refuses a bot the applier cannot take; ``start`` runs once the promotion row
+is filed and starts the delivery, answering the id of the apply run that
+delivers it. How that run ends reaches the promotion through the apply
+engine's completion publish (``promotion/settle.py``), not through the
+applier. The binding is ``DirectApplier`` (``promotion/direct_applier.py``),
+in ``di/modules/bot_genome_module.py``.
 """
 
 from __future__ import annotations
@@ -14,51 +15,26 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.bot_genome.errors import NotAppliable, PromotionUnsupported, Reason
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
-from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance
+from agentclaw.community.core.bot_genome.models import BotRef
 
-__all__ = ["PendingDeliveryApplier", "RevisionApplier"]
+__all__ = ["RevisionApplier"]
 
 
 @runtime_checkable
 class RevisionApplier(Protocol):
-    @property
-    @abstractmethod
-    def kind(self) -> str:
-        """The applier's name on the promotion row (``apply_kind``)."""
-        ...
-
     @abstractmethod
     def preflight(self, bot: BotRef, state: DesiredState) -> None:
-        """Raise ``NotAppliable`` or ``PromotionUnsupported`` before any ref moves."""
+        """Raise ``NotAppliable`` or ``PromotionUnsupported`` before anything is written."""
         ...
 
     @abstractmethod
-    async def start(self, bot: BotRef, state: DesiredState, *, actor: Provenance, reason: str) -> ApplyResult:
-        """Deliver the revision's desired state; the result's ``detail`` is the promotion row's last word."""
+    def start(self, bot: BotRef, *, promotion_id: str, principal_id: str, audit_actor: str) -> str:
+        """Start delivering the promotion's revision; answer the apply run's id.
+
+        ``principal_id`` is the user the apply's permission checks are made
+        against, ``audit_actor`` the label its record shows. Raises
+        ``ApplyBusy`` when another apply holds the bot's lock; any other
+        raise is a delivery that did not start.
+        """
         ...
-
-
-class PendingDeliveryApplier(RevisionApplier):
-    """Refuses every promotion before any ref moves: direct delivery is RSI-04."""
-
-    kind = "pending"
-
-    def preflight(self, bot: BotRef, state: DesiredState) -> None:
-        if bot.bot_type == "service":
-            raise PromotionUnsupported(
-                "promotion of a service bot goes through the publish flow, which RSI-04 / RSI-16 bind"
-            )
-        raise NotAppliable(
-            [
-                Reason(
-                    "not_appliable",
-                    "revision",
-                    "direct delivery of a compiled revision lands with RSI-04; nothing can deliver it yet",
-                )
-            ]
-        )
-
-    async def start(self, bot: BotRef, state: DesiredState, *, actor: Provenance, reason: str) -> ApplyResult:
-        raise AssertionError("PendingDeliveryApplier.preflight refuses every promotion; start is never reached")

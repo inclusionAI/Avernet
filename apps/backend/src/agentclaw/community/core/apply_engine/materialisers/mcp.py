@@ -1,14 +1,16 @@
-"""Materialise the Manifest's complete explicit MCP snapshot as Direct claims.
+"""Materialise a desired state's complete MCP list as the bot's Direct MCP servers.
 
-Every declared server converts ordinary SkillSet supply to Direct, or combines a
-Default/platform exclusion with a Direct Installation. Its closed ``config`` is
-the complete Bot override and commits atomically with that Installation.
+The list speaks only for Direct servers: what the bot's skill sets supply — an
+active ordinary set, the Default less its exclusions, the platform's default
+servers less theirs — is outside it, never counted as current and never
+removed. A declared server a set supplies is a conflict (``set_conflicts``),
+which refuses the whole apply before anything is written.
 
-Omitted explicit supply and Bot overrides are removed. Skill dependencies remain
-derived: they are not inserted into the Installation table, do not appear in
+Every declared server becomes a Direct Installation; its closed ``config`` is
+the complete Bot override and commits atomically with it. Omitted Direct
+servers and their overrides are removed. Skill dependencies remain derived:
+they are not inserted into the Installation table, do not appear in
 ``removed``, and stale Bot overrides are cleared with an ``updated`` report row.
-Source-only conversion can therefore report ``unchanged`` while
-``requires_write`` performs the internal transition.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
     ConfirmedPartialWriteError,
     Intent,
+    ChecksSetSupply,
     Materialiser,
     PlannedEntry,
     ResolveFailure,
@@ -41,7 +44,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
@@ -59,7 +62,7 @@ def _comparison_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
     return comparable
 
 
-class McpMaterialiser(Materialiser):
+class McpMaterialiser(Materialiser, ChecksSetSupply):
     """Converges this bot's enabled MCP servers toward the declaration.
 
     ``identity`` is the server code and ``Intent.value`` is the optional
@@ -129,21 +132,25 @@ class McpMaterialiser(Materialiser):
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
-    def _platform_owned(self, ctx: ApplyContext) -> frozenset[str]:
-        """The codes the write would refuse on policy grounds.
+    def _set_supplied(self, ctx: ApplyContext) -> frozenset[str]:
+        """The MCP codes the bot's skill sets supply; outside the declaration, whatever it says."""
+        _skills, codes = self._activation.set_supplied_capabilities(
+            bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+        )
+        return frozenset(codes)
 
-        Fail-closed for the same reason ``_permitted`` is, but the closed
-        direction is the opposite one: an unanswerable question here must not
-        widen what the manifest may touch, and the safe reading of "I could not
-        find out which codes are platform-owned" is *none of them are mine to
-        write*. Returning an empty set on failure would restore exactly the bug
-        this method exists to close, so the failure is raised and the
-        orchestrator aborts the category with nothing written.
-        """
-        return frozenset(
-            self._activation.platform_default_mcp_codes(
-                bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+    async def set_conflicts(
+        self, ctx: ApplyContext, entries: Sequence[DesiredMcpServer]
+    ) -> tuple[ResolveFailure, ...]:
+        supplied = self._set_supplied(ctx)
+        return tuple(
+            ResolveFailure(
+                entry.server_code,
+                "supplied by one of the bot's skill sets (or a platform default); declare it there or remove it "
+                "from the set",
             )
+            for entry in entries
+            if entry.server_code in supplied
         )
 
     def _permitted(self, ctx: ApplyContext, server_code: str) -> bool:
@@ -165,16 +172,21 @@ class McpMaterialiser(Materialiser):
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
         """Plan public outcomes separately from required source/config writes."""
-        installed = set(
+        supplied = self._set_supplied(ctx)
+        # Direct: installed and not supplied by a set. A set's servers, and its servers' overrides, are not ours.
+        direct = set(
             self._activation.list_installed_mcps(
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
             )
-        )
-        platform_owned = set(self._platform_owned(ctx))
+        ) - supplied
         declared = {intent.identity for intent in intents}
-        overrides = self._activation.get_mcp_overrides(
-            bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
-        )
+        overrides = {
+            code: config
+            for code, config in self._activation.get_mcp_overrides(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+            ).items()
+            if code not in supplied
+        }
         dependency_codes = ctx.capability_state.final_skill_dependency_codes
         if dependency_codes is None:
             resolved: set[str] = set()
@@ -187,20 +199,8 @@ class McpMaterialiser(Materialiser):
                     )
                 )
             dependency_codes = frozenset(resolved)
-        effective_current = installed | platform_owned | set(dependency_codes)
-        current = installed | platform_owned | set(overrides)
-        set_managed = self._activation.set_managed_mcp_codes(
-            bot_id=ctx.bot_id,
-            owner_id=ctx.owner_id,
-            actor_id=ctx.actor_id,
-            server_codes=current | declared,
-        )
-        manifest_direct = self._activation.manifest_direct_mcp_codes(
-            bot_id=ctx.bot_id,
-            owner_id=ctx.owner_id,
-            actor_id=ctx.actor_id,
-            server_codes=current | declared,
-        )
+        effective_current = direct | set(dependency_codes)
+        current = direct | set(overrides)
         planned = tuple(
             PlannedEntry(
                 intent,
@@ -215,11 +215,7 @@ class McpMaterialiser(Materialiser):
                     )
                 ),
                 requires_write=(
-                    intent.identity not in installed
-                    or (
-                        intent.identity in set_managed | platform_owned
-                        and intent.identity not in manifest_direct
-                    )
+                    intent.identity not in direct
                     or _comparison_config(overrides.get(intent.identity))
                     != _comparison_config(intent.value)
                 ),
@@ -253,7 +249,7 @@ class McpMaterialiser(Materialiser):
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
-        """Apply Direct conversions, overrides, and dependency-aware cleanup."""
+        """Apply Direct claims, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
         confirmed_write = False
         try:
@@ -281,7 +277,7 @@ class McpMaterialiser(Materialiser):
                         )
                     )
                     continue
-                await self._activation.claim_manifest_mcp(
+                await self._activation.claim_apply_mcp(
                     server_code=planned.intent.identity,
                     config=planned.intent.value,
                     bot_id=ctx.bot_id,
@@ -304,7 +300,7 @@ class McpMaterialiser(Materialiser):
                 else plan.removals
             )
             for server_code in removal_writes:
-                await self._activation.remove_manifest_mcp(
+                await self._activation.remove_apply_mcp(
                     server_code=server_code,
                     bot_id=ctx.bot_id,
                     owner_id=ctx.owner_id,
@@ -314,7 +310,7 @@ class McpMaterialiser(Materialiser):
                 confirmed_write = True
         except Exception as exc:
             if confirmed_write or isinstance(
-                exc, ManifestDesiredStateCommittedError
+                exc, ApplyDesiredStateCommittedError
             ):
                 raise ConfirmedPartialWriteError(
                     "MCP replacement stopped after a durable write"

@@ -20,6 +20,35 @@ a desired state is already in the content store, named by digest. That is
 what lets a revision be delivered with no Manifest document in between
 (RSI-04) and what keeps a grammar change out of the materialisers.
 
+A producer can also subscribe to how its applies end (`completion.py`): a
+second map keyed by state kind, beside the compilers. Every terminal path of
+an apply publishes its `ApplyOutcome` to the kind's subscriber — a finished
+run, a refused compile, an engine exception, a task that could not be
+rebuilt, and the task queue giving up on the apply task (its give-up hook) —
+and the apply lock is released only once the terminal report is stored and
+that publish has landed, so the bot's next apply cannot start before the
+subscriber has settled, nor beside a re-run of an apply whose report is still
+`RUNNING`. A re-run of
+an apply whose report is already terminal applies nothing and only publishes
+again (then unlocks), so a failed publish is retried by the queue with the
+bot still locked. The one exception is the give-up hook: the queue has
+already retired the task, so it unlocks regardless, and a subscriber that
+raises there is logged and not retried. The genome subscribes; the Manifest does not.
+
+A desired Center skill is found by name and a shared-repository skill by
+path through `SharedSkillPort` (`core/ports`), then claimed Direct like any
+skill.
+
+The skills and MCP materialisers speak only for the bot's Direct entries:
+what the bot's skill sets supply — an active ordinary set, the Default less
+its exclusions, the platform's default MCP servers — is never counted as
+current and never removed, for every compiler alike. Declaring a
+set-supplied entry is a conflict: before writing anything, the orchestrator
+asks each such materialiser (`ChecksSetSupply.set_conflicts`) and, on any
+conflict, refuses the whole apply — every declared category aborted, nothing
+written. The repository's claims refuse the same entries under their own
+lock, so Direct and set supply never share an Installation row.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus
@@ -38,7 +67,7 @@ provides:
   - ContentRef
   - DesiredScript
   - DesiredIdentityFile
-  - DesiredSkill  # LocalSkillPackage | CenterSkillVersion | RepoSkillPath
+  - DesiredSkill  # LocalSkillPackage | CenterSkillByName | RepoSkillPath
   - DesiredResourceFile
   - DesiredResourceTree
   - DesiredMcpServer  # McpOverride, McpHeader, McpTransport, McpEndpointEnv
@@ -46,6 +75,10 @@ provides:
   - DesiredEngineConfig
   - DesiredStateCompiler  # the compiler contract both producers implement
   - StateRef  # (kind, reference) — what an apply run converges to; each compiler registers its kind
+  - ApplyCompletionHandler  # completion.py: a producer's subscriber, told when an apply of its kind ends
+  - ApplyOutcome
+  - StateCompletionHandlers  # kind → subscriber, the second map beside the compilers
+  - CompletionPublisher  # completion.py: hands an ended apply's outcome to its kind's subscriber (run service, unstartable path)
   - Compiled
   - ContentReader  # imported from core/content_store; ContentStoreProtocol inherits it
   - Category  # the construct vocabulary (constructs.py)
@@ -84,7 +117,7 @@ provides:
   - ManagedFilesStore  # and ManagedFilesComposeReader, EngineOwnedComposeReader, PlatformIdentity / PlatformResource / PlatformSkillPackageUpload (managed_files/)
 consumes:
   - "ContentStoreProtocol (core.content_store) — the bytes every desired entry names, read by digest"
-  - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort (core.ports) — the narrow write ports the materialisers call"
+  - "IdentityFilePort, ResourceFilePort, SkillPackageUploadPort, ActivationPort, SharedSkillPort (core.ports) — the narrow ports the materialisers call"
   - "BotCapabilityStateReaderProtocol, SkillPackageValidator, DirectActivationServiceProtocol (core.skill_center) — the skills and MCP area state and the package gate"
   - "MCPAuthServiceProtocol, MCPConfigServiceProtocol (core.mcp) — the MCP permission and override checks"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the script row"
@@ -94,7 +127,7 @@ consumes:
   - "TaskQueue (core.task_queue) — the apply task"
 consumed_by:
   - "core.bot_config_manifest — compiles a stored document into a DesiredState and starts apply runs with MANIFEST_STATE, kind 'manifest'; the creation flow applies its two phases through ApplyRunService"
-  - "core.bot_genome — compiles a revision into a DesiredState (RSI-04 starts apply runs with genome_state(promotion_id), kind 'genome')"
+  - "core.bot_genome — compiles a revision into a DesiredState, starts apply runs with genome_state(promotion_id), kind 'genome', and subscribes to their completion to settle the promotion"
   - "adapters/http/openapi_v1/bots — the apply, last-apply and create-with-manifest routes"
   - "di/modules/apply_engine_module, bot_management_module — binds ports, strategies, compilers and the run service"
   - "plugins/community/agentswarm — reads a bot's last apply"

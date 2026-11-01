@@ -38,6 +38,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    ChecksSetSupply,
     ConfirmedPartialWriteError,
     Materialiser,
     ResolveFailure,
@@ -46,6 +47,13 @@ from agentclaw.community.core.apply_engine.registry import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+#: Every declared construct's entries carry this when a declared skill or MCP server is one the bot's skill sets
+#: supply: the apply is refused before any write, so nothing in any category was applied.
+SET_CONFLICT_REASON = (
+    "not applied: the apply was refused because a declared skill or MCP server is supplied by one of the bot's "
+    "skill sets"
+)
 
 _SKIPPED_REASON = (
     "not written: another entry in this category could not be materialized, and a category is written in full "
@@ -104,13 +112,19 @@ class ApplyOrchestrator:
         apply's compile is. ``sources`` is what the compiler resolved (the
         Manifest's git sources, W7), carried onto the report.
         """
+        # Not declared: no opinion, no touch, nothing reported.
+        declared = [
+            (step.construct, declaration)
+            for step in self._steps(phase)
+            if (declaration := state.declaration(step.construct)) is not None
+        ]
+        conflicts = await self._set_conflicts(ctx, declared)
         results: list[CategoryResult] = []
-        for step in self._steps(phase):
-            declaration = state.declaration(step.construct)
-            if declaration is None:
-                # Not declared: no opinion, no touch, nothing reported.
-                continue
-            results.append(await self._apply_construct(ctx, step.construct, declaration, dry_run=dry_run))
+        for construct, declaration in declared:
+            if conflicts:
+                results.append(self._refused(construct, declaration, conflicts.get(construct, ())))
+            else:
+                results.append(await self._apply_construct(ctx, construct, declaration, dry_run=dry_run))
 
         categories = tuple(results)
         return ApplyReport(
@@ -125,6 +139,41 @@ class ApplyOrchestrator:
             categories=categories,
             sources=sources,
         )
+
+    async def _set_conflicts(
+        self, ctx: ApplyContext, declared: Sequence[tuple[ApplyConstruct, Declaration[Any]]]
+    ) -> dict[ApplyConstruct, tuple[ResolveFailure, ...]]:
+        """The declared entries the bot's skill sets supply, per construct; empty when the apply may proceed.
+
+        Asked of every construct before any is written. A check that cannot answer refuses the apply too:
+        claiming an entry a set may supply is the one thing this stage exists to prevent.
+        """
+        conflicts: dict[ApplyConstruct, tuple[ResolveFailure, ...]] = {}
+        for construct, declaration in declared:
+            materialiser = self._materialisers.get(construct)
+            if not isinstance(materialiser, ChecksSetSupply) or not declaration.entries:
+                continue
+            try:
+                found = await materialiser.set_conflicts(ctx, declaration.entries)
+            except Exception as exc:  # noqa: BLE001 - an unanswered check refuses the apply
+                logger.exception(
+                    "[manifest_apply] set conflict check raised, construct=%s, bot_id=%s", construct.value, ctx.bot_id
+                )
+                found = tuple(
+                    ResolveFailure(identity, f"could not check the bot's skill sets: {type(exc).__name__}")
+                    for identity in declaration.identities
+                )
+            if found:
+                conflicts[construct] = tuple(found)
+        return conflicts
+
+    def _refused(
+        self, construct: ApplyConstruct, declaration: Declaration[Any], failures: tuple[ResolveFailure, ...]
+    ) -> CategoryResult:
+        """A construct of an apply refused for set conflicts: nothing written, its own conflicts named."""
+        if failures:
+            return self._aborted(construct, declaration.identities, cause=ResolveResult(failures=failures), reason=None)
+        return self._aborted(construct, declaration.identities, cause=None, reason=SET_CONFLICT_REASON)
 
     async def _apply_construct(
         self,

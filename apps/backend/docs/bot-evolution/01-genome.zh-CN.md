@@ -163,7 +163,7 @@ class PersonaFile:
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
 class SkillOrigin(StrEnum):
-    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    CENTER = "center"                # a governed skill from Skill Center, by name: not copied, not version-pinned
     LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
                                      # by a patch); where they were fetched from is not part of the revision (§4.2)
 
@@ -172,7 +172,9 @@ class SkillEntry:
     name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
     digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
-    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
+    repo_path: str | None = None     # REPO only: the path after git:// on the skill row, e.g. "team/weather"
+    # A CENTER entry is its name alone: the bot runs whatever version the Center publishes (ADR 0002),
+    # so a newer Center version is not drift; apply finds the Center asset by this name.
 ```
 
 精选记忆：
@@ -296,7 +298,7 @@ class GenomeSpec:
   ],
   "skills": [                                     // sorted by name
     {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
-    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
+    {"name": "refund-policy", "origin": "center"}     // a Center skill, by name: not copied, no version
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
@@ -1133,16 +1135,16 @@ class EngineMemoryProjection(Protocol):
 
 Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增任何来源类型**：已编译的
 修订版被**直接**投递进应用引擎的各物化器（RSI-04），中间不经过 Manifest 文档。
-注册表为此留下一个 `RevisionApplier` 接缝；在它落地之前，晋升不移动任何引用，并以
-`not_appliable` 被拒绝（RSI-03）。Manifest 一侧仍然获得的内容如下，全部与 schema v1
+注册表的 `RevisionApplier` 接缝绑定为 `DirectApplier`，它启动一次 apply 运行，其状态引用
+指明该次晋升（08-promotion.zh-CN.md §7.1）。Manifest 一侧仍然获得的内容如下，全部与 schema v1
 文档保持向后兼容：
 
 1. **已编译修订版的直接投递。** 应用引擎从两个编译器之一——Manifest 的或
    基因组的——接收同一种类型化期望状态（§2.7），运行服务按 apply 携带的状态
    引用（`StateRef("manifest")`，或指明某次晋升的 `StateRef("genome", promotion_id)`）查找编译器。
-   各物化器从内容存储读取字节，并按类型化条目解析 Center 技能与仓库技能；
-   已编译的修订版是完全可复现的。编译器和引擎已经就位；RSI-04 把晋升的 applier
-   绑定到一次 apply 运行，并解析 Center 与仓库技能（P1；RSI-04）。
+   各物化器从内容存储读取字节，并按类型化条目解析 Center 技能与仓库技能（Center 技能按
+   名称，仓库技能按路径，遵循 Skill Center 自身的可见性规则）；已编译的修订版在 Center
+   版本与仓库提交之外是可复现的，Bot 跟随这两者（ADR 0002）。已完成（RSI-04）。
 2. **`engine_config` 生效。** 该类别已经存在于 Manifest 模式中
    （`schema/validator.py` 会校验 `engine_config.config` 映射），但目前没有任何东西
    应用它：它已被移出第一批，也没有物化器。这项变更是为白名单中的键提供一个物化器，
@@ -1379,12 +1381,12 @@ class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_regist
 class GenomePromotionServiceProtocol(Protocol):   # core/bot_genome/promotion/promotion_service_protocol.py
     async def promote(self, bot: BotRef, *, revision: str, ref: str, expected_revision: RevisionId | None,
                       actor: Provenance, reason: str) -> Promotion:
-        """Move `ref` (`active`) by compare-and-swap, record the promotion (the moved refs and the seam's
-        answer; nothing of the state), hand the revision's desired state to the RevisionApplier seam.
-        The seam's preflight runs before any ref moves; a delivery that fails to start after the move is
-        recorded as apply_failed.
+        """File the promotion `pending` and start the apply run that delivers the revision (the
+        RevisionApplier seam; `applying` with its apply id). `ref` (`active`) moves by compare-and-swap
+        only when that apply ends: `applied`, `applied_partial` (active labelled `partial`), or
+        `apply_failed` (nothing moves). The seam's preflight runs before anything is written.
         Raises RevisionNotFound, NotPromotable, Drifted (automated actors only), NotAppliable,
-        PromotionUnsupported, RefConflict."""
+        PromotionUnsupported, RefConflict, ApplyBusy (another apply holds the bot's lock)."""
 
     def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion: ...
     def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
@@ -1668,8 +1670,7 @@ def lookup(order_id): ...
 `POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版），
 `GET …/genome/promotions` 和 `GET …/genome/promotions/{promotion_id}` 读取晋升记录。
 它们位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
-在直接投递落地之前（RSI-04），每次晋升都会在移动任何引用之前以 `422 not_appliable`
-被拒绝。
+晋升返回 `applying`；投递该修订版的 apply 结束时 `active` 才移动（RSI-04）。
 
 ### 内部接口
 
@@ -1743,17 +1744,20 @@ bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5"
 state = registry.compile(bot, "sha256:7c1e…")          # the typed desired state (§2.7)
 if actor.kind is not ProvenanceKind.USER and await registry.drift(bot):   # automated actors may not promote
     raise Drifted(...)                                 # over a bot that has moved by hand; an owner may
-applier.preflight(bot, state)                          # the delivery seam refuses here, before any ref moves
-promotions.start(row, expected_active=current_active, expected_statuses=PROMOTABLE, moved_at=now)   # one transaction: previous <- active,
-                                                       # active <- r42 (CAS), r42 promoted, the promotion row
-await applier.start(bot, state, actor=actor, reason=reason)   # direct delivery (RSI-04): an apply run whose state
-                                                       # reference is StateRef("genome", promotion_id); the genome
-                                                       # compiler resolves it back to r42 while the promotion is current
+applier.preflight(bot, state)                          # the delivery seam refuses here, before anything is written
+row = promotions.insert(pending_row)                   # filed `pending`; no ref has moved
+apply_id = applier.start(bot, promotion_id=row.promotion_id, principal_id=..., audit_actor=...)
+                                                       # DirectApplier: an apply run whose state reference is
+                                                       # StateRef("genome", promotion_id), under the apply lock
+promotions.mark_applying(..., apply_id=apply_id)
+# ... the apply worker compiles the promotion back to r42 and applies it; when it ends the apply engine
+# publishes the outcome and PromotionSettler, in one transaction, moves active <- r42 (CAS against the
+# promotion's from_revision) and previous, marks r42 promoted and settles the row.
 # The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```
 
-顺序、失败处理和服务 Bot 发布路径由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责；
-目前唯一绑定的 applier 会以 `not_appliable` 拒绝一切，并指明 RSI-04。
+顺序和失败处理由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责；通过发布流水线晋升服务
+Bot 的 verify 或 online 阶段见 [#3212](https://github.com/inclusionAI/Avernet/issues/3212)。
 
 ## 14. 交互
 

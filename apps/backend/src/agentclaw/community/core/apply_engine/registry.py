@@ -63,6 +63,7 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
         ResourceFilePort,
     )
     from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+    from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
     from agentclaw.community.core.ports.skill_package_upload_port import (
         SkillPackageUploadPort,
     )
@@ -375,6 +376,7 @@ def build_materialisers(
     resource_service: ResourceFilePort,
     resource_rows: Callable[[str], ResourceRowsPort],
     cli_tool_service: CliToolService,
+    shared_skills: SharedSkillPort,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services::
 
@@ -442,6 +444,7 @@ def build_materialisers(
             capability_reader,
             package_validator,
             content,
+            shared_skills,
         ),
         ResourcesMaterialiser(resource_service, content, resource_rows),
         CliToolsMaterialiser(cli_tool_service),
@@ -449,8 +452,24 @@ def build_materialisers(
     return {m.construct: m for m in materialisers}
 
 
+@runtime_checkable
+class ChecksSetSupply(Protocol):
+    """A materialiser whose area the bot's skill sets also supply (today ``skills`` and ``mcp``).
+
+    An apply speaks only for the bot's Direct entries. Before anything is written, the orchestrator asks each
+    such materialiser which declared entries a set supplies; any answer refuses the whole apply, so a Direct
+    claim never has to touch a set and the bot is left exactly as it was.
+    """
+
+    @abstractmethod
+    async def set_conflicts(self, ctx: ApplyContext, entries: Sequence[Any]) -> tuple[ResolveFailure, ...]:
+        """One failure per declared entry the bot's skill sets supply; read-only."""
+        ...
+
+
 __all__ = [
     "CategoryPlan",
+    "ChecksSetSupply",
     "ConfirmedPartialWriteError",
     "Intent",
     "Materialiser",

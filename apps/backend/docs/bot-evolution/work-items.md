@@ -139,14 +139,33 @@ the rest.
   script (#2862).
 - **Left to RSI-04**: delivery itself (personal bots), service-bot publish,
   pinning the commit of a shared-repository skill (`origin: repo` records
-  the path only), and resolving Center and repo skills at delivery.
+  the path only), and resolving Center and repo skills at delivery. All
+  but service-bot publish landed with RSI-04; commit pinning was dropped by
+  the owner (see RSI-04).
 - **Follow-up**: capture refuses a platform-managed teclaw bot (teclaw
   delivery mode `platform`, `CaptureRefused`): it has no device to read, so
   capturing it means composing its state from the platform's own rows, the
   way that delivery mode does.
 
-### RSI-04 Direct delivery of a compiled revision (Stage 2)
+### RSI-04 Direct delivery of a compiled revision (Stage 2) — done
 - **Module**: backend
+- **Shipped** (`apps/backend/specs/2026-10-28-rsi-04-direct-delivery/`):
+  a promotion files a `pending` row and starts an apply run whose state
+  reference names it (`DirectApplier`, under the apply lock; a busy bot is
+  `409 apply_in_progress`). The refs move when that apply ends: the apply
+  engine publishes every apply's end to a subscriber per state kind
+  (`core/apply_engine/completion.py`, with a task-queue give-up hook for
+  the deadline case), and the genome's `PromotionSettler` settles the
+  promotion `applied`, `applied_partial` (`active` labelled `partial`) or
+  `apply_failed`. Center skills are delivered by name and repo skills by
+  path (`SharedSkillPort`; #3103). A revision no longer records a Center
+  version (bots track the latest, ADR 0002) and no repo commit is recorded
+  (owner's decision). Delivery keeps the platform's default MCP servers,
+  which capture does not record. Personal bots and service-bot drafts are
+  delivered; a service bot's verify/online stage through the publish
+  pipeline is [#3212](https://github.com/inclusionAI/Avernet/issues/3212)
+  (open decision P-2 decided there: the stage's ref moves once the
+  pipeline completes).
 - **Goal**: Deliver a promoted revision to the bot runtime through the
   apply engine with no Manifest document in between. The engine, its typed
   desired state and the genome compiler already exist

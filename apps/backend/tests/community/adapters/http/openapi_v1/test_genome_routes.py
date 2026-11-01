@@ -49,6 +49,7 @@ from agentclaw.community.core.bot_genome.models import (
     GenomeRevision,
     Promotion,
     PromotionPage,
+    PromotionStatus,
     Provenance,
     ProvenanceKind,
     RecordedRevision,
@@ -133,10 +134,11 @@ def _promotion() -> Promotion:
         going_back=False,
         actor=OWNER,
         reason="ship",
-        status="applied",
-        apply_kind="pending",
-        apply_detail="",
+        status=PromotionStatus.APPLIED,
+        apply_id="ap_1",
+        apply_detail="apply ap_1: applied",
         created_at=NOW,
+        settled_at=NOW,
     )
 
 

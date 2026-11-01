@@ -11,7 +11,7 @@ from agentclaw.community.core.apply_engine.compiler import (
 )
 from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import (
-    CenterSkillVersion,
+    CenterSkillByName,
     Declaration,
     DesiredCliTool,
     DesiredEngineConfig,
@@ -80,8 +80,6 @@ def test_entries_need_their_identity() -> None:
         DesiredSkill("", LocalSkillPackage(ContentRef(DIGEST)))
     with pytest.raises(ValueError, match="needs a name"):
         DesiredCliTool("", ContentRef(DIGEST))
-    with pytest.raises(ValueError, match="needs a version"):
-        CenterSkillVersion("")
     with pytest.raises(ValueError, match="needs a path"):
         RepoSkillPath("")
     with pytest.raises(ValueError, match="not a content digest"):
@@ -99,7 +97,7 @@ def test_a_declaration_refuses_duplicate_identities() -> None:
 
 def test_skill_origin_is_read_off_the_source() -> None:
     assert DesiredSkill("a", LocalSkillPackage(ContentRef(DIGEST))).origin is SkillOrigin.LOCAL
-    assert DesiredSkill("b", CenterSkillVersion("v7")).origin is SkillOrigin.CENTER
+    assert DesiredSkill("b", CenterSkillByName()).origin is SkillOrigin.CENTER
     assert DesiredSkill("c", RepoSkillPath("team/weather")).origin is SkillOrigin.REPO
 
 
