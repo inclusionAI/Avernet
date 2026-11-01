@@ -49,7 +49,7 @@ async def test_real_http_create_manage_same_container_and_legacy_equivalence(wor
     detailed = await async_client.get(path, params=query, headers=headers())
     assert detailed.json()["data"]["owner_id"] == "u_owner"
     assert detailed.json()["data"]["device_uuid"] == "local_dev_test"
-    updated = await async_client.patch(path, params=query, headers=headers(), json={"enabled": False})
+    updated = await async_client.request("PATCH", path, params=query, headers=headers(), json={"enabled": False})
     assert updated.status_code == 200
     run = await async_client.post(f"{path}/run", params=query, headers=headers())
     assert run.status_code == 200
@@ -206,7 +206,7 @@ async def test_http_real_multireplica_list_and_stage_broadcast(world, async_clie
     assert [row["routine_id"] for row in listed.json()["data"]["items"]] == ["same", "same"]
     assert {row["device_uuid"] for row in listed.json()["data"]["items"]} == set(providers.devices)
     before = len(transport.calls)
-    update = await async_client.patch(BASE + "/same", params=query, headers=headers(), json={"enabled": False})
+    update = await async_client.request("PATCH", BASE + "/same", params=query, headers=headers(), json={"enabled": False})
     assert update.status_code == 200, update.text
     assert update.json()["data"]["succeeded"] == 2
     assert len(transport.calls) == before + 2
