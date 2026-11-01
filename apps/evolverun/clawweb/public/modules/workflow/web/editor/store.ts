@@ -19,12 +19,15 @@ export interface EditorState extends Snapshot {
   /** Monotonic editor lifetime, independent of workflow ID, saved baseline and undo history. */
   sessionId: number
   isDirty: boolean
+  /** Layout is session-only and has an independent loss boundary from the spec. */
+  isLayoutDirty: boolean
   validationErrors: ValidationError[]
   pendingEdits: Record<string, string>
   actionError: string | null
   canUndo: boolean
   canRedo: boolean
   loadSpec: (spec: WorkflowSpec) => void
+  replaceSession: (spec: WorkflowSpec, expected: EditorState, isNew: boolean) => boolean
   createNew: (id: string, title: string) => void
   updateSpecField: (field: string, value: unknown) => void
   addNode: (node: EditorNode) => void
@@ -51,6 +54,7 @@ interface HistoryState {
   _past: Snapshot[]
   _future: Snapshot[]
   _savedSpec: WorkflowSpec | null
+  _baselinePositions: Positions
   _transaction: Snapshot | null
   _transactionDepth: number
 }
@@ -85,10 +89,10 @@ function identityChangedDuringSave(current: WorkflowSpec, source: WorkflowSpec, 
   return !equal(current[field], source[field])
 }
 function historyInitial(): HistoryState {
-  return { _past: [], _future: [], _savedSpec: null, _transaction: null, _transactionDepth: 0 }
+  return { _past: [], _future: [], _savedSpec: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
 }
 function initial(sessionId = 0) {
-  return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
+  return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, isLayoutDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
 }
 
 /** Positions live only in this editor session, not localStorage or the execution document.
@@ -103,6 +107,18 @@ function positionsFor(spec: WorkflowSpec, previous?: Snapshot): Positions {
   }))
 }
 
+/** Validate and clone before any navigation or session replacement. */
+export function prepareWorkflowSession(incoming: WorkflowSpec): { spec: WorkflowSpec; positions: Positions; errors: ValidationError[] } | null {
+  try {
+    const spec = clone(incoming)
+    const errors = validateSpec(spec)
+    if (errors.some(error => error.type === 'invalid-structure') || typeof spec.id !== 'string' || !spec.id.trim()
+      || typeof spec.title !== 'string' || !spec.title.trim()
+      || !(spec.version === undefined || typeof spec.version === 'string' && spec.version.trim() || typeof spec.version === 'number' && Number.isFinite(spec.version))) return null
+    return { spec, positions: positionsFor(spec), errors }
+  } catch { return null }
+}
+
 export const useEditorStore = create<StoreState>((set, get) => {
   const fail = (message: string) => { set({ actionError: message }); return false }
   const ready = () => !Object.keys(get().pendingEdits).length || fail('有未应用草稿，请先应用或放弃: ' + Object.values(get().pendingEdits).join('; '))
@@ -114,7 +130,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
     if (sameDocument(state, next)) { set({ actionError: null }); return }
     const past = state._transaction ? state._past : [...state._past, snapshot(state)].slice(-HISTORY_LIMIT)
     set({ ...next, _past: past, _future: [], canUndo: past.length > 0, canRedo: false,
-      isDirty: !equal(next.spec, state._savedSpec), actionError: null,
+      isDirty: !equal(next.spec, state._savedSpec), isLayoutDirty: !equal(next.positions, state._baselinePositions), actionError: null,
       validationErrors: next.spec ? validateSpec(next.spec) : [] })
   }
 
@@ -143,14 +159,25 @@ export const useEditorStore = create<StoreState>((set, get) => {
       const state = get()
       // A same-ID refetch can still be a different source/version. Never overwrite
       // edits just because workflow identity is unchanged.
-      if (state.isDirty) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
+      if (state.isDirty || (state.isLayoutDirty && state.spec?.id !== incoming.id)) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
       if (validateSpec(incoming).some((error) => error.type === 'invalid-structure')) { fail('工作流结构无效，未替换当前文档'); return }
       const spec = clone(incoming)
-      set({ ...initial(state.sessionId + 1), spec, positions: positionsFor(spec, state), _savedSpec: clone(spec), validationErrors: validateSpec(spec) })
+      const positions = positionsFor(spec, state)
+      const baseline = state.spec?.id === spec.id && state.isLayoutDirty ? state._baselinePositions : positions
+      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), validationErrors: validateSpec(spec) })
+    },
+    replaceSession: (incoming, expected, isNew) => {
+      if (get() !== expected) return false
+      const prepared = prepareWorkflowSession(incoming)
+      if (!prepared || get() !== expected) return false
+      const { spec, positions, errors } = prepared
+      set({ ...initial(expected.sessionId + 1), spec, positions, _baselinePositions: clone(positions),
+        _savedSpec: isNew ? null : clone(spec), isDirty: isNew, validationErrors: errors })
+      return true
     },
     createNew: (id, title) => {
       if (!ready()) return
-      if (get().isDirty) { fail('当前工作流有未保存修改，不能新建覆盖'); return }
+      if (get().isDirty || get().isLayoutDirty) { fail('当前工作流有未保存修改，不能新建覆盖'); return }
       const spec: WorkflowSpec = { id, version: '1.0.0', title, nodes: [] }
       set({ ...initial(get().sessionId + 1), spec, isDirty: true, validationErrors: validateSpec(spec) })
     },
@@ -261,7 +288,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!previous) { set({ actionError: null }); return }
       const past = state._past.slice(0, -1)
       set({ ...snapshot(previous), _past: past, _future: [...state._future, snapshot(state)].slice(-HISTORY_LIMIT),
-        canUndo: past.length > 0, canRedo: true, isDirty: !equal(previous.spec, state._savedSpec),
+        canUndo: past.length > 0, canRedo: true, isDirty: !equal(previous.spec, state._savedSpec), isLayoutDirty: !equal(previous.positions, state._baselinePositions),
         validationErrors: previous.spec ? validateSpec(previous.spec) : [], actionError: null })
     },
     redo: () => {
@@ -271,7 +298,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!next) { set({ actionError: null }); return }
       const future = state._future.slice(0, -1)
       set({ ...snapshot(next), _past: [...state._past, snapshot(state)].slice(-HISTORY_LIMIT), _future: future,
-        canUndo: true, canRedo: future.length > 0, isDirty: !equal(next.spec, state._savedSpec),
+        canUndo: true, canRedo: future.length > 0, isDirty: !equal(next.spec, state._savedSpec), isLayoutDirty: !equal(next.positions, state._baselinePositions),
         validationErrors: next.spec ? validateSpec(next.spec) : [], actionError: null })
     },
     completeSave: (savedSpec, specAtRequest, sessionId) => {
@@ -313,8 +340,21 @@ export const useEditorStore = create<StoreState>((set, get) => {
     reset: (options) => {
       if (options?.force === true) { set(initial(get().sessionId + 1)); return }
       if (!ready()) return
-      if (get().isDirty) { fail('当前工作流有未保存修改，不能重置；请先保存或显式放弃'); return }
+      if (get().isDirty || get().isLayoutDirty) { fail('当前工作流有未保存修改，不能重置；请先保存或显式放弃'); return }
       set(initial(get().sessionId + 1))
     },
   }
 })
+
+// This listener must outlive Editor: SPA navigation leaves the Zustand draft in memory.
+// It warns only; browser policy controls the prompt, and no draft is persisted here.
+if (typeof window !== 'undefined') {
+  const beforeUnload = (event: BeforeUnloadEvent) => {
+    const state = useEditorStore.getState()
+    if (!state.isDirty && !state.isLayoutDirty && !Object.keys(state.pendingEdits).length) return
+    event.preventDefault()
+    event.returnValue = ''
+  }
+  window.addEventListener('beforeunload', beforeUnload)
+  if (import.meta.hot) import.meta.hot.dispose(() => window.removeEventListener('beforeunload', beforeUnload))
+}

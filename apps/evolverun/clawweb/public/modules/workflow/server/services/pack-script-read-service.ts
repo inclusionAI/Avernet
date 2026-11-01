@@ -2,7 +2,7 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import { resolveAutoHealGitSettings } from '../config/auto-heal-git-config.js';
 import { cloneClawflows, createTempRepo, removeTempRepo, type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
-import { readPackScriptSnapshot, type PackScriptSnapshot } from './pack-script-snapshot.js';
+import { readPackScriptSnapshot, type PackScriptSnapshot, type PackScriptVersion } from './pack-script-snapshot.js';
 
 export type PackScriptReadInput = {
   db: IDatabase;
@@ -10,6 +10,8 @@ export type PackScriptReadInput = {
   gitAuthor: GitAuthor;
   workflowId: string;
   packId: string;
+  version?: PackScriptVersion;
+  includeVersionFiles?: boolean;
 };
 
 // These fixed reader errors are needed by the caller to distinguish conflicts
@@ -28,7 +30,9 @@ export async function readPackScriptsFromRemote(input: PackScriptReadInput): Pro
       const repoDir = await createTempRepo();
       try {
         await cloneClawflows(repoDir, gitConfig);
-        return await readPackScriptSnapshot(repoDir, input.workflowId, input.packId);
+        return input.includeVersionFiles
+          ? await readPackScriptSnapshot(repoDir, input.workflowId, input.packId, input.version, { includeVersionFiles: true })
+          : await readPackScriptSnapshot(repoDir, input.workflowId, input.packId, input.version);
       } finally {
         await removeTempRepo(repoDir);
       }

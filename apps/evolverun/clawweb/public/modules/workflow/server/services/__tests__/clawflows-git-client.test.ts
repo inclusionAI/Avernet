@@ -332,9 +332,9 @@ describe("ClawFlowsGitClient pack content inheritance", () => {
   };
   const localConfig = (remoteUrl: string): ClawFlowsGitConfig => ({ remoteUrl, username: "", email: author.email });
   const fullPackFiles: Record<string, string> = {
-    [`${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+    [`${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\nnodes: []\n`,
     [`${packId}/scripts/run.sh`]: "echo pack-script\n",
-    [`${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows:\n  - id: ${workflowId}\n    file: workflows/${workflowId}.yaml\n`,
+    [`${packId}/workflow.pack.yaml`]: `id: ${packId}\nversion: "1.0.0"\nworkflows:\n  - id: ${workflowId}\n    file: workflows/${workflowId}.yaml\n`,
   };
 
   function seedBranch(branch: string, files: Record<string, string>): void {
@@ -405,35 +405,19 @@ describe("ClawFlowsGitClient pack content inheritance", () => {
     });
   });
 
-  it("prunes a polluted base down to a single manifest on deploy", async () => {
+  it("rejects a polluted base without deleting either pack", async () => {
     seedBranch(`wf/${workflowId}`, {
       ...fullPackFiles,
-      [`packs/${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\n`,
+      [`packs/${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\nnodes: []\n`,
       [`packs/${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows: [${workflowId}]\n`,
+      [`packs/${packId}/keep.txt`]: "valuable",
     });
     await withClonedWork(async (work) => {
       await prepareBranchBase(work, `wf/${workflowId}`);
-      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
-      await ensurePackManifest(work, packId, workflowId);
-      expect(await pruneLegacyPackCopy(work, packId)).toBe(true);
-      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
-      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
-      expect(tree).toContain(`${packId}/scripts/run.sh`);
-      expect(tree).not.toContain(`packs/${packId}`);
-      expect(tree.split("\n").filter((line) => line.endsWith("workflow.pack.yaml"))).toEqual([
-        `${packId}/workflow.pack.yaml`,
-      ]);
+      await expect(writeWorkflowSpecToRepo(work, packId, workflowId, spec)).rejects.toThrow(/conflict/i);
+      expect(await pruneLegacyPackCopy(work, packId)).toBe(false);
+      expect(readFileSync(path.join(work, "packs", packId, "keep.txt"), "utf8")).toBe("valuable");
+      expect(existsSync(path.join(work, packId, "workflow.pack.yaml"))).toBe(true);
     });
-  });
-
-  it("prunes the legacy copy only when the root-level layout exists", async () => {
-    mkdirSync(path.join(repo, packId, "workflows"), { recursive: true });
-    mkdirSync(path.join(repo, "packs", packId), { recursive: true });
-    writeFileSync(path.join(repo, packId, "workflow.pack.yaml"), `id: ${packId}\n`);
-    writeFileSync(path.join(repo, "packs", packId, "workflow.pack.yaml"), `id: ${packId}\n`);
-    expect(await pruneLegacyPackCopy(repo, packId)).toBe(true);
-    expect(existsSync(path.join(repo, "packs", packId))).toBe(false);
-    expect(existsSync(path.join(repo, packId, "workflow.pack.yaml"))).toBe(true);
-    expect(await pruneLegacyPackCopy(repo, "pack-b")).toBe(false);
   });
 });

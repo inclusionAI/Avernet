@@ -1,3 +1,5 @@
+> **2026-10-31 范围修订**：本文早期的跨消费者 pending 改造和永久关闭写入口方案已废弃。当前实施合同见 `../public/modules/workflow/docs/pack-version-write.md`。本次只修改 ClawWeb 公共模块与内部宿主；TaskGuard/ClawMind 不改代码，正式历史不引入 pending。以下历史分析中的实现状态不作为当前验收证据。
+
 # ClawWeb 工作流脚本 Git 管理：详细设计与开发计划
 
 状态：**设计与实施中；不得视为已经上线或端到端完成**。日期：2026-10-30。
@@ -26,7 +28,7 @@
 - **P05 保存**：确认对话展示 YAML 与脚本增、改、删的完整变更。请求冻结 `workflowId`、Pack 身份、`expectedBaseCommit`、spec 和文件操作，服务端重新验证身份/权限和当前 head，在同一 Git commit 中应用 spec 和脚本，保留其他未变文件。目标 ref/head 不符合前提返回 409，拒绝覆盖；不得自动切换基线或 force push 未观察到的他人变更。
 - **P06 部署**：未经保存、存在未应用配置、保存尚未完成、Git/DB 部分失败或基线未知时不能部署。确认冻结完整 candidate commit/Pack tree/spec 身份，服务端在执行时再次核验，发布的 tag 指向经确认的完整快照或其经明确验证的同 tree 发布 commit。不同快照、DB spec 不一致、活跃发布版本变化或 ref 竞态均 fail closed。确认期间新编辑不能跟着已确认版本悄悄部署。
 - **P07 版本与差异**：文件与 Pack 差异以实际对象计算，区分 candidate、工作区和只读 release；不会将未发布脚本冒充已发布。历史 tag 不可编辑。预览截断、无法解析的动态命令或跨 workflow 共享引用必须标识为未知/待人工审阅。
-- **P08 权限/安全**：所有读写与发布使用服务端现有认证 actor（不能以 `unknown`、header 伪造或浏览器传入 packId 作为授权），检查 workflow 查看/编辑/执行权限，跨 Pack 不可访问。拒绝绝对路径、`..`、NUL、反斜杠、符号链接、gitlink 和特殊文件；封顶单文件、文件数、总字节数；Git 执行参数化、禁用不可信 hooks/filters，不暴露凭据，不执行脚本。共享 Pack 修改/删除必须提示全部可发现的影响，无法完整识别时不能宣称安全。
+- **P08 权限/安全**：所有读写与发布使用服务端现有认证 actor（不能以 `unknown`、header 伪造或浏览器传入 packId 作为授权），检查 workflow 查看/编辑/执行权限；不得读取没有权限的其他 workflow 版本。拒绝绝对路径、`..`、NUL、反斜杠、符号链接、gitlink 和特殊文件；封顶单文件、文件数、总字节数；Git 执行参数化、禁用不可信 hooks/filters，不暴露凭据，不执行脚本。共享 Pack 修改/删除必须提示全部可发现的影响，无法完整识别时不能宣称安全。
 
 ## 4. 目标技术设计
 
@@ -48,18 +50,18 @@
 | `POST /api/workflows/:workflowId/pack-candidate` | `baseCommit`, `spec`, `changes:[{path, content: string|null}]`，并发身份、标题/facade/重命名语义经现有保存合同明确 | 检查 edit、base/head、Pack、路径、大小、YAML 与文件引用，统一 commit；返回精确 `commit`、ref、Pack tree ID、DB/Git 状态和冲突原因。新增路径不默认覆盖，删除必须存在 |
 | `POST /api/workflows/:workflowId/pack-deploy` | 经授权保存的 `candidateCommit`、预期 active revision、幂等操作 ID | 在同一候选身份上确认并发布；返回 tag、commit、deploy number 和激活状态；Git/DB 不确定时返回可对账状态，不盲目重试 |
 
-不接受浏览器提供任意 ref、文件系统绝对路径、远端 URL 或 Git token。API 必须有请求/响应类型、错误码及真实 HTTP 与 service 契约测试；当前只读试行版保守要求 edit 权限，且共享 Pack 直接拒绝；未来若开放 view，须先定义 Pack 级授权和共享影响策略。写和发布使用各自权限且所有 caller 必须参与同样的校验。
+不接受浏览器提供任意 ref、文件系统绝对路径、远端 URL 或 Git token。API 必须有请求/响应类型、错误码及真实 HTTP 与 service 契约测试；当前只读策略要求 edit 权限，已确认可读取所属 Pack 的共享和遗留脚本；读取范围是该 workflow 的版本快照，不能使用客户端选择的 ref 或其他 workflow 版本。未来若开放 view，须先定义相应授权和共享影响策略。写和发布使用各自权限且所有 caller 必须参与同样的校验。
 
 ### 4.3 Git 操作与身份
 
 - 在服务端配置中取得仓库和凭据，使用隔离临时 clone 与受控 Git 参数；在 Git commit/tree/blob 中读取，不信任 checkout 文件或 soft link。确定 Pack 唯一性及 workflow/manifest 归属，识别根级和历史 `packs/` 布局并完整保留未改动文件与 mode。对新建文件应用明确默认 mode，删除/覆盖需显式请求。禁止接受/改写 Pack 外路径。
 - 保存采用从用户已读的 **expected** base 生成新 tree/commit；Git ref 更新用针对具体 ref 与原 head 的显式 lease。即便进程内部已有锁，跨进程 / Bot 写入仍需 Git CAS；分支创建、两个 ref 分歧、远端不可达及 CAS 失败都不能回退到默认分支。
-- 必须针对 ClawMind 的 `wf/` / `saved/` 读取与写入规则做跨仓契约与迁移；不能将保守拒绝策略误称 ClawMind 的完整解析规则。任何试图前进不同 ref 的动作，先证明不覆盖已有工作，且明确非 fast-forward 情况。
+- 必须保持既有 `wf/` / `saved/` 及发布记录合同，并做消费者兼容性验证；不要求修改 ClawMind；不能将保守拒绝策略误称 ClawMind 的完整解析规则。任何试图前进不同 ref 的动作，先证明不覆盖已有工作，且明确非 fast-forward 情况。
 - tag 内容绑定审阅 commit / tree / spec；发布号、活动状态与 Git 不是单个原子事务。预留、推送、激活、确认需要幂等身份和可恢复记录；Git 成功/DB 失败、超时响应丢失、DB 已更新但 Git 失败分别给出可对账状态。**未实现对账及全部发布入口并发保护前，禁止把新脚本写入路径连接到现有 deploy 并声称完整可发布。**
 
 ### 4.4 安全与数据保护
 
-仅允许授权的 workflow Pack `scripts/**`；拒绝特殊 Git mode、子模块、无效 UTF-8、过多文件及非规范路径；读取大小先界定，避免进程输出无界。限制上传后缀和 1 MiB/文件、示例上限按实际协议固化，不可仅依赖前端。单 workflow edit 权限不自动代表其他 workflow 使用的共享脚本授权，应显示影响并对策略未明确的共享写操作 fail closed。不要执行代码、重写任意命令字符串或假装已解析动态引用。日志/错误不得输出文件内容、凭据或远端敏感地址。原子 Git CAS 和浏览器输入验证不替代审计与发布审批。
+允许编辑授权工作流版本中的完整 Pack 常规文件；拒绝特殊 Git mode、子模块、无效 UTF-8、过多文件及非规范路径；读取大小先界定，避免进程输出无界。限制上传后缀和 1 MiB/文件、示例上限按实际协议固化，不可仅依赖前端。已确认 workflow 编辑者可读取及修改该版本快照中其他 workflow 使用的共享脚本；这不表示脚本写入或发布功能已经实现，仍须落实影响提示、并发保护和发布审批。不要执行代码、重写任意命令字符串或假装已解析动态引用。日志/错误不得输出文件内容、凭据或远端敏感地址。原子 Git CAS 和浏览器输入验证不替代审计与发布审批。
 
 ## 5. 实施阶段与交付边界
 
@@ -83,38 +85,16 @@ A/B/C 可先交付可读能力；D/E 不是只改前端按钮或直接沿用 `/a
 - **端到端**：本地构建的真实 React editor + 受控 mock 权限/真实本地 Git；脚本上传→编辑→联合保存→确定 commit→发布→从实际 tag 读取 YAML 和脚本，检查其他 Pack 内容未变。网络白名单禁止真实 PROD/PRE 和意外写请求。
 - **兼容**：现有 workflow save/deploy、Bot/auto-heal 和两种宿主回归；源文件每个不超过 1,000 行。逐项记录未运行项、环境与失败，不允许用旧报告代替本轮证据。
 
+## 操作状态与既有消费者兼容性
+
+未完成的保存、部署只写 ClawWeb 私有 `clawweb_pack_operations`。正式部署历史仍使用既有 action，不写 pending，不要求 TaskGuard 或 ClawMind 升级。操作记录持久保留精确 Git 对象与恢复材料，只有 Git 已确认并且数据库事务成功才生成完成响应。数据库与 Git 不是单个事务，部分成功需按固定 requestId 对账，不能靠全局关闭原部署接口解决。
+
 ## 7. 运维与回滚
 
 - 新 UI/写能力应分阶段开关：先读后写，精确部署与对账通过后再允许发布。默认关闭不安全的写入/部署路径；故障应可禁用新入口而不破坏旧定义读取。
 - 单独记录操作者、workflow、Pack、基线与目标 commit/tree、操作 ID、动作、结果及异常类别；不记录脚本内容或 token。必要时追踪 Git/DB 分阶段状态以供重试/人工对账。
 - 回滚代码只恢复旧 UI/API；已发布 tag 不可变，工作流回滚必须走现有受控新发布流程；无法靠重置分支抹去已推送的发布事件。共享 Pack 影响、历史快照可达性及审批策略需在发布前由负责人确认。
 
-## 8. 本轮执行记录
+## 8. 实施与验证记录
 
-### 已实施（本地代码，非上线）
-
-- A：本文记录目标合同、失败矩阵及分阶段门禁。既有可视化编辑器工作区改动保留。
-- B：新增授权只读 API、临时 Git clone 与 commit/tree 快照读取；仅接受服务端验证主体、workflow edit 权限和服务端解析的 Pack ID；多成员 manifest 或分叉 ref fail closed，但单成员 manifest 不能证明 Pack 非共享；已增加独立 Pack 授权门禁。当前缺少权威 Pack 授权，公共宿主的开发 Cookie 身份也不可用于敏感操作，因此公共入口禁用，**真实脚本读取尚不可用**。API 详情和限制见 `public/modules/workflow/docs/pack-scripts-read.md`。此提交仅包含公共宿主接线；内部宿主原型位于独立仓库、未包含于此，完整类型检查受既有 `BotDirectoryRepository` 构造参数错误阻塞，不能据此宣称可发布。
-- C（部分）：Editor 增加与编排同级的脚本文件 Tab；保留编排面板挂载；具备展示 Git ref/commit 和脚本内容的界面，读取失败可重试并按状态显示脱敏提示；因授权门禁真实宿主目前不能读取脚本。没有脚本草稿、上传、编辑、删除或统一保存。
-- D（仅独立原语）：新增本地 Git 写入原语并测试，但未挂接任何 API 或 UI；其单 ref lease 不解决双 ref 并发、YAML/脚本统一提交、DB/Git 原子性或对账，因此不能用于线上。
-- E：尚未实施。旧部署流程读取 DB YAML，不能保证发布 saved 分支上的脚本，禁止将其包装成完整 Pack 发布。
-
-### 剩余交付顺序与门禁
-
-1. 先与 ClawMind/所有写入和发布入口确定双 ref 权威规则、Pack 级权限、可信身份，以及迁移方案；共享 Pack 授权未明确前继续拒绝访问。
-2. 建立 candidate 记录与幂等操作、冻结的完整 Pack tree 和 YAML，以及跨入口并发/CAS 约束；在失败注入中验证 Git/DB 部分成功后的对账和恢复。
-3. 实现真正的上传、新建、修改、删除与脚本草稿，并联合 YAML 以同一个 candidate 保存；补齐切换、导航、失败和竞态下的草稿保护。现有工作区的新建弹窗和 SPA 后退/前进草稿保护路径需要单独审查和测试，不属于已完成保证。
-4. 将发布明确绑定 candidate commit/tree，并校验 tag、发布号和活动状态；覆盖跨入口并发、重试、崩溃、ABA、tag 冲突及权限。
-5. 完成完整构建、真实浏览器与本地 Git/DB 端到端测试、独立安全复审，再申请预发验证；绝不以 UI 模拟或只读测试替代真实发布验收。
-
-本次设计及验证未写入生产数据或执行部署。测试结果及受环境阻塞的项以本轮执行报告为准。
-
-### 本轮验证记录（2026-10-30）
-
-- `@avernet/workflow` build 与 ClawWeb `ci:check`：通过，包含 public package 边界及 TypeScript 检查。
-- 权限门禁最终修改前的 workflow 全量 Vitest：170 个测试文件、1833 个测试通过；使用本机回环和临时测试仓库。脚本 Tab、只读 API、快照及写入原语均有测试，但不代表完整写入/部署已打通。
-- OCB internal 宿主 `@ocb/clawweb-internal` check：未通过，现有 `server/index.ts:203` 的 `BotDirectoryRepository` 调用传入 3 个参数而当前声明接受 1–2 个；该调用在本次改动前的 HEAD 已存在，尚未修复或验证运行时兼容性。
-- 本次验证未执行真实浏览器端到端、预发部署或线上写入。外部宿主接线和真实认证上下文仍需在对应环境独立验证。
-- 独立安全复审发现开发 Cookie 可冒充身份以及单成员 manifest 无法证明 Pack 独占；随后增加宿主禁用和权威 Pack 授权缺失 fail-closed 门禁。修复后重跑 API / 本地 Git 定向测试：2 个文件、20 个测试通过；重新 build workflow 和 `ci:check` 通过。现有通过测试不代表已有真正的 Pack 授权实现，也不代表内部宿主已可上线。
-
-- 基于最新 `dev` 的隔离工作树定向验证：8 个测试文件、87 个测试通过。内部宿主原型未包含在本提交中。
+当前改动正在按完整版本合同实施。Git 原语、服务端操作日志、宿主真实路由和 UI 均需分别验证，再运行组合测试。历史测试总数不是本轮验收结果；最终状态以当前工作区测试报告为准。本轮不执行生产数据库写入或部署。
