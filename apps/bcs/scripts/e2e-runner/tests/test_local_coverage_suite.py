@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from bcs_e2e import local_story_catalog as roster
 from bcs_e2e import local_story_commands as suite
 from bcs_e2e.cli import main
 from bcs_e2e.run_state import RunStateError
@@ -290,12 +291,12 @@ class BindingTests(unittest.TestCase):
             self.assertTrue(row['command'])
 
     def test_drift_duplicate_or_unknown_inventory_is_blocked(self):
-        original = suite.migration_plan()
+        original = roster.migration_plan()
         rows = original['local_registered_executors']
         for replacement in (rows[:-1], rows + [rows[0]],
                             [dict(rows[0], execution_command='unreviewed')] + rows[1:]):
             with self.subTest(count=len(replacement)), patch.object(
-                    suite, 'migration_plan', return_value={'local_registered_executors': replacement}):
+                    roster, 'migration_plan', return_value={'local_registered_executors': replacement}):
                 self.assertEqual(suite.list_cases()['status'], 'BLOCKED')
 
     def test_every_existing_command_dispatches_exact_parameters(self):

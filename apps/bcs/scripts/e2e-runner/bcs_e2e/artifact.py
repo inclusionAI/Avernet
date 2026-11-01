@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 # Reviewed flat focused-module allowance; the history of increments is
 # documented below disk_digest.
-FLAT_FILE_BUDGET = 348
+FLAT_FILE_BUDGET = 349
 
 
 def _artifact_paths() -> list[Path]:
@@ -155,6 +155,11 @@ def disk_digest() -> str | None:
     # primitives into three mixin planes plus a leaf transport-error
     # module instead of growing the oversized file, so the allowance
     # grows by exactly those four files (347 of 348).
+    # The same 1,000-line source-limit split of the oversized owned-local Story
+    # dispatch module moves the command roster, the parser registration and
+    # the offline evidence probes into a local_story_catalog plane instead of
+    # growing the oversized file, so the allowance grows by exactly that one
+    # file (348 of 349).
     # R1 tolerant aperture (2026-10-31): a budget breach must not poison
     # package import (pytest collection, --help, read-only probes). The
     # budget gate closes fail-closed at Run time in process_digest().
