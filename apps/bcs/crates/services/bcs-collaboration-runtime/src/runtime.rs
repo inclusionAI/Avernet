@@ -3721,12 +3721,24 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .get_run(&cmd.run_id)
             .await?
             .ok_or(CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        // Load the compiled definition before the Human check so the Bot-only
+        // short-circuit below can inspect the node kinds. authorize_run_access
+        // already loads it at this point, so this is not extra work.
+        let compiled = self.load_run_definition_for_view(&run).await?.execution;
+        // COSEC parity with authorize_run_access: a run whose compiled graph
+        // contains no HumanInput node has no pending Human node to reveal, and
+        // the Bot-only legacy-access carve-out applies. Requiring a Present
+        // Human unconditionally made the pending list of a Bot-only run
+        // unreadable by every identity, contradicting the empty-list contract
+        // the same run advertises through authorize_run_access.
+        if !compiled_has_human_input(&compiled) {
+            return Ok(Vec::new());
+        }
         self.authorize_human_for_run(&run, &cmd.caller_actor_id)
             .await?;
         if run.status != StateMachineRunStatus::Running {
             return Ok(Vec::new());
         }
-        let compiled = self.load_run_definition_for_view(&run).await?.execution;
         let state_machine = match &compiled.definition.runtime {
             CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
             _ => return Ok(Vec::new()),

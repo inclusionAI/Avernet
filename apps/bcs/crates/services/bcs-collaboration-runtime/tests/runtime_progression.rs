@@ -101,6 +101,9 @@ mod human_input_activation;
 #[path = "runtime_progression/human_input_response.rs"]
 mod human_input_response;
 
+#[path = "runtime_progression/pending_human_access.rs"]
+mod pending_human_access;
+
 #[path = "runtime_progression/timeouts.rs"]
 mod timeouts;
 
