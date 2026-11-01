@@ -469,3 +469,21 @@ async fn native_task_uuid_suppresses_uncertainty_before_and_after_late_final() {
         assert_eq!(restarted.task_status(vec![reference]).await.unwrap()[0].status, S::Completed);
     }
 }
+
+
+#[tokio::test]
+async fn application_task_handles_translate_core_failures_and_preserve_results() {
+    use bcs_service_api::application::{TaskHandleError, TaskHandleService};
+    let f = Fixture::new().await;
+    let application = bcs_message_flow::TaskHandleApplicationService::new(f.flow.clone());
+    assert_eq!(application.task_status(vec![]).await.unwrap_err(), TaskHandleError::InvalidRequest);
+    assert_eq!(application.cancel_task("not-a-reference".into(), "stop".into()).await.unwrap_err(), TaskHandleError::InvalidRequest);
+    let reference = "bcs_intent_11111111000000000000000000000000";
+    assign(&f, "11111111000000000000000000000000", None).await;
+    let tasks = application.task_status(vec![reference.into()]).await.unwrap();
+    assert_eq!(tasks[0].task_ref, reference);
+    assert_eq!(tasks[0].status, S::Queued);
+    let result = application.cancel_task(reference.into(), "stop".into()).await.unwrap();
+    assert_eq!(result.task_ref, reference);
+    assert_eq!(result.status, S::Cancelled);
+}

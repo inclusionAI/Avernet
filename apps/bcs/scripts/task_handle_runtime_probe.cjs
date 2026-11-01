@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const {randomUUID} = require('node:crypto');
+const {execFileSync} = require('node:child_process');
 // Run only against an explicitly supplied, disposable local BCS instance.
 // Requires `npm install` in openclaw-channel-bcn. This is a transport/lifecycle
 // probe, NOT evidence of a real model retaining conversation history.
@@ -11,11 +12,29 @@ const base = process.argv[2];
 if (!base || !/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base)) {
   throw Error('Usage: node task_handle_runtime_probe.cjs http://127.0.0.1:<DISPOSABLE-BCS-PORT>');
 }
+const publicUser = process.env.BCS_MOCK_USER_ID || '000000';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function api(path, body, token, method=body?'POST':'GET') {
   const r=await fetch(base+path,{method,headers:{'content-type':'application/json',...(token?{'X-BCS-Bot-Token':token}:{})},body:body?JSON.stringify(body):undefined});
   const text=await r.text(); if(!r.ok) throw Error(`${method} ${path}: ${r.status} ${text}`);
   return text?JSON.parse(text):null;
+}
+// Reuse the same signed Principal fixture as the other live V1 E2E stories.
+// The production verifier remains enabled; mock identity headers are insufficient.
+async function publicTaskApi(operation, body) {
+  const principal = execFileSync('python3', [
+    resolve(__dirname, 'e2e-test/group_session_ws_probe.py'), 'principal',
+    '--user-id', publicUser,
+    '--username', 'task-handle-e2e', '--tenant', 'bcs-e2e',
+    '--signing-key', process.env.AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE || 'avernet-dev-signing-key-NOT-FOR-PROD',
+  ], {encoding:'utf8'}).trim();
+  const response = await fetch(`${base}/openapi/v1/collaboration/worker-tasks/${operation}`, {
+    method:'POST', headers:{'content-type':'application/json', 'X-Avernet-Principal':principal},
+    body:JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok) throw Error(`worker-tasks/${operation}: HTTP ${response.status}`);
+  return result;
 }
 async function until(fn, label, ms=12000) { const end=Date.now()+ms; do { const x=await fn(); if(x) return x; await sleep(30); } while(Date.now()<end); throw Error(`timeout: ${label}`); }
 class Bot {
@@ -62,8 +81,31 @@ class Bot {
     console.log('created isolated group and Session');
     const dispatch=(message,timeout_s)=>manager.request('task.dispatch',{group_id:gid,session_id:sid,target_bot:worker.id,message,response_mode:'full',...(timeout_s?{timeout_s}:{})});
     const ref=x=>'T-'+x.task_id.replaceAll('-','').slice(0,8);
-    const status=async r=>(await api('/tasks/status',{task_refs:[r]})).tasks[0].status;
-    const cancel=r=>api('/tasks/cancel',{task_ref:r,reason:'isolated test stop'});
+    const status=async r=>(await publicTaskApi('status',{task_refs:[r]})).tasks[0].status;
+    const cancel=r=>publicTaskApi('cancel',{task_ref:r,reason:'isolated test stop'});
+    const human = await fetch(base+'/me/ensure-human', {
+      method:'POST', headers:{'content-type':'application/json','X-Mock-User-Id':publicUser,'X-Mock-Nick-Name':'task-handle-e2e'}, body:'{}',
+    });
+    assert([200,201].includes(human.status), 'public task probe Human is initialized');
+    // Exercise the real public adapter, including auth and application errors.
+    const publicPath = '/openapi/v1/collaboration/worker-tasks/';
+    for (const operation of ['status', 'cancel']) {
+      const denied = await fetch(base+publicPath+operation, {
+        method:'POST', headers:{'content-type':'application/json'}, body:'{}',
+      });
+      assert.equal(denied.status, 401, `${operation} requires a signed Principal`);
+    }
+    for (const task_refs of [[], Array(21).fill('T-00000000'), ['not-a-ref']]) {
+      await assert.rejects(publicTaskApi('status', {task_refs}), /HTTP 400/);
+    }
+    await assert.rejects(publicTaskApi('cancel', {task_ref:'T-00000000',reason:' '}), /HTTP 400/);
+    assert.deepEqual(await publicTaskApi('status', {task_refs:['T-00000000','T-00000001']}), {
+      tasks:[{ref:'T-00000000',status:'not_found'},{ref:'T-00000001',status:'not_found'}],
+    });
+    assert.equal((await cancel('T-00000000')).status, 'not_found');
+    // Internal MCP endpoints remain available alongside the browser surface.
+    assert.equal((await api('/tasks/status',{task_refs:['T-00000000']})).tasks[0].status, 'not_found');
+    assert.equal((await api('/tasks/cancel',{task_ref:'T-00000000',reason:'probe'})).status, 'not_found');
     assert.equal(await status('T-00000000'),'not_found');
     const a=await dispatch('first probe'),b=await dispatch('second probe'); const ar=ref(a),br=ref(b);
     await until(()=>worker.sends.length===1,'first dispatched');assert.match(worker.text(worker.sends[0]),new RegExp('^\\[来自 .*ref='+ar+'\\]'));
@@ -81,7 +123,7 @@ class Bot {
     const f=await dispatch('timeout live run',1),fr=ref(f);await until(async()=>await status(fr)==='timed_out','custom timeout',8000);assert.equal(worker.aborts,2);
     assert.equal((await manager.request('task.status',{task_refs:[fr]})).tasks[0].status,'timed_out');
     await require('./task_handle_scenarios.cjs')({api, until, manager, worker, dispatch, ref, status, cancel, policy, newSession});
-    console.log('PASS: native WS assign; HTTP/WS status; FIFO; completed/failed; queued and running cancel; duplicate cancel; custom timeout; Manager result refs');
+    console.log('PASS: signed public HTTP status/cancel; auth and validation failures; internal MCP compatibility; native WS assign; HTTP/WS status; FIFO; completed/failed; queued and running cancel; duplicate cancel; custom timeout; Manager result refs');
     console.log('TASK_REFS='+JSON.stringify([ar,br,cr,dr,er,fr]));
     console.log('NOT PROVEN: real model/plugin history continuation (probe peers are scripted)');
   } finally {

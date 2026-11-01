@@ -48,8 +48,9 @@ adds bounded metadata to the existing canonical write, not another record.
 
 ## Control APIs and persistence
 
-`POST /tasks/status {task_refs:[...]}` and `POST /tasks/cancel {task_ref,reason}`
-call application services; native tools use equivalent `task.status/task.cancel`
+`POST /openapi/v1/collaboration/worker-tasks/status {task_refs:[...]}` and
+`POST /openapi/v1/collaboration/worker-tasks/cancel {task_ref,reason}`
+call application services (internal MCP clients retain `/tasks/status` and `/tasks/cancel`); native tools use equivalent `task.status/task.cancel`
 WS methods. V1 intentionally permits global lookup within the store environment;
 refs are not credentials. Status batches contain 1–20 selectors, normalized and
 request-deduplicated. SQL uses three task-only indexes (task ID, intent ID and unresolved
