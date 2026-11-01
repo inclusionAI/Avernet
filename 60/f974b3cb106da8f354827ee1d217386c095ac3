@@ -1,0 +1,16 @@
+devops/hook/check_secrets.py
+  h_12dd6d063428b2 94-107,126-133,225-305,328-336,348-351,372-374,377-378
+devops/hook/test_check_secrets.py
+  h_12dd6d063428b2 1,85,89,92-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "60f974b3cb106da8f354827ee1d217386c095ac3",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
