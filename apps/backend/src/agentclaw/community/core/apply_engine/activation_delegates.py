@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.mcp.config_intent import McpConfigMutation
+
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
@@ -171,7 +173,7 @@ class _DelegatingActivation(ActivationPort):
         self,
         *,
         server_code: str,
-        config: dict | None,
+        config: McpConfigMutation,
         bot_id: str,
         owner_id: str,
         actor_id: str,

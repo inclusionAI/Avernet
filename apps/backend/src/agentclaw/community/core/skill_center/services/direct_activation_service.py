@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.mcp.config_intent import McpConfigMutation
+
 from injector import inject
 
 from agentclaw.community.core.bot_management.addressing import (
@@ -391,14 +393,14 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self,
         *,
         server_code: str,
-        config: dict | None,
+        config: McpConfigMutation,
         bot_id: str,
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """An apply's Direct MCP claim plus complete Bot override; refused when a Set supplies it."""
+        """An apply's Direct claim and preserve/clear/replace action; refused when a Set supplies it."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         mutation_result = None

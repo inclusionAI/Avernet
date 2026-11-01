@@ -360,6 +360,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.mcp.config_intent  # preserve / clear / replace on an atomic Direct MCP claim
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
   - agentclaw.community.core.space_knowledge.capture_guard

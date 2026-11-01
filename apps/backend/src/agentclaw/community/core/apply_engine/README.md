@@ -49,6 +49,14 @@ conflict, refuses the whole apply — every declared category aborted, nothing
 written. The repository's claims refuse the same entries under their own
 lock, so Direct and set supply never share an Installation row.
 
+An MCP entry carries a configuration action separately from its supply:
+Manifest's absent `config` preserves the saved override; explicit `{}` clears
+it; a nonempty object replaces it. Resolve validates the configuration that
+will be retained, and a preserve claim never rewrites it. Genome revisions
+continue to declare complete state: absent configuration clears an override.
+Removing a Direct or override-only MCP entry still clears its configuration;
+currently Set-supplied entries remain outside this removal scope.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus

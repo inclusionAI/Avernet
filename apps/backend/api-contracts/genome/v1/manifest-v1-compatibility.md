@@ -18,18 +18,20 @@ capture).
 
 ## Round-trip
 
-Apply a Manifest document **M**, capture the bot as a revision, then compile
-the revision. Both compile into the same thing: the apply engine's typed
-**desired state** (`core/apply_engine/desired_state.py`), one declaration per
-construct, every entry naming its bytes in the content store by digest. The
-round-trip holds when **the revision's desired state equals the state M
-compiles to** — the engine then converges the bot to either and reaches the
-same place. In the tables below, "M′" is the revision's compiled state.
+Apply a Manifest document **M** to a given initial Bot, capture the result as
+a revision, then compile and restore that revision. Both compilers emit the
+apply engine's typed **desired state** (`core/apply_engine/desired_state.py`).
+The round-trip holds when restoring the revision reaches **the state observed
+after applying M**. MCP configuration actions need not be structurally equal:
+an absent Manifest `config` preserves the Bot's current value, while an absent
+revision `config` explicitly declares no override. In the tables below, "M′"
+is the revision's compiled state.
 
 The revision's compiler is `compile_spec` (`core/bot_genome/compile.py`); the
 document's is `ManifestCompiler` (`core/bot_config_manifest/compiler/`). The
 contract tests compile every case both ways over the fixture sources and
-compare construct by construct
+compare construct by construct (MCP by the resulting state, the other shared
+constructs by their existing structural comparison)
 (`tests/community/core/bot_config_manifest/compiler/test_equivalence.py`),
 check that every case's M is accepted by the real Manifest validator (or
 refused, where stated), and that its revision validates against the schema
@@ -117,7 +119,8 @@ are typed sources in the state, not Manifest grammar, and never reach
 | Manifest field | Outcome | Revision / M′ |
 | --- | --- | --- |
 | `server_code` | maps | `spec.tools.mcp[].server_code` (the key) |
-| `config` absent | maps | No `config`: no bot override |
+| `config` absent | observed | Preserve the Bot's saved override when applying the Manifest; capture records that actual value if present. A revision's absent `config` still declares no override and clears a later value on restore |
+| `config: {}` | maps | Explicitly clear the complete Bot override; capture omits `config` |
 | `config.url` | normalized | Scheme lower-cased |
 | `config.url` with userinfo (`https://user:token@host/…`) | refused (*recording only*) | The revision is never deleted, so a credential in the URL would be stored for good; the Manifest refuses userinfo in source URLs but not here |
 | `config.headers` | maps | Names and values as written ([#2860](https://github.com/inclusionAI/Avernet/issues/2860)). Names are not case-folded: the stored spelling is what reaches the device, and not every apply-time merge compares names case-insensitively |

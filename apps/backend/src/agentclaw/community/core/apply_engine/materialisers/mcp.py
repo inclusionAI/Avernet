@@ -6,8 +6,9 @@ servers less theirs — is outside it, never counted as current and never
 removed. A declared server a set supplies is a conflict (``set_conflicts``),
 which refuses the whole apply before anything is written.
 
-Every declared server becomes a Direct Installation; its closed ``config`` is
-the complete Bot override and commits atomically with it. Omitted Direct
+Every declared server becomes a Direct Installation. A configuration directive
+can preserve its saved Bot override, clear it, or replace the complete override
+atomically with the claim. Omitted Direct
 servers and their overrides are removed. Skill dependencies remain derived:
 they are not inserted into the Installation table, do not appear in
 ``removed``, and stale Bot overrides are cleared with an ``updated`` report row.
@@ -39,6 +40,7 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
+from agentclaw.community.core.mcp.config_intent import McpConfigDirective
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -95,7 +97,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
         self._reader = capability_reader
 
     async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredMcpServer]) -> ResolveResult:
-        """Validate every explicit MCP before the category writes anything: permission, then the override."""
+        """Validate permission and the configuration the entry will actually retain, before any write."""
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         for entry in entries:
@@ -109,7 +111,13 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     )
                 )
                 continue
-            normalized_config = entry.override.as_config() if entry.override is not None else None
+            preserve = entry.override is McpConfigDirective.PRESERVE
+            if preserve:
+                normalized_config = self._activation.get_mcp_overrides(
+                    bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+                ).get(server_code)
+            else:
+                normalized_config = entry.override.as_config() if entry.override is not None else None
             verdict = self._mcp_config.validate_bot_override(
                 user_id=ctx.owner_id,
                 server_code=server_code,
@@ -126,7 +134,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
             intents.append(
                 Intent(
                     server_code,
-                    normalized_config,
+                    McpConfigDirective.PRESERVE if preserve else normalized_config,
                 )
             )
 
@@ -209,15 +217,19 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     if intent.identity not in effective_current
                     else (
                         EntryOutcome.UNCHANGED.value
-                        if _comparison_config(overrides.get(intent.identity))
+                        if intent.value is McpConfigDirective.PRESERVE
+                        or _comparison_config(overrides.get(intent.identity))
                         == _comparison_config(intent.value)
                         else EntryOutcome.UPDATED.value
                     )
                 ),
                 requires_write=(
                     intent.identity not in direct
-                    or _comparison_config(overrides.get(intent.identity))
-                    != _comparison_config(intent.value)
+                    or (
+                        intent.value is not McpConfigDirective.PRESERVE
+                        and _comparison_config(overrides.get(intent.identity))
+                        != _comparison_config(intent.value)
+                    )
                 ),
             )
             for intent in intents
