@@ -16,30 +16,16 @@ from app.domain.services.retrieval_logging_rate import warn_once_per_interval
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 from app.application.services.fragment_candidate_selection import select_rerank_candidates
 from app.application.services.keyword_candidate_selection import (
+    KeywordRetrievalOutcome,
     fuse_candidates,
     keyword_candidates_with_status,
 )
+from app.application.services.fragment_dense_projection import dense_fragment_search
+from app.application.services.fragment_retrieval_branches import run_retrieval_branches
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
 MIN_DENSE_FRAGMENT_SEARCH_K = 32
-
-# Bounded dense projection fields. Full `content` is intentionally omitted;
-# rerank loads complete profile text for selected candidates instead.
-DENSE_FRAGMENT_PAYLOAD_FIELDS = (
-    "profile_key",
-    "worker_id",
-    "profile_id",
-    "profile_type",
-    "fragment_type",
-    "domains",
-    "active_skills",
-    "short_profile",
-    "display_name",
-    "content_preview",
-    "_external_id",
-)
-
 
 class FragmentMatchingMixin:
     def _dense_search(
@@ -48,16 +34,14 @@ class FragmentMatchingMixin:
         top_k: int,
         filters: dict[str, Any] | None,
     ):
-        """Run dense search with bounded payload projection when supported."""
+        """Run dense search with the bounded payload projection contract."""
 
-        kwargs: dict[str, Any] = {}
-        if self._supports_payload_projection:
-            kwargs["payload_fields"] = list(DENSE_FRAGMENT_PAYLOAD_FIELDS)
-        return self._vector_store.search(
+        return dense_fragment_search(
+            self._vector_store,
             query_embedding,
             top_k,
-            filters=filters,
-            **kwargs,
+            filters,
+            supports_payload_projection=self._supports_payload_projection,
         )
 
     def _match_with_fragments(
@@ -147,48 +131,100 @@ class FragmentMatchingMixin:
             logger.debug("[FRAGMENT-MATCH] no filters")
 
         # Stage 2: Fragment 级检索（扩大召回）
-        fragment_hits = []
-        dense_available = True
         search_k = self._calculate_search_k(
             top_k=top_k,
             has_filters=filters is not None,
             has_excluded=len(excluded_set) > 0,
             expand_factor=effective_expand_factor,
         )
-        try:
+
+        def run_dense() -> list[VectorSearchHit]:
             if not query_embedding:
-                dense_available = False
                 log_stage(
                     logger,
                     "vector_search",
                     reason="embedding_unavailable",
                     hit_count=0,
                 )
-            else:
-                # A remote size/point-count probe is a second Qdrant RPC on
-                # every cold query. Let the bounded search itself report an
-                # empty index and keep the keyword/literal fallback usable.
-                search_started = perf_counter()
-                fragment_hits = self._dense_search(query_embedding, search_k, filters)
-                raw_hit_count = len(fragment_hits)
-                log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
+                return []
+            # A remote size/point-count probe is a second Qdrant RPC on
+            # every cold query. Let the bounded search itself report an
+            # empty index and keep the keyword/literal fallback usable.
+            search_started = perf_counter()
+            dense_hits = self._dense_search(query_embedding, search_k, filters)
+            log_stage(
+                logger,
+                "vector_search",
+                search_k=search_k,
+                hit_count=len(dense_hits),
+                duration_ms=round((perf_counter() - search_started) * 1000, 2),
+            )
+            return dense_hits
 
-                # 过滤掉未启用的 fragment 类型（使用运行时权重决定）
-                unfiltered_hits = fragment_hits
-                fragment_hits = self._filter_fragment_hits(fragment_hits, enabled_fragment_types)
-                retained_ids = {hit.id for hit in fragment_hits}
-                log_candidates(logger, "fragment_type_removed", (
-                    (hit.id, hit.score) for hit in unfiltered_hits if hit.id not in retained_ids
-                ), level=logging.INFO)
-                log_stage(logger, "vector_search", search_k=search_k,
-                          hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
-                          duration_ms=round((perf_counter() - search_started) * 1000, 2))
+        def run_keyword() -> KeywordRetrievalOutcome:
+            return keyword_candidates_with_status(
+                self._vector_store,
+                query,
+                effective_expand_factor * top_k,
+                filters,
+                excluded_set,
+                candidate_keys,
+                enabled_fragment_types,
+            )
 
-        except Exception as e:
-            log_stage(logger, "vector_search", reason="provider_error", error_type=type(e).__name__)
-            logger.warning("Fragment search failed: %s", e)
+        dense_result, keyword_result = run_retrieval_branches(
+            run_dense, run_keyword, self._retrieval_runner
+        )
+
+        assert dense_result is not None
+        assert keyword_result is not None
+        if dense_result.error is not None:
+            log_stage(
+                logger,
+                "vector_search",
+                reason="provider_error",
+                error_type=type(dense_result.error).__name__,
+            )
+            logger.warning("Fragment search failed: %s", dense_result.error)
             dense_available = False
             fragment_hits = []
+        else:
+            dense_available = bool(query_embedding)
+            fragment_hits = dense_result.value or []
+            if fragment_hits:
+                log_candidates(
+                    logger,
+                    "vector_hits",
+                    ((hit.id, hit.score) for hit in fragment_hits),
+                )
+                unfiltered_hits = fragment_hits
+                fragment_hits = self._filter_fragment_hits(
+                    fragment_hits, enabled_fragment_types
+                )
+                retained_ids = {hit.id for hit in fragment_hits}
+                log_candidates(
+                    logger,
+                    "fragment_type_removed",
+                    (
+                        (hit.id, hit.score)
+                        for hit in unfiltered_hits
+                        if hit.id not in retained_ids
+                    ),
+                    level=logging.INFO,
+                )
+                log_stage(
+                    logger,
+                    "vector_search",
+                    search_k=search_k,
+                    hit_count=len(unfiltered_hits),
+                    after_type_filter=len(fragment_hits),
+                )
+
+        if keyword_result.error is not None:
+            keyword_outcome = KeywordRetrievalOutcome([], available=False)
+        else:
+            assert keyword_result.value is not None
+            keyword_outcome = keyword_result.value
 
         # Preserve the empty-index contract without putting a remote point-count
         # RPC on the normal cache-miss request path. Only a zero-hit or failed
@@ -249,10 +285,6 @@ class FragmentMatchingMixin:
                 metadata_filtered=excluded_by_meta,
             )
 
-        keyword_outcome = keyword_candidates_with_status(
-            self._vector_store, query, effective_expand_factor * top_k,
-            filters, excluded_set, candidate_keys, enabled_fragment_types,
-        )
         lexical = keyword_outcome.candidates
         diagnostics = {
             "keyword_search_used": bool(lexical),
@@ -267,12 +299,14 @@ class FragmentMatchingMixin:
             runtime_config["_retrieval"] = diagnostics
 
         # A semantic-model outage must not depend on the remote keyword cluster
-        # having at least one hit. If dense retrieval is unavailable and keyword
-        # retrieval is unavailable or returns no candidate, use the process-local
-        # literal/default chain. A healthy keyword hit set remains preferred.
-        literal_fallback_required = not dense_available and (
-            not keyword_outcome.available or not lexical
-        )
+        # having at least one hit. Likewise, an admitted query with no dense or
+        # lexical candidate is an availability condition: use the process-local
+        # literal/default chain instead of returning an opaque empty success.
+        # A healthy dense or keyword hit set remains preferred.
+        literal_fallback_required = (
+            not dense_available
+            and (not keyword_outcome.available or not lexical)
+        ) or (not candidates and not lexical)
         if literal_fallback_required:
             if self._fallback_index is None:
                 logger.warning(

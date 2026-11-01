@@ -31,6 +31,10 @@ from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
+from app.application.services.search_index_state import (
+    INDEX_STATE_FIELDS,
+    index_state_from_provider,
+)
 from app.application.services.worker_vector_match_types import MatchResult
 from app.application.services.semantic_failure_metadata import (
     semantic_failure_metadata,
@@ -195,6 +199,8 @@ def degraded_reasons(metadata: Mapping[str, Any]) -> tuple[str, ...]:
     for reason in ("local_snapshot_used", "last_known_good_used"):
         if metadata.get(reason) is True and reason not in reasons:
             reasons.append(reason)
+    if metadata.get("index_complete") is False:
+        reasons.append("index_incomplete")
     return tuple(reasons)
 
 
@@ -268,6 +274,7 @@ class AgentSearchService:
         result_cache: AgentSearchResultCache | None = None,
         resilience_cache: AgentSearchResilienceCache | None = None,
         local_snapshot: Any | None = None,
+        index_state_provider: Callable[[], Mapping[str, Any]] | None = None,
         execution_budget: AgentSearchExecutionBudget | None = None,
         offload: Offload = _default_offload,
         clock: Callable[[], float] = time.monotonic,
@@ -278,9 +285,38 @@ class AgentSearchService:
         self._result_cache = result_cache
         self._resilience_cache = resilience_cache
         self._local_snapshot = local_snapshot
+        self._index_state_provider = index_state_provider
         self._execution_budget = execution_budget
         self._offload = offload
         self._clock = clock
+
+    def _apply_index_state(self, metadata: dict[str, Any]) -> None:
+        """Publish bounded index state without leaking provider diagnostics."""
+
+        index_state = index_state_from_provider(self._index_state_provider)
+        if index_state is None:
+            return
+        metadata.update(index_state)
+        if index_state.get("index_complete") is False:
+            metadata.setdefault("index_incomplete", True)
+
+    def _prepared_result_cache_hit(self, hit: Any) -> Any:
+        """Refresh current index state on a cached result and return it."""
+        hit_metadata = (
+            hit.response.metadata
+            if isinstance(hit, AgentRecommendationOutcome)
+            else hit.metadata
+        )
+        self._apply_index_state(hit_metadata)
+        self._publish_status(hit_metadata)
+        hit_metadata["cache_hit"] = True
+        if isinstance(hit, AgentRecommendationOutcome):
+            hit.metadata.update(
+                cache_hit=True,
+                status=hit_metadata["status"],
+                reasons=hit_metadata["reasons"],
+            )
+        return hit
 
     async def _cached_or_execute(
         self,
@@ -320,15 +356,7 @@ class AgentSearchService:
             hit = self._result_cache.get(key)
             if hit is not None:
                 metadata["cache_hit"] = True
-                hit_metadata = (
-                    hit.response.metadata
-                    if isinstance(hit, AgentRecommendationOutcome)
-                    else hit.metadata
-                )
-                hit_metadata["cache_hit"] = True
-                if isinstance(hit, AgentRecommendationOutcome):
-                    hit.metadata["cache_hit"] = True
-                return hit
+                return self._prepared_result_cache_hit(hit)
             self._result_cache.record_miss()
 
         if self._resilience_cache is not None:
@@ -339,6 +367,7 @@ class AgentSearchService:
                     if isinstance(negative, AgentRecommendationOutcome)
                     else negative.metadata
                 )
+                self._apply_index_state(negative_metadata)
                 negative_metadata["negative_cache_hit"] = True
                 if isinstance(negative, AgentRecommendationOutcome):
                     negative.metadata["negative_cache_hit"] = True
@@ -351,15 +380,7 @@ class AgentSearchService:
                 hit = self._result_cache.get_without_metrics(key)
                 if hit is not None:
                     metadata["cache_hit"] = True
-                    hit_metadata = (
-                        hit.response.metadata
-                        if isinstance(hit, AgentRecommendationOutcome)
-                        else hit.metadata
-                    )
-                    hit_metadata["cache_hit"] = True
-                    if isinstance(hit, AgentRecommendationOutcome):
-                        hit.metadata["cache_hit"] = True
-                    return hit
+                    return self._prepared_result_cache_hit(hit)
 
             outcome = await self._bounded_execute(
                 execute, total_timeout_fallback
@@ -387,6 +408,7 @@ class AgentSearchService:
                             if isinstance(stale, AgentRecommendationOutcome)
                             else stale.metadata
                         )
+                        self._apply_index_state(stale_metadata)
                         self._preserve_dependency_state(
                             outcome_metadata, stale_metadata
                         )
@@ -432,6 +454,8 @@ class AgentSearchService:
         if metadata.get("local_snapshot_used") is True:
             return True
         if metadata.get("last_known_good_used") is True:
+            return True
+        if metadata.get("index_complete") is False:
             return True
         return metadata.get("fallback_unavailable") is True
 
@@ -663,6 +687,7 @@ class AgentSearchService:
         started = self._clock()
 
         async def execute_search() -> AgentSearchOutcome:
+            self._apply_index_state(metadata)
             try:
                 with search_stage_metrics("search", "embedding"):
                     query_embedding = await self._run(
@@ -886,6 +911,10 @@ class AgentSearchService:
                 )
                 _mark_candidate_unavailable(response.metadata, type(error).__name__)
 
+            self._apply_index_state(metadata)
+            for key, value in metadata.items():
+                if key in INDEX_STATE_FIELDS:
+                    response.metadata.setdefault(key, value)
             _annotate_semantic_failure(response.metadata)
             if not response.recommendations:
                 # Healthy zero-candidate outcomes use the same explicit snapshot

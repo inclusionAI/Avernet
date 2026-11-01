@@ -711,7 +711,12 @@ def include_oss_business_routes(app) -> None:
                 _get_vector_match_service,
                 _get_embedding_generator,
             )
-
+            from app.application.services.search_index_state import (
+                search_index_state_metadata,
+            )
+            app_state = getattr(getattr(request, "app", None), "state", None)
+            context = getattr(app_state, "context", None)
+            registry = getattr(context, "registry", None)
             match_service = _get_vector_match_service()
             embedding_gen = _get_embedding_generator()
             if not match_service:
@@ -720,7 +725,6 @@ def include_oss_business_routes(app) -> None:
             # --- Execute the unified application search service ---
             # Query normalization, default filters, bounded execution, and
             # embedding degradation are application policy, not route policy.
-            app_state = getattr(getattr(request, "app", None), "state", None)
             result_cache = getattr(
                 app_state, "agent_search_result_cache", None
             )
@@ -738,6 +742,11 @@ def include_oss_business_routes(app) -> None:
                     app_state, "agent_search_execution_budget", None
                 ),
                 offload=run_search_in_threadpool,
+                index_state_provider=(
+                    lambda: search_index_state_metadata(registry)
+                    if registry is not None
+                    else None
+                ),
             )
             outcome = await agent_search_service.search(
                 AgentSearchCommand(

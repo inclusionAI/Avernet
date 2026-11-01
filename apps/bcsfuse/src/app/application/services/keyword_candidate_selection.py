@@ -16,6 +16,12 @@ from app.domain.services.vector_store_adapter import VectorStoreAdapter
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
+# Physical fragments outnumber unique profiles. Start with a bounded prefix that
+# normally contains enough profiles, avoiding a second remote page read on the
+# cold recommendation path. Rare low-recall queries retain the existing paging.
+KEYWORD_INITIAL_FETCH_MULTIPLIER = 4
+KEYWORD_MAX_FETCH_LIMIT = 256
+
 
 @dataclass(frozen=True)
 class KeywordRetrievalOutcome:
@@ -37,7 +43,11 @@ def keyword_candidates_with_status(
     if not query.strip() or limit <= 0 or allowed == set() or not enabled_types:
         return KeywordRetrievalOutcome([], available=True)
     try:
-        fetch_limit, lookups = limit, 0
+        fetch_limit = min(
+            max(limit * KEYWORD_INITIAL_FETCH_MULTIPLIER, limit),
+            KEYWORD_MAX_FETCH_LIMIT,
+        )
+        lookups = 0
         while True:
             hits = store.text_search(query, fetch_limit, filters=filters)
             lookups += 1

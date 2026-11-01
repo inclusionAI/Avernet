@@ -304,6 +304,11 @@ async def recommend_bots(
     )
     app_state = getattr(getattr(http_request, "app", None), "state", None)
     result_cache = getattr(app_state, "agent_search_result_cache", None)
+    from app.application.services.search_index_state import (
+        search_index_state_metadata,
+    )
+    context = getattr(app_state, "context", None)
+    registry = getattr(context, "registry", None)
     try:
         # 获取服务
         candidate_service = get_candidate_recommendation_service()
@@ -347,6 +352,11 @@ async def recommend_bots(
             local_snapshot=getattr(app_state, "local_retrieval_snapshot", None),
             execution_budget=getattr(
                 app_state, "agent_search_execution_budget", None
+            ),
+            index_state_provider=(
+                lambda: search_index_state_metadata(registry)
+                if registry is not None
+                else None
             ),
             offload=run_search_in_threadpool,
         )

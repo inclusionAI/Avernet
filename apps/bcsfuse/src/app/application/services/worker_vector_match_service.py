@@ -60,6 +60,7 @@ from app.application.services.worker_vector_match_fragments import FragmentMatch
 from app.application.services.keyword_candidate_selection import (
     keyword_candidates_with_status,
 )
+from app.application.services.retrieval_branch_runner import RetrievalBranchRunner
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate as FragmentProfileCandidate
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         fragment_config: FragmentRetrievalConfig | None = None,
         profile_content_store: Any | None = None,
         fallback_index: RetrievalIndex | None = None,
+        retrieval_runner: RetrievalBranchRunner | None = None,
     ):
         """
         初始化 WorkerVectorMatchService。
@@ -166,6 +168,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         self._profile_filter = profile_filter
         self._profile_content_store = profile_content_store
         self._fallback_index = fallback_index
+        self._retrieval_runner = retrieval_runner
 
         # V2: Fragment 配置
         self._fragment_config = fragment_config or FragmentRetrievalConfig.from_env()

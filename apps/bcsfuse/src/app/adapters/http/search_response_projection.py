@@ -11,6 +11,7 @@ from app.application.agent_search_service import (
     default_search_filters,
     degraded_reasons,
 )
+from app.application.services.search_index_state import project_index_state
 from app.bootstrap.oss_business_routes import SearchRequestOSS
 
 
@@ -44,6 +45,9 @@ def build_v1_search_response(
         "timing_ms": round(elapsed_ms, 2),
         "config_applied": outcome.config_applied,
     }
+    index_state = project_index_state(outcome.metadata)
+    if index_state:
+        response["index_state"] = index_state
     fallback_reason_code = outcome.metadata.get("fallback_reason_code")
     if isinstance(fallback_reason_code, str) and fallback_reason_code:
         response["fallback_reason_code"] = fallback_reason_code
@@ -98,6 +102,9 @@ def build_final_v1_search_response(
             "filters": default_search_filters(command.filters),
         },
     }
+    index_state = project_index_state(outcome.metadata)
+    if index_state:
+        response["index_state"] = index_state
     fallback_reason_code = outcome.metadata.get("fallback_reason_code")
     if isinstance(fallback_reason_code, str) and fallback_reason_code:
         response["fallback_reason_code"] = fallback_reason_code

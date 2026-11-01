@@ -35,6 +35,7 @@ from typing import Optional
 
 from app.application.services.literal_fallback_builder import build_literal_fallback_index
 from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
+from app.application.services.retrieval_branch_runner import RetrievalBranchRunner
 from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
 from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 from app.application.services.group_fusion_service import GroupFusionService
@@ -80,6 +81,7 @@ _embedding_generator: Optional["EmbeddingGenerator"] = None
 
 # Vector Match Service
 _vector_match_service: Optional["WorkerVectorMatchService"] = None
+_retrieval_branch_runner: Optional["RetrievalBranchRunner"] = None
 
 # Application Context (for accessing provider registry)
 _app_context: Optional["ApplicationContext"] = None
@@ -242,6 +244,7 @@ def reset_fusion_services() -> None:
     global _perspective_provider
     global _max_parallel_workers
     global _embedding_generator, _vector_match_service  # 🔧 BUG FIX: 添加缺失的全局变量声明
+    global _retrieval_branch_runner
     global _question_rewrite_service
     global _profile_merge_service
 
@@ -260,6 +263,9 @@ def reset_fusion_services() -> None:
     _conflict_alignment_service = None
     _perspective_provider = None
     _vector_match_service = None
+    if _retrieval_branch_runner is not None:
+        _retrieval_branch_runner.close()
+    _retrieval_branch_runner = None
     _max_parallel_workers = 5  # 恢复默认值
     _embedding_generator = None  # 🔧 BUG FIX: 重置embedding generator
     _question_rewrite_service = None
@@ -881,7 +887,7 @@ def _get_vector_match_service():
     Returns:
         WorkerVectorMatchService 或 None
     """
-    global _vector_match_service
+    global _vector_match_service, _retrieval_branch_runner
     if _vector_match_service is None:
         try:
             from app.application.services.worker_vector_match_service import WorkerVectorMatchService
@@ -955,11 +961,15 @@ def _get_vector_match_service():
                 logger.info("[VectorMatch] Registry-aware filter disabled, using vector store payload filtering only")
 
             fallback_index = build_literal_fallback_index(vector_store)
+            from app.application.services.retrieval_branch_runner import RetrievalBranchRunner
+            if _retrieval_branch_runner is None:
+                _retrieval_branch_runner = RetrievalBranchRunner(max_workers=64)
             _vector_match_service = WorkerVectorMatchService(
                 vector_store=vector_store,
                 metadata_store=metadata_store,
                 profile_filter=profile_filter,
                 fallback_index=fallback_index,
+                retrieval_runner=_retrieval_branch_runner,
             )
 
             # Phase B: Inject profile content store for fragment content reload
