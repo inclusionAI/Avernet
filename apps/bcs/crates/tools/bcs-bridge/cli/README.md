@@ -424,6 +424,16 @@ API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
 digits, hyphens or underscores. `--config` remains supported but cannot be
 combined with `--profile`.
 
+For `start` (including `start --daemon`), explicit `--profile`, `--config` or
+`BRIDGE_CONFIG` takes precedence. Without a selector, the bridge uses
+`~/.bcn-bridge/bridge.toml` when it exists. Otherwise it discovers named profiles
+with a `bridge.toml` file: a unique profile is selected and its name is printed;
+multiple profiles produce a sorted list of startup commands and require an
+explicit choice. Configuration contents are validated after selection; an
+invalid selected configuration fails rather than falling back to another one.
+When no configuration exists, the error suggests completing Bot onboarding.
+Registration, initialization and deinitialization retain their existing defaults.
+
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.
 Reuse preserves the saved identity policy even if an automatic resolver now
