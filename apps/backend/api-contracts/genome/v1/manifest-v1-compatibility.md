@@ -172,6 +172,7 @@ are typed sources in the state, not Manifest grammar, and never reach
 | [`09-cli-tools`](examples/manifest-v1/09-cli-tools/) | §7 | ignored (empty bot) |
 | [`10-mcp`](examples/manifest-v1/10-mcp/) | §8 | round-trips |
 | [`11-script`](examples/manifest-v1/11-script/) | §9 | round-trips |
+| [`12-mcp-preserve-and-clear`](examples/manifest-v1/12-mcp-preserve-and-clear/) | §8, second block | round-trips; absent `config` preserves, `{}` clears; capture records both without overrides on the initially empty bot |
 
 Each case directory holds `manifest.yaml` (M), `notes.md`, and either
 `revision.json` (whose compiled state the tests compare with M's) or
