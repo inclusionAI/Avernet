@@ -77,8 +77,8 @@ class RunRecoveryTest(unittest.TestCase):
                     self.assertEqual(duplicate["action"], "duplicate")
                     second = self.invoke(kind, first["run_id"])
                     self.assertTrue(second["submitted"])
-                    with self.assertRaises(SystemExit), patch.object(uc, "bcs_cli", side_effect=self.cli):
-                        uc.recovery().inspect(self.session, second["run_id"])
+                    with patch.object(uc, "bcs_cli", side_effect=self.cli):
+                        self.assertEqual(uc.recovery().inspect(self.session, second["run_id"])["action"], "exhausted")
                     # Human fallback omits --failed-run but must share the same cap.
                     with self.assertRaises(SystemExit), patch.object(uc, "bcs_cli", side_effect=self.cli):
                         (uc.cmd_open_round if kind == "speak" else uc.cmd_open_vote)(
@@ -90,8 +90,12 @@ class RunRecoveryTest(unittest.TestCase):
     def test_abort_and_untrusted_cross_session_cannot_restart(self):
         self.prepare("speak")
         self.record("old-run", "aborted", "user_aborted")
-        with self.assertRaises(SystemExit), patch.object(uc, "bcs_cli", side_effect=self.cli):
-            uc.recovery().inspect(self.session, "old-run")
+        before = uc.state_path(self.session).read_bytes()
+        with patch.object(uc, "bcs_cli", side_effect=self.cli):
+            self.assertEqual(uc.recovery().inspect(self.session, "old-run")["action"], "stopped")
+        self.assertEqual(uc.state_path(self.session).read_bytes(), before)
+        with self.assertRaises(SystemExit):
+            self.invoke("speak", "old-run")
         self.assertEqual(uc.load_state(self.session)["recovery"]["stopped"]["reason"], "user_aborted")
         self.prepare("speak")
         self.facts["old-run"]["session_id"] = "another-session"
@@ -144,7 +148,8 @@ class RunRecoveryTest(unittest.TestCase):
         with patch.object(uc, "bcs_cli", side_effect=self.cli):
             result = uc.recovery().inspect(self.session, "accepted-but-lost")
         self.assertEqual(result["action"], "retry-speak")
-        self.assertEqual(uc.load_state(self.session)["recovery"]["current"]["run_id"], "accepted-but-lost")
+        self.assertEqual(uc.load_state(self.session)["recovery"]["current"]["state"], "uncertain")
+        self.assertTrue(self.invoke("speak", "accepted-but-lost")["submitted"])
 
 
 if __name__ == "__main__":

@@ -260,6 +260,8 @@ uc open-round --session "$session_id"
 `[State Machine Run Result]` 是独立的 `RUN_RESULT` 唤醒，不是 ECHO 或 WORKER_MSG。
 先执行 `uc status --session "$session_id" --failed-run "<run_id>"`：脚本核对服务端
 run 的会话、创建者、异常终态与本局当前阶段。不要依赖消息文本自行决定重开。
+普通 status 也会核验已记录的当前 run；若返回恢复 command，优先执行，不能按本地
+RUNNING 提示继续等待。状态查询不写游戏状态；open-* 持锁重新核验后才提交及计数。
 
 | `run_result_action.action` | 最后一个工具调用 |
 | --- | --- |

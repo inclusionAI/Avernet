@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import fcntl
 import json
 import os
+import shlex
 import uuid
 
 MAX_RETRIES = 2
@@ -26,6 +27,22 @@ def safe_status(state):
             "retries": saved.get("retries", {}),
             "processed_failure_run_ids": sorted(saved.get("processed", {})),
             "stopped": saved.get("stopped")}
+
+
+def guidance(session, decision):
+    """One authoritative instruction for both ordinary and result wakeups."""
+    action = decision["action"]
+    if action in ("retry-speak", "retry-vote", "open-vote"):
+        command = "open-round" if action == "retry-speak" else "open-vote"
+        retry = " --retry" if action.startswith("retry-") else ""
+        invocation = (f"uc {command} --session {shlex.quote(session)}{retry}"
+                      f" --failed-run {shlex.quote(decision['failed_run_id'])}")
+        return {"command": invocation, "next_action": f"最后调用 {invocation}；提交成功后按返回说明结束激活。"}
+    if action in ("stopped", "exhausted", "uncertain"):
+        return {"next_action": decision["message"]}
+    if action in ("duplicate", "stale"):
+        return {"next_action": "该结果已处理或不属于当前阶段；不重开，不重复提交。"}
+    return {}
 
 
 class Recovery:
@@ -52,7 +69,7 @@ class Recovery:
             self.api.die("RUN_FACTS_UNAVAILABLE", "无法核实本局主持人提交的运行，停止恢复；请维护者核对服务端事实。")
         return run, run.get("terminal_result")
 
-    def check(self, session, failed_run):
+    def check(self, session, failed_run, *, read_only=False):
         state = self.api.load_state(session)
         recovery = state.get("recovery", {})
         current = recovery.get("current")
@@ -60,34 +77,46 @@ class Recovery:
         if not run_id:
             self.api.die("SUBMISSION_UNCERTAIN", "没有可核验的运行 ID，不能盲目重开。请维护者核对服务端运行。")
         run, terminal = self.facts(state, run_id)
+        def stop(action, code, message, **extra):
+            if not read_only:
+                self.api.die(code, message, **extra)
+            return {"action": action, "code": code, "message": message,
+                    "failed_run_id": run_id, "phase": state["phase"], **extra}
         # A lost submission response can only be reconciled against the nonce
         # persisted before sending and echoed in the server's original input.
         if current and current["state"] == "uncertain":
             marker = run.get("client_reference")
             if not marker or marker != current.get("correlation", {}).get("nonce"):
                 self.api.die("SUBMISSION_UNCERTAIN", "运行不匹配未确认提交，停止；不能再次盲目提交。")
-            with self.api.locked(session):
-                state = self.api.load_state(session)
-                current = state["recovery"]["current"]
+            if read_only:
                 current.update(run_id=run_id, state="submitted")
-                self.api.save_state(state)
+            else:
+                with self.api.locked(session):
+                    state = self.api.load_state(session)
+                    current = state["recovery"]["current"]
+                    current.update(run_id=run_id, state="submitted")
+                    self.api.save_state(state)
             recovery = state["recovery"]
         if run_id in recovery.get("processed", {}):
             return {"action": "duplicate", "failed_run_id": run_id, "phase": state["phase"]}
         if not current or current.get("run_id") != run_id:
             return {"action": "stale", "failed_run_id": run_id, "phase": state["phase"]}
         if run["status"] not in ("failed", "aborted"):
+            if read_only and run["status"] in ("pending", "running", "completed"):
+                return {"action": "wait" if run["status"] != "completed" else "follow-status",
+                        "run_id": run_id, "phase": state["phase"]}
             self.api.die("RUN_NOT_TERMINAL", "该运行仍未失败或中止，不能重开；继续等待。")
         if not isinstance(terminal, dict) or terminal.get("run_id") != run_id \
                 or terminal.get("status") != run["status"] or terminal.get("schema_version") != 1:
             self.api.die("RUN_RESULT_UNAVAILABLE", "服务端缺少可信终态摘要，停止自动恢复。")
         reason = terminal.get("reason_category")
         if run["status"] == "aborted" or reason == "user_aborted" or reason is None:
-            with self.api.locked(session):
-                state = self.api.load_state(session)
-                state["recovery"]["stopped"] = {"run_id": run_id, "reason": reason or "scope_invalid"}
-                self.api.save_state(state)
-            self.api.die("RECOVERY_STOPPED", "运行已中止或范围失效，不自动重开。")
+            if not read_only:
+                with self.api.locked(session):
+                    state = self.api.load_state(session)
+                    state["recovery"]["stopped"] = {"run_id": run_id, "reason": reason or "scope_invalid"}
+                    self.api.save_state(state)
+            return stop("stopped", "RECOVERY_STOPPED", "运行已中止或范围失效，不自动重开。")
         if reason not in ("node_failed", "human_timeout", "startup_failed", "publication_failed"):
             self.api.die("RUN_RESULT_UNAVAILABLE", "未知终态原因，停止自动恢复。")
         phase = state["phase"]
@@ -97,7 +126,7 @@ class Recovery:
         if RUNNING.get(phase) == current["kind"]:
             count = recovery.get("retries", {}).get(current["scope"], 0)
             if count >= MAX_RETRIES:
-                self.api.die("RECOVERY_EXHAUSTED", "本阶段已自动重开两次，停止恢复。请维护者排障或新建会话。", retries=count)
+                return stop("exhausted", "RECOVERY_EXHAUSTED", "本阶段已自动重开两次，停止恢复。请维护者排障或新建会话。", retries=count)
             action = "retry-" + current["kind"]
         elif current["kind"] == "speak" and phase in ("AWAIT_VOTE_START", "AWAIT_PK_VOTE_START"):
             action = "open-vote"
@@ -105,9 +134,20 @@ class Recovery:
             action = "follow-status"
         return {"action": action, "failed_run_id": run_id, "phase": phase}
 
-    def inspect(self, session, failed_run):
+    def inspect(self, session, failed_run=None):
         with self.serial(session):
-            return self.check(session, failed_run)
+            state = self.api.load_state(session)
+            if not failed_run:
+                current = state.get("recovery", {}).get("current")
+                if not current or state["phase"] == "FINISHED":
+                    return None
+                if current["state"] == "uncertain" and not current.get("run_id"):
+                    return {"action": "uncertain", "code": "SUBMISSION_UNCERTAIN",
+                            "message": "上次提交尚未确认；没有可核验运行 ID，停止，不重复提交。"}
+                # Normal handoff after an already handled run needs no query.
+                if current.get("run_id") in state.get("recovery", {}).get("processed", {}):
+                    return None
+            return self.check(session, failed_run, read_only=True)
 
     def open(self, args, kind):
         api = self.api

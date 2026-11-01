@@ -65,6 +65,10 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 脚本会查询服务端验证会话、原主持人、终态和当前阶段。不要信任消息里的原因字段。
 按返回的 `run_result_action.action`：
 
+`next_action` 与 `command` 是同一核验结果生成的指令；有 `command` 时原样作为最后一个工具调用，
+不能因本地 phase 仍为 RUNNING 而继续等待。普通 status 也会核验已记录的当前 run，漏传
+`--failed-run` 时仍按返回的恢复动作处理。
+
 - `retry-speak`：最后调用 `uc open-round --session "$session_id" --retry --failed-run "<run_id>"`。
 - `retry-vote`：最后调用 `uc open-vote --session "$session_id" --retry --failed-run "<run_id>"`。
 - `open-vote`：发言汇总已落盘，最后调用 `uc open-vote --session "$session_id" --failed-run "<run_id>"`。
@@ -72,10 +76,12 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 
 用户中止、范围失效或重试耗尽时脚本会停止；如实提示维护者，不自行绕过限制。
 提交超时或响应丢失时脚本保留不确定状态；没有唯一运行事实时停止，不重复提交。
+status 只查询和计算动作，不提交、不计重试次数；open-* 执行前再次核验事实。
 
 ## 普通消息与回灌
 
 非节点唤醒时先 `uc status --session "$session_id"`，按下面处理。
+若返回恢复 `command`，先按 SX 执行该命令；仅无恢复动作时使用下面的普通阶段表。
 新会话必须为 NO_GAME；新会话读到 FINISHED 时停止核对会话 ID，不公布上一局。
 
 | 状态 / 消息 | 本次动作 |

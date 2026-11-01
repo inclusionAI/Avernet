@@ -98,6 +98,9 @@ uc init --session S --referee-uuid R --human human_123 \
 
 `uc status --session S --failed-run RUN_ID` 核验服务端异常终态并返回安全的
 `run_result_action`；`recovery` 显示当前提交、已处理 run 和每阶段重试次数。
+普通 `uc status --session S` 也会对已记录的当前 run 查询一次服务端事实；没有提交或已终局时
+不额外查询。查询保持游戏状态文件不变；结果中的 `command` 和 `next_action` 优先于普通
+阶段提示。查询失败不能沿用本地 RUNNING 推断仍在等待，提交不确定时不能盲目重交。
 `open-round` / `open-vote` 可加 `--failed-run RUN_ID` 关联通知；重开必须同时加
 `--retry`。脚本持久化每阶段最多两次的限制，重复结果不再次提交。用户取消或提交结果
 不确定时停止，不通过重新渲染或底层命令绕过验证。
@@ -165,7 +168,7 @@ uc render-speak-run --session S [--retry]
 返回 `yaml_path`、`input_path`、`binding_args`、`attempt`，以及一条拼好的 `run_command`。
 **仅供维护者测试；主持人不能用它绕过 open-round 失败。**
 
-`--retry` 用来重开当前这一轮：只能在 `SPEAK_RUNNING` 且本轮发言还没收齐时调，**轮次不推进、本轮记录不重建**，只是把同一份 YAML 重渲染一次。上一次提交的运行失败了才用它——运行失败不会唤醒我，所以这条路只会从 SX 卡住诊断走进来。
+`--retry` 用来重开当前这一轮：只能在 `SPEAK_RUNNING` 且本轮发言还没收齐时调，**轮次不推进、本轮记录不重建**，只是把同一份 YAML 重渲染一次。上一次提交的运行已被服务端确认失败时才用；失败结果唤醒后按 SX 自动恢复，“卡住了”仅为最后兜底。
 
 ### `speeches-set`
 
