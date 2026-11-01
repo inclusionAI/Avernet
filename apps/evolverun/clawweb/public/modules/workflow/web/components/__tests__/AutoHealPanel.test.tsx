@@ -108,12 +108,12 @@ describe('AutoHealPanel source-aware reruns', () => {
 
   it('removes legacy sensitive records without rendering them and blocks unsafe replacement', async () => {
     const prefix = 'clawweb.autoheal.operation.v1.'
-    localStorage.setItem(prefix + run.workflow_id, JSON.stringify({ diagnosis: { rawResponse: 'SECRET-OTHER-USER', fixedSpec: { secret: 'PRIVATE-SPEC' } } }))
+    localStorage.setItem(prefix + run.workflow_id, JSON.stringify({ diagnosis: { rawResponse: 'SECRET-OTHER-USER', fixedSpec: { secret: 'placeholder' } } }))
     localStorage.setItem(prefix + 'another-workflow', JSON.stringify({ diagnosis: { summary: 'OTHER-SECRET' } }))
     renderPanel()
     expect(await screen.findByRole('alert')).toHaveTextContent('旧版恢复记录')
     expect(document.body.textContent).not.toContain('SECRET-OTHER-USER')
-    expect(document.body.textContent).not.toContain('PRIVATE-SPEC')
+    expect(document.body.textContent).not.toContain('placeholder')
     expect(localStorage.getItem(prefix + run.workflow_id)).toBeNull()
     expect(localStorage.getItem(prefix + 'another-workflow')).toBeNull()
     expect(JSON.stringify(localStorage)).not.toContain('SECRET')

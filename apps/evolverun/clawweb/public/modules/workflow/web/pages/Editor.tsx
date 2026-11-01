@@ -356,7 +356,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       setSaveMessage({ type: 'error', text: hasPendingEdits ? '存在未应用的配置草稿，无法部署；请先应用并保存。' : '画布有未保存改动，无法部署；请先保存完整版本。' })
       return
     }
-    const token = ++candidateRequest.current
+    const requestSequence = ++candidateRequest.current
     const sessionId = useEditorStore.getState().sessionId
     const candidatePackRevision = packVersionsRevision()
     setDeployCandidate(null)
@@ -375,7 +375,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       )
       const snapshot = validateSnapshot(raw, selectedWorkflowId, 'draft')
       if (snapshot.canWrite !== true) throw new Error('此宿主未授予版本写入/部署权限')
-      if (token !== candidateRequest.current || selectedWorkflowRef.current !== selectedWorkflowId) return
+      if (requestSequence !== candidateRequest.current || selectedWorkflowRef.current !== selectedWorkflowId) return
       const live = useEditorStore.getState()
       if (hasPackVersionEditRisk(selectedWorkflowId) || packVersionsRevision() !== candidatePackRevision || live.sessionId !== sessionId || live.isDirty || Object.keys(live.pendingEdits ?? {}).length
         || live.validationErrors?.length || !live.spec || live.spec.id !== selectedWorkflowId) {
@@ -392,7 +392,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision })
       setShowDeployConfirm(true)
     } catch (err) {
-      if (token === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId) {
+      if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId) {
         setSaveMessage({ type: 'error', text: `无法确认已保存的完整草稿，已阻止部署：${extractApiErrorMessage(err)}。请保存后重试。` })
       }
     }
