@@ -310,6 +310,7 @@ bot_request() {
     local url="${BCS_API_BASE_URL}${path}"
     local curl_args=(-s -o "$_RESPONSE_FILE" -D "$_RESPONSE_HEADERS_FILE" -w '%{http_code}' -X "$method"
         -H "X-BCS-Bot-Token: $BCS_CLI_TOKEN"
+        -H "X-Mock-User-Id: $BCS_MOCK_USER_ID"
         -H "Content-Type: application/json")
     [ -n "$body" ] && curl_args+=(-d "$body")
     HTTP_STATUS=$(curl "${curl_args[@]}" "$url" 2>/dev/null) || HTTP_STATUS="000"

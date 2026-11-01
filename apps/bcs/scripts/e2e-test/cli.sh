@@ -74,12 +74,16 @@ test_cli_discover() {
     info "CLI: bcs-cli discover"
     ensure_cli_token CEO || { skip_case "no token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
     # Discover with a query that should match one of the demo bots' summary/name.
-    bcs_cli CEO discover --query "客服" || { fail "bcs-cli discover exited $BCS_CLI_EXIT"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
+    # The query must be the CS bot's own registered role name (BOT_CS_ID), not a
+    # literal: the default profile registers "客服", but a custom cohort (e.g. the
+    # k8s simulator profile) registers "CS", and discover matches
+    # capabilities.name case-insensitively by substring.
+    bcs_cli CEO discover --query "$BOT_CS_ID" || { fail "bcs-cli discover exited $BCS_CLI_EXIT"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
     if _cli_contains "$BCS_CLI_STDOUT" "$BOT_CS_UUID"; then
-        pass "bcs-cli discover matched 客服 (CS) bot"
+        pass "bcs-cli discover matched $BOT_CS_ID (CS) bot"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else
-        fail "bcs-cli discover did not return the expected 客服 bot"
+        fail "bcs-cli discover did not return the expected $BOT_CS_ID bot"
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))

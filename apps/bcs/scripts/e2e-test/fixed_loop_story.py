@@ -111,6 +111,12 @@ class Story:
     def post(self, path: str, body=None, **kwargs):
         return self.request(path, {} if body is None else body, method="POST", **kwargs)
 
+    def _redact(self, text: str) -> str:
+        # `str.replace("")` splices the replacement between every character, so an
+        # empty/short token would shred the diagnostic this assertion exists to
+        # report. Only redact a token long enough to actually be secret.
+        return text.replace(self.token, "[redacted]") if len(self.token) >= 8 else text
+
     def cli(self, *args: str, text: bool = False):
         command = [self.args.cli, *([] if text else ["--json"]), "collaborate", "--token", self.token, *args]
         coverage_log = os.environ.get("BCS_CLI_COVERAGE_LOG")
@@ -119,7 +125,7 @@ class Story:
                 output.write(f"collaboration {args[0]}\n")
         result = subprocess.run(command, env={**os.environ, "MOLTIS_BCS_URL": self.args.base_url},
                                 capture_output=True, text=True, timeout=30)
-        assert result.returncode == 0, f"CLI {args[0]}: {result.stderr.replace(self.token, '[redacted]')}"
+        assert result.returncode == 0, f"CLI {args[0]}: {self._redact(result.stderr)}"
         return result.stdout if text else json.loads(result.stdout)
 
     def wait(self, description, read, predicate):
