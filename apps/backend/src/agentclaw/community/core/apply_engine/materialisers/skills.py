@@ -293,23 +293,27 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
 
             # Re-read identities for removals; the plan deliberately carries
             # names rather than persistence ids.
-            area = _without(self._assets_for_removal(ctx), self._set_supplied(ctx))
+            supplied = self._set_supplied(ctx)
+            active = _without(self._area(ctx), supplied)
+            local = _without(self._local_assets(ctx), supplied)
             referenced = self._set_referenced_ids(ctx)
             for name in plan.removals:
-                asset = area.get(name)
-                if asset is None:
-                    continue
-                is_local = str(asset.git_path or "").startswith("local://")
-                await self._activation.remove_apply_skill(
-                    skill_id=str(asset.skill_id),
-                    bot_id=ctx.bot_id,
-                    owner_id=ctx.entity_id,
-                    actor_id=ctx.actor_id,
-                    apply_id=ctx.apply_id,
-                )
-                confirmed_write = True
-                # Its Direct installation is gone; a package a set still references is not deleted.
-                if is_local and int(asset.skill_id) not in referenced:
+                # A name can be both an active skill and a separate Local package — a shared skill that replaced
+                # the bot's own package of the same name: each is removed, the active one first.
+                assets = {int(asset.skill_id): asset for asset in (active.get(name), local.get(name)) if asset}
+                for asset in assets.values():
+                    await self._activation.remove_apply_skill(
+                        skill_id=str(asset.skill_id),
+                        bot_id=ctx.bot_id,
+                        owner_id=ctx.entity_id,
+                        actor_id=ctx.actor_id,
+                        apply_id=ctx.apply_id,
+                    )
+                    confirmed_write = True
+                    # Its Direct installation is gone; a package a set still references is not deleted.
+                    is_local = str(asset.git_path or "").startswith("local://")
+                    if not is_local or int(asset.skill_id) in referenced:
+                        continue
                     try:
                         await self._uploads.delete_local_skill(
                             skill_id=str(asset.skill_id),
@@ -377,9 +381,6 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
             for entry in entries
             if entry.name in supplied
         )
-
-    def _assets_for_removal(self, ctx: ApplyContext) -> dict[str, Any]:
-        return {**self._area(ctx), **self._local_assets(ctx)}
 
     def _refresh_actual_dependency_codes(self, ctx: ApplyContext) -> None:
         """Never let a failed write leave the Dry-run projection in context."""

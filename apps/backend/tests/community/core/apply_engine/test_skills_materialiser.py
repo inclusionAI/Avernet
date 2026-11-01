@@ -462,6 +462,18 @@ def test_a_local_package_an_inactive_set_references_is_neither_cleaned_up_nor_de
     assert activation.skill_deactivations == [23] and uploads.deleted == []
 
 
+def test_an_omitted_name_removes_both_the_shared_skill_and_the_local_package_it_replaced():
+    """A Center skill ``foo`` replaced the bot's Local package ``foo`` (still in the catalog). Omitting ``foo``
+    removes the active Center skill too, not only the inactive Local package."""
+    center = skill_asset(41, "foo", git_path="center://foo")
+    old_local = skill_asset(42, "foo")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(assets=[center], local_assets=[old_local])
+    _, plan, _ = _run(_apply(materialiser, _ctx(), []))
+    assert plan.removals == ("foo",)
+    assert activation.skill_deactivations == [41, 42], "the active skill first, then the Local package"
+    assert uploads.deleted == ["42"], "only the Local package is deleted; the shared asset never is"
+
+
 def test_local_cleanup_is_sorted_and_stops_on_first_failure():
     materialiser, uploads, activation, _reader, _, _ = skill_rig(
         assets=[],
