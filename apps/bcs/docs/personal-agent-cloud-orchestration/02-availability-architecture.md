@@ -54,7 +54,7 @@ Two mechanisms, deliberately separated:
   per-round hot path. A mis-routed round (ring churn, scale event) is
   harmless-but-slow: it pays a rehydration, nothing more.
 - **Ownership — fenced, expiring leases in the shared DB.** A node claims a
-  task by writing a lease row (task id, node id, fencing token =
+  task by writing a lease row (`session_id`, node id, fencing token =
   monotonically increasing generation, expiry). It renews while driving;
   other nodes claim only expired leases. Every durable write made while
   driving carries the fencing token, and storage rejects writes bearing a
