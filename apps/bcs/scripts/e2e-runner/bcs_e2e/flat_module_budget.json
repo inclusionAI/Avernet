@@ -1,6 +1,6 @@
 {
   "flat_module_lower_bound": 338,
-  "flat_module_upper_bound": 343,
+  "flat_module_upper_bound": 347,
   "audit": [
     {
       "upper_bound": 338,
@@ -11,6 +11,11 @@
       "upper_bound": 343,
       "commit": "b499175d5",
       "reason": "File-size-mandated plane splits added five flat modules: four in 66531f1b0 (workspace/fixed-loop split) and one in e36ce0265 (operator-cli profile-validation plane split)."
+    },
+    {
+      "upper_bound": 347,
+      "commit": "ed2028894",
+      "reason": "File-size-mandated plane split of the 1,043-line write_transport.py (ed2028894) adds four flat modules: the write_transport_error leaf plus the registration, friend and core mixin planes; the slim write_transport base keeps its name and the full external surface. artifact.py allowance moved 344 -> 348 in the same split commit."
     }
   ],
   "policy": "Raising flat_module_upper_bound is deliberate: edit this latch in the same commit that adds flat modules and append an audit entry carrying the previous bound, the new bound, the commit and the reason. The density test verifies monotonicity and that the last audit entry matches the active upper bound."
