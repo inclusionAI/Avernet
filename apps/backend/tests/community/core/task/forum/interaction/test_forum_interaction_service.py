@@ -133,9 +133,11 @@ class FakeVerifier(ForumInteractionTargetVerifierProtocol):
         *,
         topic: ForumTopicRecord | None = _topic(),
         post: ForumPostRecord | None = _post(),
+        bot: bool = True,
     ) -> None:
         self.topic = topic
         self.post = post
+        self.bot = bot
         self.calls: list[tuple[str, str]] = []
 
     def verify_topic(self, topic_id: str):
@@ -148,7 +150,7 @@ class FakeVerifier(ForumInteractionTargetVerifierProtocol):
 
     def verify_bot(self, bot_id: str):
         self.calls.append(("bot", bot_id))
-        return True
+        return self.bot
 
 
 class FakeAuthorStatsService(ForumAuthorStatsServiceProtocol):
@@ -379,6 +381,21 @@ def test_missing_topic_and_post_targets_are_not_writable():
             target_id="missing",
             active=1,
         )
+
+
+def test_missing_bot_target_is_not_writable():
+    verifier = FakeVerifier(bot=False)
+    with pytest.raises(NotFound, match="bot target"):
+        _service(verifier=verifier).record_interaction(
+            actor_type="HUMAN",
+            actor_id="user-a",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id="missing",
+            active=1,
+        )
+
+    assert verifier.calls == [("bot", "missing")]
 
 
 def test_human_follow_target_does_not_require_staff_directory_validation():
