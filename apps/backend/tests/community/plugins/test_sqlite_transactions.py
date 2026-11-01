@@ -56,3 +56,46 @@ def test_successful_savepoint_is_committed_and_foreign_keys_still_cascade(databa
         session.execute(text("DELETE FROM transaction_parent WHERE id = 1"))
     with database.session() as session:
         assert session.execute(text("SELECT id FROM transaction_child")).all() == []
+
+
+@pytest.fixture
+def community_pair(tmp_path):
+    from sqlalchemy import event
+
+    first = CommunityDatabase(f"sqlite:///{tmp_path}/concurrent.db")
+    other = CommunityDatabase(first._url)
+
+    @event.listens_for(other._engine, "connect")
+    def reject_contending_writes_without_waiting(connection, _record):
+        connection.execute("PRAGMA busy_timeout=0").close()
+
+    asyncio.run(first.bootstrap())
+    try:
+        yield first, other
+    finally:
+        first._engine.dispose()
+        other._engine.dispose()
+
+
+def test_ordinary_reads_do_not_block_an_independent_writer(community_pair):
+    first, other = community_pair
+    with first.orm_session() as session:
+        session.execute(text("SELECT count(*) FROM ac_bot_mcp_config")).scalar_one()
+        with other.orm_session() as writer:
+            writer.execute(text(
+                "INSERT INTO ac_bot_mcp_config "
+                "(bot_id, owner_id, server_code, config, env) "
+                "VALUES ('reader-test', 'owner', 'mcp.reader', '{}', 'dev')"
+            ))
+        assert session.execute(text("SELECT count(*) FROM ac_bot_mcp_config")).scalar_one() == 1
+
+
+def test_transactional_session_reserves_the_writer_before_application_reads(community_pair):
+    from sqlalchemy.exc import OperationalError
+
+    first, other = community_pair
+    with first.transactional_orm_session() as session:
+        session.execute(text("SELECT count(*) FROM ac_bot_mcp_config")).scalar_one()
+        with pytest.raises(OperationalError, match="locked"):
+            with other.transactional_orm_session():
+                pytest.fail("A competing writer must not enter before the first UoW finishes")

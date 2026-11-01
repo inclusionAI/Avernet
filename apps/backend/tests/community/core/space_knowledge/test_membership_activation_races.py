@@ -75,7 +75,8 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
 
     @event.listens_for(other._engine, "before_cursor_execute")
     def observe_write(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().upper().startswith(("UPDATE ", "DELETE ", "INSERT ")):
+        # The SQLite UoW now reserves the writer before its first DML.
+        if statement.lstrip().upper().startswith(("BEGIN IMMEDIATE", "UPDATE ", "DELETE ", "INSERT ")):
             write_attempted.set()
 
     def mutate():
@@ -146,18 +147,16 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
 
 
 def test_source_deleted_before_activation_guard_is_not_resurrected(
-    database, monkeypatch
+    database,
 ):
     space_id, _ = create_space(database)
     before_guard, release = Event(), Event()
-    lock_space = knowledge_sync.lock_space
-
-    def pause_before_guard(*args, **kwargs):
-        before_guard.set()
-        assert release.wait(timeout=5)
-        return lock_space(*args, **kwargs)
-
-    monkeypatch.setattr(knowledge_sync, "lock_space", pause_before_guard)
+    # Pause before the actual write reservation, not after the UoW acquired it.
+    @event.listens_for(database._engine, "before_cursor_execute")
+    def pause_before_guard(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("BEGIN IMMEDIATE"):
+            before_guard.set()
+            assert release.wait(timeout=5)
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     other = CommunityDatabase(database._url)
@@ -178,6 +177,7 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
     finally:
         release.set()
         other._engine.dispose()
+        event.remove(database._engine, "before_cursor_execute", pause_before_guard)
     assert history(database, space_id) == []
     assert sink.calls == []
 

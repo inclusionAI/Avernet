@@ -42,11 +42,13 @@ The Direct MCP claim's Installation and explicit configuration write must roll
 back together on a persistence failure. Real failure injection exposed Python
 SQLite's legacy transaction mode releasing an Installation SAVEPOINT before
 an outer transaction had begun, leaving that Installation committed after a
-later configuration INSERT failed. Both community and local SQLite engine
-assembly now use `autocommit=False`; foreign keys are enabled outside the
-transaction so their existing enforcement remains active. The MySQL assembly
-is unchanged. This restores the existing UoW atomicity guarantee without a
-database schema, Service API or Manifest input change.
+later configuration INSERT failed. Both community and local SQLite plugins
+explicitly start `BEGIN IMMEDIATE` when entering `transactional_orm_session`,
+before application reads or SAVEPOINTs. Ordinary `orm_session` keeps its prior
+read behavior, and existing guarded lifecycle callers retain their own explicit
+transaction setup. Foreign-key enforcement and non-SQLite assembly remain
+unchanged. This honors the existing single-MCP supply/config atomicity and
+write-serialization guarantees without a new API or schema.
 
 ## Validation
 
