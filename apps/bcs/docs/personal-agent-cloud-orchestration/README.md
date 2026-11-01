@@ -21,8 +21,10 @@ for me this year and send me the plan 2 months before each") and delegates the
 multi-expert parts to BCN: finding supply agents (flight booking, hotels,
 tickets), selecting or creating a workflow, and running it to completion.
 
-A **task** here is the personal agent's long-running unit of work, identified
-by `(user_id, task_id)`. Over its lifetime (possibly months) the personal agent
+A **task** here is the personal agent's long-running unit of work. On the BCN
+side each task maps 1:1 to a durable **task session**, identified by
+`session_id` — the one identifier used throughout these docs (Doc 01 defines
+the full identifier mapping). Over its lifetime (possibly months) the personal agent
 returns to BCN many times for the same task — including rapid multi-round
 refinement while the user is actively chatting ("make it 5 days and find a
 cheaper hotel").
@@ -88,9 +90,10 @@ Durable state is written through to the shared database on every round
 idle episode and failover after a node death are the same operation:
 **failover is a cache miss.** → [Doc 01](01-interface-and-state-model.md)
 
-**Placement and ownership.** `hash(user_id, task_id)` routes rounds of the
-same task to the same node for intra-episode cache affinity (a latency
-optimization). Correctness — exactly one node drives a task at a time — comes
+**Placement and ownership.** `hash(user_id, session_id)` routes rounds of the
+same task session to the same node for intra-episode cache affinity (a
+latency and DB-load optimization: repeat rounds are served from memory
+instead of re-reading context from the shared DB at full QPS). Correctness — exactly one node drives a task at a time — comes
 from **fenced, expiring leases in the shared DB**, not from ring agreement.
 Hash = placement; lease = ownership. → [Doc 02](02-availability-architecture.md)
 
@@ -114,8 +117,11 @@ launch. → [Doc 04](04-supply-agent-compliance.md)
 
 **Availability.** Four planes — API (any node serves any request), executor
 (leases + takeover), connection (node-pinned agent sockets + a
-connection-location registry), storage (managed MySQL/Redis HA; BCSFuse out of
-the execution critical path). Headline invariant: **a node failure never fails
+connection-location registry), storage (managed MySQL/Redis HA; **BCSFuse** —
+the separate search/recommendation service holding the supply-agent catalog,
+used to *discover* agents and workflows — stays out of the execution critical
+path, so its outage degrades discovery freshness, never a running task).
+Headline invariant: **a node failure never fails
 or loses a task.** → [Doc 02](02-availability-architecture.md)
 
 ## 4. What exists vs. what is net-new
@@ -125,11 +131,22 @@ write-before-dispatch, an immutable per-run workflow snapshot, restart
 recovery, a persistent delivery queue with per-session FIFO and congestion
 control, MySQL/Redis plugins, and a `LeaderElectionPort` seam.
 
-Net-new for this project: node identity/membership and failure detection;
-hash-based placement; fenced task leases and takeover; the connection-location
-registry; durable (instead of process-local) idempotency/dedup state; the BCN
-A2A profile and its conformance suite; capability tiering and dispatch gating;
-session lifecycle controls on the personal-agent-facing API.
+Net-new for this project:
+
+- **node identity, membership and failure detection** — today BCN nodes do
+  not know about each other; this adds a cluster roster plus heartbeats, so
+  peers can tell which servers exist and which are alive;
+- **hash-based placement** of task sessions onto nodes;
+- **fenced task leases and takeover** (Doc 02);
+- the **connection-location registry** — a shared map of which node currently
+  holds each supply agent's live socket, so any node can route a delivery;
+- **durable (instead of process-local) idempotency/dedup state**;
+- the **BCN A2A profile** and its conformance suite (Doc 03/04);
+- **capability tiering and dispatch gating** — the workflow engine refuses to
+  send a side-effecting step to an agent whose profile compliance is not
+  verified;
+- **session lifecycle controls** on the personal-agent-facing API — continue /
+  close / expire a task session: the personal agent's retention controls.
 
 ## 5. Open questions
 

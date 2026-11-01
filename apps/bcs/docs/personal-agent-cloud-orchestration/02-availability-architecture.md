@@ -34,7 +34,9 @@ agent's calls carry ids, not connection state (Doc 01), so a load balancer
 can spread or fail over requests freely.
 
 - Availability: survives N−1 node failures behind a load balancer.
-- RPO: 0 for acknowledged requests, by construction.
+- RPO (recovery point objective — how much acknowledged data a failure may
+  lose): **0 by construction** — an acked request is already in shared
+  storage before the ack is sent.
 
 ### Plane 2 — Executor (who drives a task)
 
@@ -44,9 +46,12 @@ dispatch. Exactly one node must drive a given task at a time.
 
 Two mechanisms, deliberately separated:
 
-- **Placement — `hash(user_id, task_id)`** routes rounds of the same task to
-  the same node so the episode stays warm (Doc 01). This is a latency
-  optimization. A mis-routed round (ring churn, scale event) is
+- **Placement — `hash(user_id, session_id)`** routes rounds of the same task
+  session to the same node so the episode stays warm (Doc 01). This is a
+  latency *and DB-load* optimization: at the QPS we must support, rehydrating
+  context on every round would multiply reads against the shared DB, whereas
+  affinity serves repeat rounds from memory and keeps the DB out of the
+  per-round hot path. A mis-routed round (ring churn, scale event) is
   harmless-but-slow: it pays a rehydration, nothing more.
 - **Ownership — fenced, expiring leases in the shared DB.** A node claims a
   task by writing a lease row (task id, node id, fencing token =
@@ -56,6 +61,14 @@ Two mechanisms, deliberately separated:
   stale token — which is what actually isolates a zombie: a paused/partitioned
   node that wakes and keeps writing is refused at the data, regardless of
   what it believes.
+  Concretely: the lease row stores the current token, a generation number.
+  Claiming does a conditional update (`SET token = n+1 WHERE token = n AND
+  expired`), so exactly one claimant wins; every durable write thereafter is
+  conditional too (`… WHERE lease_token = my_token`). A paused owner that
+  wakes after expiry still holds token *n* while the row says *n+1* — its
+  writes fail at the database, the one place both nodes are guaranteed to
+  meet. This is the standard fencing-token pattern; its point is that
+  correctness never depends on the old node *knowing* it lost the lease.
 
 Why not consistent hashing alone: under membership change or partition, two
 nodes can transiently both believe they own a slice of the ring. Hashing's
@@ -75,6 +88,18 @@ pattern, generalized.
    idempotency key / `GetTask` — never blind-resend.
 4. Resume the run from its checkpoint.
 
+Division of labor between the probe and dedup: **agent-side dedup is the
+safety invariant** — it is what prevents double execution whenever two sends
+race (step 7 of the sequence diagram). The probe does not protect; it
+*informs*: it recovers the server task id and outcome that died with the old
+node, and — in retry-only form — yields a decidable answer *without
+triggering execution*, which matters when a resend would be unsafe (a
+side-effecting step whose prior outcome is unknown, or a probe outside the
+dedup window). Against an agent that implements no dedup, neither probing
+nor careful resending is 100% safe — a late duplicate can always slip in.
+That is exactly why side-effecting steps are dispatch-gated on verified
+profile compliance (Doc 04).
+
 ![Takeover sequence: the old owner writes the dispatch intent then stalls; its lease expires; the new owner claims the lease with a higher fencing token, rehydrates, probes the supply agent by the recorded idempotency key, gets "unknown", and resends with the same key; the zombie's late original send deduplicates at the agent, and its stale checkpoint write is refused by the fencing token.](assets/takeover-sequence.svg)
 
 Failure detection: lease expiry is the ground truth; node heartbeats (to the
@@ -91,13 +116,22 @@ cannot rebuild — the remote side holds the other end:
   entire presence. Recovery is the *agent's* reconnect loop re-dialing (the
   existing reconnect + admission rate-limiting machinery), after which the
   socket may land on any node.
-- **Dial-out webhook+SSE providers**: each dispatch is a self-contained HTTP
-  exchange; a lost stream is one step's feed, re-attached by sequence number;
-  the provider's reachability (its URL) is node-independent.
+- **Dial-out webhook+SSE providers**: each dispatch is one self-contained
+  HTTP exchange whose SSE response streams only that one step's events — its
+  "feed" (lifecycle, output chunks, tool events). Each event carries a
+  monotonically increasing per-stream sequence number (Provider 2.0), so a
+  dropped stream is re-attached and resumed from the last number seen, with
+  no gaps and no duplicates. The provider's reachability (its URL) is
+  node-independent.
 
 Net-new: a **connection-location registry** (shared store or gossip) mapping
 bot → node currently holding its socket, plus inter-node delivery forwarding,
-so the task-owning node can deliver to a bot whose socket lives elsewhere.
+so the session-owning node can deliver to a bot whose socket lives elsewhere.
+Note this is the **normal path, not only failover**: nothing co-locates an
+agent's socket with the sessions it serves — the socket lands on whichever
+node accepted the dial-in (or wherever the reconnect loop lands next time),
+while session ownership follows the lease. Registry lookup plus forwarding
+is part of ordinary delivery.
 Deliveries already queue durably, so an agent briefly disconnected *delays*
 its messages rather than losing them.
 
@@ -105,10 +139,14 @@ its messages rather than losing them.
 
 - MySQL and Redis plugins exist; HA for them is delegated to managed/clustered
   deployments and is a prerequisite, not part of this design.
-- **BCSFuse leaves the execution critical path**: discovery/recommendation
-  results are consumed at workflow-selection time and cacheable; a BCSFuse
-  outage degrades search freshness, never a running task (**open question
-  #4** for the caching policy).
+- **BCSFuse leaves the execution critical path.** For context: BCSFuse is a
+  separate Python service — the supply-agent catalog with embeddings. BCS
+  syncs each bot's public capability metadata (skills, domains, summary)
+  into it and queries it for agent search and recommendation; it is how
+  "find me a flight-booking expert" gets answered. In this design it serves
+  **discovery only**: results are consumed at workflow-selection time and
+  cacheable, so a BCSFuse outage degrades search freshness, never a running
+  task (**open question #4** for the caching policy).
 
 ## Failure-mode table
 

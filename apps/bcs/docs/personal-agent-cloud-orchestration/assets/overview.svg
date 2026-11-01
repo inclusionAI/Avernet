@@ -47,7 +47,7 @@
   <line x1="370" y1="195" x2="406" y2="140" stroke="#5c6a62" marker-end="url(#ar)"/>
   <line x1="370" y1="205" x2="406" y2="210" stroke="#5c6a62" marker-end="url(#ar)"/>
   <line x1="370" y1="218" x2="406" y2="278" stroke="#5c6a62" marker-end="url(#ar)"/>
-  <text x="372" y="330" font-size="10" fill="#5c6a62">hash(user_id, task_id)</text>
+  <text x="372" y="330" font-size="10" fill="#5c6a62">hash(user_id, session_id)</text>
   <text x="372" y="342" font-size="10" fill="#5c6a62">= placement preference</text>
 
   <!-- Shared DB -->

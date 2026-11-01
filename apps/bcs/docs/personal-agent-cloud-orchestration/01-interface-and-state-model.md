@@ -29,10 +29,36 @@ Two postures are possible with today's building blocks:
   over a standing WebSocket or webhook.
 
 We choose **A**, aligned with the in-flight A2A migration: the personal agent
-speaks **A2A 1.0 (JSON-RPC over HTTP + SSE)** to BCN. `SendMessage` opens or
-continues a task; `SubscribeToTask` streams a round; `GetTask` re-attaches
-after any gap. The months-long *logical* session is carried by durable
-identifiers (`task_id`, session id, A2A `contextId`) — never by a connection.
+speaks **A2A 1.0 (JSON-RPC over HTTP + SSE)** to BCN. The stack divides
+cleanly, one responsibility per layer:
+
+- **HTTP** is the transport: one short-lived request/response per call;
+  nothing persists between calls.
+- **JSON-RPC 2.0** is the envelope, on a single `POST` endpoint:
+  `{"jsonrpc":"2.0","id":…,"method":"SendMessage","params":…}` — the method
+  name travels in the body instead of being spread across REST routes.
+- **SSE** is how a response *streams*: for streaming methods the HTTP
+  response stays open as `text/event-stream` and delivers incremental events
+  (status changes, output chunks). A dropped stream is re-attached with a new
+  request that resumes from the last event seen.
+- **A2A** supplies the vocabulary and object model carried inside: the
+  methods (`SendMessage`, `SubscribeToTask`, `GetTask`) and the objects
+  (Message; Task with lifecycle states; `contextId`).
+
+`SendMessage` opens or continues a round; `SubscribeToTask` streams it;
+`GetTask` re-attaches after any gap. The months-long *logical* session is
+carried by durable identifiers — never by a connection:
+
+| Identifier | What it names | Who mints it |
+| --- | --- | --- |
+| **`session_id`** | the BCN **task session** — the durable container for one personal-agent task (1:1) | BCN, on first delegation; the personal agent stores it and sends it on every later round |
+| A2A `contextId` | the **same value**, as the A2A envelope carries it on the wire | — |
+| `run_id` | one workflow execution inside the session (one delegated round) | BCN, per round |
+| A2A task id (`server_task_id` in Doc 03) | a *supply agent's* unit of work for one dispatched step — unrelated to the personal agent's "task" | the supply agent |
+
+One term throughout these docs: the personal agent's *task* and its BCN
+*task session* are 1:1, and the identifier we write everywhere is
+**`session_id`**.
 
 Consequences:
 
@@ -43,8 +69,12 @@ Consequences:
   connectivity drops out of the HA problem (Doc 02); the only
   connection-shaped clients left are supply agents, which already have
   reconnect machinery.
-- Push notification to the personal agent (A2A push config) is an optional
-  latency optimization; correctness never depends on it.
+- Push notification to the personal agent is optional. A2A lets a client
+  register a webhook URL (its push-notification config); the server then
+  POSTs task status updates to that URL instead of waiting to be asked. For
+  us it is purely a latency optimization — an idle personal agent learns a
+  result sooner — and correctness never depends on it: `GetTask` /
+  `SubscribeToTask` recover the same information on the next call.
 - **TBD (clock ownership):** if any use case requires BCN-side timers
   (continuous monitoring, scheduled resumption without a caller), posture A
   still works but a durable-timer store must be added. Out of scope until the
@@ -69,6 +99,18 @@ traces and are not the caller's to read.
 Granularity and volume differ by an order of magnitude: L2 is tens of
 task-level messages; L3 is hundreds of step/message/event-level records per
 run.
+
+Who physically holds what: the BCN side of L3 — the group transcript, run
+events, and workflow-run state — lives in the **shared DB**; a node holds
+only a warm copy while an episode is active (Decision 3). The experts' own
+working context is the one part held outside BCN, by the provider/agent
+itself, keyed by `session_id`.
+
+A note on protocol names: `chat.send` / `chat.inject` in the diagram are
+*today's* BCS delivery frames ("respond" vs. "observe silently"). The A2A
+migration replaces the envelope and transport on this layer; those semantics
+carry over as A2A messages. The diagram shows today's frames because that is
+what runs now.
 
 ## Decision 3 — three lifetimes: run, episode, task session
 
@@ -99,10 +141,20 @@ Intra-episode cache affinity is what placement hashing optimizes (Doc 02):
 round 2 lands seconds later on the node where round 1 is still warm. Affinity
 at months scale is explicitly *not* a goal.
 
+A boundary worth stating plainly: an **episode is not a kind of session**.
+It has no identifier and no API surface — nothing ever addresses an episode.
+The task session is *data* (rows that persist); an episode is *cache
+lifetime* (the period some node keeps that data hydrated). A run, by
+contrast, is addressable (`run_id`) and corresponds roughly to one delegated
+round; multi-message HITL exchanges happen *inside* a run, not as separate
+runs.
+
 ## Decision 4 — retention is a policy knob, split by layer
 
 - **L2 (thread of record)** survives for the task's lifetime: what was asked,
-  what was delivered, what was approved. It guarantees *resumability*.
+  what was delivered, what was approved. It guarantees *resumability*. It is
+  held by **BCN**, in the shared DB — the personal agent may keep its own
+  copy of the exchange, but resumability does not depend on it.
 - **L3 (working state)** is compactable/expirable on its own clock, including
   signalling providers to drop session context. Retaining it buys *revision
   quality*: with L3 live, "change the hotel" resumes the expert's held state;
@@ -123,8 +175,9 @@ the retention policy above.
 
 - A2A server surface on BCN for personal-agent callers (rides the existing
   A2A migration direction; the profile extensions are Doc 03's scope).
-- Task-session model binding `(user_id, task_id)` → BCN session/group ids,
-  with the L2 projection persisted as the caller-facing record.
+- Task-session model: one `session_id` per personal-agent task, bound to the
+  BCN session/group it owns, with the L2 projection persisted as the
+  caller-facing record.
 - Session lifecycle API (continue / close / expire-policy).
 - Episode hydration/eviction managed by the executor plane (Doc 02); no new
   storage — the durable forms all exist in current stores.
