@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from agentclaw.community.core.mcp.config_intent import McpConfigDirective
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective
 
 from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,

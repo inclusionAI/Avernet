@@ -40,7 +40,7 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
-from agentclaw.community.core.mcp.config_intent import McpConfigDirective
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,

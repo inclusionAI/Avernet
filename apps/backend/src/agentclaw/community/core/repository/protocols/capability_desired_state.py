@@ -6,7 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.mcp.config_intent import McpConfigMutation
+    from agentclaw.community.core.ports.mcp_config import McpConfigMutation
     from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
         LegacySkillSetScope,
     )

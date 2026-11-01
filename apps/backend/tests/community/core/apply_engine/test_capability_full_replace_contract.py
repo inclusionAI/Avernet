@@ -337,7 +337,7 @@ def _context(bot: dict, *, apply_id: str | None) -> ApplyContext:
     )
 
 
-def _rig(*, overlap: bool, mcp_config=None):
+def _rig(*, overlap: bool):
     """The real persistence, reader and activation service behind both materialisers, and the parsed document."""
     db = _Database()
     bots = BotRepository(db)
@@ -373,7 +373,7 @@ def _rig(*, overlap: bool, mcp_config=None):
                     uploads, activation, reader, real_validator(), content, FakeSharedSkills()
                 ),
                 Category.MCP: McpMaterialiser(
-                    activation, _Center(), mcp_config or _McpConfig(), reader
+                    activation, _Center(), _McpConfig(), reader
                 ),
             },
             steps=ArcaDelivery(lambda: None).steps_for,

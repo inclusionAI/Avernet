@@ -31,7 +31,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
-from agentclaw.community.core.mcp.config_intent import McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigMutation
 
 
 @runtime_checkable

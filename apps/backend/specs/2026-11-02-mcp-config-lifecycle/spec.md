@@ -8,6 +8,14 @@ Bot overrides belong to the Bot and MCP identity, independently of SkillSet memb
 
 Explicit Direct uninstall and Bot deletion retain their existing cleanup contract.
 
+The runtime contract covers discovery and tool exposure: when no effective
+supply remains, `mcporter list`, normal Agent tool discovery and
+`listPolicy.allowServers` exclude that MCP. Normal Agent use discovers tools
+before calling them; this does not require a fresh list before every call.
+An explicit CLI call using an already known server name can still execute
+against retained runtime configuration. Blocking that existing path is not
+part of this change and requires no new runtime format or mcporter upgrade.
+
 Manifest configuration intent is layered:
 
 | Declaration | Effect |
@@ -54,7 +62,7 @@ Enterprise validation uses matching OCB simulator sources and records the runnin
 
 | 编号 | 场景 | 必须成立 |
 | --- | --- | --- |
-| AC01 | 停用普通集，重复对账，再启用 | override 保留且重启后仍在；Membership/Installation 各按合同变化；未供应期间不可调用，启用读取当前值。 |
+| AC01 | 停用普通集，重复对账，再启用 | override 保留且重启后仍在；Membership/Installation 各按合同变化；无有效供应时 mcporter list、正常工具发现及 allowServers 不含停用项；启用读取当前值。 |
 | AC02 | 从 active/inactive 集移除 MCP，或停用后删除集 | override 不丢失；删除集不恢复或清理无关配置。 |
 | AC03 | 停用期间通过已有配置入口更新，再启用 | 新保存值生效；无旧快照回写；保存本身不启用能力。 |
 | AC04 | Default exclusion/unexclude | 配置保留，来源冲突规则有效；无其他来源时 scope 撤销，有其他来源时仍按实际供应可用。 |

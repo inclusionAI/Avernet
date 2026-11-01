@@ -14,7 +14,7 @@ activation routes.
 
 from __future__ import annotations
 
-from agentclaw.community.core.mcp.config_intent import McpConfigDirective, McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective, McpConfigMutation
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import Skill

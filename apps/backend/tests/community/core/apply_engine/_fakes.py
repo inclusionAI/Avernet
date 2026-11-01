@@ -7,7 +7,7 @@ nothing". Equal-looking output would prove neither.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.mcp.config_intent import McpConfigDirective, McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective, McpConfigMutation
 
 import hashlib
 from dataclasses import dataclass, field

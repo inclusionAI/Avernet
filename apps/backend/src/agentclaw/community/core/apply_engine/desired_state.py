@@ -31,7 +31,7 @@ from agentclaw.community.core.workspace.protected_entries import protected_entry
 from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
 from agentclaw.community.core.apply_engine.paths import resource_path_refusal
 from agentclaw.community.core.content_store import DIGEST_RE
-from agentclaw.community.core.mcp.config_intent import McpConfigDirective
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective
 
 __all__ = [
     "CenterSkillByName",
