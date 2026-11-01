@@ -16,6 +16,7 @@ from app.infra.vectorstore_backends.sqlite_vector_persistence_backend import (
 class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
     def __init__(
         self,
+        collection_name: str = "bcsfuse_vectors",
         dimension: int = 4096,
         db_path: str = ":memory:",
         *,
@@ -35,6 +36,7 @@ class QdrantSQLiteVectorStore(QdrantMySQLVectorStore):
             else:
                 qdrant_path = db_path + ".qdrant"
         super().__init__(
+            collection_name=collection_name,
             dimension=dimension,
             connection=connection,
             keyword_connection=keyword_connection,

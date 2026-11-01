@@ -48,6 +48,27 @@ def _get_metrics() -> dict[str, Any]:
             ["outcome"],
             buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
         ),
+        "search_fallback_unavailable": Counter(
+            "bcsfuse_search_fallback_unavailable_total",
+            "Terminal search or recommendation fallback envelopes by reason",
+            ["operation", "reason_code"],
+        ),
+        "agent_search_last_known_good_stores": Counter(
+            "bcsfuse_search_last_known_good_stores_total",
+            "Successful search outcomes stored as last-known-good candidates",
+        ),
+        "agent_search_last_known_good_hits": Counter(
+            "bcsfuse_search_last_known_good_hits_total",
+            "Dependency-degraded requests served by explicit last-known-good data",
+        ),
+        "agent_search_negative_cache_stores": Counter(
+            "bcsfuse_search_negative_cache_stores_total",
+            "Terminal fallback outcomes stored in the short-lived negative cache",
+        ),
+        "agent_search_negative_cache_hits": Counter(
+            "bcsfuse_search_negative_cache_hits_total",
+            "Requests answered by the short-lived negative cache during an outage",
+        ),
         "embedding_calls": Counter(
             "bcsfuse_embedding_calls_total",
             "External embedding provider invocations",
@@ -68,6 +89,21 @@ def _get_metrics() -> dict[str, Any]:
             "bcsfuse_embedding_wire_responses_total",
             "External embedding responses by negotiated transport protocol",
             ["model", "protocol"],
+        ),
+        "embedding_dimension_contract_violations": Counter(
+            "bcsfuse_embedding_dimension_contract_violations_total",
+            "Embedding responses that violated the configured dimension contract",
+            ["model", "protocol", "expected_dimension", "actual_dimensions"],
+        ),
+        "embedding_quota_rejected": Counter(
+            "bcsfuse_embedding_quota_rejected_total",
+            "Requests rejected by the shared model-capacity state",
+            ["model", "reason"],
+        ),
+        "embedding_capacity_store_errors": Counter(
+            "bcsfuse_embedding_capacity_store_errors_total",
+            "Failures while reading or writing shared embedding capacity state",
+            ["model", "operation"],
         ),
         "rerank_circuit_open": Gauge(
             "bcsfuse_rerank_circuit_open",
@@ -171,6 +207,37 @@ def set_embedding_circuit_open(model: str, *, open_: bool) -> None:
     )
 
 
+def record_embedding_dimension_contract_violation(
+    model: str,
+    protocol: str,
+    *,
+    expected_dimension: int,
+    actual_dimensions: set[int],
+) -> None:
+    """Record a fail-closed provider response dimension contract violation."""
+
+    _get_metrics()["embedding_dimension_contract_violations"].labels(
+        model=model,
+        protocol=protocol,
+        expected_dimension=str(int(expected_dimension)),
+        actual_dimensions=",".join(
+            str(int(dimension)) for dimension in sorted(actual_dimensions)
+        ),
+    ).inc()
+
+
+def record_embedding_quota_rejection(model: str, reason: str) -> None:
+    _get_metrics()["embedding_quota_rejected"].labels(
+        model=model, reason=reason or "unknown"
+    ).inc()
+
+
+def record_embedding_capacity_store_error(model: str, operation: str) -> None:
+    _get_metrics()["embedding_capacity_store_errors"].labels(
+        model=model, operation=operation
+    ).inc()
+
+
 def record_embedding_circuit_rejection(model: str) -> None:
     _get_metrics()["embedding_circuit_rejected"].labels(model=model).inc()
 
@@ -198,3 +265,26 @@ def record_rerank_circuit_transition(
     _get_metrics()["rerank_circuit_transitions"].labels(
         model=model, from_state=from_state, to_state=to_state
     ).inc()
+
+
+def record_search_fallback_unavailable(operation: str, reason_code: str) -> None:
+    """Record one explicit terminal outcome rather than a hidden empty success."""
+    _get_metrics()["search_fallback_unavailable"].labels(
+        operation=operation, reason_code=reason_code or "unknown"
+    ).inc()
+
+
+def record_agent_search_last_known_good_store() -> None:
+    _get_metrics()["agent_search_last_known_good_stores"].inc()
+
+
+def record_agent_search_last_known_good_hit() -> None:
+    _get_metrics()["agent_search_last_known_good_hits"].inc()
+
+
+def record_agent_search_negative_cache_store() -> None:
+    _get_metrics()["agent_search_negative_cache_stores"].inc()
+
+
+def record_agent_search_negative_cache_hit() -> None:
+    _get_metrics()["agent_search_negative_cache_hits"].inc()

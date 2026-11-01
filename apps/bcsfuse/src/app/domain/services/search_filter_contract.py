@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-SUPPORTED_V1_FILTER_FIELDS = frozenset(
-    {
-        "availability",
-        "runtime_state",
-        "domains",
-        "trust_level",
-        "worker_id",
-        "profile_key",
-    }
-)
+from search_core.api.filters import SEARCH_FILTER_FIELDS
+
+SUPPORTED_V1_FILTER_FIELDS = frozenset(SEARCH_FILTER_FIELDS)
 MAX_V1_FILTER_FIELDS = 16
 MAX_V1_FILTER_VALUES_PER_FIELD = 32
 MAX_V1_FILTER_VALUE_LENGTH = 256

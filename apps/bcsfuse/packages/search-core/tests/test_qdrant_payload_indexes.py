@@ -144,11 +144,9 @@ def test_keyword_server_collection_creates_keyword_payload_indexes(monkeypatch):
 
 
 def test_payload_index_fields_include_every_bounded_v1_filter():
-    from app.domain.services.search_filter_contract import (
-        SUPPORTED_V1_FILTER_FIELDS,
-    )
+    from search_core.api.filters import SEARCH_FILTER_FIELDS
 
-    supported = frozenset(SUPPORTED_V1_FILTER_FIELDS)
+    supported = frozenset(SEARCH_FILTER_FIELDS)
     assert supported <= set(DENSE_PAYLOAD_INDEX_FIELDS)
     assert supported <= set(KEYWORD_PAYLOAD_INDEX_FIELDS)
 

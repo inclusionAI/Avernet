@@ -77,15 +77,16 @@ class MySQLWorkerRegistryStore:
         self._pool = connection_pool
         self._schema_initialized = False
         self._schema_lock = threading.Lock()
-        self._ensure_schema()
 
-    def _ensure_schema(self) -> None:
+    def _ensure_schema(self, conn: object | None = None) -> None:
         if self._schema_initialized:
             return
         with self._schema_lock:
             if self._schema_initialized:
                 return
-            conn = self._pool.get_connection()
+            owned_connection = conn is None
+            if conn is None:
+                conn = self._pool.get_connection()
             try:
                 cursor = conn.cursor()
                 try:
@@ -122,11 +123,25 @@ class MySQLWorkerRegistryStore:
                     """)
                 finally:
                     cursor.close()
-                conn.commit()
+                if owned_connection:
+                    conn.commit()
                 self._schema_initialized = True
                 logger.info("[MySQLWorkerRegistryStore] Schema initialized successfully")
             finally:
+                if owned_connection:
+                    conn.close()
+
+    def _connection(self):
+        """Borrow one connection and initialize schema lazily on first use."""
+
+        conn = self._pool.get_connection()
+        if not self._schema_initialized:
+            try:
+                self._ensure_schema(conn)
+            except BaseException:
                 conn.close()
+                raise
+        return conn
 
     @staticmethod
     def _get_enum_value(value) -> str:
@@ -283,7 +298,7 @@ class MySQLWorkerRegistryStore:
 
     def _execute(self, sql: str, params: Optional[tuple] = None, commit: bool = False) -> Optional[dict]:
         """Simple helper for one-off execution; returns last row if any."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -304,7 +319,7 @@ class MySQLWorkerRegistryStore:
         placeholders = ", ".join(["%s"] * len(data))
         sql = f"INSERT INTO bcsfuse_workers ({columns}) VALUES ({placeholders})"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
@@ -341,7 +356,7 @@ class MySQLWorkerRegistryStore:
             return {}, []
 
         placeholders = ",".join("%s" for _ in worker_ids)
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -381,7 +396,7 @@ class MySQLWorkerRegistryStore:
             return {}
 
         placeholders = ",".join("%s" for _ in worker_ids)
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -420,7 +435,7 @@ class MySQLWorkerRegistryStore:
         sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = %s AND version = %s"
         params = [v for k, v in data.items() if k not in ("id", "gmt_create")] + [updated.id, worker.version]
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
@@ -476,7 +491,7 @@ class MySQLWorkerRegistryStore:
     def delete(self, worker_id: str) -> bool:
         if not self.exists(worker_id):
             raise WorkerNotFoundException(worker_id)
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -556,7 +571,7 @@ class MySQLWorkerRegistryStore:
             sql += " OFFSET %s"
             params.append(offset)
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -573,7 +588,7 @@ class MySQLWorkerRegistryStore:
         return workers
 
     def list_workers(self) -> list[dict]:
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:

@@ -38,6 +38,7 @@ def test_database_times_are_returned_and_readback_failure_rolls_back(
             cursor.rowcount = 1
         with patch.object(MySQLWorkerRegistryStore, "_ensure_schema"):
             store = MySQLWorkerRegistryStore(pool)
+            store._schema_initialized = True
         worker = Worker(
             id="clock-test",
             type="bot",
@@ -53,6 +54,7 @@ def test_database_times_are_returned_and_readback_failure_rolls_back(
     else:
         with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
             store = MySQLWorkerProfileContentStore(pool)
+            store._schema_initialized = True
         cursor.fetchone.side_effect = [
             {"version": 1} if operation.endswith("update") else None,
             row,

@@ -143,8 +143,8 @@ def test_keyword_profile_budget_follows_topk_and_expand_factor(pipeline, caplog)
     assert keyword_logs[0].profile_budget == 4
 
 
-def test_small_dense_recall_prefix_is_capped_at_sixty_four(pipeline, caplog):
-    """Small dense requests cannot be amplified without bound by legacy factors."""
+def test_dense_recall_prefix_is_bounded_by_request_budget(pipeline, caplog):
+    """Small dense requests use the bounded 32-fragment prefix contract."""
 
     service, _ = pipeline([
         ("dense", "full", .99),
@@ -159,14 +159,14 @@ def test_small_dense_recall_prefix_is_capped_at_sixty_four(pipeline, caplog):
         has_filters=True,
         has_excluded=True,
         expand_factor=10,
-    ) == 64
+    ) == 60
     run(service, top_k=3, expand=10, rerank=False)
     vector_logs = [
         record
         for record in caplog.records
         if getattr(record, "retrieval_stage", "") == "vector_search"
     ]
-    assert vector_logs[0].search_k == 64
+    assert vector_logs[0].search_k == 60
 
 
 @pytest.mark.parametrize("rerank,fail", [(False, False), (True, True)])
@@ -219,7 +219,7 @@ def test_debug_candidate_decisions_are_chunked_without_losing_tail(pipeline, cap
     service, _ = pipeline([(f"worker{i:03}", "full", .99 - i * .001) for i in range(61)])
     service._fragment_config.reranker_model = "controlled"
     caplog.set_level(logging.DEBUG, logger="app.application.services.worker_vector_match_service")
-    run(service, top_k=2)
+    run(service, top_k=10, expand=10)
     chunks = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "candidate_decisions"]
     assert [len(r.entries) for r in chunks] == [25, 25, 11]
     assert len({entry[0] for record in chunks for entry in record.entries}) == 61

@@ -64,7 +64,10 @@ class AgentSearchResultCache:
             _config_get(context, "search.result_cache.enabled", True, "get_bool")
         )
         if not enabled:
-            return None
+            raise RuntimeError(
+                "search.result_cache.enabled must be true for serving; "
+                "disable the cache only by making the deployment invalid"
+            )
 
         max_entries = int(
             _config_get(
@@ -133,7 +136,7 @@ class AgentSearchResultCache:
         ).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    def get(self, key: str) -> Any | None:
+    def get(self, key: str, *, operation: str = "candidate") -> Any | None:
         if not self.enabled:
             return None
         with self._entry_lock:
@@ -143,13 +146,21 @@ class AgentSearchResultCache:
             expires_at, value = entry
             if self._clock() >= expires_at:
                 self._entries.pop(key, None)
-                record_search_result_cache_eviction("v1")
+                record_search_result_cache_eviction("v1", operation=operation)
                 set_search_result_cache_entries(len(self._entries), "v1")
                 return None
             self._entries.move_to_end(key)
             self._hits += 1
-        record_search_result_cache_hit("v1")
+        record_search_result_cache_hit("v1", operation=operation)
         return deepcopy(value)
+
+    def store_and_get(
+        self, key: str, value: Any, *, operation: str = "candidate"
+    ) -> Any | None:
+        """Store and re-read a projection while allowing middleware fail-open."""
+
+        self.store(key, value, operation=operation)
+        return self.get(key, operation=operation)
 
     def get_without_metrics(self, key: str) -> Any | None:
         """Recheck a value inside singleflight without counting a second hit."""
@@ -163,17 +174,17 @@ class AgentSearchResultCache:
             expires_at, value = entry
             if self._clock() >= expires_at:
                 self._entries.pop(key, None)
-                record_search_result_cache_eviction("v1")
+                record_search_result_cache_eviction("v1", operation="candidate")
                 set_search_result_cache_entries(len(self._entries), "v1")
                 return None
             return deepcopy(value)
 
-    def record_miss(self) -> None:
+    def record_miss(self, *, operation: str = "candidate") -> None:
         with self._entry_lock:
             self._misses += 1
-        record_search_result_cache_miss("v1")
+        record_search_result_cache_miss("v1", operation=operation)
 
-    def store(self, key: str, value: Any) -> None:
+    def store(self, key: str, value: Any, *, operation: str = "candidate") -> None:
         if not self.enabled:
             return
         value_copy = deepcopy(value)
@@ -182,7 +193,7 @@ class AgentSearchResultCache:
             self._entries.move_to_end(key)
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)
-                record_search_result_cache_eviction("v1")
+                record_search_result_cache_eviction("v1", operation=operation)
             set_search_result_cache_entries(len(self._entries), "v1")
 
     @asynccontextmanager

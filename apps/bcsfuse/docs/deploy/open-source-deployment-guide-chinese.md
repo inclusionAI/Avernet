@@ -647,19 +647,23 @@ export MYSQL_PORT="3306"                         # MySQL 端口
 export MYSQL_USER="bcsfuse_user"                 # MySQL 用户
 export MYSQL_PASSWORD="your_password"            # MySQL 密码
 export MYSQL_DATABASE="bcsfuse_oss"              # 数据库名
-export MYSQL_POOL_SIZE="15"                      # 连接池大小
+export MYSQL_POOL_SIZE="8"                      # 连接池大小
+export MYSQL_CONNECT_TIMEOUT="3"               # MySQL 连接超时上限，单位秒
 ```
 
-#### 向量存储（Qdrant Local）
+#### 向量存储（Qdrant Server）
 
 ```bash
-export VECTOR_BACKEND="qdrant_local"             # 使用本地 Qdrant（嵌入式）
-export QDRANT_LOCAL_PATH=".runtime/data/qdrant" # 存储路径
+export VECTOR_BACKEND="qdrant_server"           # Runtime 使用共享 Server
+export QDRANT_MODE="server"                     # Runtime/HA 必需
+export QDRANT_URL="http://qdrant.example.test:6333"  # Qdrant Server endpoint
 export QDRANT_COLLECTION_NAME="bcsfuse_profiles" # 集合名称
+export QDRANT_PREFER_GRPC="true"                # 生产推荐传输
+export QDRANT_GRPC_PORT="6334"                   # gRPC 端口
+export QDRANT_TIMEOUT_SECONDS="10"              # 查询超时
 
-# ⚠️ 本地模式不要设置这些：
-# export QDRANT_URL="..."                        # 仅用于服务器模式
-# export QDRANT_HOST="..."                       # 仅用于服务器模式
+# 可选：独立 keyword 集群
+# export QDRANT_KEYWORD_URL="http://keyword-qdrant.example.test:6333"
 ```
 
 #### LLM 配置
@@ -1365,6 +1369,20 @@ cp -r qdrant_backup_20260706_130000 .runtime/data/qdrant
 ./scripts/deploy/macos/start_local.sh
 ```
 
+### Literal Fallback 快照持久卷
+
+BCSFuse 将“仅包含 payload 的 literal fallback 快照”作为最后一层可用性
+数据来源。运行时管理必须显式配置：
+
+```bash
+export BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH="/var/lib/bcsfuse/literal_fallback_snapshot.json"
+```
+
+`/var/lib/bcsfuse` 必须挂载到持久卷、共享只读卷或对象存储挂载。禁止将
+该路径指向 `/tmp`、tmpfs、容器临时目录或另一个 Pod-local 目录，否则
+BCSFuse 会在启动组装阶段直接拒绝，避免 Pod 重启后静默丢失 DB 故障时的
+兜底数据。
+
 ### 数据重置（危险操作！）
 
 **⚠️ 警告：这会删除所有数据**
@@ -1414,7 +1432,7 @@ cp -r qdrant_migration_backup .runtime/data/qdrant
 
 ```bash
 # 在 .runtime/env/.env.local 中
-export MYSQL_POOL_SIZE="30"  # 增加以提高并发
+export MYSQL_POOL_SIZE="30"  # 每个 Pod 的受限覆盖值；最大 64
 ```
 
 #### LLM 超时

@@ -41,3 +41,30 @@ def test_connection_mapping_keeps_auth_out_of_repr():
     assert connection.mode == "server"
     assert not connection.prefer_grpc
     assert "test-token" not in repr(connection)
+
+
+def test_runtime_environment_template_defaults_to_qdrant_server() -> None:
+    """The public runtime template must not reintroduce per-pod local locking."""
+    from pathlib import Path
+
+    template = Path(__file__).resolve().parents[2] / ".env.example"
+    rendered = template.read_text(encoding="utf-8")
+    runtime_lines = [
+        line
+        for line in rendered.splitlines()
+        if "VECTOR_BACKEND" in line or "QDRANT_" in line
+    ]
+    runtime_config = "\n".join(runtime_lines)
+    assert 'export QDRANT_MODE="server"' in runtime_config
+    assert 'export QDRANT_URL="change_me"' in runtime_config
+    assert 'export QDRANT_KEYWORD_URL="change_me"' in runtime_config
+    assert 'export QDRANT_PREFER_GRPC="true"' in runtime_config
+    assert 'export QDRANT_KEYWORD_PREFER_GRPC="true"' in runtime_config
+    assert 'export VECTOR_BACKEND="qdrant_server"' in runtime_config
+    assert "QDRANT_LOCAL_PATH" not in runtime_config
+
+    import yaml
+
+    config_path = Path(__file__).resolve().parents[2] / "configs" / "application.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["vector"]["runtime_default"] == "qdrant_server"

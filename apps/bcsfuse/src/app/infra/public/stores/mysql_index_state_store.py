@@ -28,15 +28,27 @@ CREATE TABLE IF NOT EXISTS bcsfuse_index_states (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+_CREATE_SIGNATURE_TABLE = """
+CREATE TABLE IF NOT EXISTS bcsfuse_embedding_index_signatures (
+    collection_pair VARCHAR(255) NOT NULL,
+    embedding_model VARCHAR(255) NOT NULL,
+    embedding_dimension INT NOT NULL,
+    updated_at DOUBLE NOT NULL,
+    PRIMARY KEY (collection_pair),
+    KEY idx_bcsfuse_embedding_signature_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 
 class MySQLIndexStateStore:
     """Coordinate one collection-pair owner through a shared MySQL table."""
 
     def __init__(self, connection_pool: MySQLConnectionPoolProvider):
+        if connection_pool is None:
+            raise ValueError("connection_pool is required")
         self._pool = connection_pool
         self._schema_initialized = False
         self._schema_lock = threading.Lock()
-        self._ensure_schema()
 
     def _ensure_schema(self) -> None:
         if self._schema_initialized:
@@ -48,6 +60,7 @@ class MySQLIndexStateStore:
             cursor = connection.cursor()
             try:
                 cursor.execute(_CREATE_TABLE)
+                cursor.execute(_CREATE_SIGNATURE_TABLE)
                 connection.commit()
                 self._schema_initialized = True
             finally:
@@ -60,6 +73,7 @@ class MySQLIndexStateStore:
         self._validate_call(collection_pair, owner_id)
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
+        self._ensure_schema()
         connection = self._pool.get_connection()
         try:
             now = self._server_now(connection)
@@ -112,6 +126,7 @@ class MySQLIndexStateStore:
     def read_owner(self, collection_pair: str) -> IndexStateRecord:
         if not collection_pair:
             raise ValueError("collection_pair is required")
+        self._ensure_schema()
         connection = self._pool.get_connection()
         try:
             now = self._server_now(connection)
@@ -141,6 +156,7 @@ class MySQLIndexStateStore:
         self._validate_call(collection_pair, owner_id)
         if index_version < 0:
             raise ValueError("index_version must not be negative")
+        self._ensure_schema()
         connection = self._pool.get_connection()
         try:
             now = self._server_now(connection)
@@ -183,8 +199,59 @@ class MySQLIndexStateStore:
         finally:
             connection.close()
 
+    def register_embedding_index_signature(
+        self,
+        collection_pair: str,
+        *,
+        embedding_model: str,
+        embedding_dimension: int,
+    ) -> tuple[str, int]:
+        """Return the active model signature, preserving an existing one."""
+        if not collection_pair:
+            raise ValueError("collection_pair is required")
+        if not embedding_model:
+            raise ValueError("embedding_model is required")
+        if embedding_dimension <= 0:
+            raise ValueError("embedding_dimension must be positive")
+        self._ensure_schema()
+        connection = self._pool.get_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT IGNORE INTO bcsfuse_embedding_index_signatures
+                    (collection_pair, embedding_model, embedding_dimension,
+                     updated_at)
+                VALUES (%s, %s, %s, COALESCE(UNIX_TIMESTAMP(NOW(6)), 0))
+                """,
+                (collection_pair, embedding_model, embedding_dimension),
+            )
+            cursor.execute(
+                """
+                SELECT embedding_model, embedding_dimension
+                FROM bcsfuse_embedding_index_signatures
+                WHERE collection_pair = %s
+                """,
+                (collection_pair,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                connection.rollback()
+                raise RuntimeError("embedding index signature was not persisted")
+            connection.commit()
+            return (str(row[0]), int(row[1]))
+        except Error as error:
+            connection.rollback()
+            raise RuntimeError(
+                f"MySQL embedding index signature read failed: {error}"
+            ) from error
+        finally:
+            cursor.close()
+            connection.close()
+
     def release_owner(self, collection_pair: str, owner_id: str) -> None:
         self._validate_call(collection_pair, owner_id)
+        self._ensure_schema()
         connection = self._pool.get_connection()
         cursor = connection.cursor()
         try:

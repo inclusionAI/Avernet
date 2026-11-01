@@ -118,7 +118,7 @@ def test_runtime_composition_uses_short_lease_defaults(monkeypatch) -> None:
         state_store_module, "MySQLIndexStateStore", ConfiguredIndexStateStore
     )
     monkeypatch.setattr(
-        "app.bootstrap.opensource._with_literal_fallback", lambda store: store
+        "app.bootstrap.opensource._with_literal_fallback", lambda store, snapshot_store=None: store
     )
     embedding_base_env = "EMBEDDING_" + "BASE_URL"
     embedding_credential_env = "EMBEDDING_" + "AUTH_TOKEN"

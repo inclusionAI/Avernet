@@ -380,3 +380,118 @@ def test_invalid_json_miss_replays_the_body_downstream() -> None:
         assert downstream.calls == 1
 
     asyncio.run(scenario())
+
+
+def test_cold_identical_request_burst_does_not_split_singleflight_locks() -> None:
+    """A burst of identical misses must share one downstream execution."""
+    from starlette.responses import JSONResponse
+
+    from app.adapters.http.search_response_cache import (
+        SearchResponseCacheMiddleware,
+        store_v1_search_response,
+    )
+
+    result_cache = cache()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BurstDownstream:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            self.calls += 1
+            entered.set()
+            await release.wait()
+            assert (
+                store_v1_search_response(
+                    result_cache=result_cache,
+                    request=search_request(),
+                    response=search_response(),
+                    metadata={},
+                )
+                is True
+            )
+            await JSONResponse(search_response())(scope, receive, send)
+
+    downstream = BurstDownstream()
+    middleware = SearchResponseCacheMiddleware(
+        app=downstream,
+        result_cache=result_cache,
+        require_auth=lambda request: None,
+    )
+
+    async def scenario() -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=middleware), base_url="http://test"
+        ) as client:
+            requests = [
+                asyncio.create_task(
+                    client.post(
+                        "/api/v1/search",
+                        json={"query": "支付 风险", "top_k": 3},
+                    )
+                )
+                for _ in range(64)
+            ]
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            await asyncio.sleep(0.1)
+            release.set()
+            responses = await asyncio.gather(*requests)
+
+        assert [response.status_code for response in responses] == [200] * 64
+        assert downstream.calls == 1
+
+    asyncio.run(scenario())
+
+
+def test_degraded_cold_burst_is_not_split_into_duplicate_downstream_calls() -> None:
+    """An outage at a single query must produce one expensive retrieval call."""
+    from starlette.responses import JSONResponse
+
+    from app.adapters.http.search_response_cache import SearchResponseCacheMiddleware
+
+    result_cache = cache()
+    completed = asyncio.Event()
+
+    class BurstDownstream:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            self.calls += 1
+            # Move other middleware coroutines to their finish handlers before
+            # the first request releases its lock.
+            await asyncio.sleep(0.05)
+            await JSONResponse({"results": [], "status": "degraded"})(
+                scope, receive, send
+            )
+            completed.set()
+
+    downstream = BurstDownstream()
+    middleware = SearchResponseCacheMiddleware(
+        app=downstream,
+        result_cache=result_cache,
+        require_auth=lambda request: None,
+    )
+
+    async def scenario() -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=middleware), base_url="http://test"
+        ) as client:
+            requests = [
+                asyncio.create_task(
+                    client.post(
+                        "/api/v1/search",
+                        json={"query": "duplicate outage query", "top_k": 3},
+                    )
+                )
+                for _ in range(64)
+            ]
+            responses = await asyncio.gather(*requests)
+
+        assert [response.status_code for response in responses] == [200] * 64
+        assert downstream.calls == 1
+        assert completed.is_set()
+
+    asyncio.run(scenario())

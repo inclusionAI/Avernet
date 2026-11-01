@@ -71,6 +71,24 @@ class RealEmbeddingProvider(SharedEmbeddingProvider):
             latency_ms=latency_ms,
         )
 
+    def _record_dimension_contract_violation(
+        self,
+        *,
+        protocol: str,
+        expected_dimension: int,
+        actual_dimensions: set[int],
+    ) -> None:
+        from app.infra.public.observability.search_dependency_metrics import (
+            record_embedding_dimension_contract_violation,
+        )
+
+        record_embedding_dimension_contract_violation(
+            self._settings.model,
+            protocol,
+            expected_dimension=expected_dimension,
+            actual_dimensions=actual_dimensions,
+        )
+
     def _record_wire_protocol(self, protocol: str):
         from app.infra.public.observability.search_dependency_metrics import (
             record_embedding_wire_response,

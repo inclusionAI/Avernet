@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from time import perf_counter
@@ -17,6 +16,11 @@ from app.application.agent_search_service import default_search_filters
 from app.bootstrap.oss_business_routes import SearchRequestOSS
 from app.bootstrap.search_capacity import MAX_SEARCH_BODY_BYTES, _get_search_metrics
 from app.infra.config.feature_flags import FeatureFlags
+from app.adapters.http.response_singleflight import ResponseBurstSingleflight
+from app.adapters.http.shared_response_cache_reader import (
+    BoundedSharedResponseCacheReader,
+    DEFAULT_L2_READ_CONCURRENCY,
+)
 from app.adapters.http.shared_response_cache_writer import (
     DEFAULT_L2_WRITE_QUEUE_SIZE,
     DEFAULT_L2_WRITE_WORKERS,
@@ -24,8 +28,6 @@ from app.adapters.http.shared_response_cache_writer import (
 )
 from app.infra.public.observability.shared_response_cache_metrics import (
     record_shared_response_cache_error,
-    record_shared_response_cache_hit,
-    record_shared_response_cache_miss,
 )
 
 RequireAuth = Callable[[Request], None]
@@ -87,6 +89,7 @@ def store_v1_search_response(
         json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
         ),
+        operation="v1_search_response",
     )
     return True
 
@@ -97,6 +100,12 @@ def _cacheable_response(metadata: dict[str, Any]) -> bool:
     if metadata.get("keyword_unavailable") is True:
         return False
     if metadata.get("literal_fallback_used") is True:
+        return False
+    if metadata.get("fallback_unavailable") is True:
+        return False
+    if metadata.get("retrieval_unavailable") is True:
+        return False
+    if metadata.get("candidate_unavailable") is True:
         return False
     if metadata.get("rerank_degraded") is True:
         return False
@@ -114,6 +123,8 @@ class SearchResponseCacheMiddleware:
         require_auth: RequireAuth,
         metrics: dict[str, Any] | None = None,
         shared_response_cache: Any | None = None,
+        shared_cache_reader: BoundedSharedResponseCacheReader | None = None,
+        shared_cache_read_concurrency: int = DEFAULT_L2_READ_CONCURRENCY,
         shared_cache_ttl_seconds: float = DEFAULT_L2_TTL_SECONDS,
         shared_cache_timeout_seconds: float = DEFAULT_L2_TIMEOUT_SECONDS,
         shared_cache_write_queue_size: int = DEFAULT_L2_WRITE_QUEUE_SIZE,
@@ -124,6 +135,13 @@ class SearchResponseCacheMiddleware:
         self._require_auth = require_auth
         self._metrics = metrics or _get_search_metrics()
         self._shared_response_cache = shared_response_cache
+        self._shared_cache_reader = shared_cache_reader
+        if shared_response_cache is not None and shared_cache_reader is None:
+            self._shared_cache_reader = BoundedSharedResponseCacheReader(
+                shared_response_cache=shared_response_cache,
+                timeout_seconds=shared_cache_timeout_seconds,
+                max_concurrent_reads=shared_cache_read_concurrency,
+            )
         self._shared_cache_ttl_seconds = shared_cache_ttl_seconds
         self._shared_cache_timeout_seconds = shared_cache_timeout_seconds
         self._l2_writer = (
@@ -138,7 +156,67 @@ class SearchResponseCacheMiddleware:
                 worker_count=shared_cache_write_workers,
             )
         )
-        self._inflight: dict[str, asyncio.Lock] = {}
+        self._response_burst = ResponseBurstSingleflight()
+
+    async def _coalesce(
+        self,
+        *,
+        coalescing_key: str,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        request: SearchRequestOSS,
+        started_at: float,
+    ) -> None:
+        async def execute_downstream(capture_send: Send) -> None:
+            recovered_response = self._cached_response(request)
+            if recovered_response is not None:
+                self._record_preflight_request(200, started_at)
+                await recovered_response(scope, receive, capture_send)
+                return
+
+            current_key = self._coalescing_key(request)
+            shared_response = None
+            if current_key is not None:
+                index_version = self._result_cache.current_index_version()
+                if index_version is not None:
+                    shared_payload = await self._shared_payload(
+                        current_key, index_version
+                    )
+                    if shared_payload is not None:
+                        shared_response = self._promoted_shared_response(
+                            key=current_key,
+                            payload=shared_payload,
+                        )
+
+            if shared_response is not None:
+                self._record_preflight_request(200, started_at)
+                await shared_response(scope, receive, capture_send)
+                return
+
+            recording_send = None
+            if current_key is not None:
+                recording_send = self._recording_send(
+                    request=request,
+                    key=current_key,
+                    send=capture_send,
+                )
+            await self.app(
+                scope,
+                receive,
+                recording_send if recording_send is not None else capture_send,
+            )
+
+        await self._response_burst.coalesce(
+            key=coalescing_key,
+            scope=scope,
+            receive=receive,
+            send=send,
+            execute_downstream=execute_downstream,
+            on_shared_response=lambda captured: self._record_preflight_request(
+                captured.status_code, started_at
+            ),
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -171,28 +249,14 @@ class SearchResponseCacheMiddleware:
             await self.app(scope, replay_receive, send)
             return
 
-        lock = self._inflight.setdefault(coalescing_key, asyncio.Lock())
-        try:
-            async with lock:
-                recovered_response = (
-                    None
-                    if missed_request is None
-                    else self._cached_response(missed_request)
-                )
-                if recovered_response is not None:
-                    self._record_preflight_request(200, started_at)
-                    await recovered_response(scope, replay_receive, send)
-                    return
-                recording_send = self._recording_send(
-                    request=missed_request,
-                    key=coalescing_key,
-                    send=send,
-                )
-                await self.app(scope, replay_receive, recording_send)
-        finally:
-            if not lock.locked() and self._inflight.get(coalescing_key) is lock:
-                self._inflight.pop(coalescing_key, None)
-
+        await self._coalesce(
+            coalescing_key=coalescing_key,
+            scope=scope,
+            receive=replay_receive,
+            send=send,
+            request=missed_request,
+            started_at=started_at,
+        )
     async def _hit_response(
         self, scope: Scope, receive: Receive
     ) -> tuple[
@@ -237,57 +301,42 @@ class SearchResponseCacheMiddleware:
                 None,
             )
 
-        index_version = self._result_cache.current_index_version()
-        if index_version is None:
-            return None, replay_receive, None, started_at, request
-        key = build_v1_search_response_cache_key(
-            result_cache=self._result_cache,
-            request=request,
-            index_version=index_version,
+        cached_response = self._cached_response(
+            request, record_failure=True
         )
-        cached_payload = self._result_cache.get(key)
-        if isinstance(cached_payload, bytes):
-            return (
-                Response(cached_payload, media_type="application/json"),
-                replay_receive,
-                200,
-                started_at,
-                None,
+        if cached_response is not None:
+            return cached_response, replay_receive, 200, started_at, None
+        return None, replay_receive, None, started_at, request
+
+    def _promoted_shared_response(
+        self, *, key: str, payload: bytes
+    ) -> Response | None:
+        assert self._result_cache is not None
+        try:
+            promoted_payload = self._result_cache.store_and_get(
+                key, payload, operation="v1_search_response"
             )
-        shared_payload = await self._shared_payload(key, index_version)
-        if shared_payload is None:
-            return None, replay_receive, None, started_at, request
-        # Promote a shared hit into L1 so subsequent requests remain process-local.
-        self._result_cache.store(key, shared_payload)
-        promoted_payload = self._result_cache.get(key)
+        except Exception:
+            record_shared_response_cache_error("search", stage="promote")
+            return None
         if not isinstance(promoted_payload, bytes):
             record_shared_response_cache_error("search", stage="promote")
-            return None, replay_receive, None, started_at, request
-        return (
-            Response(promoted_payload, media_type="application/json"),
-            replay_receive,
-            200,
-            started_at,
-            None,
-        )
+            return None
+        return Response(promoted_payload, media_type="application/json")
 
     async def _shared_payload(self, key: str, index_version: int) -> bytes | None:
-        if self._shared_response_cache is None:
+        if self._shared_cache_reader is None:
             return None
         try:
-            payload = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._shared_response_cache.get,
-                    key,
-                    index_version=index_version,
-                ),
-                timeout=self._shared_cache_timeout_seconds,
+            payload = await self._shared_cache_reader.get(
+                key,
+                index_version=index_version,
+                operation="search",
             )
         except Exception:
             record_shared_response_cache_error("search", stage="read")
             return None
         if not isinstance(payload, bytes):
-            record_shared_response_cache_miss("search", stage="read")
             return None
         try:
             parsed = json.loads(payload)
@@ -297,7 +346,6 @@ class SearchResponseCacheMiddleware:
         if not isinstance(parsed, dict):
             record_shared_response_cache_error("search", stage="decode")
             return None
-        record_shared_response_cache_hit("search", stage="read")
         return payload
 
     def _recording_send(
@@ -336,34 +384,51 @@ class SearchResponseCacheMiddleware:
             return
         # L1 contains only projections the route explicitly stored as
         # non-degraded. Never infer cacheability from HTTP status alone.
-        payload = self._result_cache.get_without_metrics(key)
-        if not isinstance(payload, bytes):
-            return
-        self._l2_writer.submit(key=key, payload=payload, index_version=index_version)
+        try:
+            payload = self._result_cache.get_without_metrics(key)
+            if not isinstance(payload, bytes):
+                return
+            self._l2_writer.submit(
+                key=key, payload=payload, index_version=index_version
+            )
+        except Exception:
+            record_shared_response_cache_error("search", stage="publish")
 
     def _coalescing_key(self, request: SearchRequestOSS) -> str | None:
         assert self._result_cache is not None
-        index_version = self._result_cache.current_index_version()
-        if index_version is None:
-            return None
-        return build_v1_search_response_cache_key(
-            result_cache=self._result_cache,
-            request=request,
-            index_version=index_version,
-        )
-
-    def _cached_response(self, request: SearchRequestOSS) -> Response | None:
-        assert self._result_cache is not None
-        index_version = self._result_cache.current_index_version()
-        if index_version is None:
-            return None
-        cached_payload = self._result_cache.get(
-            build_v1_search_response_cache_key(
+        try:
+            index_version = self._result_cache.current_index_version()
+            if index_version is None:
+                return None
+            return build_v1_search_response_cache_key(
                 result_cache=self._result_cache,
                 request=request,
                 index_version=index_version,
             )
-        )
+        except Exception:
+            record_shared_response_cache_error("search", stage="preflight")
+            return None
+
+    def _cached_response(
+        self, request: SearchRequestOSS, *, record_failure: bool = False
+    ) -> Response | None:
+        assert self._result_cache is not None
+        try:
+            index_version = self._result_cache.current_index_version()
+            if index_version is None:
+                return None
+            cached_payload = self._result_cache.get(
+                build_v1_search_response_cache_key(
+                    result_cache=self._result_cache,
+                    request=request,
+                    index_version=index_version,
+                ),
+                operation="v1_search_response",
+            )
+        except Exception:
+            if record_failure:
+                record_shared_response_cache_error("search", stage="preflight")
+            return None
         if not isinstance(cached_payload, bytes):
             return None
         return Response(cached_payload, media_type="application/json")

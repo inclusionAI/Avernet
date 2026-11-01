@@ -52,6 +52,7 @@ async def authenticate(request: Request):
 def test_v2_reports_graceful_semantic_degradation_from_tc_metadata():
     metadata = {
         "semantic_unavailable": True,
+        "keyword_search_used": True,
         "keyword_unavailable": False,
         "score_source": "hybrid_rrf",
         "literal_fallback_used": False,
@@ -68,7 +69,7 @@ def test_v2_reports_graceful_semantic_degradation_from_tc_metadata():
         )
 
     assert result.status == "degraded"
-    assert result.reasons == ("semantic_unavailable",)
+    assert result.reasons == ("semantic_unavailable", "keyword_fallback_used")
 
 
 def test_v2_reports_literal_and_rerank_degradation_from_tc_metadata():

@@ -29,7 +29,7 @@ class SearchCapacitySettings:
         max_inflight: int,
         retry_after_seconds: float,
         max_queue: int = 128,
-        queue_wait_seconds: float = 0.5,
+        queue_wait_seconds: float = 2.0,
     ):
         if max_inflight <= 0:
             raise ValueError("search capacity max_inflight must be positive")
@@ -47,7 +47,7 @@ class SearchCapacitySettings:
     @classmethod
     def from_context(cls, context: Any) -> "SearchCapacitySettings":
         max_inflight = int(
-            _config_get(context, "search.capacity.max_inflight", 64, "get_int")
+            _config_get(context, "search.capacity.max_inflight", 128, "get_int")
         )
         retry_after_seconds = float(
             _config_get(
@@ -64,7 +64,7 @@ class SearchCapacitySettings:
             _config_get(
                 context,
                 "search.capacity.queue_wait_seconds",
-                0.5,
+                2.0,
                 "get_float",
             )
         )

@@ -16,14 +16,108 @@ Design:
 
 import os
 import logging
+import math
 import threading
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-import mysql.connector
 from mysql.connector import pooling, Error
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MYSQL_POOL_SIZE = 8
+MAX_MYSQL_POOL_SIZE = 64
+DEFAULT_MYSQL_STARTUP_RETRY_ATTEMPTS = 5
+MAX_MYSQL_STARTUP_RETRY_ATTEMPTS = 30
+DEFAULT_MYSQL_STARTUP_RETRY_INTERVAL_MS = 250.0
+MAX_MYSQL_STARTUP_RETRY_INTERVAL_MS = 5000.0
+
+
+def mysql_pool_size(pool_size: Optional[int] = None) -> int:
+    """Return a bounded pool size from an explicit value or MYSQL_POOL_SIZE.
+
+    The open-source runtime default is intentionally lower than the historical
+    hard-coded value because a multi-pod deployment shares the MySQL server
+    connection quota. Explicit scaling remains possible, but one pod cannot
+    silently reserve an unbounded share of the shared database.
+    """
+
+    if pool_size is None:
+        raw_value = os.getenv("MYSQL_POOL_SIZE", str(DEFAULT_MYSQL_POOL_SIZE))
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "MYSQL_POOL_SIZE must be an integer between 1 and "
+                f"{MAX_MYSQL_POOL_SIZE}"
+            ) from error
+    else:
+        value = pool_size
+
+    if value <= 0:
+        raise ValueError(
+            f"pool_size must be between 1 and {MAX_MYSQL_POOL_SIZE}, got {value}"
+        )
+    if value > MAX_MYSQL_POOL_SIZE:
+        raise ValueError(
+            f"pool_size must not exceed {MAX_MYSQL_POOL_SIZE}, got {value}"
+        )
+    return value
+
+
+def _bounded_positive_int_env(name: str, default: int, maximum: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be an integer between 1 and {maximum}") from error
+    if value <= 0 or value > maximum:
+        raise ValueError(f"{name} must be an integer between 1 and {maximum}")
+    return value
+
+
+def _bounded_positive_float_env(name: str, default: float, maximum: float) -> float:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a number between 0 and {maximum}") from error
+    if value <= 0 or value > maximum:
+        raise ValueError(f"{name} must be a number between 0 and {maximum}")
+    return value
+
+
+def mysql_startup_retry_attempts(attempts: int | None = None) -> int:
+    """Return a bounded retry count for transient MySQL connection quota errors."""
+    if attempts is not None:
+        if attempts <= 0 or attempts > MAX_MYSQL_STARTUP_RETRY_ATTEMPTS:
+            raise ValueError(
+                f"MYSQL_STARTUP_RETRY_ATTEMPTS must be between 1 and "
+                f"{MAX_MYSQL_STARTUP_RETRY_ATTEMPTS}"
+            )
+        return attempts
+    return _bounded_positive_int_env(
+        "MYSQL_STARTUP_RETRY_ATTEMPTS",
+        DEFAULT_MYSQL_STARTUP_RETRY_ATTEMPTS,
+        MAX_MYSQL_STARTUP_RETRY_ATTEMPTS,
+    )
+
+
+def mysql_startup_retry_delay_ms(delay_ms: float | None = None) -> float:
+    """Return the base backoff delay in milliseconds for startup retries."""
+    if delay_ms is not None:
+        if delay_ms <= 0 or delay_ms > MAX_MYSQL_STARTUP_RETRY_INTERVAL_MS:
+            raise ValueError(
+                f"MYSQL_STARTUP_RETRY_INTERVAL_MS must be between 0 and "
+                f"{MAX_MYSQL_STARTUP_RETRY_INTERVAL_MS}"
+            )
+        return delay_ms
+    return _bounded_positive_float_env(
+        "MYSQL_STARTUP_RETRY_INTERVAL_MS",
+        DEFAULT_MYSQL_STARTUP_RETRY_INTERVAL_MS,
+        MAX_MYSQL_STARTUP_RETRY_INTERVAL_MS,
+    )
 
 
 class _TrackedConnection:
@@ -140,8 +234,9 @@ class MySQLConnectionPoolProvider:
         user: Optional[str] = None,
         password: Optional[str] = None,
         database: Optional[str] = None,
-        pool_size: int = 15,
+        pool_size: Optional[int] = None,
         pool_name: Optional[str] = None,
+        connection_timeout: Optional[float] = None,
     ):
         """Initialize MySQL connection pool.
 
@@ -151,8 +246,11 @@ class MySQLConnectionPoolProvider:
             user: MySQL user (default: MYSQL_USER env var).
             password: MySQL password (default: MYSQL_PASSWORD env var).
             database: MySQL database (default: MYSQL_DATABASE env var).
-            pool_size: Connection pool size (default: 15, covers G1/G2/G5 concurrent workers).
+            pool_size: Connection pool size. Defaults to MYSQL_POOL_SIZE (8)
+                and is capped at 64 to preserve shared MySQL quota across pods.
             pool_name: Pool name (default: bcsfuse_pool_<timestamp>).
+            connection_timeout: MySQL connect timeout in seconds (default:
+                MYSQL_CONNECT_TIMEOUT env var, then 3.0).
 
         Raises:
             RuntimeError: If pool initialization fails.
@@ -167,19 +265,32 @@ class MySQLConnectionPoolProvider:
                 "This is insecure for production. Set MYSQL_PASSWORD environment variable."
             )
         self.database = database or os.getenv("MYSQL_DATABASE", "bcsfuse")
-        self.pool_size = pool_size
+
+        # Initialize lifecycle attributes before config validation so __del__
+        # remains safe if the constructor rejects invalid input.
+        self._pool: Optional[pooling.MySQLConnectionPool] = None
+        self._lock = threading.Lock()
+        self._initialized = False
+        self._connection_count = 0
+        self._peak_connections = 0
+        self._pool_failed_at: Optional[float] = None
+        self._pool_failure_summary: Optional[str] = None
+        self._pool_failure_cooldown_seconds = 30.0
+        self.pool_size = mysql_pool_size(pool_size)
+
+        self.connection_timeout = (
+            float(os.getenv("MYSQL_CONNECT_TIMEOUT", "3.0"))
+            if connection_timeout is None
+            else float(connection_timeout)
+        )
+        if self.connection_timeout <= 0:
+            raise ValueError("connection_timeout must be positive")
 
         # Generate unique pool name to avoid conflicts
         if pool_name is None:
             self.pool_name = f"bcsfuse_pool_{int(datetime.now().timestamp())}"
         else:
             self.pool_name = pool_name
-
-        self._pool: Optional[pooling.MySQLConnectionPool] = None
-        self._lock = threading.Lock()
-        self._initialized = False
-        self._connection_count = 0
-        self._peak_connections = 0
 
         # Initialize pool lazily on first get_connection() call
         logger.info(
@@ -218,44 +329,90 @@ class MySQLConnectionPoolProvider:
             if self._pool is not None:
                 return
 
-            try:
-                logger.info(
-                    f"[MySQLConnectionPool] Initializing pool: pool_name={self.pool_name}, "
-                    f"pool_size={self.pool_size}, host={self._mask_host()}, port={self.port}, "
-                    f"database={self.database}, user={self._mask_user()}"
-                )
+            if self._pool_failed_at is not None:
+                age = time.monotonic() - self._pool_failed_at
+                remaining = self._pool_failure_cooldown_seconds - age
+                if remaining > 0:
+                    summary = self._pool_failure_summary or "unknown"
+                    logger.warning(
+                        f"[MySQLConnectionPool] Initialization cooldown active: "
+                        f"pool_name={self.pool_name}, retry_in_seconds={remaining:.2f}, "
+                        f"previous_error={summary}"
+                    )
+                    raise RuntimeError(
+                        f"MySQL connection pool is in cooldown for "
+                        f"{remaining:.2f}s; previous error: {summary}"
+                    )
 
-                self._pool = pooling.MySQLConnectionPool(
-                    pool_name=self.pool_name,
-                    pool_size=self.pool_size,
-                    host=self.host,
-                    port=self.port,
-                    user=self.user,
-                    password=self.password,
-                    database=self.database,
-                    autocommit=True,
-                    pool_reset_session=True,  # Reset session state when returning to pool
-                )
+            attempts = mysql_startup_retry_attempts()
+            base_delay_ms = mysql_startup_retry_delay_ms()
 
-                self._initialized = True
+            for attempt in range(1, attempts + 1):
+                try:
+                    logger.info(
+                        f"[MySQLConnectionPool] Initializing pool: pool_name={self.pool_name}, "
+                        f"pool_size={self.pool_size}, host={self._mask_host()}, port={self.port}, "
+                        f"database={self.database}, user={self._mask_user()}, "
+                        f"connection_timeout={self.connection_timeout}, attempt={attempt}"
+                    )
 
-                logger.info(
-                    f"[MySQLConnectionPool] Pool initialized successfully: pool_name={self.pool_name}"
-                )
+                    self._pool = pooling.MySQLConnectionPool(
+                        pool_name=self.pool_name,
+                        pool_size=self.pool_size,
+                        host=self.host,
+                        port=self.port,
+                        user=self.user,
+                        password=self.password,
+                        database=self.database,
+                        connection_timeout=max(1, math.ceil(self.connection_timeout)),
+                        autocommit=True,
+                        pool_reset_session=True,  # Reset session state when returning to pool
+                    )
 
-            except Error as e:
-                # Driver messages may echo credentials or a DSN. Keep a useful
-                # error type/code without exposing the driver's raw message.
-                error_summary = f"{type(e).__name__} (errno={e.errno})"
-                logger.error(
-                    f"[MySQLConnectionPool] Pool initialization failed: "
-                    f"host={self._mask_host()}, port={self.port}, database={self.database}, "
-                    f"error={error_summary}"
-                )
-                raise RuntimeError(
-                    f"Failed to initialize MySQL connection pool at "
-                    f"{self._mask_host()}:{self.port}/{self.database}: {error_summary}"
-                ) from None
+                    self._initialized = True
+                    self._pool_failed_at = None
+                    self._pool_failure_summary = None
+
+                    logger.info(
+                        f"[MySQLConnectionPool] Pool initialized successfully: "
+                        f"pool_name={self.pool_name}, attempt={attempt}"
+                    )
+                    return
+
+                except Error as error:
+                    # Driver messages may echo credentials or a DSN. Keep a useful
+                    # error type/code without exposing the driver's raw message.
+                    error_summary = f"{type(error).__name__} (errno={error.errno})"
+                    logger.warning(
+                        f"[MySQLConnectionPool] Pool initialization attempt failed: "
+                        f"pool_name={self.pool_name}, attempt={attempt}/{attempts}, "
+                        f"host={self._mask_host()}, port={self.port}, "
+                        f"database={self.database}, error={error_summary}"
+                    )
+
+                    # A horizontal-scale pod can start while the shared MySQL
+                    # quota is temporarily exhausted. Back off and retry so a
+                    # rolling restart does not cascade into failed pods. Other
+                    # connectivity, authentication, and schema errors fail fast.
+                    if error.errno != 1040 or attempt == attempts:
+                        self._pool_failed_at = time.monotonic()
+                        self._pool_failure_summary = error_summary
+                        logger.error(
+                            f"[MySQLConnectionPool] Pool initialization failed: "
+                            f"host={self._mask_host()}, port={self.port}, "
+                            f"database={self.database}, error={error_summary}"
+                        )
+                        raise RuntimeError(
+                            f"Failed to initialize MySQL connection pool at "
+                            f"{self._mask_host()}:{self.port}/{self.database}: "
+                            f"{error_summary}"
+                        ) from None
+
+                    delay_ms = min(
+                        base_delay_ms * (2 ** (attempt - 1)),
+                        MAX_MYSQL_STARTUP_RETRY_INTERVAL_MS,
+                    )
+                    time.sleep(delay_ms / 1000.0)
 
     def get_connection(self):
         """Get a connection from the pool.
@@ -363,6 +520,7 @@ class MySQLConnectionPoolProvider:
         return {
             "pool_name": self.pool_name,
             "pool_size": self.pool_size,
+            "connection_timeout": self.connection_timeout,
             "initialized": self._initialized,
             "host_masked": self._mask_host(),
             "port": self.port,
@@ -371,6 +529,9 @@ class MySQLConnectionPoolProvider:
             "password_present": bool(self.password),
             "active_connections": self._connection_count,
             "peak_connections": self._peak_connections,
+            "pool_available": self._pool is not None,
+            "pool_failure_summary": self._pool_failure_summary,
+            "pool_failure_cooldown_seconds": self._pool_failure_cooldown_seconds,
         }
 
     def close(self) -> None:

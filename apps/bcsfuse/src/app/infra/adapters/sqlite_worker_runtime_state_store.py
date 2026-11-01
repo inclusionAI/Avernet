@@ -8,10 +8,23 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
+from functools import wraps
+from threading import RLock
 from typing import Optional
 
 from app.domain.models.worker_runtime_state import WorkerRuntimeState
 from app.infra.adapters.sqlite_schema import init_schema
+
+
+def _serialized_connection(method):
+    """Keep all operations on one SQLite connection outside peer transactions."""
+
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._connection_lock:
+            return method(self, *args, **kwargs)
+
+    return locked
 
 
 class SQLiteWorkerRuntimeStateStore:
@@ -31,6 +44,7 @@ class SQLiteWorkerRuntimeStateStore:
             db_path: 数据库路径，默认为内存模式
         """
         self._db_path = db_path
+        self._connection_lock = RLock()
         # check_same_thread=False 允许在多线程环境中使用
         # timeout=30.0 允许等待30秒获取锁
         self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
@@ -40,6 +54,7 @@ class SQLiteWorkerRuntimeStateStore:
         self._conn.execute("PRAGMA busy_timeout=30000")
         init_schema(self._conn)
 
+    @_serialized_connection
     def get_runtime_state(self, worker_id: str) -> Optional[WorkerRuntimeState]:
         """
         获取运行态
@@ -62,6 +77,7 @@ class SQLiteWorkerRuntimeStateStore:
 
         return WorkerRuntimeState(row["runtime_state"])
 
+    @_serialized_connection
     def set_runtime_state(
         self,
         worker_id: str,
@@ -109,6 +125,7 @@ class SQLiteWorkerRuntimeStateStore:
 
         return cursor.rowcount > 0
 
+    @_serialized_connection
     def batch_get_runtime_states(
         self,
         worker_ids: list[str],
@@ -138,6 +155,7 @@ class SQLiteWorkerRuntimeStateStore:
             for row in rows
         }
 
+    @_serialized_connection
     def count_by_state(self, runtime_state: WorkerRuntimeState) -> int:
         """
         按状态统计数量
@@ -155,6 +173,7 @@ class SQLiteWorkerRuntimeStateStore:
         )
         return cursor.fetchone()[0]
 
+    @_serialized_connection
     def close(self) -> None:
         """关闭数据库连接"""
         self._conn.close()

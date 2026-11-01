@@ -495,3 +495,63 @@ def test_invalid_json_recommendation_miss_replays_the_body_downstream() -> None:
         assert downstream.calls == 1
 
     asyncio.run(scenario())
+
+
+def test_degraded_cold_recommendation_burst_is_not_split() -> None:
+    """A failure burst for one request produces one core recommendation call."""
+    from starlette.responses import JSONResponse
+
+    from app.adapters.http.recommend_response_cache import (
+        RecommendationResponseCacheMiddleware,
+    )
+
+    result_cache = cache()
+    completed = asyncio.Event()
+
+    class BurstDownstream:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            self.calls += 1
+            await asyncio.sleep(0.05)
+            degraded = response()
+            degraded.metadata["semantic_unavailable"] = True
+            await JSONResponse(degraded.model_dump())(scope, receive, send)
+            completed.set()
+
+    downstream = BurstDownstream()
+    middleware = RecommendationResponseCacheMiddleware(
+        app=downstream,
+        result_cache=result_cache,
+        require_auth=lambda request: None,
+    )
+
+    async def scenario() -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=middleware), base_url="http://test"
+        ) as client:
+            requests = [
+                asyncio.create_task(
+                    client.post(
+                        "/api/v1/recommend",
+                        json={
+                            "question": "duplicate recommendation outage",
+                            "topK": 3,
+                            "enable_rerank": False,
+                        },
+                    )
+                )
+                for _ in range(64)
+            ]
+            responses = await asyncio.gather(*requests)
+
+        assert [result.status_code for result in responses] == [200] * 64
+        assert all(
+            result.json()["metadata"]["semantic_unavailable"] is True
+            for result in responses
+        )
+        assert downstream.calls == 1
+        assert completed.is_set()
+
+    asyncio.run(scenario())

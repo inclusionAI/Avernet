@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.bootstrap.app_factory import create_bcsfuse_app
@@ -19,6 +20,18 @@ from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
 from search_core.config.qdrant import QdrantConnection
+
+
+@pytest.fixture(autouse=True)
+def disable_background_index(monkeypatch):
+    """Health-route tests isolate readiness from optional startup reconciliation."""
+    from app.infra.config.feature_flags import FeatureFlags
+
+    FeatureFlags.reset()
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
+    FeatureFlags._get_settings()
+    yield
+    FeatureFlags.reset()
 
 
 class StartupProvider:

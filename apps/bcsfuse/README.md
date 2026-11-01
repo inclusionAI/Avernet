@@ -171,11 +171,26 @@ export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
 export EMBEDDING_AUTH_TOKEN="your-embedding-token-here"
 export EMBEDDING_MODEL="text-embedding-3-small"
 export EMBEDDING_DIMENSION="1024"
+# Required for Qwen3 non-native dimensions; use native dimensions only with
+# services that do not implement the optional OpenAI dimensions parameter.
+# export EMBEDDING_REQUEST_DIMENSIONS="true"
 export EMBEDDING_MAX_RETRIES="1"
 export EMBEDDING_RETRY_BACKOFF_SECONDS="0.25"
 export EMBEDDING_RETRY_BUDGET_MS="2000"
 # Optional overrides: EMBEDDING_CIRCUIT_FAILURE_THRESHOLD=3 and
 # EMBEDDING_CIRCUIT_RECOVERY_SECONDS=10 fail fast when embedding is down.
+# EMBEDDING_QUOTA_RECOVERY_SECONDS=60 is the fallback window after a remote
+# model 429 when the provider does not return Retry-After. Runtime replicas share
+# the resulting exhausted state through MySQL bcsfuse_embedding_capacity_states.
+# EMBEDDING_QUOTA_MAX_CALLS_PER_MINUTE=30 is a proactive cluster-wide upstream
+# call limit. It counts provider calls, not unique queries, so batch=32 keeps its
+# capacity advantage. Set it from the actual model quota; 0 disables admission.
+# EMBEDDING_QUOTA_PERIOD_SECONDS=60 defines the shared call window.
+
+# Payload-only final fallback snapshot (runtime). The durable lease owner
+# publishes it atomically; read-only replicas only read it. Runtime requires an
+# absolute path on a mounted persistent volume; tmpfs and `/tmp` are rejected.
+# export BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH="/var/lib/bcsfuse/literal_fallback.json"
 
 # Reranker Provider (optional)
 export RERANKER_BASE_URL="http://your-reranker-service:19998"

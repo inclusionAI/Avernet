@@ -11,7 +11,20 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+_QWEN_MODEL_DIMENSIONS: dict[str, set[int]] = {
+    "Qwen3-Embedding-0.6B": {1024},
+    "Qwen3-Embedding-4B": {1024, 2048, 2560},
+    "Qwen3-Embedding-8B": {1024, 2048, 4096},
+}
+
+_QWEN_NATIVE_DIMENSIONS: dict[str, int] = {
+    "Qwen3-Embedding-0.6B": 1024,
+    "Qwen3-Embedding-4B": 2560,
+    "Qwen3-Embedding-8B": 4096,
+}
 
 
 class EmbeddingSettings(BaseModel):
@@ -26,6 +39,7 @@ class EmbeddingSettings(BaseModel):
         EMBEDDING_MODEL: 模型名称
         EMBEDDING_DIMENSION: 向量维度（默认 4096）
         EMBEDDING_TIMEOUT_MS: 请求超时（毫秒）
+        EMBEDDING_REQUEST_DIMENSIONS: 是否显式请求 dimensions
 
     Attributes:
         base_url: API 基础 URL
@@ -59,12 +73,44 @@ class EmbeddingSettings(BaseModel):
         description="向量维度",
     )
 
+    request_dimensions: bool = Field(
+        default=False,
+        description="是否在 OpenAI-compatible 请求中发送 dimensions",
+    )
+
     timeout_ms: int = Field(
         default=30000,
         ge=1000,
         le=120000,
         description="请求超时（毫秒）",
     )
+
+    @model_validator(mode="after")
+    def validate_model_dimension_contract(self) -> "EmbeddingSettings":
+        """Reject known model dimensions that cannot be requested safely.
+
+        The allowlist is intentionally limited to the production models whose
+        dimensions have already been verified against the actual model service.
+        Unknown models remain compatible with the generic OpenAI wire contract.
+        """
+
+        model_name = (self.model or "").strip()
+        if model_name not in _QWEN_MODEL_DIMENSIONS:
+            return self
+
+        allowed_dimensions = _QWEN_MODEL_DIMENSIONS[model_name]
+        native_dimension = _QWEN_NATIVE_DIMENSIONS[model_name]
+        if self.dimension not in allowed_dimensions:
+            raise ValueError(
+                f"Embedding model {model_name} does not support "
+                f"dimension {self.dimension}"
+            )
+        if not self.request_dimensions and self.dimension != native_dimension:
+            raise ValueError(
+                "Embedding request_dimensions must be true when a non-native "
+                f"dimension is selected for {model_name}"
+            )
+        return self
 
     def __init__(self, **data):
         """
@@ -98,6 +144,10 @@ class EmbeddingSettings(BaseModel):
             data["dimension"] = int(os.environ["EMBEDDING_DIMENSION"])
         if os.environ.get("EMBEDDING_TIMEOUT_MS"):
             data["timeout_ms"] = int(os.environ["EMBEDDING_TIMEOUT_MS"])
+        if os.environ.get("EMBEDDING_REQUEST_DIMENSIONS"):
+            data["request_dimensions"] = os.environ[
+                "EMBEDDING_REQUEST_DIMENSIONS"
+            ].strip().lower() in ("1", "true", "yes", "on")
 
         return data
 

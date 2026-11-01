@@ -224,7 +224,7 @@ def test_runtime_composition_reads_the_split_keyword_cluster(monkeypatch) -> Non
     monkeypatch.setenv("LLM_AUTH_TOKEN", "isolated-test-token")
     monkeypatch.setattr(
         "app.bootstrap.opensource._with_literal_fallback",
-        lambda store: store,
+        lambda store, snapshot_store=None: store,
     )
     monkeypatch.setenv("QDRANT_MODE", "server")
     monkeypatch.setenv("QDRANT_URL", "http://dense-qdrant.example.test:6333")
@@ -254,13 +254,16 @@ def test_runtime_composition_reads_the_split_keyword_cluster(monkeypatch) -> Non
         vector_store.close()
 
 
-def test_ready_reports_dense_and_keyword_qdrant_modes_separately() -> None:
+def test_ready_reports_dense_and_keyword_qdrant_modes_separately(
+    monkeypatch,
+) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     from app.bootstrap.app_factory import _register_health_routes
     from app.bootstrap.application_context import ApplicationContext
     from app.bootstrap.provider_registry import ProviderRegistry
+    from app.infra.config.feature_flags import FeatureFlags
 
     store = split_store()
     probes: list[tuple[str, str]] = []
@@ -268,6 +271,12 @@ def test_ready_reports_dense_and_keyword_qdrant_modes_separately() -> None:
     store._keywords = ProbeStore(
         probes, "keyword", "cluster_split_contract_keywords"
     )
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        classmethod(lambda cls: True),
+    )
+    monkeypatch.setattr(store, "size", lambda: 1)
     registry = ProviderRegistry()
     registry.register("vector_store", store)
     app = FastAPI()
@@ -284,5 +293,6 @@ def test_ready_reports_dense_and_keyword_qdrant_modes_separately() -> None:
         assert payload["keyword_qdrant_mode"] == "server"
         assert "dense-qdrant.example.test" not in response.text
         assert "keyword-qdrant.example.test" not in response.text
+        assert payload["index_size"] == 1
     finally:
         store.close()

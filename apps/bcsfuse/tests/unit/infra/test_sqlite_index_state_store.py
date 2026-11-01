@@ -114,3 +114,27 @@ def test_publishing_a_non_increasing_index_version_is_rejected(tmp_path):
     assert store.publish_index_version("profiles", "pod-a", 2) is None
 
     assert store.read_owner("profiles").index_version == 3
+
+
+def test_concurrent_first_claims_observed_after_durable_index_time(tmp_path):
+    """Concurrent lease acquisition must not fail on a durable future timestamp."""
+    path = str(tmp_path / "index-state.sqlite")
+    store = SQLiteIndexStateStore(path)
+
+    store.claim_owner("profiles:dense+keyword", "pod-a", lease_seconds=60)
+    future = time.time() + 1.0
+    store._execute(
+        lambda cursor: cursor.execute(
+            "UPDATE bcsfuse_index_states SET index_updated_at = ? "
+            "WHERE collection_pair = ?",
+            (future, "profiles:dense+keyword"),
+        )
+    )
+
+    record = store.claim_owner(
+        "profiles:dense+keyword", "pod-a", lease_seconds=60
+    )
+    assert record.observed_at >= record.index_updated_at
+
+    read = store.read_owner("profiles:dense+keyword")
+    assert read.observed_at >= read.index_updated_at

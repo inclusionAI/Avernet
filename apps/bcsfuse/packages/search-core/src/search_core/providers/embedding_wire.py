@@ -28,6 +28,21 @@ class EmbeddingWireError(ValueError):
     """A declared binary embedding response violates the wire contract."""
 
 
+class EmbeddingWireDimensionError(EmbeddingWireError):
+    """The binary response declared a dimension outside the configured contract."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        expected_dimension: int,
+        actual_dimension: int,
+    ):
+        super().__init__(message)
+        self.expected_dimension = expected_dimension
+        self.actual_dimension = actual_dimension
+
+
 def encode_embedding_vectors(
     vectors: Sequence[Sequence[float]],
     *,
@@ -78,8 +93,10 @@ def decode_embedding_vectors(
     if dtype != _FLOAT32_LITTLE_ENDIAN:
         raise EmbeddingWireError("Embedding binary response uses an unsupported dtype")
     if encoded_dimension != dimension:
-        raise EmbeddingWireError(
-            "Embedding binary response dimension does not match the configured model dimension"
+        raise EmbeddingWireDimensionError(
+            "Embedding binary response dimension does not match the configured model dimension",
+            expected_dimension=dimension,
+            actual_dimension=encoded_dimension,
         )
     if count != expected_count:
         raise EmbeddingWireError(
@@ -126,4 +143,5 @@ __all__ = [
     "EmbeddingWireError",
     "decode_embedding_vectors",
     "encode_embedding_vectors",
+    "EmbeddingWireDimensionError",
 ]

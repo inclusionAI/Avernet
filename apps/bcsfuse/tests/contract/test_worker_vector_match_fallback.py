@@ -164,7 +164,7 @@ def test_literal_fallback_matches_exact_worker_id(tmp_path):
     assert runtime_config["_retrieval"]["literal_fallback_used"] is True
 
 
-def test_keyword_availability_prevents_literal_fallback(tmp_path):
+def test_semantic_outage_uses_literal_when_keyword_has_no_hits(tmp_path):
     vector_store = Mock()
     vector_store.size.return_value = 1
     vector_store.search.side_effect = RuntimeError("qdrant unavailable")
@@ -182,10 +182,42 @@ def test_keyword_availability_prevents_literal_fallback(tmp_path):
         runtime_config=runtime_config,
     )
 
-    assert results == []
+    assert [result.profile_key for result in results] == ["worker:default"]
     diagnostics = runtime_config["_retrieval"]
-    assert diagnostics["score_source"] == "vector_weighted"
-    assert diagnostics["literal_fallback_used"] is False
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["literal_fallback_used"] is True
+    assert diagnostics["semantic_unavailable"] is True
+    assert diagnostics["keyword_unavailable"] is False
+    assert diagnostics["literal_fallback_default_used"] is False
+
+
+def test_semantic_outage_with_no_literal_overlap_uses_final_default(tmp_path):
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.side_effect = RuntimeError("qdrant unavailable")
+    vector_store.text_search.return_value = []
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="unrelated alpha zeta omega",
+        mode="fragment",
+        top_k=1,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    assert results[0].score == 0.01
+    assert results[0].reasons == ["literal_fallback_default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["literal_fallback_used"] is True
+    assert diagnostics["literal_fallback_default_used"] is True
+    assert diagnostics["semantic_unavailable"] is True
+    assert diagnostics["keyword_unavailable"] is False
 
 
 def test_empty_vector_index_is_not_an_outage_and_has_no_literal_fallback(tmp_path):

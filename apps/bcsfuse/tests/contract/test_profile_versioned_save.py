@@ -228,6 +228,7 @@ def test_mysql_versioned_save_rolls_back_when_profile_changed():
     cursor.rowcount = 0
     with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
         store = MySQLWorkerProfileContentStore(pool)
+        store._schema_initialized = True
 
     result = store.save_if_version(
         WorkerProfileContent(worker_id="bot:owner", profile_id="default"), 1,
@@ -254,6 +255,7 @@ def test_mysql_versioned_save_commits_and_returns_persisted_version():
     }
     with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
         store = MySQLWorkerProfileContentStore(pool)
+        store._schema_initialized = True
 
     saved = store.save_if_version(
         WorkerProfileContent(worker_id="bot:owner", profile_id="default"), 1,
@@ -278,6 +280,7 @@ def test_mysql_versioned_save_stores_description_without_a_new_column():
     }
     with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
         store = MySQLWorkerProfileContentStore(pool)
+        store._schema_initialized = True
 
     saved = store.save_if_version(WorkerProfileContent(
         worker_id="bot:owner", description="New description",
@@ -320,6 +323,7 @@ def test_mysql_profile_read_restores_description_from_existing_metadata_column()
     }
     with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
         store = MySQLWorkerProfileContentStore(pool)
+        store._schema_initialized = True
 
     profile = store.get("bot:owner", "default")
 
@@ -329,8 +333,12 @@ def test_mysql_profile_read_restores_description_from_existing_metadata_column()
 
 def test_mysql_profile_store_does_not_alter_existing_schema():
     pool = MagicMock()
+    store = MySQLWorkerProfileContentStore(pool)
 
-    MySQLWorkerProfileContentStore(pool)
+    # Lazy initialization allows a scale-out Pod to survive a temporary MySQL
+    # quota outage; schema DDL is still observed and bounded on first use.
+    assert pool.get_connection.call_count == 0
+    store._ensure_schema()
 
     executed = [call.args[0] for call in
                 pool.get_connection.return_value.cursor.return_value.execute.call_args_list]
@@ -347,6 +355,7 @@ def test_mysql_versioned_create_treats_duplicate_as_conflict():
     )
     with patch.object(MySQLWorkerProfileContentStore, "_ensure_schema"):
         store = MySQLWorkerProfileContentStore(pool)
+        store._schema_initialized = True
 
     result = store.save_if_version(
         WorkerProfileContent(worker_id="bot:owner", profile_id="default"), None,

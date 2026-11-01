@@ -106,7 +106,9 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         collection_name: str = "default",
         vector_dimension: int = 4096,
         distance_metric: str = "Cosine",
+        connection_pool: object | None = None,
     ):
+        self._connection_pool = connection_pool
         self.host = host or os.getenv("MYSQL_HOST", "localhost")
         self.port = port or int(os.getenv("MYSQL_PORT", "3306"))
         self.user = user or os.getenv("MYSQL_USER", "")
@@ -126,15 +128,18 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
             return
 
         try:
-            self._conn = mysql.connector.connect(
-                host=self.host,
-                port=self.port,
-                user=self.user,
-                password=self.password,
-                database=self.database,
-                autocommit=False,
-            )
-        except Error as e:
+            if self._connection_pool is not None:
+                self._conn = self._connection_pool.get_connection()
+            else:
+                self._conn = mysql.connector.connect(
+                    host=self.host,
+                    port=self.port,
+                    user=self.user,
+                    password=self.password,
+                    database=self.database,
+                    autocommit=False,
+                )
+        except Exception as e:
             log_storage_error(
                 logger,
                 "mysql_vector_connection_failure",
@@ -148,7 +153,8 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                 user=mask_user(self.user),
             )
             raise RuntimeError(
-                f"Failed to connect to MySQL at {mask_host(self.host)}:{self.port}/{self.database}: {e}"
+                f"Failed to connect to MySQL for {TABLE_NAME}: "
+                f"{type(e).__name__}"
             ) from e
 
         log_storage_event(
@@ -176,7 +182,8 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
             cursor = conn.cursor()
             try:
                 cursor.execute(CREATE_TABLE_SQL)
-                conn.commit()
+                if self._connection_pool is None:
+                    conn.commit()
                 self._schema_initialized = True
                 logger.info("[MySQLVectorBackend] Schema initialized: %s", TABLE_NAME)
             finally:
@@ -673,9 +680,15 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
 
     @_synchronized_connection
     def close(self) -> None:
-        if self._conn is not None and self._conn.is_connected():
+        if self._conn is None:
+            return
+        if self._connection_pool is not None:
+            # A pooled wrapper's close() returns the connection to the shared
+            # pool instead of terminating it.
             self._conn.close()
-            self._conn = None
+        elif self._conn.is_connected():
+            self._conn.close()
+        self._conn = None
 
 
 __all__ = ["MySQLVectorPersistenceBackend"]

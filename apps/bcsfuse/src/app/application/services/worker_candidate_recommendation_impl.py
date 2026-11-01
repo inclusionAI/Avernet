@@ -32,9 +32,11 @@ from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from app.domain.services.retrieval_logging import log_stage
+from app.application.services.semantic_failure_metadata import semantic_failure_metadata
 from app.domain.models.domain_coverage import DomainCoverage
 from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.services.retrieval_logging import log_stage
+from app.domain.services.retrieval_logging_rate import warn_once_per_interval
 from app.domain.services.participants_sufficiency_checker import (
     ParticipantsSufficiencyChecker,
 )
@@ -322,7 +324,19 @@ class WorkerCandidateRecommendationImpl:
                 "expand_factor": runtime_config.get("expand_factor", 2) if runtime_config else 2,
             }
             metadata.update(runtime_config.get("_retrieval", {}) if runtime_config else {})
-            if metadata.get("keyword_search_used"):
+            metadata.update(runtime_config.get("_semantic_failure", {}) if runtime_config else {})
+            if (
+                metadata.get("literal_fallback_used") is True
+                or metadata.get("literal_fallback_default_used") is True
+                or metadata.get("score_source") == "regex_fallback"
+            ):
+                metadata["candidate_source"] = "literal_fallback"
+            elif (
+                metadata.get("semantic_unavailable") is True
+                and metadata.get("keyword_search_used") is True
+            ):
+                metadata["candidate_source"] = "keyword_fallback"
+            elif metadata.get("keyword_search_used") is True:
                 metadata["candidate_source"] = "hybrid"
 
             return CandidateRecommendationResponse(
@@ -340,11 +354,21 @@ class WorkerCandidateRecommendationImpl:
 
         except Exception as e:
             logger.warning(f"WorkerCandidateRecommendation: Error during recommendation: {e}")
-            return self._build_empty_response(
+            # A generic recommendation failure is not a successful empty result.
+            # Keep the bounded-service contract, but publish a stable marker so the
+            # application boundary can reject an empty 200 when it is caused by an
+            # unexpected internal error.
+            response = self._build_empty_response(
                 question=question,
                 mode=mode,
                 participants=participants,
             )
+            response.metadata.update(
+                (runtime_config or {}).get("_semantic_failure", {})
+            )
+            response.metadata["candidate_unavailable"] = True
+            response.metadata["candidate_error"] = type(e).__name__
+            return response
 
     # =========================================================================
     # 内部方法
@@ -670,10 +694,20 @@ class WorkerCandidateRecommendationImpl:
             logger.warning(
                 "[VectorMatch-Try] EMBEDDING_UNAVAILABLE | continuing with lexical retrieval"
             )
+            if runtime_config is not None:
+                runtime_config["_semantic_failure"] = {
+                    "semantic_error": "EMBEDDING_UNAVAILABLE",
+                    "semantic_status_code": 503,
+                }
         elif not FeatureFlags.is_real_embedding_enabled():
             logger.warning(
                 "[VectorMatch-Try] EMBEDDING_DISABLED | continuing with lexical retrieval"
             )
+            if runtime_config is not None:
+                runtime_config["_semantic_failure"] = {
+                    "semantic_error": "EMBEDDING_DISABLED",
+                    "semantic_status_code": 503,
+                }
         else:
             try:
                 embedding_started = perf_counter()
@@ -681,10 +715,16 @@ class WorkerCandidateRecommendationImpl:
                 log_stage(logger, "embedding", dimension=len(query_embedding),
                           duration_ms=round((perf_counter() - embedding_started) * 1000, 2))
             except Exception as error:
-                logger.warning(
-                    "[VectorMatch-Try] EMBEDDING_FAILED | "
-                    f"error_type={type(error).__name__}; continuing with lexical retrieval"
+                metadata = semantic_failure_metadata(error)
+                warn_once_per_interval(
+                    logger,
+                    "embedding_failed"
+                    f":{type(error).__name__}:{metadata.get('semantic_reason_code') or 'unknown'}",
+                    "recommendation embedding failed; continuing with lexical retrieval",
+                    error_type=type(error).__name__,
                 )
+                if runtime_config is not None:
+                    runtime_config["_semantic_failure"] = metadata
 
         logger.debug(
             "[VectorMatch-Try] RETRIEVAL_INPUT_READY | "

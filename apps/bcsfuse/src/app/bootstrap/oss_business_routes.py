@@ -27,395 +27,40 @@ Authentication:
     Public routes (health/ready/openapi) are defined in opensource_app.py.
 """
 import os
-from typing import Optional, Any
 import logging
 from datetime import datetime
-from fastapi import APIRouter, Request, HTTPException, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, model_validator
 
+from fastapi import APIRouter, Request, HTTPException, status
+
+from app.adapters.http.schemas.worker_management_schemas import (
+    ProfileRequest,
+    ProfileResponse,
+)
 from app.application.agent_search_service import (
     AgentSearchCommand,
     AgentSearchService,
 )
 from app.bootstrap.index_write_guard import ensure_writable_index
-from app.domain.services.search_filter_contract import (
-    validate_v1_search_filters,
+from app.bootstrap.oss_business_support import (
+    SearchRequestOSS,
+    _get_profile_binding_store,
+    _get_profile_content_store,
+    _get_vector_store,
+    _get_worker_registry_store,
+    _profile_to_contract_response,
+    _trust_gateway_enabled,  # compatibility re-export
+    require_oss_auth,
 )
-
-# Import schemas directly (safe - no import chain)
-from app.adapters.http.schemas.worker_management_schemas import (
-    ProfileRequest,
-    ProfileResponse,
-)
+from app.bootstrap.oss_worker_routes import include_oss_worker_routes
 
 logger = logging.getLogger(__name__)
 
-
-
-class SearchRequestOSS(BaseModel):
-    """Search request (OSS wrapper)"""
-
-    query: str = Field(
-        ..., min_length=1, max_length=4096, description="Search query"
-    )
-    top_k: int = Field(default=10, ge=1, le=50, description="Number of results")
-    mode: str = Field(default="auto", description="Search mode")
-    min_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Minimum score threshold")
-    filters: Optional[dict] = Field(default=None, description="Search filters")
-
-    @model_validator(mode="after")
-    def bounded_filters(self):
-        validate_v1_search_filters(self.filters)
-        return self
-
-
-class WorkerCreateRequestOSS(BaseModel):
-    """Worker create request (OSS wrapper)"""
-    worker_id: str = Field(..., min_length=1, description="Worker ID")
-    name: str = Field(..., min_length=1, description="Worker name")
-    description: Optional[str] = Field(None, description="Worker description")
-    skills: list[str] = Field(default_factory=list, description="Worker skills")
-    domains: list[str] = Field(default_factory=list, description="Worker domains")
-    is_public: bool = Field(default=True, description="Public visibility")
-
-
-class ProfileUpsertRequestOSS(BaseModel):
-    """
-    Profile upsert request (OSS wrapper).
-
-    DEPRECATED: This schema is kept for backwards compatibility but should not be used.
-    Use ProfileRequest from worker_management_schemas instead.
-    """
-    profile_id: str = Field(..., min_length=1, description="Profile ID")
-    content: str = Field(..., min_length=1, description="Profile content")
-    metadata: Optional[dict] = Field(default_factory=dict, description="Profile metadata")
-
-
-# Dependency injection helpers (use app.state.context, NOT global imports)
-def _get_provider_registry(request: Request):
-    """Get provider registry from ApplicationContext."""
-    return request.app.state.context.registry
-
-
-def _get_provider(request: Request, name: str) -> Optional[Any]:
-    """Get a specific provider from the registry."""
-    registry = _get_provider_registry(request)
-    return registry.get(name)
-
-
-# ========================================
-# Provider Keys - MUST match registry keys in opensource.py
-# ========================================
-# Registry keys (from opensource.py):
-# - worker_registry_store
-# - worker_profile_content_store
-# - vector_store
-# - embedding_provider
-# ========================================
-
-def _get_worker_registry_store(request: Request):
-    """Get worker registry store from provider registry.
-
-    NOTE: Registry key is 'worker_registry_store', NOT 'worker_store'
-    """
-    return _get_provider(request, 'worker_registry_store')
-
-
-def _get_profile_content_store(request: Request):
-    """Get profile content store from provider registry.
-
-    NOTE: Registry key is 'worker_profile_content_store', NOT 'profile_store'
-    """
-    return _get_provider(request, 'worker_profile_content_store')
-
-
-def _get_profile_binding_store(request: Request):
-    """Get profile binding store from provider registry.
-
-    Phase B2 Fix: Ensures same instance across all paths (Profile CRUD, Fusion, etc.)
-    """
-    return _get_provider(request, 'worker_profile_binding_store')
-
-
-def _get_runtime_state_store(request: Request):
-    """Get runtime state store from provider registry."""
-    return _get_provider(request, 'worker_runtime_state_store')
-
-
-def _get_audit_log_store(request: Request):
-    """Get audit log store from provider registry."""
-    return _get_provider(request, 'worker_audit_log_store')
-
-
-def _get_index_sync_adapter(request: Request):
-    """Get index sync adapter from provider registry."""
-    return _get_provider(request, 'worker_index_sync_adapter')
-
-
-def _get_vector_store(request: Request):
-    """Get vector store from provider registry (optional)."""
-    return _get_provider(request, 'vector_store')
-
-
-# ========================================
-# Response Conversion Helpers (Contract-First)
-# ========================================
-
-def _enum_value(value):
-    """Extract enum value safely."""
-    if value is None:
-        return None
-    if hasattr(value, "value"):
-        return value.value
-    return str(value)
-
-
-def _dt_iso(value):
-    """Convert datetime to ISO format safely."""
-    if value is None:
-        return None
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
-
-
-def _model_dump(value):
-    """Convert model to dict safely."""
-    if value is None:
-        return None
-    if hasattr(value, "model_dump"):
-        return value.model_dump()
-    if isinstance(value, dict):
-        return value
-    return value
-
-
-def _list_model_dump(values):
-    """Convert list of models to list of dicts safely."""
-    if not values:
-        return []
-    return [_model_dump(v) for v in values]
-
-
-def _worker_to_contract_response(worker) -> dict:
-    """Convert worker object/dict to flat WorkerResponse contract.
-
-    OpenAPI WorkerResponse fields:
-    - success, id, type, name, handle, description
-    - lifecycle_state, runtime_state, source_type, version
-    - responsibilities, domains, availability, trust_level
-    - created_at, updated_at
-    """
-    # Handle both dict and object
-    if isinstance(worker, dict):
-        w = worker
-    elif hasattr(worker, 'model_dump'):
-        w = worker.model_dump()
-    else:
-        w = dict(worker)
-
-    # Extract identity
-    identity = w.get('identity', {})
-    if hasattr(identity, 'model_dump'):
-        identity = identity.model_dump()
-    elif not isinstance(identity, dict):
-        identity = dict(identity) if identity else {}
-
-    # Extract state
-    state = w.get('state', {})
-    if hasattr(state, 'model_dump'):
-        state = state.model_dump()
-    elif not isinstance(state, dict):
-        state = dict(state) if state else {}
-
-    return {
-        "success": True,
-        "id": w.get('id'),
-        "type": _enum_value(w.get('type')),
-        "name": identity.get('name'),
-        "handle": identity.get('handle'),
-        "description": identity.get('description'),
-        "lifecycle_state": _enum_value(w.get('lifecycle_state')),
-        "runtime_state": _enum_value(state.get('runtime_state')),
-        "source_type": _enum_value(w.get('source_type')),
-        "version": w.get('version'),
-        "responsibilities": w.get('responsibilities', []),
-        "domains": w.get('domains', []),
-        "availability": _enum_value(state.get('availability')),
-        "trust_level": _enum_value(state.get('trust_level')),
-        "created_at": _dt_iso(w.get('created_at')),
-        "updated_at": _dt_iso(w.get('updated_at')),
-    }
-
-
-def _profile_to_contract_response(content, *, is_active: bool = False) -> dict:
-    """Convert profile content to flat ProfileResponse contract.
-
-    OpenAPI ProfileResponse fields:
-    - worker_id, profile_id, display_name, soul_md, agents_md, tools_md
-    - boot_md, heartbeat_md, contents, skill_sets, metadata
-    - content_type, is_active, version, quality_score, quality_issues
-    - created_at, updated_at
-    """
-    # Handle both dict and object
-    if isinstance(content, dict):
-        c = content
-    elif hasattr(content, 'model_dump'):
-        c = content.model_dump()
-    else:
-        c = dict(content) if content else {}
-
-    # Debug logging
-    logger.debug(f"[PROFILE_TO_CONTRACT] content_type={type(content).__name__} keys={list(c.keys()) if c else []} worker_id={c.get('worker_id')} profile_id={c.get('profile_id')}")
-
-    # Extract skill_sets
-    skill_sets = c.get('skill_sets', [])
-    if skill_sets and not isinstance(skill_sets, list):
-        skill_sets = []
-    elif skill_sets:
-        skill_sets = _list_model_dump(skill_sets)
-
-    return {
-        "worker_id": c.get('worker_id'),
-        "profile_id": c.get('profile_id'),
-        "display_name": c.get('display_name'),
-        "soul_md": c.get('soul_md'),
-        "agents_md": c.get('agents_md'),
-        "tools_md": c.get('tools_md'),
-        "boot_md": c.get('boot_md'),
-        "heartbeat_md": c.get('heartbeat_md'),
-        "contents": c.get('contents') or {},
-        "skill_sets": skill_sets,
-        "metadata": c.get('metadata') or {},
-        "content_type": _enum_value(c.get('content_type')) or 'api',
-        "is_active": is_active,  # MUST be bool, not None
-        "version": c.get('version', 1),
-        "quality_score": c.get('quality_score'),
-        "quality_issues": c.get('quality_issues') or [],
-        "created_at": _dt_iso(c.get('created_at')),
-        "updated_at": _dt_iso(c.get('updated_at')),
-    }
-
-
-def _get_runtime_state_service(request: Request):
-    """Get WorkerRuntimeStateService with all required dependencies."""
-    from app.application.services.worker_runtime_state_service import WorkerRuntimeStateService
-
-    registry_store = _get_worker_registry_store(request)
-    runtime_state_store = _get_runtime_state_store(request)
-    audit_log_store = _get_audit_log_store(request)
-    index_sync_adapter = _get_index_sync_adapter(request)
-    vector_store = _get_vector_store(request)
-
-    if registry_store is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "PROVIDER_NOT_AVAILABLE",
-                "message": "worker_registry_store provider not available"
-            }
-        )
-
-    if runtime_state_store is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "PROVIDER_NOT_AVAILABLE",
-                "message": "worker_runtime_state_store provider not available"
-            }
-        )
-
-    return WorkerRuntimeStateService(
-        registry_store=registry_store,
-        runtime_state_store=runtime_state_store,
-        audit_log_adapter=audit_log_store,
-        index_sync_adapter=index_sync_adapter,
-        vector_store=vector_store,
-    )
-
-
-def _get_embedding_provider(request: Request):
-    """Get embedding provider from provider registry."""
-    return _get_provider(request, 'embedding_provider')
-
-
-def _get_vector_store(request: Request):
-    """Get vector store from provider registry."""
-    return _get_provider(request, 'vector_store')
-
-
-def _check_provider_availability(request: Request) -> dict:
-    """Check which providers are available in the registry."""
-    registry = _get_provider_registry(request)
-    return {
-        'worker_registry_store': registry.get('worker_registry_store') is not None,
-        'worker_profile_content_store': registry.get('worker_profile_content_store') is not None,
-        'embedding_provider': registry.get('embedding_provider') is not None,
-        'vector_store': registry.get('vector_store') is not None,
-    }
-
-
-def _trust_gateway_enabled(config: Any) -> bool:
-    """Read the gateway-trust deployment decision from composed configuration.
-
-    The gateway authenticates the caller and forwards the request; when this
-    explicit composition value is true, bcsfuse skips its own shared-Bearer
-    check. Route code never reads the environment directly, so a stray
-    ``BCSFUSE_TRUST_GATEWAY`` value cannot silently bypass composed auth.
-
-    Scope: this bypass is GLOBAL — when the value is true, every protected
-    bcsfuse route guarded by require_oss_auth skips the shared-Bearer check.
-    Operational precondition: BCSFuse must then be reachable only through the
-    gateway, not through a debug, singlebox, or direct port.
-    """
-    get_bool = getattr(config, "get_bool", None)
-    if get_bool is None:
-        return False
-    return bool(get_bool("auth.trust_gateway", False))
-
-
-def require_oss_auth(request: Request) -> None:
-    """
-    Require authentication for protected OSS routes.
-
-    This function checks if a valid Bearer token is provided in the Authorization header.
-    It reads the expected token from the auth provider registered in the application context.
-
-    Args:
-        request: FastAPI request object.
-
-    Raises:
-        HTTPException: 401 if authentication fails.
-    """
-    # Get auth provider from registry (NOT global)
-    registry = _get_provider_registry(request)
-    if _trust_gateway_enabled(registry.get("config")):
-        return
-
-    auth_provider = registry.get("auth")
-
-    if auth_provider is None:
-        # No auth provider configured - reject by default
-        logger.error("[OSS Auth] No auth provider in registry")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "UNAUTHORIZED",
-                "message": "Authentication required. Auth provider not configured."
-            }
-        )
-
-    # Validate request
-    if not auth_provider.validate_request(request):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "UNAUTHORIZED",
-                "message": "Authentication required. Provide valid Bearer token in Authorization header."
-            }
-        )
-
+__all__ = [
+    "SearchRequestOSS",
+    "_trust_gateway_enabled",
+    "include_oss_business_routes",
+    "require_oss_auth",
+]
 
 def include_oss_business_routes(app) -> None:
     """
@@ -525,394 +170,11 @@ def include_oss_business_routes(app) -> None:
     except Exception as e:
         logger.warning(f"Failed to mount route skeletons: {e}", exc_info=True)
 
-    # ========================================
-    # Provider Status Endpoint
-    # ========================================
-    # Admin Diagnostic Endpoints (Phase 3.2.4)
-    # ========================================
-    # Workers Endpoints
-    # ========================================
-    @mgmt_router.get("/workers", tags=["Workers"])
-    async def list_workers_oss(request: Request):
-        """List workers (OSS wrapper)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-
-        store = _get_worker_registry_store(request)
-        if store is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": "worker_registry_store provider not available in OSS mode"
-                }
-            )
-
-        try:
-            workers = store.list()
-            # Handle both dict and object returns
-            items = []
-            for w in (workers or [])[:100]:
-                if isinstance(w, dict):
-                    items.append({
-                        "id": w.get("worker_id", ""),
-                        "name": w.get("identity", {}).get("name", "unknown"),
-                        "type": w.get("worker_type", "bot"),
-                    })
-                else:
-                    items.append({
-                        "id": w.id if hasattr(w, 'id') else "",
-                        "name": w.identity.name if hasattr(w, 'identity') and w.identity else "unknown",
-                        "type": str(w.type) if hasattr(w, 'type') else "bot",
-                    })
-
-            return {
-                "success": True,
-                "items": items,
-                "total": len(workers) if workers else 0,
-            }
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to list workers: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"code": "LIST_WORKERS_ERROR", "message": str(e)}
-            )
-
-    @admin_router.post("/workers", tags=["Workers"])
-    async def create_worker_oss(request: Request, create_req: WorkerCreateRequestOSS):
-        """Create worker (OSS wrapper for test mode)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-
-        store = _get_worker_registry_store(request)
-        if store is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": "worker_registry_store provider not available in OSS mode"
-                }
-            )
-
-        try:
-            # Import domain models
-            from app.domain.models.worker import Worker, WorkerType, WorkerIdentity, WorkerState
-            from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
-            from app.domain.models.worker_source_info import WorkerSourceType
-            from app.domain.models.worker_runtime_state import WorkerRuntimeState
-            from app.domain.models.worker import Availability, TrustLevel
-
-            # Create minimal worker object for test mode
-            worker = Worker(
-                id=create_req.worker_id,
-                type=WorkerType.BOT,
-                identity=WorkerIdentity(
-                    name=create_req.name,
-                    handle=create_req.worker_id,  # Use worker_id as handle
-                    description=create_req.description or f"OSS test worker: {create_req.name}",
-                ),
-                responsibilities=["bot"],
-                domains=create_req.domains,
-                capabilities=[],
-                constraints=[],
-                skills=[],
-                resources=[],
-                memory_refs=[],
-                state=WorkerState(
-                    availability=Availability.PRIVATE,
-                    trust_level=TrustLevel.UNVERIFIED,
-                ),
-                lifecycle_state=WorkerLifecycleState.INACTIVE,
-                source_type=WorkerSourceType.API,
-                version=1,  # Version must be >= 1
-            )
-
-            # Try to create in store
-            created = store.create(worker)
-
-            # Handle both dict and object returns (compatibility for different stores)
-            if isinstance(created, dict):
-                worker_id = created.get("worker_id", create_req.worker_id)
-                name = created.get("identity", {}).get("name", create_req.name)
-            else:
-                worker_id = created.id if hasattr(created, 'id') else create_req.worker_id
-                name = created.identity.name if hasattr(created, 'identity') else create_req.name
-
-            return {
-                "success": True,
-                "worker_id": worker_id,
-                "name": name,
-            }
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to create worker: {e}", exc_info=True)
-            # Check for duplicate worker
-            if "DuplicateWorker" in str(type(e).__name__) or "already exists" in str(e).lower():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "WORKER_ALREADY_EXISTS", "message": f"Worker {create_req.worker_id} already exists"}
-                )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"code": "CREATE_WORKER_ERROR", "message": str(e)}
-            )
-
-    @mgmt_router.get("/workers/{worker_id}", tags=["Workers"])
-    async def get_worker_oss(worker_id: str, request: Request):
-        """Get worker by ID (OSS wrapper)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-
-        store = _get_worker_registry_store(request)
-        if store is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": "worker_registry_store provider not available in OSS mode"
-                }
-            )
-
-        try:
-            worker = store.get_by_id(worker_id)
-            if worker is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"code": "WORKER_NOT_FOUND", "message": f"Worker {worker_id} not found"}
-                )
-
-            # Handle both dict and object returns
-            if isinstance(worker, dict):
-                worker_dict = worker
-            elif hasattr(worker, 'model_dump'):
-                worker_dict = worker.model_dump()
-            elif hasattr(worker, 'dict'):
-                worker_dict = worker.dict()
-            else:
-                worker_dict = dict(worker)
-
-            # Fetch runtime state from runtime_state_store
-            runtime_state_store = _get_runtime_state_store(request)
-            if runtime_state_store:
-                try:
-                    runtime_state_data = runtime_state_store.get_runtime_state(worker_id)
-                    if runtime_state_data:
-                        # Add runtime_state to worker dict
-                        worker_dict["runtime_state"] = runtime_state_data.get("state", "offline")
-                        worker_dict["is_online"] = runtime_state_data.get("state", "offline") == "online"
-                    else:
-                        # No runtime state record = offline
-                        worker_dict["runtime_state"] = "offline"
-                        worker_dict["is_online"] = False
-                except Exception as e:
-                    logger.warning(f"[Workers OSS] Failed to get runtime state for {worker_id}: {e}")
-                    worker_dict["runtime_state"] = "offline"
-                    worker_dict["is_online"] = False
-            else:
-                worker_dict["runtime_state"] = "unknown"
-                worker_dict["is_online"] = False
-
-            # Return flat WorkerResponse (OpenAPI contract)
-            logger.info(f"[OSS_WORKER_GET_CONTRACT_RESPONSE] worker_id={worker_id} response_shape=flat worker_class={type(worker).__name__} store_class={type(store).__name__}")
-            return _worker_to_contract_response(worker)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to get worker {worker_id}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"code": "GET_WORKER_ERROR", "message": str(e)}
-            )
-
-    @business_router.put("/workers/{worker_id}/online", tags=["Workers"])
-    async def set_worker_online_oss(worker_id: str, request: Request):
-        """Set worker online (OSS wrapper for test mode)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-        ensure_writable_index(request)
-
-        # Get runtime state service
-        try:
-            runtime_state_service = _get_runtime_state_service(request)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to get runtime state service: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": f"Failed to initialize runtime state service: {str(e)}"
-                }
-            )
-
-        try:
-            # Use WorkerRuntimeStateService.set_online() - proper implementation
-            updated = runtime_state_service.set_online(worker_id, updated_by="oss_api")
-
-            # Extract runtime state from worker
-            if hasattr(updated, 'state') and hasattr(updated.state, 'runtime_state'):
-                if hasattr(updated.state.runtime_state, 'value'):
-                    runtime_state = str(updated.state.runtime_state.value)
-                else:
-                    runtime_state = str(updated.state.runtime_state)
-            else:
-                runtime_state = "online"
-
-            if hasattr(updated, 'lifecycle_state'):
-                if hasattr(updated.lifecycle_state, 'value'):
-                    lifecycle_state = str(updated.lifecycle_state.value)
-                else:
-                    lifecycle_state = str(updated.lifecycle_state)
-            else:
-                lifecycle_state = "active"
-
-            # Sync runtime_state to vector store payloads (Faiss + Qdrant)
-            from app.adapters.http.worker_profile_parity_routes import _sync_runtime_state_to_vector_store
-            _sync_runtime_state_to_vector_store(worker_id, "online")
-
-            return {
-                "success": True,
-                "worker_id": worker_id,
-                "status": "online",
-                "runtime_state": runtime_state,
-                "lifecycle_state": lifecycle_state,
-            }
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"[Workers OSS] Failed to set worker {worker_id} online: {e}", exc_info=True)
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"[Workers OSS] Failed to set worker {worker_id} online: {e}", exc_info=True)
-
-            # Check for specific errors
-            if "not found" in error_msg.lower() or "WorkerNotFoundException" in type(e).__name__:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"code": "WORKER_NOT_FOUND", "message": f"Worker {worker_id} not found"}
-                )
-            elif "DISABLED" in error_msg or "INACTIVE" in error_msg:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={"code": "INVALID_STATE_TRANSITION", "message": error_msg}
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={"code": "SET_WORKER_ONLINE_ERROR", "message": error_msg}
-                )
-
-    @business_router.put("/workers/{worker_id}/offline", tags=["Workers"])
-    async def set_worker_offline_oss(worker_id: str, request: Request):
-        """Set worker offline (OSS wrapper for test mode)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-        ensure_writable_index(request)
-
-        # Get runtime state service
-        try:
-            runtime_state_service = _get_runtime_state_service(request)
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to get runtime state service: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": f"Failed to initialize runtime state service: {str(e)}"
-                }
-            )
-
-        try:
-            # Use WorkerRuntimeStateService.set_offline() - proper implementation
-            updated = runtime_state_service.set_offline(worker_id, updated_by="oss_api")
-
-            # Extract version
-            version = 1
-            if hasattr(updated, 'version'):
-                version = updated.version
-            elif isinstance(updated, dict):
-                version = updated.get('version', 1)
-
-            # Return flat RuntimeStateResponse (OpenAPI contract)
-            result = {
-                "success": True,
-                "worker_id": worker_id,
-                "runtime_state": _enum_value(updated.state.runtime_state if hasattr(updated, 'state') else 'offline'),
-                "lifecycle_state": _enum_value(updated.lifecycle_state if hasattr(updated, 'lifecycle_state') else 'inactive'),
-                "version": version,
-            }
-
-            state_type = type(updated).__name__ if updated else 'None'
-            logger.info(f"[OSS_WORKER_OFFLINE_CONTRACT_RESPONSE] worker_id={worker_id} state_type={state_type} runtime_state={result['runtime_state']} lifecycle_state={result['lifecycle_state']} version={version} audit_log_adapter_class={type(runtime_state_service._audit_log_adapter).__name__ if runtime_state_service._audit_log_adapter else None} result=success")
-
-            # Sync runtime_state to vector store payloads (Faiss + Qdrant)
-            from app.adapters.http.worker_profile_parity_routes import _sync_runtime_state_to_vector_store
-            _sync_runtime_state_to_vector_store(worker_id, "offline")
-
-            return result
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"[Workers OSS] Failed to set worker {worker_id} offline: {e}", exc_info=True)
-
-            # Check for specific errors
-            if "not found" in error_msg.lower() or "WorkerNotFoundException" in type(e).__name__:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"code": "WORKER_NOT_FOUND", "message": f"Worker {worker_id} not found"}
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={"code": "SET_WORKER_OFFLINE_ERROR", "message": error_msg}
-                )
-
-    # ===== End OpenAPI P1 Worker Core Routes =====
-
-    # ========================================
-    # OpenAPI P1 Worker Config Routes (Phase 3.2.3)
-    @admin_router.delete("/workers/{worker_id}", tags=["Workers"])
-    async def delete_worker_oss(worker_id: str, request: Request):
-        """Delete worker (OSS wrapper for test mode)."""
-        # Require authentication for protected endpoint
-        require_oss_auth(request)
-
-        store = _get_worker_registry_store(request)
-        if store is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "PROVIDER_NOT_AVAILABLE",
-                    "message": "worker_registry_store provider not available in OSS mode"
-                }
-            )
-
-        try:
-            # Check if worker exists first
-            worker = store.get_by_id(worker_id)
-            if worker is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"code": "WORKER_NOT_FOUND", "message": f"Worker {worker_id} not found"}
-                )
-
-            # Delete worker
-            store.delete(worker_id)
-
-            return {
-                "success": True,
-                "worker_id": worker_id,
-                "deleted": True,
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[Workers OSS] Failed to delete worker {worker_id}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"code": "DELETE_WORKER_ERROR", "message": str(e)}
-            )
-
+    include_oss_worker_routes(
+        business_router=business_router,
+        mgmt_router=mgmt_router,
+        admin_router=admin_router,
+    )
     # ========================================
     # Profiles Endpoints
     # ========================================
@@ -1432,6 +694,7 @@ def include_oss_business_routes(app) -> None:
         require_oss_auth(request)
         start_time = time.time()
 
+        response: dict | None = None
         try:
             logger.info(
                 "[Search OSS] Request query_length=%s, top_k=%s",
@@ -1452,28 +715,28 @@ def include_oss_business_routes(app) -> None:
             match_service = _get_vector_match_service()
             embedding_gen = _get_embedding_generator()
             if not match_service:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "code": "PROVIDER_NOT_AVAILABLE",
-                        "message": "match_service not available",
-                    },
-                )
+                raise RuntimeError("match service not available")
 
             # --- Execute the unified application search service ---
             # Query normalization, default filters, bounded execution, and
             # embedding degradation are application policy, not route policy.
+            app_state = getattr(getattr(request, "app", None), "state", None)
             result_cache = getattr(
-                getattr(
-                    getattr(request, "app", None), "state", None
-                ),
-                "agent_search_result_cache",
-                None,
+                app_state, "agent_search_result_cache", None
             )
             agent_search_service = AgentSearchService(
                 embedding_generator=embedding_gen,
                 vector_match_service=match_service,
                 result_cache=result_cache,
+                resilience_cache=getattr(
+                    app_state, "agent_search_resilience_cache", None
+                ),
+                local_snapshot=getattr(
+                    app_state, "local_retrieval_snapshot", None
+                ),
+                execution_budget=getattr(
+                    app_state, "agent_search_execution_budget", None
+                ),
                 offload=run_search_in_threadpool,
             )
             outcome = await agent_search_service.search(
@@ -1507,17 +770,24 @@ def include_oss_business_routes(app) -> None:
                 metadata=outcome.metadata,
             )
             return response
-        except HTTPException:
-            raise
         except Exception as e:
-            logger.error("[Search OSS] Search failed: %s", e, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "SEARCH_UNAVAILABLE",
-                    "message": "search service unavailable",
-                },
-            ) from e
+            if response is not None:
+                return response
+            logger.error("[Search OSS] Search failed: %s", type(e).__name__)
+            from app.adapters.http.search_response_projection import (
+                build_final_v1_search_response,
+            )
+
+            return build_final_v1_search_response(
+                search_req,
+                elapsed_ms=(time.time() - start_time) * 1000,
+                error_type=type(e).__name__,
+                local_snapshot=getattr(
+                    getattr(getattr(request, "app", None), "state", None),
+                    "local_retrieval_snapshot",
+                    None,
+                ),
+            )
 
 # ========================================
     # Include routers in app

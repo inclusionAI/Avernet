@@ -230,3 +230,18 @@ class BlockThenRunApp:
         await SimpleReceive()()
         response = JSONResponse(status_code=200, content={"ok": True})
         await response(scope, receive, send)
+
+
+def test_default_admission_capacity_absorbs_hundred_request_bursts() -> None:
+    class EmptyConfig:
+        def get(self, key, default=None):
+            return default
+
+    class EmptyContext:
+        config = EmptyConfig()
+
+    settings = SearchCapacitySettings.from_context(EmptyContext())
+
+    assert settings.max_inflight == 128
+    assert settings.max_queue == 128
+    assert settings.queue_wait_seconds == 2.0

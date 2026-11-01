@@ -33,10 +33,12 @@ from __future__ import annotations
 import logging
 import os
 from time import perf_counter
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
 from app.domain.models.bot_recommendation import (
+    BotRecommendation,
     BotRecommendationRequest,
     BotRecommendationResponse,
     create_bot_recommendation_response,
@@ -52,12 +54,51 @@ from app.application.agent_search_service import (
 )
 from app.infra.trace_context import get_trace_id
 from app.application.utils.drm_config_helper import get_recommend_min_score
+from app.infra.config.feature_flags import FeatureFlags
 
 from app.domain.services.retrieval_logging import log_stage, log_candidates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _final_recommendation_projection(
+    command: AgentRecommendationCommand,
+    request: BotRecommendationRequest,
+    trace_id: str,
+    *,
+    error_type: str,
+    local_snapshot: Any | None = None,
+) -> BotRecommendationResponse:
+    """Return a non-empty last-resort envelope when projection fails."""
+
+    outcome = AgentSearchService.final_recommendation_outcome(
+        command,
+        error_type=error_type,
+        local_snapshot=local_snapshot,
+    )
+    recommendations = [
+        BotRecommendation(
+            profile_key=rec.profile_key,
+            worker_id=rec.worker_id,
+            score=rec.score,
+            reasons=rec.reasons,
+            short_profile=rec.short_profile,
+            profile_tags={"trust_level": rec.trust_level} if rec.trust_level else {},
+        )
+        for rec in outcome.response.recommendations
+    ]
+    driver_bot_id = request.driver_bot_id
+    if driver_bot_id is None and recommendations:
+        driver_bot_id = recommendations[0].profile_key
+    return BotRecommendationResponse(
+        trace_id=trace_id,
+        type=request.type,
+        driver_bot_id=driver_bot_id,
+        recommendations=recommendations,
+        metadata=outcome.response.metadata,
+    )
 
 
 def _enrich_trust_level(response: BotRecommendationResponse) -> None:
@@ -243,28 +284,6 @@ async def recommend_bots(
             trace_id=trace_id,
         )
 
-    # 获取服务
-    candidate_service = get_candidate_recommendation_service()
-
-    # DIAGNOSTIC: 检查服务状态和配置
-    from app.infra.config.feature_flags import FeatureFlags
-    vector_aware_enabled = FeatureFlags.is_vector_aware_recommendation_enabled()
-    real_embedding_enabled = FeatureFlags.is_real_embedding_enabled()
-
-    # 检查服务注入状态
-    has_vector_match = candidate_service._vector_match_service is not None
-    has_embedding_gen = candidate_service._embedding_generator is not None
-
-    logger.debug(
-        f"[RECOMMEND][{trace_id}] DIAGNOSTIC | "
-        f"route=recommend_routes.py (REAL VECTOR ROUTE), "
-        f"vector_aware_flag={vector_aware_enabled}, "
-        f"real_embedding_flag={real_embedding_enabled}, "
-        f"has_vector_match_service={has_vector_match}, "
-        f"has_embedding_generator={has_embedding_gen}, "
-        f"retrieval_mode=EXPERT_DIAGNOSIS"
-    )
-
     # 构建并执行统一应用服务命令。推荐仍是 query-based 检索，只是 projection
     # 和阈值业务语义与 search 不同；公共 normalization/default filters/
     # bounded execution 均由 AgentSearchService 承担。
@@ -272,51 +291,66 @@ async def recommend_bots(
     request_reranker_model = (
         request.reranker_model or default_reranker_model if enable_rerank else None
     )
-
-    logger.debug(
-        f"[RECOMMEND][{trace_id}] config | "
-        f"enable_rerank_requested={enable_rerank}, "
-        f"reranker_model={request_reranker_model}, "
-        f"expand_factor={request.expand_factor}, "
-        f"filter_fields={sorted(request.filters or {})}"
+    command = AgentRecommendationCommand(
+        question=rewrite_question,
+        top_k=request.topK,
+        enable_rerank=enable_rerank,
+        reranker_model=request_reranker_model,
+        expand_factor=request.expand_factor,
+        vector_min_score=vector_min_score,
+        rerank_min_score=rerank_min_score,
+        min_score_explicit=explicit_min_score_provided,
+        filters=request.filters,
     )
-
-    logger.debug(
-        f"[RECOMMEND][{trace_id}] CALLING SERVICE | "
-        f"service=AgentSearchService.recommend, "
-        f"mode=EXPERT_DIAGNOSIS, "
-        f"participants=None (全库推荐), "
-        f"max_candidates={request.topK}, "
-        f"vector_min_score={vector_min_score}, "
-        f"rerank_min_score={rerank_min_score}"
-    )
-
-    result_cache = getattr(
-        getattr(
-            getattr(http_request, "app", None), "state", None
-        ),
-        "agent_search_result_cache",
-        None,
-    )
-    agent_search_service = AgentSearchService(
-        candidate_recommendation_service=candidate_service,
-        result_cache=result_cache,
-        offload=run_search_in_threadpool,
-    )
+    app_state = getattr(getattr(http_request, "app", None), "state", None)
+    result_cache = getattr(app_state, "agent_search_result_cache", None)
     try:
-        outcome = await agent_search_service.recommend(
-            AgentRecommendationCommand(
-                question=rewrite_question,
-                top_k=request.topK,
-                enable_rerank=enable_rerank,
-                reranker_model=request_reranker_model,
-                expand_factor=request.expand_factor,
-                vector_min_score=vector_min_score,
-                rerank_min_score=rerank_min_score,
-                min_score_explicit=explicit_min_score_provided,
-                filters=request.filters,
-            )
+        # 获取服务
+        candidate_service = get_candidate_recommendation_service()
+
+        # DIAGNOSTIC: 检查服务状态和配置
+        vector_aware_enabled = FeatureFlags.is_vector_aware_recommendation_enabled()
+        real_embedding_enabled = FeatureFlags.is_real_embedding_enabled()
+
+        # 检查服务注入状态；诊断信息不能让可用请求失败。
+        has_vector_match = (
+            getattr(candidate_service, "_vector_match_service", None) is not None
         )
+        has_embedding_gen = (
+            getattr(candidate_service, "_embedding_generator", None) is not None
+        )
+
+        logger.debug(
+            f"[RECOMMEND][{trace_id}] DIAGNOSTIC | "
+            f"route=recommend_routes.py (REAL VECTOR ROUTE), "
+            f"vector_aware_flag={vector_aware_enabled}, "
+            f"real_embedding_flag={real_embedding_enabled}, "
+            f"has_vector_match_service={has_vector_match}, "
+            f"has_embedding_generator={has_embedding_gen}, "
+            f"retrieval_mode=EXPERT_DIAGNOSIS"
+        )
+
+        logger.debug(
+            f"[RECOMMEND][{trace_id}] config | "
+            f"enable_rerank_requested={enable_rerank}, "
+            f"reranker_model={request_reranker_model}, "
+            f"expand_factor={request.expand_factor}, "
+            f"filter_fields={sorted(request.filters or {})}"
+        )
+
+        agent_search_service = AgentSearchService(
+            candidate_recommendation_service=candidate_service,
+            result_cache=result_cache,
+            resilience_cache=getattr(
+                app_state, "agent_search_resilience_cache", None
+            ),
+            local_snapshot=getattr(app_state, "local_retrieval_snapshot", None),
+            execution_budget=getattr(
+                app_state, "agent_search_execution_budget", None
+            ),
+            offload=run_search_in_threadpool,
+        )
+        outcome = await agent_search_service.recommend(command)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -326,82 +360,98 @@ async def recommend_bots(
             },
         ) from error
     except Exception as error:
-        logger.error("[RECOMMEND] core execution failed: %s", type(error).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "RECOMMEND_UNAVAILABLE",
-                "message": "recommendation service unavailable",
-            },
-        ) from error
+        logger.error("[RECOMMEND] core failed: %s", type(error).__name__)
+        outcome = AgentSearchService.final_recommendation_outcome(
+            command,
+            error_type=type(error).__name__,
+            local_snapshot=getattr(app_state, "local_retrieval_snapshot", None),
+        )
 
-    candidate_response = outcome.response
-    runtime_config = outcome.config_applied
+    # Response projection, optional enrichment, cache publication, and logging are
+    # also execution stages. An admitted recommendation must not become an
+    # unexplained 500 if one of these late stages throws.
+    try:
+        candidate_response = outcome.response
+        runtime_config = outcome.config_applied
 
-    # Phase D: 构建响应 metadata（在创建响应之前）
-    metadata = candidate_response.metadata
-    metadata.update({
-        # Phase B: Threshold 信息
-        "vector_min_score": vector_min_score,
-        "rerank_min_score": rerank_min_score,
-        "enable_rerank": enable_rerank,
-        "reranker_model": metadata.get("reranker_model", runtime_config.get("reranker_model")) if enable_rerank else None,
-        "expand_factor": runtime_config.get("expand_factor", 2),
+        # Phase D: 构建响应 metadata（在创建响应之前）
+        metadata = candidate_response.metadata
+        metadata.update({
+            # Phase B: Threshold 信息
+            "vector_min_score": vector_min_score,
+            "rerank_min_score": rerank_min_score,
+            "enable_rerank": enable_rerank,
+            "reranker_model": metadata.get("reranker_model", runtime_config.get("reranker_model")) if enable_rerank else None,
+            "expand_factor": runtime_config.get("expand_factor", 2),
 
-        # Phase F: Backward Compatibility 信息
-        "explicit_min_score_provided": explicit_min_score_provided,
-        "min_score_source": min_score_source,
-        "min_score_compat_mode": min_score_compat_mode,
-        "min_score_stage": min_score_stage,
+            # Phase F: Backward Compatibility 信息
+            "explicit_min_score_provided": explicit_min_score_provided,
+            "min_score_source": min_score_source,
+            "min_score_compat_mode": min_score_compat_mode,
+            "min_score_stage": min_score_stage,
 
-        # 向量搜索信息
-        "candidate_source": metadata.get("candidate_source", "vector"),
-        "vector_search_used": True,
+            # 向量搜索信息
+            "candidate_source": metadata.get("candidate_source", "vector"),
+            "vector_search_used": metadata.get("semantic_unavailable") is not True,
+            "keyword_search_used": metadata.get("keyword_search_used", False) is True,
+            "literal_fallback_used": metadata.get("literal_fallback_used", False) is True,
+            "literal_fallback_default_used": (
+                metadata.get("literal_fallback_default_used", False) is True
+            ),
 
-        # Fragment 和 Rerank 信息
-        "fragment_embedding_enabled": FeatureFlags.is_profile_embedding_index_enabled(),
-        "content_reload_enabled": True,  # Phase C: 已启用 content reload
+            # Fragment 和 Rerank 信息
+            "fragment_embedding_enabled": FeatureFlags.is_profile_embedding_index_enabled(),
+            "content_reload_enabled": True,  # Phase C: 已启用 content reload
 
-        # 统计信息（需要在创建 response 之后更新）
-        "recommendations_count": 0,  # 临时占位，稍后更新
-        "total_candidates": candidate_response.total_candidates,
-        "selected_candidates": candidate_response.selected_candidates,
-    })
+            # 统计信息（需要在创建 response 之后更新）
+            "recommendations_count": 0,  # 临时占位，稍后更新
+            "total_candidates": candidate_response.total_candidates,
+            "selected_candidates": candidate_response.selected_candidates,
+        })
 
-    # 转换为 BotRecommendationResponse
-    response = create_bot_recommendation_response(
-        candidate_response=candidate_response,
-        driver_bot_id=request.driver_bot_id,
-        trace_id=trace_id,
-        query_type=request.type,
-    )
+        # 转换为 BotRecommendationResponse
+        response = create_bot_recommendation_response(
+            candidate_response=candidate_response,
+            driver_bot_id=request.driver_bot_id,
+            trace_id=trace_id,
+            query_type=request.type,
+        )
 
-    # 更新 recommendations_count
-    response.metadata["recommendations_count"] = len(response.recommendations)
+        # 更新 recommendations_count
+        response.metadata["recommendations_count"] = len(response.recommendations)
 
-    # 从 Worker Registry 补充 trust_level
-    _enrich_trust_level(response)
+        # 从 Worker Registry 补充 trust_level
+        _enrich_trust_level(response)
 
-    from app.adapters.http.recommend_response_cache import (
-        store_v1_recommendation_response,
-    )
+        from app.adapters.http.recommend_response_cache import (
+            store_v1_recommendation_response,
+        )
 
-    store_v1_recommendation_response(
-        result_cache=result_cache,
-        request=request,
-        response=response,
-    )
+        store_v1_recommendation_response(
+            result_cache=result_cache,
+            request=request,
+            response=response,
+        )
 
-    # Response metadata describes configuration, not proof a stage ran.
-    # Use the real stage counters for execution diagnostics.
-    top_rec = response.recommendations[0] if response.recommendations else None
-    log_stage(logger, "response", recommendations_count=len(response.recommendations),
-              duration_ms=round((perf_counter() - started) * 1000, 2),
-              top_profile_key=top_rec.profile_key if top_rec else None,
-              top_score=top_rec.score if top_rec else None)
-    log_candidates(logger, "response", ((r.profile_key, r.score) for r in response.recommendations))
+        # Response metadata describes configuration, not proof a stage ran.
+        # Use the real stage counters for execution diagnostics.
+        top_rec = response.recommendations[0] if response.recommendations else None
+        log_stage(logger, "response", recommendations_count=len(response.recommendations),
+                  duration_ms=round((perf_counter() - started) * 1000, 2),
+                  top_profile_key=top_rec.profile_key if top_rec else None,
+                  top_score=top_rec.score if top_rec else None)
+        log_candidates(logger, "response", ((r.profile_key, r.score) for r in response.recommendations))
 
-    return response
+        return response
+    except Exception as error:
+        logger.error("[RECOMMEND] projection failed: %s", type(error).__name__)
+        return _final_recommendation_projection(
+            command,
+            request,
+            trace_id,
+            error_type=type(error).__name__,
+            local_snapshot=getattr(app_state, "local_retrieval_snapshot", None),
+        )
 
 
 async def _rewrite_with_group_context(question: str, group_id: str, trace_id: str = "") -> str:
@@ -418,15 +468,15 @@ async def _rewrite_with_group_context(question: str, group_id: str, trace_id: st
     Returns:
         改写后的问题,或原始问题(如果改写不可用)
     """
-    rewrite_service = get_question_rewrite_service()
-
-    if rewrite_service is None:
-        logger.info(
-            f"[RECOMMEND][{trace_id}] QuestionRewriteService 不可用, 使用原始问题"
-        )
-        return question
-
     try:
+        rewrite_service = get_question_rewrite_service()
+
+        if rewrite_service is None:
+            logger.info(
+                f"[RECOMMEND][{trace_id}] QuestionRewriteService 不可用, 使用原始问题"
+            )
+            return question
+
         result = await rewrite_service.rewrite(question=question, group_id=group_id)
 
         if result.context_messages_count == 0:
@@ -443,7 +493,7 @@ async def _rewrite_with_group_context(question: str, group_id: str, trace_id: st
 
     except Exception as e:
         logger.warning(
-            f"[RECOMMEND][{trace_id}] 问题改写失败, 使用原始问题: {e}"
+            f"[RECOMMEND][{trace_id}] 问题改写失败, 使用原始问题: {type(e).__name__}"
         )
         return question
 

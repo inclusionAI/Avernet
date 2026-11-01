@@ -66,9 +66,8 @@ class MySQLWorkerRuntimeStateStore:
 
         self._schema_initialized = False
         self._schema_lock = threading.Lock()
-        self._ensure_schema()
 
-    def _ensure_schema(self) -> None:
+    def _ensure_schema(self, conn: object | None = None) -> None:
         """Ensure database schema exists."""
         if self._schema_initialized:
             return
@@ -77,7 +76,9 @@ class MySQLWorkerRuntimeStateStore:
             if self._schema_initialized:
                 return
 
-            conn = self._pool.get_connection()
+            owned_connection = conn is None
+            if conn is None:
+                conn = self._pool.get_connection()
             try:
                 cursor = conn.cursor()
                 try:
@@ -93,13 +94,27 @@ class MySQLWorkerRuntimeStateStore:
                     """)
                 finally:
                     cursor.close()
-                conn.commit()
+                if owned_connection:
+                    conn.commit()
                 self._schema_initialized = True
                 logger.info(
                     "[MySQLWorkerRuntimeStateStore] Schema initialized successfully"
                 )
             finally:
+                if owned_connection:
+                    conn.close()
+
+    def _connection(self):
+        """Borrow one connection and initialize schema lazily on first use."""
+
+        conn = self._pool.get_connection()
+        if not self._schema_initialized:
+            try:
+                self._ensure_schema(conn)
+            except BaseException:
                 conn.close()
+                raise
+        return conn
 
     @staticmethod
     def _resolve_state_value(runtime_state) -> str:
@@ -119,7 +134,7 @@ class MySQLWorkerRuntimeStateStore:
 
     def get_runtime_state(self, worker_id: str) -> Optional[WorkerRuntimeState]:
         """Get runtime state for worker."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -151,7 +166,7 @@ class MySQLWorkerRuntimeStateStore:
         """
         state_value = self._resolve_state_value(runtime_state)
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -189,7 +204,7 @@ class MySQLWorkerRuntimeStateStore:
         if not worker_ids:
             return {}
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -216,7 +231,7 @@ class MySQLWorkerRuntimeStateStore:
         """Count workers by runtime state."""
         state_value = self._resolve_state_value(runtime_state)
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:

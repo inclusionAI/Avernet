@@ -98,3 +98,233 @@ def test_smart_update_deletes_fragments_removed_from_profile(monkeypatch):
     profile_store.delete.assert_called_once_with(
         [f"{profile_key}:capabilities"],
     )
+
+
+def test_profiles_missing_fragments_detects_partial_profile_rebuilds():
+    class Fragment:
+        def __init__(self, fragment_type: str) -> None:
+            self.fragment_type = fragment_type
+            self.index = 0
+            self.content_hash = "same"
+
+        def compute_fragment_id(self, profile_key: str) -> str:
+            return f"{profile_key}:{self.fragment_type}"
+
+    class Decomposer:
+        def decompose(self, profile):
+            return [Fragment("full"), Fragment("profile")]
+
+    class Profile:
+        def __init__(self, profile_key: str) -> None:
+            self.profile_key = profile_key
+
+    class DecomposingIndexer(ProfileEmbeddingIndexer):
+        def __init__(self) -> None:
+            self._fragment_decomposer = Decomposer()
+
+    indexer = DecomposingIndexer()
+    indexed_ids = {
+        "worker-a:default:full",
+        "worker-b:default:full",
+        "worker-b:default:profile",
+    }
+
+    missing = indexer.profiles_missing_fragments(
+        [
+            Profile("worker-a:default"),
+            Profile("worker-b:default"),
+            Profile("worker-c:default"),
+        ],
+        indexed_ids,
+    )
+
+    assert [profile.profile_key for profile in missing] == [
+        "worker-a:default",
+        "worker-c:default",
+    ]
+
+
+def test_profiles_missing_fragments_fails_closed_when_ids_cannot_be_enumerated():
+    class Profile:
+        profile_key = "worker-a:default"
+
+    indexer = ProfileEmbeddingIndexer(
+        MagicMock(),
+        MagicMock(),
+        fragment_decomposer=MagicMock(decompose=lambda profile: []),
+    )
+
+    missing = indexer.profiles_missing_fragments([Profile()], None)
+
+    assert [profile.profile_key for profile in missing] == ["worker-a:default"]
+
+
+def test_build_index_embeds_across_profiles_with_batch_provider(monkeypatch):
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        lambda: True,
+    )
+
+    from types import SimpleNamespace
+
+    from app.domain.models.profile_fragment import ProfileFragment
+
+    def profile(index: int):
+        return SimpleNamespace(
+            profile_key=f"worker-{index}:default",
+            staff_id=f"worker-{index}",
+            profile_id="default",
+            profile_type=SimpleNamespace(value="bot"),
+            active_skills=[SimpleNamespace(name="general")],
+            metadata={},
+            short_profile="",
+        )
+
+    class StaticDecomposer:
+        def decompose(self, worker_profile):
+            return [
+                ProfileFragment(
+                    fragment_type="full",
+                    content=(
+                        f"worker_id: {worker_profile.staff_id} "
+                        f"Skills: general token {worker_profile.staff_id}"
+                    ),
+                    weight=1.0,
+                )
+            ]
+
+    class BatchEmbeddingProvider:
+        def __init__(self):
+            self.batches = []
+
+        def embed_batch(self, texts):
+            self.batches.append(list(texts))
+            return [[0.25] for _ in texts]
+
+    batcher = BatchEmbeddingProvider()
+    profile_store = MagicMock()
+    profile_store.upsert_embeddings.return_value = len
+    indexer = ProfileEmbeddingIndexer(
+        batcher,
+        profile_store,
+        batch_size=2,
+        fragment_decomposer=StaticDecomposer(),
+    )
+    profiles = [profile(index) for index in range(4)]
+
+    result = indexer.build_index(profiles, clear_existing=False)
+
+    assert result.indexed_count == 4
+    assert result.failed_count == 0
+    assert [len(batch) for batch in batcher.batches] == [2, 2]
+    assert profile_store.upsert_embeddings.call_count == 2
+    first_call = profile_store.upsert_embeddings.call_args_list[0].args[0]
+    assert [item[0] for item in first_call] == [
+        "worker-0:default:full",
+        "worker-1:default:full",
+    ]
+
+
+def test_build_index_reports_failed_profiles_without_partial_upsert(monkeypatch):
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        lambda: True,
+    )
+    from types import SimpleNamespace
+
+    def create_profile(index: int):
+        return SimpleNamespace(
+            profile_key=f"worker-failed-{index}:default",
+            staff_id=f"worker-failed-{index}",
+            profile_id="default",
+            profile_type=SimpleNamespace(value="bot"),
+            active_skills=[],
+            metadata={},
+            short_profile="",
+        )
+
+    class OneFragmentDecomposer:
+        def decompose(self, profile):
+            from app.domain.models.profile_fragment import ProfileFragment
+
+            return [
+                ProfileFragment(
+                    fragment_type="full",
+                    content=f"worker_id: {profile.staff_id} Skills: general",
+                )
+            ]
+
+    class FailingProvider:
+        def embed_batch(self, texts):
+            raise RuntimeError("provider rate limited")
+
+    profile_store = MagicMock()
+    indexer = ProfileEmbeddingIndexer(
+        FailingProvider(),
+        profile_store,
+        batch_size=2,
+        fragment_decomposer=OneFragmentDecomposer(),
+    )
+    result = indexer.build_index([create_profile(0), create_profile(1)])
+
+    assert result.indexed_count == 0
+    assert result.failed_count == 2
+    profile_store.upsert_embeddings.assert_not_called()
+    assert indexer.batch_size == 2
+
+
+def test_indexer_default_batch_size_matches_embedding_request_limit():
+    assert ProfileEmbeddingIndexer(
+        MagicMock(), MagicMock()
+    ).batch_size == 32
+
+
+def test_build_index_paces_provider_batches_and_skips_delay_after_last(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        lambda: True,
+    )
+    from types import SimpleNamespace
+
+    provider = MagicMock()
+    provider.embed_batch.side_effect = lambda texts: [[0.5] for _ in texts]
+    profile_store = MagicMock()
+    indexer = ProfileEmbeddingIndexer(
+        provider,
+        profile_store,
+        batch_size=1,
+        inter_batch_delay_seconds=0.25,
+        fragment_decomposer=MagicMock(
+            decompose=lambda profile: [MagicMock(
+                compute_fragment_id=lambda key: f"{key}:full",
+                to_embedding_text=lambda: "full text",
+                metadata={},
+            )]
+        ),
+    )
+    delays = []
+    monkeypatch.setattr(
+        "app.domain.services.profile_embedding_indexer.time.sleep",
+        delays.append,
+    )
+    indexer.build_index(
+        [
+            SimpleNamespace(
+                profile_key=f"worker-paced-{index}:default",
+                staff_id=f"worker-paced-{index}",
+                profile_id="default",
+                profile_type=SimpleNamespace(value="bot"),
+                active_skills=[],
+                metadata={},
+                short_profile="",
+            )
+            for index in range(4)
+        ]
+    )
+
+    assert delays == [0.25, 0.25, 0.25]

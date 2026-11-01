@@ -53,17 +53,62 @@ class YamlEnvConfigProvider:
             "EMBEDDING_AUTH_TOKEN": ["embedding", "auth_token"],
             "EMBEDDING_MODEL": ["embedding", "model"],
             "EMBEDDING_DIMENSION": ["embedding", "dimension"],
+            "EMBEDDING_REQUEST_DIMENSIONS": [
+                "embedding", "request_dimensions",
+            ],
+            "EMBEDDING_QUERY_CACHE_ENABLED": [
+                "embedding", "cache", "enabled",
+            ],
+            "EMBEDDING_QUERY_BATCH_MAX_WORKERS": [
+                "embedding", "cache", "max_query_batch_workers",
+            ],
+            "EMBEDDING_QUERY_BATCH_MAX_SIZE": [
+                "embedding", "cache", "max_query_batch_size",
+            ],
+            "EMBEDDING_QUERY_BATCH_WAIT_SECONDS": [
+                "embedding", "cache", "query_batch_wait_seconds",
+            ],
+            "EMBEDDING_QUERY_BATCH_PEAK_WAIT_SECONDS": [
+                "embedding", "cache", "query_batch_peak_wait_seconds",
+            ],
+            "EMBEDDING_QUERY_BATCH_PEAK_THRESHOLD": [
+                "embedding", "cache", "query_batch_peak_threshold",
+            ],
             "EMBEDDING_CIRCUIT_FAILURE_THRESHOLD": [
                 "embedding", "circuit", "failure_threshold",
             ],
             "EMBEDDING_CIRCUIT_RECOVERY_SECONDS": [
                 "embedding", "circuit", "recovery_seconds",
             ],
+            "EMBEDDING_QUOTA_RECOVERY_SECONDS": [
+                "embedding", "quota", "recovery_seconds",
+            ],
+            "EMBEDDING_QUOTA_MAX_CALLS_PER_MINUTE": [
+                "embedding", "quota", "max_calls_per_minute",
+            ],
+            "EMBEDDING_QUOTA_PERIOD_SECONDS": [
+                "embedding", "quota", "period_seconds",
+            ],
             "RERANKER_BASE_URL": ["reranker", "base_url"],
             "RERANKER_API_KEY": ["reranker", "api_key"],
             "RERANKER_MODEL": ["reranker", "model"],
             "VECTOR_BACKEND": ["vector", "backend"],
             "QDRANT_LOCAL_PATH": ["vector", "qdrant", "local_path"],
+            "QDRANT_COLLECTION_NAME": ["vector", "qdrant", "collection"],
+            "BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH": [
+                "vector",
+                "literal_fallback",
+                "snapshot_path",
+            ],
+            "BCSFUSE_SEARCH_RESULT_CACHE_ENABLED": [
+                "search", "result_cache", "enabled",
+            ],
+            "BCSFUSE_SEARCH_RESULT_CACHE_MAX_ENTRIES": [
+                "search", "result_cache", "max_entries",
+            ],
+            "BCSFUSE_SEARCH_RESULT_CACHE_TTL_SECONDS": [
+                "search", "result_cache", "ttl_seconds",
+            ],
             "WORKER_REGISTRY_DATABASE_MODE": ["database", "mode"],
             "WORKER_REGISTRY_SQLITE_DB_PATH": ["database", "sqlite", "path"],
         }

@@ -252,11 +252,14 @@ def test_result_cache_metrics_are_exported():
         application._executor.shutdown()
 
     assert metric(
-        "bcsfuse_search_result_cache_hits_total", {"api_version": "v2"}
+        "bcsfuse_search_result_cache_hits_total",
+        {"api_version": "v2", "operation": "v2_search"}
     ) >= 1
     assert metric(
-        "bcsfuse_search_result_cache_misses_total", {"api_version": "v2"}
+        "bcsfuse_search_result_cache_misses_total",
+        {"api_version": "v2", "operation": "v2_search"}
     ) >= 1
     assert metric(
-        "bcsfuse_search_result_cache_entries", {"api_version": "v2"}
+        "bcsfuse_search_result_cache_entries",
+        {"api_version": "v2", "operation": "v2_search"}
     ) >= 1

@@ -12,6 +12,7 @@ from app.domain.models.profile_fragment import (
 from app.domain.models.vector_search_hit import VectorSearchHit
 from app.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 from app.domain.services.retrieval_logging import log_stage, log_candidates, log_rows
+from app.domain.services.retrieval_logging_rate import warn_once_per_interval
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 from app.application.services.fragment_candidate_selection import select_rerank_candidates
 from app.application.services.keyword_candidate_selection import (
@@ -240,8 +241,13 @@ class FragmentMatchingMixin:
             ))
 
         if len(candidates) == 0:
-            logger.warning("[FRAGMENT-MATCH] all candidates filtered out! excluded=%d, meta_filtered=%d",
-                           excluded_by_set, excluded_by_meta)
+            warn_once_per_interval(
+                logger,
+                "fragment_candidates_filtered_out",
+                "fragment matching filtered out every dense candidate",
+                excluded=excluded_by_set,
+                metadata_filtered=excluded_by_meta,
+            )
 
         keyword_outcome = keyword_candidates_with_status(
             self._vector_store, query, effective_expand_factor * top_k,
@@ -260,11 +266,24 @@ class FragmentMatchingMixin:
         if runtime_config is not None:
             runtime_config["_retrieval"] = diagnostics
 
-        if not dense_available and not keyword_outcome.available:
+        # A semantic-model outage must not depend on the remote keyword cluster
+        # having at least one hit. If dense retrieval is unavailable and keyword
+        # retrieval is unavailable or returns no candidate, use the process-local
+        # literal/default chain. A healthy keyword hit set remains preferred.
+        literal_fallback_required = not dense_available and (
+            not keyword_outcome.available or not lexical
+        )
+        if literal_fallback_required:
             if self._fallback_index is None:
-                logger.warning("[FRAGMENT-MATCH] both retrieval branches down and no literal fallback")
+                logger.warning(
+                    "[FRAGMENT-MATCH] semantic degradation has no literal fallback"
+                )
                 return []
-            logger.warning("[FRAGMENT-MATCH] both retrieval branches down; using literal fallback")
+            warn_once_per_interval(
+                logger,
+                "semantic_literal_fallback",
+                "semantic degradation or retrieval outage; using literal fallback",
+            )
             diagnostics["score_source"] = "regex_fallback"
             diagnostics["literal_fallback_used"] = True
             results = self._literal_fallback_matches(

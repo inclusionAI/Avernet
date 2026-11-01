@@ -298,3 +298,97 @@ def test_readiness_redacts_vector_store_failure_details() -> None:
     assert response.status_code == 200
     assert response.json()["vector_store_error"] == "RuntimeError"
     assert "secret-value-must-not-leak" not in response.text
+
+
+def test_background_index_does_not_invoke_unsupported_incremental_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.adapters.http.dependencies import fusion_dependencies
+    from app.domain.services.profile_embedding_indexer import IndexingResult
+
+    startup = StartupSpy()
+    startup.events = []
+    context, _ = build_context(startup=startup)
+    index_events: list[str] = []
+
+    class VectorStore:
+        dimension = 64
+
+        def size(self) -> int:
+            return 0
+
+        def upsert(self, points):
+            return len(points)
+
+        def sync_incremental(self):
+            raise AssertionError(
+                "index writes already went through the vector store"
+            )
+
+    vector_store = VectorStore()
+    vector_store.sync_called = False
+    original_sync = vector_store.sync_incremental
+
+    def spy_sync():
+        vector_store.sync_called = True
+        original_sync()
+
+    vector_store.sync_incremental = spy_sync
+    context.registry.register("vector_store", vector_store)
+
+    class ProfileSource:
+        def scan(self):
+            return SimpleNamespace(
+                profiles=[
+                    SimpleNamespace(
+                        profile_key="worker-syncless:default",
+                        staff_id="worker-syncless",
+                        profile_id="default",
+                    )
+                ]
+            )
+
+    class Indexer:
+        def __init__(self, **kwargs):
+            pass
+
+        def profiles_missing_fragments(self, profiles, indexed_ids):
+            return list(profiles)
+
+        def build_index(self, **kwargs):
+            index_events.append("index.build")
+            return IndexingResult(
+                total_profiles=1,
+                indexed_count=1,
+                duration_seconds=0.01,
+            )
+
+    monkeypatch.setattr(
+        "app.infra.config.feature_flags.FeatureFlags.is_enabled",
+        lambda _: True,
+    )
+    monkeypatch.setattr(fusion_dependencies, "_get_embedding_generator", lambda: object())
+    monkeypatch.setattr(fusion_dependencies, "_get_profile_source", lambda: ProfileSource())
+    monkeypatch.setattr(
+        fusion_dependencies,
+        "_get_registry_store",
+        lambda: (_ for _ in ()).throw(RuntimeError("registry unavailable")),
+    )
+    monkeypatch.setattr(
+        "app.domain.services.profile_embedding_indexer.ProfileEmbeddingIndexer",
+        Indexer,
+    )
+
+    app = create_bcsfuse_app(context)
+
+    with TestClient(app):
+        pass
+
+    # Failure is observed through sync_incremental raising, but the direct
+    # assertion documents that background indexing must not resync directly
+    # written vectors.
+    assert index_events == ["index.build"]
+    assert vector_store.sync_called is False
+    assert context.registry.get("vector_store") is vector_store

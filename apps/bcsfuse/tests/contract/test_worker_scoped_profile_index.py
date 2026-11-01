@@ -166,6 +166,7 @@ def test_mysql_active_profiles_are_bounded_at_sql_boundary():
     row.update(gmt_create=content.created_at, gmt_modify=content.updated_at)
     store = MySQLWorkerProfileContentStore.__new__(MySQLWorkerProfileContentStore)
     store._pool = MagicMock()
+    store._schema_initialized = True
     connection = store._pool.get_connection.return_value
     cursor = connection.cursor.return_value
     cursor.fetchall.return_value = [row]

@@ -67,6 +67,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         mysql_user: Optional[str] = None,
         mysql_password: Optional[str] = None,
         mysql_database: Optional[str] = None,
+        mysql_connection_pool: object | None = None,
         persistence_backend: VectorPersistenceBackend | None = None,
         connection: QdrantConnection = LOCAL_QDRANT,
         keyword_connection: QdrantConnection | None = None,
@@ -91,16 +92,26 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 dimension=dimension, distance=distance,
             )
 
-        self._persistence = persistence_backend or MySQLVectorPersistenceBackend(
-            host=mysql_host,
-            port=mysql_port,
-            user=mysql_user,
-            password=mysql_password,
-            database=mysql_database,
-            collection_name=collection_name,
-            vector_dimension=dimension,
-            distance_metric=distance,
-        )
+        if persistence_backend is not None:
+            self._persistence = persistence_backend
+        elif mysql_connection_pool is not None:
+            self._persistence = MySQLVectorPersistenceBackend(
+                connection_pool=mysql_connection_pool,
+                collection_name=collection_name,
+                vector_dimension=dimension,
+                distance_metric=distance,
+            )
+        else:
+            self._persistence = MySQLVectorPersistenceBackend(
+                host=mysql_host,
+                port=mysql_port,
+                user=mysql_user,
+                password=mysql_password,
+                database=mysql_database,
+                collection_name=collection_name,
+                vector_dimension=dimension,
+                distance_metric=distance,
+            )
         # Compatibility alias for existing diagnostics and tests.
         self._mysql = self._persistence
         self._last_sync_time = 0.0
@@ -293,6 +304,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         vector: List[float],
         top_k: int,
         filters: Optional[dict] = None,
+        *,
+        payload_fields: Optional[List[str]] = None,
     ) -> List[VectorSearchHit]:
         """Search local Qdrant index and return VectorSearchHit list.
 
@@ -306,7 +319,12 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             with self._index_lock.read():
                 call.lock_wait_seconds = time.perf_counter() - lock_started_at
                 self._ensure_client()
-                return self._qdrant.search(vector, top_k, filter=filters)
+                return self._qdrant.search(
+                    vector,
+                    top_k,
+                    filter=filters,
+                    payload_fields=payload_fields,
+                )
 
     def batch_search(
         self,

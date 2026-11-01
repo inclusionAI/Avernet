@@ -65,9 +65,8 @@ class MySQLWorkerAuditLogStore:
 
         self._schema_initialized = False
         self._schema_lock = threading.Lock()
-        self._ensure_schema()
 
-    def _ensure_schema(self) -> None:
+    def _ensure_schema(self, conn: object | None = None) -> None:
         """Ensure database schema exists."""
         if self._schema_initialized:
             return
@@ -76,7 +75,9 @@ class MySQLWorkerAuditLogStore:
             if self._schema_initialized:
                 return
 
-            conn = self._pool.get_connection()
+            owned_connection = conn is None
+            if conn is None:
+                conn = self._pool.get_connection()
             try:
                 cursor = conn.cursor()
                 try:
@@ -100,11 +101,25 @@ class MySQLWorkerAuditLogStore:
                     """)
                 finally:
                     cursor.close()
-                conn.commit()
+                if owned_connection:
+                    conn.commit()
                 self._schema_initialized = True
                 logger.info("[MySQLWorkerAuditLogStore] Schema initialized successfully")
             finally:
+                if owned_connection:
+                    conn.close()
+
+    def _connection(self):
+        """Borrow one connection and initialize schema lazily on first use."""
+
+        conn = self._pool.get_connection()
+        if not self._schema_initialized:
+            try:
+                self._ensure_schema(conn)
+            except BaseException:
                 conn.close()
+                raise
+        return conn
 
     def _row_to_audit_log(self, row: dict) -> WorkerAuditLog:
         """Convert database row to WorkerAuditLog."""
@@ -146,7 +161,7 @@ class MySQLWorkerAuditLogStore:
                 return json.dumps(value, ensure_ascii=False)
             return value
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -195,7 +210,7 @@ class MySQLWorkerAuditLogStore:
         sql += " ORDER BY performed_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -209,7 +224,7 @@ class MySQLWorkerAuditLogStore:
 
     def get_latest_log(self, worker_id: str) -> Optional[WorkerAuditLog]:
         """Get latest audit log for worker."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -270,7 +285,7 @@ class MySQLWorkerAuditLogStore:
         sql += " ORDER BY performed_at DESC LIMIT %s"
         params.append(limit)
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:

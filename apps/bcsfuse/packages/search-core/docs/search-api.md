@@ -50,9 +50,15 @@ Search failures must not be converted to an empty success by new providers.
 Dependency errors expose generic messages, not provider details. The deadline
 defaults to 2 seconds and is set by the host. It is not a capacity promise and
 does not stop already-running synchronous work. TC's adapter holds its bounded
-execution slot until the underlying task actually finishes. Retry policy, model
-quotas and production overload/degradation behavior will be established with
-real retrieval providers and load tests.
+execution slot until the underlying task actually finishes.
+
+A host may expose dependency diagnostics alongside the generic message. Those
+fields are optional manifest fields: `semantic_status_code`,
+`semantic_retry_after_seconds`, and `semantic_provider_reason_code`. They must
+never replace the stable public `reasons` code or leak provider endpoint
+details. For example, a quota-limited embedding provider may expose
+`semantic_provider_reason_code=RPM_LIMIT_EXCEEDED` while keeping the public
+`reasons` entry stable as `embedding_quota_exhausted`.
 
 `api/services.py` is the in-process application boundary, not a second network
 service. `RetrievalService` must honor the requested prefilters and trusted scope,

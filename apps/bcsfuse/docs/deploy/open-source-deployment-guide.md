@@ -647,19 +647,23 @@ export MYSQL_PORT="3306"                         # MySQL port
 export MYSQL_USER="bcsfuse_user"                 # MySQL user
 export MYSQL_PASSWORD="your_password"            # MySQL password
 export MYSQL_DATABASE="bcsfuse_oss"              # Database name
-export MYSQL_POOL_SIZE="15"                      # Connection pool size
+export MYSQL_POOL_SIZE="8"                      # Connection pool size
+export MYSQL_CONNECT_TIMEOUT="3"               # Bounded MySQL connect timeout, seconds
 ```
 
-#### Vector Store (Qdrant Local)
+#### Vector Store (Qdrant Server)
 
 ```bash
-export VECTOR_BACKEND="qdrant_local"             # Use local Qdrant (embedded)
-export QDRANT_LOCAL_PATH=".runtime/data/qdrant" # Storage path
+export VECTOR_BACKEND="qdrant_server"           # Runtime uses a shared server
+export QDRANT_MODE="server"                     # Required for runtime/HA
+export QDRANT_URL="http://qdrant.example.test:6333"  # Qdrant Server endpoint
 export QDRANT_COLLECTION_NAME="bcsfuse_profiles" # Collection name
+export QDRANT_PREFER_GRPC="true"                # Preferred production transport
+export QDRANT_GRPC_PORT="6334"
+export QDRANT_TIMEOUT_SECONDS="10"
 
-# ⚠️ DO NOT set these for local mode:
-# export QDRANT_URL="..."                        # Only for server mode
-# export QDRANT_HOST="..."                       # Only for server mode
+# Optional isolated keyword cluster:
+# export QDRANT_KEYWORD_URL="http://keyword-qdrant.example.test:6333"
 ```
 
 #### LLM Configuration
@@ -1357,6 +1361,21 @@ cp -r qdrant_backup_20260706_130000 .runtime/data/qdrant
 ./scripts/deploy/macos/start_local.sh
 ```
 
+### Literal Fallback Snapshot Volume
+
+BCSFuse uses a payload-only literal fallback snapshot as the last legible-data
+availability layer. Runtime composition requires:
+
+```bash
+export BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH="/var/lib/bcsfuse/literal_fallback_snapshot.json"
+```
+
+Mount `/var/lib/bcsfuse` on a persistent volume, shared read-only volume, or
+object-storage-backed mount. Do not point this variable at `/tmp`, tmpfs, the
+container root filesystem, or another Pod-local ephemeral directory; BCSFuse
+rejects those paths at startup, because a Pod restart would silently lose the
+snapshot needed for first-boot DB outages.
+
 ### Data Reset (Dangerous!)
 
 **⚠️ WARNING: This deletes ALL data**
@@ -1406,7 +1425,7 @@ cp -r qdrant_migration_backup .runtime/data/qdrant
 
 ```bash
 # In .runtime/env/.env.local
-export MYSQL_POOL_SIZE="30"  # Increase for high concurrency
+export MYSQL_POOL_SIZE="30"  # Bounded per-Pod override; maximum 64
 ```
 
 #### LLM Timeout

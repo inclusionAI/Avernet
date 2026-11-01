@@ -29,7 +29,7 @@ provider:
   mode_env: BCSFUSE_PROVIDER_MODE
   default_mode: dev
   modes:
-    runtime: mysql + qdrant_local + real_http
+    runtime: mysql + qdrant_server + real_http
     dev: sqlite + qdrant_local + real_http
     dev_smoke: sqlite + qdrant_local + fake_noop
     test: in_memory + fake_noop
@@ -96,7 +96,7 @@ audit_log:
 
 vector:
   backend_env: VECTOR_BACKEND
-  runtime_default: qdrant_local
+  runtime_default: qdrant_server
   dev_fallback: qdrant_local
   test_fallback: in_memory
   qdrant:
@@ -104,6 +104,9 @@ vector:
     collection_name_env: QDRANT_COLLECTION_NAME
   sqlite:
     sqlite_path_env: BCSFUSE_VECTOR_SQLITE_PATH
+  literal_fallback:
+    snapshot_enabled: true
+    snapshot_path: data/literal_fallback_snapshot.json
 
 embedding:
   runtime_default: http
@@ -116,6 +119,22 @@ embedding:
   circuit:
     failure_threshold: 3
     recovery_seconds: 10
+  quota:
+    recovery_seconds: 60
+    # Counts upstream provider calls, not unique queries. Batched calls retain
+    # their capacity advantage while every replica shares the same model budget.
+    max_calls_per_minute: 30
+    period_seconds: 60
+  cache:
+    enabled: true
+    max_entries: 10000
+    ttl_seconds: 300
+    max_query_batch_size: 32
+    query_batch_wait_seconds: 0.05
+    query_batch_peak_wait_seconds: 0.15
+    query_batch_peak_threshold: 8
+    max_query_batch_workers: 2
+  request_dimensions: false
   # All embedding service credentials MUST come from env vars
 
 reranker:
@@ -140,6 +159,24 @@ llm:
   fast_model_env: LLM_FAST_MODEL
   reasoning_model_env: LLM_REASONING_MODEL
   # All LLM service credentials MUST come from env vars
+
+search:
+  result_cache:
+    enabled: true
+    max_entries: 10000
+    ttl_seconds: 60
+  execution:
+    embedding_timeout_seconds: 0.50
+    retrieval_timeout_seconds: 0.25
+    local_snapshot_timeout_seconds: 0.05
+    total_timeout_seconds: 1.00
+  resilience:
+    enabled: true
+    max_entries: 10000
+    last_known_good:
+      ttl_seconds: 600
+    negative:
+      ttl_seconds: 10
 
 cache:
   runtime_default: in_memory

@@ -7,11 +7,13 @@ from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 
 from app.bootstrap.application_context import ApplicationContext
+from app.bootstrap.index_backfill_status import IndexBackfillStatus
 from app.bootstrap.logging_setup import (
     configure_business_logging,
     resolve_business_log_level,
 )
 from app.bootstrap.oss_business_routes import include_oss_business_routes
+from app.bootstrap.readiness_probe import ReadinessProbeCache
 from app.bootstrap.route_mount_contract import (
     validate_required_oss_business_routes,
 )
@@ -135,8 +137,51 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
     )
     if index_stale:
         is_ready = False
+
+    from app.infra.config.feature_flags import FeatureFlags
+
+    profile_embedding_index_enabled = (
+        FeatureFlags.is_profile_embedding_index_enabled()
+    )
+    backfill_status = context.registry.get("index_backfill_status")
+    backfill = (
+        backfill_status.snapshot()
+        if backfill_status is not None
+        else {"running": False, "failed": False, "error_type": None}
+    )
+    if backfill["running"] or backfill["failed"]:
+        is_ready = False
+    index_size: int | None = None
+    index_size_unavailable = False
+    size_probe = getattr(vector_store, "size", None)
+    if callable(size_probe):
+        try:
+            index_size = int(await run_in_threadpool(size_probe))
+            if index_size < 0:
+                raise ValueError("index size cannot be negative")
+        except Exception:
+            index_size = None
+            index_size_unavailable = True
+            if profile_embedding_index_enabled:
+                is_ready = False
+        else:
+            if profile_embedding_index_enabled and index_size == 0:
+                is_ready = False
     if startup_rebuild_failed:
         is_ready = False
+    literal_fallback = getattr(vector_store, "literal_fallback_index", None)
+    literal_fallback_source = getattr(literal_fallback, "source", None)
+    literal_fallback_version = getattr(
+        literal_fallback,
+        "snapshot_index_version",
+        None,
+    )
+    literal_fallback_profiles = getattr(literal_fallback, "profile_count", None)
+    literal_fallback_publish_error = getattr(
+        vector_store,
+        "snapshot_publish_error_type",
+        None,
+    )
     vector_store_info: dict = {
         "vector_store_available": True,
         "qdrant_mode": getattr(connection, "mode", None),
@@ -165,7 +210,47 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         "index_state_unavailable": bool(
             getattr(vector_store, "index_state_unavailable", False)
         ),
+        "index_size": index_size,
+        "index_size_unavailable": index_size_unavailable,
+        "index_backfill_running": bool(backfill["running"]),
+        "index_backfill_failed": bool(backfill["failed"]),
+        "index_backfill_error_type": (
+            backfill["error_type"]
+            if backfill["failed"]
+            else None
+        ),
+        "dense_index_empty": bool(
+            profile_embedding_index_enabled
+            and index_size == 0
+        ),
         "read_only": bool(getattr(vector_store, "read_only", False)),
+        "literal_fallback_source": literal_fallback_source,
+        "literal_fallback_index_version": literal_fallback_version,
+        "literal_fallback_profiles": literal_fallback_profiles,
+        "literal_fallback_publish_error_type": literal_fallback_publish_error,
+        "embedding_model": getattr(vector_store, "embedding_model", None),
+        "embedding_dimension": getattr(
+            vector_store, "embedding_dimension", None
+        ),
+        "embedding_index_signature_ready": bool(
+            partial_readiness.get("embedding_index_signature_ready", True)
+            if partial_readiness is not None
+            else True
+        ),
+        "embedding_index_signature_mismatch": bool(
+            getattr(
+                vector_store,
+                "embedding_index_signature_mismatch",
+                False,
+            )
+        ),
+        "embedding_index_signature_unavailable": bool(
+            getattr(
+                vector_store,
+                "embedding_index_signature_unavailable",
+                False,
+            )
+        ),
     }
     if partial_readiness is not None:
         dense_ready = bool(partial_readiness.get("dense_qdrant_ready"))
@@ -185,10 +270,19 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         is_ready = False
     if vector_store_info.get("startup_rebuild_failed", False):
         vector_store_info["degraded"] = True
+    if literal_fallback_publish_error:
+        vector_store_info["degraded"] = True
+    if backfill["running"] or backfill["failed"]:
+        vector_store_info["degraded"] = True
     return is_ready, vector_store_info
 
 
-def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
+def _register_health_routes(
+    app: FastAPI,
+    context: ApplicationContext,
+    readiness_cache: ReadinessProbeCache | None = None,
+) -> None:
+    readiness_cache = readiness_cache or ReadinessProbeCache()
     @app.get("/health", tags=["Health"])
     async def health():
         """Return shallow process health without initializing providers."""
@@ -206,7 +300,9 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
     async def ready():
         """Return provider readiness without leaking provider failure details."""
         try:
-            is_ready, vector_store_info = await _index_readiness(context)
+            is_ready, vector_store_info = await readiness_cache.resolve(
+                lambda: _index_readiness(context)
+            )
             provider_count = len(context.registry.keys())
             return JSONResponse(
                 status_code=200 if is_ready else 503,
@@ -242,7 +338,9 @@ def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
         from fastapi import Response
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-        is_ready, info = await _index_readiness(context)
+        is_ready, info = await readiness_cache.resolve(
+            lambda: _index_readiness(context)
+        )
         collection = str(info.get("qdrant_collection_name") or "unknown")
         owner = str(info.get("index_owner") or "unknown")
         gauges = _get_index_metrics()
@@ -292,6 +390,11 @@ def create_bcsfuse_app(
             ensure_profile_route_compatibility(profile_store),
         )
     background_index_target = None
+    shared_cache_reader = None
+    backfill_status = context.registry.get("index_backfill_status")
+    if backfill_status is None:
+        backfill_status = IndexBackfillStatus()
+        context.registry.register("index_backfill_status", backfill_status)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -308,8 +411,18 @@ def create_bcsfuse_app(
             if background_index_target is not None:
                 import threading
 
+                def run_background_index_target() -> None:
+                    try:
+                        background_index_target()
+                    except Exception as error:
+                        backfill_status.mark_failed(type(error).__name__)
+                        raise
+                    else:
+                        backfill_status.mark_completed()
+
+                backfill_status.mark_started()
                 background_thread = threading.Thread(
-                    target=background_index_target,
+                    target=run_background_index_target,
                     daemon=True,
                     name="bg-index-build",
                 )
@@ -317,7 +430,7 @@ def create_bcsfuse_app(
                 background_thread_started = True
                 logger.info(
                     "[Startup] Background index build thread started — "
-                    "search will return empty results until complete"
+                    "the pod remains not-ready until reconciliation completes"
                 )
             yield
         finally:
@@ -325,7 +438,11 @@ def create_bcsfuse_app(
                 if background_thread_started:
                     background_thread.join()
             finally:
-                await startup_provider.shutdown()
+                try:
+                    if shared_cache_reader is not None:
+                        await shared_cache_reader.close()
+                finally:
+                    await startup_provider.shutdown()
 
     # CRITICAL: Share application context with fusion_dependencies to avoid
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
@@ -344,6 +461,8 @@ def create_bcsfuse_app(
         openapi_url="/openapi.json",
         lifespan=lifespan,
     )
+    readiness_cache = ReadinessProbeCache()
+    app.state.readiness_probe_cache = readiness_cache
 
     from app.bootstrap.search_capacity import (
         SearchCapacityMiddleware,
@@ -363,6 +482,9 @@ def create_bcsfuse_app(
     )
     app.state.search_capacity_max_inflight = capacity_settings.max_inflight
 
+    from app.adapters.http.shared_response_cache_reader import (
+        BoundedSharedResponseCacheReader,
+    )
     from app.application.agent_search_cache import AgentSearchResultCache
     from app.adapters.http.recommend_response_cache import (
         RecommendationResponseCacheMiddleware,
@@ -373,20 +495,46 @@ def create_bcsfuse_app(
     from app.bootstrap.oss_business_routes import require_oss_auth
 
     result_cache = AgentSearchResultCache.from_context(context)
+    try:
+        vector_store = context.registry.get("vector_store")
+    except Exception:
+        vector_store = None
+    local_retrieval_snapshot = getattr(
+        vector_store, "literal_fallback_index", None
+    )
+    from app.application.agent_search_resilience_cache import (
+        AgentSearchResilienceCache,
+    )
+    from app.application.services.agent_search_execution_budget import (
+        AgentSearchExecutionBudget,
+    )
+
+    resilience_cache = AgentSearchResilienceCache.from_context(context)
+    execution_budget = AgentSearchExecutionBudget.from_context(context)
     shared_response_cache = context.registry.get("shared_response_cache")
+    if shared_response_cache is not None:
+        shared_cache_reader = BoundedSharedResponseCacheReader(
+            shared_response_cache=shared_response_cache
+        )
     app.state.agent_search_result_cache = result_cache
+    app.state.local_retrieval_snapshot = local_retrieval_snapshot
+    app.state.agent_search_resilience_cache = resilience_cache
+    app.state.agent_search_execution_budget = execution_budget
     app.state.shared_response_cache = shared_response_cache
+    app.state.shared_cache_reader = shared_cache_reader
     app.add_middleware(
         SearchResponseCacheMiddleware,
         result_cache=result_cache,
         require_auth=require_oss_auth,
         shared_response_cache=shared_response_cache,
+        shared_cache_reader=shared_cache_reader,
     )
     app.add_middleware(
         RecommendationResponseCacheMiddleware,
         result_cache=result_cache,
         require_auth=require_oss_auth,
         shared_response_cache=shared_response_cache,
+        shared_cache_reader=shared_cache_reader,
     )
     app.add_middleware(TraceIdMiddleware)
 
@@ -398,7 +546,7 @@ def create_bcsfuse_app(
     if search_router is not None:
         app.include_router(search_router)
 
-    _register_health_routes(app, context)
+    _register_health_routes(app, context, readiness_cache)
 
     # ========================================
     # Business Routes (OSS-safe)
@@ -459,12 +607,8 @@ def create_bcsfuse_app(
                             "[Startup] Profile source not available — skipping background index build"
                         )
                         return
-                    if vector_store and vector_store.size() > 0:
-                        logger.info(
-                            "[Startup] Vector store already has %d vectors — skipping background index build",
-                            vector_store.size(),
-                        )
-                        return
+                    # A non-empty vector index is not proof that indexing
+                    # completed. Check exact expected fragment IDs after scan.
 
                     from app.domain.services.profile_embedding_indexer import (
                         ProfileEmbeddingIndexer,
@@ -503,6 +647,45 @@ def create_bcsfuse_app(
                             "[Startup] No profiles found — skipping background index build"
                         )
                         return
+
+                    indexed_ids: list[str] | set[str] | None = None
+                    if vector_store and vector_store.size() > 0:
+                        get_vector_ids = getattr(
+                            vector_store, "get_vector_ids", None
+                        )
+                        if callable(get_vector_ids):
+                            try:
+                                indexed_ids = set(get_vector_ids())
+                            except Exception as error:
+                                logger.warning(
+                                    "[Startup] Failed to inspect existing index for completion: %s; scheduling a full rebuild",
+                                    error,
+                                )
+                                indexed_ids = None
+
+                    if vector_store and vector_store.size() > 0:
+                        if indexed_ids is not None:
+                            original_profile_count = len(all_profiles)
+                            all_profiles = indexer.profiles_missing_fragments(
+                                all_profiles, indexed_ids
+                            )
+                            if not all_profiles:
+                                logger.info(
+                                    "[Startup] Existing vector index is complete (%d vectors) — skipping background index build",
+                                    vector_store.size(),
+                                )
+                                return
+                            logger.warning(
+                                "[Startup] Existing vector index is partial: vectors=%d, expected_profiles=%d, profiles_to_backfill=%d",
+                                vector_store.size(),
+                                original_profile_count,
+                                len(all_profiles),
+                            )
+                        else:
+                            logger.warning(
+                                "[Startup] Existing vector index size=%d but fragment IDs cannot be inspected — scheduling a full rebuild",
+                                vector_store.size(),
+                            )
 
                     # Build worker_states for payload (availability, runtime_state)
                     worker_states = {}
@@ -555,6 +738,13 @@ def create_bcsfuse_app(
                         worker_states=worker_states,
                     )
 
+                    if result.failed_count > 0:
+                        raise RuntimeError(
+                            "profile embedding index backfill did not "
+                            f"complete: indexed={result.indexed_count}, "
+                            f"failed={result.failed_count}"
+                        )
+
                     elapsed = time.time() - start
                     if result.indexed_count > 0:
                         logger.info(
@@ -563,12 +753,11 @@ def create_bcsfuse_app(
                             result.failed_count,
                             elapsed,
                         )
-                        # Sync vectors to service index
+                        # ProfileEmbeddingStore::upsert_embeddings writes
+                        # through the composed vector store. An additional
+                        # incremental sync would duplicate durable work and is
+                        # not supported by every durable adapter.
                         if vector_store:
-                            if hasattr(vector_store, "sync_from_backend"):
-                                vector_store.sync_from_backend(force=True)
-                            elif hasattr(vector_store, "sync_incremental"):
-                                vector_store.sync_incremental()
                             logger.info(
                                 "[Startup] Vector store now has %d vectors",
                                 vector_store.size(),
@@ -587,6 +776,7 @@ def create_bcsfuse_app(
                         e,
                         exc_info=True,
                     )
+                    raise
 
             background_index_target = _background_build_index
     except Exception as e:

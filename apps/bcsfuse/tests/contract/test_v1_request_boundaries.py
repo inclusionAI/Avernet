@@ -266,7 +266,8 @@ def test_v1_search_does_not_log_query_text_or_filter_values(monkeypatch, caplog)
             json={"query": "secret-query-text", "filters": {"domains": ["secret-filter-value"]}},
         )
 
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert response.json()["status"] == "fallback_unavailable"
     assert "secret-query-text" not in caplog.text
     assert "secret-filter-value" not in caplog.text
 
@@ -307,12 +308,13 @@ def test_v1_dependency_failures_use_stable_503_without_provider_details(monkeypa
             json={"question": "支付", "topK": 1, "enable_rerank": False},
         )
 
-    assert search_response.status_code == 503
-    assert search_response.json()["detail"]["code"] == "SEARCH_UNAVAILABLE"
+    assert search_response.status_code == 200
+    assert search_response.json()["status"] == "fallback_unavailable"
     assert "private qdrant server failure detail" not in search_response.text
 
-    assert recommend_response.status_code == 503
-    assert recommend_response.json()["detail"]["code"] == "RECOMMEND_UNAVAILABLE"
+    assert recommend_response.status_code == 200
+    recommend_metadata = recommend_response.json()["metadata"]
+    assert recommend_metadata["status"] == "fallback_unavailable"
     assert "private reranker endpoint failure detail" not in recommend_response.text
 
 

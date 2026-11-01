@@ -83,6 +83,11 @@ class TcSearchApplication:
         if metadata.get("semantic_unavailable") is True:
             reasons.append("semantic_unavailable")
         if (
+            metadata.get("semantic_unavailable") is True
+            and metadata.get("keyword_search_used") is True
+        ):
+            reasons.append("keyword_fallback_used")
+        if (
             metadata.get("literal_fallback_used") is True
             or metadata.get("score_source") == "regex_fallback"
         ):

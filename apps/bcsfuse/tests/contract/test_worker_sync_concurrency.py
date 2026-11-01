@@ -162,6 +162,7 @@ def test_mysql_worker_update_uses_version_predicate_and_rejects_conflict():
     cursor.rowcount = 0
     with patch.object(MySQLWorkerRegistryStore, "_ensure_schema"):
         store = MySQLWorkerRegistryStore(pool)
+        store._schema_initialized = True
     worker = make_sample_worker(worker_id="bot:owner")
     with patch.object(store, "get_by_id", return_value=worker):
         with pytest.raises(ValueError, match="Version conflict"):

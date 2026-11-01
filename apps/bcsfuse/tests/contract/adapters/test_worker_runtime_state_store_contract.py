@@ -77,3 +77,28 @@ class TestSQLiteWorkerRuntimeStateStore:
     def test_count_by_state(self, sqlite_runtime_state_store):
         """测试按状态计数"""
         WorkerRuntimeStateStoreContractTests(sqlite_runtime_state_store).test_count_by_state()
+
+class TestSQLiteRuntimeStateConcurrency:
+    def test_concurrent_state_writes_are_serialized(self, tmp_path):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.infra.adapters.sqlite_worker_runtime_state_store import (
+            SQLiteWorkerRuntimeStateStore,
+        )
+
+        store = SQLiteWorkerRuntimeStateStore(str(tmp_path / "runtime.sqlite"))
+
+        def write(index):
+            store.set_runtime_state(
+                f"worker-{index}", WorkerRuntimeState.ONLINE, updated_by="load"
+            )
+            store.get_runtime_state(f"worker-{index}")
+            store.batch_get_runtime_states([f"worker-{index}"])
+            store.count_by_state(WorkerRuntimeState.ONLINE)
+
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(write, range(128)))
+
+        assert store.count_by_state(WorkerRuntimeState.ONLINE) == 128
+        store.close()

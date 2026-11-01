@@ -42,14 +42,23 @@ class RecordingEmbeddingProvider(RealEmbeddingProvider):
 
     def embed(self, text: str) -> list[float]:
         self.calls.append(text)
-        if self.fail_first and not self.failed_once:
-            self.failed_once = True
-            raise RuntimeError("backend unavailable")
+        return self._embed_one(text, len(self.calls))
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        self.calls.extend(texts)
         if self.release is not None:
             self.entered.set()
             self.release.wait(timeout=2)
             self.release = None
-        return [float(len(self.calls)), 1.0]
+
+        if self.fail_first and not self.failed_once:
+            self.failed_once = True
+            raise RuntimeError("backend unavailable")
+
+        return [self._embed_one(text, index + 1) for index, text in enumerate(texts)]
+
+    def _embed_one(self, text: str, call_index: int) -> list[float]:
+        return [float(len(text) + call_index), 1.0]
 
 
 def _provider(backend, **kwargs):
@@ -176,6 +185,34 @@ def test_runtime_composition_registers_cached_real_embedding_provider(monkeypatc
     assert provider.cache_ttl_seconds > 0
 
 
+def test_runtime_composition_binds_configured_query_batch_size(monkeypatch):
+    from app.bootstrap.opensource import register_runtime_service_providers
+    from app.bootstrap.provider_registry import ProviderRegistry
+
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-only")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("LLM_AUTH_TOKEN", "test-only")
+
+    class Config:
+        def get(self, key, default=None):
+            return default
+
+        def get_int(self, key, default=None):
+            if key == "embedding.cache.max_query_batch_size":
+                return 12
+            return default
+
+        def get_float(self, key, default=None):
+            return default
+
+    registry = ProviderRegistry()
+    register_runtime_service_providers(registry, Config())
+    provider = registry.get("embedding_provider")
+
+    assert provider.max_query_batch_size == 12
+
+
 def test_metrics_endpoint_exposes_embedding_cache_metrics():
     class StartupProvider:
         async def initialize(self):
@@ -222,5 +259,36 @@ def test_metrics_endpoint_exposes_embedding_cache_metrics():
         "bcsfuse_embedding_cache_errors_total",
         "bcsfuse_embedding_cache_evictions_total",
         "bcsfuse_embedding_cache_entries",
+        "bcsfuse_embedding_batch_calls_total",
+        "bcsfuse_embedding_batched_queries_total",
+        "bcsfuse_embedding_batch_size",
     ]:
         assert metric_name in response.text
+
+
+def test_runtime_composition_binds_query_batch_workers(monkeypatch):
+    from app.bootstrap.opensource import register_runtime_service_providers
+    from app.bootstrap.provider_registry import ProviderRegistry
+
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-only")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("LLM_AUTH_TOKEN", "test-only")
+
+    class Config:
+        def get(self, key, default=None):
+            return default
+
+        def get_int(self, key, default=None):
+            if key == "embedding.cache.max_query_batch_workers":
+                return 3
+            return default
+
+        def get_float(self, key, default=None):
+            return default
+
+    registry = ProviderRegistry()
+    register_runtime_service_providers(registry, Config())
+    provider = registry.get("embedding_provider")
+
+    assert provider.max_query_batch_workers == 3

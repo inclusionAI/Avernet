@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 from search_core.plugin_api.vector_point import VectorPoint as CoreVectorPoint
@@ -40,6 +42,11 @@ class LiteralFallbackSnapshot:
         self._physical: dict[str, dict[str, Any]] = {}
         self._index = RegexFallbackIndex([])
         self.version = 0
+        self.snapshot_index_version = 0
+        self.snapshot_saved_at_unix = 0.0
+        self.source = "unloaded"
+        self.created_at = time.monotonic()
+        self.updated_at = time.monotonic()
 
     def clear(self) -> None:
         self._physical.clear()
@@ -118,6 +125,10 @@ class LiteralFallbackSnapshot:
                 }
             self._physical = physical
             self._reindex()
+            observed_version = int(getattr(store, "index_version", 0) or 0)
+            if observed_version >= self.snapshot_index_version:
+                self.snapshot_index_version = observed_version
+            self.source = "durable"
             return
 
         point_ids = store.get_vector_ids()
@@ -133,6 +144,44 @@ class LiteralFallbackSnapshot:
             }
         self._physical = physical
         self._reindex()
+        self.source = "durable"
+
+    def export_entries(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": point_id,
+                "profile_key": entry["profile_key"],
+                "payload": dict(entry["payload"]),
+            }
+            for point_id, entry in self._physical.items()
+        ]
+
+    def restore_entries(
+        self,
+        entries: list[dict[str, Any]],
+        *,
+        index_version: int,
+        saved_at_unix: float = 0.0,
+    ) -> None:
+        physical: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("snapshot entry must be an object")
+            point_id = str(entry.get("id") or "")
+            profile_key = str(entry.get("profile_key") or "")
+            payload = entry.get("payload")
+            if not point_id or not profile_key or not isinstance(payload, dict):
+                raise ValueError("snapshot entry is invalid")
+            physical[point_id] = {
+                "profile_key": profile_key,
+                "payload": dict(payload),
+            }
+        self._physical = physical
+        self._reindex()
+        self.version = max(0, int(index_version))
+        self.snapshot_index_version = self.version
+        self.snapshot_saved_at_unix = max(0.0, float(saved_at_unix))
+        self.source = "file"
 
     def _reindex(self) -> None:
         selected = self._selected_profiles()
@@ -145,6 +194,7 @@ class LiteralFallbackSnapshot:
             for profile_key, payload in selected.items()
         ])
         self.version += 1
+        self.updated_at = time.monotonic()
 
     def _selected_profiles(self) -> dict[str, dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
@@ -174,13 +224,43 @@ class LiteralFallbackSnapshot:
 class LiteralFallbackMaintainingVectorStore:
     """Proxy that maintains a local fallback only after durable writes succeed."""
 
-    def __init__(self, backend: VectorStoreAdapter, fallback: LiteralFallbackSnapshot):
+    def __init__(
+        self,
+        backend: VectorStoreAdapter,
+        fallback: LiteralFallbackSnapshot,
+        snapshot_store: Any | None = None,
+    ):
         self._backend = backend
         self.literal_fallback_index = fallback
+        self._snapshot_store = snapshot_store
+        self._snapshot_publish_lock = threading.Lock()
+        self.snapshot_publish_error_type: str | None = None
 
     @property
     def backend(self) -> VectorStoreAdapter:
         return self._backend
+
+    def _publish_snapshot_once_owned(self) -> None:
+        """Publish only from the lease owner so shared snapshot writes do not race."""
+
+        if self._snapshot_store is None or getattr(self._backend, "read_only", False):
+            return
+        with self._snapshot_publish_lock:
+            try:
+                self._snapshot_store.save(
+                    entries=self.literal_fallback_index.export_entries(),
+                    index_version=int(
+                        getattr(self._backend, "index_version", 0)
+                        or self.literal_fallback_index.snapshot_index_version
+                    ),
+                )
+                self.snapshot_publish_error_type = None
+            except Exception as error:
+                self.snapshot_publish_error_type = type(error).__name__
+                logger.warning(
+                    "[LITERAL-FALLBACK] snapshot publication failed: %s",
+                    type(error).__name__,
+                )
 
     def index_dependency_readiness(self) -> dict[str, bool]:
         """Forward partial readiness while maintaining the local literal view."""
@@ -190,6 +270,7 @@ class LiteralFallbackMaintainingVectorStore:
         # recovery without probing Qdrant twice.
         if result.pop("index_revision_recovered", False):
             self.literal_fallback_index.reload_from_store(self._backend)
+            self._publish_snapshot_once_owned()
         return result
 
     def check_ready(self) -> bool:
@@ -210,34 +291,41 @@ class LiteralFallbackMaintainingVectorStore:
         if isinstance(supplied, str):
             metadata = args[2] if len(args) > 2 else kwargs.get("metadata", {})
             self.literal_fallback_index.upsert_raw(supplied, dict(metadata or {}))
+            self._publish_snapshot_once_owned()
         elif supplied:
             self.literal_fallback_index.upsert(supplied)
+            self._publish_snapshot_once_owned()
         return result
 
     def delete(self, ids):
         result = self._backend.delete(ids)
         normalized = [ids] if isinstance(ids, str) else list(ids)
         self.literal_fallback_index.remove_ids(normalized)
+        self._publish_snapshot_once_owned()
         return result
 
     def update_payload_by_worker(self, worker_id, payload_updates):
         result = self._backend.update_payload_by_worker(worker_id, payload_updates)
         self.literal_fallback_index.update_worker_payload(worker_id, payload_updates)
+        self._publish_snapshot_once_owned()
         return result
 
     def delete_by_worker(self, worker_id):
         result = self._backend.delete_by_worker(worker_id)
         self.literal_fallback_index.remove_worker(worker_id)
+        self._publish_snapshot_once_owned()
         return result
 
     def delete_by_profile(self, worker_id, profile_id):
         result = self._backend.delete_by_profile(worker_id, profile_id)
         self.literal_fallback_index.remove_profile(worker_id, profile_id)
+        self._publish_snapshot_once_owned()
         return result
 
     def clear(self):
         result = self._backend.clear()
         self.literal_fallback_index.clear()
+        self._publish_snapshot_once_owned()
         return result
 
     def synchronize_read_view(self, *args: Any, **kwargs: Any):
@@ -252,6 +340,7 @@ class LiteralFallbackMaintainingVectorStore:
             return self.synchronize_read_view(*args, **kwargs)
         result = self._backend.rebuild_from_backend(*args, **kwargs)
         self.literal_fallback_index.reload_from_store(self._backend)
+        self._publish_snapshot_once_owned()
         return result
 
     def sync_incremental(self, *args: Any, **kwargs: Any):
@@ -259,6 +348,7 @@ class LiteralFallbackMaintainingVectorStore:
             return self.synchronize_read_view(*args, **kwargs)
         result = self._backend.sync_incremental(*args, **kwargs)
         self.literal_fallback_index.reload_from_store(self._backend)
+        self._publish_snapshot_once_owned()
         return result
 
     def __getattr__(self, name: str) -> Any:
@@ -267,18 +357,47 @@ class LiteralFallbackMaintainingVectorStore:
 
 def wrap_vector_store_with_literal_fallback(
     store: VectorStoreAdapter,
+    *,
+    snapshot_store: Any | None = None,
 ) -> LiteralFallbackMaintainingVectorStore:
-    """Wrap a composed vector store with an incrementally maintained snapshot."""
+    """Wrap a store with an incrementally maintained, publishable fallback."""
     fallback = LiteralFallbackSnapshot()
     try:
         fallback.reload_from_store(store)
-    except Exception as error:
-        logger.warning(
-            "[LITERAL-FALLBACK] initial snapshot load failed; "
-            "writes will maintain it: %s",
-            error,
+        wrapper = LiteralFallbackMaintainingVectorStore(
+            store,
+            fallback,
+            snapshot_store=snapshot_store,
         )
-    return LiteralFallbackMaintainingVectorStore(store, fallback)
+        wrapper._publish_snapshot_once_owned()
+        return wrapper
+    except Exception as durable_error:
+        logger.warning(
+            "[LITERAL-FALLBACK] durable snapshot load failed; "
+            "trying a published file: %s",
+            type(durable_error).__name__,
+        )
+
+    if snapshot_store is None:
+        return LiteralFallbackMaintainingVectorStore(store, fallback)
+
+    try:
+        published = snapshot_store.load()
+        fallback.restore_entries(
+            published.entries,
+            index_version=published.index_version,
+            saved_at_unix=published.saved_at_unix,
+        )
+    except Exception as file_error:
+        logger.warning(
+            "[LITERAL-FALLBACK] published snapshot unavailable: %s",
+            type(file_error).__name__,
+        )
+    return LiteralFallbackMaintainingVectorStore(
+        store,
+        fallback,
+        snapshot_store=snapshot_store,
+    )
 
 
 __all__ = [

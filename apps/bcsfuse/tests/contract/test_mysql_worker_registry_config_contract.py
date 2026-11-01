@@ -17,6 +17,7 @@ def mysql_store():
     pool = MagicMock()
     with patch.object(MySQLWorkerRegistryStore, "_ensure_schema"):
         store = MySQLWorkerRegistryStore(pool)
+        store._schema_initialized = True
     return store, pool, pool.get_connection.return_value.cursor.return_value
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+import time
 from typing import Any, Optional
 
 from app.domain.models.worker_profile import WorkerProfile
@@ -76,7 +77,8 @@ class ProfileEmbeddingIndexer:
         self,
         embedding_provider: Any,  # EmbeddingProvider
         profile_store: ProfileEmbeddingStore,
-        batch_size: int = 100,
+        batch_size: int = 32,
+        inter_batch_delay_seconds: float = 0.25,
         fragment_decomposer: ProfileFragmentDecomposer | None = None,
     ):
         """
@@ -91,8 +93,91 @@ class ProfileEmbeddingIndexer:
         self._embedding_provider = embedding_provider
         self._profile_store = profile_store
         self._batch_size = batch_size
+        self._inter_batch_delay_seconds = inter_batch_delay_seconds
         self._fragment_decomposer = fragment_decomposer or ProfileFragmentDecomposer()
     
+    @property
+    def batch_size(self) -> int:
+        """Return the provider batch size used by index construction."""
+
+        return self._batch_size
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Use provider batching when available, retaining the legacy ``embed`` API."""
+        embed_batch = getattr(self._embedding_provider, "embed_batch", None)
+        if callable(embed_batch):
+            return embed_batch(texts)
+        if not texts:
+            return []
+        return [self._embedding_provider.embed(text) for text in texts]
+
+    def _resolve_worker_state(
+        self,
+        profile: WorkerProfile,
+        worker_states: dict[str, dict] | None,
+    ) -> dict | None:
+        """Resolve visibility state through the existing candidate lookup order."""
+
+        if not worker_states:
+            return None
+
+        candidates: list[str] = []
+        staff_id = getattr(profile, "staff_id", None)
+        worker_id = getattr(profile, "worker_id", None)
+        profile_key = getattr(profile, "profile_key", None)
+        profile_id = getattr(profile, "profile_id", None)
+
+        if staff_id:
+            candidates.append(staff_id)
+        if worker_id:
+            candidates.append(worker_id)
+        if profile_key:
+            candidates.append(profile_key)
+            if ":" in profile_key:
+                candidates.append(profile_key.split(":", 1)[0])
+        if staff_id and profile_id:
+            candidates.append(f"{staff_id}:{profile_id}")
+
+        for key in candidates:
+            if key in worker_states:
+                return worker_states[key]
+        return None
+
+    def _profile_fragment_plans(
+        self,
+        profile: WorkerProfile,
+        worker_state: dict | None = None,
+    ) -> list[tuple[str, str, dict]]:
+        """Build fragment IDs, embedding text, and payload before model work."""
+
+        fragments = self._fragment_decomposer.decompose(profile)
+        plans: list[tuple[str, str, dict]] = []
+
+        if not fragments:
+            logger.warning(
+                "[ProfileEmbeddingIndexer] No fragments generated for %s",
+                profile.profile_key,
+            )
+            return plans
+
+        for fragment in fragments:
+            embedding_text = fragment.to_embedding_text()
+            if not embedding_text or not embedding_text.strip():
+                continue
+            fragment_id = fragment.compute_fragment_id(profile.profile_key)
+
+            metadata: dict[str, Any] = {}
+            profile_metadata = getattr(profile, "metadata", None)
+            if profile_metadata:
+                metadata.update(profile_metadata)
+            if fragment.metadata:
+                metadata.update(fragment.metadata)
+            metadata.update(
+                self._build_fragment_metadata(fragment, profile, worker_state)
+            )
+            plans.append((fragment_id, embedding_text, metadata))
+        return plans
+
     def build_index(
         self,
         profiles: list[WorkerProfile],
@@ -133,8 +218,12 @@ class ProfileEmbeddingIndexer:
             self._profile_store.clear_all()
             logger.info("[ProfileEmbeddingIndexer] Cleared existing index")
         
-        # 批处理
-        batch_embeddings = []
+        # Build all non-embedding plans first so one provider call can cover
+        # fragments from multiple profiles. This is necessary for cold index
+        # construction: sequential per-fragment calls cannot use query request
+        # coalescing and can exhaust the model request quota.
+        plans: list[tuple[WorkerProfile, str, str, dict]] = []
+        planned_counts: dict[str, int] = {}
 
         # 统计有多少 profile 能找到 worker 状态
         found_count = 0
@@ -142,95 +231,96 @@ class ProfileEmbeddingIndexer:
 
         for i, profile in enumerate(profiles):
             try:
-                # Phase 2.6.4: Enhanced worker_state lookup with multiple key candidates
-                worker_state = None
-                lookup_key = None
-
-                if worker_states:
-                    # Build lookup candidates in priority order
-                    candidates = []
-
-                    # 1. Try staff_id first (most common case)
-                    if hasattr(profile, 'staff_id') and profile.staff_id:
-                        candidates.append(('staff_id', profile.staff_id))
-
-                    # 2. Try worker_id if available
-                    if hasattr(profile, 'worker_id') and profile.worker_id:
-                        candidates.append(('worker_id', profile.worker_id))
-
-                    # 3. Try profile_key (full format: "worker_id:profile_type:variant")
-                    if hasattr(profile, 'profile_key') and profile.profile_key:
-                        candidates.append(('profile_key', profile.profile_key))
-
-                        # 4. Extract worker_id from profile_key (split on ':' and take first part)
-                        if ':' in profile.profile_key:
-                            extracted_worker_id = profile.profile_key.split(':', 1)[0]
-                            candidates.append(('extracted_worker_id', extracted_worker_id))
-
-                    # 5. Last resort: try staff_id:profile_id combination
-                    if hasattr(profile, 'staff_id') and hasattr(profile, 'profile_id') and profile.staff_id and profile.profile_id:
-                        candidates.append(('staff_id:profile_id', f"{profile.staff_id}:{profile.profile_id}"))
-
-                    # Try each candidate
-                    for key_type, key_value in candidates:
-                        if key_value in worker_states:
-                            worker_state = worker_states[key_value]
-                            lookup_key = f"{key_type}={key_value}"
-                            break
-
+                worker_state = self._resolve_worker_state(profile, worker_states)
                 if worker_state:
                     found_count += 1
                 elif worker_states and len(missing_staff_ids) < 5:
-                    missing_staff_ids.append(f"{profile.staff_id}(profile_key={profile.profile_key})")
+                    missing_staff_ids.append(
+                        f"{profile.staff_id}(profile_key={profile.profile_key})"
+                    )
 
-                # Diagnostic log for first 3 profiles
                 if i < 3 and worker_states:
                     logger.info(
-                        "[WORKER-STATE-TRACE] stage=indexer_lookup, profile_staff_id=%s, profile_id=%s, profile_key=%s, lookup_candidates=%s, worker_states_keys=%s, found=%s, lookup_key=%s",
+                        "[WORKER-STATE-TRACE] stage=indexer_lookup, profile_staff_id=%s, "
+                        "profile_id=%s, profile_key=%s, found=%s",
                         getattr(profile, "staff_id", None),
                         getattr(profile, "profile_id", None),
                         getattr(profile, "profile_key", None),
-                        {
-                            "staff_id": getattr(profile, "staff_id", None),
-                            "worker_id": getattr(profile, "worker_id", None),
-                            "profile_key": getattr(profile, "profile_key", None),
-                        },
-                        sorted((worker_states or {}).keys())[:20],
                         worker_state is not None,
-                        lookup_key
                     )
 
-                # 生成多 Fragment embeddings
-                fragment_embeddings = self._generate_profile_fragment_embeddings(profile, worker_state)
-
-                if fragment_embeddings:
-                    for fragment_id, embedding, metadata in fragment_embeddings:
-                        batch_embeddings.append((fragment_id, embedding, metadata))
-
-                    # 统计：一个 profile 可能生成多个 fragments
-                    result.indexed_count += 1
-                else:
+                profile_plans = self._profile_fragment_plans(profile, worker_state)
+                if not profile_plans:
                     result.failed_count += 1
-                    result.errors.append(f"Failed to generate embedding for {profile.profile_key}")
-
-                # 批量写入
-                if len(batch_embeddings) >= self._batch_size:
-                    self._profile_store.upsert_embeddings(batch_embeddings)
-                    batch_embeddings = []
-                    logger.debug(
-                        "[ProfileEmbeddingIndexer] Batch indexed: %d/%d profiles",
-                        i + 1, result.total_profiles
+                    result.errors.append(
+                        f"No embeddable fragments for {profile.profile_key}"
                     )
+                    continue
+
+                for fragment_id, embedding_text, metadata in profile_plans:
+                    plans.append((profile, fragment_id, embedding_text, metadata))
+                planned_counts[profile.profile_key] = len(profile_plans)
 
             except Exception as e:
                 result.failed_count += 1
-                error_msg = f"Error indexing {profile.profile_key}: {str(e)}"
+                error_msg = f"Error planning {profile.profile_key}: {str(e)}"
                 result.errors.append(error_msg)
                 logger.error("[ProfileEmbeddingIndexer] %s", error_msg)
 
-        # 写入剩余的 embeddings
-        if batch_embeddings:
-            self._profile_store.upsert_embeddings(batch_embeddings)
+        completed_counts = {profile_key: 0 for profile_key in planned_counts}
+        failed_profile_keys: set[str] = set()
+        request_count = 0
+        for offset in range(0, len(plans), self._batch_size):
+            request_count += 1
+            if request_count > 1 and self._inter_batch_delay_seconds > 0:
+                time.sleep(self._inter_batch_delay_seconds)
+            batch = plans[offset : offset + self._batch_size]
+            profile_keys = {
+                profile.profile_key for profile, _, _, _ in batch
+            }
+            try:
+                vectors = self._embed_texts(
+                    [embedding_text for _, _, embedding_text, _ in batch]
+                )
+                if len(vectors) != len(batch):
+                    raise ValueError(
+                        "embedding provider returned a mismatched batch count"
+                    )
+                self._profile_store.upsert_embeddings([
+                    (fragment_id, vector, metadata)
+                    for (_, fragment_id, _, metadata), vector in zip(batch, vectors)
+                ])
+                logger.debug(
+                    "[ProfileEmbeddingIndexer] Batch indexed: %d/%d fragment plans",
+                    min(offset + self._batch_size, len(plans)),
+                    len(plans),
+                )
+            except Exception as e:
+                for profile_key in sorted(profile_keys - failed_profile_keys):
+                    profile = batch_i = next(
+                        candidate
+                        for candidate, _, _, _ in batch
+                        if candidate.profile_key == profile_key
+                    )
+                    result.failed_count += 1
+                    result.errors.append(f"Error index batch {profile_key}: {str(e)}")
+                    logger.error(
+                        "[ProfileEmbeddingIndexer] Batch failed for %s: %s",
+                        profile_key,
+                        e,
+                    )
+                    failed_profile_keys.add(profile_key)
+                continue
+
+            for profile_key in profile_keys:
+                completed_counts[profile_key] += sum(
+                    candidate.profile_key == profile_key for candidate, _, _, _ in batch
+                )
+                if (
+                    completed_counts[profile_key] == planned_counts[profile_key]
+                    and profile_key not in failed_profile_keys
+                ):
+                    result.indexed_count += 1
 
         # 计算耗时
         result.duration_seconds = (datetime.now() - start_time).total_seconds()
@@ -254,6 +344,36 @@ class ProfileEmbeddingIndexer:
         
         return result
     
+    def profiles_missing_fragments(
+        self,
+        profiles: list[WorkerProfile],
+        indexed_ids: list[str] | set[str] | None,
+    ) -> list[WorkerProfile]:
+        """Return profiles whose current fragments are absent from the index.
+
+        A non-empty vector index is not an index-complete signal. Startup can
+        be interrupted after a small subset of profiles has been persisted, and
+        such a partial index previously caused the backfill to be skipped.
+
+        Passing ``None`` fails closed and returns every profile so callers can
+        rebuild rather than silently accepting an index whose IDs cannot be
+        inspected.
+        """
+
+        if indexed_ids is None:
+            return list(profiles)
+
+        indexed = set(indexed_ids)
+        missing: list[WorkerProfile] = []
+        for profile in profiles:
+            expected_ids = {
+                fragment.compute_fragment_id(profile.profile_key)
+                for fragment in self._fragment_decomposer.decompose(profile)
+            }
+            if expected_ids - indexed:
+                missing.append(profile)
+        return missing
+
     def update_index(
         self,
         profiles: list[WorkerProfile],
@@ -618,136 +738,38 @@ class ProfileEmbeddingIndexer:
         worker_state: dict | None = None,
     ) -> list[tuple[str, list[float], dict]]:
         """
-        生成 Profile 的多 Fragment embeddings
+        Generate one Profile's multi-fragment embeddings.
 
-        将 Profile 分解为多个语义片段，每个片段生成独立的 embedding。
-
-        Args:
-            profile: Worker profile
-            worker_state: Worker 状态字典（availability, runtime_state）
-
-        Returns:
-            列表，每个元素为 (fragment_id, embedding, metadata)
+        The batch indexer uses `_profile_fragment_plans` and groups plans across
+        profiles. This method remains for callers that intentionally rebuild a
+        single profile, and still uses one provider batch call for that profile.
         """
-        results = []
+
+        plans = self._profile_fragment_plans(profile, worker_state)
+        if not plans:
+            return []
 
         try:
-            # 使用 decomposer 分解 profile
-            fragments = self._fragment_decomposer.decompose(profile)
-
-            if not fragments:
-                logger.warning(
-                    "[ProfileEmbeddingIndexer] No fragments generated for %s",
-                    profile.profile_key
-                )
-                return []
-
-            for fragment in fragments:
-                try:
-                    # 获取用于 embedding 的文本
-                    embedding_text = fragment.to_embedding_text()
-
-                    if not embedding_text.strip():
-                        continue
-
-                    # 生成 embedding
-                    embedding = self._embedding_provider.embed(embedding_text)
-
-                    if not embedding:
-                        continue
-
-                    # 构造 fragment ID
-                    # 格式: {profile_key}:{fragment_type}
-                    # 如果有 index，则为 {profile_key}:{fragment_type}:{index}
-                    if fragment.index > 0:
-                        fragment_id = f"{profile.profile_key}:{fragment.fragment_type}:{fragment.index}"
-                    else:
-                        fragment_id = f"{profile.profile_key}:{fragment.fragment_type}"
-
-                    # 准备 metadata（注：权重不在索引中存储，搜索时动态决定）
-                    # Phase 2.3.1 Fix: Merge profile.metadata (business metadata) first
-                    metadata = {}
-
-                    # 1. Start with profile.metadata (business metadata: test_id, business_regression, domain, etc.)
-                    if hasattr(profile, 'metadata') and profile.metadata:
-                        metadata.update(profile.metadata)
-
-                    # Phase 2.3.5: PAYLOAD-TRACE - Log metadata values after merge
-                    if 'test_id' in metadata or 'business_regression' in metadata:
-                        logger.info(
-                            "[PAYLOAD-TRACE] stage=metadata_merged, worker_id=%s, profile_id=%s, "
-                            "test_id_present=%s, business_regression_value=%r, business_regression_type=%s, domain=%r",
-                            profile.staff_id,
-                            profile.profile_id,
-                            "test_id" in metadata,
-                            metadata.get("business_regression"),
-                            type(metadata.get("business_regression")).__name__,
-                            metadata.get("domain")
-                        )
-
-                    # 2. Add fragment metadata if exists
-                    if hasattr(fragment, 'metadata') and fragment.metadata:
-                        metadata.update(fragment.metadata)
-
-                    # 3. Set core system fields (these must not be overwritten by business metadata)
-                    metadata.update({
-                        "profile_key": profile.profile_key,
-                        "worker_id": profile.staff_id,
-                        "profile_id": profile.profile_id,
-                        "profile_type": profile.profile_type.value,
-                        "fragment_type": fragment.fragment_type,
-                        "active_skills": [s.name for s in profile.active_skills[:100]],
-                        "content_preview": fragment.content_preview,  # 200字符预览
-                        "content": fragment.get_full_content(),  # 完整内容，供reranker使用
-                        "indexed_at": datetime.now().isoformat(),
-                        "short_profile": profile.short_profile,  # 精简画像（30字以内）
-                    })
-
-                    # 添加 Worker 状态信息（用于前置过滤）
-                    if worker_state:
-                        if "availability" in worker_state:
-                            metadata["availability"] = worker_state["availability"]
-                        if "runtime_state" in worker_state:
-                            metadata["runtime_state"] = worker_state["runtime_state"]
-                        logger.info(
-                            "[WORKER-STATE-TRACE] stage=payload_visibility_fields, fragment_id=%s, worker_id=%s, profile_id=%s, runtime_state=%r, availability=%r",
-                            fragment_id,
-                            metadata.get("worker_id"),
-                            metadata.get("profile_id"),
-                            metadata.get("runtime_state"),
-                            metadata.get("availability"),
-                        )
-                    else:
-                        logger.warning(
-                            "[ProfileEmbeddingIndexer] No worker_state for fragment %s (profile.staff_id=%s, profile_key=%s)",
-                            fragment_id,
-                            profile.staff_id,
-                            profile.profile_key
-                        )
-
-                    results.append((fragment_id, embedding, metadata))
-
-                except Exception as e:
-                    logger.warning(
-                        "[ProfileEmbeddingIndexer] Failed to generate embedding for fragment %s: %s",
-                        fragment.fragment_type, str(e)
-                    )
-                    continue
-
-            logger.debug(
-                "[ProfileEmbeddingIndexer] Generated %d fragment embeddings for %s",
-                len(results), profile.profile_key
+            vectors = self._embed_texts(
+                [embedding_text for _, embedding_text, _ in plans]
             )
-
-            return results
-
+            if len(vectors) != len(plans):
+                raise ValueError(
+                    "embedding provider returned a mismatched batch count"
+                )
         except Exception as e:
-            logger.error(
-                "[ProfileEmbeddingIndexer] Failed to generate fragment embeddings for %s: %s",
-                profile.profile_key, str(e)
+            logger.warning(
+                "[ProfileEmbeddingIndexer] Failed to generate embeddings for %s: %s",
+                profile.profile_key,
+                e,
             )
             return []
-    
+
+        return [
+            (fragment_id, vector, metadata)
+            for (_, fragment_id, _, metadata), vector in zip(plans, vectors)
+        ]
+
     def delete_by_worker(self, worker_id: str) -> int:
         """Delete exact-owner vectors, including generated or removed profiles."""
         store = self._profile_store.vector_store

@@ -11,6 +11,8 @@ RealEmbeddingProvider
 from __future__ import annotations
 
 import logging
+import math
+import json
 import time
 from typing import Optional
 
@@ -21,6 +23,7 @@ from search_core.config.embedding import EmbeddingSettings
 from search_core.providers.embedding_wire import (
     BINARY_CONTENT_TYPE,
     EMBEDDING_ACCEPT_HEADER,
+    EmbeddingWireDimensionError,
     EmbeddingWireError,
     decode_embedding_vectors,
 )
@@ -31,6 +34,35 @@ logger = logging.getLogger(__name__)
 def _is_binary_response(response: httpx.Response) -> bool:
     content_type = response.headers.get("Content-Type", "").split(";", 1)[0]
     return content_type.strip().lower() == BINARY_CONTENT_TYPE
+
+
+def _provider_reason_code(response: httpx.Response | None) -> str | None:
+    if response is None or getattr(response, "status_code", None) != 429:
+        return None
+    try:
+        payload: object = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    reason: object = error.get("param") or error.get("reason") or error.get("code")
+    if isinstance(reason, str):
+        try:
+            decoded = json.loads(reason)
+        except Exception:
+            decoded = None
+        if isinstance(decoded, dict):
+            reason = decoded.get("errorCode")
+    if isinstance(reason, dict):
+        reason = reason.get("errorCode") or reason.get("reasonCode")
+    if isinstance(reason, int):
+        reason = str(reason)
+    if not isinstance(reason, str) or not reason.strip():
+        return None
+    return reason.strip().upper()
 
 
 class EmbeddingAPIError(Exception):
@@ -45,6 +77,20 @@ class EmbeddingAPIError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.response = response
+        self.provider_reason_code = _provider_reason_code(response)
+
+
+class EmbeddingDimensionContractError(EmbeddingAPIError):
+    """A successful embedding response violated the configured dimension contract."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = 415,
+        response: httpx.Response | None = None,
+    ):
+        super().__init__(message, status_code=status_code, response=response)
+        self.reason_code = "embedding_dimension_contract_mismatch"
 
 
 class RealEmbeddingProvider(EmbeddingProvider):
@@ -306,6 +352,12 @@ class RealEmbeddingProvider(EmbeddingProvider):
             "input": texts,
             "model": self._settings.model,
         }
+        if bool(getattr(self._settings, "request_dimensions", False)):
+            # This is opt-in because some OpenAI-compatible model servers do
+            # not implement the optional `dimensions` parameter. MRL-capable
+            # servers use it to return a smaller vector without truncating it
+            # in the application.
+            payload["dimensions"] = self._settings.dimension
 
         # Log embedding request prepare (no secrets)
         from urllib.parse import urlparse
@@ -352,6 +404,17 @@ class RealEmbeddingProvider(EmbeddingProvider):
                         e,
                         self._settings.model,
                     )
+                    if isinstance(e, EmbeddingWireDimensionError):
+                        self._record_dimension_contract_violation(
+                            protocol="binary",
+                            expected_dimension=e.expected_dimension,
+                            actual_dimensions={e.actual_dimension},
+                        )
+                        raise EmbeddingDimensionContractError(
+                            f"Embedding binary response dimension mismatch: expected "
+                            f"{e.expected_dimension}, actual={e.actual_dimension}",
+                            status_code=415,
+                        ) from e
                     raise EmbeddingAPIError(
                         f"Embedding binary response is invalid: {e}",
                         status_code=415,
@@ -420,8 +483,51 @@ class RealEmbeddingProvider(EmbeddingProvider):
 
             if len(embeddings) != len(texts):
                 raise EmbeddingAPIError(
-                    f"返回的 embedding 数量不匹配: 期望 {len(texts)}, 实际 {len(embeddings)}"
+                    "Embedding JSON response embedding count mismatch: "
+                    f"expected {len(texts)}, actual {len(embeddings)}",
+                    status_code=415,
                 )
+
+            if not embeddings:
+                raise EmbeddingAPIError(
+                    "Embedding JSON response is empty", status_code=415
+                )
+
+            actual_dimensions = {len(embedding) for embedding in embeddings}
+            if actual_dimensions != {self._settings.dimension}:
+                actual_dimension = sorted(actual_dimensions)
+                logger.error(
+                    "EMBEDDING_DIMENSION_CONTRACT_MISMATCH: model=%s %s:%s actual=%s",
+                    self._settings.model,
+                    self._settings.base_url,
+                    "/embeddings",
+                    actual_dimension,
+                )
+                self._record_dimension_contract_violation(
+                    protocol="json",
+                    expected_dimension=self._settings.dimension,
+                    actual_dimensions=actual_dimensions,
+                )
+                raise EmbeddingDimensionContractError(
+                    "Embedding JSON response dimension mismatch: expected "
+                    f"{self._settings.dimension}, actual values={actual_dimension}",
+                    status_code=415,
+                )
+
+            for index, embedding in enumerate(embeddings):
+                try:
+                    values = [float(value) for value in embedding]
+                except (TypeError, ValueError):
+                    raise EmbeddingAPIError(
+                        f"Embedding JSON response value at index {index} is invalid",
+                        status_code=415,
+                    ) from None
+                if not all(math.isfinite(value) for value in values):
+                    raise EmbeddingAPIError(
+                        f"Embedding JSON response contains non-finite values at index {index}",
+                        status_code=415,
+                    )
+                embeddings[index] = values
 
             self._record_wire_protocol("json")
             return embeddings
@@ -531,6 +637,15 @@ class RealEmbeddingProvider(EmbeddingProvider):
     def _record_wire_protocol(self, protocol: str) -> None:
         """Application adapter may observe the negotiated response type."""
 
+    def _record_dimension_contract_violation(
+        self,
+        *,
+        protocol: str,
+        expected_dimension: int,
+        actual_dimensions: set[int],
+    ) -> None:
+        """Application adapters may expose dimension-contract failures."""
+
     def _record_success(self, latency_ms: int) -> None:
         """Application adapter may observe a successful request."""
 
@@ -541,4 +656,5 @@ class RealEmbeddingProvider(EmbeddingProvider):
 __all__ = [
     "RealEmbeddingProvider",
     "EmbeddingAPIError",
+    "EmbeddingDimensionContractError",
 ]

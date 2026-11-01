@@ -11,6 +11,7 @@ import pytest
 
 from app.application.agent_search_service import (
     AgentRecommendationCommand,
+    degraded_reasons,
     AgentRecommendationOutcome,
     AgentSearchCommand,
     AgentSearchOutcome,
@@ -141,6 +142,47 @@ def test_search_embedding_failure_degrades_to_keyword_retrieval() -> None:
     assert core.match_calls[0]["runtime_config"]["reranker_model"] is None
 
 
+def test_embedding_rate_limit_degrades_through_literal_default() -> None:
+    class RateLimitedEmbedding:
+        def embed(self, query: str) -> list[float]:
+            error = RuntimeError("embedding quota exceeded")
+            error.status_code = 429
+            raise error
+
+    class LiteralDefaultMatch:
+        def match(self, **kwargs: Any) -> list[Any]:
+            kwargs["runtime_config"]["_retrieval"] = {
+                "score_source": "regex_fallback",
+                "semantic_unavailable": True,
+                "keyword_unavailable": False,
+                "literal_fallback_used": True,
+                "literal_fallback_default_used": True,
+            }
+            return [{"profile_key": "bot:reader:default", "score": 0.01}]
+
+    service = AgentSearchService(
+        embedding_generator=RateLimitedEmbedding(),
+        vector_match_service=LiteralDefaultMatch(),
+        candidate_recommendation_service=None,
+    )
+
+    outcome = asyncio.run(
+        service.search(AgentSearchCommand(query="reader", top_k=1))
+    )
+
+    assert outcome.metadata["semantic_unavailable"] is True
+    assert outcome.metadata["semantic_status_code"] == 429
+    assert outcome.metadata["literal_fallback_default_used"] is True
+    assert len(outcome.results) == 1
+    assert degraded_reasons(outcome.metadata) == (
+        "semantic_unavailable",
+        "embedding_quota_exhausted",
+        "literal_fallback_used",
+        "literal_fallback_default",
+        "regex_fallback",
+    )
+
+
 def test_search_and_recommend_offload_blocking_work() -> None:
     async def scenario() -> AgentSearchOutcome:
         core = RecordingCore([], [], [])
@@ -194,7 +236,7 @@ def test_blank_or_invalid_limits_are_rejected_before_core_calls() -> None:
     assert core.recommend_calls == []
 
 
-def test_search_failure_reports_unavailable_without_provider_details() -> None:
+def test_search_failure_returns_fallback_without_provider_details() -> None:
     class FailingMatch:
         match_calls: list[dict[str, Any]] = []
 
@@ -214,10 +256,11 @@ def test_search_failure_reports_unavailable_without_provider_details() -> None:
         candidate_recommendation_service=FailingMatch(),
     )
 
-    with pytest.raises(RuntimeError, match="search retrieval unavailable") as error:
-        asyncio.run(service.search(AgentSearchCommand(query="x", top_k=1)))
+    outcome = asyncio.run(service.search(AgentSearchCommand(query="x", top_k=1)))
 
-    assert "private qdrant endpoint detail" not in str(error.value)
+    assert "private qdrant endpoint detail" not in str(outcome.metadata)
+    assert outcome.metadata["retrieval_unavailable"] is True
+    assert outcome.metadata["fallback_unavailable"] is True
     assert FailingMatch.match_calls != []
 
 
@@ -545,7 +588,7 @@ def test_search_copies_delegate_diagnostics_into_outcome_metadata() -> None:
                 "literal_fallback_used": True,
                 "score_source": "regex_fallback",
             }
-            return []
+            return [{"profile_key": "bot:reader:default", "score": 0.9}]
 
     core = DiagnosticCore([], [], [])
     service = _service(core)
@@ -620,3 +663,46 @@ def test_v1_search_projection_preserves_colon_worker_ids_and_bounded_evidence() 
     assert len(projected["fragment_matches"]) == 5
     assert projected["fragment_matches"][0]["fragment_type"] == "fragment-0"
     assert projected["fragment_matches"][-1]["content"] == "content-4"
+
+
+def test_search_and_recommend_record_stage_durations() -> None:
+    """Core stage latency must be visible separately for capacity diagnosis."""
+
+    from prometheus_client import REGISTRY
+
+    def count(operation: str, stage: str) -> float:
+        return float(
+            REGISTRY.get_sample_value(
+                "bcsfuse_search_stage_duration_seconds_count",
+                {"operation": operation, "stage": stage},
+            )
+            or 0.0
+        )
+
+    before = {
+        "embedding": count("search", "embedding"),
+        "search_retrieval": count("search", "retrieval"),
+        "recommend_retrieval": count("recommend", "retrieval"),
+    }
+    core = RecordingCore([], [], [])
+    service = _service(core)
+
+    asyncio.run(service.search(AgentSearchCommand(query="stage", top_k=1)))
+    asyncio.run(
+        service.recommend(
+            AgentRecommendationCommand(
+                question="stage recommend",
+                top_k=1,
+                enable_rerank=False,
+                reranker_model=None,
+                expand_factor=3,
+                vector_min_score=0.01,
+                rerank_min_score=None,
+                min_score_explicit=False,
+            )
+        )
+    )
+
+    assert count("search", "embedding") - before["embedding"] == 1
+    assert count("search", "retrieval") - before["search_retrieval"] == 1
+    assert count("recommend", "retrieval") - before["recommend_retrieval"] == 1

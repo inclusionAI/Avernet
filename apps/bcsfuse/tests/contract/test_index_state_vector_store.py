@@ -664,3 +664,25 @@ def test_non_owner_lease_renewal_does_not_steal_a_live_owner(tmp_path):
 
     owner.close()
     reader.close()
+
+
+def test_concurrent_same_owner_writes_publish_every_revision_once(tmp_path):
+    """Serialize same-owner writes; shared version state is process-critical."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    owner = wrapped(tmp_path, "pod-a")
+    failures = []
+
+    def write(index):
+        try:
+            owner.update_payload_by_worker(f"worker-{index}", {"runtime_state": "online"})
+        except Exception as error:
+            failures.append(error)
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        list(executor.map(write, range(64)))
+
+    assert failures == []
+    assert owner.index_version == 64
+    assert not owner.index_stale
+    owner.close()

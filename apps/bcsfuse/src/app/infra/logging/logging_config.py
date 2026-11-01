@@ -30,6 +30,7 @@ YAML 配置示例：
 
 from __future__ import annotations
 
+import json
 import logging
 import logging.handlers
 import os
@@ -82,6 +83,24 @@ def _load_yaml_config() -> dict[str, Any]:
                 continue
 
     return {}
+
+
+class JsonLogFormatter(logging.Formatter):
+    """Render log records as one-line JSON for environments using LOG_FORMAT=json."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "traceid": getattr(record, "traceid", getattr(record, "trace_id", "-")),
+            "process": record.process,
+            "processName": record.processName,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def configure_logging(
@@ -169,8 +188,11 @@ def configure_logging(
     handlers: list[logging.Handler] = []
 
     # stdout handler - 始终启用
+    use_json_format = fmt.strip().casefold() == "json"
+    formatter = JsonLogFormatter(datefmt=date_fmt) if use_json_format else logging.Formatter(fmt, date_fmt)
+
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter(fmt, date_fmt))
+    console_handler.setFormatter(formatter)
     handlers.append(console_handler)
 
     # file handler - 可选
@@ -201,7 +223,7 @@ def configure_logging(
                 backupCount=backup_count_val,
                 encoding="utf-8",
             )
-            file_handler.setFormatter(logging.Formatter(fmt, date_fmt))
+            file_handler.setFormatter(formatter)
             handlers.append(file_handler)
         except Exception:
             pass  # 文件日志初始化失败，不影响控制台日志
@@ -209,7 +231,7 @@ def configure_logging(
     # 6. 配置根 logger
     logging.basicConfig(
         level=numeric_level,
-        format=fmt,
+        format=DEFAULT_FORMAT if use_json_format else fmt,
         handlers=handlers,
         force=True,  # 强制重新配置，即使已有配置
     )

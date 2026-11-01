@@ -94,9 +94,8 @@ class MySQLWorkerProfileContentStore:
 
         self._schema_initialized = False
         self._schema_lock = threading.Lock()
-        self._ensure_schema()
 
-    def _ensure_schema(self) -> None:
+    def _ensure_schema(self, conn: object | None = None) -> None:
         """Ensure database schema exists."""
         if self._schema_initialized:
             return
@@ -105,7 +104,9 @@ class MySQLWorkerProfileContentStore:
             if self._schema_initialized:
                 return
 
-            conn = self._pool.get_connection()
+            owned_connection = conn is None
+            if conn is None:
+                conn = self._pool.get_connection()
             try:
                 cursor = conn.cursor()
                 try:
@@ -135,13 +136,27 @@ class MySQLWorkerProfileContentStore:
                     """)
                 finally:
                     cursor.close()
-                conn.commit()
+                if owned_connection:
+                    conn.commit()
                 self._schema_initialized = True
                 logger.info(
                     "[MySQLWorkerProfileContentStore] Schema initialized successfully"
                 )
             finally:
+                if owned_connection:
+                    conn.close()
+
+    def _connection(self):
+        """Borrow one connection and initialize schema lazily on first use."""
+
+        conn = self._pool.get_connection()
+        if not self._schema_initialized:
+            try:
+                self._ensure_schema(conn)
+            except BaseException:
                 conn.close()
+                raise
+        return conn
 
     @staticmethod
     def _generate_id(worker_id: str, profile_id: str) -> str:
@@ -236,7 +251,7 @@ class MySQLWorkerProfileContentStore:
         content_id = self._generate_id(content.worker_id, content.profile_id or "default")
         profile_id = content.profile_id or "default"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             # Method delegation reaches the raw connection through both pool wrappers.
             conn.start_transaction()
@@ -336,7 +351,7 @@ class MySQLWorkerProfileContentStore:
     ) -> WorkerProfileContent | None:
         """Atomically save only when the stored Profile version still matches."""
         data = self._content_to_dict(content)
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
@@ -410,7 +425,7 @@ class MySQLWorkerProfileContentStore:
         """Get profile content (object API)."""
         profile_id = profile_id or "default"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -429,7 +444,7 @@ class MySQLWorkerProfileContentStore:
 
     def list_by_worker(self, worker_id: str) -> WorkerProfileContentList:
         """List all profiles for a worker (object API)."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -458,7 +473,7 @@ class MySQLWorkerProfileContentStore:
         """Delete profile content (object API)."""
         profile_id = profile_id or "default"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -477,7 +492,7 @@ class MySQLWorkerProfileContentStore:
         """Set active profile (object API)."""
         profile_id = profile_id or "default"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -505,7 +520,7 @@ class MySQLWorkerProfileContentStore:
 
     def get_active(self, worker_id: str) -> Optional[WorkerProfileContent]:
         """Get active profile for worker (object API)."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -526,7 +541,7 @@ class MySQLWorkerProfileContentStore:
         """Check if profile exists (object API)."""
         profile_id = profile_id or "default"
 
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -542,7 +557,7 @@ class MySQLWorkerProfileContentStore:
 
     def count(self, worker_id: Optional[str] = None) -> int:
         """Count profiles (object API)."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor()
             try:
@@ -561,7 +576,7 @@ class MySQLWorkerProfileContentStore:
 
     def get_all_active(self) -> list[WorkerProfileContent]:
         """Get all active profiles (object API)."""
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:
@@ -583,7 +598,7 @@ class MySQLWorkerProfileContentStore:
         """Read the same active records as get_all_active, scoped at the SQL boundary."""
         if not worker_ids:
             return []
-        conn = self._pool.get_connection()
+        conn = self._connection()
         try:
             cursor = conn.cursor(dictionary=True)
             try:

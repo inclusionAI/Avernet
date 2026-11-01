@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from app.infra.public.config.yaml_env_config_provider import (
         YamlEnvConfigProvider,
     )
+    from app.infra.public.database.mysql_connection_pool import (
+        MySQLConnectionPoolProvider,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +34,44 @@ def _safe_host(url: str | None) -> str:
         return "<invalid-url>"
 
 
-def _with_literal_fallback(vector_store):
+def _literal_fallback_snapshot_store(config, *, enabled: bool):
+    """Resolve the optional owner-published payload-only fallback snapshot."""
+
+    if not enabled or not config.get_bool(
+        "vector.literal_fallback.snapshot_enabled", False
+    ):
+        return None
+
+    from app.infra.public.stores.literal_fallback_path_policy import (
+        EphemeralSnapshotPathError,
+        LiteralFallbackSnapshotPathPolicy,
+    )
+    from app.infra.public.stores.literal_fallback_snapshot_store import (
+        LiteralFallbackSnapshotFileStore,
+    )
+
+    explicit_path = os.getenv("BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH")
+    if explicit_path is None:
+        raise EphemeralSnapshotPathError(
+            "runtime literal fallback snapshot requires an explicit persistent path: "
+            "set BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH"
+        )
+    resolved_path = LiteralFallbackSnapshotPathPolicy().validate_runtime_path(
+        explicit_path
+    )
+    return LiteralFallbackSnapshotFileStore(resolved_path)
+
+
+def _with_literal_fallback(vector_store, snapshot_store=None):
     """Register a vector store that also maintains the final local snapshot."""
     from app.application.services.literal_fallback_maintenance import (
         wrap_vector_store_with_literal_fallback,
     )
 
-    return wrap_vector_store_with_literal_fallback(vector_store)
+    return wrap_vector_store_with_literal_fallback(
+        vector_store,
+        snapshot_store=snapshot_store,
+    )
 
 
 def _config_int(config: object, key: str, default: int) -> int:
@@ -47,6 +81,26 @@ def _config_int(config: object, key: str, default: int) -> int:
         return int(method(key, default))
     try:
         return int(config.get(key, default))  # type: ignore[attr-defined]
+    except AttributeError:
+        return default
+
+
+def _env_bool(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _config_bool(config: object, key: str, default: bool) -> bool:
+    env_value = os.getenv(key.upper())
+    if env_value is not None:
+        return bool(_env_bool(key.upper()))
+    method = getattr(config, "get_bool", None)
+    if method is not None:
+        return bool(method(key, default))
+    try:
+        return bool(config.get(key, default))  # type: ignore[attr-defined]
     except AttributeError:
         return default
 
@@ -88,6 +142,12 @@ def register_runtime_service_providers(
     )
     from app.infra.public.reranker.http_reranker import HttpReranker
 
+    if not _config_bool(config, "embedding.cache.enabled", True):
+        raise RuntimeError(
+            "embedding.cache.enabled must be true for runtime serving; "
+            "the query cache is a required capacity contract"
+        )
+
     embedding_base_url = (
         os.getenv("EMBEDDING_BASE_URL")
         or config.get("embedding.base_url")
@@ -103,10 +163,13 @@ def register_runtime_service_providers(
         or config.get("embedding.dimension")
         or 4096
     )
+    embedding_request_dimensions = _config_bool(
+        config, "embedding.request_dimensions", False
+    )
 
     logger.info(
         "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
-        "base_url_host=%s model=%s dimension=%s env_base_url_present=%s env_model_present=%s "
+        "base_url_host=%s model=%s dimension=%s request_dimensions=%s env_base_url_present=%s env_model_present=%s "
         "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
         "runtime",
         True,
@@ -114,6 +177,7 @@ def register_runtime_service_providers(
         _safe_host(embedding_base_url),
         embedding_model,
         embedding_dimension,
+        embedding_request_dimensions,
         "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
         "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
         "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
@@ -138,6 +202,7 @@ def register_runtime_service_providers(
             or config.get("embedding.auth_token"),
             model=embedding_model,
             dimension=embedding_dimension,
+            request_dimensions=embedding_request_dimensions,
         )
     )
     circuit_embedding_provider = CircuitBreakerEmbeddingProvider(
@@ -148,6 +213,16 @@ def register_runtime_service_providers(
         recovery_timeout_seconds=_config_float(
             config, "embedding.circuit.recovery_seconds", 10.0
         ),
+        capacity_store=registry.get("embedding_capacity_store"),
+        quota_recovery_seconds=_config_float(
+            config, "embedding.quota.recovery_seconds", 60.0
+        ),
+        max_calls_per_minute=_config_int(
+            config, "embedding.quota.max_calls_per_minute", 30
+        ),
+        quota_period_seconds=_config_float(
+            config, "embedding.quota.period_seconds", 60.0
+        ),
     )
     registry.register(
         "embedding_provider",
@@ -155,6 +230,23 @@ def register_runtime_service_providers(
             circuit_embedding_provider,
             max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
             ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
+            max_query_batch_size=_config_int(
+                config, "embedding.cache.max_query_batch_size", 32
+            ),
+            query_batch_wait_seconds=_config_float(
+                config, "embedding.cache.query_batch_wait_seconds", 0.05
+            ),
+            query_batch_peak_wait_seconds=_config_float(
+                config,
+                "embedding.cache.query_batch_peak_wait_seconds",
+                0.15,
+            ),
+            query_batch_peak_threshold=_config_int(
+                config, "embedding.cache.query_batch_peak_threshold", 8
+            ),
+            max_query_batch_workers=_config_int(
+                config, "embedding.cache.max_query_batch_workers", 1
+            ),
         ),
     )
     from app.infra.public.reranker.http_reranker import get_reranker
@@ -287,6 +379,22 @@ def build_opensource_provider_registry(mode: str = "runtime") -> "ProviderRegist
     return registry
 
 
+def create_runtime_mysql_pool() -> "MySQLConnectionPoolProvider":
+    """Create the runtime shared MySQL pool with bounded, scalable sizing."""
+
+    from app.infra.public.database.mysql_connection_pool import (
+        MySQLConnectionPoolProvider,
+    )
+
+    return MySQLConnectionPoolProvider(
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        port=int(os.getenv("MYSQL_PORT", "3306")),
+        user=os.getenv("MYSQL_USER", ""),
+        password=os.getenv("MYSQL_PASSWORD", ""),
+        database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
+    )
+
+
 def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:
     """Build runtime providers (MySQL + Qdrant + Real HTTP)."""
     # Import runtime providers
@@ -302,16 +410,10 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     )
     from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
 
-    # R12-Pool-2 Fix: Create shared MySQL connection pool for thread-safe access
-    # Pool size covers G1/G2/G5 concurrent workers + headroom
-    mysql_pool = MySQLConnectionPoolProvider(
-        host=os.getenv("MYSQL_HOST", "localhost"),
-        port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", ""),
-        password=os.getenv("MYSQL_PASSWORD", ""),
-        database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
-        pool_size=15,
-    )
+    # R12-Pool-2 Fix: Create one shared, bounded pool per pod. MYSQL_POOL_SIZE
+    # defaults to 8 so horizontal Pod scaling does not immediately exhaust the
+    # MySQL server's global connection quota.
+    mysql_pool = create_runtime_mysql_pool()
     registry.register("mysql_connection_pool", mysql_pool)
 
     # Shared L2 final-response cache. All runtime pods use this provider and
@@ -362,11 +464,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         qdrant_path=qdrant_path,
         dimension=config.get_int("embedding.dimension", 4096),
         distance=config.get("vector.qdrant.distance", "Cosine"),
-        mysql_host=os.getenv("MYSQL_HOST", "localhost"),
-        mysql_port=int(os.getenv("MYSQL_PORT", "3306")),
-        mysql_user=os.getenv("MYSQL_USER", ""),
-        mysql_password=os.getenv("MYSQL_PASSWORD", ""),
-        mysql_database=os.getenv("MYSQL_DATABASE", "bcsfuse"),
+        mysql_connection_pool=mysql_pool,
     )
     from app.application.services.index_state_vector_store import (
         wrap_vector_store_with_index_state,
@@ -375,15 +473,32 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
 
     collection_name = config.get("vector.qdrant.collection", "bcsfuse_profiles")
     lease_settings = resolve_index_lease_settings(config)
+    embedding_model = (
+        os.getenv("EMBEDDING_MODEL")
+        or config.get("embedding.model")
+        or "Qwen3-Embedding-8B"
+    )
+    embedding_dimension = int(
+        os.getenv("EMBEDDING_DIMENSION")
+        or config.get("embedding.dimension")
+        or 4096
+    )
+    index_state_store = MySQLIndexStateStore(connection_pool=mysql_pool)
     vector_store = wrap_vector_store_with_index_state(
         vector_store,
-        store=MySQLIndexStateStore(connection_pool=mysql_pool),
+        store=index_state_store,
         owner_id=_index_owner_id(),
         collection_pair=f"{collection_name}:dense+keyword",
         stale_after_seconds=lease_settings.stale_after_seconds,
         lease_seconds=lease_settings.lease_seconds,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_index_signature_store=index_state_store,
     )
-    vector_store = _with_literal_fallback(vector_store)
+    vector_store = _with_literal_fallback(
+        vector_store,
+        snapshot_store=_literal_fallback_snapshot_store(config, enabled=True),
+    )
     registry.register("vector_store", vector_store)
 
     # Rebuild only after startup dependencies initialize. A failed rebuild
@@ -406,6 +521,15 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         f"qdrant_path={qdrant_path} "
         f"collection={vector_store.collection_name} "
         f"source=created dimension={vector_store.dimension}"
+    )
+
+    from app.infra.public.stores.mysql_embedding_capacity_store import (
+        MySQLEmbeddingCapacityStore,
+    )
+
+    registry.register(
+        "embedding_capacity_store",
+        MySQLEmbeddingCapacityStore(connection_pool=mysql_pool),
     )
 
     register_runtime_service_providers(registry, config)
@@ -453,17 +577,64 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     # Qdrant Local + SQLite vector store
     vector_db_path = os.getenv("BCSFUSE_VECTOR_SQLITE_PATH") or config.get("vector.sqlite.db_path", "data/vector_embeddings.db")
     qdrant_connection = QdrantConnection.from_mapping(os.environ)
+    dev_collection_name = config.get(
+        "vector.qdrant.collection", "bcsfuse_vectors"
+    )
     vector_store = QdrantSQLiteVectorStore(
         connection=qdrant_connection,
         keyword_connection=QdrantConnection.keyword_from_mapping(
             os.environ, fallback=qdrant_connection
         ),
+        collection_name=dev_collection_name,
         dimension=config.get_int("embedding.dimension", 4096),
         db_path=vector_db_path,
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
     )
-    vector_store = _with_literal_fallback(vector_store)
+    from pathlib import Path
+
+    from app.application.services.index_state_vector_store import (
+        wrap_vector_store_with_index_state,
+    )
+    from app.infra.public.stores.sqlite_index_state_store import (
+        SQLiteIndexStateStore,
+    )
+
+    vector_path = Path(vector_db_path)
+    default_index_state_path = vector_path.with_name(
+        f"{vector_path.stem}-index-state{vector_path.suffix}"
+    )
+    index_state_path = (
+        config.get("vector.index.sqlite.path", str(default_index_state_path))
+    )
+    collection_pair_name = dev_collection_name
+    dev_lease_settings = resolve_index_lease_settings(config)
+    embedding_model = (
+        os.getenv("EMBEDDING_MODEL")
+        or config.get("embedding.model")
+        or "Qwen3-Embedding-8B"
+    )
+    embedding_dimension = int(
+        os.getenv("EMBEDDING_DIMENSION")
+        or config.get("embedding.dimension")
+        or 4096
+    )
+    index_state_store = SQLiteIndexStateStore(index_state_path)
+    vector_store = wrap_vector_store_with_index_state(
+        vector_store,
+        store=index_state_store,
+        owner_id=_index_owner_id(),
+        collection_pair=f"{collection_pair_name}:dense+keyword",
+        stale_after_seconds=dev_lease_settings.stale_after_seconds,
+        lease_seconds=dev_lease_settings.lease_seconds,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_index_signature_store=index_state_store,
+    )
+    vector_store = _with_literal_fallback(
+        vector_store,
+        snapshot_store=_literal_fallback_snapshot_store(config, enabled=False),
+    )
     registry.register("vector_store", vector_store)
     from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
     registry.register("startup_provider", VectorIndexStartupProvider(
@@ -482,20 +653,28 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         os.getenv("EMBEDDING_AUTH_TOKEN")
         or config.get("embedding.auth_token")
     )
-    embedding_model = (
-        os.getenv("EMBEDDING_MODEL")
-        or config.get("embedding.model")
-        or "Qwen3-Embedding-8B"
+    embedding_request_dimensions = _config_bool(
+        config, "embedding.request_dimensions", False
     )
-    embedding_dimension = int(
-        os.getenv("EMBEDDING_DIMENSION")
-        or config.get("embedding.dimension")
-        or 4096
+
+    from app.infra.public.stores.sqlite_embedding_capacity_store import (
+        SQLiteEmbeddingCapacityStore,
+    )
+
+    capacity_db_path = os.getenv("BCSFUSE_CAPACITY_SQLITE_PATH") or config.get(
+        "database.sqlite.capacity_path",
+        str(Path(vector_db_path).with_name(
+            f"{Path(vector_db_path).stem}-embedding-capacity{Path(vector_db_path).suffix}"
+        )),
+    )
+    registry.register(
+        "embedding_capacity_store",
+        SQLiteEmbeddingCapacityStore(capacity_db_path),
     )
 
     logger.info(
         "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
-        "base_url_host=%s model=%s dimension=%s env_base_url_present=%s env_model_present=%s "
+        "base_url_host=%s model=%s dimension=%s request_dimensions=%s env_base_url_present=%s env_model_present=%s "
         "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
         "dev",
         True,
@@ -503,6 +682,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         _safe_host(embedding_base_url),
         embedding_model,
         embedding_dimension,
+        embedding_request_dimensions,
         "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
         "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
         "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
@@ -515,6 +695,7 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         auth_token=embedding_auth_token,
         model=embedding_model,
         dimension=embedding_dimension,
+        request_dimensions=embedding_request_dimensions,
     )
     if embedding_settings.is_configured():
         from app.infra.public.embedding.cached_embedding_provider import (
@@ -534,9 +715,36 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
                 recovery_timeout_seconds=_config_float(
                     config, "embedding.circuit.recovery_seconds", 10.0
                 ),
+                capacity_store=registry.get("embedding_capacity_store"),
+                quota_recovery_seconds=_config_float(
+                    config, "embedding.quota.recovery_seconds", 60.0
+                ),
+                max_calls_per_minute=_config_int(
+                    config, "embedding.quota.max_calls_per_minute", 30
+                ),
+                quota_period_seconds=_config_float(
+                    config, "embedding.quota.period_seconds", 60.0
+                ),
             ),
             max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
             ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
+            max_query_batch_size=_config_int(
+                config, "embedding.cache.max_query_batch_size", 32
+            ),
+            query_batch_wait_seconds=_config_float(
+                config, "embedding.cache.query_batch_wait_seconds", 0.05
+            ),
+            query_batch_peak_wait_seconds=_config_float(
+                config,
+                "embedding.cache.query_batch_peak_wait_seconds",
+                0.15,
+            ),
+            query_batch_peak_threshold=_config_int(
+                config, "embedding.cache.query_batch_peak_threshold", 8
+            ),
+            max_query_batch_workers=_config_int(
+                config, "embedding.cache.max_query_batch_workers", 1
+            ),
         )
         registry.register("embedding_provider", embedding_provider)
     else:
@@ -657,7 +865,10 @@ def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvCon
         qdrant_path=os.getenv("QDRANT_LOCAL_PATH") or config.get("vector.qdrant.path"),
         auto_load=False,
     )
-    vector_store = _with_literal_fallback(vector_store)
+    vector_store = _with_literal_fallback(
+        vector_store,
+        snapshot_store=_literal_fallback_snapshot_store(config, enabled=False),
+    )
     registry.register("vector_store", vector_store)
     from app.providers.public.vector_index_startup_provider import VectorIndexStartupProvider
     registry.register("startup_provider", VectorIndexStartupProvider(
@@ -713,7 +924,10 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
 
     # InMemory vector store
     vector_store = InMemoryVectorStore(dimension=config.get_int("embedding.dimension", 4096))
-    vector_store = _with_literal_fallback(vector_store)
+    vector_store = _with_literal_fallback(
+        vector_store,
+        snapshot_store=_literal_fallback_snapshot_store(config, enabled=False),
+    )
     registry.register("vector_store", vector_store)
 
     # Fake embedding provider

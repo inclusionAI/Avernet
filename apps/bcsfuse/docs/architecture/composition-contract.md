@@ -114,6 +114,70 @@ no-provider/error fallback ordering when there are no keyword matches.
 Explicitly disabling rerank without keyword matches retains aggregate-only
 selection and ranking. Storage schemas and durable vectors are unchanged.
 
+### Embedding dimension request contract
+
+The OpenAI-compatible embedding client does not send `dimensions` by default.
+Set `embedding.request_dimensions=true` (or `EMBEDDING_REQUEST_DIMENSIONS=true`)
+only for model servers that explicitly support Matryoshka/custom dimensions.
+When enabled, the wire request carries the composed `embedding.dimension`, and
+the durable vector collection must be rebuilt at that same dimension before
+search traffic is admitted. The smaller wire/vector size is a capacity change
+and must be released with a quality regression, not enabled opportunistically.
+
+The provider contract is fail-closed at both composition and response time:
+
+- A known model cannot be composed with an unsupported dimension.
+- A known non-native dimension cannot be composed unless
+  `embedding.request_dimensions=true`.
+- A successful JSON or binary response must return exactly the requested input
+  count and the composed dimension. Mismatched counts, mismatched dimensions
+  or non-finite values are provider errors; they never reach the vector store.
+- A response dimension violation increments
+  `bcsfuse_embedding_dimension_contract_violations_total` carrying the model,
+  protocol, expected dimension, and actual dimensions.
+- Semantic responses can expose `semantic_reason_code` plus the upstream
+  provider reason (for example `semantic_provider_reason_code=RPM_LIMIT_EXCEEDED`)
+  while keeping the stable public reason, such as
+  `semantic_reason_code=embedding_quota_exhausted`,
+  in `reasons` and degraded-response metadata.
+
+### Embedding model-space index consistency
+
+The durable index-state store also records the active embedding model and
+dimension for each collection-pair. On the first deployment this signature is
+registered once from the composed `embedding.model` and `embedding.dimension`.
+
+A replica must not query or write the dense index when its configured model
+space differs from the durable signature. In that state:
+
+- dense search raises an explicit model-space mismatch error;
+- hybrid retrieval continues through keyword and literal/regex fallback;
+- process writes are rejected so an incompatible model cannot mix vectors;
+- `/ready` reports dense unavailable, the model, dimension, and
+  `embedding_index_signature_mismatch=true`;
+- the response path may return a bounded degraded result, never an empty 200
+  caused by the mismatch.
+
+Changing the embedding model or dimension is a controlled index migration, not
+a runtime configuration toggle. A new model-space must be fully rebuilt (ideally
+in a blue-green collection) and its signature activated only after the complete
+index is validated. Until then, old model vectors may serve only non-dense
+fallback, not semantic search.
+
+The model-space fence covers every dense mutation path, not only request-scope
+upserts. If the current configured model or dimension differs from the durable
+signature, `upsert`, payload update, deletion, `clear`,
+`rebuild_from_backend`, and `sync_incremental` all fail before they reach
+Qdrant or the durable vector backend. Maintenance rebuild is not a bypass for
+the active model-space contract.
+
+The signature is verified during composition/readiness and cached in the
+index-state wrapper; dense requests do not add an additional SQL round trip on
+the serving hot path. The durable signature is first-write-stable: subsequent
+registrations for the same collection return the active signature and cannot
+silently replace it. This keeps the model-space fail-safe without recreating a
+per-query database bottleneck.
+
 ### Keyword recall and score semantics (HTTP v1 compatible)
 
 The durable Qdrant vector-store composition implements the existing
@@ -220,13 +284,151 @@ service remain `SearchUnavailable` / HTTP 503; this projection describes only a
 successful response that actually used a bounded fallback or degraded rerank. It
 does not turn an empty valid result into an outage.
 
+### V1 semantic outage and bounded fallback
+
+Search and recommendation place the semantic-model outcome into the shared
+degradation contract. If the embedding provider fails but the bounded keyword or
+literal branch still produces candidates, v1 search returns HTTP 200 with
+``status="degraded"`` and ``reasons=["semantic_unavailable"]``; v1 recommendation
+returns the same fields in response ``metadata``. These degraded projections are
+not eligible for the result cache. The stable source fields also identify the
+bounded path that produced the candidates: v1 search uses
+``source="keyword_fallback"`` for a semantic-outage keyword chain, and
+``literal_fallback`` / ``literal_fallback_default`` for the regex chains, and
+``local_snapshot`` when the process-local snapshot supplies the bounded result;
+v1 recommendation reports the same source choice through ``candidate_source``.
+A healthy dense-only result remains ``vector`` and a successful dense+keyword
+merge remains ``hybrid``.
+
+If an authenticated request passes the shared request boundary and is admitted to
+the v1 search/recommendation application path, the delivery layer must never
+turn a late dependency or core execution failure into an unexplained transport
+failure. When semantic, keyword, literal, and deterministic-default fallbacks all
+yield no candidates—or when retrieval/dependency composition itself fails—the
+application returns a stable HTTP 200 fallback envelope:
+
+- search sets top-level ``status="fallback_unavailable"``;
+- recommendation sets ``metadata.status="fallback_unavailable"`` and
+  ``metadata.candidate_source="fallback_unavailable"``;
+- both expose ordered ``reasons`` ending in ``fallback_unavailable`` and a stable
+  ``fallback_reason_code`` (``SEMANTIC_RETRIEVAL_UNAVAILABLE``,
+  ``SEARCH_RETRIEVAL_UNAVAILABLE``, or
+  ``CANDIDATE_RETRIEVAL_UNAVAILABLE``);
+- provider admission state, such as embedding HTTP 429 and ``Retry-After``, is
+  preserved in response metadata rather than converted into hidden success;
+- no result is fabricated: the item list is empty when no legitimate candidate
+  exists;
+- this envelope is never stored in L1 or L2 response caches. A delivery-stage
+projection failure attempts the same process-local snapshot first; if it recovers
+real results, the response remains ``status="degraded"`` with
+``local_snapshot_used=true`` and preserves the stage error type without counting
+the request as ``fallback_unavailable``.
+
+A healthy query with a valid, genuine no-match remains ``status="ok"`` with
+zero items. A ``fallback_unavailable`` response is therefore visibly different
+from a successful empty result. Prometheus records each genuinely terminal envelope in
+``bcsfuse_search_fallback_unavailable_total`` with `operation` and
+`reason_code` labels. Delivery-stage projection failures are included only if the
+process-local snapshot also yields no result. Authentication, malformed/oversized requests, and
+gateway capacity admission continue to return their existing stable errors
+(401/403, 413/422, or 429) before application execution.
+
+### V1 zero-dependency resilience
+
+The composed `AgentSearchService` owns the last stages of availability. Composition
+selects a process-local literal snapshot from the vector store
+(`literal_fallback_index`), an index-version-aware resilience cache, and hard
+execution budgets. Routes only bind protocol requests to those already-owned
+services.
+
+Runtime composition additionally owns a payload-only fallback snapshot file.
+`vector.literal_fallback.snapshot_enabled` enables it. Runtime composition
+requires an explicitly configured absolute snapshot path on a persistent volume
+(`BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH`); common ephemeral containers such as
+`/tmp`, `/var/tmp`, `/run`, and tmpfs mounts are rejected at assembly so a Pod
+restart cannot silently lose the HA snapshot. Development and smoke compositions
+keep this file store disabled unless a test explicitly supplies one. `vector.literal_fallback.snapshot_path` (or
+`BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH`) selects the publish/read location.
+Only the current durable-index lease owner publishes the snapshot, using an
+atomic replace; read-only replicas load it but never race to overwrite the
+shared file. The file records its schema version and durable `index_version`,
+and contains only real durable point IDs, profile keys and payloads—never
+vectors and never synthetic candidates. A corrupt, incomplete, duplicate-ID or
+wrong-schema file is rejected in full rather than partially loaded.
+
+When the durable backend is unavailable during a first boot or restart, a
+previously published legitimate snapshot is loaded into the process-local
+literal fallback and responses remain explicitly degraded with its source and
+index version (`snapshot_source="file"` and
+`snapshot_index_version`). If no valid snapshot exists, the existing explicit
+`fallback_unavailable` contract remains in force. A snapshot publication error
+does not fail search serving, remove readiness, or overwrite the last valid
+file; `/ready` remains HTTP 200 but reports `degraded=true`,
+`literal_fallback_publish_error_type`, `literal_fallback_source`,
+`literal_fallback_index_version`, and `literal_fallback_profiles`.
+
+Execution budgets are selected from the `config` provider:
+
+- `search.execution.embedding_timeout_seconds` (default 0.50);
+- `search.execution.retrieval_timeout_seconds` (default 0.25);
+- `search.execution.local_snapshot_timeout_seconds` (default 0.05);
+- `search.execution.total_timeout_seconds` (default 1.00).
+
+The runtime shared MySQL pool is bounded per Pod through `MYSQL_POOL_SIZE`
+(default 8, maximum 64). This prevents horizontal Pod scaling from immediately
+exhausting the shared MySQL connection quota. Transient error 1040 during a
+rolling scale-out is retried with bounded exponential backoff via
+`MYSQL_STARTUP_RETRY_ATTEMPTS` (default 5, maximum 30) and
+`MYSQL_STARTUP_RETRY_INTERVAL_MS` (default 250, maximum 5000); non-quota errors
+fail fast. A failed startup retry cycle records a 30-second cooldown, so
+later components fail fast instead of independently repeating the full retry
+loop during rolling scale-out. After the cooldown the provider may retry again.
+
+A stage timeout records the dependency as unavailable and continues into bounded
+recovery; it never waits indefinitely for embedding, Qdrant, or recommendation
+providers. The local snapshot is used both for dependency failures and for
+healthy zero-hit search/zero-candidate recommendation responses before the public
+empty envelope. It tries keyword matches first, then deterministic defaults. If it
+returns real last-known agents, search and recommendation return
+``status="degraded"`` with ``local_snapshot_used=true`` and response-specific
+source information. Such a response is not a terminal failure and is not cached as
+a fresh success.
+
+The resilience cache contains two explicit layers, selected through:
+
+- `search.resilience.enabled` (default true);
+- `search.resilience.max_entries` (default 10,000);
+- `search.resilience.last_known_good.ttl_seconds` (default 600);
+- `search.resilience.negative.ttl_seconds` (default 10).
+
+Last-known-good stores only a fully successful result. During dependency failure
+it may be served as an explicitly stale degraded result with
+``last_known_good_used=true`` and ``last_known_good_age_seconds``. Empty terminal outcomes are never persisted in the negative cache: caching an
+empty fallback would turn an outage response into a short-lived guaranteed-empty
+answer. Both cache keys include operation, index version, normalized query, and
+request semantics; an index-version change isolates stale entries.
+
+`ok`, `degraded`, and `fallback_unavailable` remain distinct. A valid no-match is
+`ok`; stale or process-local snapshot data is `degraded`; only a dependency
+failure with no legitimate candidate can be `fallback_unavailable`. None of these
+layers bypasses authentication, request validation, body-size limits, or capacity
+admission.
+
+Search and recommendation response-cache middleware are optional optimizations.
+Their internal L1/L2 read, key, promotion, and publish failures fail open to the
+normal downstream route and increment
+`bcsfuse_search_shared_response_cache_errors_total` with
+`stage="preflight"`, `"promote"`, or `"publish"`. Cache instrumentation can
+therefore reduce throughput, but it cannot turn an admitted valid request into an
+unexplained HTTP 500.
+
 ### Search capacity admission and workers
 
 The composed application owns a process-wide bounded search admission pool and
 wait queue. It is configured through the `config` provider, not route code or
-raw environment access: `search.capacity.max_inflight` (default 64),
+raw environment access: `search.capacity.max_inflight` (default 128),
 `search.capacity.max_queue` (default 128),
-`search.capacity.queue_wait_seconds` (default 0.5), and
+`search.capacity.queue_wait_seconds` (default 2.0), and
 `search.capacity.retry_after_seconds` (default 1). The pool is shared by
 `/api/v1/search`, `/api/v1/recommend`, `/api/v2/search`, and
 `/api/v2/recommend`. A request beyond both the execution and queue budgets, or
@@ -256,12 +458,13 @@ accepted. Each value is a string or a string array and every value is at most
 256 characters. Unsupported fields, non-string values and oversized values reject
 with HTTP 422 before V2-style projection or core execution. The string-scalar
 form preserves the existing V1 exact-worker filter contract.
-V1 dependency execution failures at the delivery boundary return a stable
-HTTP 503 rather than surfacing provider details: `/api/v1/search` uses
-`SEARCH_UNAVAILABLE`, and `/api/v1/recommend` uses `RECOMMEND_UNAVAILABLE`.
-Business-level degradation continues to run inside the candidate service, so
-these errors represent an unavailable core path after declared fallback, not a
-result-set condition.
+Once a V1 request is authenticated and admitted, late dependency lookup or
+execution failures at the delivery boundary use the same explicit
+``fallback_unavailable`` envelope instead of an opaque HTTP 503. Logs record the
+error class rather than provider details or raw query text. This is a
+non-successful fallback contract, not a result-set success; transport errors are
+reserved for failures that happen before the application boundary can represent
+a result.
 
 Admitted V1 search and recommendation delivery calls use a dedicated bounded
 worker pool configured to the same admission value. They do not queue on
@@ -290,8 +493,8 @@ capacity admission, so a hit does not take a worker, embedding, Qdrant, rerank,
 or other admission permit.
 
 Semantic- and keyword-unavailable responses, declared literal fallback, regex
-fallback, rerank-degraded responses, and responses without a valid durable
-index version are never stored. A miss, an invalid or oversized undeclared
+fallback, rerank-degraded responses, ``fallback_unavailable`` responses, and
+responses without a valid durable index version are never stored. A miss, an invalid or oversized undeclared
 body, or an index-version change replays the original request body downstream
 through admission, parsing, and business execution unchanged. Miss replay is
 bounded by the same request-body limit as capacity admission.
@@ -366,9 +569,14 @@ latency and availability without log mining:
   `..._stores_total`, and `..._errors_total` with `operation` and `stage`
   labels. The stage separates L2 `read`, `decode`, `promote`, `enqueue`, and
   `store`; a full background-write queue or a store returning false is an
-  explicit error, never a success. L2 writes use a bounded per-route writer
-  (default 128 queued writes and 2 workers) and do not wait in the HTTP
-  response path. An error does not change HTTP semantics; the request proceeds
+  explicit error, never a success. L2 reads use one process-wide bounded reader
+  shared by search and recommendation (default four concurrent backend reads);
+  a slow backend or timeout consumes at most those review-visible reads and
+  is treated as an optional-cache miss while the request proceeds downstream.
+  The reader is process-owned and closed during application shutdown after all
+  detached lookup futures finish; restarts therefore do not leak L2 reader threads.
+  L2 writes use a bounded per-route writer (default 128 queued writes and 2
+  workers) and do not wait in the HTTP response path. An error does not change HTTP semantics; the request proceeds
   through the declared L1 miss and downstream admission path.
 - The real embedding provider records `bcsfuse_embedding_calls_total`,
   `bcsfuse_embedding_duration_seconds` and, on the final failed call,
@@ -402,10 +610,15 @@ transition counts by model and state.
 
 ### Durable index ownership and replica staleness
 
-Runtime composition fences mutable Qdrant stores with a shared durable
-index-state lease. MySQL owns table `bcsfuse_index_states`; one row represents
-one dense/keyword collection pair and stores the active owner, lease expiry,
-index revision and update time. The owning application identity is supplied by
+Runtime and configured dev compositions fence mutable Qdrant stores with a
+shared durable index-state lease. Runtime uses the MySQL
+`bcsfuse_index_states` table; dev uses `SQLiteIndexStateStore`, by default beside
+the vector SQLite database and configurable through
+`vector.index.sqlite.path`. One row represents one dense/keyword collection
+pair and stores the active owner, lease expiry, index revision and update
+time. The dev state is not optional: it supplies the durable `index_version`
+required by the v1 result caches and avoids silently disabling request caching
+in local and pre-production deployments. The owning application identity is supplied by
 composition (`BCSFUSE_INDEX_OWNER_ID` in a pod environment), never a caller.
 A second live replica is read-only and cannot reach Qdrant or the durable
 backend with a write. Another replica may take over only after the prior owner
@@ -431,6 +644,41 @@ emit a business log record. Readiness exposes `index_owner_changes` and
 Read replicas clear staleness only after reconstruction or sync reaches the
 shared revision.
 
+Runtime registry, profile, runtime-state, and audit stores are also lazy: they
+borrow their first MySQL connection only when an operation needs it. Lazy schema
+installation reuses that same operation connection rather than borrowing a second
+connection from the pool. The durable vector persistence backend uses the same
+injected shared pool instead of opening an independent MySQL connection, so its
+connection count, retry behavior, and failure cooldown are part of the same
+bounded Pod quota. A restart therefore consumes no process-wide startup
+connection quota and the first recoverable operation has a bounded connection
+footprint even while another replica temporarily holds the quota.
+
+The production MySQL index-state store is constructed lazily. Its constructor
+does not connect to MySQL or initialize schema; the first lease, version,
+signature, or release operation does. Consequently a temporary MySQL outage
+during composition does not prevent the process from completing assembly. The
+index-state wrapper records `index_state_unavailable=true` and the signature
+probe records the inability to verify the dense model space; dense serving and
+writes then fail closed while keyword/literal fallback remains available. Once
+the coordination database recovers, the next readiness lease/signature probe
+clears the condition and can return the replica to normal service. The mutable
+MySQL pool also resolves a bounded `MYSQL_CONNECT_TIMEOUT` (three seconds by
+default), rejects non-positive timeouts, and initializes only on first use; an
+unreachable database therefore fails the readiness probe quickly instead of
+hanging process startup or request admission indefinitely.
+
+`/ready` and `/metrics` wrap readiness probing in a per-process bounded
+singleflight. The probe is capped at one second, repeats are served from a
+0.5-second explicit result cache, and a probe that exceeds 1 second is no longer
+allowed to block the event loop or flood Qdrant/MySQL. The first timeout returns
+HTTP 503 with `readiness_probe_timeout=true` and `readiness_probe_inflight=true`;
+a recently healthy probe may be returned for up to five seconds as an explicit
+stale result with `readiness_result_stale=true` and
+`readiness_cache_age_seconds`. Fresh-cache responses report
+`readiness_result_cached=true` so operators can distinguish a cached status from
+a live dependency check without exposing endpoint or credential details.
+
 An explicit `QDRANT_KEYWORD_URL` may move the sparse collection to a separate
 Qdrant Server while keeping the same collection-name, owner lease and shared
 `index_version`. All other `QDRANT_KEYWORD_*` settings resolve independently,
@@ -441,10 +689,20 @@ unchanged. Readiness uses dense Qdrant as the hard serving dependency:
 available and not stale, and explicitly reports `degraded=true` plus
 `keyword_qdrant_unavailable=true`. A dense outage returns `ready=false` with
 `dense_qdrant_unavailable=true`; stale index state or state-store failure also
-returns 503 and cannot be masked by a successful Qdrant probe. Readiness reports
-both `qdrant_mode` and `keyword_qdrant_mode` without exposing endpoints,
-provider errors or credentials. The `bcsfuse_index_degraded` gauge is one when
-dense or keyword Qdrant is unavailable.
+returns 503 and cannot be masked by a successful Qdrant probe. Readiness counts
+the dense collection as an additional hard dependency when the profile embedding
+index is enabled. A count of zero returns 503 with `dense_index_empty=true`;
+a failed count returns 503 with `index_size_unavailable=true`. A non-empty index
+reports `index_size`, which makes partial backfills visible even while serving
+with the declared fallback chain. Readiness reports both `qdrant_mode` and
+`keyword_qdrant_mode` without exposing endpoints, provider errors or credentials.
+When startup reconciliation/backfill is enabled, its status is a hard readiness
+condition: `/ready` returns 503 with `index_backfill_running=true` until
+reconciliation finishes, and a failed reconciliation remains 503 with
+`index_backfill_failed=true` and `index_backfill_error_type` instead of being
+logged as completed and admitted by the load balancer.
+The `bcsfuse_index_degraded` gauge is one when dense or keyword Qdrant is
+unavailable.
 
 A lease owner may execute `rebuild_from_backend` or `sync_incremental`. A
 read-only replica must not: both direct operations raise
@@ -490,16 +748,29 @@ health; metrics are `bcsfuse_search_result_cache_hits_total`,
 
 Runtime and configured dev compositions wrap real embedding with a
 process-local query cache. Configuration comes from composition:
-`embedding.cache.max_entries` (default 10000) and
-`embedding.cache.ttl_seconds` (default 300). The cache key contains the exact
-model, dimension and a conservative normalized query: Unicode NFKC plus
-whitespace collapsing. Case folding and alias rewriting are not performed here.
-The backend receives the original text.
+`embedding.cache.max_entries` (default 10000),
+`embedding.cache.ttl_seconds` (default 300),
+`embedding.cache.max_query_batch_size` (default 32), and adaptive query
+coalescing controls: `embedding.cache.query_batch_wait_seconds` (default 0.05),
+`embedding.cache.query_batch_peak_wait_seconds` (default 0.15),
+`embedding.cache.query_batch_peak_threshold` (default 8), and
+`embedding.cache.max_query_batch_workers` (default 1).
+The cache key contains the exact model, dimension and a conservative normalized
+query: Unicode NFKC plus whitespace collapsing. Case folding and alias rewriting
+are not performed here. The backend receives the original text.
 
-Concurrent identical queries share one in-flight backend call. Entries use LRU
+Concurrent identical queries share one in-flight backend call. Concurrent
+unique query misses are grouped into bounded batches before crossing the
+embedding circuit. The dispatcher waits for the configured short coalescing
+window so bursty `search` and `recommend` traffic fills each batch instead of
+immediately splitting into one-element calls. The window is zero only when
+composition explicitly disables it. A bounded backend worker pool executes formed
+batches in parallel while one coordinator deduplicates and fills the next batch;
+the worker count is the process-local model-request fan-out. Entries use LRU
 and TTL capacity, failures are not cached, and index bulk embedding bypasses
-the query cache. Prometheus exposes cache hits, misses, errors, evictions and
-entries by model. This is an L1 process cache only; it is not a distributed
+the query cache. Prometheus exposes cache hits, misses, errors, evictions,
+entries, backend batch calls, batched unique queries, and backend batch sizes by
+model. This is an L1 process cache only; it is not a distributed
 cache or a global model quota.
 
 ### Bounded embedding retries
@@ -802,9 +1073,25 @@ requests and awaits `startup_provider.shutdown()` when the application stops.
 Initialization failures propagate and prevent startup. Business-route mounting
 failures also propagate instead of producing a partially usable service.
 
-Background indexing starts only after startup initialization succeeds. During
-shutdown, the application waits for an active index build before shutting down
-providers so that background work cannot race provider teardown.
+Full index construction groups fragment embedding text across profiles in
+provider batches. The default batch size is 32, matching the currently wrapped
+embedding server's request maximum; deployment providers with a different
+maximum must explicitly configure the indexer batch size. The background indexer
+also paces batch calls by 0.25 seconds. A failed embedding batch does not upsert
+any fragment from that batch and marks every profile in the failed batch as
+failed so the next startup or activation can retry the whole profile. Because
+`ProfileEmbeddingStore::upsert_embeddings` writes through the composed vector
+store, successful batch writes must not trigger an additional incremental-sync
+operation that is unsupported by some durable adapters.
+
+Background indexing starts only after startup initialization succeeds. A
+non-empty existing index is not treated as an index-complete signal. Startup
+scans current profiles, computes their exact fragment IDs, and backfills only
+profiles with missing fragments. If an existing index cannot be inspected, the
+startup path fails closed and schedules a full rebuild rather than preserving an
+unknown partial index. During shutdown, the application waits for an active index
+build before shutting down providers so that background work cannot race provider
+teardown.
 
 Worker registration is a compensating operation across registry, runtime,
 binding, audit, and index providers. If a post-create side effect fails, the
@@ -956,3 +1243,32 @@ sparse retrieval has no Worker-ID priority; the TC keyword adapter enables it.
 startup rebuilding. Existing FAISS files are left untouched and are not automatic
 migration inputs. Re-sync test Workers into a new local dataset; SQLite snapshots
 replace FAISS snapshot artifacts. No online TC database migration is required.
+
+### Shared embedding quota degradation
+
+Embedding HTTP 429 is mapped to the explicit reason
+`embedding_quota_exhausted` and a positive semantic retry window. When a
+provider supplies `Retry-After`, that value wins; otherwise
+`embedding.quota.recovery_seconds` (default 60 seconds) supplies the fallback
+block.
+
+Runtime replicas persist that condition in
+`bcsfuse_embedding_capacity_states` through MySQL. Configured dev deployments
+use a SQLite store beside the vector database for co-located replicas. Once any
+replica observes 429, replicas share the block and fail fast before another
+model call; callers fall back to the bounded keyword/literal chain. The
+capacity-store operation intentionally fails open to the existing process-local
+circuit if durable coordination itself is unavailable, so a coordination outage
+does not become a total search outage.
+
+In addition to the post-429 block, runtime uses
+`bcsfuse_embedding_call_windows` as a proactive shared admission counter.
+`embedding.quota.max_calls_per_minute` (default 30) counts upstream provider
+calls rather than unique queries; `embedding.quota.period_seconds` defaults to
+60. When the shared window is exhausted, replicas fail fast with the same
+embedding-quota reason and continue serving the bounded keyword/literal chain.
+A disabled or unavailable window fails open to the local circuit so coordination
+outages cannot become total search outages.
+
+Both tables contain only model-level counters and expiry metadata. They never
+store a provider URL, token, query, or response body.

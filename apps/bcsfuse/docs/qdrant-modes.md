@@ -164,7 +164,7 @@ multi-replica deployment is enabled:
 - Static literal/regex fallback is the last bounded path. It applies filters and trusted
   allowed IDs before limiting and never treats the caller query as an untrusted regex.
 
-These cases currently start red in
+These contracts are executable in
 `packages/search-core/tests/test_ha_refactor_tdd.py` and
-`tests/contract/test_ha_refactor_tdd.py`; production composition is not enabled until
-the corresponding contracts pass.
+`tests/contract/test_ha_refactor_tdd.py`; production composition may only ship
+while those tests and the Qdrant Server composition tests pass.

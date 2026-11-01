@@ -26,6 +26,10 @@ def setup_test_environment():
     os.environ["EMBEDDING_BASE_URL"] = ""
     os.environ["EMBEDDING_AUTH_TOKEN"] = ""
     os.environ["EMBEDDING_MODEL"] = ""
+    # Optional startup reconciliation is not part of every HTTP contract. Tests
+    # that exercise it explicitly monkeypatch or set this flag; the default test
+    # environment keeps unrelated readiness and async probes isolated.
+    os.environ["ENABLE_PROFILE_EMBEDDING_INDEX"] = "false"
 
     yield
 
