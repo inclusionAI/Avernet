@@ -328,3 +328,52 @@ def test_build_index_paces_provider_batches_and_skips_delay_after_last(
     )
 
     assert delays == [0.25, 0.25, 0.25]
+
+
+def test_generate_profile_fragment_embeddings_matches_plan_contract(monkeypatch):
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        lambda: True,
+    )
+    from types import SimpleNamespace
+
+    class Provider:
+        def embed_batch(self, texts):
+            assert texts == ["full text"]
+            return [[0.25, 0.75]]
+
+    profile_store = MagicMock()
+    indexer = ProfileEmbeddingIndexer(
+        Provider(),
+        profile_store,
+        fragment_decomposer=MagicMock(
+            decompose=lambda profile: [MagicMock(
+                compute_fragment_id=lambda key: f"{key}:full",
+                to_embedding_text=lambda: "full text",
+                metadata={"fragment_hint": "full"},
+                fragment_type="full",
+                content_preview="full text",
+                content_hash="hash-full",
+                get_full_content=lambda: "full text",
+            )]
+        ),
+    )
+
+    result = indexer._generate_profile_fragment_embeddings(
+        SimpleNamespace(
+            profile_key="worker-plans:default",
+            staff_id="worker-plans",
+            profile_id="default",
+            profile_type=SimpleNamespace(value="bot"),
+            active_skills=[SimpleNamespace(name="general")],
+            metadata={},
+            short_profile="General search reliability",
+        )
+    )
+
+    assert len(result) == 1
+    fragment_id, vector, metadata = result[0]
+    assert fragment_id == "worker-plans:default:full"
+    assert vector == [0.25, 0.75]
+    assert metadata["profile_key"] == "worker-plans:default"

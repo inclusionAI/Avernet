@@ -265,7 +265,7 @@ class ProfileEmbeddingIndexer:
                 result.failed_count += 1
                 error_msg = f"Error planning {profile.profile_key}: {str(e)}"
                 result.errors.append(error_msg)
-                logger.error("[ProfileEmbeddingIndexer] %s", error_msg)
+                logger.error("[ProfileEmbeddingIndexer] %s", error_msg, exc_info=True)
 
         completed_counts = {profile_key: 0 for profile_key in planned_counts}
         failed_profile_keys: set[str] = set()
@@ -553,7 +553,7 @@ class ProfileEmbeddingIndexer:
                 result.failed_count += 1
                 error_msg = f"Error smart updating {profile.profile_key}: {str(e)}"
                 result.errors.append(error_msg)
-                logger.error("[ProfileEmbeddingIndexer] %s", error_msg)
+                logger.error("[ProfileEmbeddingIndexer] %s", error_msg, exc_info=True)
 
         # 计算耗时
         result.duration_seconds = (datetime.now() - start_time).total_seconds()
@@ -767,7 +767,7 @@ class ProfileEmbeddingIndexer:
 
         return [
             (fragment_id, vector, metadata)
-            for (_, fragment_id, _, metadata), vector in zip(plans, vectors)
+            for (fragment_id, _, metadata), vector in zip(plans, vectors)
         ]
 
     def delete_by_worker(self, worker_id: str) -> int:
