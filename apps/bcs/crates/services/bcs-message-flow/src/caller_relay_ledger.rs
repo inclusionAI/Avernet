@@ -137,6 +137,22 @@ impl CallerRelayLedger {
         Some((entry.root_turn_id.clone(), entry.ingress.clone()))
     }
 
+    /// Non-consuming liveness probe for the session's CURRENT human capture:
+    /// an unraced readiness check used by admission-side gates (the
+    /// chat-final claim channel below requires the owner identity to be
+    /// actually present before a stored coordination intent may be
+    /// claimed). Unlike `redeem`, this NEVER decrements the budget or
+    /// evicts an expired entry — a still-live answer is advisionly
+    /// followed by a real `redeem` at dispatch time, or an expired one
+    /// is cleaned up lazily by the next `record`/`redeem`.
+    pub fn has_live_capture(&self, env: &str, session_id: &str, now_ms: i64) -> bool {
+        self.entries
+            .lock()
+            .expect("relay ledger lock")
+            .get(&(env.to_string(), session_id.to_string()))
+            .is_some_and(|entry| entry.expires_at_ms > now_ms)
+    }
+
     /// Master-term boundary (spec §7.5.2): captured identity dies with the
     /// term. Returns how many session captures were wiped.
     pub fn seal_term(&self) -> usize {
@@ -217,6 +233,29 @@ mod tests {
         assert!(ledger.record("prod", "s-1", "turn-1", ingress("human_a"), NOW, 300_000));
         assert_eq!(ledger.seal_term(), 1);
         assert!(ledger.redeem("prod", "s-1", NOW).is_none());
+    }
+
+    #[test]
+    fn a_live_capture_probe_never_consumes_and_never_evicts() {
+        // The unraced readiness surface the chat-final claim channel gates
+        // on: true while the window is live, false once expired — and the
+        // probe neither spends a redeem nor removes a dead entry (the
+        // next record/redeem lazily cleans those).
+        let ledger = CallerRelayLedger::new(8);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW));
+        assert!(ledger.record("prod", "s-1", "turn-1", ingress("human_a"), NOW, 300_000));
+        assert!(ledger.has_live_capture("prod", "s-1", NOW + 1));
+        // The probe is non-consuming: the full redeem budget is intact.
+        let mut redeemed = 0;
+        while ledger.redeem("prod", "s-1", NOW + 1).is_some() {
+            redeemed += 1;
+        }
+        assert_eq!(redeemed, RELAY_PER_TURN);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW + 300_000));
+        // An expired entry is still probe-visible-late-but-untouched: the
+        // probe answers false and leaves reaping to record/redeem.
+        assert!(ledger.seal_term() >= 1);
+        assert!(!ledger.has_live_capture("prod", "s-1", NOW));
     }
 
     #[test]

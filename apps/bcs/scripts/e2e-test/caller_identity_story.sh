@@ -14,3 +14,15 @@ story_caller_identity_guarded_dispatch() {
         --driver "${BOT_PM_UUID:-}" || result=$?
     assert_eq "Caller identity preserved through guarded dispatch, config sync and lease commands" "$result" "0"
 }
+story_chat_final_coordination_claim() {
+    info "Story: chat-final coordination claim for provider manager bots (relay G1 gated)"
+    local result=0
+    python3 "$SCRIPT_DIR/coordination_chat_final_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "chat-final coordination claim settles stored-intent frames silently" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_chat_final_coordination_claim")
+fi
