@@ -1842,13 +1842,15 @@ and Bot containers. See the [English runbook and rollback procedure](skills-trac
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[RoutinePage]` |
 | POST | `/openapi/v1/bots/{bot_id}/routines` | Create | `201 Envelope[Routine]` |
 | GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Get | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine or RoutineOperationBatch]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun or RoutineOperationBatch]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[RoutineRunPage]` |
+
+Runtime targets: see [the routines target contract](engine-surface.md#routines-runtime-targets) for body/query placement, stage defaults, Caller authorization, per-instance identity and partial failures.
 
 ### 🟩 lucas-xzp · P2 — identity (3 endpoints) · `openapi_v1/identity/router.py`
 Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an
