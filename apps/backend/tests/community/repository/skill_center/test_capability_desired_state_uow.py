@@ -4054,6 +4054,10 @@ def test_ordinary_update_and_remove_can_manage_a_legacy_manifest_direct_mcp():
             user_id="owner", bot_id="bot", skill_set_id=default.id, server_code="mcp.member",
         ))
 
+    assert repository.manifest_direct_mcp_exists(
+        bot_id="bot", owner_id="owner", server_code="mcp.member", platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    ) is True
     updated = repository.set_mcp_override(
         bot_id="bot", owner_id="owner", server_code="mcp.member",
         config={"headers": {}}, platform_default_codes=frozenset(),

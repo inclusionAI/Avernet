@@ -119,6 +119,27 @@ class ApplyClaimCommands:
         )
         return frozenset(names), frozenset(mcp_codes | platform)
 
+    def manifest_direct_mcp_exists(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_code: str,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> bool:
+        with self._db.orm_session() as session:
+            return self._manifest_direct_mcp_in_session(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+
     def _manifest_direct_mcp_in_session(
         self,
         session,

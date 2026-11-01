@@ -296,6 +296,16 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         """An apply's Direct MCP claim plus atomic override; refuses a code a Set supplies."""
         ...
     @abstractmethod
+    def manifest_direct_mcp_exists(
+        self, *, bot_id: str, owner_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> bool:
+        """Whether a legacy Manifest claim (Default exclusion plus Installation) holds this MCP server Direct;
+        the ordinary MCP commands let a user manage such a server."""
+        ...
+    @abstractmethod
     def remove_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
         platform_default_codes: frozenset[str],
