@@ -181,8 +181,9 @@ pending-cutover marker semantics. A ready marker alone is not proof of a live
 mount. **Initial detection failure is treated as non-fastdisk** for restart
 compatibility; publication/restore still fail closed on detection errors.
 
-For a confirmed fastdisk target, `/opt/agentclaw/bin/restart_backup start/status`
-must return `committed` with a matching operation, boot identity, generation and
+With the guard enabled (the default), the confirmed fastdisk target
+must return `committed` from `/opt/agentclaw/bin/restart_backup start/status`
+with a matching operation, boot identity, generation and
 successful backup receipt. `partial_success`, degraded completeness, failure,
 missing helper, missing mounts, malformed output, transport error and unconfirmed
 timeout block replacement. Strict backup has a shared **300-second wait budget**
@@ -191,14 +192,27 @@ checked again before mutation. Non-fastdisk/unknown detection retains the
 existing best-effort backup behavior and its original budget. Binding checks,
 restart locks and mutation fences remain mandatory in either case.
 
-Ordinary durable restarts persist positive target confirmations monotonically in
+The existing `ac_common_config` key `aicoding / fastdisk_fail_open`
+controls only fastdisk backup vetoes. Fail-open defaults to `false`; only an enabled
+row with JSON boolean `true`
+allows backup failures to warn and continue; missing, disabled, invalid or unreadable
+configuration retains blocking. The strategy lazily reads configuration only for
+confirmed fastdisk and snapshots the value across its backup/receipt precondition.
+The composition root supplies the config-service factory, without doing I/O at
+import time. No per-engine logic is added to the shared restart flow. Disabled
+guards still run backup and retain the 300-second fastdisk budget; binding checks
+and mutation fences remain blocking. See `engines/aicoding/restart-backup.md` for
+the operator curl and data-loss warning.
+
+With blocking enabled, ordinary durable restarts persist positive target confirmations monotonically in
 `ext.coding_restart.fastdisk_targets`, so redelivery cannot downgrade them. A
 failure reuses `status`, `ext.start_status` and `ext.start_message`. Published
 restarts translate the terminal engine veto to the existing publish FAILED and
 `ext.error_message` fields using status/ext CAS, preserve the old binding, and
 finish the task without issuing a provider workflow. All veto classification,
 operation failure, guard ownership, replay checks and failure persistence live in
-`engines/aicoding/restart_publish.py`; there is no shared backup exception.
+`engines/aicoding/restart_backup.py`; there is no shared backup exception or
+separate published-restart mixin. Failure-log formatting also lives in this file.
 The common publish flow keeps its original orchestration inside `execute_restart`
 and enters the strategy's `published_restart_scope`; it does not extract a second
 common execution function. The scope yields an empty result to proceed, or a
@@ -217,8 +231,9 @@ strategy together. Third-party overrides of the former hook must implement the
 scope contract instead. Ordinary Bot restart hooks and task payloads are unchanged.
 
 The scripts may retain a maintenance barrier after partial backup, and a timed-out
-backup worker may still be running. Backend does **not** delete that barrier or
-force restart; investigate/repair the existing backup operation before retrying.
+backup worker may still be running. Backend does **not** delete that barrier.
+On the blocking path, investigate/repair the existing backup operation before retrying. Explicitly disabling the guard can authorize replacement after
+backup failure/timeout and may interrupt a running backup or lose unsaved data.
 Published retries retain their existing deterministic helper operation key (so a
 failed receipt on the same container is not silently replaced with a new attempt).
 A committed backup is a recoverable generation, not a zero-RPO promise: live

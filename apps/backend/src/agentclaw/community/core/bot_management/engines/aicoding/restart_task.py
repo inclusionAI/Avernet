@@ -44,8 +44,7 @@ from .restart_state import (
     task_key,
 )
 
-from .restart_backup import RestartBackupBlocked
-from .restart_failure_log import log_restart_failure
+from .restart_backup import RestartBackupBlocked, log_restart_failure
 from .restart_baas import find_rejection
 
 logger = get_logger()

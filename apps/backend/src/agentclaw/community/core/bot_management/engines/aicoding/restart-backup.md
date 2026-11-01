@@ -3,12 +3,14 @@
 ## Confirmed-fastdisk policy (2026-10-30)
 
 Backend sends the embedded publication detector. Unknown/failed initial detection
-uses the best-effort policy below; a positively confirmed fastdisk target requires
+uses the best-effort policy below; with blocking enabled (default), a positively
+confirmed fastdisk target requires
 a successful, complete backup receipt within 300 seconds. Failure, partial backup,
 missing capability or unconfirmed result blocks replacement. Ordinary durable
 restarts persist positive confirmations across redelivery.
 
-Published restart policy lives in `restart_publish.py`, contributed by
+Published restart policy and correlated failure logs live in the existing
+`restart_backup.py`, contributed by
 `AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
 exact-operation failure and status/ext CAS for the existing frontend fields.
 Shared publish orchestration stays in its original `execute_restart` method and
@@ -22,6 +24,66 @@ operation runner retains its adopt-before-issue logic and has no backup exceptio
 Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
 failures retain the existing crash-resume behavior. No shared service is patched
 or reconfigured per request.
+
+## Runtime switch (2026-11-01)
+
+Use the existing `ac_common_config` record (no schema or frontend change):
+
+| Field | Value |
+| --- | --- |
+| `business_code` | `aicoding` |
+| `param_code` | `fastdisk_fail_open` |
+| `enable` | `"1"` (configuration record is active) |
+| `param_value` | JSON boolean `false` (default) to block, `true` to warn and continue |
+| `env` | Chosen by the backend environment, not by the request body |
+
+Missing or disabled records, invalid values and configuration read errors retain
+fail-open `false` (blocking). In particular, `enable="0"` disables the configuration record and restores
+the **blocking default**; use `param_value=true` to allow continuation after backup failure. Read errors
+log only the error type, never raw exception text. Only a confirmed fastdisk
+attempt reads the setting. Each backup precondition snapshots it once across all
+replicas and final receipt checks; changing the record affects later attempts,
+not a backup already using its snapshot. Already-terminal failed tasks remain
+failed; the switch does not revive them.
+
+Both values still attempt the same helper and retain the fastdisk 300-second
+wait budget. With `true`, backup-only failures use the existing sanitized
+`action=continue_restart data_loss_risk=true` warning with bot/ARCA/owner/env
+correlation fields; they do not produce the restart-failed marker. A failed
+backup is not reported as successful. Binding changes, ownership/CAS failures
+and mutation fences still block. Non-coding engines and non-fastdisk/unknown
+initial detection keep their existing behavior. Ordinary BaaS, direct ARCA and
+published/Caller restarts all use the same coding strategy. Ordinary publication
+and restore policy are unchanged.
+
+**Disabling blocking accepts data loss:** replacement can interrupt an unfinished
+backup or destroy unpersisted data. Backend does not remove a maintenance barrier,
+repair a failed helper or guarantee the replacement will become ready.
+
+Operator example (not automatically executed): set `OCB_BASE_URL` to the target
+backend origin and `OCB_COOKIE` to your authorized operator login cookie. The
+existing `upsert` route inserts a missing record or updates that same key in the
+backend's current environment. Use `create` instead to reject an existing key.
+
+```bash
+curl --fail-with-body --request POST \
+  "${OCB_BASE_URL%/}/api/v1/common-config/upsert" \
+  --header 'Content-Type: application/json' \
+  --cookie "$OCB_COOKIE" \
+  --data-raw '{
+    "business_code": "aicoding",
+    "business_name": "AICoding",
+    "param_code": "fastdisk_fail_open",
+    "param_name": "快盘备份失败允许继续重启",
+    "param_value": false,
+    "enable": "1"
+  }'
+```
+
+Keep `enable="1"` and set only `param_value` to `true` to allow continuation.
+Confirm the response body's `success` is `true` (HTTP 200 alone is insufficient).
+The existing `POST /api/v1/common-config/get` accepts the same `business_code` and
+`param_code` for readback; its returned `env` identifies the effective environment.
 
 ## Non-fastdisk / unconfirmed best-effort policy (2026-10-12)
 

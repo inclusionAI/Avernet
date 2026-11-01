@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
-from agentclaw.community.core.bot_management.engines.aicoding.restart_failure_log import (
+from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import (
     MARKER, arca_identity, log_restart_failure,
 )
 from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartSuperseded

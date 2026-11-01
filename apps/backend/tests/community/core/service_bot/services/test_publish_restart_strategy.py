@@ -257,3 +257,30 @@ async def test_coding_scope_does_not_turn_cancellation_into_a_backup_veto(engine
     assert 'precondition_error' not in record.ext['restart']
     svc._publish_service.update_publish_status_with_ext.assert_not_called()
     assert ledger.get_latest_by_kind(1, 'restart', 'online').state == PublishOperationState.PENDING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('fail_open', [False, True])
+async def test_registered_strategy_reads_common_config_for_published_restart(engine, fail_open, monkeypatch, caplog):
+    from agentclaw.community.core.common_config.common_config_service_protocol import CommonConfigServiceProtocol
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import _operation_id
+    from agentclaw.community import di
+    from tests.community.core.bot_management.aicoding.test_restart_backup import response
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import executor
+
+    config, injector = Mock(), Mock()
+    config.get_value.return_value = fail_open
+    injector.get.return_value = config
+    monkeypatch.setattr(di, 'get_app_injector', lambda: injector)
+    svc, _, baas, build, record = _setup(engine)
+    baas.list_devices_by_bot_uuid.side_effect = None
+    baas.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    execute = executor([response('failed', operation_id=_operation_id(None, 'restart:1:online'))])
+    baas.post_bots_api.side_effect = lambda **kw: execute(kw['payload']['cmd'])
+    result = await svc.execute_restart(1, 'online', 'operator')
+    assert result['success'] is fail_open
+    assert build.upgrade_async.await_count == (1 if fail_open else 0)
+    assert ('AICODING_RESTART_FAILED' in caplog.text) is (not fail_open)
+    injector.get.assert_called_once_with(CommonConfigServiceProtocol)
+    config.get_value.assert_called_once()

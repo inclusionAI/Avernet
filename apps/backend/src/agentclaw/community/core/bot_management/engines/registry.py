@@ -233,6 +233,14 @@ class EngineProvisioningRegistry:
         return self._default
 
 
+def _restart_common_config():
+    """Resolve lazily at the composition root, never during registry import."""
+    from agentclaw.community.core.common_config.common_config_service_protocol import CommonConfigServiceProtocol
+    from agentclaw.community.di import get_app_injector
+
+    return get_app_injector().get(CommonConfigServiceProtocol)
+
+
 def _build_default_registry() -> EngineProvisioningRegistry:
     """Assemble the process-wide strategy registry with all known engines.
 
@@ -241,8 +249,10 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     obvious and no lazy double-checked-locking is needed.
     """
     registry = EngineProvisioningRegistry()
-    registry.register(AicodingProvisioningStrategy(AICODING_ENGINE_TYPE))
-    registry.register(AicodingProvisioningStrategy(CLAUDE_CODE_ENGINE_TYPE))
+    registry.register(AicodingProvisioningStrategy(
+        AICODING_ENGINE_TYPE, common_config_provider=_restart_common_config))
+    registry.register(AicodingProvisioningStrategy(
+        CLAUDE_CODE_ENGINE_TYPE, common_config_provider=_restart_common_config))
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry
