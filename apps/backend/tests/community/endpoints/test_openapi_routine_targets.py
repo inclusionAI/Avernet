@@ -21,9 +21,9 @@ def headers(user="u_owner", app_only=False):
     principals = [{"type": "app", "tenant": "teamclaw", "app": {
         "app_id": 701, "app_name": "routine-test", "owners": "team", "tenant": "teamclaw"}}] if app_only else [
         {"type": "user", "subject": {"id": user, "username": "routine@example.test"}}]
-    token = jwt.encode({"iss": "gateway", "aud": "backend", "iat": now,
-                        "exp": now + 3600, "principals": principals}, _KEY, algorithm="HS256")
-    return {PRINCIPAL_HEADER: token}
+    return {PRINCIPAL_HEADER: jwt.encode(
+        {"iss": "gateway", "aud": "backend", "iat": now,
+         "exp": now + 3600, "principals": principals}, _KEY, algorithm="HS256")}
 
 
 def seed(world, collaborator=False):
