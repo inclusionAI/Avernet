@@ -32,7 +32,12 @@ export function useMessageDeliveries(
   const scopeRef = useRef<object | null>(null);
   useEffect(() => {
     scopeRef.current = {};
-    return () => { scopeRef.current = null; };
+    return () => {
+      scopeRef.current = null;
+      // A new provider in the same Session must also release pending UI state.
+      cancellingRef.current.clear();
+      setCancellingDeliveryIds(new Set());
+    };
   }, [provider, sessionId]);
 
   // 订阅 WS delivery 事件
@@ -66,8 +71,6 @@ export function useMessageDeliveries(
       }
       terminalTimersRef.current.forEach((timer) => clearTimeout(timer));
       terminalTimersRef.current.clear();
-      cancellingRef.current.clear();
-      setCancellingDeliveryIds(new Set());
     };
   }, [sessionId]);
 

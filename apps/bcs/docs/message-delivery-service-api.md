@@ -424,7 +424,11 @@ The SQL implementation uses one indexed aggregate on existing
 Session and environment isolation and no per-message DB round trips. Memory
 history aggregates delivery states once per Session, rather than scanning all
 deliveries for each message. Cancellation reuses its existing message/delivery
-reads and CAS writes. Candidate-history and per-message target scans are data
+reads and CAS writes. After any successful transition, one additional source-message
+lookup confirms removability from persisted sibling states; it is not repeated per
+target. Confirmation-read failure returns a service error without authorizing
+message removal, and does not roll back already committed cancellations.
+Candidate-history and per-message target scans are data
 dependent in cancellation-dense ranges; LIMIT bounds returned rows, not all
 scanned rows. SQLite index selection is tested; remote MySQL/OceanBase plans
 require deployment verification. Publication of a correlation-capable SDK is independent:
