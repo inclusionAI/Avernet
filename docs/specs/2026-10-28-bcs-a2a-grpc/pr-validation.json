@@ -1,6 +1,6 @@
 {
   "recorded_at": "2026-10-31T16:04:00.285520+00:00",
-  "scope": "Frozen pre-publication evidence; use current PR checks for the final CI status.",
+  "scope": "Frozen pre-publication evidence, including historical frontend checks now owned by PR #3397. The A2A PR contains no frontend source changes; use current PR checks for final CI status.",
   "ci_results_url": "https://github.com/inclusionAI/Avernet/pull/3390/checks",
   "harness_sdk_included": false,
   "validated_baseline_commit": "6186224ba5f58908b0a14f01510eee105bb963e6",

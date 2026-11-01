@@ -183,15 +183,16 @@ export function selectWebsocketUrl(
   return `ws://localhost:20003${wsPath}`;
 }
 
-/** local dev 使用同源 /bcnproxy 代理。 */
-declare const LOCAL_BCN_PROXY: boolean | undefined;
+/** local dev 注入的 BCS 端口；非 local 预设为空。 */
+declare const LOCAL_BCN_PORT: string | undefined;
 
 /** 获取 BCN WebSocket URL（群聊用） */
 export function selectBcnWebsocketUrl(): string {
-  // 保留浏览器实际访问的 host（含端口），兼容 SSH 转发及 IPv6。
-  if (typeof LOCAL_BCN_PROXY !== 'undefined' && LOCAL_BCN_PROXY) {
+  // 外部用户访问开发机上的 local demo 时，hostname 是开发机，
+  // 而不是访问者电脑的 127.0.0.1。端口仍跟随 BCS_PORT。
+  if (typeof LOCAL_BCN_PORT !== 'undefined' && LOCAL_BCN_PORT) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/bcnproxy/ws`;
+    return `${protocol}//${window.location.hostname}:${LOCAL_BCN_PORT}/ws`;
   }
 
   const bcnServer = getServers().BCN;
