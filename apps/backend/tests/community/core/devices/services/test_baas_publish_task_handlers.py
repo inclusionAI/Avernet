@@ -1330,6 +1330,71 @@ def test_create_init_marks_failed_when_init_fails():
     )
 
 
+def test_create_poll_completes_when_binding_is_released():
+    """A released binding must not consume a late create publish result.
+
+    This can happen when delete/release races a still-active create publish.
+    The task must stop cleanly rather than enqueueing create init and then
+    marking a synthetic start failure against a bot that no longer exists.
+    """
+    repo = MagicMock()
+    baas_device_service = MagicMock()
+    task_queue_service = MagicMock()
+    handler = BaasCreatePublishPollHandler(
+        binding_repository=repo,
+        baas_service=baas_device_service,
+        task_queue_service=task_queue_service,
+        clock=lambda: 200.0,
+    )
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.RELEASED.value,
+        device_props={"publish_id": 1001},
+    )
+    baas_device_service.poll_publish_once.return_value = "ACTIVE"
+
+    outcome = handler.handle(
+        {
+            "binding_id": 42,
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "publish_id": 1001,
+            "started_at_epoch_s": 123.4,
+        }
+    )
+
+    assert outcome == Complete()
+    baas_device_service.poll_publish_once.assert_not_called()
+    task_queue_service.enqueue.assert_not_called()
+    baas_device_service._mark_service_start_failed.assert_not_called()
+
+
+def test_create_init_completes_when_binding_is_released():
+    """Stale create init work must not run against a released binding."""
+    repo = MagicMock()
+    baas_device_service = MagicMock()
+    handler = BaasCreateInitTaskHandler(
+        binding_repository=repo,
+        baas_device_service=baas_device_service,
+    )
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.RELEASED.value,
+        device_props={"publish_id": 1001},
+    )
+
+    outcome = handler.handle(
+        {
+            "binding_id": 42,
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "publish_id": 1001,
+        }
+    )
+
+    assert outcome == Complete()
+    baas_device_service.run_create_init_once.assert_not_called()
+    baas_device_service._mark_service_start_failed.assert_not_called()
+
+
 def test_create_init_completes_when_binding_is_terminal_or_not_baas():
     repo = MagicMock()
     baas_device_service = MagicMock()

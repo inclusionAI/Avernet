@@ -215,6 +215,7 @@ def _binding_is_terminal(binding: Any) -> bool:
     return getattr(binding, "status", None) in {
         DeviceBindingStatus.ACTIVE.value,
         DeviceBindingStatus.FAILED.value,
+        DeviceBindingStatus.RELEASED.value,
     }
 
 
@@ -329,6 +330,10 @@ class BaasCreateInitTaskHandler:
         if getattr(binding, "device_provider", None) != "baas":
             return Complete()
         if not _payload_publish_id_matches(binding, publish_id, "publish_id"):
+            return Complete()
+        if getattr(binding, "status", None) in {
+            DeviceBindingStatus.RELEASED.value,
+        }:
             return Complete()
         if getattr(binding, "status", None) == DeviceBindingStatus.ACTIVE.value:
             _publish_baas_completed(
