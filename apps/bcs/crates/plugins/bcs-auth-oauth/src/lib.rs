@@ -21,4 +21,4 @@ mod verify;
 pub use login_state::MemoryPendingOAuthLoginStore;
 pub use plugin::OAuthSessionPlugin;
 pub use strict::OAuthSessionEngine;
-pub use verify::{verify_oauth_session, verify_oauth_session_unsafe_construction_transition};
+pub use verify::verify_oauth_session;

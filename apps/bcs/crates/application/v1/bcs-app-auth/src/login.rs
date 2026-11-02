@@ -19,8 +19,8 @@
 
 use bcs_service_api::application::v1::error::ApplicationError;
 use bcs_service_api::application::v1::{
-    AuthFlowReply, AuthProviderUrl, AuthProviderUrlList, BoundOAuthLogin, BrowserCookieChange,
-    BuildLoginUrls,
+    AuthFlowReply, AuthRedirectLocation, AuthProviderUrl, AuthProviderUrlList, BrowserCookieChange,
+    BuildLoginUrls, CompleteOAuthLogin,
 };
 
 use crate::AuthApplicationService;
@@ -139,8 +139,8 @@ pub(super) async fn login_urls_flow(
 /// binding order above.
 pub(super) async fn complete_login_flow(
     service: &AuthApplicationService,
-    command: BoundOAuthLogin,
-) -> AuthFlowReply<bcs_service_api::application::v1::AuthRedirectLocation> {
+    command: CompleteOAuthLogin,
+) -> AuthFlowReply<AuthRedirectLocation> {
     let names = service.providers.names();
     if names.is_empty() {
         return reply_error(ApplicationError::not_found(
@@ -225,7 +225,7 @@ pub(super) async fn complete_login_flow(
         "oauth login complete"
     );
     AuthFlowReply {
-        result: Ok(bcs_service_api::application::v1::AuthRedirectLocation {
+        result: Ok(AuthRedirectLocation {
             location: service.success_redirect_path().to_string(),
         }),
         cookie_changes: vec![

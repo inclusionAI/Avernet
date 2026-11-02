@@ -1,16 +1,31 @@
-//! OAuth HTTP routes: /auth/url, /auth/callback/{provider}, /auth/logout.
+//! Legacy `/auth/*` HTTP entry (V1 API auth plan, Task 11).
 //!
-//! These routes are shared across all OAuth providers. Provider-specific
-//! logic is delegated to the `OAuthProvider` trait implementations injected
-//! into `OAuthRouteState`.
+//! This state is now a THIN holder: the injected secure
+//! [`AuthService`] (the same transport-neutral orchestration the V1
+//! entry uses, built with the LEGACY flow namespace and the same
+//! pending-state / session ports) owns every callback / refresh /
+//! logout business decision. The handlers in [`routes`] only parse the
+//! temporary login-challenge cookie, the session cookie, the request
+//! method, and the request Origin, then consume the reply's
+//! [`AuthFlowReply`] cookie instructions as separate appended
+//! `Set-Cookie` headers. The retained local readers are the non-OAuth
+//! `/auth/user` chain fallback and the `/auth/user/{user_id}` display
+//! lookup — neither re-implements flow business logic.
 //!
-//! Route ownership is split by responsibility: the HTTP handlers live in
-//! [`routes`] and the V1 `AuthService` facade over the shared state lives in
-//! [`legacy_facade`]. This module owns `OAuthRouteState` and the
-//! session-cookie helpers both of them share.
+//! Cookie contract (plan §8.4): the production login challenge is the
+//! host-only `__Host-bcs_oauth_login` cookie (Path=/, HttpOnly, Secure,
+//! SameSite=Lax, Max-Age=300) and plain-HTTP local development uses a
+//! different, non-`__Host` name — production never downgrades. The
+//! session cookie keeps the existing `bcs_session` name and flags.
+//!
+//! CSRF (plan §8.3 — compatibility tightening, documented): the legacy
+//! refresh/logout POST are cookie-authenticated unsafe writes. Their
+//! trusted-origin set is injected by bootstrap from the finite exact
+//! subset of `cors.allowed_origins` (wildcards and invalid entries are
+//! excluded); with no exact origins configured, cookie unsafe requests
+//! are REJECTED. Origins are never inferred from Host or Referer, and a
+//! Gateway identity never substitutes for the cookie.
 
-mod legacy_facade;
-pub mod state;
 mod routes;
 
 #[cfg(test)]
@@ -24,97 +39,86 @@ pub use routes::{
     refresh_handler, routes,
 };
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use bcs_auth_api::{BCS_SESSION_COOKIE, OAuthConfig, OAuthProvider, UserIdentityPort};
+use bcs_auth_api::{AuthPluginChain, OAuthConfig, UserIdentityPort};
 use bcs_jwt::JwtService;
+use bcs_service_api::application::v1::AuthService;
 
-use crate::oauth::state::OAuthStateStore;
+/// The cookie name pair for the login challenge (plan §8.4): production
+/// uses the host-only `__Host-` name; plain-HTTP local development uses
+/// a different name because browsers drop `Secure` cookies over HTTP —
+/// and the production name must never learn to work without `Secure`.
+pub const HOST_CHALLENGE_COOKIE: &str = "__Host-bcs_oauth_login";
+pub const LOCAL_CHALLENGE_COOKIE: &str = "bcs_oauth_login";
+/// Pinned challenge window (plan §8.4: 5 minutes).
+pub const CHALLENGE_MAX_AGE_SECS: u64 = 300;
 
-// Names this module no longer uses itself but that `tests.rs` /
-// `diagnostics_test.rs` reach through their `use super::*` glob imports.
-// Keep in sync with those files; behavior-preserving boundary split.
-#[allow(unused_imports)]
-use axum::{
-    extract::{Path, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
-};
-#[allow(unused_imports)]
-use bcs_jwt::Claims;
-#[allow(unused_imports)]
-use bcs_service_api::application::RequestAuthHeaders;
-#[allow(unused_imports)]
-use bcs_service_api::application::v1::{
-    ApplicationError, AuthService, BuildLoginUrls, CompleteOAuthLogin, LogoutSession,
-    ReadCurrentUser, RefreshSession,
-};
-
-/// Shared state for OAuth routes.
+/// Shared state for the legacy `/auth/*` routes: an injected secure
+/// `AuthService` plus the legacy identity readers. No flow business
+/// logic lives here.
 pub struct OAuthRouteState {
-    pub jwt_service: JwtService,
+    /// The injected secure orchestration (LEGACY flow namespace). `None`
+    /// only for the identity-only mount that serves `/auth/user` alone.
+    pub auth_service: Option<Arc<dyn AuthService>>,
+    /// Legacy identity reader for the non-OAuth `/auth/user` path.
+    pub auth_chain: Option<Arc<AuthPluginChain>>,
+    /// Legacy display reader for `/auth/user/{user_id}`.
     pub user_port: Arc<dyn UserIdentityPort>,
-    pub providers: HashMap<String, Arc<dyn OAuthProvider>>,
-    pub state_store: OAuthStateStore,
+    pub jwt_service: JwtService,
     pub config: OAuthConfig,
-    /// Non-OAuth fallback identity source. When a request has no valid
-    /// `bcs_session` cookie (or OAuth is not configured at all),
-    /// `current_user_handler` resolves the caller via this chain — e.g. the
-    /// local mock plugin. `None` only in contract-test state that never serves
-    /// real traffic.
-    pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
+    /// Exact trusted origins for cookie-authenticated unsafe writes,
+    /// injected by bootstrap (derived from `cors.allowed_origins`).
+    pub trusted_origins: Vec<String>,
 }
-
 
 impl OAuthRouteState {
     pub fn new(
-        jwt_secret: &str,
+        auth_service: Arc<dyn AuthService>,
         user_port: Arc<dyn UserIdentityPort>,
-        providers: HashMap<String, Arc<dyn OAuthProvider>>,
         config: OAuthConfig,
-        auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
+        auth_chain: Option<Arc<AuthPluginChain>>,
+        trusted_origins: Vec<String>,
     ) -> Self {
+        let jwt_secret = config.jwt_secret.clone();
         Self {
-            jwt_service: JwtService::new(jwt_secret),
-            user_port,
-            providers,
-            state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
-            config,
+            auth_service: Some(auth_service),
             auth_chain,
+            user_port,
+            jwt_service: JwtService::new(&jwt_secret),
+            config,
+            trusted_origins,
         }
     }
 
-    /// Identity-only state for the no-OAuth case: `/auth/user` is backed solely
-    /// by the auth chain. The `JwtService` is unused on this path — the cookie
-    /// lookup is only attempted when `config.jwt_secret` is non-empty, which this
-    /// state leaves empty, so no cookie is ever verified here.
+    /// Identity-only state for the no-OAuth case: `/auth/user` is backed
+    /// solely by the auth chain. The `JwtService` is unused on this path
+    /// (no `bcs_session` cookie is ever verified without OAuth), and no
+    /// login family route is mounted with this state.
     pub fn new_chain_only(
         user_port: Arc<dyn UserIdentityPort>,
-        auth_chain: Arc<bcs_auth_api::AuthPluginChain>,
+        auth_chain: Arc<AuthPluginChain>,
     ) -> Self {
         Self {
-            jwt_service: JwtService::new(""),
-            user_port,
-            providers: HashMap::new(),
-            state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
-            config: OAuthConfig::default(),
+            auth_service: None,
             auth_chain: Some(auth_chain),
+            user_port,
+            jwt_service: JwtService::new(""),
+            config: OAuthConfig::default(),
+            trusted_origins: Vec::new(),
         }
+    }
+
+    /// The injected secure service for the mounted login family routes.
+    pub fn require_auth_service(&self) -> Option<&Arc<dyn AuthService>> {
+        self.auth_service.as_ref()
     }
 }
 
-/// Build the `Set-Cookie` value carrying the session JWT. `secure` controls the
-/// `Secure` attribute — must be `false` over plain HTTP (local dev) or browsers
-/// drop the cookie.
-fn session_cookie(jwt: &str, secure: bool) -> String {
-    let secure_attr = if secure { "; Secure" } else { "" };
-    format!("{BCS_SESSION_COOKIE}={jwt}; HttpOnly{secure_attr}; SameSite=Lax; Path=/")
-}
-
-/// Build the `Set-Cookie` value that clears the session cookie.
-fn clear_session_cookie(secure: bool) -> String {
-    let secure_attr = if secure { "; Secure" } else { "" };
-    format!("{BCS_SESSION_COOKIE}=; HttpOnly{secure_attr}; SameSite=Lax; Path=/; Max-Age=0")
+fn challenge_cookie_name(secure: bool) -> &'static str {
+    if secure {
+        HOST_CHALLENGE_COOKIE
+    } else {
+        LOCAL_CHALLENGE_COOKIE
+    }
 }

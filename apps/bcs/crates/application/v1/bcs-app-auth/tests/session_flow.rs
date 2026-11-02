@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
     AuthenticatedCaller, AuthenticatedUserIdentity, BrowserCookieChange, PresentedSession,
-    SecureAuthService,
+    AuthService,
 };
 
 use support::fake_ports::{FakePendingLoginPort, FakeProviderPort, FakeSessionPort};

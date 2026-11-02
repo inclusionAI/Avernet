@@ -103,6 +103,12 @@ pub struct BcsServerState {
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
+    /// Strict session identity port over the SAME store as
+    /// `user_identity_port` (V1 API auth plan, Task 11): the login
+    /// entries install/refresh/revoke sessions through it, and
+    /// integration tests seed strict sessions via this handle.
+    pub auth_session_identity: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
+
     /// User-controlled outbound HTTP URL security policy.
     pub outbound_url_guard: OutboundUrlGuard,
 
@@ -757,11 +763,14 @@ impl Default for BcsServerState {
             &config.auth,
             crate::config_loader::Environment::resolve().as_str(),
         );
-        let user_identity_port = Some(crate::identity_wiring::memory_user_identity_port());
+        let identity_ports = crate::identity_wiring::memory_identity_ports();
+        let user_identity_port = Some(identity_ports.user_identity.clone());
+        let auth_session_identity = Some(identity_ports.auth_session_identity.clone());
         let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
             &auth_config,
             bot_registry.clone(),
-            user_identity_port.clone(),
+            Some(identity_ports.user_identity.clone()),
+            Some(identity_ports.auth_session_identity.clone()),
         ));
         let bot_ws_admission = config.bot_ws_admission.build();
 
@@ -796,6 +805,7 @@ impl Default for BcsServerState {
             internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
+            auth_session_identity,
             outbound_url_guard,
             admin_invocation_runs,
             connect_service: Arc::new(bcs_test_support::NoopConnectService),

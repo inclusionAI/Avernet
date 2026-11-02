@@ -1,5 +1,5 @@
 //! Redaction tests for the Task 9 auth service types (plan §8.4
-//! credential-log red line): `BrowserLoginBinding`, `BoundOAuthLogin`,
+//! credential-log red line): `BrowserLoginBinding`, `CompleteOAuthLogin`,
 //! and `BrowserCookieChange` all carry login credentials (nonce, state,
 //! code, session token), and even the outer `AuthFlowReply` envelope
 //! must format them away. Asserted with sentinel credentials constructed
@@ -7,7 +7,7 @@
 //! formatted value.
 
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthFlowReply, BrowserCookieChange, BrowserLoginBinding, BoundOAuthLogin,
+    ApplicationError, AuthFlowReply, BrowserCookieChange, BrowserLoginBinding, CompleteOAuthLogin,
 };
 use bcs_service_api::port::oauth::{BrowserSession, PendingLoginBatch};
 
@@ -18,8 +18,8 @@ const CODE_SENTINEL: &str = "code-sentinel";
 const TOKEN_SENTINEL: &str = "token-sentinel";
 
 /// Real, required browser binding — no `Option` or default-empty escape.
-fn bound_login() -> BoundOAuthLogin {
-    BoundOAuthLogin {
+fn bound_login() -> CompleteOAuthLogin {
+    CompleteOAuthLogin {
         provider: "github".to_string(),
         code: Some(CODE_SENTINEL.to_string()),
         auth_code: None,
@@ -81,8 +81,8 @@ fn browser_login_binding_debug_omits_nonce() {
 fn bound_oauth_login_debug_omits_credentials() {
     let login = bound_login();
     let debug = format!("{login:?}");
-    assert!(debug.contains("BoundOAuthLogin"), "debug names the type");
-    assert_no_sentinels(&debug, "BoundOAuthLogin");
+    assert!(debug.contains("CompleteOAuthLogin"), "debug names the type");
+    assert_no_sentinels(&debug, "CompleteOAuthLogin");
 }
 
 #[test]

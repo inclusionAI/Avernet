@@ -17,25 +17,20 @@ use crate::AuthApplicationService;
 /// Project the ALREADY-authenticated Human caller. No credential chain
 /// runs here: the caller, provider label, and avatar are trusted-adapter
 /// input, and the label/avatar are display data only — never authority.
+/// The projection itself is the ONE shared `project_current_user` in the
+/// service contract, so a delivery-side projection of a verified caller
+/// (no-OAuth deployments) cannot drift from this path.
 pub(super) async fn current_user_flow(
     _service: &AuthApplicationService,
     query: AuthenticatedUserQuery,
 ) -> Result<AuthUserInfo, ApplicationError> {
-    let Some(user) = query.caller.user else {
-        tracing::debug!("current user rejected: caller has no human identity");
-        return Err(ApplicationError::Unauthenticated);
-    };
-    let name = user
-        .display_name
-        .clone()
-        .or_else(|| user.full_name.clone())
-        .or_else(|| Some(user.username.clone()));
-    Ok(AuthUserInfo {
-        user_id: user.id,
-        name,
-        provider: query.provider_label,
-        avatar: query.avatar,
-    })
+    match bcs_service_api::application::v1::project_current_user(&query) {
+        Ok(user) => Ok(user),
+        Err(error) => {
+            tracing::debug!("current user rejected: caller has no human identity");
+            Err(error)
+        }
+    }
 }
 
 /// Rotate the presented session; the rotated credential arrives as a

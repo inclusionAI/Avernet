@@ -3,8 +3,6 @@ use std::fmt;
 use async_trait::async_trait;
 use serde::Serialize;
 
-use crate::application::RequestAuthHeaders;
-
 use super::identity::AuthenticatedCaller;
 use super::ApplicationError;
 
@@ -17,13 +15,12 @@ pub struct BrowserLoginBinding {
     pub nonce: String,
 }
 
-/// Verified OAuth callback command carrying the initiating browser's
-/// REQUIRED binding (plan §8.4). Coexists with the legacy
-/// [`CompleteOAuthLogin`] until Task 11 atomically swaps the active
-/// `AuthService` surface; new code must construct a real
-/// [`BrowserLoginBinding`] — there is no `Option` escape hatch.
+/// Verified OAuth callback command (plan §8.4) carrying the initiating
+/// browser's REQUIRED binding. The FINAL `CompleteOAuthLogin` shape:
+/// there is no `Option` escape hatch and no second login command type —
+/// every entry (legacy and V1) constructs a real [`BrowserLoginBinding`].
 #[derive(Clone)]
-pub struct BoundOAuthLogin {
+pub struct CompleteOAuthLogin {
     pub provider: String,
     pub code: Option<String>,
     pub auth_code: Option<String>,
@@ -80,9 +77,9 @@ impl fmt::Debug for BrowserLoginBinding {
     }
 }
 
-impl fmt::Debug for BoundOAuthLogin {
+impl fmt::Debug for CompleteOAuthLogin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BoundOAuthLogin").finish_non_exhaustive()
+        f.debug_struct("CompleteOAuthLogin").finish_non_exhaustive()
     }
 }
 
@@ -147,75 +144,12 @@ impl fmt::Debug for AuthProviderUrlList {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct CompleteOAuthLogin {
-    pub provider: String,
-    pub code: Option<String>,
-    pub auth_code: Option<String>,
-    pub state: String,
-    pub callback_base_url: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReadCurrentUser {
-    pub headers: RequestAuthHeaders,
-}
-
-#[derive(Debug, Clone)]
-pub struct RefreshSession {
-    pub headers: RequestAuthHeaders,
-}
-
-#[derive(Debug, Clone)]
-pub struct LogoutSession {
-    pub headers: RequestAuthHeaders,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthUserInfo {
     pub user_id: String,
     pub name: Option<String>,
     pub provider: String,
     pub avatar: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AuthRedirect {
-    pub location: String,
-    pub set_cookie: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SessionRenewal {
-    #[serde(skip_serializing)]
-    pub set_cookie: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct LogoutResult {
-    #[serde(skip_serializing)]
-    pub set_cookie: String,
-}
-
-#[async_trait]
-pub trait AuthService: Send + Sync {
-    async fn login_urls(
-        &self,
-        request: BuildLoginUrls,
-    ) -> Result<AuthProviderUrlList, ApplicationError>;
-
-    async fn complete_login(
-        &self,
-        request: CompleteOAuthLogin,
-    ) -> Result<AuthRedirect, ApplicationError>;
-
-    async fn current_user(&self, request: ReadCurrentUser)
-        -> Result<AuthUserInfo, ApplicationError>;
-
-    async fn refresh_session(&self, request: RefreshSession)
-        -> Result<SessionRenewal, ApplicationError>;
-
-    async fn logout(&self, request: LogoutSession) -> Result<LogoutResult, ApplicationError>;
 }
 
 /// REQUIRED presentation of an existing login-session credential (V1 API
@@ -265,13 +199,13 @@ pub struct SessionRenewalData {}
 pub struct LogoutData {}
 
 /// Transport-neutral secure OAuth orchestration contract (V1 API auth
-/// plan, Task 10). TEMPORARY NAME: Task 11 atomically replaces the
-/// active `AuthService` surface above with this trait and restores the
-/// stable name `AuthService`; until then both coexist and delivery still
-/// routes through the old entry.
+/// plan, Tasks 10–11): the ONE entry surface both the legacy `/auth/*`
+/// HTTP entry and the V1 `/openapi/v1/auth/*` entry route through. Every
+/// implementation injects its ports and configuration; delivery adapters
+/// only parse temporary cookies, the request method/Origin, and session
+/// cookies, then consume [`AuthFlowReply`] cookie instructions.
 ///
-/// Beyond the different input/output shapes, the contract differs from
-/// the legacy trait in three binding ways:
+/// Binding contract (plan §8.4):
 /// - login flows answer with [`AuthFlowReply`]: cookie instructions are
 ///   returned on BOTH success and failure so cleanup is never lost;
 /// - `complete_login` demands the REQUIRED browser binding (a rejected
@@ -281,7 +215,7 @@ pub struct LogoutData {}
 /// - session flows take [`PresentedSession`] instead of raw Headers:
 ///   parsing cookies is delivery's job, never the application's.
 #[async_trait]
-pub trait SecureAuthService: Send + Sync {
+pub trait AuthService: Send + Sync {
     /// Issue the browser-bound provider authorize-URL batch: keeps the
     /// provider chain (subsequence) order and returns ONE
     /// `SetLoginChallenge` instruction carrying the fresh window.
@@ -295,7 +229,7 @@ pub trait SecureAuthService: Send + Sync {
     /// state → exchange the code → install the strict session.
     async fn complete_login(
         &self,
-        command: BoundOAuthLogin,
+        command: CompleteOAuthLogin,
     ) -> AuthFlowReply<AuthRedirectLocation>;
 
     /// Project the already-authenticated Human caller; display-only.
@@ -314,4 +248,30 @@ pub trait SecureAuthService: Send + Sync {
     /// Revoke the presented session when there is one; `None` (no cookie)
     /// is a valid idempotent success boundary that skips the port.
     async fn logout(&self, session: Option<PresentedSession>) -> AuthFlowReply<LogoutData>;
+}
+
+/// The ONE Human projection for an ALREADY-authenticated caller (plan
+/// §8.2): pure, HTTP-free, and shared by [`AuthService::current_user`]
+/// implementations and delivery-side projections of verified callers (so
+/// a deployment whose auth service is not configured — no OAuth —
+/// projects identically to one that has it). Non-Human callers are not
+/// projectable; there is no second chain execution behind this query and
+/// `provider_label`/`avatar` are display data only, never authority.
+pub fn project_current_user(
+    query: &AuthenticatedUserQuery,
+) -> Result<AuthUserInfo, ApplicationError> {
+    let Some(user) = query.caller.user.as_ref() else {
+        return Err(ApplicationError::Unauthenticated);
+    };
+    let name = user
+        .display_name
+        .clone()
+        .or_else(|| user.full_name.clone())
+        .or_else(|| Some(user.username.clone()));
+    Ok(AuthUserInfo {
+        user_id: user.id.clone(),
+        name,
+        provider: query.provider_label.clone(),
+        avatar: query.avatar.clone(),
+    })
 }

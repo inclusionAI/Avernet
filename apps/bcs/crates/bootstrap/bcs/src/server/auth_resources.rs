@@ -41,6 +41,10 @@ pub(super) async fn build_gateway_principal_auth_resources(
 pub(super) struct AuthChainResources {
     pub(super) auth_config: bcs_auth_api::AuthConfig,
     pub(super) user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
+    /// Strict session identity port over the SAME store as
+    /// `user_identity_port`: session issuance/rotation/revocation for both
+    /// HTTP login entries, and the seed handle for integration tests.
+    pub(super) auth_session_identity: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
     pub(super) auth_chain: Arc<bcs_auth_api::AuthPluginChain>,
 }
 
@@ -54,18 +58,25 @@ pub(super) fn build_auth_chain_resources(
         &config.auth,
         crate::config_loader::Environment::resolve().as_str(),
     );
-    let user_identity_port = match infrastructure_plugins.db() {
-        Some(db) => Some(crate::identity_wiring::db_user_identity_port(
+    // One identity build over ONE store instance: the legacy display port
+    // and the strict session port share the same in-memory map / DB rows,
+    // so sessions installed through the strict port are visible to the
+    // display readers.
+    let identity_ports = match infrastructure_plugins.db() {
+        Some(db) => crate::identity_wiring::db_identity_ports(
             infrastructure_plugins.db_kind(),
             db,
-        )),
-        None => Some(crate::identity_wiring::memory_user_identity_port()),
+        ),
+        None => crate::identity_wiring::memory_identity_ports(),
     };
+    let user_identity_port = Some(identity_ports.user_identity.clone());
+    let auth_session_identity = Some(identity_ports.auth_session_identity.clone());
     let auth_chain = Arc::new(
         crate::auth_wiring::try_build_auth_chain_with_factories(
             &auth_config,
             Arc::clone(bot_registry),
-            user_identity_port.clone(),
+            Some(identity_ports.user_identity.clone()),
+            Some(identity_ports.auth_session_identity.clone()),
             &extensions.auth_plugin_factories,
         )
         .map_err(crate::BcsError::InvalidConfig)?,
@@ -73,6 +84,7 @@ pub(super) fn build_auth_chain_resources(
     Ok(AuthChainResources {
         auth_config,
         user_identity_port,
+        auth_session_identity,
         auth_chain,
     })
 }

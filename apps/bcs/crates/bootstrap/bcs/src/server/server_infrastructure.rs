@@ -931,6 +931,7 @@ impl BcsServer {
         let AuthChainResources {
             auth_config,
             user_identity_port,
+            auth_session_identity,
             auth_chain,
         } = super::auth_resources::build_auth_chain_resources(
             &config,
@@ -969,6 +970,7 @@ impl BcsServer {
             internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
+            auth_session_identity,
             outbound_url_guard,
             admin_invocation_runs,
             connect_service,

@@ -38,23 +38,28 @@ use bcs_service_api::port::oauth::{
     PendingOAuthLoginPort,
 };
 
-/// Provider-chain bridge: one name lookup + vocabulary translation, no
-/// provider selection of its own. Sorting/priority is upstream in the
-/// injection; `names()` preserves the injection order.
+/// Provider-chain bridge: one instance-name lookup + vocabulary
+/// translation, no provider selection of its own. The bootstrap injects
+/// `(instance_name, provider)` pairs: the INSTANCE name is the public
+/// identity (the legacy entry's map key, the callback path segment, the
+/// recorded `src`/display source), while the concrete provider behind it
+/// only supplies `auth_url`/`exchange` behavior. Sorting/priority is
+/// upstream in the injection; `names()` preserves the injection order.
 pub struct ConfiguredOAuthProviderBridge {
-    providers: Vec<Arc<dyn OAuthProvider>>,
+    providers: Vec<(String, Arc<dyn OAuthProvider>)>,
 }
 
 impl ConfiguredOAuthProviderBridge {
     /// Wrap the already-built provider chain (injection order kept).
-    pub fn new(providers: Vec<Arc<dyn OAuthProvider>>) -> Self {
+    pub fn new(providers: Vec<(String, Arc<dyn OAuthProvider>)>) -> Self {
         Self { providers }
     }
 
     fn find(&self, name: &str) -> Result<&Arc<dyn OAuthProvider>, ApplicationError> {
         self.providers
             .iter()
-            .find(|provider| provider.name() == name)
+            .find(|(instance, _)| instance == name)
+            .map(|(_, provider)| provider)
             .ok_or_else(|| {
                 ApplicationError::not_found(
                     "provider_not_enabled",
@@ -67,7 +72,10 @@ impl ConfiguredOAuthProviderBridge {
 #[async_trait]
 impl OAuthProviderPort for ConfiguredOAuthProviderBridge {
     fn names(&self) -> Vec<String> {
-        self.providers.iter().map(|p| p.name().to_string()).collect()
+        self.providers
+            .iter()
+            .map(|(instance, _)| instance.clone())
+            .collect()
     }
 
     async fn auth_url(
@@ -352,7 +360,9 @@ mod tests {
 
     #[tokio::test]
     async fn provider_bridge_lowering_discards_sentinel_laden_text() {
-        let bridge = ConfiguredOAuthProviderBridge::new(vec![Arc::new(FailingProvider)]);
+        let bridge = ConfiguredOAuthProviderBridge::new(vec![
+            ("github".to_string(), Arc::new(FailingProvider)),
+        ]);
 
         assert_eq!(bridge.names(), vec!["github".to_string()]);
 

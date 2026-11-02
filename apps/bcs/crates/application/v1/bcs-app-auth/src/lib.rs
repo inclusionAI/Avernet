@@ -2,7 +2,7 @@
 //! (V1 API auth plugin chain, Task 10).
 //!
 //! [`AuthApplicationService`] implements the transport-neutral
-//! [`SecureAuthService`] use-case contract: browser-bound login URL
+//! [`AuthService`] use-case contract: browser-bound login URL
 //! issuance, the binding-complete callback order (validate → consume →
 //! exchange → install), the Human projection, and session refresh and
 //! logout. Flow outcomes are [`AuthFlowReply`]s — cookie instructions on
@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::error::ApplicationError;
 use bcs_service_api::application::v1::{
     AuthRedirectLocation, AuthenticatedUserQuery, AuthFlowReply, AuthProviderUrlList,
-    AuthUserInfo, BoundOAuthLogin, BuildLoginUrls, LogoutData, SecureAuthService,
+    AuthUserInfo, BuildLoginUrls, CompleteOAuthLogin, LogoutData, AuthService,
     SessionRenewalData,
 };
 use bcs_service_api::port::oauth::{
@@ -36,8 +36,8 @@ use crate::session::{current_user_flow, logout_flow, refresh_session_flow};
 mod login;
 mod session;
 
-/// Transport-neutral secure OAuth orchestration (the Task 10
-/// `SecureAuthService` implementation).
+/// Transport-neutral secure OAuth orchestration (the shared `AuthService`
+/// implementation both HTTP entries inject).
 ///
 /// Everything injectable is injected: the three application ports, the
 /// configured same-origin success redirect, and the configured login
@@ -80,7 +80,7 @@ impl AuthApplicationService {
 }
 
 #[async_trait]
-impl SecureAuthService for AuthApplicationService {
+impl AuthService for AuthApplicationService {
     async fn login_urls(
         &self,
         request: BuildLoginUrls,
@@ -90,7 +90,7 @@ impl SecureAuthService for AuthApplicationService {
 
     async fn complete_login(
         &self,
-        command: BoundOAuthLogin,
+        command: CompleteOAuthLogin,
     ) -> AuthFlowReply<AuthRedirectLocation> {
         complete_login_flow(self, command).await
     }

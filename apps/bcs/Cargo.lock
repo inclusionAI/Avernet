@@ -364,6 +364,7 @@ dependencies = [
  "bcs-a2a-http",
  "bcs-api-http",
  "bcs-app-a2a-bot",
+ "bcs-app-auth",
  "bcs-app-bot",
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-draft",
@@ -578,7 +579,9 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-auth",
  "bcs-auth-api",
+ "bcs-auth-oauth",
  "bcs-bot-store",
  "bcs-config",
  "bcs-config-api",

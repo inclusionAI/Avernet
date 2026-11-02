@@ -82,3 +82,49 @@ The contract is covered by bootstrap integration tests in `crates/bootstrap/bcs/
 - `/logout` returns a success envelope and clears the cookie.
 - `/callback/{provider}` returns V1 errors for invalid state and provider/state mismatch.
 - Protected business routes use `x-avernet-principal` when present and fall back to the configured OpenAPI auth service + `bcs_session` when the gateway header is absent.
+
+## 2026-11 Security-compatible reproduction (V1 API auth plugin chain, Task 11)
+
+Both HTTP login entries now run on the SAME secured OAuth primitives
+(the shared strict session engine, the browser-bound pending-login
+store, and the shared application orchestration). The legacy
+`/auth/*` entry keeps its response SHAPES but inherits the following
+security tightening — deployments relying on the old behavior must
+adjust:
+
+- **Browser-bound login (spec §8.4).** `GET /auth/url` now issues a
+  temporary, host-only `__Host-bcs_oauth_login` challenge cookie
+  (`Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=300` in
+  production; plain-HTTP local development uses the separate
+  non-`__Host` name `bcs_oauth_login`). The callback requires this
+  cookie's nonce: a browser that did not receive the challenge cannot
+  redeem a valid state, and the state is bound to the exact
+  `{callback_base}/{provider}` URL. Historical bookmarks into the
+  callback flow stop working; users must restart login from URL
+  discovery. Flow responses carry `Cache-Control: no-store`.
+- **Cookie CSRF on refresh/logout (spec §8.3 compatibility rule).**
+  `POST /auth/refresh` and cookie-bearing `POST /auth/logout` now
+  require exactly one `Origin` header that is an EXACT member of the
+  trusted set bootstrap derives from `cors.allowed_origins` —
+  wildcards (`*`, `*.domain`), the literal `null`, and empty entries
+  are EXCLUDED. With no exact origin configured, cookie-authenticated
+  unsafe writes are REJECTED. Origins are never inferred from
+  `Host`/`Referer`, and a Gateway identity never substitutes for the
+  cookie. `/auth/logout` without any cookie remains the idempotent
+  success boundary; an EMPTY `bcs_session=` cookie value is an error.
+- **Strict sessions only.** The unconditional `update_token`
+  backdoor is gone: sessions install/refresh/revoke through the
+  strict engine's atomic lifecycle (session instance + revision +
+  hash). Legacy sid-less JWTs are rejected by the hot path; existing
+  browser sessions must log in again after this change.
+- **Logout persistence.** `POST /auth/logout` (and the V1
+  counterpart) revoke the session BEFORE clearing the cookie; a
+  persistent revoke failure is an error response, never a success
+  with a cleared cookie.
+
+Tests: `crates/bootstrap/bcs/tests/integration_oauth_routes.rs`
+(mounting, challenge cookie, origin gating, strict seeding),
+`crates/adapters/http/bcs-api-http/tests/oauth_browser_binding.rs`
+(two-jar browser binding over the V1 router), and
+`crates/bootstrap/bcs/tests/auth_log_redaction.rs` (credential-log
+red line over both real routers).

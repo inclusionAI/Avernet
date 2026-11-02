@@ -1,4 +1,5 @@
 mod authentication;
+mod auth_cookies;
 mod composite_principal;
 mod csrf;
 mod envelope;
@@ -12,6 +13,7 @@ mod state;
 pub use authentication::{
     AuthenticationContext, CredentialKind, VerificationAttempt, VerifiedRequestIdentity,
 };
+pub use auth_cookies::encode_cookie_change;
 pub use composite_principal::CompositePrincipalVerifier;
 pub use csrf::TrustedBrowserOrigins;
 pub use envelope::{Envelope, ErrorData};

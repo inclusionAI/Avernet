@@ -201,23 +201,6 @@ impl UserIdentityRepoPort for MemoryUserIdentityRepo {
             .cloned()
     }
 
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), String> {
-        let mut store = self.store.write().await;
-        let map = &mut store.by_external;
-        for identity in map.values_mut() {
-            if identity.user_id == user_id {
-                identity.token = Some(token.to_string());
-                identity.token_expire_at = Some(expire_at);
-                return Ok(());
-            }
-        }
-        Err(format!("update_token: user_id {user_id} not found"))
-    }
 }
 
 /// Strict atomic session operations. Every call takes the ONE store lock and
@@ -295,35 +278,25 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[tokio::test]
-    async fn get_by_token_finds_identity() {
-        let repo = MemoryUserIdentityRepo::new();
-        let uid = repo.ensure_identity("google", "sub-1", Some("Alice"), Some("https://img.url"), "dev").await.unwrap();
-        repo.update_token(&uid, "jwt-token-abc", 9999).await.unwrap();
-
-        let found = repo.get_by_token("jwt-token-abc").await.unwrap();
-        assert_eq!(found.user_id, uid);
-        assert_eq!(found.auth_source, "google");
-        assert_eq!(found.external_user_name.as_deref(), Some("Alice"));
-        assert_eq!(found.avatar.as_deref(), Some("https://img.url"));
-    }
+    // NOTE (V1 API auth plan, Task 11): the legacy `update_token`
+    // single-session cases that lived here (bind/overwrite the identity
+    // row's token column) are REPLACED by the strict session lifecycle
+    // coverage: crate-level `conformance_auth_session_memory.rs` /
+    // `conformance_auth_session_sqlite.rs` drive the central
+    // `auth_session_repo_port_contract_tests` harness over THIS SAME store
+    // (install → rotate → revoke atomicity, single-active-session via
+    // revision CAS), and `bcs-test-support`'s `oauth_session_engine_
+    // contract_tests` pins the lifecycle end-to-end. No legacy
+    // unconditional writer exists anymore.
 
     #[tokio::test]
-    async fn get_by_token_returns_none_for_unknown() {
+    async fn get_by_token_returns_none_without_a_legacy_binding() {
+        // Session credentials are now bound ONLY through the strict session
+        // columns (`get_session_by_hash`); the identity row's legacy token
+        // column has no writer, so a raw token lookup must find nothing.
         let repo = MemoryUserIdentityRepo::new();
+        repo.ensure_identity("google", "sub-1", Some("Alice"), Some("https://img.url"), "dev").await.unwrap();
         assert!(repo.get_by_token("nonexistent").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn update_token_overwrites_previous() {
-        let repo = MemoryUserIdentityRepo::new();
-        let uid = repo.ensure_identity("google", "sub-2", None, None, "dev").await.unwrap();
-        repo.update_token(&uid, "old-jwt", 1000).await.unwrap();
-        repo.update_token(&uid, "new-jwt", 2000).await.unwrap();
-
-        assert!(repo.get_by_token("old-jwt").await.is_none());
-        let found = repo.get_by_token("new-jwt").await.unwrap();
-        assert_eq!(found.user_id, uid);
     }
 
     #[tokio::test]

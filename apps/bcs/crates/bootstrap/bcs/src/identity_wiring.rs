@@ -93,34 +93,6 @@ impl UserIdentityPort for RepoUserIdentityPort {
             .await
             .map(|r| to_display_info(&r)))
     }
-
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError> {
-        self.repo
-            .update_token(user_id, token, expire_at)
-            .await
-            .map_err(AuthError::LookupFailed)
-    }
-}
-
-/// Build a DB-backed identity port from the selected DB plugin.
-///
-/// Public builds wire the identity store selected by the unified database kind.
-pub fn db_user_identity_port(
-    db_kind: DbPluginKind,
-    db: Arc<dyn DbPlugin>,
-) -> Arc<dyn UserIdentityPort> {
-    db_identity_ports(db_kind, db).user_identity
-}
-
-/// Build an in-memory identity port for standalone / test paths that have no
-/// DB plugin. Identities do not survive a restart.
-pub fn memory_user_identity_port() -> Arc<dyn UserIdentityPort> {
-    memory_identity_ports().user_identity
 }
 
 /// The two identity bridges over one store: the display-oriented legacy
@@ -131,7 +103,6 @@ pub fn memory_user_identity_port() -> Arc<dyn UserIdentityPort> {
 /// (legacy `/auth/*`) and V1 strict session operations in one state; the
 /// DB bridges share the database naturally.
 pub struct IdentityPorts {
-    #[allow(dead_code, reason = "Task 5 ships the wiring; Task 8/12 wires call sites")]
     pub auth_session_identity: Arc<dyn AuthSessionIdentityPort>,
     pub user_identity: Arc<dyn UserIdentityPort>,
 }

@@ -8,10 +8,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bcs_api_http::{ApiState, router};
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthProviderUrlList, AuthRedirect, AuthService as ApplicationAuthService,
-    AuthUserInfo, BuildLoginUrls, CompleteOAuthLogin, FriendConnectionActorType,
-    FriendRequestDirection, FriendRequestStatus, LogoutResult, LogoutSession, ReadCurrentUser,
-    RefreshSession, SessionRenewal,
+    ApplicationError, AuthFlowReply, AuthProviderUrlList, AuthRedirectLocation,
+    AuthenticatedUserQuery, AuthService as ApplicationAuthService, AuthUserInfo, BuildLoginUrls,
+    CompleteOAuthLogin, FriendConnectionActorType, FriendRequestDirection, FriendRequestStatus,
+    LogoutData, PresentedSession, SessionRenewalData,
 };
 use serde_json::Value;
 use tower::ServiceExt;
@@ -23,7 +23,7 @@ use super::fixtures::*;
 
 #[derive(Default)]
 struct CapturingAuthService {
-    current_user_request: Mutex<Option<ReadCurrentUser>>,
+    current_user_query: Mutex<Option<AuthenticatedUserQuery>>,
 }
 
 #[async_trait]
@@ -31,22 +31,28 @@ impl ApplicationAuthService for CapturingAuthService {
     async fn login_urls(
         &self,
         _request: BuildLoginUrls,
-    ) -> Result<AuthProviderUrlList, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
+    ) -> AuthFlowReply<AuthProviderUrlList> {
+        AuthFlowReply {
+            result: Err(ApplicationError::internal("unused")),
+            cookie_changes: Vec::new(),
+        }
     }
 
     async fn complete_login(
         &self,
         _request: CompleteOAuthLogin,
-    ) -> Result<AuthRedirect, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
+    ) -> AuthFlowReply<AuthRedirectLocation> {
+        AuthFlowReply {
+            result: Err(ApplicationError::internal("unused")),
+            cookie_changes: Vec::new(),
+        }
     }
 
-    async fn current_user(&self, request: ReadCurrentUser) -> Result<AuthUserInfo, ApplicationError> {
+    async fn current_user(&self, query: AuthenticatedUserQuery) -> Result<AuthUserInfo, ApplicationError> {
         *self
-            .current_user_request
+            .current_user_query
             .lock()
-            .expect("current user request lock") = Some(request);
+            .expect("current user query lock") = Some(query);
         Ok(AuthUserInfo {
             user_id: "staff-1".to_string(),
             name: Some("alice".to_string()),
@@ -57,13 +63,19 @@ impl ApplicationAuthService for CapturingAuthService {
 
     async fn refresh_session(
         &self,
-        _request: RefreshSession,
-    ) -> Result<SessionRenewal, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
+        _session: PresentedSession,
+    ) -> AuthFlowReply<SessionRenewalData> {
+        AuthFlowReply {
+            result: Err(ApplicationError::internal("unused")),
+            cookie_changes: Vec::new(),
+        }
     }
 
-    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
+    async fn logout(&self, _session: Option<PresentedSession>) -> AuthFlowReply<LogoutData> {
+        AuthFlowReply {
+            result: Err(ApplicationError::internal("unused")),
+            cookie_changes: Vec::new(),
+        }
     }
 }
 
@@ -185,7 +197,7 @@ async fn list_friend_requests_defaults_direction_to_received() {
 }
 
 #[tokio::test]
-async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
+async fn openapi_auth_user_projects_the_verified_caller_through_auth_service() {
     let auth_service = Arc::new(CapturingAuthService::default());
     let app = router(
         ApiState::new(
@@ -206,10 +218,6 @@ async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
                 .method("GET")
                 .uri("/openapi/v1/auth/user")
                 .header("x-test-auth", "yes")
-                .header("authorization", "Bearer forwarded-user-token")
-                .header("cookie", "bcs_session=session-token")
-                .header("x-forwarded-for", "1.2.3.4")
-                .header("forwarded", "for=1.2.3.4")
                 .body(Body::empty())
                 .expect("auth user request"),
         )
@@ -217,24 +225,18 @@ async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
         .expect("auth user response");
     assert_eq!(response.status(), StatusCode::OK);
 
-    let request = auth_service
-        .current_user_request
+    // The new contract (V1 API auth plan §8.2): `/user` receives the
+    // VERIFIED caller plus its pinned provenance source — never raw
+    // request headers (the service must not re-run a credential chain).
+    let queried = auth_service
+        .current_user_query
         .lock()
-        .expect("current user request lock")
+        .expect("current user query lock")
         .clone()
-        .expect("captured auth request");
-    assert_eq!(request.headers.authorization.as_deref(), Some("Bearer forwarded-user-token"));
-    assert_eq!(request.headers.cookie.as_deref(), Some("bcs_session=session-token"));
-    let mut forwarded = request.headers.forwarded_headers.clone();
-    forwarded.sort();
-    assert_eq!(
-        forwarded,
-        vec![
-            ("forwarded".to_string(), "for=1.2.3.4".to_string()),
-            ("x-forwarded-for".to_string(), "1.2.3.4".to_string()),
-            ("x-test-auth".to_string(), "yes".to_string()),
-        ]
-    );
+        .expect("captured auth query");
+    let user = queried.caller.user.expect("authenticated human caller");
+    assert_eq!(user.id, "staff-1");
+    assert_eq!(queried.provider_label, "test-double");
 }
 
 #[tokio::test]

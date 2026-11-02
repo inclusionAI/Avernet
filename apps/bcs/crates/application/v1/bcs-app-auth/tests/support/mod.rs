@@ -9,7 +9,7 @@ pub mod log_capture;
 
 use std::sync::Arc;
 
-use bcs_service_api::application::v1::{BrowserLoginBinding, BoundOAuthLogin};
+use bcs_service_api::application::v1::{BrowserLoginBinding, CompleteOAuthLogin};
 use bcs_service_api::port::oauth::{OAuthProviderPort, OAuthSessionPort, PendingOAuthLoginPort};
 
 use fake_ports::{FakePendingLoginPort, FakeProviderPort, FakeSessionPort};
@@ -30,8 +30,8 @@ pub fn expected_exact_callback(provider: &str) -> String {
 
 /// A real, required browser binding — never `Option` or a default-empty
 /// nonce (plan Task 9 step 4: test doubles must provide a real binding).
-pub fn bound_login(provider: &str, code: &str, state: &str, nonce: &str) -> BoundOAuthLogin {
-    BoundOAuthLogin {
+pub fn bound_login(provider: &str, code: &str, state: &str, nonce: &str) -> CompleteOAuthLogin {
+    CompleteOAuthLogin {
         provider: provider.to_string(),
         code: Some(code.to_string()),
         auth_code: None,

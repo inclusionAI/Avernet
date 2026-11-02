@@ -124,10 +124,6 @@ impl UserIdentityRepoPort for FailingUserIdentityRepo {
     async fn get_by_user_id_display(&self, _user_id: &str) -> Option<bcs_service_api::UserIdentity> {
         None
     }
-
-    async fn update_token(&self, _user_id: &str, _token: &str, _expire_at: u64) -> Result<(), String> {
-        Err("identity store unavailable".to_string())
-    }
 }
 
 /// Assert the exact `Unavailable` category for one injected-failure call.

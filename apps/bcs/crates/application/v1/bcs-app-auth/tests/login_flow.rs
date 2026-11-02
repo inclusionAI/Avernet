@@ -8,7 +8,7 @@ mod support;
 use std::sync::Arc;
 
 use bcs_service_api::application::v1::{
-    ApplicationError, BrowserCookieChange, BuildLoginUrls, SecureAuthService,
+    ApplicationError, BrowserCookieChange, BuildLoginUrls, AuthService,
 };
 
 use support::fake_ports::{FakePendingLoginPort, FakeProviderPort, FakeSessionPort};

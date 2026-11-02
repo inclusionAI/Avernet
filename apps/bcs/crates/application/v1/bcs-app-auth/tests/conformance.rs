@@ -8,7 +8,7 @@ mod support;
 
 use std::sync::Arc;
 
-use bcs_service_api::application::v1::{BuildLoginUrls, PresentedSession, SecureAuthService};
+use bcs_service_api::application::v1::{BuildLoginUrls, PresentedSession, AuthService};
 
 use support::fake_ports::{FakePendingLoginPort, FakeProviderPort, FakeSessionPort};
 use support::{auth_service, bound_login, expected_exact_callback, TEST_CALLBACK_BASE, TEST_FLOW};

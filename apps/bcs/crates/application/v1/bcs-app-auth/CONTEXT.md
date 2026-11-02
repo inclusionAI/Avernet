@@ -3,7 +3,7 @@
 ## Provides
 
 - `AuthApplicationService`, the transport-neutral implementation of the
-  service-api `SecureAuthService` contract (temporary name; Task 11
+  service-api `AuthService` contract (temporary name; Task 11
   atomically replaces the legacy `AuthService` surface with it and
   restores the stable `AuthService` name).
 - `login_urls`: the browser-bound authorize-URL batch. One pending-login
@@ -37,8 +37,8 @@
 
 ## Consumes
 
-- `bcs-service-api` application contracts (`SecureAuthService`,
-  `AuthFlowReply`, `BoundOAuthLogin`, `BuildLoginUrls`,
+- `bcs-service-api` application contracts (`AuthService`,
+  `AuthFlowReply`, `CompleteOAuthLogin`, `BuildLoginUrls`,
   `AuthenticatedUserQuery`, `PresentedSession`, `ApplicationError`) and
   the outbound `port::oauth` ports (`OAuthProviderPort`,
   `OAuthSessionPort`, `PendingOAuthLoginPort`).

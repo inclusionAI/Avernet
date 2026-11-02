@@ -1,8 +1,13 @@
-//! OAuth HTTP route handlers for the shared `/auth/*` endpoints, extracted
-//! verbatim from `mod.rs`. Pure move: route paths, handler order, and every
-//! response/validation path are unchanged.
-
-use super::*;
+//! Legacy OAuth HTTP route handlers (`/auth/*`, plan Task 11).
+//!
+//! Thin by contract: THIS layer extracts the temporary challenge cookie,
+//! the session cookie, the request method, and the Origin header, then
+//! calls the injected secure [`AuthService`] (LEGACY flow namespace) and
+//! consumes the reply's cookie instructions. The response SHAPES of the
+//! legacy entry (plain-text errors, the `/auth/url` JSON provider list,
+//! the 302 callback redirect, the `bcs_session` set/clear cookies) are
+//! preserved; the business semantics behind them are the secured,
+//! browser-bound, atomic session lifecycle shared with the V1 entry.
 
 use std::sync::Arc;
 
@@ -14,10 +19,15 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::warn;
 
-use bcs_auth_api::extract_session_cookie;
-use bcs_jwt::Claims;
+use bcs_auth_api::{extract_session_cookie, BCS_SESSION_COOKIE};
+use bcs_service_api::application::v1::{
+    ApplicationError, AuthFlowReply, BrowserCookieChange, BrowserLoginBinding, BuildLoginUrls,
+    CompleteOAuthLogin, PresentedSession,
+};
+
+use super::{OAuthRouteState, challenge_cookie_name};
 
 /// Build the OAuth router for the shared `/auth/*` endpoints, bound to the
 /// given `OAuthRouteState`.
@@ -42,7 +52,8 @@ pub fn identity_routes(state: Arc<OAuthRouteState>) -> Router {
         .with_state(state)
 }
 
-/// GET /auth/url — Return all enabled OAuth provider login URLs.
+/// GET /auth/url — issue the browser-bound provider login URLs and the
+/// temporary challenge cookie that binds the browser to the pending batch.
 #[derive(Serialize)]
 pub struct AuthUrlResponse {
     pub providers: Vec<ProviderUrl>,
@@ -54,146 +65,240 @@ pub struct ProviderUrl {
     pub url: String,
 }
 
-pub async fn auth_url_handler(
-    State(state): State<Arc<OAuthRouteState>>,
-) -> Json<AuthUrlResponse> {
-    let mut providers = Vec::new();
-    // Sort for deterministic output
-    let mut names: Vec<&str> = state.providers.keys().map(|s| s.as_str()).collect();
-    names.sort();
-    for name in names {
-        if let Some(provider) = state.providers.get(name) {
-            let csrf_state = state.state_store.generate(name).await;
-            let redirect_uri = format!("{}/auth/callback/{}", state.config.base_url, name);
-            let url = provider.auth_url(&csrf_state, &redirect_uri);
-            providers.push(ProviderUrl {
-                name: name.to_string(),
-                url,
-            });
+/// Encode one cookie instruction into a `Set-Cookie` header value. The
+/// production challenge uses the fixed `__Host-` name; plain HTTP (local
+/// development) uses the separate non-`__Host` name — never a downgraded
+/// `__Host-` cookie.
+pub(super) fn encode_cookie_change(change: &BrowserCookieChange, secure: bool) -> axum::http::HeaderValue {
+    let secure_attr = if secure { "; Secure" } else { "" };
+    let value = match change {
+        BrowserCookieChange::SetLoginChallenge { nonce, .. } => format!(
+            "{}={nonce}; Path=/; HttpOnly{secure_attr}; SameSite=Lax; Max-Age={}",
+            challenge_cookie_name(secure),
+            super::CHALLENGE_MAX_AGE_SECS
+        ),
+        BrowserCookieChange::ClearLoginChallenge => format!(
+            "{}=; Path=/; HttpOnly{secure_attr}; SameSite=Lax; Max-Age=0",
+            challenge_cookie_name(secure)
+        ),
+        BrowserCookieChange::SetSession { token, .. } => {
+            format!("{BCS_SESSION_COOKIE}={token}; HttpOnly{secure_attr}; SameSite=Lax; Path=/")
         }
-    }
-    Json(AuthUrlResponse { providers })
+        BrowserCookieChange::ClearSession => format!(
+            "{BCS_SESSION_COOKIE}=; HttpOnly{secure_attr}; SameSite=Lax; Path=/; Max-Age=0"
+        ),
+    };
+    axum::http::HeaderValue::from_str(&value).expect("encoded Set-Cookie value is header-safe")
 }
 
-/// GET /auth/callback/{provider}?code=...&state=...
+/// Consume the reply: run the success/error mapping LAST, then APPEND each
+/// cookie instruction as its own `Set-Cookie` header (append, never insert:
+/// success sets the session WHILE clearing the challenge) and stamp
+/// `Cache-Control: no-store` — credentials never live in a shared cache.
+fn apply_flow_reply<T>(
+    reply: AuthFlowReply<T>,
+    secure: bool,
+    on_success: impl FnOnce(T) -> axum::response::Response,
+    on_error: impl FnOnce(ApplicationError) -> axum::response::Response,
+) -> axum::response::Response {
+    let result = reply.result;
+    let mut response = match result {
+        Ok(payload) => on_success(payload),
+        Err(error) => on_error(error),
+    };
+    for change in &reply.cookie_changes {
+        response.headers_mut().append(
+            axum::http::header::SET_COOKIE,
+            encode_cookie_change(change, secure),
+        );
+    }
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
+/// Legacy plain-text error responses (shape preserved from the pre-security
+/// entry): stable category text only — never third-party or storage text.
+fn legacy_error(error: ApplicationError) -> axum::response::Response {
+    let (status, body): (StatusCode, &'static str) = match &error {
+        ApplicationError::Unauthenticated => (StatusCode::UNAUTHORIZED, "not authenticated"),
+        ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. } => {
+            (StatusCode::FORBIDDEN, "forbidden")
+        }
+        ApplicationError::NotFound { .. } => (StatusCode::NOT_FOUND, "provider not found"),
+        ApplicationError::InvalidInput { code, .. } if code == "invalid_login_state" => {
+            (StatusCode::BAD_REQUEST, "invalid state")
+        }
+        ApplicationError::InvalidInput { code, .. } if code == "invalid_callback_base_url" => {
+            (StatusCode::BAD_REQUEST, "invalid state")
+        }
+        ApplicationError::InvalidInput { code, .. } if code == "missing_code" => {
+            (StatusCode::BAD_REQUEST, "missing code or auth_code")
+        }
+        ApplicationError::BadGateway { code, .. } if code == "token_exchange_failed" => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "token exchange failed",
+        ),
+        ApplicationError::BadGateway { code, .. } if code == "userinfo_request_failed" => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "userinfo request failed",
+        ),
+        ApplicationError::Conflict { .. } => {
+            (StatusCode::CONFLICT, "login session conflict")
+        }
+        ApplicationError::InvalidInput { .. } => (StatusCode::BAD_REQUEST, "invalid request"),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+    };
+    (status, body).into_response()
+}
+
+/// The unique, REQUIRED browser-challenge cookie value (plan §8.4):
+/// missing / duplicated / empty is an `invalid state` rejection BEFORE the
+/// service is entered; a nonce in the query never substitutes.
+pub(super) fn extract_login_challenge(headers: &HeaderMap) -> Result<String, ()> {
+    let mut found: Option<String> = None;
+    for value in headers.get_all(axum::http::header::COOKIE) {
+        let raw = value.to_str().map_err(|_| ())?;
+        for pair in raw.split(';') {
+            let mut parts = pair.splitn(2, '=');
+            let name = match parts.next() {
+                Some(name) => name.trim(),
+                None => continue,
+            };
+            let is_challenge = name == super::HOST_CHALLENGE_COOKIE
+                || name == super::LOCAL_CHALLENGE_COOKIE;
+            if !is_challenge {
+                continue;
+            }
+            let value = match parts.next() {
+                Some(value) => value.trim().to_string(),
+                None => return Err(()),
+            };
+            if value.is_empty() || found.replace(value).is_some() {
+                return Err(());
+            }
+        }
+    }
+    found.ok_or(())
+}
+
+/// Present the session cookie under the carried adapter obligations:
+/// `None` = no cookie at all (the valid idempotent boundary), `Err(())` =
+/// the cookie exists but is EMPTY (a malformed credential — never an
+/// empty token handed to revoke/refresh).
+pub(super) fn presented_session_cookie(headers: &HeaderMap) -> Result<Option<String>, ()> {
+    // `extract_session_cookie` returns the raw value if the cookie exists;
+    // an empty value must be treated as invalid without reaching the
+    // engine.
+    let cookie = extract_session_cookie(headers);
+    match cookie {
+        None => Ok(None),
+        Some(value) if value.is_empty() => Err(()),
+        Some(value) => Ok(Some(value)),
+    }
+}
+
+/// The injected service for the mounted login family. `None` only exists on
+/// the identity-only mount (serving `/auth/user` alone), so reaching a login
+/// route without a service is an internal misconfiguration.
+fn flow_service(state: &OAuthRouteState) -> Result<Arc<dyn bcs_service_api::application::v1::AuthService>, axum::response::Response> {
+    match state.require_auth_service() {
+        Some(service) => Ok(Arc::clone(service)),
+        None => {
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "internal_error", "login family route reached without an injected auth service");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response())
+        }
+    }
+}
+
+/// Cookie-kind Origin gate for the legacy unsafe writes (refresh/logout,
+/// plan §8.3 compatibility tightening): the request must present exactly
+/// one UTF-8 Origin that is an EXACT member of the bootstrap-injected
+/// trusted set. Missing Origin, duplicated/malformed Origin, an
+/// untrusted Origin, and an empty trusted set all REJECT. No inference
+/// from Host/Referer, and a Gateway identity never substitutes.
+pub(super) fn cookie_unsafe_origin_allowed(headers: &HeaderMap, trusted: &[String]) -> bool {
+    if trusted.is_empty() {
+        return false;
+    }
+    let mut values = headers.get_all(axum::http::header::ORIGIN).iter();
+    let Some(first) = values.next() else {
+        return false;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    match first.to_str() {
+        Ok(origin) => trusted.iter().any(|allowed| allowed == origin),
+        Err(_) => false,
+    }
+}
+
+pub async fn auth_url_handler(
+    State(state): State<Arc<OAuthRouteState>>,
+) -> impl IntoResponse {
+    let Ok(service) = flow_service(&state) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+    };
+    let callback_base_url = format!("{}/auth/callback", state.config.base_url.trim_end_matches('/'));
+    let reply = service.login_urls(BuildLoginUrls { callback_base_url }).await;
+    let secure = state.config.cookie_secure;
+    apply_flow_reply(
+        reply,
+        secure,
+        |result| {
+            let providers = result
+                .providers
+                .into_iter()
+                .map(|provider| ProviderUrl { name: provider.name, url: provider.url })
+                .collect();
+            Json(AuthUrlResponse { providers }).into_response()
+        },
+        legacy_error,
+    )
+}
+
 pub async fn callback_handler(
     State(state): State<Arc<OAuthRouteState>>,
     Path(provider_name): Path<String>,
     axum::extract::Query(params): axum::extract::Query<CallbackParams>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // 1. Validate state (CSRF)
-    let provider_key = match state.state_store.consume(&params.state).await {
-        Ok(key) => key,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "OAuth callback: invalid state");
+    let Ok(service) = flow_service(&state) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+    };
+
+    // The temporary cookie binding comes FIRST: the callback GET is
+    // protected by this binding plus the one-time state, never by the
+    // write-CSRF path.
+    let nonce = match extract_login_challenge(&headers) {
+        Ok(nonce) => nonce,
+        Err(()) => {
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "invalid_state", "OAuth callback: browser challenge cookie missing or invalid");
             return (StatusCode::BAD_REQUEST, "invalid state").into_response();
         }
     };
 
-    // 2. Verify provider matches state
-    if provider_key != provider_name {
-        warn!(request_id = %bcs_observability::CurrentRequestId, expected = %provider_key, got = %provider_name, "OAuth callback: provider mismatch");
-        return (StatusCode::BAD_REQUEST, "provider mismatch").into_response();
-    }
-
-    // 3. Find provider
-    let provider = match state.providers.get(&provider_name) {
-        Some(p) => Arc::clone(p),
-        None => {
-            return (StatusCode::NOT_FOUND, "provider not found").into_response();
-        }
-    };
-
-    // 4. Exchange code for token (Alipay uses auth_code instead of code)
-    let code = match params.code.or(params.auth_code) {
-        Some(c) => c,
-        None => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, "OAuth callback: missing code or auth_code");
-            return (StatusCode::BAD_REQUEST, "missing code or auth_code").into_response();
-        }
-    };
-    let redirect_uri = format!("{}/auth/callback/{}", state.config.base_url, provider_name);
-    let token = match provider.exchange_code(&code, &redirect_uri).await {
-        Ok(t) => t,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, provider = %provider_name, "OAuth token exchange failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "token exchange failed").into_response();
-        }
-    };
-
-    // 5. Get user info
-    let user_info = match provider.get_user_info(&token).await {
-        Ok(u) => u,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, provider = %provider_name, "OAuth userinfo failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "userinfo request failed").into_response();
-        }
-    };
-
-    // 6. Ensure identity in database, partitioned by the configured runtime env.
-    let user_id = match state
-        .user_port
-        .ensure_identity(
-            &provider_name,
-            &user_info.id,
-            user_info.name.as_deref(),
-            user_info.avatar.as_deref(),
-            &state.config.env,
-        )
-        .await
-    {
-        Ok(id) => id,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "ensure_identity failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "identity creation failed").into_response();
-        }
-    };
-
-    // 7. Issue JWT
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let claims = Claims {
-        sub: user_id,
-        src: provider_name.clone(),
-        iat: now,
-        exp: now + state.config.idle_timeout_secs(),
-        name: user_info.name.clone(),
-    };
-    let jwt = match state.jwt_service.sign(&claims) {
-        Ok(j) => j,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "JWT signing failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "session creation failed").into_response();
-        }
-    };
-
-    // 7b. Persist the JWT fingerprint (SHA-256) so the session can be looked
-    // up / single-session-enforced later. Only the hash is stored — the raw
-    // JWT lives solely in the client cookie. This bind is load-bearing for
-    // single-session + revocation, so a failure here aborts the login.
-    if let Err(e) = state
-        .user_port
-        .update_token(&claims.sub, &bcs_jwt::token_hash(&jwt), claims.exp)
-        .await
-    {
-        warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "update_token failed; aborting login");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "session creation failed").into_response();
-    }
-
-    info!(provider = %provider_name, user_id = %claims.sub, "OAuth login successful");
-
-    // 8. Set cookie and redirect
-    let cookie = session_cookie(&jwt, state.config.cookie_secure);
-    (
-        StatusCode::FOUND,
-        [
-            ("location", state.config.success_redirect_location().to_string()),
-            ("set-cookie", cookie),
-        ],
+    let callback_base_url = format!("{}/auth/callback", state.config.base_url.trim_end_matches('/'));
+    let reply = service
+        .complete_login(CompleteOAuthLogin {
+            provider: provider_name,
+            code: params.code,
+            auth_code: params.auth_code,
+            state: params.state,
+            callback_base_url,
+            browser_binding: BrowserLoginBinding { nonce },
+        })
+        .await;
+    let secure = state.config.cookie_secure;
+    apply_flow_reply(
+        reply,
+        secure,
+        |location| (StatusCode::FOUND, [("location", location.location)]).into_response(),
+        legacy_error,
     )
-        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -206,95 +311,69 @@ pub struct CallbackParams {
     pub state: String,
 }
 
-/// POST /auth/logout — Clear the session cookie and revoke the session.
-///
-/// Clearing the cookie alone does not stop a copy of the JWT from being
-/// replayed, so we also clear the stored token hash for the user, which
-/// invalidates the JWT server-side on the next request (the hot-path hash
-/// match fails). Best-effort: cookie is always cleared even if revocation
-/// fails.
+/// POST /auth/logout — revoke the presented OAuth session by session
+/// instance, THEN clear the cookie. A persistence failure is never
+/// reported as success (plan §8.2); a request with no cookie at all is
+/// the valid idempotent boundary that never touches the port.
 pub async fn logout_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Some(jwt) = extract_session_cookie(&headers) {
-        if let Ok(claims) = state.jwt_service.verify(&jwt) {
-            if let Err(e) = state.user_port.update_token(&claims.sub, "", 0).await {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, user_id = %claims.sub, "logout: token revocation failed");
-            }
+    let Ok(service) = flow_service(&state) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+    };
+    let session = match presented_session_cookie(&headers) {
+        Ok(option) => option.map(|token| PresentedSession { token }),
+        Err(()) => {
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "unauthenticated", "logout rejected: empty session cookie");
+            return (StatusCode::UNAUTHORIZED, "not authenticated").into_response();
         }
+    };
+    if session.is_some() && !cookie_unsafe_origin_allowed(&headers, &state.trusted_origins) {
+        warn!(request_id = %bcs_observability::CurrentRequestId, category = "forbidden", "logout rejected: cookie origin not trusted");
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
-    let cookie = clear_session_cookie(state.config.cookie_secure);
-    (StatusCode::OK, [("set-cookie", cookie)])
+    let reply = service.logout(session).await;
+    apply_flow_reply(
+        reply,
+        state.config.cookie_secure,
+        |_| StatusCode::OK.into_response(),
+        legacy_error,
+    )
 }
 
-/// POST /auth/refresh — Sliding-window session renewal.
-///
-/// This is the only place sessions are renewed. The hot-path auth chain is
-/// read-only, so renewal cannot happen there (no way to return `Set-Cookie`).
-/// Accepts a still-valid or recently-expired cookie, re-signs a fresh JWT,
-/// rebinds the stored hash (so the old JWT is immediately invalidated), and
-/// returns the new cookie. The presented JWT must currently be the bound
-/// session, otherwise renewal is refused.
+/// POST /auth/refresh — rotate the presented OAuth session via the
+/// engine's compare-and-swap lifecycle. The browser cookie is the ONLY
+/// credential that authorizes this write; a Gateway identity never
+/// substitutes, and the cookie Origin must be trusted.
 pub async fn refresh_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let jwt = match extract_session_cookie(&headers) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, "not authenticated").into_response(),
+    let Ok(service) = flow_service(&state) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
     };
-
-    // Tolerate a recently-expired token within the idle window: verify the
-    // signature but not exp, so a client whose cookie just lapsed can still
-    // renew. Hard-expiry beyond renewal is enforced by the hash-bind below
-    // only being valid while the stored token_expire_at has not been cleared.
-    let claims = match state.jwt_service.verify_no_exp(&jwt) {
-        Ok(c) => c,
-        Err(_) => return (StatusCode::UNAUTHORIZED, "not authenticated").into_response(),
-    };
-
-    // Confirm the presented JWT is the current bound session before renewing.
-    let info = match state.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
-        Ok(Some(info)) if info.user_id == claims.sub => info,
-        Ok(_) => return (StatusCode::UNAUTHORIZED, "not authenticated").into_response(),
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "refresh: identity lookup failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+    let token = match presented_session_cookie(&headers) {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            return (StatusCode::UNAUTHORIZED, "not authenticated").into_response();
+        }
+        Err(()) => {
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "unauthenticated", "refresh rejected: empty session cookie");
+            return (StatusCode::UNAUTHORIZED, "not authenticated").into_response();
         }
     };
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let new_claims = Claims {
-        sub: claims.sub.clone(),
-        src: claims.src.clone(),
-        iat: now,
-        exp: now + state.config.idle_timeout_secs(),
-        name: info.user_name.or(info.external_user_name),
-    };
-    let new_jwt = match state.jwt_service.sign(&new_claims) {
-        Ok(j) => j,
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "refresh: JWT signing failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "session renewal failed").into_response();
-        }
-    };
-
-    // Rebind the stored hash to the new JWT; the old JWT is now invalid.
-    if let Err(e) = state
-        .user_port
-        .update_token(&new_claims.sub, &bcs_jwt::token_hash(&new_jwt), new_claims.exp)
-        .await
-    {
-        warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "refresh: update_token failed");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "session renewal failed").into_response();
+    if !cookie_unsafe_origin_allowed(&headers, &state.trusted_origins) {
+        warn!(request_id = %bcs_observability::CurrentRequestId, category = "forbidden", "refresh rejected: cookie origin not trusted");
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
-
-    let cookie = session_cookie(&new_jwt, state.config.cookie_secure);
-    (StatusCode::OK, [("set-cookie", cookie)]).into_response()
+    let reply = service.refresh_session(PresentedSession { token }).await;
+    apply_flow_reply(
+        reply,
+        state.config.cookie_secure,
+        |_| StatusCode::OK.into_response(),
+        legacy_error,
+    )
 }
 
 /// Response body for `GET /auth/user` and `GET /auth/user/{user_id}`.
@@ -306,7 +385,7 @@ pub struct UserInfoResponse {
     pub avatar: Option<String>,
 }
 
-/// GET /auth/user — "Who am I?"
+/// GET /auth/user — "Who am I?" (legacy identity reader, unchanged).
 ///
 /// Identity is resolved solely through the request-time auth chain, which
 /// already encapsulates every authentication source:
@@ -358,8 +437,11 @@ pub async fn current_user_handler(
             _ => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
                 .into_response(),
         },
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "auth chain failed in /auth/user");
+        Err(error) => {
+            // AuthError is a closed, sanitized taxonomy (lookup failure
+            // categories) — log the category marker, never a raw chain body.
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "auth_chain_failed", "auth chain failed in /auth/user");
+            let _ = &error;
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }
@@ -399,8 +481,8 @@ pub async fn get_user_handler(
             avatar: info.avatar,
         })).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "not found"}))).into_response(),
-        Err(e) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "get_identity_by_user_id failed");
+        Err(_) => {
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "identity_lookup_failed", "get_identity_by_user_id failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }

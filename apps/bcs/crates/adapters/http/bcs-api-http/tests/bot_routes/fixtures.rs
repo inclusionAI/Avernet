@@ -50,33 +50,54 @@ impl AuthService for NoopAuthService {
     async fn login_urls(
         &self,
         _request: BuildLoginUrls,
-    ) -> Result<AuthProviderUrlList, ApplicationError> {
-        Err(ApplicationError::internal("not configured"))
+    ) -> AuthFlowReply<AuthProviderUrlList> {
+        AuthFlowReply {
+            result: Err(ApplicationError::not_found(
+                "auth_not_configured",
+                "OAuth is not configured",
+            )),
+            cookie_changes: Vec::new(),
+        }
     }
 
     async fn complete_login(
         &self,
         _request: CompleteOAuthLogin,
-    ) -> Result<AuthRedirect, ApplicationError> {
-        Err(ApplicationError::internal("not configured"))
+    ) -> AuthFlowReply<AuthRedirectLocation> {
+        AuthFlowReply {
+            result: Err(ApplicationError::not_found(
+                "auth_not_configured",
+                "OAuth is not configured",
+            )),
+            cookie_changes: Vec::new(),
+        }
     }
 
     async fn current_user(
         &self,
-        _request: ReadCurrentUser,
+        _request: AuthenticatedUserQuery,
     ) -> Result<AuthUserInfo, ApplicationError> {
         Err(ApplicationError::internal("not configured"))
     }
 
     async fn refresh_session(
         &self,
-        _request: RefreshSession,
-    ) -> Result<SessionRenewal, ApplicationError> {
-        Err(ApplicationError::internal("not configured"))
+        _session: PresentedSession,
+    ) -> AuthFlowReply<SessionRenewalData> {
+        AuthFlowReply {
+            result: Err(ApplicationError::Unauthenticated),
+            cookie_changes: Vec::new(),
+        }
     }
 
-    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
-        Err(ApplicationError::internal("not configured"))
+    async fn logout(
+        &self,
+        _session: Option<PresentedSession>,
+    ) -> AuthFlowReply<LogoutData> {
+        AuthFlowReply {
+            result: Err(ApplicationError::internal("not configured")),
+            cookie_changes: Vec::new(),
+        }
     }
 }
 

@@ -7,47 +7,27 @@
 //! userinfo) lives in each [`bcs_auth_api::OAuthProvider`] implementation,
 //! not here.
 //!
-//! Two construction paths exist during the V1 API auth migration:
-//!
-//! - [`OAuthSessionPlugin::new_with_session_engine`] — the STRICT path: the
-//!   plugin delegates to the injected [`crate::OAuthSessionEngine`], which
-//!   enforces signature, injected env, hash binding, sid/revision, and
-//!   revocation. This is the path bootstrap wiring migrates to.
-//! - [`OAuthSessionPlugin::new`] — the **UNSAFE-CONSTRUCTION TRANSITION
-//!   SEAM** (deleted when the HTTP entrypoints are migrated, Task 11): it
-//!   keeps the pre-strict legacy behavior for callers not yet injected with
-//!   a strict identity session port. It is marked so the migration can find
-//!   every remaining constructor by grepping `unsafe_construction_transition`.
+//! The plugin delegates to an INJECTED [`crate::OAuthSessionEngine`] (the
+//! strict construction from the Task 8 lifecycle): signature, injected env,
+//! hash binding, sid/revision, and revocation are all enforced, so every
+//! accepted session was issued through the engine's install lifecycle —
+//! the path the shared (legacy + V1) login entries use.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 
-use bcs_auth_api::{extract_session_cookie, AuthError, AuthPlugin, AuthPrincipal, UserIdentityPort};
+use bcs_auth_api::{extract_session_cookie, AuthError, AuthPlugin, AuthPrincipal};
 
 use crate::strict::OAuthSessionEngine;
-use crate::verify::{
-    verify_oauth_session, verify_oauth_session_unsafe_construction_transition,
-};
-
-/// Which session backend this plugin instance consults.
-enum SessionBackend {
-    /// Strict engine delegation (the new chain's path).
-    Strict(Arc<OAuthSessionEngine>),
-    /// UNSAFE-CONSTRUCTION TRANSITION SEAM (Task 11 deletes this variant
-    /// together with [`OAuthSessionPlugin::new`]).
-    UnsafeConstructionTransition {
-        jwt_secret: String,
-        user_port: Arc<dyn UserIdentityPort>,
-    },
-}
+use crate::verify::verify_oauth_session;
 
 /// Session-cookie `AuthPlugin` shared by all OAuth providers.
 ///
 /// Priority 25 places it between `cookie` (20) and `session` (30).
 pub struct OAuthSessionPlugin {
-    backend: SessionBackend,
+    engine: Arc<OAuthSessionEngine>,
     priority: u8,
 }
 
@@ -55,33 +35,15 @@ impl OAuthSessionPlugin {
     /// Default chain priority (lower runs earlier).
     pub const DEFAULT_PRIORITY: u8 = 25;
 
-    /// STRICT construction: the plugin delegates verification to the
+    /// STRICT construction (the ONLY construction since the Task 11
+    /// entrypoint migration): the plugin delegates verification to the
     /// injected [`OAuthSessionEngine`] (signature + injected env + hash
     /// binding + sid/revision + revocation) and builds the principal from
     /// the trusted snapshot. Legacy sid-less JWTs are rejected on this
     /// path — sessions must be issued via the engine's lifecycle.
     pub fn new_with_session_engine(engine: Arc<OAuthSessionEngine>) -> Self {
         Self {
-            backend: SessionBackend::Strict(engine),
-            priority: Self::DEFAULT_PRIORITY,
-        }
-    }
-
-    /// UNSAFE-CONSTRUCTION TRANSITION SEAM — ** scheduled for DELETION in
-    /// the HTTP entrypoint migration (Task 11)**.
-    ///
-    /// Pre-strict construction: the plugin verifies legacy sid-less JWTs
-    /// against the token-hash binding kept by [`UserIdentityPort`]. Kept so
-    /// not-yet-migrated wiring keeps compiling and running during the
-    /// transition; every remaining call site is discoverable by grepping
-    /// `unsafe_construction_transition`. Bootstrap wiring migrates to
-    /// [`OAuthSessionPlugin::new_with_session_engine`].
-    pub fn new(jwt_secret: impl Into<String>, user_port: Arc<dyn UserIdentityPort>) -> Self {
-        Self {
-            backend: SessionBackend::UnsafeConstructionTransition {
-                jwt_secret: jwt_secret.into(),
-                user_port,
-            },
+            engine,
             priority: Self::DEFAULT_PRIORITY,
         }
     }
@@ -103,20 +65,7 @@ impl AuthPlugin for OAuthSessionPlugin {
         &self,
         headers: &HeaderMap,
     ) -> Result<Option<AuthPrincipal>, AuthError> {
-        match &self.backend {
-            SessionBackend::Strict(engine) => verify_oauth_session(engine, headers).await,
-            SessionBackend::UnsafeConstructionTransition {
-                jwt_secret,
-                user_port,
-            } => {
-                verify_oauth_session_unsafe_construction_transition(
-                    headers,
-                    jwt_secret,
-                    user_port.as_ref(),
-                )
-                .await
-            }
-        }
+        verify_oauth_session(&self.engine, headers).await
     }
 
     fn priority(&self) -> u8 {

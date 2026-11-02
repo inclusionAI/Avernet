@@ -1,12 +1,31 @@
-//! OAuth unit tests, extracted verbatim from `mod.rs`. Pure move.
+//! OAuth route unit tests (Task 11 shape): the legacy handlers are thin,
+//! so these pin the ADAPTER contract exactly — challenge-cookie extraction,
+//! session-cookie presentation rules, the injected cors-derived Origin
+//! gate, cookie-instruction encoding, and the `/auth/user` chain reader.
+//! The flow business semantics (binding, atomic consume, install/rotate/
+//! revoke) are owned by the shared application service and covered at
+//! the bootstrap integration + application levels.
 use super::*;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use bcs_test_support::{NoopAuthPlugin, NoopUserIdentityPort};
+use super::routes::{
+    cookie_unsafe_origin_allowed, encode_cookie_change, extract_login_challenge,
+    presented_session_cookie,
+};
+
 use async_trait::async_trait;
 use axum::body::to_bytes;
 use bcs_auth_api::{
     AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource, UserIdentityInfo,
     UserIdentityPort,
 };
-use bcs_test_support::{MockOAuthProvider, NoopAuthPlugin, NoopUserIdentityPort};
+use bcs_service_api::application::v1::{
+    AuthFlowReply, AuthRedirectLocation, AuthService, AuthProviderUrl, AuthProviderUrlList,
+    AuthenticatedUserQuery, AuthUserInfo, BrowserCookieChange, BuildLoginUrls, CompleteOAuthLogin,
+    LogoutData, PresentedSession, SessionRenewalData,
+};
 
 /// A chain plugin that always yields a principal with the given `user_id`
 /// (which may be `None`), so the empty/missing-user_id branch of
@@ -58,156 +77,6 @@ async fn run_current_user(chain: Arc<AuthPluginChain>) -> (StatusCode, serde_jso
     (status, body)
 }
 
-#[tokio::test]
-async fn auth_service_complete_login_issues_redirect_cookie_without_network() {
-    let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
-    providers.insert(
-        "google".to_string(),
-        Arc::new(MockOAuthProvider::new("google", "external-123")),
-    );
-    let state = OAuthRouteState::new(
-        "test-secret-key-at-least-32-bytes!!",
-        Arc::new(NoopUserIdentityPort),
-        providers,
-        OAuthConfig {
-            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
-            idle_timeout_minutes: 30,
-            base_url: "https://bcs.example.com".to_string(),
-            cookie_secure: false,
-            env: "test".to_string(),
-            success_redirect_path: "/".to_string(),
-        },
-        None,
-    );
-
-    let urls = state
-        .login_urls(BuildLoginUrls {
-            callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
-        })
-        .await
-        .expect("login urls");
-    let provider_url = &urls.providers[0].url;
-    let state_param = provider_url
-        .split('&')
-        .find_map(|part| part.strip_prefix("state="))
-        .expect("state query param")
-        .to_string();
-
-    let result = state
-        .complete_login(CompleteOAuthLogin {
-            provider: "google".to_string(),
-            code: Some("auth-code".to_string()),
-            auth_code: None,
-            state: state_param,
-            callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
-        })
-        .await
-        .expect("complete login");
-
-    assert_eq!(result.location, "/");
-    assert!(result.set_cookie.starts_with("bcs_session="));
-    assert!(result.set_cookie.contains("HttpOnly"));
-    assert!(result.set_cookie.contains("SameSite=Lax"));
-
-    // The issued `bcs_session` JWT must carry the user's display name so an
-    // external JWT-only verifier (e.g. a gateway) can populate user_name.
-    let jwt = result
-        .set_cookie
-        .strip_prefix("bcs_session=")
-        .and_then(|rest| rest.split(';').next())
-        .expect("bcs_session cookie value");
-    let claims = JwtService::new("test-secret-key-at-least-32-bytes!!")
-        .verify_no_exp(jwt)
-        .expect("verify issued login jwt");
-    assert_eq!(
-        claims.name.as_deref(),
-        Some("Mock User"),
-        "login JWT must carry the provider's display name"
-    );
-}
-
-
-#[tokio::test]
-async fn login_urls_rejects_empty_callback_base_url() {
-    let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
-    providers.insert(
-        "google".to_string(),
-        Arc::new(MockOAuthProvider::new("google", "external-123")),
-    );
-    let state = OAuthRouteState::new(
-        "test-secret-key-at-least-32-bytes!!",
-        Arc::new(NoopUserIdentityPort),
-        providers,
-        OAuthConfig {
-            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
-            idle_timeout_minutes: 30,
-            base_url: "https://bcs.example.com".to_string(),
-            cookie_secure: false,
-            env: "test".to_string(),
-            success_redirect_path: "/".to_string(),
-        },
-        None,
-    );
-
-    let err = state
-        .login_urls(BuildLoginUrls {
-            callback_base_url: "   ".to_string(),
-        })
-        .await
-        .expect_err("empty callback base url should fail");
-
-    assert_eq!(err.code(), "invalid_callback_base_url");
-}
-
-#[tokio::test]
-async fn complete_login_rejects_missing_code() {
-    let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
-    providers.insert(
-        "google".to_string(),
-        Arc::new(MockOAuthProvider::new("google", "external-123")),
-    );
-    let state = OAuthRouteState::new(
-        "test-secret-key-at-least-32-bytes!!",
-        Arc::new(NoopUserIdentityPort),
-        providers,
-        OAuthConfig {
-            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
-            idle_timeout_minutes: 30,
-            base_url: "https://bcs.example.com".to_string(),
-            cookie_secure: false,
-            env: "test".to_string(),
-            success_redirect_path: "/".to_string(),
-        },
-        None,
-    );
-
-    let urls = state
-        .login_urls(BuildLoginUrls {
-            callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
-        })
-        .await
-        .expect("login urls");
-    let provider_url = &urls.providers[0].url;
-    let state_param = provider_url
-        .split('&')
-        .find_map(|part| part.strip_prefix("state="))
-        .expect("state query param")
-        .to_string();
-
-    let err = state
-        .complete_login(CompleteOAuthLogin {
-            provider: "google".to_string(),
-            code: None,
-            auth_code: None,
-            state: state_param,
-            callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
-        })
-        .await
-        .expect_err("missing code should fail");
-
-    assert_eq!(err.code(), "missing_code");
-}
-
 /// A principal whose `user_id` is `None` is not a human login — `/auth/user`
 /// must NOT return 200 with an empty user_id.
 #[tokio::test]
@@ -232,106 +101,260 @@ async fn current_user_accepts_principal_with_user_id() {
     assert_eq!(body["user_id"], "u-123");
 }
 
-/// In-memory `UserIdentityPort` for refresh tests: binds one session token
-/// hash to a single user and serves its display name, so `refresh_session`
-/// (which reads `get_identity_by_token` and re-signs) can be exercised
-/// without `NoopUserIdentityPort` short-circuiting to `None`.
-struct BoundTokenIdentityPort {
-    user_id: String,
-    name: Option<String>,
-    bound: tokio::sync::Mutex<Option<String>>,
+// ---------------------------------------------------------------------------
+// Challenge-cookie extraction (plan §8.4): unique, non-empty, either name.
+
+fn cookie_header(value: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::COOKIE,
+        axum::http::HeaderValue::from_str(value).expect("cookie header value"),
+    );
+    headers
 }
 
-impl BoundTokenIdentityPort {
-    fn new(user_id: &str, name: Option<&str>) -> Self {
-        Self {
-            user_id: user_id.to_string(),
-            name: name.map(str::to_string),
-            bound: tokio::sync::Mutex::new(None),
-        }
+#[test]
+fn challenge_extraction_accepts_the_last_present_value() {
+    let headers = cookie_header("first=1; __Host-bcs_oauth_login=nonce-a; other=2");
+    assert_eq!(
+        extract_login_challenge(&headers).ok().as_deref(),
+        Some("nonce-a")
+    );
+    let local = cookie_header("bcs_oauth_login=nonce-b");
+    assert_eq!(
+        extract_login_challenge(&local).ok().as_deref(),
+        Some("nonce-b")
+    );
+}
+
+#[test]
+fn challenge_extraction_rejects_missing_duplicate_and_empty() {
+    let none = cookie_header("bcs_session=abc");
+    assert_eq!(extract_login_challenge(&none), Err(()));
+    let empty = cookie_header("__Host-bcs_oauth_login=");
+    assert_eq!(extract_login_challenge(&empty), Err(()));
+    let mut duplicated = cookie_header("__Host-bcs_oauth_login=a");
+    duplicated.append(
+        axum::http::header::COOKIE,
+        axum::http::HeaderValue::from_static("bcs_oauth_login=b"),
+    );
+    assert_eq!(extract_login_challenge(&duplicated), Err(()));
+}
+
+// ---------------------------------------------------------------------------
+// Session-cookie presentation obligations (Task 10 review):
+// missing -> None (idempotent boundary); EMPTY -> error, never a token.
+
+#[test]
+fn session_cookie_presentation_rules() {
+    let missing = cookie_header("other=1");
+    assert_eq!(presented_session_cookie(&missing), Ok(None));
+    let present = cookie_header("bcs_session=abc; other=1");
+    assert_eq!(
+        presented_session_cookie(&present),
+        Ok(Some("abc".to_string()))
+    );
+    let empty = cookie_header("bcs_session=");
+    assert_eq!(presented_session_cookie(&empty), Err(()));
+}
+
+// ---------------------------------------------------------------------------
+// Cookieinstruction encoding (plan §8.4 attributes).
+
+#[test]
+fn cookie_encoding_follows_the_pinned_contract() {
+    use super::routes::encode_cookie_change as encode;
+    let secure = encode(
+        &BrowserCookieChange::SetLoginChallenge {
+            nonce: "n".into(),
+            expires_at: 1,
+        },
+        true,
+    )
+    .to_str()
+    .expect("utf-8")
+    .to_string();
+    assert!(secure.starts_with("__Host-bcs_oauth_login=n;"));
+    for attr in ["Path=/", "HttpOnly", "Secure", "SameSite=Lax", "Max-Age=300"] {
+        assert!(secure.contains(attr), "missing {attr} in {secure}");
+    }
+    let local = encode(
+        &BrowserCookieChange::SetLoginChallenge {
+            nonce: "n".into(),
+            expires_at: 1,
+        },
+        false,
+    );
+    let local = local.to_str().expect("utf-8").to_string();
+    assert!(local.starts_with("bcs_oauth_login=n;"));
+    assert!(!local.contains("Secure"));
+    assert_eq!(
+        encode(&BrowserCookieChange::ClearSession, true)
+            .to_str()
+            .expect("utf-8"),
+        "bcs_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The cors-derived Origin gate (plan §8.3 compatibility tightening).
+
+#[test]
+fn origin_gate_exact_list_semantics() {
+    use super::routes::cookie_unsafe_origin_allowed as allowed;
+    let trusted = vec!["https://work.example".to_string()];
+    let ok = cookie_header("x=1");
+    let mut ok = ok;
+    ok.insert(
+        axum::http::header::ORIGIN,
+        axum::http::HeaderValue::from_static("https://work.example"),
+    );
+    assert!(allowed(&ok, &trusted));
+    for raw in ["https://evil.example", "https://work.example.evil.com", "null"] {
+        let mut bad = HeaderMap::new();
+        bad.insert(
+            axum::http::header::ORIGIN,
+            axum::http::HeaderValue::from_str(raw).expect("origin"),
+        );
+        assert!(!allowed(&bad, &trusted), "{raw} must not pass");
+    }
+    let no_origin = HeaderMap::new();
+    assert!(!allowed(&no_origin, &trusted));
+    assert!(
+        !allowed(&ok, &[]),
+        "no configured exact origins fails closed"
+    );
+    let mut duplicated = HeaderMap::new();
+    duplicated.insert(
+        axum::http::header::ORIGIN,
+        axum::http::HeaderValue::from_static("https://work.example"),
+    );
+    duplicated.append(
+        axum::http::header::ORIGIN,
+        axum::http::HeaderValue::from_static("https://work.example"),
+    );
+    assert!(!allowed(&duplicated, &trusted), "duplicated Origin rejects");
+}
+
+// ---------------------------------------------------------------------------
+// The thin handlers over a recording AuthService fake: the reply's cookie
+// instructions must become SEPARATE appended Set-Cookie headers and the
+// legacy text shapes must be preserved.
+
+use std::sync::Mutex as StdMutex;
+
+struct ScriptedAuthService {
+    calls: StdMutex<Vec<&'static str>>,
+}
+
+impl ScriptedAuthService {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            calls: StdMutex::new(Vec::new()),
+        })
     }
 }
 
 #[async_trait]
-impl UserIdentityPort for BoundTokenIdentityPort {
-    async fn ensure_identity(
+impl AuthService for ScriptedAuthService {
+    async fn login_urls(
         &self,
-        _auth_source: &str,
-        _external_user_id: &str,
-        _external_user_name: Option<&str>,
-        _avatar: Option<&str>,
-        _env: &str,
-    ) -> Result<String, AuthError> {
-        Ok(self.user_id.clone())
-    }
-
-    async fn lookup_by_user_id(
-        &self,
-        _user_id: &str,
-        _auth_source: &str,
-    ) -> Result<Option<String>, AuthError> {
-        Ok(Some(self.user_id.clone()))
-    }
-
-    async fn get_identity_by_token(
-        &self,
-        token_hash: &str,
-    ) -> Result<Option<UserIdentityInfo>, AuthError> {
-        let bound = self.bound.lock().await;
-        if bound.as_deref() == Some(token_hash) {
-            Ok(Some(UserIdentityInfo {
-                user_id: self.user_id.clone(),
-                auth_source: "google".to_string(),
-                user_name: self.name.clone(),
-                external_user_name: self.name.clone(),
-                avatar: None,
-            }))
-        } else {
-            Ok(None)
+        _request: BuildLoginUrls,
+    ) -> AuthFlowReply<AuthProviderUrlList> {
+        self.calls.lock().unwrap().push("login_urls");
+        AuthFlowReply {
+            result: Ok(AuthProviderUrlList {
+                providers: vec![AuthProviderUrl {
+                    name: "google".to_string(),
+                    url: "https://provider.example/authorize?state=s".to_string(),
+                }],
+            }),
+            cookie_changes: vec![BrowserCookieChange::SetLoginChallenge {
+                nonce: "challenge-nonce".to_string(),
+                expires_at: 1,
+            }],
         }
     }
 
-    async fn get_identity_by_user_id(
+    async fn complete_login(
         &self,
-        _user_id: &str,
-    ) -> Result<Option<UserIdentityInfo>, AuthError> {
-        Ok(Some(UserIdentityInfo {
-            user_id: self.user_id.clone(),
-            auth_source: "google".to_string(),
-            user_name: self.name.clone(),
-            external_user_name: self.name.clone(),
-            avatar: None,
-        }))
+        command: CompleteOAuthLogin,
+    ) -> AuthFlowReply<AuthRedirectLocation> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(command.browser_binding.nonce.is_empty().then_some("bad").unwrap_or("complete_login"));
+        AuthFlowReply {
+            result: Ok(AuthRedirectLocation {
+                location: "/after-login".to_string(),
+            }),
+            cookie_changes: vec![
+                BrowserCookieChange::ClearLoginChallenge,
+                BrowserCookieChange::SetSession {
+                    token: "session-token".to_string(),
+                    expires_at: 2,
+                },
+            ],
+        }
     }
 
-    async fn update_token(
+    async fn current_user(
         &self,
-        _user_id: &str,
-        token_hash: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        *self.bound.lock().await = if token_hash.is_empty() {
-            None
+        _query: AuthenticatedUserQuery,
+    ) -> Result<AuthUserInfo, bcs_service_api::application::v1::ApplicationError> {
+        Err(bcs_service_api::application::v1::ApplicationError::internal("unused"))
+    }
+
+    async fn refresh_session(&self, session: PresentedSession) -> AuthFlowReply<SessionRenewalData> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(if session.token == "current-token" { "refresh" } else { "refresh-bad-token" });
+        if session.token == "current-token" {
+            AuthFlowReply {
+                result: Ok(SessionRenewalData {}),
+                cookie_changes: vec![BrowserCookieChange::SetSession {
+                    token: "rotated-token".to_string(),
+                    expires_at: 3,
+                }],
+            }
         } else {
-            Some(token_hash.to_string())
-        };
-        Ok(())
+            AuthFlowReply {
+                result: Err(bcs_service_api::application::v1::ApplicationError::Unauthenticated),
+                cookie_changes: Vec::new(),
+            }
+        }
+    }
+
+    async fn logout(
+        &self,
+        session: Option<PresentedSession>,
+    ) -> AuthFlowReply<LogoutData> {
+        match session {
+            None => {
+                self.calls.lock().unwrap().push("logout-idempotent");
+                AuthFlowReply {
+                    result: Ok(LogoutData {}),
+                    cookie_changes: vec![BrowserCookieChange::ClearSession],
+                }
+            }
+            Some(session) => {
+                self.calls.lock().unwrap().push("logout-revoke");
+                AuthFlowReply {
+                    result: Ok(LogoutData {}),
+                    cookie_changes: vec![BrowserCookieChange::ClearSession],
+                }
+            }
+        }
     }
 }
 
-/// `refresh_session` must re-sign the JWT carrying the identity row's CURRENT
-/// display name (so an edited `user_name` re-syncs into the gateway-parsed
-/// cookie on sliding renewal), regardless of the presented JWT's own `name`.
-#[tokio::test]
-async fn refresh_session_emits_current_name_in_jwt() {
-    let jwt_secret = "test-secret-key-at-least-32-bytes!!";
-    let port = Arc::new(BoundTokenIdentityPort::new("u1", Some("The Name")));
-    let state = OAuthRouteState::new(
-        jwt_secret,
-        port.clone(),
-        HashMap::new(),
+fn legacy_state(service: Arc<ScriptedAuthService>) -> Arc<OAuthRouteState> {
+    Arc::new(OAuthRouteState::new(
+        service,
+        Arc::new(NoopUserIdentityPort),
         OAuthConfig {
-            jwt_secret: jwt_secret.to_string(),
+            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
             idle_timeout_minutes: 30,
             base_url: "https://bcs.example.com".to_string(),
             cookie_secure: false,
@@ -339,52 +362,188 @@ async fn refresh_session_emits_current_name_in_jwt() {
             success_redirect_path: "/".to_string(),
         },
         None,
-    );
+        vec!["https://work.example".to_string()],
+    ))
+}
 
-    // Issue and bind a login-style JWT; its `name` is irrelevant — refresh
-    // re-derives the name from the identity row via `get_identity_by_token`.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let svc = JwtService::new(jwt_secret);
-    let login_jwt = svc
-        .sign(&Claims {
-            sub: "u1".to_string(),
-            src: "google".to_string(),
-            iat: now,
-            exp: now + 60,
-            name: None,
-        })
-        .expect("sign login jwt");
-    port.update_token("u1", &bcs_jwt::token_hash(&login_jwt), now + 60)
+async fn response_parts(
+    response: axum::response::Response,
+) -> (
+    StatusCode,
+    Vec<String>,
+    Option<String>,
+    String,
+) {
+    let status = response.status();
+    let cookies = response
+        .headers()
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok().map(str::to_string))
+        .collect();
+    let location = response
+        .headers()
+        .get(axum::http::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let cache = response
+        .headers()
+        .get(axum::http::header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_default();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
-        .expect("bind login token");
+        .expect("body");
+    (status, cookies, location, cache)
+}
 
-    let result = state
-        .refresh_session(RefreshSession {
-            headers: RequestAuthHeaders {
-                authorization: None,
-                cookie: Some(format!("bcs_session={login_jwt}")),
-                forwarded_headers: Vec::new(),
-            },
-        })
-        .await
-        .expect("refresh");
-    assert!(result.set_cookie.starts_with("bcs_session="));
-
-    let new_jwt = result
-        .set_cookie
-        .strip_prefix("bcs_session=")
-        .and_then(|rest| rest.split(';').next())
-        .expect("new bcs_session value");
-    let claims = JwtService::new(jwt_secret)
-        .verify_no_exp(new_jwt)
-        .expect("verify renewed jwt");
-    assert_eq!(claims.sub, "u1");
-    assert_eq!(
-        claims.name.as_deref(),
-        Some("The Name"),
-        "refresh must re-sign the JWT with the identity row's current name"
+#[tokio::test]
+async fn url_handler_appends_the_challenge_cookie_and_keeps_the_legacy_json_shape() {
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let resp = auth_url_handler(State(state)).await.into_response();
+    let (status, cookies, _, cache) = response_parts(resp).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cookies.len(), 1, "one SetLoginChallenge => one header");
+    assert!(
+        cookies[0].starts_with("bcs_oauth_login="),
+        "plain-HTTP base uses the non-__Host name: {}",
+        cookies[0]
     );
+    assert!(cookies[0].contains("Max-Age=300"));
+    assert!(cookies[0].contains("HttpOnly"));
+    assert_eq!(cache, "no-store");
+    assert_eq!(*service.calls.lock().unwrap(), vec!["login_urls"]);
+}
+
+#[tokio::test]
+async fn callback_success_sets_session_and_clears_challenge_as_separate_headers() {
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let headers = cookie_header("__Host-bcs_oauth_login=challenge-nonce");
+    let resp = callback_handler(
+        State(state),
+        axum::extract::Path("google".to_string()),
+        axum::extract::Query(CallbackParams {
+            code: Some("code-1".to_string()),
+            auth_code: None,
+            state: "state-1".to_string(),
+        }),
+        headers,
+    )
+    .await
+    .into_response();
+    let (status, cookies, location, cache) = response_parts(resp).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(location.as_deref(), Some("/after-login"));
+    assert_eq!(cookies.len(), 2, "session set + challenge clear, appended");
+    assert!(
+        cookies.iter().any(|cookie| cookie.starts_with("bcs_session=session-token")),
+        "the session install arrives as its own header: {cookies:?}"
+    );
+    assert!(
+        cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("bcs_oauth_login=;") && cookie.contains("Max-Age=0")),
+        "the challenge clear arrives as its own header: {cookies:?}"
+    );
+    assert_eq!(cache, "no-store");
+    assert_eq!(service.calls.lock().unwrap().as_slice(), ["complete_login"]);
+}
+
+#[tokio::test]
+async fn callback_without_challenge_cookie_is_rejected_before_the_service() {
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let resp = callback_handler(
+        State(state),
+        axum::extract::Path("google".to_string()),
+        axum::extract::Query(CallbackParams {
+            code: Some("code-1".to_string()),
+            auth_code: None,
+            state: "state-1".to_string(),
+        }),
+        HeaderMap::new(),
+    )
+    .await
+    .into_response();
+    let (status, cookies, location, _) = response_parts(resp).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(cookies.is_empty());
+    assert_eq!(location, None);
+    assert!(
+        service.calls.lock().unwrap().is_empty(),
+        "no service call may happen without the browser binding"
+    );
+}
+
+#[tokio::test]
+async fn refresh_rotates_the_cookie_behind_the_trusted_origin_gate() {
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let mut headers = cookie_header("bcs_session=current-token");
+    headers.insert(
+        axum::http::header::ORIGIN,
+        axum::http::HeaderValue::from_static("https://work.example"),
+    );
+    let (status, cookies, _, _) = response_parts(refresh_handler(State(state), headers).await.into_response()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cookies.len(), 1);
+    assert!(cookies[0].starts_with("bcs_session=rotated-token"));
+    assert!(cookies[0].contains("SameSite=Lax"));
+
+    // Without the Origin, the same cookie request is forbidden.
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let headers = cookie_header("bcs_session=current-token");
+    let (status, cookies, _, _) = response_parts(refresh_handler(State(state), headers).await.into_response()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(cookies.is_empty());
+    assert!(service.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn logout_rejects_empty_cookie_and_honors_the_cookie_less_boundary() {
+    // EMPTY cookie = malformed credential, an error (never an empty token).
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let headers = cookie_header("bcs_session=");
+    let (status, _, _, _) = response_parts(logout_handler(State(state), headers).await.into_response()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(service.calls.lock().unwrap().is_empty());
+
+    // Missing cookie = the valid idempotent boundary that still clears.
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let (status, cookies, _, _) =
+        response_parts(logout_handler(State(state), HeaderMap::new()).await.into_response()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cookies.len(), 1);
+    assert!(cookies[0].starts_with("bcs_session=;"));
+    assert!(cookies[0].contains("Max-Age=0"));
+    assert_eq!(service.calls.lock().unwrap().as_slice(), ["logout-idempotent"]);
+
+    // With a cookie but no Origin: forbidden (cookie unsafe write).
+    let service = ScriptedAuthService::new();
+    let state = legacy_state(service.clone());
+    let headers = cookie_header("bcs_session=current-token");
+    let (status, _, _, _) =
+        response_parts(logout_handler(State(state), headers).await.into_response()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+// ---------------------------------------------------------------------------
+// The identity-only mount: no login family route may run without the
+// injected service.
+
+#[tokio::test]
+async fn identity_only_state_has_no_injected_login_service() {
+    let state = OAuthRouteState::new_chain_only(
+        Arc::new(NoopUserIdentityPort),
+        chain_with(Some("u".into())),
+    );
+    assert!(state.require_auth_service().is_none());
+    let (status, body) = run_current_user(chain_with(Some("u-1".into()))).await;
+    assert_eq!(status, StatusCode::OK, "identity-only /auth/user still works, got {body}");
 }
