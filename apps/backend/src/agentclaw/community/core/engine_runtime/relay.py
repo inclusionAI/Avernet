@@ -85,7 +85,16 @@ _SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
 
 
 def _stale_agentclaw_sandbox(exc: Any) -> bool:
-    """Whether this transport failure specifically denotes a stale sandbox."""
+    """Whether this transport failure specifically denotes a stale sandbox.
+
+    AgentClaw does not expose a structured ``sandbox-reported`` state over the
+    BaaS ``/http-info`` proxy, so Avernet relies on the upstream response body
+    contract ``sandbox info not exist`` as the transport-level signal.
+    ``DeviceAdapterHTTPStatusError`` is deliberately limited to the transport
+    boundary and does not retain structured cause codes. Do not widen this:
+    if upstream changes the phrase or moves to a boolean, revisit the
+    stale-sandbox contract explicitly instead of silently broadening it.
+    """
     return (exc.status_code == 500 and "sandbox info not exist" in (getattr(exc, "response_text", None) or "").lower())
 
 
