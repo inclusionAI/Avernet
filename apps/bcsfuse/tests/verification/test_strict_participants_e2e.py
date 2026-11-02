@@ -327,7 +327,7 @@ class TestStrictParticipantsParameterChain:
         # 验证 diagnose 被调用时传递了 strict_participants
         mock_expert_service.diagnose.assert_called_once()
         call_kwargs = mock_expert_service.diagnose.call_args[1]
-        assert call_kwargs.get("strict_participants") == True, \
+        assert call_kwargs.get("strict_participants") is True, \
             "strict_participants 必须传递到 ExpertDiagnosisService"
 
 

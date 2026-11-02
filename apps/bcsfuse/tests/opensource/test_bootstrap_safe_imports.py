@@ -10,7 +10,14 @@ def test_oss_worker_lifecycle_routes_do_not_load_legacy_api_app() -> None:
     bcsfuse_root = Path(__file__).resolve().parents[2]
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
-        filter(None, (str(bcsfuse_root), env.get("PYTHONPATH")))
+        filter(
+            None,
+            (
+                str(bcsfuse_root / "src"),
+                str(bcsfuse_root / "packages/search-core/src"),
+                env.get("PYTHONPATH"),
+            ),
+        )
     )
     script = """
 import sys
@@ -36,7 +43,14 @@ def test_legacy_api_package_exports_keep_their_object_types() -> None:
     bcsfuse_root = Path(__file__).resolve().parents[2]
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
-        filter(None, (str(bcsfuse_root), env.get("PYTHONPATH")))
+        filter(
+            None,
+            (
+                str(bcsfuse_root / "src"),
+                str(bcsfuse_root / "packages/search-core/src"),
+                env.get("PYTHONPATH"),
+            ),
+        )
     )
     script = """
 from fastapi import APIRouter, FastAPI

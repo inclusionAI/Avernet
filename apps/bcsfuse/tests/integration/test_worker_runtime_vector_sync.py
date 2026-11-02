@@ -70,7 +70,7 @@ def test_failed_vector_write_is_reported_and_same_state_retry_repairs_it(isolate
             def fail(*args, **kwargs):
                 raise RuntimeError("injected vector write failure")
             with monkeypatch.context() as patch:
-                patch.setattr(store, "upsert", fail)
+                patch.setattr(store, "update_payload_by_worker", fail)
                 response = acceptance.request("PUT", f"/v1/workers/{worker_id}/offline", expected=500)
                 assert response["detail"]["code"] == "RUNTIME_STATE_UPDATE_ERROR"
             assert registry.require("worker_registry_store").get_by_id(worker_id).state.runtime_state.value == "offline"

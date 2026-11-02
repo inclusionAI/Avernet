@@ -242,7 +242,7 @@ class TestStrictParticipantsInExpertDiagnosisService:
         # Verify strict_participants was passed
         mock_enhancer.enhance.assert_called_once()
         call_kwargs = mock_enhancer.enhance.call_args[1]
-        assert call_kwargs.get("strict_participants") == True
+        assert call_kwargs.get("strict_participants") is True
 
     def test_strict_mode_empty_enhancer_result_stays_empty(self):
         """When strict=True and enhancer returns empty, should NOT fallback to base perspectives"""
@@ -355,7 +355,7 @@ class TestStrictParticipantsInGroupFusionService:
         # Verify strict_participants was passed
         mock_expert_service.diagnose.assert_called_once()
         call_kwargs = mock_expert_service.diagnose.call_args[1]
-        assert call_kwargs.get("strict_participants") == True
+        assert call_kwargs.get("strict_participants") is True
 
     def test_default_strict_participants_is_false(self):
         """Default strict_participants should be False for backward compatibility"""
@@ -363,7 +363,7 @@ class TestStrictParticipantsInGroupFusionService:
 
         options = FuseOptions()
         # Default should allow fallback
-        assert options.strict_participants == True  # Based on the current model default
+        assert options.strict_participants is True  # Based on the current model default
 
     def test_g5_mode_with_explicit_participants(self):
         """G5 mode should respect explicit participants"""

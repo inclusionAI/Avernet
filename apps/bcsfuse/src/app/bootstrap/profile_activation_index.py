@@ -95,6 +95,12 @@ class ProfileActivationIndexCoordinator:
             with self._lock:
                 self._leader_active = False
 
+            # The leader owns the only call path that never waits on its event.
+            # Check its batch result as well: an indexing failure must surface
+            # to the activation route instead of being converted into HTTP 200.
+            if request.error is not None:
+                raise request.error
+
     def _drain_queue(self) -> None:
         while True:
             # Keep the coalescing interval short. It only needs to absorb an
@@ -222,8 +228,12 @@ class ProfileActivationIndexCoordinator:
         successful_keys = set(result.indexed_profile_keys)
 
         for entry in resolved:
-            if entry.profile.profile_key not in successful_keys and entry.error is None:
-                entry.error = RuntimeError("activated profile indexing failed")
+            if entry.profile.profile_key not in successful_keys:
+                entry.error = entry.error or RuntimeError(
+                    "activated profile indexing failed"
+                )
+            for request in entry.requests:
+                request.error = request.error or entry.error
 
 _activation_index_coordinator = ProfileActivationIndexCoordinator()
 

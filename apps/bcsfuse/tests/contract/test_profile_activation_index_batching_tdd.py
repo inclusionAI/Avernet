@@ -207,6 +207,20 @@ def test_concurrent_activations_coalesce_into_one_model_call(monkeypatch):
     assert vector_store.delete_stale_fragments.call_count == len(profiles)
 
 
+def test_activation_index_leader_error_reaches_caller(monkeypatch):
+    """A single-request coalescing failure must not be swallowed by the leader."""
+
+    _content, registry, workers, provider, _store = prepare_activation_environment(
+        monkeypatch,
+        {"worker-failing": ("default", "failing title")},
+    )
+    provider.fail_texts = {"worker_id: worker-failing\nfailing title"}
+    coordinator = ProfileActivationIndexCoordinator(coalesce_seconds=0)
+
+    with pytest.raises(RuntimeError, match="activated profile indexing failed"):
+        coordinator.refresh(registry, workers["worker-failing"], "default")
+
+
 def test_activation_route_runs_index_refresh_in_threadpool(monkeypatch):
     """The production activation route must not run indexing on its event loop."""
 

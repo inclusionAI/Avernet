@@ -62,7 +62,7 @@ def get_question_rewrite_service() -> Optional["QuestionRewriteService"]:
     """
     global _question_rewrite_service
     if _question_rewrite_service is None:
-        gateway = fusion.fusion._get_llm_gateway_service()
+        gateway = fusion._get_llm_gateway_service()
         if gateway is None:
             logger.warning("[DEP-DIAG] ⚠️ LLM Gateway 不可用, QuestionRewriteService 无法创建")
             return None
@@ -112,7 +112,7 @@ def get_capability_verify_service():
 
     try:
         import os
-        gateway = fusion.fusion._get_llm_gateway_service()
+        gateway = fusion._get_llm_gateway_service()
         if gateway is None:
             logger.warning("[DI] LLM Gateway not available, CapabilityVerifyService cannot be created")
             return None
@@ -141,7 +141,7 @@ def get_capability_verify_service():
         # Peer review service（召回相似 bot 进行面试）
         peer_review_service = PeerReviewService(
             executor=executor,
-            worker_repo=fusion.fusion._get_registry_store(),
+            worker_repo=fusion._get_registry_store(),
             recommendation_service=fusion.get_candidate_recommendation_service(),
             top_k=settings.peer_top_k,
             min_similarity=settings.peer_min_similarity,
@@ -151,8 +151,8 @@ def get_capability_verify_service():
             prompt_composer=prompt_composer,
             executor=executor,
             judge=judge,
-            worker_repo=fusion.fusion._get_registry_store(),
-            profile_repo=fusion.fusion._get_api_profile_store(),
+            worker_repo=fusion._get_registry_store(),
+            profile_repo=fusion._get_api_profile_store(),
             peer_review_service=peer_review_service,
             total_timeout=settings.total_timeout,
             debug_output_dir=settings.debug_output_dir,

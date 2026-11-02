@@ -39,12 +39,13 @@ class Config:
 def build_request(
     auth_provider: ContractAuthProvider,
     config: Config | None = None,
+    mode: str = "test",
 ):
     registry = ProviderRegistry()
     registry.register("config", config or Config(False))
     registry.register("auth", auth_provider)
     context = ApplicationContext(
-        mode="test",
+        mode=mode,
         startup_profile="test",
         registry=registry,
     )
@@ -105,6 +106,6 @@ def test_gateway_env_override_is_loaded_by_config_provider(
 
 
 def test_composed_gateway_trust_value_skips_local_bearer_validation() -> None:
-    request = build_request(ContractAuthProvider(None), Config(True))
+    request = build_request(ContractAuthProvider(None), Config(True), mode="runtime")
 
     require_oss_auth(request)

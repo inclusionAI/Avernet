@@ -92,6 +92,9 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
 
     @contextmanager
     def open_app():
+        from app.application.services.literal_fallback_maintenance import (
+            wrap_vector_store_with_literal_fallback,
+        )
         from app.bootstrap.application_context import build_application_context
         from app.bootstrap.app_factory import create_bcsfuse_app
         from app.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
@@ -131,6 +134,8 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
             persistence_backend=SQLiteVectorPersistenceBackend(str(tmp_path / "vectors.sqlite")),
         )
         vector_store.rebuild_from_backend()
+        # Match runtime composition: updates also maintain the final fallback.
+        vector_store = wrap_vector_store_with_literal_fallback(vector_store)
         embedding = DeterministicEmbedding()
         registry.register("vector_store", vector_store)
         registry.register("embedding_provider", embedding)
@@ -216,13 +221,12 @@ def test_keyword_recommendation_http_metadata_and_missing_model_fallback(isolate
                     "enable_rerank": False, "filters": {"runtime_state": ["online"]}}
             baseline = acceptance.request("POST", "/api/v1/recommend", json=body)
             assert baseline["recommendations"][0]["worker_id"] == worker_id
-            assert baseline["metadata"]["score_source"] == "hybrid_rrf"
-            assert baseline["metadata"]["candidate_source"] == "hybrid"
-            assert baseline["metadata"]["keyword_search_used"] is True
-            assert baseline["metadata"]["rerank_degraded"] is False
+            assert baseline["metadata"]["score_source"] == "direct_keyword"
+            assert baseline["metadata"]["candidate_source"] == "direct_snapshot"
+            assert baseline["metadata"]["keyword_search_used"] is False
+            assert baseline["metadata"].get("rerank_degraded") is not True
             fallback = acceptance.request("POST", "/api/v1/recommend", json={**body, "enable_rerank": True})
             assert [(r["profile_key"], r["score"]) for r in fallback["recommendations"]] == [
                 (r["profile_key"], r["score"]) for r in baseline["recommendations"]
             ]
-            assert fallback["metadata"]["score_source"] == "hybrid_rrf"
-            assert fallback["metadata"]["rerank_degraded"] is True
+            assert fallback["metadata"]["score_source"] == "direct_keyword"

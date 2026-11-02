@@ -107,12 +107,12 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
         availability = checker.check_availability(worker_id)
 
         # 期望结果：已注册且可用
-        assert availability.is_registered == True, (
+        assert availability.is_registered is True, (
             f"Worker {worker_id} should be registered. "
             f"Got: is_registered={availability.is_registered}, "
             f"reason={availability.unavailability_reason}"
         )
-        assert availability.is_available == True, (
+        assert availability.is_available is True, (
             f"Worker {worker_id} should be available (online). "
             f"Got runtime_state={availability.runtime_state}"
         )
@@ -157,7 +157,7 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
         # 使用 profile_key 检查
         availability = checker.check_availability(profile_key)
 
-        assert availability.is_registered == True
+        assert availability.is_registered is True
         assert availability.worker_id == worker_id
 
 
@@ -385,11 +385,11 @@ class TestFusionEndToEnd:
         # 检查所有 participants
         for wid in worker_ids:
             availability = checker.check_availability(wid)
-            assert availability.is_registered == True, (
+            assert availability.is_registered is True, (
                 f"Participant {wid} should be registered. "
                 f"Got: {availability.unavailability_reason}"
             )
-            assert availability.is_available == True, (
+            assert availability.is_available is True, (
                 f"Participant {wid} should be available. "
                 f"Got runtime_state: {availability.runtime_state}"
             )
@@ -455,7 +455,7 @@ class TestParticipantAvailabilityCheckerDirect:
         availability = checker.check_availability(worker_id)
 
         # 修复后的预期行为: is_registered=True
-        assert availability.is_registered == True, (
+        assert availability.is_registered is True, (
             f"Worker {worker_id} exists in RegistryStore but "
             f"ParticipantAvailabilityChecker returns is_registered=False. "
             f"Reason: {availability.unavailability_reason}"

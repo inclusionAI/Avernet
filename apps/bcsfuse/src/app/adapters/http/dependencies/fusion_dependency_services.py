@@ -28,6 +28,7 @@ _structured_signal_extractor = None
 _conflict_dimension_analyzer = None
 _fused_profile_storage_service = None
 _profile_merge_service = None
+_group_context_service = None
 _conflict_alignment_service = None
 _perspective_provider = None
 
@@ -39,6 +40,7 @@ def reset_runtime_services() -> None:
     global _group_fusion_service, _structured_signal_extractor
     global _conflict_dimension_analyzer, _conflict_alignment_service
     global _perspective_provider, _profile_merge_service
+    global _group_context_service
 
     _expert_diagnosis_service = None
     _g5_expert_enhancer = None
@@ -50,6 +52,7 @@ def reset_runtime_services() -> None:
     _conflict_alignment_service = None
     _perspective_provider = None
     _profile_merge_service = None
+    _group_context_service = None
 
 
 
@@ -341,7 +344,7 @@ def get_group_fusion_service() -> GroupFusionService:
 
         # 获取 expert diagnosis service（这一步会触发 G5 enhancer 的创建）
         logger.info("[DEP-DIAG] Step 4: 获取 expert diagnosis service...")
-        expert_diagnosis_svc = fusion.fusion.get_expert_diagnosis_service()
+        expert_diagnosis_svc = fusion.get_expert_diagnosis_service()
         logger.info("[DEP-DIAG] expert_diagnosis_service: %s", "已创建" if expert_diagnosis_svc else "None")
         if expert_diagnosis_svc:
             logger.info("[DEP-DIAG]   - _g5_enhancer: %s",

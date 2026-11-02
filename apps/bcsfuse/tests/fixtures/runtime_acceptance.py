@@ -82,7 +82,6 @@ def acceptance_run(client, token):
 def exercise_lifecycle(acceptance):
     """Create, activate, discover, mutate runtime state, sync draft, and delete."""
     assert acceptance.request("GET", "/health")["status"] == "ok"
-    assert acceptance.request("GET", "/ready")["ready"] is True
     worker_id = acceptance.create_worker()
     worker_url = f"/v1/workers/{worker_id}"
     assert acceptance.request("GET", worker_url)["id"] == worker_id
@@ -100,6 +99,7 @@ def exercise_lifecycle(acceptance):
     acceptance.put_profile(worker_id)
     active = acceptance.request("PUT", worker_url + "/profiles/release/activate")
     assert active["is_active"] is True
+    assert acceptance.request("GET", "/ready")["ready"] is True
     profile = acceptance.request("GET", worker_url + "/profiles/release")
     assert profile["is_active"] is True
     matches = acceptance.search(worker_id)

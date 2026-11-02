@@ -69,7 +69,7 @@ class TestCandidateRecommendationStrictMode:
 
         # 应该返回空
         assert len(result.recommendations) == 0
-        assert result.participants_given == True
+        assert result.participants_given is True
         # 不应该调用第二次检索（补充推荐）
         assert mock_retrieval.retrieve.call_count == 1
 
@@ -110,7 +110,7 @@ class TestCandidateRecommendationStrictMode:
 
         # 应该返回补充推荐
         assert len(result.recommendations) == 1
-        assert result.recommendations[0].is_supplement == True
+        assert result.recommendations[0].is_supplement is True
         # 显式参与者走 retrieval，补充候选来自 vector matcher。
         assert mock_retrieval.retrieve.call_count == 1
 
@@ -150,7 +150,7 @@ class TestCandidateRecommendationStrictMode:
         # 应该只返回找到的
         assert len(result.recommendations) == 1
         assert result.recommendations[0].profile_key == 'wrk_existing:default'
-        assert result.recommendations[0].is_supplement == False
+        assert result.recommendations[0].is_supplement is False
 
     def test_strict_mode_with_no_participants_allows_full_db_search(self):
         """
@@ -189,7 +189,7 @@ class TestCandidateRecommendationStrictMode:
 
         # 应该返回全库推荐
         assert len(result.recommendations) == 2
-        assert all(r.is_supplement == True for r in result.recommendations)
+        assert all(r.is_supplement is True for r in result.recommendations)
 
 
 class TestCandidateRecommendationStrictModeIntegration:
@@ -226,7 +226,7 @@ class TestCandidateRecommendationStrictModeIntegration:
         # 应该找到显式 participant
         assert len(result.recommendations) == 1
         assert result.recommendations[0].profile_key == 'wrk_test:default'
-        assert result.recommendations[0].is_supplement == False
+        assert result.recommendations[0].is_supplement is False
 
     def test_strict_mode_parameter_propagated_correctly(self):
         """

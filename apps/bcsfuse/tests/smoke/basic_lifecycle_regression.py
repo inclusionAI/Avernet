@@ -123,7 +123,7 @@ def test_basic_lifecycle_regression():
         }, headers=auth_headers())
         assert response.status_code in [200, 201], f"Worker creation failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Worker creation unsuccessful: {data}"
+        assert data.get("success") is True, f"Worker creation unsuccessful: {data}"
         assert data.get("worker_id") == worker_id, f"Worker ID mismatch: {data}"
         print(f"✅ Worker created: {worker_id}")
     except Exception as e:
@@ -139,7 +139,7 @@ def test_basic_lifecycle_regression():
         response = client.get("/v1/workers", headers=auth_headers())
         assert response.status_code == 200, f"Worker list failed: {response.status_code}"
         data = response.json()
-        assert data.get("success") == True, f"Worker list unsuccessful: {data}"
+        assert data.get("success") is True, f"Worker list unsuccessful: {data}"
         items = data.get("items", [])
         total = data.get("total", 0)
         print(f"Workers: {total} total")
@@ -160,7 +160,7 @@ def test_basic_lifecycle_regression():
         response = client.get(f"/v1/workers/{worker_id}", headers=auth_headers())
         assert response.status_code == 200, f"Worker get failed: {response.status_code}"
         data = response.json()
-        assert data.get("success") == True, f"Worker get unsuccessful: {data}"
+        assert data.get("success") is True, f"Worker get unsuccessful: {data}"
         worker = data.get("worker", {})
         assert worker.get("id") == worker_id, f"Worker ID mismatch: {worker}"
         print(f"✅ Worker retrieved: {worker_id}")
@@ -177,7 +177,7 @@ def test_basic_lifecycle_regression():
         response = client.put(f"/v1/workers/{worker_id}/online", headers=auth_headers())
         assert response.status_code == 200, f"Worker online failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Worker online unsuccessful: {data}"
+        assert data.get("success") is True, f"Worker online unsuccessful: {data}"
         assert data.get("status") == "online", f"Worker status not online: {data}"
         print(f"✅ Worker set online: {worker_id}")
     except Exception as e:
@@ -193,7 +193,7 @@ def test_basic_lifecycle_regression():
         response = client.put(f"/v1/workers/{worker_id}/offline", headers=auth_headers())
         assert response.status_code == 200, f"Worker offline failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Worker offline unsuccessful: {data}"
+        assert data.get("success") is True, f"Worker offline unsuccessful: {data}"
         assert data.get("status") == "offline", f"Worker status not offline: {data}"
         print(f"✅ Worker set offline: {worker_id}")
     except Exception as e:
@@ -214,7 +214,7 @@ def test_basic_lifecycle_regression():
         }, headers=auth_headers())
         assert response.status_code in [200, 201], f"Profile creation failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Profile creation unsuccessful: {data}"
+        assert data.get("success") is True, f"Profile creation unsuccessful: {data}"
         assert data.get("worker_id") == worker_id, f"Worker ID mismatch: {data}"
         assert data.get("profile_id") == profile_id, f"Profile ID mismatch: {data}"
         print(f"✅ Profile created: {profile_id}")
@@ -231,7 +231,7 @@ def test_basic_lifecycle_regression():
         response = client.get(f"/v1/workers/{worker_id}/profiles", headers=auth_headers())
         assert response.status_code == 200, f"Profile list failed: {response.status_code}"
         data = response.json()
-        assert data.get("success") == True, f"Profile list unsuccessful: {data}"
+        assert data.get("success") is True, f"Profile list unsuccessful: {data}"
         items = data.get("items", [])
         total = data.get("total", 0)
         print(f"Profiles: {total} total")
@@ -252,7 +252,7 @@ def test_basic_lifecycle_regression():
         response = client.get(f"/v1/workers/{worker_id}/profiles/{profile_id}", headers=auth_headers())
         assert response.status_code == 200, f"Profile get failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Profile get unsuccessful: {data}"
+        assert data.get("success") is True, f"Profile get unsuccessful: {data}"
         assert data.get("worker_id") == worker_id, f"Worker ID mismatch: {data}"
         assert data.get("profile_id") == profile_id, f"Profile ID mismatch: {data}"
         print(f"✅ Profile retrieved: {profile_id}")
@@ -269,8 +269,8 @@ def test_basic_lifecycle_regression():
         response = client.post(f"/v1/workers/{worker_id}/profiles/{profile_id}/activate", headers=auth_headers())
         assert response.status_code == 200, f"Profile activation failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Profile activation unsuccessful: {data}"
-        assert data.get("indexed") == True, f"Profile not indexed: {data}"
+        assert data.get("success") is True, f"Profile activation unsuccessful: {data}"
+        assert data.get("indexed") is True, f"Profile not indexed: {data}"
         vector_count = data.get("vector_count", 0)
         print(f"✅ Profile activated and indexed: vector_count={vector_count}")
     except Exception as e:
@@ -308,7 +308,7 @@ def test_basic_lifecycle_regression():
         }, headers=auth_headers())
         assert response.status_code == 200, f"Search failed: {response.status_code} - {response.text}"
         data = response.json()
-        assert data.get("success") == True, f"Search unsuccessful: {data}"
+        assert data.get("success") is True, f"Search unsuccessful: {data}"
         results_count = data.get("results_count", 0)
         results = data.get("results", [])
         print(f"Search results: {results_count} found")
@@ -401,7 +401,7 @@ def test_basic_lifecycle_regression():
         response = client.delete(f"/v1/workers/{worker_id}/profiles/{profile_id}", headers=auth_headers())
         assert response.status_code in [200, 204], f"Profile deletion failed: {response.status_code} - {response.text}"
         data = response.json() if response.status_code == 200 else {}
-        assert data.get("success") == True or response.status_code == 204, f"Profile deletion unsuccessful: {data}"
+        assert data.get("success") is True or response.status_code == 204, f"Profile deletion unsuccessful: {data}"
         print(f"✅ Profile deleted: {profile_id}")
 
         # Verify profile is gone
@@ -421,7 +421,7 @@ def test_basic_lifecycle_regression():
         response = client.delete(f"/v1/workers/{worker_id}", headers=auth_headers())
         assert response.status_code in [200, 204], f"Worker deletion failed: {response.status_code} - {response.text}"
         data = response.json() if response.status_code == 200 else {}
-        assert data.get("success") == True or response.status_code == 204, f"Worker deletion unsuccessful: {data}"
+        assert data.get("success") is True or response.status_code == 204, f"Worker deletion unsuccessful: {data}"
         print(f"✅ Worker deleted: {worker_id}")
 
         # Verify worker is gone

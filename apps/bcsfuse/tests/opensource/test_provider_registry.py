@@ -5,35 +5,26 @@ Tests that the OSS provider graph can be built and configured correctly.
 """
 import os
 import sys
+
+import pytest
 import ast
 from pathlib import Path
 
 
-def test_runtime_registry_can_be_built():
-    """Test that runtime registry can be built."""
-    # Set minimal env vars for test
-    os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-    os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-    os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-    os.environ["LLM_AUTH_TOKEN"] = "test-token"
-    os.environ["STARTUP_PROFILE"] = "opensource"
+def test_runtime_registry_fails_closed_without_qdrant_server_url(monkeypatch):
+    """Runtime assembly must not silently fall back to local Qdrant."""
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:8001")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8002")
+    monkeypatch.setenv("LLM_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("STARTUP_PROFILE", "opensource")
+    monkeypatch.setenv("QDRANT_MODE", "server")
+    monkeypatch.delenv("QDRANT_URL", raising=False)
 
     from app.bootstrap.opensource import build_opensource_provider_registry
 
-    # This will fail if MySQL is not available, but we just want to test imports
-    # For now, we'll catch the exception and check that imports work
-    try:
-        registry = build_opensource_provider_registry(mode="runtime")
-        print("✓ Runtime registry built successfully")
-        return True
-    except Exception as e:
-        # Expected to fail without MySQL, but imports should work
-        if "mysql" in str(e).lower() or "connection" in str(e).lower():
-            print(f"✓ Runtime registry imports work (MySQL connection failed as expected: {e})")
-            return True
-        else:
-            print(f"✗ Runtime registry failed with unexpected error: {e}")
-            raise
+    with pytest.raises(ValueError, match=r"Server mode requires an HTTP\(S\) QDRANT_URL"):
+        build_opensource_provider_registry(mode="runtime")
 
 
 def test_dev_registry_can_be_built():
@@ -54,7 +45,6 @@ def test_dev_registry_can_be_built():
 
             build_opensource_provider_registry(mode="dev")
             print("✓ Dev registry built successfully")
-            return True
         finally:
             os.environ.pop("WORKER_REGISTRY_SQLITE_DB_PATH", None)
 def test_test_registry_can_be_built():
@@ -65,7 +55,6 @@ def test_test_registry_can_be_built():
 
     registry = build_opensource_provider_registry(mode="test")
     print("✓ Test registry built successfully")
-    return True
 
 
 def test_registry_contains_required_provider_keys():
@@ -106,7 +95,6 @@ def test_registry_contains_required_provider_keys():
         raise AssertionError(f"Missing required provider keys: {missing_keys}")
     else:
         print("✓ Registry contains all required provider keys")
-        return True
 
 
 def test_runtime_default_provider_types():
@@ -114,7 +102,6 @@ def test_runtime_default_provider_types():
     # This test validates the configuration, not the actual instances
     # In a real runtime environment with MySQL, this would work
     print("✓ Runtime default provider types validated (MySQL, Qdrant, Real HTTP)")
-    return True
 
 
 def test_dev_fallback_provider_types():
@@ -140,12 +127,13 @@ def test_dev_fallback_provider_types():
             # Check types
             assert isinstance(registry.get("worker_registry_store"), SQLiteWorkerRegistryStore)
             vector_store = registry.get("vector_store")
-            assert isinstance(vector_store.backend, QdrantSQLiteVectorStore)
+            backend = vector_store.backend
             assert vector_store.literal_fallback_index is not None
+            assert type(backend).__name__ == "IndexStateMaintainingVectorStore"
+            assert isinstance(backend.backend, QdrantSQLiteVectorStore)
             assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
 
             print("✓ Dev fallback provider types validated (SQLite, Faiss, Real HTTP)")
-            return True
         finally:
             os.environ.pop("WORKER_REGISTRY_SQLITE_DB_PATH", None)
 def test_test_fallback_provider_types():
@@ -171,7 +159,6 @@ def test_test_fallback_provider_types():
     assert isinstance(registry.get("llm_provider"), FakeLLMProvider)
 
     print("✓ Test fallback provider types validated (InMemory, Fake, Noop)")
-    return True
 
 
 def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
@@ -244,7 +231,6 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
         raise AssertionError(f"Forbidden internal imports found: {violations}")
     else:
         print("✓ No forbidden internal imports found in provider modules")
-        return True
 
 
 def test_runtime_service_providers_can_be_added_without_replacing_storage(
@@ -342,7 +328,6 @@ def test_object_storage_root_dir_not_in_source_code():
                 raise AssertionError(f"Object storage root_dir in forbidden directory: {forbidden}")
 
         print(f"✓ Object storage root_dir validation passed: {provider.root_dir}")
-        return True
 
 
 def run_all_tests():
@@ -358,7 +343,7 @@ def run_all_tests():
         test_test_fallback_provider_types,
         test_dev_registry_can_be_built,
         test_dev_fallback_provider_types,
-        test_runtime_registry_can_be_built,
+        test_runtime_registry_fails_closed_without_qdrant_server_url,
         test_runtime_default_provider_types,
         test_provider_module_path_does_not_contain_forbidden_internal_patterns,
         test_object_storage_root_dir_not_in_source_code,
