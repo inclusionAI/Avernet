@@ -230,6 +230,26 @@ async def test_unreadable_node_modules_map_does_not_fail_build():
 
 
 @pytest.mark.asyncio
+async def test_symlinked_files_are_skipped_not_hard_failed():
+    """Symlinked source files cannot round-trip as per-file OSS content; the
+    engine cannot vouch for their target at the next stage, so skip them."""
+    fs = _FakeDeviceFs(
+        listings={
+            "workspace": [
+                {"path": "/workspace/report.csv", "is_dir": False},
+                {"path": "/workspace/sub/x", "is_dir": False, "is_link": True},
+            ],
+            "identity": [],
+        },
+        contents={"workspace/report.csv": b"csv"},  # the symlink has no content
+    )
+    oss = _oss_ok()
+    refs = await _promo(oss).stage_files(device_fs=fs, **_ARGS)
+    assert [r["name"] for r in refs.resources] == ["report.csv"]
+    assert "workspace/sub/x" not in fs.read_calls
+
+
+@pytest.mark.asyncio
 async def test_unreadable_source_file_raises():
     fs = _FakeDeviceFs(
         listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
