@@ -6,7 +6,7 @@ Uses simple Fake/Stub implementations instead of mocking.
 from __future__ import annotations
 
 import asyncio
-import uuid
+import uuid as uuid_mod
 from datetime import datetime
 from typing import Optional
 
@@ -15,8 +15,6 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.quality import router
-from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
-from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
 from agentclaw.community.core.quality.models import QualityTaskRecord
 
 
@@ -124,10 +122,11 @@ class FakeQualityTaskService:
         owner_id: Optional[str] = None,
         ext: Optional[dict] = None,
         operator_id: Optional[str] = None,
+        uuid: Optional[str] = None,
     ) -> QualityTaskRecord:
         return self.add_task(_make_record(
             id=0,
-            uuid=uuid.uuid4().hex,
+            uuid=uuid or uuid_mod.uuid4().hex,
             task_type=task_type,
             biz_type=biz_type,
             bot_id=bot_id,
