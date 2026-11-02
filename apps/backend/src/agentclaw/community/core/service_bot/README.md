@@ -47,6 +47,7 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
@@ -304,3 +305,19 @@ mutate the Bot context, or fall back on lookup failure. Other engines never make
 this strategy-specific query; the shared draft flow retains its original context.
 Optional command-timeout forwarding remains infrastructure-only: omitted timeout
 arguments retain the existing provider call/default behavior.
+
+## Optional knowledge observation
+
+The verify-flow task captures knowledge selection at BUILDING entry through a
+lazy ordinary Service API. After a real online deployment reports terminal BaaS
+SUCCESS, publication progress polling may project the target version to existing
+online selection fields. Rollback follows the same target-deploy completion;
+its early native SUCCESS admission flip never triggers the projection. Plain
+restart polling does not invoke knowledge observers: restarting the same version
+must not bless a newly admitted rollback or recopy its auxiliary selection.
+Each observer call is failure-isolated outside native phase calls and outside
+native transactions. Provider/encoding/storage failures do not change native
+Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,
+retry/compensation infrastructure or publish lock is introduced. These optional
+DB calls can still wait on existing driver/connection timeouts; this is not a
+promise of hard time isolation or DB-outage resilience.

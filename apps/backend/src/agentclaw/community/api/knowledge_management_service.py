@@ -54,5 +54,5 @@ class KnowledgeManagementServiceProtocol(Protocol):
         ...
 
     def available_for_bot(self, **kwargs) -> dict:
-        """List authorized knowledge bases and current Bot enablement."""
+        """List authorized bases and stage enablement (runtime_stage defaults to draft)."""
         ...
