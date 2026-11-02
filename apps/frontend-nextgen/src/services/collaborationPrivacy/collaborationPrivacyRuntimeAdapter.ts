@@ -380,6 +380,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
   },
 ): CollaborationPrivacyGateway {
   let overview: CollaborationPrivacyOverview | undefined;
+  let isExternalOverview = false;
   let activeRawUserId: string | undefined;
   let latestLoadId = 0;
   let managedBotSnapshots = new Map<string, CollaborationBotDto>();
@@ -403,6 +404,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
           managedBotSnapshots = new Map();
           activeRawUserId = rawUserId;
           overview = userScopedOverview;
+          isExternalOverview = false;
         }
         return structuredClone(userScopedOverview);
       }
@@ -425,7 +427,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
           dependencies.listOrgDepts,
           signal,
         ),
-        hydrateProfilePublic(baseBots, dependencies.getWorkerConfig, signal),
+        // 外部 Bot 不提供画像公开能力，不查询 BCSFuse Worker 配置。
+        isExternalLoad ? baseBots : hydrateProfilePublic(baseBots, dependencies.getWorkerConfig, signal),
       ]);
       const profileByBotId = new Map(botsWithProfile.map((bot) => [bot.id, bot]));
       const nextOverview: CollaborationPrivacyOverview = {
@@ -445,24 +448,29 @@ export function createCollaborationPrivacyRuntimeAdapter(
         managedBotSnapshots = new Map(hydratableBots.map((item) => [item.bot_id, structuredClone(item)]));
         activeRawUserId = rawUserId;
         overview = nextOverview;
+        isExternalOverview = isExternalLoad;
       }
       return structuredClone(nextOverview);
     },
 
     async refreshManagedBot(botId, signal) {
       if (!overview) throw new Error('协作权限数据尚未加载');
+      const isExternalBot = isExternalOverview;
       const dto = await dependencies.apiAdapter.getManagedBot(botId, signal);
       if (dto.kind !== 'bot') throw new Error('目标不是可配置的物理 Bot');
       const previousDto = managedBotSnapshots.get(botId);
       const dtoWithPreservedEngine =
         dto.engine?.trim() || !previousDto?.engine ? dto : { ...dto, engine: previousDto.engine };
-      const [refreshedBot] = await hydrateDepartmentScopes([dtoWithPreservedEngine], dependencies.listOrgDepts, signal);
-      if (!refreshedBot) throw new Error('Bot 详情接口未返回可配置的 Bot');
-      const [refreshedBotWithProfile] = await hydrateProfilePublic(
-        [refreshedBot],
-        dependencies.getWorkerConfig,
+      const [refreshedBot] = await hydrateDepartmentScopes(
+        [isExternalBot ? stripExternalAgentViewScopeDeps(dtoWithPreservedEngine) : dtoWithPreservedEngine],
+        dependencies.listOrgDepts,
         signal,
       );
+      if (!refreshedBot) throw new Error('Bot 详情接口未返回可配置的 Bot');
+      // 刷新沿用加载时的显式外部范围，不能重新发起已跳过的画像查询。
+      const [refreshedBotWithProfile] = isExternalBot
+        ? [applyExternalBotDtoToDomain(refreshedBot, dtoWithPreservedEngine)]
+        : await hydrateProfilePublic([refreshedBot], dependencies.getWorkerConfig, signal);
       managedBotSnapshots.set(botId, structuredClone(dtoWithPreservedEngine));
       overview.bots = overview.bots.map((bot) => (bot.id === botId ? refreshedBotWithProfile : bot));
       return structuredClone(refreshedBotWithProfile);

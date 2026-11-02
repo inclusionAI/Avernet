@@ -106,7 +106,7 @@ function createExternalAdapter() {
     getWorkerConfig,
     updateWorkerConfig: jest.fn(),
   });
-  return { adapter, listMyBots, getCollaborationBot, patchCollaborationBot, listOrgDepts, publishBotPublic };
+  return { adapter, listMyBots, getCollaborationBot, patchCollaborationBot, listOrgDepts, publishBotPublic, getWorkerConfig };
 }
 
 /** 让 mine 命中给定的外部 Bot，返回形如已部署 BCS 的标准信封（code 20000）。 */
@@ -252,6 +252,85 @@ describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {
       expect.objectContaining({ public_scope: 'user', visibility: 'private', view_depts: null }),
       undefined,
     );
+  });
+});
+
+describe('collaborationPrivacyRuntimeAdapter 外部 Bot 不读取画像公开配置', () => {
+  it('首次加载、重新加载和刷新外部 Bot 均不请求 Worker config', async () => {
+    const { adapter, listMyBots, getCollaborationBot, getWorkerConfig } = createExternalAdapter();
+    const dto = createExternalBotDto({
+      visibility: 'protected',
+      friend_ext: { view_scope_agent_friend_deps: ['协作平台'] },
+    });
+    listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto }));
+    getCollaborationBot.mockResolvedValue({ code: 20000, data: dto });
+
+    await adapter.loadOverview('900004', undefined, externalScope);
+    await adapter.loadOverview('900004', undefined, externalScope);
+    const refreshed = await adapter.refreshManagedBot('external-1');
+
+    expect(getWorkerConfig).not.toHaveBeenCalled();
+    expect(getCollaborationBot).toHaveBeenCalledWith('external-1', undefined);
+    expect(refreshed.publication.bot.scope).toBe('restricted');
+    expect(refreshed.pendingPublications).toEqual({});
+  });
+
+  it('普通 Bot 的加载和刷新仍查询 Worker config，切换加载范围不会复用外部标记', async () => {
+    const { adapter, listMyBots, getCollaborationBot, getWorkerConfig } = createExternalAdapter();
+    const dto = createExternalBotDto();
+    listMyBots.mockResolvedValue(mockMineWithExternalBot({ dto }));
+    getCollaborationBot.mockResolvedValue({ code: 20000, data: dto });
+    await adapter.loadOverview('900004', undefined, externalScope);
+    getWorkerConfig.mockClear();
+
+    // 使用同一个 Bot ID，只改变显式范围，确保不是按名称/ID 猜测 Bot 类型。
+    await adapter.loadOverview('900004', undefined, { target: 'activeBot', botId: 'external-1' });
+    await adapter.refreshManagedBot('external-1');
+    expect(getWorkerConfig).toHaveBeenCalledTimes(2);
+
+    getWorkerConfig.mockClear();
+    await adapter.loadOverview('900004', undefined, externalScope);
+    await adapter.refreshManagedBot('external-1');
+    expect(getWorkerConfig).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('过期加载晚返回时不覆盖最新刷新范围（最新 external=%s）', async (latestExternal) => {
+    const { adapter, listMyBots, getCollaborationBot, getWorkerConfig } = createExternalAdapter();
+    const dto = createExternalBotDto();
+    const response = mockMineWithExternalBot({ dto });
+    let releaseStale!: (value: typeof response) => void;
+    let markStarted!: () => void;
+    const staleResponse = new Promise<typeof response>((resolve) => { releaseStale = resolve; });
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    listMyBots.mockImplementationOnce(() => {
+      markStarted();
+      return staleResponse;
+    }).mockResolvedValueOnce(response);
+    getCollaborationBot.mockResolvedValue({ code: 20000, data: dto });
+    const normalScope = { target: 'activeBot', botId: 'external-1' } as const;
+    const staleLoad = adapter.loadOverview('900004', undefined, latestExternal ? normalScope : externalScope);
+    await started;
+    await adapter.loadOverview('900004', undefined, latestExternal ? externalScope : normalScope);
+    releaseStale(response);
+    await staleLoad;
+    getWorkerConfig.mockClear();
+
+    await adapter.refreshManagedBot('external-1');
+    expect(getWorkerConfig).toHaveBeenCalledTimes(latestExternal ? 0 : 1);
+  });
+
+  it('失败的普通 Bot 加载不改变当前外部 Bot 的刷新范围', async () => {
+    const { adapter, listMyBots, getCollaborationBot, getWorkerConfig } = createExternalAdapter();
+    const dto = createExternalBotDto();
+    listMyBots.mockResolvedValueOnce(mockMineWithExternalBot({ dto }));
+    getCollaborationBot.mockResolvedValue({ code: 20000, data: dto });
+    await adapter.loadOverview('900004', undefined, externalScope);
+    getWorkerConfig.mockClear();
+
+    listMyBots.mockRejectedValueOnce(new Error('mine unavailable'));
+    await expect(adapter.loadOverview('900004', undefined, { target: 'allBots' })).rejects.toThrow('mine unavailable');
+    await adapter.refreshManagedBot('external-1');
+    expect(getWorkerConfig).not.toHaveBeenCalled();
   });
 });
 
