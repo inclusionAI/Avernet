@@ -255,12 +255,18 @@ export default function PackVersionEditor({ files, onChange, onUploadStateChange
             ? <p className="mt-4 px-2.5 text-[10px] text-muted-foreground">{files.length === 0 ? '没有文件。' : '没有匹配的文件。'}</p>
             : <ul aria-label="版本文件列表">
               {groups.map(group => <li key={group.name}>
-                <p className="mx-1 mb-1.5 mt-4 text-[10px] font-bold text-muted-foreground">{group.name} <span>({group.files.length})</span></p>
+                <div className="mx-1 mb-1.5 mt-4 flex items-center justify-between gap-2 text-[11px] font-semibold text-muted-foreground">
+                  <span>{group.name}</span>
+                  <span className="font-mono">({group.files.length})</span>
+                </div>
                 <ul>
                   {group.files.map(file => <li key={file.path}>
-                    <button type="button" aria-label={file.path} aria-pressed={selected?.path === file.path} disabled={uploading} onClick={() => { setError(''); setSelectedPath(file.path) }} className="flex w-full items-center gap-2 rounded-[7px] border border-transparent px-2 py-2 text-left text-[11px] text-muted-foreground hover:bg-muted aria-pressed:border-[#cedeff] aria-pressed:bg-[#eaf1ff] aria-pressed:text-primary disabled:opacity-40">
-                      <span aria-hidden="true" className="text-[11px] leading-none">▤</span>
+                    <button type="button" aria-label={file.path} aria-pressed={selected?.path === file.path} disabled={uploading} onClick={() => { setError(''); setSelectedPath(file.path) }} className="group flex w-full cursor-pointer items-center gap-2 rounded-[7px] border border-input/60 bg-background px-2 py-2 text-left text-[11px] font-medium text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 aria-pressed:border-primary/50 aria-pressed:bg-primary/10 aria-pressed:text-primary disabled:opacity-40">
+                      <svg aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 16 16">
+                        <path d="M4 3.5h3.5l1 1H12A1.5 1.5 0 0 1 13.5 6v6A1.5 1.5 0 0 1 12 13.5H4A1.5 1.5 0 0 1 2.5 12V5A1.5 1.5 0 0 1 4 3.5Z" />
+                      </svg>
                       <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{file.path.split('/').pop()}</span>
+                      <svg aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground/60 group-hover:text-primary/80" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg>
                     </button>
                   </li>)}
                 </ul>
