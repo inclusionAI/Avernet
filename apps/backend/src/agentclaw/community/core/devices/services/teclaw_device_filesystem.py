@@ -109,10 +109,15 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             logger.info("[TeclawDeviceFileSystem.delete_file] removed %s", engine_path)
             return True
         except httpx.HTTPStatusError as e:
-            # Teclaw 404 is normally just "this target is already gone"; that is
-            # not an engine failure. 5xx / other HTTP errors still react log.
+            # Teclaw's 404 cannot distinguish an absent target from an
+            # unavailable route. Keep the existing False contract and reduce
+            # the observability volume without treating an expected missing
+            # target as an engine failure.
             if e.response.status_code == 404:
-                logger.warning("[TeclawDeviceFileSystem.delete_file] %s: HTTP 404 target missing", engine_path)
+                logger.warning(
+                    "[TeclawDeviceFileSystem.delete_file] %s: HTTP 404 target missing or unavailable route",
+                    engine_path,
+                )
                 return False
             logger.error("[TeclawDeviceFileSystem.delete_file] error: %s: %s", engine_path, e)
             return False
