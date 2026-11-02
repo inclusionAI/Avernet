@@ -11,6 +11,7 @@
  *   annotation:   version=N\naction=deploy\nworkflowIds={workflowId}
  */
 import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
+import { packVersionGitEnvironment } from "./pack-version-git-env.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { TextDecoder } from "node:util";
@@ -134,9 +135,20 @@ export async function removeTempRepo(repoDir: string): Promise<void> {
   await rm(repoDir, { recursive: true, force: true });
 }
 
-export async function cloneClawflows(
+export async function cloneClawflows(repoDir: string, config: ClawFlowsGitConfig): Promise<void> {
+  return initializeClawflows(repoDir, config, false);
+}
+
+/** Initialize a read-only repository without cloning any default branch. */
+export async function initClawflowsReadRepo(repoDir: string, config: ClawFlowsGitConfig, objectFormat: "sha1" | "sha256" = "sha1"): Promise<void> {
+  return initializeClawflows(repoDir, config, true, objectFormat);
+}
+
+async function initializeClawflows(
   repoDir: string,
   config: ClawFlowsGitConfig,
+  readOnly: boolean,
+  objectFormat: "sha1" | "sha256" = "sha1",
 ): Promise<void> {
   if (!config.remoteUrl) throw new Error("clawflowsRemoteUrl is not configured");
 
@@ -165,33 +177,41 @@ export async function cloneClawflows(
     }
   }
 
+  const readEnv = readOnly ? packVersionGitEnvironment() : undefined;
+  const run = (args: string[], options?: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number }) =>
+    git(repoDir, args, { ...options, env: readEnv ?? options?.env });
   let repoAuthDir: string | undefined;
   try {
     let bootstrapAuthDir: string | undefined;
     try {
       const cloneOptions: string[] = [];
-      if (credentials) {
+      if (credentials && !readOnly) {
         // Clone requires an empty destination. Use a private sibling directory
         // so credentials are available BEFORE the very first network request.
         bootstrapAuthDir = await mkdtemp(path.join(path.dirname(path.resolve(repoDir)), "cw-autoheal-auth-"));
         const helper = await writeCredentials(bootstrapAuthDir, credentials);
         cloneOptions.push("-c", "credential.helper=", "-c", `credential.helper=${helper}`);
       }
-      await git(repoDir, [...cloneOptions, "clone", "--quiet", cloneUrl, "."], {
-        env: isolatedGitEnvironment(process.env),
-        timeout: 120_000,
-      });
-      await git(repoDir, ["remote", "set-url", "origin", cloneUrl]);
-      await git(repoDir, ["config", "user.name", config.username || "clawweb"]);
-      await git(repoDir, ["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
+      if (readOnly) {
+        await run(["init", "--quiet", ...(objectFormat === "sha256" ? ["--object-format=sha256"] : [])]);
+        await run(["remote", "add", "--", "origin", cloneUrl]);
+      } else {
+        await run([...cloneOptions, "clone", "--quiet", cloneUrl, "."], {
+          env: isolatedGitEnvironment(process.env),
+          timeout: 120_000,
+        });
+        await run(["remote", "set-url", "origin", cloneUrl]);
+      }
+      await run(["config", "user.name", config.username || "clawweb"]);
+      await run(["config", "user.email", config.email || `${config.username || "clawweb"}@antgroup.com`]);
 
       if (credentials) {
         // A new owned directory also lets failure cleanup remove partial writes
         // without deleting files that predated this operation.
         repoAuthDir = await mkdtemp(path.join(repoDir, ".git", "cw-autoheal-auth-"));
         const helper = await writeCredentials(repoAuthDir, credentials);
-        await git(repoDir, ["config", "--local", "--replace-all", "credential.helper", ""]);
-        await git(repoDir, ["config", "--local", "--add", "credential.helper", helper]);
+        await run(["config", "--local", "--replace-all", "credential.helper", ""]);
+        await run(["config", "--local", "--add", "credential.helper", helper]);
       }
     } finally {
       if (bootstrapAuthDir) await rm(bootstrapAuthDir, { recursive: true, force: true });

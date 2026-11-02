@@ -25,6 +25,14 @@ switch; see `pack-operation-migration.md` for the exact conditions and limits.
 snapshot from `wf/<id>` for `current` or `saved/<id>` for `draft`. A missing
 ref is not replaced with the other ref. `canWrite` indicates that the host has
 installed a Pack-file save handler, not that a journal or recovery exists.
+The explicit version reader fetches only this workflow's two branch tips, without
+checking out the default branch or fetching all repository history. It verifies
+that the advertised refs still match during the read and fails closed if they
+change. It does not affect the separate Git paths used for save or deployment.
+A duplicate matching manifest or overlapping Pack layout is rejected as 409
+`SNAPSHOT_CONFLICT` instead of selecting a file tree implicitly. The service logs
+only a fixed failure phase and error category, never Git credentials, raw errors,
+or file contents. Other errors may still return 503 `SERVICE_UNAVAILABLE`.
 
 `POST /api/auto-heal/save` validates an existing workflow's spec and stores the
 submitted document in `workflow_specs` in a database transaction. The database

@@ -202,3 +202,44 @@ it('denies deploy recovery when neither execute nor edit is granted and allows e
   expect((await fetch(`${url}/reconcile`, { method: 'POST' })).status).toBe(200);
   expect(d.reconcileOperation).toHaveBeenCalledExactlyOnceWith('request-status-01', 'flow', 'trusted');
 });
+
+it.each(['Pack manifest conflict', 'Mixed Pack layout'])('reports %s as a safe snapshot conflict', async message => {
+  const d = deps(); const url = await fixture(d);
+  const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+  try {
+    d.readSnapshot.mockRejectedValueOnce(new Error(message));
+    const response = await fetch(`${url}?version=current`);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'Version snapshot conflict', code: 'SNAPSHOT_CONFLICT' });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('PACK_MANIFEST_CONFLICT'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('"phase":"snapshot"'));
+  } finally { log.mockRestore(); }
+});
+
+it('records only a fixed failure category and phase without raw identity or provider errors', async () => {
+  const d = deps(); const url = await fixture(d);
+  const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+  try {
+    d.resolvePrincipal.mockRejectedValueOnce(Object.assign(new Error('secret-token /private/path'), { code: 'secret-provider-code' }));
+    const response = await fetch(`${url}?version=current`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' });
+    const serialized = JSON.stringify(log.mock.calls);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('"phase":"identity"'));
+    expect(serialized).toContain('PACK_READ_FAILED');
+    expect(serialized).not.toMatch(/secret|private\/path/);
+  } finally { log.mockRestore(); }
+});
+
+it('logs a safe ref-change category without leaking the underlying exception', async () => {
+  const d = deps(); const url = await fixture(d);
+  const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+  try {
+    d.readSnapshot.mockRejectedValueOnce(Object.assign(new Error('secret-ref-detail'), { code: 'PACK_REFS_CHANGED' }));
+    const response = await fetch(`${url}?version=current`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('PACK_REFS_CHANGED'));
+    expect(JSON.stringify(log.mock.calls)).not.toContain('secret-ref-detail');
+  } finally { log.mockRestore(); }
+});

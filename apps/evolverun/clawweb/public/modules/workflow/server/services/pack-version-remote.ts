@@ -3,7 +3,9 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import { resolveAutoHealGitSettings } from '../config/auto-heal-git-config.js';
 import { WorkflowDeployHistoryRepository } from '../repositories/workflow-deploy-history-repository.js';
-import { cloneClawflows, createTempRepo, removeTempRepo, type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
+import { createTempRepo, removeTempRepo, type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
+import { fetchPackVersionRefs, preparePackVersionRepo } from './pack-version-git-read.js';
+import { packVersionPhase } from './pack-version-observability.js';
 import { readPackScriptSnapshot, type PackScriptVersion } from './pack-script-snapshot.js';
 import { withPreparedPackCandidate, PackCandidateConflictError, PackWorkflowContentChangedError, type PackCandidateChange } from './pack-candidate-save.js';
 import { PackOperationError, requestIdentity } from './pack-operation-service.js';
@@ -14,12 +16,20 @@ export type SavePackVersionInput = Context & { actorId: string; requestId?: stri
   sourceCommit: string; expectedSavedHead: string | null; changes: PackCandidateChange[] };
 export type SavedPackVersion = { ok: true; saved: true; requestId: string; workflowId: string; packId: string; branch: string; commit: string; version: number };
 export async function readPackVersionFromRemote(input: Context & { packId: string; version: PackScriptVersion }) {
-  const { gitConfig } = await resolveAutoHealGitSettings(input.db, input.gitConfig, input.gitAuthor);
+  const { gitConfig } = await packVersionPhase('git_config', () => resolveAutoHealGitSettings(input.db, input.gitConfig, input.gitAuthor));
   return withGitOperation({ workflowId: input.workflowId, operation: 'pack_version_read' }, async () => {
-    const dir = await createTempRepo();
+    const dir = await packVersionPhase('git_prepare', async () => {
+      const temp = await createTempRepo();
+      try { await preparePackVersionRepo(temp, gitConfig, input.workflowId); return temp; }
+      catch (error) { await removeTempRepo(temp); throw error; }
+    });
     try {
-      await cloneClawflows(dir, gitConfig);
-      return await readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: true });
+      const verifyRefs = await packVersionPhase('git_fetch', () => fetchPackVersionRefs(dir, gitConfig, input.workflowId));
+      try {
+        return await packVersionPhase('snapshot', () => readPackScriptSnapshot(dir, input.workflowId, input.packId, input.version, { includeVersionFiles: true }));
+      } finally {
+        await packVersionPhase('git_verify', verifyRefs);
+      }
     } finally { await removeTempRepo(dir); }
   });
 }
