@@ -204,3 +204,15 @@ async def test_eval_publish_device_count_forwarded() -> None:
 
     assert result["success"] is True
     assert svc._build_service.release_async.await_args.kwargs["device_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_rejects_non_positive_device_count() -> None:
+    """device_count 是部署意向输入，0 或负数没有可执行语义。"""
+    svc = _FakeEvalPublishService()
+
+    with pytest.raises(
+        PublishFlowServiceError,
+        match="device_count must be at least 1",
+    ):
+        await svc.eval_publish(42, "tester", device_count=0)
