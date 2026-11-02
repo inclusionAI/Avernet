@@ -14,6 +14,8 @@
 # Assertion style: follow cli-stories.sh (bcs_cli/bcs_cli_json wrappers,
 # assert_* tally helpers, cleanup of every fixture via the API helpers).
 
+source "$(dirname "${BASH_SOURCE[0]}")/cli_cancellation_story.sh"
+
 # Render a bcs-cli invocation for logging; `token:` credentials are redacted.
 _cli_story_redact_args() {
     [[ "$#" -gt 0 ]] && printf '%s' "$*" | sed -E 's/token:[^ ]+/token:<redacted>/g'
@@ -889,17 +891,7 @@ story_cli_operator_chats_and_shares_files_in_terminal() {
     fi
     assert_json_eq "completed-run cancellation stays completed" "$BCS_CLI_STDOUT" "state" "completed"
 
-    _cli_story_run "operator opens a bounded wait-until chat" PM chat \
-        --bot-uuid "$BOT_ENG_UUID" --message "terminal wait check $$" \
-        --wait-until running --timeout-ms 15000 || return 1
-    local waiting_run_id
-    waiting_run_id=$(json_path "$BCS_CLI_STDOUT" "run_id")
-    assert_not_empty "wait-until chat returns a run id" "$waiting_run_id"
-    [[ -n "$waiting_run_id" ]] || return 1
-
-    _cli_story_run "operator cancels the observed running chat" PM chat-run cancel \
-        --run-id "$waiting_run_id" || return 1
-    assert_json_eq "running chat is cancelled" "$BCS_CLI_STDOUT" "state" "cancelled"
+    _cli_story_wait_and_cancel_chat || return 1
 
     info "CLI story: bcs-cli chat unknown bot (expected failure)"
     if bcs_cli PM chat --bot-uuid "bot_cli_story_unknown_$$" --message "anyone?"; then

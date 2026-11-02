@@ -7,14 +7,6 @@ Enforces three thresholds against the testresult/ produced by ci_test.sh
   2. Overall line coverage > 84%
   3. Changed-line coverage >= 80%  (instrumentable changed BCS lines vs base ref)
 
-The changed-line threshold reads an optional expiring waiver list (JSON, by
-default <bcs-dir>/scripts/coverage_waivers.json): each entry subtracts the
-instrumentable changed lines of its files from the denominator — a bounded
-exemption for change classes whose behavior coverage lives in another gate
-(e.g. a verified behavior-preserving move covered by e2e). Expired entries
-and unusable files fail the gate (fail-closed); an absent file applies no
-waivers. See docs/arch/ci.enforce.md §H.
-
 When run inside GitHub Actions (CI=true), prints ::error::/::notice:: workflow
 commands so failures annotate the job. Elsewhere, prints plain FAIL/OK lines
 and exits non-zero on any failure.
@@ -24,8 +16,6 @@ Usage:
 """
 
 import argparse
-import datetime
-import json
 import os
 import re
 import subprocess
@@ -56,67 +46,7 @@ def parse_args():
     p.add_argument("--pass-rate-min", type=float, default=100.0)
     p.add_argument("--overall-line-min", type=float, default=84.0)
     p.add_argument("--changed-line-min", type=float, default=80.0)
-    p.add_argument("--changed-line-waivers",
-                   help="expiring changed-line waiver list (JSON; default: "
-                        "<bcs-dir>/scripts/coverage_waivers.json)")
     return p.parse_args()
-
-
-WAIVER_KEYS = ("path", "reason", "owner", "expires")
-_EXPIRY = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-
-
-def load_waivers(path):
-    """Load + validate the changed-line waiver list (fail-closed).
-
-    Returns (waivers, error): each waiver is a dict adding a parsed `date`
-    to the entry's four string fields; error is a one-line message when the
-    file exists but must not be trusted. A missing file is not an error — it
-    means "no waivers", leaving gate output identical to a waiver-less run.
-    """
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return [], None
-    except (OSError, json.JSONDecodeError) as e:
-        return [], "cannot read or parse %s: %s" % (path, e)
-    version = data.get("version") if isinstance(data, dict) else None
-    if (not isinstance(data, dict) or set(data) != {"version", "waivers"}
-            or not isinstance(version, int) or isinstance(version, bool)
-            or version != 1 or not isinstance(data["waivers"], list)):
-        return [], ('%s must be {"version": 1, "waivers": [...]}' % path)
-    waivers = []
-    for i, entry in enumerate(data["waivers"]):
-        if (not isinstance(entry, dict) or set(entry) != set(WAIVER_KEYS)
-                or any(not isinstance(entry[k], str) or not entry[k].strip()
-                       for k in WAIVER_KEYS)):
-            return [], ("waivers[%d] in %s needs non-empty string fields "
-                        "path/reason/owner/expires" % (i, path))
-        if any("\n" in entry[k] or "\r" in entry[k] for k in WAIVER_KEYS):
-            return [], ("waivers[%d] (%r) in %s must not contain line breaks"
-                        % (i, entry["path"], path))
-        m = _EXPIRY.match(entry["expires"])
-        try:
-            date = datetime.date(int(m[1]), int(m[2]), int(m[3])) if m else None
-        except ValueError:
-            date = None
-        if date is None:
-            return [], ("waivers[%d] in %s has expires=%r; expected a real "
-                        "YYYY-MM-DD date" % (i, path, entry["expires"]))
-        waivers.append(dict(entry, date=date))
-    return waivers, None
-
-
-def waiver_matches(path, changed_path):
-    """True when a waiver entry matches a bcs-relative changed file path.
-
-    Dead simple on purpose: a trailing '/' makes the entry a directory
-    prefix match; anything else must equal the changed file's path exactly.
-    """
-    if path.endswith("/"):
-        return changed_path.startswith(path)
-    return changed_path == path
 
 
 def main():
@@ -204,26 +134,6 @@ def main():
                     continue
         coverage[fname] = lines
 
-    # Waivers must be loadable and unexpired before counting: an unusable
-    # list stops the gate rather than silently passing lines through it
-    # (fail-closed), and an expired entry is void — its lines count against
-    # the threshold again until it is renewed or re-covered.
-    waiver_path = args.changed_line_waivers or os.path.join(
-        args.bcs_dir, "scripts", "coverage_waivers.json")
-    waivers, waiver_error = load_waivers(waiver_path)
-    if waiver_error:
-        gh("::error::coverage waiver list unusable: %s" % waiver_error)
-        sys.exit(1)
-    today = datetime.date.today()
-    valid_waivers = []
-    for w in waivers:
-        if w["date"] < today:
-            gh("::error::coverage waiver for '%s' expired on %s — renew or re-cover"
-               % (w["path"], w["expires"]))
-            fail = True
-        else:
-            valid_waivers.append(w)
-
     # repo root = parent that contains .git; bcs-dir lives under it.
     root = subprocess.run(["git", "-C", args.bcs_dir, "rev-parse", "--show-toplevel"],
                           check=True, capture_output=True, text=True).stdout.strip()
@@ -256,30 +166,10 @@ def main():
             count = int(hm.group(2)) if hm.group(2) else 1
             changed.setdefault(cur_path, set()).update(range(start, start + count))
 
-    # Apply unexpired waivers: matching files drop out of the changed-line
-    # denominator (and their covered lines out of the numerator — the same
-    # lines are excluded on both sides, so no waived line can count covered).
-    waived_files = set()
-    for w in valid_waivers:
-        matched = sorted(f for f in changed if waiver_matches(w["path"], f))
-        if not matched:
-            gh("::notice::[changed-line-cov] waiver for '%s' matched no changed "
-               "files — consider removing" % w["path"])
-            continue
-        waived = sum(
-            sum(1 for ln in changed[f] if ln in coverage.get(f, {}))
-            for f in matched)
-        waived_files.update(matched)
-        gh("::notice::[changed-line-cov] waived %d file(s) / %d instrumentable "
-           "changed line(s) — %s (owner %s, expires %s)"
-           % (len(matched), waived, w["reason"], w["owner"], w["expires"]))
-
     total_changed = 0
     total_changed_covered = 0
     per_file = []
     for fname, lines in changed.items():
-        if fname in waived_files:
-            continue
         cov = coverage.get(fname, {})
         for ln in lines:
             # Only count source lines coverage marked as valid instrumentable
