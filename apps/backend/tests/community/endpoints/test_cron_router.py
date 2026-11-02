@@ -27,19 +27,30 @@ from tests.community.framework import (
 
 
 class _RecordingBotService:
-    """The slice of ``BotServiceProtocol`` ``_resolve_user_identity`` uses.
+    """The slice of ``BotServiceProtocol`` ``_resolve_user_identity`` uses."""
 
-    Hand-written rather than a mock so the recorded calls are the only thing
-    the assertions can read: an unexpected method would raise here instead of
-    being invented on demand.
-    """
-
-    def __init__(self, *, bot: dict | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        bot: dict | None = None,
+        collaborator_bot: dict | None = None,
+        search_error: Exception | None = None,
+        error: Exception | None = None,
+    ):
         self.get_bot_calls: list[tuple[str, str]] = []
+        self.search_bots_calls: list[dict] = []
         self._bot = bot
         self._error = error
+        self._collaborator_bot = collaborator_bot
+        self._search_error = search_error
 
-    def get_bot(self, bot_id, user_id):
+    def search_bots(self, **kwargs):
+        self.search_bots_calls.append(kwargs)
+        if self._search_error is not None:
+            raise self._search_error
+        return {"items": [self._collaborator_bot]} if self._collaborator_bot else {"items": []}
+
+    def get_bot(self, bot_id: str, user_id: str):
         self.get_bot_calls.append((bot_id, user_id))
         if self._error is not None:
             raise self._error
@@ -96,8 +107,17 @@ class TestResolveUserIdentity:
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        # bot_service should not be called when owner_id is None
+        # Exact reachability is used to restore a shared bot's owner identity.
         assert bot_service.get_bot_calls == []
+        assert bot_service.search_bots_calls == [
+            {
+                "owner_id": "u001",
+                "collaborator_user_id": "u001",
+                "bot_id": "bot1",
+                "page": 1,
+                "page_size": 1,
+            }
+        ]
 
     def test_owner_scenario_with_empty_owner_id(self):
         """When owner_id is empty string, returns current user's identity."""
@@ -115,6 +135,15 @@ class TestResolveUserIdentity:
         assert user_id == "u001"
         assert nick_name == "Test User"
         assert bot_service.get_bot_calls == []
+        assert bot_service.search_bots_calls == [
+            {
+                "owner_id": "u001",
+                "collaborator_user_id": "u001",
+                "bot_id": "bot1",
+                "page": 1,
+                "page_size": 1,
+            }
+        ]
 
     def test_bot_id_all_returns_current_user(self):
         """When bot_id is 'all', returns current user's identity regardless of owner_id."""
@@ -191,6 +220,70 @@ class TestResolveUserIdentity:
 
         assert user_id == "u_owner"
         assert nick_name == "u_owner"
+
+    def test_no_owner_id_resolves_shared_bot_owner(self):
+        """An authorized collaborator omits owner_id and still gains the owner identity."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+        bot_service = _RecordingBotService(
+            collaborator_bot={
+                "bot_id": "bot1",
+                "owner_id": "u_owner",
+                "owner_name": "Owner User",
+            },
+        )
+        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+
+        assert user_id == "u_owner"
+        assert nick_name == "Owner User"
+        assert bot_service.search_bots_calls == [
+            {
+                "owner_id": "u_collab",
+                "collaborator_user_id": "u_collab",
+                "bot_id": "bot1",
+                "page": 1,
+                "page_size": 1,
+            }
+        ]
+        assert bot_service.get_bot_calls == []
+
+    def test_no_owner_id_falls_back_when_bot_is_not_reachable(self):
+        """Without reachability, identity stays with the current caller."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+        bot_service = _RecordingBotService()
+        user_id, nick_name = _resolve_user_identity(None, "outside_bot", user, bot_service)
+
+        assert user_id == "u_collab"
+        assert nick_name == "Collab User"
+
+    def test_no_owner_id_falls_back_when_resolution_fails(self):
+        """Search failures preserve the existing current-user identity."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+        bot_service = _RecordingBotService(search_error=Exception("search failed"))
+        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+
+        assert user_id == "u_collab"
+        assert nick_name == "Collab User"
 
 
 # =============================================================================
@@ -347,6 +440,24 @@ def list_crons_specific_bot():
 )
 def list_crons_collaborator():
     """list_crons with owner_id for collaborator scenario."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/cron",
+    scenario="list_crons_collaborator_without_owner_id",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        query_params={"bot_id": "bot_test"},
+    ),
+    seed=_seed_bot_with_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+)
+def list_crons_collaborator_without_owner_id():
+    """list_crons resolves a shared bot's owner when owner_id is omitted."""
 
 
 # ============================================================================
