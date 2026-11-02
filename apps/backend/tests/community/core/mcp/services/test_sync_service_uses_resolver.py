@@ -20,6 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from .test_sync_service import _configure_identity_defaults
+
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
 
@@ -81,6 +83,7 @@ def _make_service(
         None, {}, "PROD", None
     )
     service.bot_repository = bot_repository or MagicMock()
+    _configure_identity_defaults(service.bot_repository)
     service.caller_identity_repository = caller_identity_repository or MagicMock()
     service.caller_identity_repository.list_draft_call_types.return_value = {}
 
