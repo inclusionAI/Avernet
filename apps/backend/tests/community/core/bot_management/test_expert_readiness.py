@@ -17,7 +17,9 @@ def test_expert_readiness_uses_current_binding_and_adapter_state(state, expected
         resolver=resolver, transport=transport,
     ) is expected
     resolver.resolve_for_binding_invoke.assert_called_once_with(42, "owner", bot_id="expert-bot")
-    transport.invoke.assert_awaited_once_with({"bind_id": 42}, "GET", "/readiness", timeout=3.0)
+    transport.invoke.assert_awaited_once_with(
+        {"bind_id": 42, "probe_runtime_readiness": True}, "GET", "/readiness", timeout=3.0,
+    )
 
 
 def test_missing_binding_does_not_probe_another_instance():

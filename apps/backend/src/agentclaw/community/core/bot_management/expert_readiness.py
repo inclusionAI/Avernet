@@ -29,11 +29,12 @@ def expert_adapter_ready(
     context = resolver.resolve_for_binding_invoke(
         int(binding_id), owner_id, bot_id=bot_id,
     )
+    conn_info = {**context.conn_info, "probe_runtime_readiness": True}
 
     async def probe() -> dict[str, Any]:
         try:
             return await asyncio.wait_for(
-                transport.invoke(context.conn_info, "GET", "/readiness", timeout=3.0),
+                transport.invoke(conn_info, "GET", "/readiness", timeout=3.0),
                 timeout=3.0,
             )
         except DeviceAdapterEndpointNotFoundError as exc:
@@ -42,7 +43,7 @@ def expert_adapter_ready(
             # Older adapters lack /readiness. Do not treat 404 as ready: the
             # same authenticated route must successfully answer /health.
             health = await asyncio.wait_for(
-                transport.invoke(context.conn_info, "GET", "/health", timeout=3.0),
+                transport.invoke(conn_info, "GET", "/health", timeout=3.0),
                 timeout=3.0,
             )
             return {"state": "ready"} if health.get("status") == "ok" else {}
