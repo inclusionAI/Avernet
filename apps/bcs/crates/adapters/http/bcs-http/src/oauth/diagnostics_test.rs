@@ -67,7 +67,9 @@ async fn current_user_dependency_failure_correlates_chain_and_endpoint_warnings(
 }
 
 /// The `/auth/user/{user_id}` identity-reader failure keeps its request-id
-/// correlation and generic public error.
+/// correlation and generic public error. The caller resolves through the
+/// injected auth chain (the strict delegated verification); the display
+/// lookup then fails on the identity port.
 struct FailingIdentity;
 
 #[async_trait]
@@ -93,56 +95,59 @@ impl UserIdentityPort for FailingIdentity {
     }
 }
 
+/// A chain plugin that always yields a principal for the fixed subject —
+/// standing in for a strictly verified `bcs_session` login so the identity
+/// lookup failure (not the verification) is the path under test.
+struct FixedVerifiedUserPlugin {
+    user_id: String,
+}
+
+#[async_trait]
+impl AuthPlugin for FixedVerifiedUserPlugin {
+    fn can_authenticate(&self, _: &HeaderMap) -> bool {
+        true
+    }
+    async fn authenticate(&self, _: &HeaderMap) -> Result<Option<AuthPrincipal>, AuthError> {
+        let mut principal = AuthPrincipal::new(bcs_auth_api::AuthSource::Local);
+        principal.user_id = Some(self.user_id.clone());
+        Ok(Some(principal))
+    }
+    fn priority(&self) -> u8 {
+        10
+    }
+    fn name(&self) -> &'static str {
+        "diagnostic-verified-user"
+    }
+}
+
 fn get_user_identity_failure_state() -> Arc<OAuthRouteState> {
-    Arc::new(OAuthRouteState::new(
-        scripted_service().0,
+    Arc::new(OAuthRouteState::new_chain_only(
         Arc::new(FailingIdentity),
-        OAuthConfig {
-            jwt_secret: JWT_SECRET.to_string(),
-            idle_timeout_minutes: 30,
-            base_url: "https://bcs.example.com".to_string(),
-            cookie_secure: true,
-            env: "test".to_string(),
-            success_redirect_path: "/".to_string(),
-        },
-        None,
-        Vec::new(),
+        Arc::new(AuthPluginChain::new(vec![Box::new(
+            FixedVerifiedUserPlugin {
+                user_id: "oauth-diagnostic-user".to_string(),
+            },
+        )])),
     ))
 }
 
 #[tokio::test]
 async fn get_user_identity_failure_keeps_request_id_and_returns_a_generic_error() {
     let state = get_user_identity_failure_state();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let jwt = state
-        .jwt_service
-        .sign(&bcs_jwt::Claims {
-            sub: "oauth-diagnostic-user".into(),
-            src: "google".into(),
-            iat: now,
-            exp: now + 3600,
-            name: Some("Previous Name".into()),
-        })
-        .unwrap();
-    let mut headers = HeaderMap::new();
-    let cookie = format!("bcs_session={jwt}");
-    headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
     let request_id = "oauth-get-user-identity-failure";
     let (response, logs) = capture_request_logs(
         request_id,
-        get_user_handler(State(state), axum::extract::Path("oauth-diagnostic-user".into()), headers),
+        get_user_handler(
+            State(state),
+            axum::extract::Path("oauth-diagnostic-user".into()),
+            HeaderMap::new(),
+        ),
     )
     .await;
     let response = response.into_response();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     warning(&logs, request_id, "get_identity_by_user_id failed");
-    assert_no_credentials(
-        &logs,
-        &[jwt.as_str(), JWT_SECRET, "oauth-diagnostic-user"],
-    );
+    assert_no_credentials(&logs, &[JWT_SECRET]);
 }
 
 // ---------------------------------------------------------------------------

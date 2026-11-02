@@ -158,6 +158,36 @@ async fn seed_strict_session(
     (user_id, session.token)
 }
 
+/// The strict engine over the SAME identity port the real chain verifies
+/// against, so the `/auth/user/{user_id}` tests can drive lifecycle
+/// mutations (revoke / rotate) on the shared store.
+async fn strict_engine_for(state: &BcsServerState) -> bcs_auth_oauth::OAuthSessionEngine {
+    let env = state
+        .auth_config
+        .oauth
+        .as_ref()
+        .expect("oauth config")
+        .env
+        .clone();
+    let identities = state
+        .auth_session_identity
+        .clone()
+        .expect("strict session identity port wired");
+    bcs_auth_oauth::OAuthSessionEngine::new(
+        bcs_jwt::OAuthSessionJwt::new(TEST_JWT_SECRET),
+        identities,
+        env,
+        1800,
+    )
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
 async fn start(config: BcsConfig) -> (SocketAddr, tokio::task::JoinHandle<Result<(), BcsError>>) {
     BcsServer::new_allowing_private_outbound_for_tests(config)
         .run_on_random_port()
@@ -435,6 +465,122 @@ async fn openapi_auth_user_comes_from_the_v1_chain_and_legacy_auth_user_from_the
     assert_eq!(body["name"], "Alice OAuth");
     assert_eq!(body["avatar"], "https://example.com/a.png");
     assert_eq!(body["provider"], "google");
+
+    handle.abort();
+}
+
+/// `/auth/user/{user_id}` verifies the presented cookie against the
+/// STRICT lifecycle (sid/revision/revocation — spec §6/§8.5), never a
+/// raw JWT decode: a valid CURRENT session still serves the exact legacy
+/// success shape.
+#[tokio::test]
+async fn legacy_get_user_serves_a_valid_current_session_with_the_legacy_shape() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let config = config_with_auth(&tmp.path().to_path_buf(), full_oauth_config());
+    let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
+        .run_on_random_port_with_state()
+        .await
+        .expect("start server with state");
+    let (user_id, token) =
+        seed_strict_session(&state, "Alice OAuth", "https://example.com/a.png").await;
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://{addr}/auth/user/{user_id}"))
+        .header("cookie", format!("bcs_session={token}"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request /auth/user/{user_id}");
+    assert_eq!(resp.status(), 200, "a live session serves the self lookup");
+    let body: Value = resp.json().await.expect("json body");
+    assert_eq!(body["user_id"], user_id);
+    assert_eq!(body["name"], "Alice OAuth");
+    assert_eq!(body["provider"], "google");
+    assert_eq!(body["avatar"], "https://example.com/a.png");
+
+    handle.abort();
+}
+
+/// A REVOKED session's cookie must be rejected by the legacy
+/// `/auth/user/{user_id}` reader even though its signature and expiry are
+/// still perfectly valid (final-review Fix 2: the old handler verified
+/// signature+expiry only and served the row).
+#[tokio::test]
+async fn legacy_get_user_rejects_a_revoked_session_cookie() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let config = config_with_auth(&tmp.path().to_path_buf(), full_oauth_config());
+    let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
+        .run_on_random_port_with_state()
+        .await
+        .expect("start server with state");
+    let (user_id, token) =
+        seed_strict_session(&state, "Alice OAuth", "https://example.com/a.png").await;
+    strict_engine_for(&state)
+        .await
+        .revoke(&token)
+        .await
+        .expect("revoke the installed session");
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://{addr}/auth/user/{user_id}"))
+        .header("cookie", format!("bcs_session={token}"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request /auth/user/{user_id}");
+    assert_eq!(
+        resp.status(),
+        401,
+        "a revoked cookie is not authenticated, signature+expiry notwithstanding"
+    );
+    let body: Value = resp.json().await.expect("legacy json error shape");
+    assert_eq!(body["error"], "not authenticated");
+
+    handle.abort();
+}
+
+/// A rotated-out token (refresh moved the instance to a new revision and
+/// credential) must be rejected on its user-identity read exactly as on
+/// every other strict surface; the ROTATED descendant keeps serving.
+#[tokio::test]
+async fn legacy_get_user_rejects_a_rotated_out_token_and_serves_the_rotation() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let config = config_with_auth(&tmp.path().to_path_buf(), full_oauth_config());
+    let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
+        .run_on_random_port_with_state()
+        .await
+        .expect("start server with state");
+    let (user_id, token) =
+        seed_strict_session(&state, "Alice OAuth", "https://example.com/a.png").await;
+    let rotated = strict_engine_for(&state)
+        .await
+        .refresh(&token, unix_now())
+        .await
+        .expect("rotate the installed session")
+        .token;
+
+    let client = reqwest::Client::new();
+    let get = |cookie: String| {
+        client
+            .get(format!("http://{addr}/auth/user/{user_id}"))
+            .header("cookie", cookie)
+            .timeout(Duration::from_secs(5))
+    };
+    let stale = get(format!("bcs_session={token}")).send().await.expect("stale token");
+    assert_eq!(
+        stale.status(),
+        401,
+        "the rotated-out credential is 'not authenticated' on its read"
+    );
+
+    let fresh = get(format!("bcs_session={rotated}"))
+        .send()
+        .await
+        .expect("rotated token");
+    assert_eq!(fresh.status(), 200, "the rotation's current credential serves");
+    let body: Value = fresh.json().await.expect("json body");
+    assert_eq!(body["user_id"], user_id);
+    assert_eq!(body["name"], "Alice OAuth");
 
     handle.abort();
 }

@@ -10,7 +10,9 @@
 //! [`AuthFlowReply`] cookie instructions as separate appended
 //! `Set-Cookie` headers. The retained local readers are the non-OAuth
 //! `/auth/user` chain fallback and the `/auth/user/{user_id}` display
-//! lookup — neither re-implements flow business logic.
+//! lookup — both resolve the caller through the injected auth chain (the
+//! strict delegated session verification) and neither re-implements flow
+//! business logic or JWT decoding.
 //!
 //! Cookie contract (plan §8.4): the production login challenge is the
 //! host-only `__Host-bcs_oauth_login` cookie (Path=/, HttpOnly, Secure,
@@ -42,7 +44,6 @@ pub use routes::{
 use std::sync::Arc;
 
 use bcs_auth_api::{AuthPluginChain, OAuthConfig, UserIdentityPort};
-use bcs_jwt::JwtService;
 use bcs_service_api::application::v1::AuthService;
 
 /// The cookie name pair for the login challenge (plan §8.4): production
@@ -65,7 +66,6 @@ pub struct OAuthRouteState {
     pub auth_chain: Option<Arc<AuthPluginChain>>,
     /// Legacy display reader for `/auth/user/{user_id}`.
     pub user_port: Arc<dyn UserIdentityPort>,
-    pub jwt_service: JwtService,
     pub config: OAuthConfig,
     /// Exact trusted origins for cookie-authenticated unsafe writes,
     /// injected by bootstrap (derived from `cors.allowed_origins`).
@@ -80,21 +80,19 @@ impl OAuthRouteState {
         auth_chain: Option<Arc<AuthPluginChain>>,
         trusted_origins: Vec<String>,
     ) -> Self {
-        let jwt_secret = config.jwt_secret.clone();
         Self {
             auth_service: Some(auth_service),
             auth_chain,
             user_port,
-            jwt_service: JwtService::new(&jwt_secret),
             config,
             trusted_origins,
         }
     }
 
     /// Identity-only state for the no-OAuth case: `/auth/user` is backed
-    /// solely by the auth chain. The `JwtService` is unused on this path
-    /// (no `bcs_session` cookie is ever verified without OAuth), and no
-    /// login family route is mounted with this state.
+    /// solely by the auth chain (no `bcs_session` cookie is ever verified
+    /// without OAuth), and no login family route is mounted with this
+    /// state.
     pub fn new_chain_only(
         user_port: Arc<dyn UserIdentityPort>,
         auth_chain: Arc<AuthPluginChain>,
@@ -103,7 +101,6 @@ impl OAuthRouteState {
             auth_service: None,
             auth_chain: Some(auth_chain),
             user_port,
-            jwt_service: JwtService::new(""),
             config: OAuthConfig::default(),
             trusted_origins: Vec::new(),
         }

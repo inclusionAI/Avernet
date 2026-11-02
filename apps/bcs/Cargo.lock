@@ -1721,7 +1721,6 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
- "bcs-jwt",
  "bcs-message-flow",
  "bcs-message-store",
  "bcs-observability",

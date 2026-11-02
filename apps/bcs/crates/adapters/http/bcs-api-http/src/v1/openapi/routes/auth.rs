@@ -426,12 +426,20 @@ fn verification_error(error: crate::v1::common::PrincipalVerificationError) -> A
             "forbidden",
             "authenticated sources rejected the presented credentials",
         ),
-        PrincipalVerificationError::DependencyUnavailable | PrincipalVerificationError::Unavailable => {
-            ApplicationError::unavailable(
-                "auth_dependency_unavailable",
-                "authentication dependency unavailable",
-            )
-        }
+        // Mirror the principal middleware's two-arm 5xx taxonomy (spec
+        // §7.4): the Bot identity store fault keeps its long-standing
+        // 502 / `bot_identity_unavailable` mapping, while the strict-auth
+        // dependency outage is the 503 / `auth_dependency_unavailable`
+        // class — current_user must not answer differently from the
+        // middleware for the same variant.
+        PrincipalVerificationError::Unavailable => ApplicationError::bad_gateway(
+            "bot_identity_unavailable",
+            "Bot identity store unavailable",
+        ),
+        PrincipalVerificationError::DependencyUnavailable => ApplicationError::unavailable(
+            "auth_dependency_unavailable",
+            "authentication dependency unavailable",
+        ),
         PrincipalVerificationError::Internal(_) => ApplicationError::internal(
             "authentication internal failure",
         ),

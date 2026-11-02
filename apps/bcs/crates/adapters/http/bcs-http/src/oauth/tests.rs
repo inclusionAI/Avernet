@@ -102,6 +102,120 @@ async fn current_user_accepts_principal_with_user_id() {
 }
 
 // ---------------------------------------------------------------------------
+// `/auth/user/{user_id}` verifies through the SAME delegated chain as
+// `/auth/user` (no raw JWT decode): a chain-visible principal feeds the
+// sub==path self-check, and a chain denial (the strict engine maps a
+// revoked/rotated-out/expired cookie to `Ok(None)` at its one legacy
+// compatibility exit) is "not authenticated", not a lookup.
+
+/// A user-identity port serving one fixed row, so the success shape is
+/// reachable without a store.
+struct FixedIdentityPort;
+
+#[async_trait]
+impl UserIdentityPort for FixedIdentityPort {
+    async fn ensure_identity(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: &str,
+    ) -> Result<String, AuthError> {
+        Err(AuthError::LookupFailed("unused in this fake".into()))
+    }
+    async fn lookup_by_user_id(&self, _: &str, _: &str) -> Result<Option<String>, AuthError> {
+        Ok(None)
+    }
+    async fn get_identity_by_token(&self, _: &str) -> Result<Option<UserIdentityInfo>, AuthError> {
+        Ok(None)
+    }
+    async fn get_identity_by_user_id(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<UserIdentityInfo>, AuthError> {
+        if user_id != "u-123" {
+            return Ok(None);
+        }
+        Ok(Some(UserIdentityInfo {
+            user_id: "u-123".to_string(),
+            auth_source: "google".to_string(),
+            user_name: Some("Internal Name".to_string()),
+            external_user_name: Some("External Name".to_string()),
+            avatar: Some("https://example.com/a.png".to_string()),
+        }))
+    }
+}
+
+async fn run_get_user(
+    chain_user_id: Option<String>,
+    path_user_id: &str,
+) -> (StatusCode, serde_json::Value) {
+    let state = Arc::new(OAuthRouteState::new_chain_only(
+        Arc::new(FixedIdentityPort),
+        chain_with(chain_user_id),
+    ));
+    let resp = get_user_handler(
+        State(state),
+        axum::extract::Path(path_user_id.to_string()),
+        HeaderMap::new(),
+    )
+    .await
+    .into_response();
+    let status = resp.status();
+    let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+    let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+/// A chain denial — no principal (a revoked/rotated-out/expired cookie
+/// after the legacy `Ok(None)` compatibility exit) — is 401 with the
+/// legacy JSON shape, never a lookup.
+#[tokio::test]
+async fn get_user_rejects_a_denied_session_with_the_legacy_shape() {
+    let (status, body) = run_get_user(None, "u-123").await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "denied credential => 401, got {body}"
+    );
+    assert_eq!(body["error"], "not authenticated");
+    // The identity port is never reached on a denial.
+}
+
+/// The sub==path self-check stays: a strictly verified principal for a
+/// DIFFERENT subject cannot read that subject's row.
+#[tokio::test]
+async fn get_user_forbids_a_foreign_subject() {
+    let (status, body) = run_get_user(Some("someone-else".to_string()), "u-123").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "foreign sub => 403, got {body}");
+    assert_eq!(body["error"], "forbidden");
+}
+
+/// Valid current session + matching path: the exact legacy success shape.
+#[tokio::test]
+async fn get_user_returns_the_legacy_success_shape_for_a_matching_subject() {
+    let (status, body) = run_get_user(Some("u-123".to_string()), "u-123").await;
+    assert_eq!(status, StatusCode::OK, "self row => 200, got {body}");
+    assert_eq!(body["user_id"], "u-123");
+    assert_eq!(
+        body["name"], "Internal Name",
+        "internal display name preferred over the external one"
+    );
+    assert_eq!(body["provider"], "google");
+    assert_eq!(body["avatar"], "https://example.com/a.png");
+}
+
+/// A verified self lookup whose identity row is gone keeps the legacy
+/// 404 shape (self lookup, but no such identity row anymore).
+#[tokio::test]
+async fn get_user_returns_the_legacy_not_found_shape_without_a_row() {
+    let (status, body) = run_get_user(Some("ghost".to_string()), "ghost").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "no row => 404, got {body}");
+    assert_eq!(body["error"], "not found");
+}
+
+// ---------------------------------------------------------------------------
 // Challenge-cookie extraction (plan §8.4): unique, non-empty, either name.
 
 fn cookie_header(value: &str) -> HeaderMap {

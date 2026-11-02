@@ -15,7 +15,7 @@
 
 use async_trait::async_trait;
 
-use crate::application::v1::error::ApplicationError;
+use crate::types::error::ApplicationError;
 
 /// Normalized external identity of a completed provider login; the
 /// strict session port turns it into a browser session (creating or

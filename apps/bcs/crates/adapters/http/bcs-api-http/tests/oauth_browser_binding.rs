@@ -785,6 +785,94 @@ async fn without_oauth_user_projects_the_verified_human_and_login_fails_closed()
 }
 
 // ---------------------------------------------------------------------------
+// current_user 5xx arms mirror the principal middleware's taxonomy (spec
+// §7.4): the SAME PrincipalVerificationError variant must answer with the
+// SAME status/error_code the middleware produces — the Bot identity store
+// fault keeps its long-standing 502 `bot_identity_unavailable` mapping,
+// and only the strict-auth dependency outage is the 503
+// `auth_dependency_unavailable` class.
+
+struct FailingHarnessVerifier(bcs_api_http::PrincipalVerificationError);
+
+#[async_trait]
+impl bcs_api_http::PrincipalVerifier for FailingHarnessVerifier {
+    async fn verify(
+        &self,
+        _headers: &HeaderMap,
+    ) -> Result<bcs_api_http::VerifiedRequestIdentity, bcs_api_http::PrincipalVerificationError> {
+        Err(self.0.clone())
+    }
+}
+
+fn user_router_with_failing_verifier(
+    failure: bcs_api_http::PrincipalVerificationError,
+) -> axum::Router {
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(FailingHarnessVerifier(failure)),
+    );
+    router(state)
+}
+
+/// The Bot identity store outage arm: 502 / 50200 / `bot_identity_unavailable`,
+/// never folded into the 503 dependency class.
+#[tokio::test]
+async fn current_user_unavailable_mirrors_the_middleware_502_bot_identity_unavailable() {
+    let app = user_router_with_failing_verifier(
+        bcs_api_http::PrincipalVerificationError::Unavailable,
+    );
+    let mut response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/openapi/v1/auth/user")
+            .body(Body::empty())
+            .expect("user request"),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_GATEWAY,
+        "Unavailable keeps the middleware's 502 bot-identity-store mapping"
+    );
+    let body = json_body(&mut response).await;
+    assert_eq!(body["code"], 50_200);
+    assert_eq!(body["data"]["error_code"], "bot_identity_unavailable");
+}
+
+/// The strict-auth dependency outage arm: 503 / 50300 /
+/// `auth_dependency_unavailable`, exactly the middleware's
+/// DependencyUnavailable response.
+#[tokio::test]
+async fn current_user_dependency_unavailable_keeps_the_503_auth_dependency_class() {
+    let app = user_router_with_failing_verifier(
+        bcs_api_http::PrincipalVerificationError::DependencyUnavailable,
+    );
+    let mut response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/openapi/v1/auth/user")
+            .body(Body::empty())
+            .expect("user request"),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "DependencyUnavailable stays the 503 auth-dependency class"
+    );
+    let body = json_body(&mut response).await;
+    assert_eq!(body["code"], 50_300);
+    assert_eq!(body["data"]["error_code"], "auth_dependency_unavailable");
+}
+
+// ---------------------------------------------------------------------------
 // Cookie-name transport confinement (review fix): the callback accepts ONLY
 // the mode-correct challenge name — over production HTTPS a local-name
 // `Domain`-scoped cookie planted by a hostile subdomain must not satisfy

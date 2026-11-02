@@ -24,6 +24,7 @@ errors carry `data.error_code`. Status families:
 | 400 | 40000 | `invalid_state` / `invalid_login_state` / `missing_code` | Callback without (or with a broken/duplicated/foreign) browser challenge or pending state, or without an authorization code |
 | 401 | 40100 | `unauthenticated` | No source matched, or the presented session is invalid/expired/revoked/superseded — INCLUDING a lost refresh rotation race (never a 500) |
 | 403 | 40300 | `forbidden` | A verified identity is rejected by source policy on the protected surface (final — the chain is never re-entered) |
+| 403 | 40300 | `forbidden` | Pinned current behavior: an ordinary cookie-authenticated write on any OTHER protected route whose browser Origin fails the per-source CSRF gate also surfaces as plain 403 `forbidden` — only the login-family writes `/auth/refresh` and cookie-bearing `/auth/logout` use the distinct `browser_origin_untrusted` code below |
 | 403 | 40300 | `browser_origin_untrusted` | Cookie-authenticated unsafe write (`/auth/refresh`, cookie-bearing `/auth/logout`) with a missing, malformed, or untrusted Origin |
 | 404 | 40400 | `auth_not_configured` / `provider_not_found` / `provider_not_enabled` | No OAuth source configured, or the callback path names a provider outside the enabled chain |
 | 409 | 40900 | `login_session_conflict` | A concurrent login replaced this identity's session instance between the revision read and the atomic install; the browser restarts the login batch |
@@ -91,8 +92,12 @@ JWT whose REQUIRED claims are:
 
 Legacy tokens without `env`/`session_id`/`revision` are rejected by the
 strict verifier and by the refresh/revoke paths — the 2026-11 security
-upgrade invalidates them; users must re-login. Only the SHA-256 of the JWT
-is stored (64 hex chars). Storage conformance:
+upgrade invalidates them; users must re-login. External JWT-only verifiers
+of `bcs_session` (offline signature+expiry decoding) necessarily lose all
+session-instance visibility — revocation, rotation, and revision are
+invisible to pure JWT validation, so the server-side strict verify (which
+owns the stored hash/revision) is authoritative. Only the SHA-256 of the
+JWT is stored (64 hex chars). Storage conformance:
 
 - **MySQL deployments MUST run a strict SQL mode.** The token hash column is
   `VARCHAR(64)` — exactly 64 chars with zero headroom. A non-strict mode

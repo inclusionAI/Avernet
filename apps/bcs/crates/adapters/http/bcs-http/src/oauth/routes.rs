@@ -452,25 +452,52 @@ pub async fn current_user_handler(
 
 /// GET /auth/user/{user_id} — Look up a user by ID (self only).
 ///
-/// The path `user_id` must match the JWT subject; otherwise 403.
+/// The presented `bcs_session` cookie is verified through the injected
+/// auth chain — the SAME strict delegated path `/auth/user` uses: the
+/// `oauth_session` source delegates to the STRICT engine (signature +
+/// claim integrity + env binding + sid/revision + revocation, plan
+/// §6/§8.5), with its one legacy `Option` compatibility exit preserved at
+/// the boundary (a revoked, rotated-out, expired, or otherwise denied
+/// credential is "not authenticated", not an error). The path `user_id`
+/// must match the STRICTLY VERIFIED session subject; otherwise 403. The
+/// response shapes stay the legacy ones.
 pub async fn get_user_handler(
     State(state): State<Arc<OAuthRouteState>>,
     Path(user_id): Path<String>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    // 1. Extract JWT from cookie, verify signature + expiration
-    let jwt = match extract_session_cookie(&headers) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
+    // 1. Strict delegated verification via the auth chain (the raw
+    //    `JwtService::verify` — signature + expiry only — is gone: it
+    //    accepted revoked and rotated-out cookies).
+    let Some(chain) = state.auth_chain.as_ref() else {
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response();
+    };
+    let principal = match chain.authenticate(&headers).await {
+        // The chain yields `Ok(None)`/empty user_id for a non-human or a
+        // denied credential: exactly the legacy "not authenticated" shape.
+        Ok(result) => match result.principal {
+            Some(principal)
+                if principal
+                    .user_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty()) =>
+            {
+                principal
+            }
+            _ => {
+                return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response()
+            }
+        },
+        Err(_error) => {
+            // AuthError is a closed, sanitized taxonomy (lookup failure
+            // categories) — log the category marker, never a raw chain body.
+            warn!(request_id = %bcs_observability::CurrentRequestId, category = "auth_chain_failed", "auth chain failed in /auth/user/{user_id}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
+        }
     };
 
-    let claims = match state.jwt_service.verify(&jwt) {
-        Ok(c) => c,
-        Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"}))).into_response(),
-    };
-
-    // 2. Authorize: path user_id must match JWT subject
-    if claims.sub != user_id {
+    // 2. Authorize: path user_id must match the verified session subject
+    if principal.user_id.as_deref() != Some(user_id.as_str()) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "forbidden"}))).into_response();
     }
 
