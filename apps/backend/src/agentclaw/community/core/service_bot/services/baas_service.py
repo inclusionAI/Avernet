@@ -1921,7 +1921,39 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except httpx.RemoteProtocolError as e:
+            logger.warning(
+                f"[BaasService.get_publish_progress] "
+                f"Remote protocol error before retrying: {e}"
+            )
+            time.sleep(0.1)
+            response = self._http.get(
+                f"/api/v1/publishes/{publish_id}/progress",
+                params=params,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return response.json().get("data", {})
+
         except Exception as e:
+            cause = e.__cause__ or e.__context__
+
+            # ant_baselib wraps remote disconnect into a generic exception while
+            # the original ``httpx.RemoteProtocolError`` stays on ``__cause__``.
+            if isinstance(cause, httpx.RemoteProtocolError):
+                logger.warning(
+                    f"[BaasService.get_publish_progress] "
+                    f"Remote protocol error before retrying: {cause}"
+                )
+                time.sleep(0.1)
+                response = self._http.get(
+                    f"/api/v1/publishes/{publish_id}/progress",
+                    params=params,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                return response.json().get("data", {})
+
             logger.error(
                 f"[BaasService.get_publish_progress] "
                 f"Failed to get publish progress: {e}"
