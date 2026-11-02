@@ -137,7 +137,7 @@ it('reports an unknown DB outcome without sending the Git move', async () => {
 it('does not overwrite a changed DB Pack identity and stops before Git on mismatch', async () => {
   const ctx = setup(); act(() => move(ctx, btoa(stringify({ ...ctx.spec, title: 'File' }))))
   vi.mocked(fetchJson).mockResolvedValueOnce({ ok: true, saved: true, workflowId: ctx.id, packId: 'other-pack' })
-  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('数据库报告已保存，但 Pack 身份与 Git 基线不一致') })
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('数据库已报告保存，但返回的 Pack 身份与预期不一致') })
   const calls = vi.mocked(fetchJson).mock.calls
   expect(JSON.parse(await blobText(calls[0][1]!.body as Blob))).not.toHaveProperty('packId')
   expect(calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0)

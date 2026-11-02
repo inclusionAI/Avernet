@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { readWorkflowDocument } from './workflowDocument'
+import { readEditorWorkflowSource } from './editorWorkflowSource'
 
-/** Normalize before caching so initial Editor loads and imperative switches agree. */
+/** Cache both the displayed source and the independent DB optimistic baseline. */
 export function useEditorWorkflowDocument(workflowId: string) {
-  return useQuery({ queryKey: ['editor-workflow-document', workflowId], queryFn: () => readWorkflowDocument(workflowId), enabled: !!workflowId })
+  const query = useQuery({ queryKey: ['editor-workflow-document', workflowId], queryFn: () => readEditorWorkflowSource(workflowId), enabled: !!workflowId })
+  return { ...query, data: query.data?.spec, databaseSpec: query.data?.databaseSpec, activeDeployNumber: query.data?.activeDeployNumber }
 }

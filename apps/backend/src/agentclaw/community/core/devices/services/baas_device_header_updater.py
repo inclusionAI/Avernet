@@ -173,6 +173,7 @@ class BaasDeviceHeaderUpdater:
         self._baas_service.update_device_outbound_rule(
             paas_device_id,
             outbound_rule,
+            **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
         )
         logger.info(
             f"[BaasDeviceHeaderUpdater.update] Single device updated: "
@@ -218,6 +219,7 @@ class BaasDeviceHeaderUpdater:
             self._baas_service.update_device_outbound_rule(
                 paas_device_id,
                 outbound_rule,
+                **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
             )
             updated_devices.append(
                 {
