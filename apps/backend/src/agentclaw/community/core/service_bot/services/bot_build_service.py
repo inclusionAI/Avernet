@@ -1610,6 +1610,21 @@ class BotBuildService:
             )
             return False
 
+    @staticmethod
+    def _read_pretty_name(service, device_id: str) -> str | None:
+        """Read an OS-release description from the bot container."""
+        result = service.exec_shell_new(
+            device_id=device_id,
+            shell_cmd="cat /etc/os-release",
+        )
+        if getattr(result, "exit_code", 0) != 0:
+            return None
+        for token in shlex.split(result.stdout or ""):
+            key, sep, value = token.partition("=")
+            if key == "PRETTY_NAME" and sep:
+                return value.strip('"') or None
+        return None
+
     def _generate_mcp_config(
         self,
         device_id: str,
@@ -1636,42 +1651,41 @@ class BotBuildService:
                 device_id=device_id,
                 shell_cmd="cat /home/admin/.mcporter/mcporter.json",
             )
-
             logger.info(
                 f"[BotBuildService._generate_mcp_config] result={result}"
-
             )
 
-            # 检查返回结果
-            if not result.stdout or not result.stdout.strip():
-                logger.warning(
-                    f"[BotBuildService._generate_mcp_config] "
-                    f"Empty stdout from device {device_id}, stderr={result.stderr}"
-                )
-                return False
-
-            # 解析 JSON
-            try:
+            pretty_name: str | None = None
+            mcporter_content: dict[str, Any] | list[Any] | None = None
+            if result.exit_code == 0 and result.stdout and result.stdout.strip():
+                # mcporter.json is the normal format; malformed data is not a
+                # signal to manufacture configuration.
                 mcporter_content = json.loads(result.stdout)
-            except json.JSONDecodeError as e:
-                logger.warning(
-                    f"[BotBuildService._generate_mcp_config] "
-                    f"Invalid JSON from device {device_id}: {e}"
-                )
-                return False
-
-            if not mcporter_content:
-                logger.warning(
-                    f"[BotBuildService._generate_mcp_config] "
-                    f"Empty mcporter.json content from device {device_id}"
-                )
-                return False
-
-            # 处理返回值：dict 或 list 都用 json.dumps
-            if isinstance(mcporter_content, (dict, list)):
-                content_str = json.dumps(mcporter_content, ensure_ascii=False, indent=2)
             else:
-                content_str = str(mcporter_content)
+                # When the source file is not readable yet, keep the migration
+                # usable with the container's user-visible OS description.
+                pretty_name = self._read_pretty_name(self._device_service, device_id)
+
+            if mcporter_content is not None:
+                content_str = json.dumps(
+                    mcporter_content,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            elif pretty_name is not None:
+                logger.warning(
+                    "[BotBuildService._generate_mcp_config] "
+                    "using /etc/os-release fallback for device %s",
+                    device_id,
+                )
+                content_str = json.dumps({"context": pretty_name}, ensure_ascii=False)
+            else:
+                logger.warning(
+                    "[BotBuildService._generate_mcp_config] "
+                    "unable to read mcporter.json or PRETTY_NAME on device %s",
+                    device_id,
+                )
+                return False
 
             # 写入目标配置路径
             if build_plan:
