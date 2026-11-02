@@ -2,7 +2,6 @@ import { getCapabilities } from '@/capabilities';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { cn } from '@/utils/cn';
 import React, { useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
@@ -18,6 +17,7 @@ import { useGroupChat } from './hooks/useGroupChat';
 import { useGroupCreateDialog } from './hooks/useGroupCreateDialog';
 import { useGroupManagement } from './hooks/useGroupManagement';
 import { useGroupChatHeaderPanels } from './hooks/useGroupChatHeaderPanels';
+import { useGroupSessionLocation } from './hooks/useGroupSessionLocation';
 import { useGroupSessions } from './hooks/useGroupSessions';
 import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useGroupSidebarProps } from './hooks/useGroupSidebarProps';
@@ -35,8 +35,9 @@ export function GroupWorkspaceArea({
 }: GroupWorkspaceAreaProps) {
   const ws = useGroupWorkspace(scope?.group);
   const expandedGroupIds = React.useMemo(
-    () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
-    [ws.groups, ws.expandedGroupIds],
+    // 数据加载只跟随显式展开意图，不把搜索/类型筛选的显隐当成重新展开。
+    () => Object.keys(ws.expandedGroupIds).filter((id) => !scope || id === scope.group.groupId),
+    [ws.expandedGroupIds, scope],
   );
   const sessions = useGroupSessions(
     scope && ws.selectedGroupId !== scope.group.groupId ? null : ws.selectedGroupId,
@@ -45,6 +46,7 @@ export function GroupWorkspaceArea({
   );
   const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession, userIdentityId);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
+  const sessionLocation = useGroupSessionLocation(ws.selectedGroup, sessions.selectedSession, onOpenMobileList);
   // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({
@@ -140,14 +142,13 @@ export function GroupWorkspaceArea({
   return (
     <>
       {!sessionOnly && (
-        <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
+        <GroupWorkspaceSidebar
+          sidebar={{ ...groupSidebarProps, location: sessionLocation.location, onDismissLocation: sessionLocation.dismissLocation }}
+          open={mobileListOpen}
+          onClose={onCloseMobileList}
+        />
       )}
-      {/* 本地管理/历史/资源面板必须连同隔离上下文高于 AppShell 的持久副屏（z-10）。
-          只提升子面板的 z-index 无法越过 isolate；关闭后恢复，不卸载正在运行的副屏。 */}
-      <div
-        className={cn('relative isolate flex min-h-0 min-w-0 flex-1', activePanel !== 'none' && 'z-20')}
-        data-workspace-conversation="true"
-      >
+      <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
         <GroupChatPane
           identityLocked={Boolean(scope)}
           group={selectedGroup}
@@ -178,6 +179,7 @@ export function GroupWorkspaceArea({
           cancelDelivery={chat.cancelDelivery}
           reconnect={chat.reconnect}
           onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
+          onLocateSession={sessionOnly ? undefined : sessionLocation.locate}
           reloadHistory={chat.reloadHistory}
           hasMoreHistory={chat.hasMoreHistory}
           isLoadingMoreHistory={chat.isLoadingMoreHistory}
