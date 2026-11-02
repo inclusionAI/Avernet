@@ -8,6 +8,10 @@ export interface CancelDeliveryOutcome {
   results: CancelDeliveryResult[];
   /** 结果中首个非空 error；全部成功为 null。 */
   firstError: string | null;
+  /** Correlations returned by BCS when all source-message deliveries are safely removable. */
+  clientMessageIds: string[];
+  /** Canonical IDs from the same confirmed results, for history-loaded user messages. */
+  canonicalMessageIds: string[];
 }
 
 /**
@@ -21,5 +25,17 @@ export async function cancelQueuedDelivery(
   sessionId: string,
 ): Promise<CancelDeliveryOutcome> {
   const results = await cancelDeliveryApi(messageId, deliveryId, sessionId);
-  return { results, firstError: results.find((item) => item.error)?.error ?? null };
+  const removable = results.flatMap((item) =>
+    !item.error && typeof item.client_message_id === 'string' && item.client_message_id.length > 0
+      ? [{ clientMessageId: item.client_message_id, canonicalMessageId: item.delivery.message_id }] : [],
+  );
+  return {
+    results,
+    firstError: results.find((item) => item.error)?.error ?? null,
+    clientMessageIds: Array.from(new Set(removable.map((item) => item.clientMessageId))),
+    canonicalMessageIds: Array.from(new Set(removable.flatMap((item) =>
+      typeof item.canonicalMessageId === 'string' && item.canonicalMessageId.length > 0
+        ? [item.canonicalMessageId] : [],
+    ))),
+  };
 }

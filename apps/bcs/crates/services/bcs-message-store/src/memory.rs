@@ -281,7 +281,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = query.limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -403,7 +405,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);

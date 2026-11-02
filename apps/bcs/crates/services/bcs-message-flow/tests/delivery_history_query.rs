@@ -16,6 +16,9 @@ mod session_support;
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
+#[path = "support/cancellation_probe.rs"]
+mod cancellation_probe;
+
 #[path = "support/delivery_history_repo.rs"]
 mod repository_support;
 
@@ -241,4 +244,102 @@ async fn missing_legacy_join_anchor_keeps_existing_behavior_without_window_read(
         assert_eq!(flow.query_message_deliveries(query(&[4])).await.unwrap().len(), 1);
     }
     assert!(probe.calls.lock().unwrap().is_empty());
+}
+
+async fn multi_target_fixture() -> (
+    BcsMessageFlow,
+    Arc<MemoryMessageRepo>,
+    Vec<bcs_domain::message_delivery::PersistedMessageDelivery>,
+) {
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let (flow, repo) = fixture().await;
+    let mut msg = message(20);
+    msg.client_msg_id = Some("exact-client-id".into());
+    flow.managed_deliveries.as_ref().unwrap().admit(AdmitMessageDeliveries {
+        display_message: None, message_id: "multi-target".into(), message: msg,
+        flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+        now_ms: 20, expire_at_ms: None, event: None,
+        targets: ["bot-driver", "bot-observer"].iter().map(|bot| DeliveryAdmissionTarget {
+            rejection: None, target_bot_id: (*bot).into(), kind: DeliveryType::Send,
+            max_queued: 100, semantic_projection_json: json!({"version":1}), run_id: None,
+        }).collect(),
+    }).await.unwrap();
+    let rows = repo.lookup(DeliveryLookup::Message("multi-target".into())).await.unwrap();
+    (flow, repo, rows)
+}
+
+fn cancel(delivery_id: Option<String>) -> bcs_service_api::CancelMessageDeliveryCommand {
+    bcs_service_api::CancelMessageDeliveryCommand {
+        caller: human(), session_id: SESSION.into(), message_id: "multi-target".into(), delivery_id,
+    }
+}
+
+#[tokio::test]
+async fn cancellation_returns_exact_client_id_only_after_every_target_is_unsent_terminal() {
+    let (flow, repo, rows) = multi_target_fixture().await;
+    let first = flow.cancel_message_deliveries(cancel(Some(rows[0].delivery_id.clone()))).await.unwrap();
+    assert!(first[0].error.is_none());
+    assert!(first[0].client_message_id.is_none(), "the other Bot still has a queued delivery");
+    let last = flow.cancel_message_deliveries(cancel(Some(rows[1].delivery_id.clone()))).await.unwrap();
+    assert!(last[0].error.is_none());
+    assert_eq!(last[0].client_message_id.as_deref(), Some("exact-client-id"));
+    assert!(repo.get_message_by_id(SESSION, "multi-target").await.unwrap().is_some());
+    let page = repo.list_session_history(SESSION, bcs_domain::MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
+    assert!(!page.messages.iter().any(|m| m.message_id == "multi-target"));
+}
+
+#[tokio::test]
+async fn overlapping_cancellations_confirm_siblings_from_a_fresh_lookup() {
+    use std::sync::atomic::Ordering;
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let (mut flow, repo, rows) = multi_target_fixture().await;
+    let mut probe = cancellation_probe::CancellationProbe::new(flow.managed_deliveries.clone().unwrap());
+    probe.initial_snapshots = Some(tokio::sync::Barrier::new(2));
+    let probe = Arc::new(probe);
+    flow.managed_deliveries = Some(probe.clone());
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(
+            flow.cancel_message_deliveries(cancel(Some(rows[0].delivery_id.clone()))),
+            flow.cancel_message_deliveries(cancel(Some(rows[1].delivery_id.clone()))),
+        )
+    }).await.expect("overlapping lookups must not deadlock");
+    let outcomes = [first.unwrap(), second.unwrap()];
+    assert!(outcomes.iter().flatten().all(|result| result.error.is_none()));
+    assert!(outcomes.iter().flatten().any(|result| result.client_message_id.as_deref() == Some("exact-client-id")),
+        "at least the last cancellation must confirm the message can be removed");
+    assert_eq!(probe.lookup_calls.load(Ordering::SeqCst), 4, "one initial and one confirmation read per request");
+    let persisted = repo.lookup(DeliveryLookup::Message("multi-target".into())).await.unwrap();
+    assert!(persisted.iter().all(|row| row.state.is_unsent_terminal()));
+    assert!(repo.get_message_by_id(SESSION, "multi-target").await.unwrap().is_some());
+    let history = repo.list_session_history(SESSION, bcs_domain::MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
+    assert!(!history.messages.iter().any(|message| message.message_id == "multi-target"));
+}
+
+#[tokio::test]
+async fn cancelling_all_targets_uses_one_confirmation_read_not_one_per_target() {
+    use std::sync::atomic::Ordering;
+    let (mut flow, _, _) = multi_target_fixture().await;
+    let probe = Arc::new(cancellation_probe::CancellationProbe::new(flow.managed_deliveries.clone().unwrap()));
+    flow.managed_deliveries = Some(probe.clone());
+    let results = flow.cancel_message_deliveries(cancel(None)).await.unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|result| result.error.is_none() && result.client_message_id.as_deref() == Some("exact-client-id")));
+    assert_eq!(probe.lookup_calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn failed_cancellation_confirmation_read_is_an_error_not_removal_confirmation() {
+    use std::sync::atomic::Ordering;
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let (mut flow, repo, _) = multi_target_fixture().await;
+    let mut probe = cancellation_probe::CancellationProbe::new(flow.managed_deliveries.clone().unwrap());
+    probe.fail_refresh = true;
+    let probe = Arc::new(probe);
+    flow.managed_deliveries = Some(probe.clone());
+    let result = flow.cancel_message_deliveries(cancel(None)).await;
+    assert!(matches!(result, Err(bcs_service_api::ServiceError::InternalError(_))), "{result:?}");
+    assert_eq!(probe.lookup_calls.load(Ordering::SeqCst), 2);
+    // The write already committed; failed confirmation must not fabricate a successful response.
+    let persisted = repo.lookup(DeliveryLookup::Message("multi-target".into())).await.unwrap();
+    assert!(persisted.iter().all(|row| row.state.is_unsent_terminal()));
 }
