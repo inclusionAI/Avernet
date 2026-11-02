@@ -11,6 +11,7 @@ import {
   ChevronRight,
   FolderOpen,
   History,
+  LocateFixed,
   Monitor,
   Settings2,
   Share2,
@@ -41,6 +42,7 @@ export interface GroupHeaderProps {
   connectionStatus: ProviderConnectionStatus;
   historyOnly?: boolean;
   onOpenSessionList?: () => void;
+  onLocateSession?: () => void;
   canManageGroup?: unknown;
   activePanel: GroupPanelKind;
   onTogglePanel: (panel: GroupPanelKind) => void;
@@ -106,6 +108,7 @@ export function GroupHeader({
   selectedSession,
   connectionStatus,
   onOpenSessionList,
+  onLocateSession,
   activePanel,
   onTogglePanel,
   favorites,
@@ -202,6 +205,14 @@ export function GroupHeader({
           )}
 
           <div className="flex shrink-0 items-center justify-end gap-1">
+            {selectedSession && onLocateSession ? (
+              <HeaderIcon
+                label="定位当前会话"
+                icon={<LocateFixed className="size-4" aria-hidden />}
+                active={false}
+                onClick={onLocateSession}
+              />
+            ) : null}
             {selectedSession || selectedGroup ? (
               /* 收藏会话：chat 同构禁用态（无会话渲染 disabled 而非隐藏）；收藏态星标填充。 */
               <HeaderIcon
