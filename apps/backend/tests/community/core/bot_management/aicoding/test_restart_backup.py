@@ -23,6 +23,15 @@ def response(status, **values):
         version=1, operation_id=OPERATION, boot_id='instance-1', status=status) | values))
 
 
+def partial_response(*, operation_id=OPERATION, **backup_fields):
+    """Published source-omission receipt from the container helper's v1 contract."""
+    return response('partial_success', operation_id=operation_id, backup={
+        'status': 'partial_success', 'operation_id': operation_id, 'generation_id': 'g-partial',
+        'error_code': 'source_files_skipped', 'failed_phase': 'backup_partial',
+        **backup_fields,
+    })
+
+
 def prepare(execute):
     with patch.object(backup.time, 'sleep'):
         return backup.prepare_backup(execute=execute, operation_id=OPERATION,

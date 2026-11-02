@@ -75,11 +75,11 @@ async def test_real_coding_backup_transport_failure_still_upgrades_caller():
 @pytest.mark.asyncio
 @pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy'])
 @pytest.mark.parametrize('block_on_failure', [False, True])
-async def test_confirmed_fastdisk_caller_failure_follows_guard(outcome, block_on_failure, monkeypatch):
+async def test_confirmed_fastdisk_caller_result_follows_guard(outcome, block_on_failure, monkeypatch, caplog):
     from unittest.mock import Mock
     from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import command
     from agentclaw.community.core.bot_management.engines.registry import get_engine_provisioning_registry
-    from tests.community.core.bot_management.aicoding.test_restart_backup import response
+    from tests.community.core.bot_management.aicoding.test_restart_backup import partial_response, response
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, detection_command
     import re
 
@@ -97,12 +97,15 @@ async def test_confirmed_fastdisk_caller_failure_follows_guard(outcome, block_on
         if cmd == detection_command():
             return detection()
         operation = re.search(r'[a-f0-9]{32}', cmd).group()
+        if outcome == 'partial_success':
+            assert cmd in {command('start', operation), command('status', operation)}
+            return partial_response(operation_id=operation)
         assert cmd == command('start', operation)
         return response(outcome, operation_id=operation)
 
     svc._baas.post_bots_api = Mock(side_effect=execute)
     build.upgrade_async = AsyncMock(return_value={'publish_id': 77})
-    if block_on_failure:
+    if block_on_failure and outcome != 'partial_success':
         with pytest.raises(ConnectionError, match='快盘'):
             await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
                                          owner_id=OWNER_ID, migration_path='/artifact')
@@ -112,7 +115,10 @@ async def test_confirmed_fastdisk_caller_failure_follows_guard(outcome, block_on
                                               owner_id=OWNER_ID, migration_path='/artifact')
         assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
         build.upgrade_async.assert_awaited_once()
-    assert svc._baas.post_bots_api.call_count == 2
+    assert svc._baas.post_bots_api.call_count == (3 if outcome == 'partial_success' else 2)
+    if outcome == 'partial_success':
+        assert 'phase=verify status=partial_success' in caplog.text
+        assert 'AICODING_RESTART_FAILED' not in caplog.text
     config.get_value.assert_called_once()
     build.release_async.assert_not_called()
     instances.update_instance.assert_not_called()

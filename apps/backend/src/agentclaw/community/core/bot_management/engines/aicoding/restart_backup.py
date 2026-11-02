@@ -2,7 +2,8 @@
 
 Backend sends the same read-only detector as publication. Detection failures keep
 legacy behavior. When enabled, a confirmed fastdisk target cannot downgrade
-after backup failure. Binding checks and durable mutation fences always remain mandatory.
+after backup failure. Valid partial receipts allow restart with a warning.
+Binding checks and durable mutation fences always remain mandatory.
 """
 from __future__ import annotations
 
@@ -145,7 +146,6 @@ class RestartBackupBlocked(RestartBackupError):
     def __init__(self, reason: str):
         detail = {
             'backup_failed': '快盘备份失败',
-            'partial_backup': '快盘备份不完整',
             'timeout': '快盘备份等待超时，结果未确认',
             'helper_missing': '快盘容器缺少重启备份能力',
             'mount_changed': '快盘挂载状态发生变化',
@@ -235,25 +235,35 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     observed_status = 'unknown'
 
     def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
-        getattr(logger, level)(
+        partial = status == 'partial_success'
+        getattr(logger, 'warning' if partial else level)(
             "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
-            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s arca_id=%s env=%s owner_id=%s",
-            phase, status, bot_id, target_id, operation_id,
-            int((time.monotonic() - started) * 1000), generation, error_type, reason,
+            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s arca_id=%s env=%s owner_id=%s%s",
+            phase, status, safe_log_field(bot_id), safe_log_field(target_id), operation_id,
+            int((time.monotonic() - started) * 1000), safe_log_field(generation), error_type, reason,
             arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
+            " action=continue_restart data_loss_risk=true" if partial else "",
         )
 
     def receipt(value):
         event = value.get('backup')
-        if (not isinstance(event, dict) or event.get('status') != 'success'
+        partial = value['status'] == 'partial_success'
+        expected_status = 'partial_success' if partial else 'success'
+        if (not isinstance(event, dict) or event.get('status') != expected_status
                 or not event.get('generation_id') or event.get('operation_id') != operation_id):
             raise RestartBackupError('invalid_receipt', '缺少有效的最终备份凭据')
-        if require_backup:
-            if event.get('completeness', 'success') != 'success':
-                raise RestartBackupError('partial_backup', '最终快盘备份不完整')
+        completeness = event.get('completeness', 'degraded' if partial else 'success')
+        if partial and (event.get('error_code') != 'source_files_skipped'
+                        or event.get('failed_phase') != 'backup_partial'
+                        or completeness != 'degraded'):
+            raise RestartBackupError('invalid_receipt', '缺少有效的部分备份凭据')
+        if require_backup or partial:
             if not isinstance(event['generation_id'], str):
                 raise RestartBackupError('invalid_receipt', '备份版本无效')
-        return event['generation_id']
+            if completeness not in {'success', 'degraded'}:
+                raise RestartBackupError('invalid_receipt', '备份完整性结果无效')
+        # A published partial copy counts as success for restart, not as full data.
+        return event['generation_id'], partial or completeness == 'degraded'
 
     log('probe', 'started')
     try:
@@ -265,8 +275,6 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 raise TimeoutError("重启备份超过等待预算")
             status = value['status']
             observed_status = status
-            if status == 'partial_success':
-                raise RestartBackupError('partial_backup', '最终快盘备份不完整')
             if require_backup and status in {'legacy', 'not_mounted'}:
                 reason = 'helper_missing' if status == 'legacy' else 'mount_changed'
                 raise RestartBackupError(reason, '已确认快盘，不能跳过重启备份')
@@ -280,11 +288,12 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 boot = current_boot
             if status == 'not_mounted' and action != 'start':
                 raise RestartBackupError('mount_changed', '备份期间挂载状态发生变化')
-            generation = receipt(value) if status == 'committed' else '-'
-            if status in {'legacy', 'not_mounted', 'committed'}:
-                log('prepared', status, generation=generation, reason={
-                    'legacy': 'helper_absent', 'not_mounted': 'no_live_binds',
-                    'committed': 'receipt_valid'}[status])
+            generation, partial = receipt(value) if status in {'committed', 'partial_success'} else ('-', False)
+            if status in {'legacy', 'not_mounted', 'committed', 'partial_success'}:
+                log('prepared', 'partial_success' if partial else status, generation=generation,
+                    reason='partial_receipt_valid' if partial else {
+                        'legacy': 'helper_absent', 'not_mounted': 'no_live_binds',
+                        'committed': 'receipt_valid'}[status])
                 break
             if status == 'failed':
                 raise RestartBackupError('backup_failed', '备份脚本报告失败，请检查容器备份日志')
@@ -318,14 +327,18 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             observed_status = current['status']
             if (require_backup or execution is not None) and time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
-            if require_backup and current['status'] in {'failed', 'partial_success'}:
-                reason = 'partial_backup' if current['status'] == 'partial_success' else 'backup_failed'
-                raise RestartBackupError(reason, '最终快盘备份未成功')
+            if require_backup and current['status'] == 'failed':
+                raise RestartBackupError('backup_failed', '最终快盘备份未成功')
             if current['status'] != status or (boot and current.get('boot_id') != boot):
                 raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化')
-            if status == 'committed' and receipt(current) != generation:
-                raise RestartBackupError('generation_changed', '备份凭据变化')
-            log('verify', 'allowed', generation=generation)
+            if status in {'committed', 'partial_success'}:
+                current_generation, current_partial = receipt(current)
+                if current_generation != generation:
+                    raise RestartBackupError('generation_changed', '备份凭据变化')
+                if current_partial != partial:
+                    raise RestartBackupError('receipt_stale', '备份完整性结果变化')
+            log('verify', 'partial_success' if partial else 'allowed', generation=generation,
+                reason='partial_receipt_valid' if partial else '-')
         except Exception as error:
             log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
             if require_backup and block_on_failure:

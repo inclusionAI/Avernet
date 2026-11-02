@@ -5,8 +5,9 @@
 Backend sends the embedded publication detector. Unknown/failed initial detection
 uses the best-effort policy below; with blocking explicitly enabled, a positively
 confirmed fastdisk target requires
-a successful, complete backup receipt within 300 seconds. Failure, partial backup,
-missing capability or unconfirmed result blocks replacement. Ordinary durable
+a valid complete or partial backup receipt within 300 seconds. Failure,
+missing capability or unconfirmed result blocks replacement; a validated
+`partial_success` permits restart with a distinct warning, even when blocking is enabled. Ordinary durable
 restarts persist positive confirmations across redelivery.
 
 Published restart policy and correlated failure logs live in the existing
@@ -24,6 +25,30 @@ operation runner retains its adopt-before-issue logic and has no backup exceptio
 Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
 failures retain the existing crash-resume behavior. No shared service is patched
 or reconfigured per request.
+
+## Partial backup is restart success (2026-11-02)
+
+A durably published `partial_success` is a terminal successful backup for restart
+policy, not a complete copy of all source data. It permits restart with either
+value of `fastdisk_fail_block`. The strategy validates the nested partial receipt:
+matching operation ID, nonempty string generation ID, `status=partial_success`,
+`error_code=source_files_skipped` and `failed_phase=backup_partial`. Optional
+`completeness` must be `degraded` when present. A committed success receipt with
+`completeness=degraded` is also classified as partial rather than full success.
+
+Both preparation and the final pre-mutation verification log at WARN with
+`event=aicoding_restart_backup status=partial_success reason=partial_receipt_valid
+ action=continue_restart data_loss_risk=true`, plus bot ID, full ARCA ID (including
+`@` suffix), owner, environment, operation, generation and elapsed time. Raw helper
+diagnostics and file paths are not logged. A valid partial result neither emits
+`[AICODING_RESTART_FAILED]` nor writes failure fields for the frontend. Full success
+keeps its INFO `committed`/`allowed` logs; actual failures keep the existing policy.
+
+The same status, boot identity, generation and completeness classification are
+rechecked before mutation. Malformed or changed receipts are still unconfirmed
+failures governed by the existing switch, not partial successes. Binding changes
+and ownership fences remain mandatory. This behavior is confined to the aicoding
+strategy; no shared flow, frontend or container-script changes are needed.
 
 ## Runtime switch (2026-11-01)
 
@@ -209,9 +234,10 @@ An absent `/opt/agentclaw/bin/restart_backup` is a legacy skip only when both th
 new `/opt/agentclaw/restart-backup-v1` installation and the restart barrier are
 absent. The older `.fastdisk.ready` marker is not a backup capability marker.
 A permission error is not absence. Once installed, the runtime helper checks
-actual mounts; `not_mounted` skips backup. Mounted runtimes must stop writers and
-return a committed generation/operation receipt for backup to count as successful.
-Unconfirmed backup still allows restart, with a data-loss warning.
+actual mounts; `not_mounted` skips backup only under the non-blocking policy.
+Current helpers perform a live backup without stopping business processes and
+return a durable complete or partial generation/operation receipt. Unconfirmed
+backup follows the switch above, rather than counting as success.
 
 Inventory logs include `source=baas_devices`, query start/failure, device count,
 status distribution, resolved target count, operation ID and elapsed time.
@@ -283,17 +309,18 @@ Additional JSON fields are ignored to allow additive v1 changes.
 | --- | --- |
 | `version` | Integer `1`; incompatible versions must not be silently accepted |
 | `operation_id` | The requested operation ID, identical throughout one operation |
-| `status` | `legacy`, `not_mounted`, `running`, `committed`, or `failed` |
+| `status` | `legacy`, `not_mounted`, `running`, `committed`, `partial_success`, or `failed` |
 | `boot_id` | Nonempty container-boot identity, required except for `legacy` |
-| `backup` | Required for `committed`: object with `status: success`, matching `operation_id`, and nonempty `generation_id` |
+| `backup` | Required for `committed` or `partial_success`: matching `operation_id` and nonempty `generation_id`; committed uses nested `status: success`, partial uses the partial receipt contract above |
 
 `legacy` is emitted only by the backend's missing-helper probe when both new
 capability markers are absent; it is not a fallback for transport errors.
 `not_mounted` means the installed helper found no canonical data mounts.
 `running` requires polling; it must not transition to a skip state. `committed`
-means writers have been stopped and the backup generation is durable. `failed`
-degrades backup but allows replacement. Before replacement, the status, boot
-identity and committed generation are checked again; changes warn and continue.
+means a durable successful generation; `partial_success` means a durable generation
+with omitted source files. Both allow restart after receipt validation, with
+distinct logs. `failed` and unconfirmed results follow the blocking switch. Before
+replacement, status, boot identity, generation and completeness are checked again.
 Changed physical inventories stop receipt probing against those targets.
 
 The paired script repository must implement this same v1 contract. Rollout must

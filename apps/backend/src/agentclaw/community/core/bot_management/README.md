@@ -182,11 +182,15 @@ mount. **Initial detection failure is treated as non-fastdisk** for restart
 compatibility; publication/restore still fail closed on detection errors.
 
 With the guard explicitly enabled, the confirmed fastdisk target
-must return `committed` from `/opt/agentclaw/bin/restart_backup start/status`
-with a matching operation, boot identity, generation and
-successful backup receipt. `partial_success`, degraded completeness, failure,
-missing helper, missing mounts, malformed output, transport error and unconfirmed
-timeout block replacement. Strict backup has a shared **300-second wait budget**
+must return `committed` or `partial_success` from
+`/opt/agentclaw/bin/restart_backup start/status` with a matching operation, boot
+identity, generation and valid backup receipt. Valid partial receipts (including
+success receipts with degraded completeness) allow restart with either switch
+value and log WARN `status=partial_success reason=partial_receipt_valid
+ action=continue_restart data_loss_risk=true`; they do not write frontend failure
+fields or emit the restart-failed marker. Full success retains INFO logs. Actual
+failure, missing helper, missing mounts, malformed output, transport error and
+unconfirmed timeout block replacement when enabled. Strict backup has a shared **300-second wait budget**
 across replicas; command durations count against that budget and receipts are
 checked again before mutation. Non-fastdisk/unknown detection retains the
 existing best-effort backup behavior and its original budget. Binding checks,

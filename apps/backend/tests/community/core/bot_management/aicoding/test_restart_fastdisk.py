@@ -11,7 +11,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.restart_dependenci
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import AicodingProvisioningStrategy
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
-from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
+from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, partial_response, response
 
 
 def strict_strategy(engine='aicoding'):
@@ -65,7 +65,7 @@ def attempt(execute):
 
 @pytest.mark.parametrize('failure', [
     response('failed'), response('partial_success'), response('legacy'), response('not_mounted'),
-    committed(completeness='degraded'), committed(status='partial_success'),
+    committed(completeness='failed'), committed(status='partial_success'),
     committed(generation_id=''), committed(operation_id='b' * 32),
     SimpleNamespace(exit_code=1, stdout='private output'),
     SimpleNamespace(exit_code=0, stdout='invalid json'),
@@ -189,7 +189,7 @@ from tests.community.core.bot_management.aicoding.test_restart_service import li
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['baas', 'arca'])
-@pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy', 'not_mounted'])
+@pytest.mark.parametrize('outcome', ['failed', 'legacy', 'not_mounted'])
 async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_target(lifecycle, provider, outcome, caplog, monkeypatch, enabled_guard):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import TASK_TYPE, task_key, journal
@@ -308,13 +308,13 @@ def test_redelivery_dependency_failure_cannot_bypass_positive_confirmation():
 
 def test_mixed_replicas_cannot_hide_failed_fastdisk_behind_nonfastdisk():
     plain = executor([response('failed')], detected=detection('skip_no_fastdisk'))
-    fast = executor([response('partial_success')])
+    fast = executor([response('failed')])
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [
         {'provider_device_id': p, 'status': 'ACTIVE'} for p in ('plain', 'fast')]
     runtime.post_bots_api.side_effect = lambda **kw: (
         plain if '/plain/' in kw['path'] else fast)(kw['payload']['cmd'])
-    with pytest.raises(backup.RestartBackupBlocked, match='不完整'):
+    with pytest.raises(backup.RestartBackupBlocked, match='快盘备份失败'):
         strict_strategy('aicoding')._prepare_restart(
             BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
             device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
@@ -346,7 +346,7 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
     op = task.payload['operation_id']
     receipt = response('committed', operation_id=op, backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': op, 'completeness': 'success'})
-    execute = executor([receipt, receipt, response('partial_success', operation_id=op) if final_failure else receipt])
+    execute = executor([receipt, receipt, response('failed', operation_id=op) if final_failure else receipt])
     updates = []
 
     def post(**kw):
@@ -361,7 +361,7 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
     if final_failure:
         assert isinstance(outcome, Fail)
         assert not updates
-        assert '快盘备份不完整' in s.repo.bot['ext']['start_message']
+        assert '快盘备份失败' in s.repo.bot['ext']['start_message']
         assert '提交前准备失败' not in s.repo.bot['ext']['start_message']
         assert s.repo.bot['binding_id'] == 7
     else:
@@ -394,7 +394,7 @@ def test_restart_blocking_config_read_failure_keeps_nonblocking(caplog):
 
 
 @pytest.mark.parametrize('failure', [response('failed'), response('partial_success'),
-                                    response('legacy'), committed(completeness='degraded')])
+                                    response('legacy'), committed(completeness='failed')])
 def test_disabled_guard_still_backs_up_and_warns_without_failure_alarm(failure, caplog):
     execute = executor([failure])
     check = backup._attempt_backup(
@@ -472,7 +472,8 @@ def test_common_config_storage_semantics(enabled, stored, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider', ['baas', 'arca'])
-async def test_disabled_guard_allows_durable_restart_after_backup_failure(lifecycle, provider, monkeypatch, caplog):
+@pytest.mark.parametrize('outcome, blocking', [('failed', False), ('partial_success', False), ('partial_success', True)])
+async def test_durable_restart_accepts_nonblocking_failure_or_valid_partial(lifecycle, provider, outcome, blocking, monkeypatch, caplog):
     from copy import deepcopy
     from agentclaw.community.core.bot_management.engines.registry import resolve_restart_strategy
     from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
@@ -481,7 +482,7 @@ async def test_disabled_guard_allows_durable_restart_after_backup_failure(lifecy
 
     s = lifecycle
     config = Mock()
-    config.get_value.return_value = False
+    config.get_value.return_value = blocking
     _, strategy = resolve_restart_strategy(s.repo.bot)
     monkeypatch.setattr(strategy, '_common_config_provider', lambda: config)
     s.binding.update(device_provider=provider, device_props={'sandbox_id': 'old-sandbox@8'})
@@ -504,7 +505,9 @@ async def test_disabled_guard_allows_durable_restart_after_backup_failure(lifecy
         s.service.start_bot = Mock(side_effect=start)
     await s.service.restart_bot_async(bot_id='b', user_id='o')
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
-    execute = executor([response('failed', operation_id=task.payload['operation_id'])])
+    op = task.payload['operation_id']
+    result = partial_response(operation_id=op) if outcome == 'partial_success' else response('failed', operation_id=op)
+    execute = executor([result] * 4)
 
     def post(**kwargs):
         if kwargs['path'].endswith('/commands'):
@@ -515,7 +518,9 @@ async def test_disabled_guard_allows_durable_restart_after_backup_failure(lifecy
     s.platform.post_bots_api.side_effect = post
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     assert events == (['stop', 'start'] if provider == 'arca' else ['update'])
-    assert execute.call_count == 2
+    assert execute.call_count == (2 if outcome == 'failed' else 3 if provider == 'arca' else 4)
+    if outcome == 'partial_success':
+        assert 'phase=verify status=partial_success' in caplog.text
     assert journal(s.repo.bot)['phase'] == 'WAITING_READY'
     assert s.repo.bot['ext'].get('start_status') != 'FAILED'
     assert 'action=continue_restart' in caplog.text
