@@ -73,6 +73,7 @@ def snapshot() -> ManagerSnapshot:
         "entity",
         "owner",
         (CollaboratorFact("a", "admin", True), CollaboratorFact("b", "member", True)),
+        bot_type="service",
     )
     return build_snapshot(facts)
 
@@ -117,6 +118,7 @@ async def test_put_carries_a_self_signed_principal_and_no_bearer():
         "entity",
         "owner",
         (CollaboratorFact("a", "admin", True), CollaboratorFact("b", "member", True)),
+        bot_type="service",
     )
     async with httpx.AsyncClient(
         base_url=_BASE_URL, transport=httpx.MockTransport(handle)
@@ -176,6 +178,7 @@ async def test_empty_roster_puts_a_present_empty_array():
         "entity",
         "owner",
         (CollaboratorFact("gone", "admin", False),),
+        bot_type="service",
     )
     projected = build_snapshot(facts)
     assert projected.manager_user_ids == ()
@@ -262,6 +265,7 @@ async def test_unmintable_principal_refuses_to_send():
         "entity",
         "owner",
         (CollaboratorFact("a", "admin", True),),
+        bot_type="service",
     )
     async with _plugin_with(handle) as _:
         plugin = HttpBcsManagersPlugin(

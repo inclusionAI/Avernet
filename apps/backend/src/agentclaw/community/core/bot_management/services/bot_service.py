@@ -2832,6 +2832,9 @@ class BotService(BotServiceProtocol):
         page_size: int = 20,
     ) -> Dict[str, Any]:
         """Return display-source records for exact Bot and owner pairs."""
+        from agentclaw.community.core.bot_management.bcn_metadata import resolve_metadata_pairs
+
+        pairs = resolve_metadata_pairs(self._repository, pairs)
         total, items = self._repository.list_bots_by_owner_bot_pairs(
             pairs,
             page=page,
