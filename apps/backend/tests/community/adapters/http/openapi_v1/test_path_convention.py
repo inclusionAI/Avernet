@@ -114,6 +114,8 @@ _BOT_FREE = frozenset(
         # component namespace, not one bot — the same literal the retiring
         # routines shim already keeps there.
         "routines",
+        # Service-env progress / teardown are self-addressing: progress is
+        # BaaS-workflow-keyed and teardown carries the eval bot UUID in its path.
         "service-envs",
         "spaces",
         # Repo catalog is tenant-wide but follows the Skill namespace as
