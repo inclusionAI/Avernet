@@ -141,4 +141,3 @@ async def deliver_mcp_detail(
         url_override=url_override,
         strict_transport_protocol=strict_transport_protocol,
     )
-
