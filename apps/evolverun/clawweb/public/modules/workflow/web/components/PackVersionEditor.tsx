@@ -228,96 +228,101 @@ export default function PackVersionEditor({ files, onChange, onUploadStateChange
         ? '有未保存更改'
         : '与已保存内容一致'
 
-  return <section aria-label="版本文件编辑器" className="space-y-4">
-    <p className="text-sm text-muted-foreground">编辑提供的版本文件；更改仅交由上层处理，不会自动保存或部署。单个文件编辑或上传上限为 1 MiB；已有较大文件保持原样。</p>
-    {uploading && <p role="status" className="text-sm">正在读取上传文件，请等待完成后再保存或切换。</p>}
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <div className="grid gap-4 xl:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)_minmax(14rem,18rem)]">
-      <aside aria-label="Pack 文件导航" className="min-w-0 rounded-lg border border-border bg-card p-4">
-        <div className="space-y-1">
-          <h3 className="font-semibold">Pack 文件</h3>
-          <p className="text-xs text-muted-foreground">相对 Pack 根目录</p>
+  return <section aria-label="版本文件编辑器" className="space-y-2">
+    <p className="text-[11px] leading-relaxed text-muted-foreground">编辑提供的版本文件；更改仅交由上层处理，不会自动保存或部署。单个文件编辑或上传上限为 1 MiB；已有较大文件保持原样。</p>
+    {uploading && <p role="status" className="text-[11px]">正在读取上传文件，请等待完成后再保存或切换。</p>}
+    {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
+    <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border border-border bg-card xl:flex-row">
+      <aside aria-label="Pack 文件导航" className="min-w-0 shrink-0 border-b border-border bg-muted/30 px-3 py-[15px] xl:w-[235px] xl:border-b-0 xl:border-r">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-[13px] font-bold text-foreground">Pack 文件</h3>
+          <span className="text-[10px] text-muted-foreground">相对 Pack 根目录</span>
         </div>
-        <label className="mt-3 block text-xs">搜索 Pack 文件
-          <input type="search" className="mt-1 w-full rounded border border-input bg-background px-2 py-1" value={search} disabled={uploading} onChange={event => setSearch(event.target.value)} />
-        </label>
-        <div className="mt-4 space-y-2">
-          <label className="grid gap-1 text-xs">新文件相对路径
-            <input className="rounded border border-input bg-background px-2 py-1" value={newPath} disabled={uploading} onChange={event => setNewPath(event.target.value)} />
-          </label>
-          <label className="grid gap-1 text-xs">新文件模式
-            <select className="rounded border border-input bg-background px-2 py-1" value={newMode} disabled={uploading} onChange={event => setNewMode(event.target.value as PackVersionFile['mode'])}>
-              <option value="100644">100644（普通文件）</option>
-              <option value="100755">100755（可执行文件）</option>
-            </select>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" aria-label="添加空文件" disabled={uploading} className="rounded border border-input bg-background px-3 py-1" onClick={addFile}>新建</button>
-            <button type="button" disabled={uploading || !selected} className="rounded border border-input bg-background px-3 py-1" onClick={() => uploadInput.current?.click()}>上传</button>
-          </div>
+        <input type="search" aria-label="搜索 Pack 文件" placeholder="搜索文件名..." className="h-[33px] w-full rounded-[7px] border border-input bg-background px-2.5 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" value={search} disabled={uploading} onChange={event => setSearch(event.target.value)} />
+        <div className="mt-2.5 flex gap-1.5">
+          <button type="button" aria-label="添加空文件" disabled={uploading} className="flex min-h-[31px] flex-1 items-center justify-center rounded-[7px] border border-input bg-background px-2.5 text-[11px] font-semibold text-foreground disabled:opacity-40" onClick={addFile}>新建</button>
+          <button type="button" disabled={uploading || !selected} className="flex min-h-[31px] flex-1 items-center justify-center rounded-[7px] border border-input bg-background px-2.5 text-[11px] font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary disabled:opacity-40" onClick={() => uploadInput.current?.click()}>上传</button>
         </div>
-        <div className="mt-4">
+        <div className="mt-2.5 grid gap-1.5">
+          <input aria-label="新文件相对路径" placeholder="新文件相对路径..." className="h-[31px] min-w-0 rounded-[7px] border border-input bg-background px-2.5 text-[11px] text-foreground placeholder:text-muted-foreground" value={newPath} disabled={uploading} onChange={event => setNewPath(event.target.value)} />
+          <select aria-label="新文件模式" className="h-[27px] rounded-[7px] border border-input bg-background px-2 text-[11px] text-foreground" value={newMode} disabled={uploading} onChange={event => setNewMode(event.target.value as PackVersionFile['mode'])}>
+            <option value="100644">100644（普通文件）</option>
+            <option value="100755">100755（可执行文件）</option>
+          </select>
+        </div>
+        <div className="mt-2">
           {groups.length === 0
-            ? <p className="text-sm text-muted-foreground">{files.length === 0 ? '没有文件。' : '没有匹配的文件。'}</p>
-            : <ul aria-label="版本文件列表" className="space-y-4">
+            ? <p className="mt-4 px-2.5 text-[10px] text-muted-foreground">{files.length === 0 ? '没有文件。' : '没有匹配的文件。'}</p>
+            : <ul aria-label="版本文件列表">
               {groups.map(group => <li key={group.name}>
-                <p className="mb-1 text-xs font-medium text-muted-foreground">{group.name} · {group.files.length}</p>
-                <ul className="space-y-1">
+                <p className="mx-1 mb-1.5 mt-4 text-[10px] font-bold text-muted-foreground">{group.name} <span>({group.files.length})</span></p>
+                <ul>
                   {group.files.map(file => <li key={file.path}>
-                    <button type="button" aria-pressed={selected?.path === file.path} disabled={uploading} onClick={() => { setError(''); setSelectedPath(file.path) }} className="w-full break-all rounded px-2 py-1 text-left hover:bg-muted aria-pressed:bg-primary aria-pressed:text-primary-foreground">{file.path}</button>
+                    <button type="button" aria-label={file.path} aria-pressed={selected?.path === file.path} disabled={uploading} onClick={() => { setError(''); setSelectedPath(file.path) }} className="flex w-full items-center gap-2 rounded-[7px] border border-transparent px-2 py-2 text-left text-[11px] text-muted-foreground hover:bg-muted aria-pressed:border-[#cedeff] aria-pressed:bg-[#eaf1ff] aria-pressed:text-primary disabled:opacity-40">
+                      <span aria-hidden="true" className="text-[11px] leading-none">▤</span>
+                      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{file.path.split('/').pop()}</span>
+                    </button>
                   </li>)}
                 </ul>
               </li>)}
             </ul>}
         </div>
       </aside>
-      <section aria-label="所选文件" className="flex min-w-0 flex-col rounded-lg border border-border bg-card">
+      <section aria-label="所选文件" className="flex min-w-0 flex-1 flex-col bg-card">
         {selected ? <>
-          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
-            <div className="min-w-0">
-              <h3 className="break-all text-base font-semibold">{selected.path.split('/').pop()}</h3>
-              <p className="break-all text-xs text-muted-foreground">路径：{selected.path}</p>
+          <header className="flex min-h-[49px] flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span aria-hidden="true" className="text-[13px] text-muted-foreground">▤</span>
+              <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] font-semibold text-foreground">{selected.path.split('/').pop()}</strong>
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-muted-foreground">{selected.path}</span>
             </div>
-            <button type="button" disabled={uploading} className="rounded border border-input px-3 py-1 text-destructive" onClick={() => { change(files.filter(file => file !== selected)); setSelectedPath(null) }}>删除所选文件</button>
-          </header>
-          <div className="flex-1 space-y-3 p-4">
-            <label className="grid gap-1 text-sm">所选文件模式
-              <select className="w-fit rounded border border-input bg-background px-2 py-1" value={selected.mode} disabled={uploading} onChange={event => change(files.map(file => file === selected ? { ...file, mode: event.target.value as PackVersionFile['mode'] } : file))}>
+            <div className="flex items-center gap-2">
+              <select aria-label="所选文件模式" className="h-[27px] rounded-[7px] border border-input bg-background px-2 text-[11px] text-foreground" value={selected.mode} disabled={uploading} onChange={event => change(files.map(file => file === selected ? { ...file, mode: event.target.value as PackVersionFile['mode'] } : file))}>
                 <option value="100644">100644（普通文件）</option>
                 <option value="100755">100755（可执行文件）</option>
               </select>
-            </label>
+              <button type="button" disabled={uploading} className="flex min-h-[31px] items-center rounded-[7px] border border-input bg-background px-2.5 text-[11px] font-semibold text-destructive hover:bg-destructive/5 disabled:opacity-40" onClick={() => { change(files.filter(file => file !== selected)); setSelectedPath(null) }}>删除所选文件</button>
+            </div>
+          </header>
+          <div className="min-h-[430px] flex-1 bg-[#fcfdff]">
             {text === null
-              ? <p className="text-sm">此文件不是可安全编辑的 UTF-8 文本，或超过编辑大小限制；原内容保持不变，可上传文件替换。</p>
-              : <label className="grid gap-1 text-sm">文件内容
-                <textarea className="min-h-72 w-full flex-1 rounded border border-input bg-background p-2 font-mono" value={text} disabled={uploading} onChange={event => editText(event.target.value)} />
-              </label>}
+              ? <div className="p-4">
+                <p className="text-[11px] leading-[1.8] text-muted-foreground">此文件不是可安全编辑的 UTF-8 文本，或超过编辑大小限制；原内容保持不变，可上传文件替换。</p>
+              </div>
+              : <textarea aria-label="文件内容" className="block h-full min-h-[430px] w-full flex-1 resize-none border-0 bg-[#fcfdff] px-4 py-4 font-mono text-[12px] leading-[1.8] text-foreground outline-none disabled:bg-muted/40" value={text} disabled={uploading} onChange={event => editText(event.target.value)} />}
           </div>
-          <footer className="border-t border-border px-4 py-3">
-            <label className="grid gap-1 text-sm">上传文件替换所选文件
-              <input ref={uploadInput} type="file" disabled={uploading} onChange={event => { upload(event.target.files?.[0]); event.target.value = '' }} />
-            </label>
+          <footer className="flex items-center justify-between border-t border-border px-4 py-1.5">
+            <span className="font-mono text-[10px] text-muted-foreground">{selectedBytes === null ? '—' : `${selectedBytes} B`} · UTF-8</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{saveStateText}</span>
           </footer>
-        </> : <p className="p-4 text-sm text-muted-foreground">请选择或新建文件。</p>}
+          <input ref={uploadInput} type="file" aria-label="上传文件替换所选文件" className="sr-only" disabled={uploading} onChange={event => { upload(event.target.files?.[0]); event.target.value = '' }} />
+        </> : <p className="p-4 text-[11px] text-muted-foreground">请选择或新建文件。</p>}
       </section>
-      <aside aria-label="文件信息" className="min-w-0 rounded-lg border border-border bg-card p-4">
-        <h3 className="font-semibold">文件信息</h3>
-        <dl className="mt-3 space-y-3 text-xs">
-          <div><dt className="text-muted-foreground">文件名</dt><dd className="mt-1 break-all">{selected?.path.split('/').pop() ?? '—'}</dd></div>
-          <div><dt className="text-muted-foreground">文件路径</dt><dd className="mt-1 break-all">{selected?.path ?? '—'}</dd></div>
-          <div><dt className="text-muted-foreground">模式</dt><dd className="mt-1">{selected?.mode ?? '—'}</dd></div>
-          <div><dt className="text-muted-foreground">大小</dt><dd className="mt-1">{selectedBytes === null ? '—' : `${selectedBytes} B`}</dd></div>
-        </dl>
-        <h4 className="mt-5 text-xs font-medium text-muted-foreground">版本来源</h4>
-        <dl className="mt-2 space-y-3 text-xs">
-          <div><dt className="text-muted-foreground">版本</dt><dd className="mt-1">{versionSource.version === 'current' ? '当前版（wf）' : '草稿版（saved）'}</dd></div>
-          <div><dt className="text-muted-foreground">Pack</dt><dd className="mt-1 break-all">{versionSource.packId}</dd></div>
-          <div><dt className="text-muted-foreground">分支 / Tag</dt><dd className="mt-1 break-all">{versionSource.baseRef}</dd></div>
-          <div><dt className="text-muted-foreground">Commit</dt><dd className="mt-1 break-all">{versionSource.baseCommit}</dd></div>
-        </dl>
-        <h4 className="mt-5 text-xs font-medium text-muted-foreground">保存状态</h4>
-        <p className="mt-2 text-xs">{saveStateText}</p>
-        <p className="mt-3 text-xs text-muted-foreground">保存与部署由上层统一处理；刷新或关闭页面会丢失未保存更改。</p>
+      <aside aria-label="文件信息" className="min-w-0 shrink-0 border-t border-border px-4 py-4 xl:w-[275px] xl:border-l xl:border-t-0">
+        <h3 className="mb-3 text-[13px] font-semibold text-foreground">文件信息</h3>
+        <div className="border-b border-border/70 py-3">
+          <p className="mb-2 text-[10px] font-bold text-muted-foreground">文件详情</p>
+          <dl className="grid gap-1">
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">文件名</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{selected?.path.split('/').pop() ?? '—'}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">文件路径</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{selected?.path ?? '—'}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">模式</dt><dd className="font-mono text-[10px] font-semibold text-foreground">{selected?.mode ?? '—'}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">大小</dt><dd className="font-mono text-[10px] font-semibold text-foreground">{selectedBytes === null ? '—' : `${selectedBytes} B`}</dd></div>
+          </dl>
+        </div>
+        <div className="border-b border-border/70 py-3">
+          <p className="mb-2 text-[10px] font-bold text-muted-foreground">版本来源</p>
+          <dl className="grid gap-1">
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">版本</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.version === 'current' ? '当前版（wf）' : '草稿版（saved）'}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">Pack</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.packId}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">分支 / Tag</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.baseRef}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">Commit</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.baseCommit}</dd></div>
+          </dl>
+        </div>
+        <div className="py-3">
+          <p className="mb-2 text-[10px] font-bold text-muted-foreground">保存状态</p>
+          <p className="font-mono text-[10px] text-muted-foreground">{saveStateText}</p>
+          <p className="mt-3 rounded-lg border border-primary/15 bg-primary/5 p-2.5 text-[10px] leading-[1.7] text-muted-foreground">保存与部署由上层统一处理；刷新或关闭页面会丢失未保存更改。</p>
+        </div>
       </aside>
     </div>
   </section>
