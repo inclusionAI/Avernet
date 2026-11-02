@@ -64,6 +64,48 @@ def test_sync_symlinks_empty_calls_clean_endpoint_via_transport():
     )
 
 
+HERMES_LEGACY_LOCAL_PROFILE_SYMLINK = {
+    "source": "/home/admin/.hermes/workspace/skills/skills-local/ai-law-reference",
+    "target": "/home/admin/.hermes/workspace/skills-pool/skills-local/ai-law-reference",
+}
+HERMES_SYMLINK_BY_BINDPATH = {
+    "source": "/home/admin/.hermes/workspace/skills-pool/skills-local/ai-law-reference",
+    "target": "/home/admin/.hermes/skills/ai-law-reference",
+}
+
+
+def test_sync_symlinks_skips_hermes_legacy_local_profile_symlink():
+    """Avoid the legacy bindpath noise; logical mapping owns this source root."""
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    transport = _make_transport()
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    result = plugin.sync_symlinks([HERMES_LEGACY_LOCAL_PROFILE_SYMLINK])
+
+    assert result["success"] is True
+    transport.post.assert_not_called()
+
+
+def test_sync_symlinks_keeps_other_hermes_symlinks_when_filtering_profile():
+    """The filter is source-root scoped so normal bindpath delivery survives."""
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    transport = _make_transport()
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    result = plugin.sync_symlinks([
+        HERMES_LEGACY_LOCAL_PROFILE_SYMLINK,
+        HERMES_SYMLINK_BY_BINDPATH,
+    ])
+
+    assert result["success"] is True
+    transport.post.assert_called_once_with(
+        "/api/skills/symlink/bindpath",
+        json={"symlinks": [HERMES_SYMLINK_BY_BINDPATH], "clean_target_dir": True},
+    )
+
+
 def test_sync_symlinks_nonempty_calls_bindpath_endpoint_via_transport():
     from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
 
