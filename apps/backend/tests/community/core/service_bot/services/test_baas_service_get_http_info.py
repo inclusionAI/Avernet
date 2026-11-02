@@ -19,6 +19,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
+    BaasTransientServiceError,
     HttpConnectionInfo,
 )
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
@@ -143,11 +144,11 @@ def test_get_http_info_404_raises(baas_service, http):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 
-def test_get_http_info_503_raises(baas_service, http):
-    """No active devices -> raise BaasServiceError."""
+def test_get_http_info_5xx_raises_transient(baas_service, http):
+    """5xx is retryable, so it maps to the narrower transient error."""
     http.set_response("get", _err_resp(503, {"error": "no_active_devices", "message": "No active devices"}))
 
-    with pytest.raises(BaasServiceError, match="503"):
+    with pytest.raises(BaasTransientServiceError, match="503"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 

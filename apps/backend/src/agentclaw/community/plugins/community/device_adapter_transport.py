@@ -18,8 +18,12 @@ from injector import inject
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
+    BaasTransientServiceError,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -126,6 +130,10 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
                     f"Adapter request timed out: {method} {path}"
                 ) from exc
             raise ValueError(f"Failed to connect to adapter: {exc}") from exc
+        except BaasTransientServiceError as exc:
+            raise DeviceConnectionUnavailableError(
+                f"BaaS connection is temporarily unavailable: {method} {path}"
+            ) from exc
         except BaasServiceError as exc:
             raise ValueError(f"Failed to resolve adapter connection: {exc}") from exc
 
@@ -178,6 +186,10 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
                     f"Adapter request timed out: POST {path}"
                 ) from exc
             raise ValueError(f"Failed to connect to adapter: {exc}") from exc
+        except BaasTransientServiceError as exc:
+            raise DeviceConnectionUnavailableError(
+                f"BaaS connection is temporarily unavailable for stream: {path}"
+            ) from exc
         except BaasServiceError as exc:
             raise ValueError(f"Failed to resolve adapter connection: {exc}") from exc
 
@@ -221,6 +233,10 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
                     f"Adapter stream timed out: {method} {path}"
                 ) from exc
             raise ValueError(f"Failed to open adapter stream: {exc}") from exc
+        except BaasTransientServiceError as exc:
+            raise DeviceConnectionUnavailableError(
+                f"BaaS connection is temporarily unavailable for stream: {path}"
+            ) from exc
         except BaasServiceError as exc:
             raise ValueError(f"Failed to resolve adapter connection: {exc}") from exc
 

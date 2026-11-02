@@ -8,8 +8,12 @@ import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasTransientServiceError,
     BaasServiceError,
     HttpConnectionInfo,
+)
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
 )
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -125,6 +129,23 @@ def test_invoke_multipart_forwards_replayable_package_and_provider_header():
     }
 
 
+def test_invoke_multipart_maps_baas_transient_error():
+    transport, baas = _transport()
+    baas.get_http_info.side_effect = BaasTransientServiceError(
+        "BaaS API transient error: 503"
+    )
+
+    with pytest.raises(DeviceConnectionUnavailableError):
+        asyncio.run(
+            transport.invoke_multipart(
+                {"binding_id": 17, "engine_port": 20003},
+                "/api/skills/local/apply",
+                files={"file": ("weather.zip", b"zip", "application/zip")},
+                data={"skill_name": "weather"},
+            )
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
@@ -194,6 +215,20 @@ def test_invoke_maps_baas_resolution_error():
         )
 
 
+def test_invoke_maps_baas_transient_error():
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = BaasTransientServiceError(
+        "BaaS API transient error: 503"
+    )
+
+    with pytest.raises(DeviceConnectionUnavailableError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 1}, method="GET", path="/api/test"
+            )
+        )
+
+
 def test_stream_uses_baas_http_info_and_closes():
     transport, baas = _transport()
     baas.get_http_info.return_value = HttpConnectionInfo(
@@ -251,3 +286,20 @@ def test_stream_uses_baas_http_info_and_closes():
     )
     response.aclose.assert_awaited_once()
     client.aclose.assert_awaited_once()
+
+
+def test_stream_rejects_baas_transient_error():
+    transport, baas = _transport()
+    baas.get_http_info.side_effect = BaasTransientServiceError(
+        "BaaS API transient error: 503"
+    )
+
+    with pytest.raises(DeviceConnectionUnavailableError):
+        asyncio.run(
+            transport.stream(
+                conn_info={"binding_id": 9, "engine_port": 20003},
+                method="POST",
+                path="/api/chat/stream",
+                body={"message": "hello"},
+            )
+        )

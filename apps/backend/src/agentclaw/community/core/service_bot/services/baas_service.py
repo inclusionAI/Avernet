@@ -3730,6 +3730,14 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                logger.warning(
+                    f"[BaasService.get_http_info] "
+                    f"Transient HTTP error: {e.response.status_code} - {e.response.text}"
+                )
+                raise BaasTransientServiceError(
+                    f"BaaS API transient error: {e.response.status_code}"
+                ) from e
             logger.error(
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
