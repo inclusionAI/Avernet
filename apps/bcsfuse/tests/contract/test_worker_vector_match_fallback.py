@@ -568,3 +568,228 @@ def test_vector_match_service_builds_when_index_size_probe_fails(monkeypatch, tm
     finally:
         fusion_dependencies.reset_fusion_services()
         fusion_dependencies.set_app_context(None)
+
+
+def test_embedding_admission_failure_uses_literal_snapshot_without_qdrant(tmp_path):
+    vector_store = Mock()
+    dense_called = False
+    keyword_called = False
+
+    def reject_dense(*args, **kwargs):
+        nonlocal dense_called
+        dense_called = True
+        raise AssertionError("dense search must not be called")
+
+    def reject_keyword(*args, **kwargs):
+        nonlocal keyword_called
+        keyword_called = True
+        raise AssertionError("keyword search must not be called")
+
+    vector_store.search.side_effect = reject_dense
+    vector_store.text_search.side_effect = reject_keyword
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+
+    runtime_config = {
+        "_semantic_failure": {
+            "semantic_error": "EMBEDDING_QUOTA_EXHAUSTED",
+            "semantic_status_code": 429,
+        }
+    }
+    results = service.match(
+        query_embedding=[],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=3,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["literal_fallback_used"] is True
+    assert diagnostics["semantic_unavailable"] is True
+    assert diagnostics["keyword_bypassed"] is True
+    assert diagnostics["keyword_unavailable"] is False
+    assert dense_called is False
+    assert keyword_called is False
+
+
+def test_successful_semantic_query_skips_remote_keyword_when_local_snapshot_suffices(
+    tmp_path,
+):
+    from app.domain.models.vector_search_hit import VectorSearchHit
+
+    vector_store = Mock()
+    vector_store.size.return_value = 2
+    vector_store.search.return_value = [
+        VectorSearchHit(
+            id="worker:default:full",
+            score=0.8,
+            payload={
+                "profile_key": "worker:default",
+                "worker_id": "worker",
+                "profile_id": "default",
+                "fragment_type": "full",
+                "content": "dense semantic result",
+                "runtime_state": "online",
+                "availability": "public",
+            },
+        )
+    ]
+    vector_store.text_search.side_effect = AssertionError(
+        "remote keyword search must be skipped"
+    )
+    service = service_for(
+        vector_store,
+        RegexFallbackIndex(
+            [
+                fallback_point("worker:default", "星河 数据分析助手"),
+                fallback_point("second:default", "星河 数据分析平台"),
+            ]
+        ),
+        tmp_path,
+    )
+    service._fragment_config.expand_factor = 1
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=2,
+        runtime_config=runtime_config,
+        vector_min_score=0.0,
+    )
+
+    assert {result.profile_key for result in results} == {
+        "worker:default",
+        "second:default",
+    }
+    vector_store.text_search.assert_not_called()
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["keyword_search_used"] is True
+    assert diagnostics["keyword_source"] == "local_snapshot"
+    assert diagnostics["local_keyword_sufficient"] is True
+    assert diagnostics["literal_fallback_used"] is False
+
+
+def test_insufficient_local_keyword_still_uses_remote_keyword_candidates(tmp_path):
+    from app.domain.models.vector_search_hit import VectorSearchHit
+
+    vector_store = Mock()
+    vector_store.size.return_value = 2
+    vector_store.search.return_value = [
+        VectorSearchHit(
+            id="worker:default:full",
+            score=0.8,
+            payload={
+                "profile_key": "worker:default",
+                "worker_id": "worker",
+                "profile_id": "default",
+                "fragment_type": "full",
+                "content": "dense semantic result",
+                "runtime_state": "online",
+                "availability": "public",
+            },
+        )
+    ]
+    vector_store.text_search.return_value = [
+        VectorSearchHit(
+            id="second:default:full",
+            score=1.0,
+            payload={
+                "profile_key": "second:default",
+                "worker_id": "second",
+                "profile_id": "default",
+                "fragment_type": "full",
+                "content": "星河 数据分析平台",
+                "runtime_state": "online",
+                "availability": "public",
+            },
+        )
+    ]
+    service = service_for(
+        vector_store,
+        RegexFallbackIndex([fallback_point("worker:default", "星河 数据分析助手")]),
+        tmp_path,
+    )
+    service._fragment_config.expand_factor = 1
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=2,
+        runtime_config=runtime_config,
+        vector_min_score=0.0,
+    )
+
+    assert vector_store.text_search.call_count == 1
+    assert {result.profile_key for result in results} == {
+        "worker:default",
+        "second:default",
+    }
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["keyword_source"] == "hybrid_local"
+    assert diagnostics["local_keyword_sufficient"] is False
+    assert diagnostics["local_keyword_count"] == 1
+
+
+def test_local_keyword_path_uses_final_topk_not_expand_budget_for_sufficiency(
+    tmp_path,
+):
+    from app.domain.models.vector_search_hit import VectorSearchHit
+
+    vector_store = Mock()
+    vector_store.size.return_value = 3
+    vector_store.search.return_value = [
+        VectorSearchHit(
+            id="worker:default:full",
+            score=0.8,
+            payload={
+                "profile_key": f"worker:{index}:default",
+                "worker_id": f"worker:{index}",
+                "profile_id": "default",
+                "fragment_type": "full",
+                "content": "dense semantic result",
+                "runtime_state": "online",
+                "availability": "public",
+            },
+        )
+        for index in range(3)
+    ]
+    vector_store.text_search.side_effect = AssertionError(
+        "expanded keyword budget must not force a Qdrant lookup"
+    )
+    service = service_for(
+        vector_store,
+        RegexFallbackIndex(
+            [
+                fallback_point(
+                    f"local:{index}:default", f"星河 数据分析专家 {index}"
+                )
+                for index in range(3)
+            ]
+        ),
+        tmp_path,
+    )
+    service._fragment_config.expand_factor = 3
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=3,
+        runtime_config=runtime_config,
+        vector_min_score=0.0,
+    )
+
+    vector_store.text_search.assert_not_called()
+    assert len(results) >= 3
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["keyword_source"] == "local_snapshot"
+    assert diagnostics["local_keyword_sufficient"] is True

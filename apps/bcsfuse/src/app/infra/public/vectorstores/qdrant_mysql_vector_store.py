@@ -131,6 +131,23 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             payload_indexes_on_connect=False,
         )
 
+    @staticmethod
+    def _reset_transport(component: Any) -> None:
+        """Close one unhealthy shared-client transport without inventing storage."""
+
+        reset_connection = getattr(component, "reset_connection", None)
+        close = component.close if reset_connection is None else None
+        try:
+            if reset_connection is not None:
+                reset_connection()
+            else:
+                close()
+        except Exception as error:
+            logger.warning(
+                "[QdrantMySQLVectorStore] readiness transport reset failed: %s",
+                type(error).__name__,
+            )
+
     # ------------------------------------------------------------------
     # Compatibility proxies for callers that reach into Qdrant internals
     # ------------------------------------------------------------------
@@ -368,6 +385,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         """
         dense_ready = True
         keyword_ready = self._keywords_ready
+        reset_dense = False
+        reset_keyword = False
         with self._index_lock.read():
             if self.connection.mode == "server":
                 try:
@@ -375,6 +394,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                     self._qdrant._client.get_collection(self.collection_name)
                 except Exception:
                     dense_ready = False
+                    reset_dense = True
             if self.keyword_connection.mode == "server" and keyword_ready:
                 try:
                     self._keywords._ensure_client()
@@ -383,6 +403,16 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                     )
                 except Exception:
                     keyword_ready = False
+                    reset_keyword = True
+
+        # Leave the shared read lock before closing a failed transport. The
+        # next readiness probe then connects afresh and cannot keep reporting
+        # an outage because of stale local endpoint state.
+        if reset_dense:
+            self._reset_transport(self._qdrant)
+        if reset_keyword:
+            self._reset_transport(self._keywords)
+
         return {
             "dense_qdrant_ready": dense_ready,
             "keyword_qdrant_ready": keyword_ready,

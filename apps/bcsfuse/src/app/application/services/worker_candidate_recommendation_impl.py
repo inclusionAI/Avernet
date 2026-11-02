@@ -690,7 +690,13 @@ class WorkerCandidateRecommendationImpl:
         )
 
         query_embedding: list[float] = []
-        if self._embedding_generator is None:
+        direct_keyword = (
+            runtime_config is not None
+            and runtime_config.get("query_route") == "direct_keyword"
+        )
+        if direct_keyword:
+            pass
+        elif self._embedding_generator is None:
             logger.warning(
                 "[VectorMatch-Try] EMBEDDING_UNAVAILABLE | continuing with lexical retrieval"
             )

@@ -68,6 +68,49 @@ def project_snapshot_recommendation(hit: Any) -> CandidateRecommendation:
     )
 
 
+
+
+def direct_snapshot_hits(
+    snapshot: Any,
+    *,
+    query: str,
+    limit: int,
+    filters: dict[str, Any],
+) -> tuple[tuple[Any, ...], str]:
+    """Execute a bounded exact-identifier snapshot path before Qdrant work.
+
+    A direct target may contain multiple whitespace-separated identifiers. The
+    snapshot is queried once per token with only the remaining result budget,
+    so an explicit multi-agent lookup never expands into a full Qdrant scan.
+    """
+
+    exact_search = getattr(snapshot, "exact_search", None)
+    if not callable(exact_search) or limit <= 0:
+        return (), "miss"
+
+    hits: list[Any] = []
+    remaining = limit
+    seen: set[str] = set()
+    for token in query.split():
+        if remaining <= 0:
+            break
+        token_hits = _snapshot_call(
+            lambda token=token, remaining=remaining: exact_search(
+                token, remaining, filters, None
+            )
+        )
+        for hit in token_hits:
+            hit_id = str(getattr(hit, "id", "") or len(seen))
+            if hit_id in seen and hit_id:
+                continue
+            if hit_id:
+                seen.add(hit_id)
+            hits.append(hit)
+            remaining -= 1
+            if remaining <= 0:
+                break
+    return tuple(hits), "exact"
+
 def snapshot_metadata(
     snapshot: Any,
     *,
@@ -86,6 +129,24 @@ def snapshot_metadata(
         ),
         "snapshot_profile_count": getattr(snapshot, "profile_count", None),
         "snapshot_age_seconds": snapshot_age_seconds(snapshot),
+    }
+
+
+def direct_snapshot_metadata(
+    snapshot: Any,
+    *,
+    hit_count: int,
+    strategy: str,
+) -> dict[str, Any]:
+    """Publish exact direct lookup provenance without an outage marker."""
+
+    metadata = snapshot_metadata(snapshot, hit_count=hit_count, strategy=strategy)
+    metadata.pop("local_snapshot_used", None)
+    return {
+        **metadata,
+        "direct_snapshot_used": True,
+        "direct_snapshot_exact": strategy == "exact",
+        "score_source": "direct_keyword",
     }
 
 
@@ -162,6 +223,8 @@ def _string_list(value: Any) -> list[str]:
 
 
 __all__ = [
+    "direct_snapshot_hits",
+    "direct_snapshot_metadata",
     "project_snapshot_hit",
     "project_snapshot_recommendation",
     "snapshot_hits",

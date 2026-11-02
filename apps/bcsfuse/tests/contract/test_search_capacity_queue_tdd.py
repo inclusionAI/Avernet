@@ -48,7 +48,7 @@ class SimpleReceive:
             self.first = False
             return {
                 "type": "http.request",
-                "body": b'{"query":"assistant"}',
+                "body": b'{"query":"assistant semantic search"}',
                 "more_body": False,
             }
         return {"type": "http.disconnect"}

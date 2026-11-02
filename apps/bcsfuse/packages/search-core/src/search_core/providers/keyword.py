@@ -263,6 +263,12 @@ class QdrantKeywordIndex:
         return results
 
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        with self._init_lock:
+            if self._client is not None:
+                self._client.close()
+                self._client = None
+
+    def reset_connection(self) -> None:
+        """Close an unhealthy transport for the next readiness probe."""
+
+        self.close()

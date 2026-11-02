@@ -200,7 +200,9 @@ def test_concurrent_activations_coalesce_into_one_model_call(monkeypatch):
 
     assert errors == {worker_id: None for worker_id in profiles}
     assert len(provider.calls) == 1
-    assert len(provider.calls[0]) == len(profiles)
+    # Rich SOUL profiles now produce a precise profile fragment plus the full
+    # fallback; the batch contains both unique embedding texts per profile.
+    assert len(provider.calls[0]) == len(profiles) * 2
     assert vector_store.upsert_embeddings.call_count == 1
     assert vector_store.delete_stale_fragments.call_count == len(profiles)
 
@@ -260,3 +262,21 @@ def test_activation_route_runs_index_refresh_in_threadpool(monkeypatch):
             (registry, worker, "default"),
         )
     ]
+
+
+def test_reindexed_profiles_remove_old_sparse_fragments_after_success(monkeypatch):
+    provider = RecordingEmbeddingProvider()
+    store = MagicMock()
+    profile = make_profile("worker-reindex", "Rich replacement")
+    fragments = [Fragment("profile", "worker_id: worker-reindex\nRich replacement")]
+    indexer = ProfileEmbeddingIndexer(provider, store, batch_size=8)
+    indexer._fragment_decomposer = Decomposer({"worker-reindex:default": fragments})
+
+    result = indexer.build_index([profile])
+
+    assert result.failed_count == 0
+    assert store.delete_stale_fragments.call_count == 1
+    profile_key, current_ids, worker_id = store.delete_stale_fragments.call_args.args
+    assert profile_key == "worker-reindex:default"
+    assert current_ids == {"worker-reindex:default:profile"}
+    assert worker_id == "worker-reindex"

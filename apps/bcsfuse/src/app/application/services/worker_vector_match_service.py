@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from app.domain.services.adapters.worker_profile_filter_adapter import WorkerProfileFilterAdapter
 
 
+from app.application.services.literal_fallback_recovery import LiteralFallbackMixin
 from app.application.services.worker_vector_match_fragments import FragmentMatchingMixin
 from app.application.services.keyword_candidate_selection import (
     keyword_candidates_with_status,
@@ -116,7 +117,7 @@ class FragmentRetrievalConfig:
 
 
 
-class WorkerVectorMatchService(FragmentMatchingMixin):
+class WorkerVectorMatchService(FragmentMatchingMixin, LiteralFallbackMixin):
     """Worker 向量匹配服务。
 
     职责：

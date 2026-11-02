@@ -116,9 +116,13 @@ class TestMySQLVectorPersistenceBackendContract:
 
         # Set PYTHONPATH to include the open-core root
         env = dict(os.environ)
-        pythonpath = str(open_core_root)
-        if "PYTHONPATH" in env:
-            pythonpath = pythonpath + os.pathsep + env["PYTHONPATH"]
+        pythonpath = os.pathsep.join(
+            (
+                str(open_core_root / "src"),
+                str(open_core_root / "packages/search-core/src"),
+                env.get("PYTHONPATH", ""),
+            )
+        )
         env["PYTHONPATH"] = pythonpath
 
         result = subprocess.run(

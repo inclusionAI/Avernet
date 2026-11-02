@@ -37,11 +37,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.adapters.http.bot_recommendation_projection import (
+    build_v1_recommendation_response,
+)
 from app.domain.models.bot_recommendation import (
     BotRecommendation,
     BotRecommendationRequest,
     BotRecommendationResponse,
-    create_bot_recommendation_response,
 )
 from app.adapters.http.dependencies.fusion_dependencies import (
     get_candidate_recommendation_service,
@@ -386,6 +388,8 @@ async def recommend_bots(
 
         # Phase D: 构建响应 metadata（在创建响应之前）
         metadata = candidate_response.metadata
+        direct_keyword_route = metadata.get("query_route") == "direct_keyword"
+        direct_snapshot_used = metadata.get("direct_snapshot_used") is True
         metadata.update({
             # Phase B: Threshold 信息
             "vector_min_score": vector_min_score,
@@ -401,8 +405,14 @@ async def recommend_bots(
             "min_score_stage": min_score_stage,
 
             # 向量搜索信息
-            "candidate_source": metadata.get("candidate_source", "vector"),
-            "vector_search_used": metadata.get("semantic_unavailable") is not True,
+            "candidate_source": metadata.get(
+                "candidate_source",
+                "direct_snapshot" if direct_snapshot_used else "vector",
+            ),
+            "vector_search_used": metadata.get(
+                "vector_search_used",
+                not direct_keyword_route and metadata.get("semantic_unavailable") is not True,
+            ),
             "keyword_search_used": metadata.get("keyword_search_used", False) is True,
             "literal_fallback_used": metadata.get("literal_fallback_used", False) is True,
             "literal_fallback_default_used": (
@@ -420,8 +430,8 @@ async def recommend_bots(
         })
 
         # 转换为 BotRecommendationResponse
-        response = create_bot_recommendation_response(
-            candidate_response=candidate_response,
+        response = build_v1_recommendation_response(
+            candidate_response,
             driver_bot_id=request.driver_bot_id,
             trace_id=trace_id,
             query_type=request.type,

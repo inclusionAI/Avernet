@@ -302,7 +302,7 @@ curl -X PUT http://localhost:8765/api/v1/workers/my-bot-001/offline \
 {
   "query": "string (required)",
   "top_k": "int (default: 10, max: 50)",
-  "mode": "string (default: auto)",
+  "mode": "auto | fast | balanced | accurate (default: auto)",
   "min_score": "float (default: 0.0)",
   "filters": {
     "runtime_state": "online|offline",

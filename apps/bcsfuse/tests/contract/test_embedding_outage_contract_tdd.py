@@ -104,7 +104,7 @@ def test_search_rate_limited_embedding_without_any_fallback_returns_final_envelo
     app = create_bcsfuse_app(_context())
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/search", json={"query": "reader", "top_k": 5})
+        response = client.post("/api/v1/search", json={"query": "reader expert", "top_k": 5})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -132,7 +132,7 @@ def test_search_rate_limited_embedding_with_keyword_hits_keeps_degraded_200(
     app = create_bcsfuse_app(_context())
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/search", json={"query": "reader", "top_k": 5})
+        response = client.post("/api/v1/search", json={"query": "reader expert", "top_k": 5})
 
     assert response.status_code == 200, response.text
     body = response.json()

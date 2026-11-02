@@ -15,19 +15,18 @@ from app.domain.services.retrieval_logging import log_stage, log_candidates, log
 from app.domain.services.retrieval_logging_rate import warn_once_per_interval
 from app.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 from app.application.services.fragment_candidate_selection import select_rerank_candidates
+from app.application.services.fragment_keyword_routing import FragmentKeywordRoutingMixin
 from app.application.services.keyword_candidate_selection import (
     KeywordRetrievalOutcome,
     fuse_candidates,
-    keyword_candidates_with_status,
 )
 from app.application.services.fragment_dense_projection import dense_fragment_search
-from app.application.services.fragment_retrieval_branches import run_retrieval_branches
 
 logger = logging.getLogger("app.application.services.worker_vector_match_service")
 
 MIN_DENSE_FRAGMENT_SEARCH_K = 32
 
-class FragmentMatchingMixin:
+class FragmentMatchingMixin(FragmentKeywordRoutingMixin):
     def _dense_search(
         self,
         query_embedding: list[float],
@@ -137,6 +136,34 @@ class FragmentMatchingMixin:
             has_excluded=len(excluded_set) > 0,
             expand_factor=effective_expand_factor,
         )
+        embedding_admission_failed = (
+            not query_embedding
+            and runtime_config is not None
+            and runtime_config.get("_semantic_failure") is not None
+            and runtime_config.get("query_route") != "direct_keyword"
+        )
+        if embedding_admission_failed:
+            diagnostics = {
+                "keyword_search_used": False,
+                "rerank_degraded": False,
+                "score_source": "regex_fallback",
+                "semantic_unavailable": True,
+                "keyword_bypassed": True,
+                "keyword_unavailable": False,
+                "literal_fallback_used": True,
+                "literal_fallback_default_used": False,
+            }
+            runtime_config["_retrieval"] = diagnostics
+            results = self._literal_fallback_matches(
+                query=query,
+                top_k=top_k,
+                filters=filters or {},
+                excluded=excluded_set,
+                allowed=candidate_keys,
+                diagnostics=diagnostics,
+            )
+            return self._apply_registry_filter(self._rerank(results))[:top_k]
+
 
         def run_dense() -> list[VectorSearchHit]:
             if not query_embedding:
@@ -161,21 +188,18 @@ class FragmentMatchingMixin:
             )
             return dense_hits
 
-        def run_keyword() -> KeywordRetrievalOutcome:
-            return keyword_candidates_with_status(
-                self._vector_store,
-                query,
-                effective_expand_factor * top_k,
-                filters,
-                excluded_set,
-                candidate_keys,
-                enabled_fragment_types,
-            )
 
-        dense_result, keyword_result = run_retrieval_branches(
-            run_dense, run_keyword, self._retrieval_runner
+        dense_result, keyword_result = self._route_fragment_keyword(
+            query=query,
+            query_embedding=query_embedding,
+            keyword_budget=effective_expand_factor * top_k,
+            final_top_k=top_k,
+            filters=filters,
+            excluded=excluded_set,
+            allowed=candidate_keys,
+            enabled_types=enabled_fragment_types,
+            run_dense=run_dense,
         )
-
         assert dense_result is not None
         assert keyword_result is not None
         if dense_result.error is not None:
@@ -286,12 +310,24 @@ class FragmentMatchingMixin:
             )
 
         lexical = keyword_outcome.candidates
+        direct_keyword = (
+            runtime_config is not None
+            and runtime_config.get("query_route") == "direct_keyword"
+        )
+        semantic_unavailable = not dense_available and not direct_keyword
         diagnostics = {
             "keyword_search_used": bool(lexical),
             "rerank_degraded": False,
-            "score_source": "hybrid_rrf" if lexical else "vector_weighted",
-            "semantic_unavailable": not dense_available,
+            "score_source": (
+                "direct_keyword" if direct_keyword and lexical
+                else "hybrid_rrf" if lexical
+                else "vector_weighted"
+            ),
+            "semantic_unavailable": semantic_unavailable,
             "keyword_unavailable": not keyword_outcome.available,
+            "keyword_source": keyword_outcome.source,
+            "local_keyword_sufficient": keyword_outcome.local_keyword_sufficient,
+            "local_keyword_count": keyword_outcome.local_count,
             "literal_fallback_used": False,
             "literal_fallback_default_used": False,
         }
@@ -390,90 +426,6 @@ class FragmentMatchingMixin:
 
         return results[:top_k]
 
-
-    def _literal_fallback_matches(
-        self,
-        query: str,
-        top_k: int,
-        filters: dict[str, Any],
-        excluded: set[str],
-        allowed: set[str] | None,
-        diagnostics: dict | None = None,
-    ) -> list[MatchResult]:
-        """Build the final local result without invoking embedding or rerank."""
-        fallback_reason = "literal_fallback"
-        try:
-            hits = self._fallback_index.keyword_search(
-                query=query,
-                limit=top_k,
-                filters=filters,
-                allowed_ids=None,
-            )
-            if not hits:
-                default_search = getattr(self._fallback_index, "default_search", None)
-                if callable(default_search):
-                    hits = default_search(
-                        limit=top_k,
-                        filters=filters,
-                        allowed_ids=None,
-                    )
-                    fallback_reason = "literal_fallback_default"
-                    if diagnostics is not None:
-                        diagnostics["literal_fallback_default_used"] = bool(hits)
-        except Exception as error:
-            log_stage(
-                logger,
-                "literal_fallback",
-                available=False,
-                error_type=type(error).__name__,
-            )
-            logger.error("[FRAGMENT-MATCH] literal fallback failed: %s", error)
-            raise
-
-        results: list[MatchResult] = []
-        for hit in hits:
-            payload = dict(hit.payload or {})
-            profile_key = payload.get("profile_key") or hit.id
-            if profile_key in excluded or (
-                allowed is not None and profile_key not in allowed
-            ):
-                continue
-            metadata = self._metadata_store.get(profile_key)
-            if metadata is None:
-                metadata = self._build_metadata_from_payload(profile_key, payload)
-            if metadata is None:
-                continue
-            content = str(
-                payload.get("content")
-                or payload.get("searchable_text")
-                or payload.get("content_preview")
-                or ""
-            )
-            fragment = FragmentMatch(
-                fragment_type="full",
-                fragment_id=hit.id,
-                score=hit.score,
-                content_preview=content[:200],
-                content=content,
-            )
-            results.append(MatchResult(
-                profile_key=profile_key,
-                metadata=metadata,
-                score=hit.score,
-                aggregated_score=hit.score,
-                reasons=[fallback_reason],
-                fragment_matches=[fragment],
-            ))
-            if len(results) >= top_k:
-                break
-        log_stage(
-            logger,
-            "literal_fallback",
-            hit_count=len(hits),
-            result_count=len(results),
-            available=True,
-        )
-        return results
 
     def _calculate_search_k(
         self,

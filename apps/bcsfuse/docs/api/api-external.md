@@ -266,7 +266,7 @@ curl -X PUT http://localhost:8765/api/v1/workers/my-bot-001/availability \
 {
   "query": "string (必填，搜索关键词)",
   "top_k": 10,
-  "mode": "auto",
+  "mode": "auto | fast | balanced | accurate",
   "min_score": 0.0,
   "filters": {
     "runtime_state": "online",

@@ -126,6 +126,16 @@ class QdrantServerVectorStore(QdrantLocalVectorStore):
             self._client = None
             self._collection_initialized = False
 
+    def reset_connection(self) -> None:
+        """Close an unhealthy transport so the next probe builds a fresh client.
+
+        The Qdrant client normally reconnects internally, but an endpoint or
+        proxy reset can leave process-local transport state behind. Readiness
+        must recover based on the server, not based on a stale cached client.
+        """
+
+        self.close()
+
 
 def dense_store(
     *,

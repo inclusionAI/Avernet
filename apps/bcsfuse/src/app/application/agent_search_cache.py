@@ -6,12 +6,12 @@ import hashlib
 import json
 import threading
 import time
-import unicodedata
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import Any, Callable
 
+from app.application.services.query_normalizer import normalize_query_text
 from app.infra.public.observability.search_result_cache_metrics import (
     record_search_result_cache_eviction,
     record_search_result_cache_hit,
@@ -106,9 +106,9 @@ class AgentSearchResultCache:
             }
 
     def normalize_query(self, query: str) -> str:
-        """Use the conservative core normalization shared by cache and retrieval."""
+        """Use the stable core normalization shared by cache and retrieval."""
 
-        return " ".join(unicodedata.normalize("NFKC", query).split())
+        return normalize_query_text(query)
 
     def current_index_version(self) -> int | None:
         if not self.enabled:

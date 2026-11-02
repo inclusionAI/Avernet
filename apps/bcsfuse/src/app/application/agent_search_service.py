@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,16 +20,29 @@ from app.application.agent_search_resilience_cache import AgentSearchResilienceC
 from app.application.services.agent_search_execution_budget import (
     AgentSearchExecutionBudget,
 )
+from app.application.services.search_degradation_reasons import (
+    degraded_reasons,
+)
+from app.application.services.search_mode_policy import (
+    resolve_search_mode_policy,
+)
 from app.application.services.local_retrieval_snapshot import (
     project_snapshot_hit,
     project_snapshot_recommendation,
     snapshot_hits,
     snapshot_metadata,
 )
+from app.application.services.agent_search_terminal_fallback import (
+    build_final_recommendation_outcome,
+    build_final_search_outcome,
+)
+from app.application.services.local_snapshot_router import LocalSnapshotRouter
 from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
+from app.application.services.query_intent_policy import resolve_query_intent
+from app.application.services.query_normalizer import normalize_query_text
 from app.application.services.search_index_state import (
     INDEX_STATE_FIELDS,
     index_state_from_provider,
@@ -151,58 +163,6 @@ def _mark_terminal_recommendation_fallback(
     )
 
 
-def degraded_reasons(metadata: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return v1's stable, ordered degradation reason codes."""
-
-    reasons: list[str] = []
-    for reason in (
-        "semantic_unavailable",
-        "keyword_unavailable",
-        "literal_fallback_used",
-        "literal_fallback_default",
-    ):
-        if metadata.get(reason) is True and reason not in reasons:
-            reasons.append(reason)
-    semantic_reason_code = metadata.get("semantic_reason_code")
-    if (
-        metadata.get("semantic_unavailable") is True
-        and isinstance(semantic_reason_code, str)
-        and semantic_reason_code
-        and semantic_reason_code not in reasons
-    ):
-        reasons.insert(
-            min(1, len(reasons)),
-            semantic_reason_code,
-        )
-    if (
-        metadata.get("semantic_unavailable") is True
-        and metadata.get("keyword_search_used") is True
-        and "keyword_fallback_used" not in reasons
-    ):
-        reasons.append("keyword_fallback_used")
-    if (
-        metadata.get("literal_fallback_default_used") is True
-        and "literal_fallback_default" not in reasons
-    ):
-        reasons.append("literal_fallback_default")
-    if metadata.get("score_source") == "regex_fallback" and "regex_fallback" not in reasons:
-        reasons.append("regex_fallback")
-    for reason in (
-        "retrieval_unavailable",
-        "candidate_unavailable",
-        "fallback_unavailable",
-    ):
-        if metadata.get(reason) is True and reason not in reasons:
-            reasons.append(reason)
-    if metadata.get("rerank_degraded") is True and "rerank_degraded" not in reasons:
-        reasons.append("rerank_degraded")
-    for reason in ("local_snapshot_used", "last_known_good_used"):
-        if metadata.get(reason) is True and reason not in reasons:
-            reasons.append(reason)
-    if metadata.get("index_complete") is False:
-        reasons.append("index_incomplete")
-    return tuple(reasons)
-
 
 @dataclass(frozen=True, slots=True)
 class AgentRecommendationCommand:
@@ -255,11 +215,9 @@ async def _default_offload(operation: Callable[[], Any]) -> Any:
 
 
 def normalize_query(query: str) -> str:
-    """Return a stable cache/retrieval representation without raw whitespace."""
+    """Return the stable cache/retrieval representation."""
 
-    if not isinstance(query, str):
-        raise ValueError("query must be a string")
-    return " ".join(unicodedata.normalize("NFKC", query).split())
+    return normalize_query_text(query)
 
 
 class AgentSearchService:
@@ -285,6 +243,15 @@ class AgentSearchService:
         self._result_cache = result_cache
         self._resilience_cache = resilience_cache
         self._local_snapshot = local_snapshot
+        self._snapshot_router = (
+            LocalSnapshotRouter(
+                local_snapshot,
+                run=self._run,
+                timeout=self._stage_timeout,
+            )
+            if local_snapshot is not None
+            else None
+        )
         self._index_state_provider = index_state_provider
         self._execution_budget = execution_budget
         self._offload = offload
@@ -332,48 +299,58 @@ class AgentSearchService:
 
         metadata.setdefault("negative_cache_hit", False)
         cache = self._result_cache or self._resilience_cache
-        if cache is None:
+        key: str | None = None
+        execute_live = False
+
+        # Only key lookup and hit resolution belong to the cache stage. Cold
+        # execution stays visible under its own embedding/retrieval labels.
+        with search_stage_metrics(operation, "cache"):
+            if cache is None:
+                execute_live = True
+            else:
+                index_version = cache.current_index_version()
+                if index_version is None:
+                    execute_live = True
+                else:
+                    key = cache.key(
+                        operation,
+                        index_version=index_version,
+                        material={
+                            "normalized_query": cache.normalize_query(
+                                normalized_query
+                            ),
+                            **material,
+                        },
+                    )
+                    if self._result_cache is not None:
+                        hit = self._result_cache.get(key)
+                        if hit is not None:
+                            metadata["cache_hit"] = True
+                            return self._prepared_result_cache_hit(hit)
+                        self._result_cache.record_miss()
+
+                    if self._resilience_cache is not None:
+                        negative = self._resilience_cache.get_negative(key)
+                        if negative is not None:
+                            negative_metadata = (
+                                negative.response.metadata
+                                if isinstance(negative, AgentRecommendationOutcome)
+                                else negative.metadata
+                            )
+                            self._apply_index_state(negative_metadata)
+                            negative_metadata["negative_cache_hit"] = True
+                            if isinstance(negative, AgentRecommendationOutcome):
+                                negative.metadata["negative_cache_hit"] = True
+                            metadata["negative_cache_hit"] = True
+                            self._publish_status(negative_metadata)
+                            return negative
+
+        if execute_live:
             return await self._bounded_execute(
                 execute, total_timeout_fallback
             )
-
-        index_version = cache.current_index_version()
-        if index_version is None:
-            return await self._bounded_execute(
-                execute, total_timeout_fallback
-            )
-
-        key = cache.key(
-            operation,
-            index_version=index_version,
-            material={
-                "normalized_query": cache.normalize_query(normalized_query),
-                **material,
-            },
-        )
-
-        if self._result_cache is not None:
-            hit = self._result_cache.get(key)
-            if hit is not None:
-                metadata["cache_hit"] = True
-                return self._prepared_result_cache_hit(hit)
-            self._result_cache.record_miss()
-
-        if self._resilience_cache is not None:
-            negative = self._resilience_cache.get_negative(key)
-            if negative is not None:
-                negative_metadata = (
-                    negative.response.metadata
-                    if isinstance(negative, AgentRecommendationOutcome)
-                    else negative.metadata
-                )
-                self._apply_index_state(negative_metadata)
-                negative_metadata["negative_cache_hit"] = True
-                if isinstance(negative, AgentRecommendationOutcome):
-                    negative.metadata["negative_cache_hit"] = True
-                metadata["negative_cache_hit"] = True
-                self._publish_status(negative_metadata)
-                return negative
+        if key is None:
+            raise RuntimeError("cache key was not initialized")
 
         async with cache.singleflight(key):
             if self._result_cache is not None:
@@ -551,51 +528,13 @@ class AgentSearchService:
         error_type: str,
         local_snapshot: Any | None = None,
     ) -> AgentSearchOutcome:
-        """Build the last-resort search envelope from the process snapshot."""
-
-        metadata: dict[str, Any] = {
-            "retrieval_unavailable": True,
-            "retrieval_error": error_type,
-        }
-        filters = default_search_filters(command.filters)
-        runtime_config = {"reranker_model": command.reranker_model, "filters": filters}
-        results: tuple[MatchResult, ...] = ()
-        try:
-            if local_snapshot is not None:
-                hits, strategy = snapshot_hits(
-                    local_snapshot,
-                    query=normalize_query(command.query),
-                    limit=command.top_k,
-                    filters=filters,
-                )
-                results = tuple(project_snapshot_hit(hit) for hit in hits)
-                if results:
-                    metadata.update(
-                        snapshot_metadata(
-                            local_snapshot,
-                            hit_count=len(results),
-                            strategy=strategy,
-                        )
-                    )
-                    metadata.pop("fallback_unavailable", None)
-        except Exception:
-            results = ()
-        if not results:
-            metadata["fallback_unavailable"] = True
-            metadata["fallback_reason_code"] = "SEARCH_RETRIEVAL_UNAVAILABLE"
-            record_search_fallback_unavailable(
-                "search", metadata["fallback_reason_code"]
-            )
-        cls._publish_status(metadata)
-        return AgentSearchOutcome(
-            query=command.query,
-            normalized_query=normalize_query(command.query),
-            top_k=command.top_k,
-            mode=command.mode,
-            results=results,
-            metadata=metadata,
-            config_applied=runtime_config,
-            elapsed_ms=0.0,
+        return build_final_search_outcome(
+            command,
+            error_type=error_type,
+            local_snapshot=local_snapshot,
+            filters=default_search_filters(command.filters),
+            outcome_type=AgentSearchOutcome,
+            publish_status=cls._publish_status,
         )
 
     def _stage_timeout(self, stage: str) -> float | None:
@@ -625,26 +564,12 @@ class AgentSearchService:
         query: str,
         top_k: int,
         filters: dict[str, Any],
-    ) -> tuple[MatchResult, ...]:
-        if self._local_snapshot is None:
-            return ()
-        timeout = self._stage_timeout("local_snapshot")
-        hits, strategy = await self._run(
-            lambda: snapshot_hits(
-                self._local_snapshot,
-                query=query,
-                limit=top_k,
-                filters=filters,
-            ),
-            timeout,
+    ) -> tuple[tuple[MatchResult, ...], dict[str, Any]]:
+        if self._snapshot_router is None:
+            return (), {}
+        return await self._snapshot_router.search(
+            query=query, top_k=top_k, filters=filters
         )
-        results = tuple(project_snapshot_hit(hit) for hit in hits)
-        self._local_snapshot_metadata = snapshot_metadata(
-            self._local_snapshot,
-            hit_count=len(results),
-            strategy=strategy,
-        )
-        return results
 
     async def _local_snapshot_recommendations(
         self,
@@ -652,28 +577,12 @@ class AgentSearchService:
         question: str,
         top_k: int,
         filters: dict[str, Any],
-    ) -> list[CandidateRecommendation]:
-        if self._local_snapshot is None:
-            return []
-        timeout = self._stage_timeout("local_snapshot")
-        hits, strategy = await self._run(
-            lambda: snapshot_hits(
-                self._local_snapshot,
-                query=question,
-                limit=top_k,
-                filters=filters,
-            ),
-            timeout,
+    ) -> tuple[list[CandidateRecommendation], dict[str, Any]]:
+        if self._snapshot_router is None:
+            return [], {}
+        return await self._snapshot_router.recommend(
+            question=question, top_k=top_k, filters=filters
         )
-        recommendations = [
-            project_snapshot_recommendation(hit) for hit in hits
-        ]
-        self._local_snapshot_metadata = snapshot_metadata(
-            self._local_snapshot,
-            hit_count=len(recommendations),
-            strategy=strategy,
-        )
-        return recommendations
 
     async def search(self, command: AgentSearchCommand) -> AgentSearchOutcome:
         """Execute the shared search retrieval chain and return raw matches."""
@@ -682,26 +591,82 @@ class AgentSearchService:
             raise ValueError("top_k must be positive")
         normalized_query = self._validated_query(command.query, field_name="query")
         filters = self._default_filters(command.filters)
-        runtime_config = {"reranker_model": command.reranker_model}
-        metadata: dict[str, Any] = {}
+        mode_policy = resolve_search_mode_policy(command.mode)
+        query_intent = resolve_query_intent(normalized_query)
+        runtime_config: dict[str, Any] = {
+            "reranker_model": command.reranker_model,
+            "query_route": query_intent.route,
+        }
+        if mode_policy.expand_factor is not None:
+            if mode_policy.rerank_enabled and command.reranker_model is None:
+                # Omitting the key lets the explicit balanced/accurate contract
+                # inherit the composed global model instead of disabling it.
+                runtime_config.pop("reranker_model")
+            else:
+                runtime_config["reranker_model"] = (
+                    command.reranker_model
+                    if mode_policy.rerank_enabled
+                    else None
+                )
+            runtime_config["expand_factor"] = mode_policy.expand_factor
+        retrieval_query = (
+            query_intent.target
+            if query_intent.route == "direct_keyword"
+            else normalized_query
+        )
+        metadata: dict[str, Any] = {
+            "query_route": query_intent.route,
+            "query_intent": query_intent.reason,
+        }
         started = self._clock()
 
         async def execute_search() -> AgentSearchOutcome:
             self._apply_index_state(metadata)
-            try:
-                with search_stage_metrics("search", "embedding"):
-                    query_embedding = await self._run(
-                        lambda: self._embedding_generator.embed(normalized_query),
-                        self._stage_timeout("embedding"),
+            if (
+                query_intent.route == "direct_keyword"
+                and self._snapshot_router is not None
+            ):
+                direct_hits, direct_metadata = await self._snapshot_router.direct_search(
+                    query=retrieval_query, top_k=command.top_k, filters=filters
+                )
+                if direct_hits:
+                    metadata.update(direct_metadata)
+                    direct_config = dict(runtime_config)
+                    direct_config["filters"] = filters
+                    direct_config["direct_snapshot_used"] = True
+                    direct_config["direct_snapshot_exact"] = True
+                    direct_config["candidate_source"] = "direct_snapshot"
+                    direct_config["score_source"] = "direct_keyword"
+                    self._publish_status(metadata)
+                    return AgentSearchOutcome(
+                        query=command.query,
+                        normalized_query=normalized_query,
+                        top_k=command.top_k,
+                        mode=command.mode,
+                        results=direct_hits,
+                        metadata=metadata,
+                        config_applied=direct_config,
+                        elapsed_ms=(self._clock() - started) * 1000,
                     )
-            except Exception as error:
-                # The bounded keyword/literal chain in the match service remains
-                # usable when the semantic model is unavailable. Preserve the
-                # provider admission status for the explicit fallback envelope.
-                metadata["semantic_unavailable"] = True
-                metadata.update(semantic_failure_metadata(error))
-                _annotate_semantic_failure(metadata)
+            if query_intent.route == "direct_keyword":
                 query_embedding = []
+            else:
+                try:
+                    with search_stage_metrics("search", "embedding"):
+                        query_embedding = await self._run(
+                            lambda: self._embedding_generator.embed(
+                                normalized_query
+                            ),
+                            self._stage_timeout("embedding"),
+                        )
+                except Exception as error:
+                    # Preserve provider admission status for the explicit fallback envelope.
+                    failure_metadata = semantic_failure_metadata(error)
+                    metadata["semantic_unavailable"] = True
+                    metadata.update(failure_metadata)
+                    runtime_config["_semantic_failure"] = failure_metadata
+                    _annotate_semantic_failure(metadata)
+                    query_embedding = []
 
             try:
                 with search_stage_metrics("search", "retrieval"):
@@ -709,8 +674,8 @@ class AgentSearchService:
                         lambda: self._vector_match_service.match(
                             query_embedding=query_embedding,
                             top_k=command.top_k,
-                            query=normalized_query,
-                            mode=command.mode,
+                            query=retrieval_query,
+                            mode=mode_policy.retrieval_mode,
                             min_score=command.min_score,
                             filters=filters,
                             runtime_config=runtime_config,
@@ -736,13 +701,13 @@ class AgentSearchService:
                 # also consumes the process snapshot before returning the
                 # public empty envelope. That response is explicit degraded data,
                 # never a synthetic normal result.
-                results = await self._local_snapshot_search(
-                    query=normalized_query,
+                results, snapshot_diagnostic = await self._local_snapshot_search(
+                    query=retrieval_query,
                     top_k=command.top_k,
                     filters=filters,
                 )
                 if results:
-                    metadata.update(self._local_snapshot_metadata)
+                    metadata.update(snapshot_diagnostic)
             if not results:
                 if metadata.get("retrieval_unavailable") is True:
                     _mark_terminal_search_fallback(metadata)
@@ -773,7 +738,7 @@ class AgentSearchService:
             normalized_query=normalized_query,
             material={
                 "top_k": command.top_k,
-                "mode": command.mode,
+                "mode": mode_policy.requested_mode,
                 "min_score": command.min_score,
                 "filters": filters,
                 "reranker_model": command.reranker_model,
@@ -791,73 +756,14 @@ class AgentSearchService:
         error_type: str,
         local_snapshot: Any | None = None,
     ) -> AgentRecommendationOutcome:
-        """Build the last-resort recommendation envelope from the snapshot."""
-
-        metadata: dict[str, Any] = {
-            "candidate_unavailable": True,
-            "candidate_error": error_type,
-        }
-        recommendations: list[CandidateRecommendation] = []
-        filters = default_search_filters(command.filters)
-        try:
-            if local_snapshot is not None:
-                hits, strategy = snapshot_hits(
-                    local_snapshot,
-                    query=normalize_query(command.question),
-                    limit=command.top_k,
-                    filters=filters,
-                )
-                recommendations = [
-                    project_snapshot_recommendation(hit) for hit in hits
-                ]
-                if recommendations:
-                    metadata.update(
-                        snapshot_metadata(
-                            local_snapshot,
-                            hit_count=len(recommendations),
-                            strategy=strategy,
-                        )
-                    )
-                    metadata["candidate_source"] = "local_snapshot"
-                    metadata.pop("fallback_unavailable", None)
-        except Exception:
-            recommendations = []
-        if not recommendations:
-            metadata["fallback_unavailable"] = True
-            metadata["fallback_reason_code"] = "CANDIDATE_RETRIEVAL_UNAVAILABLE"
-            metadata["candidate_source"] = "fallback_unavailable"
-            record_search_fallback_unavailable(
-                "recommend", metadata["fallback_reason_code"]
-            )
-        else:
-            metadata["candidate_source"] = "local_snapshot"
-        cls._publish_status(metadata)
-        response = CandidateRecommendationResponse(
-            question=command.question,
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            metadata=metadata,
-            recommendations=recommendations,
-            total_candidates=len(recommendations),
-            selected_candidates=len(recommendations),
-        )
-        return AgentRecommendationOutcome(
-            question=command.question,
-            response=response,
-            config_applied={
-                "expand_factor": min(
-                    command.expand_factor, MAX_RECOMMEND_EXPAND_FACTOR
-                ),
-                "reranker_model": (
-                    None if not command.enable_rerank else command.reranker_model
-                ),
-            },
-            elapsed_ms=0.0,
-            diagnostics={
-                "min_score_explicit": command.min_score_explicit,
-                "vector_min_score": command.vector_min_score,
-                "rerank_min_score": command.rerank_min_score,
-            },
-            metadata=dict(metadata),
+        return build_final_recommendation_outcome(
+            command,
+            error_type=error_type,
+            local_snapshot=local_snapshot,
+            filters=default_search_filters(command.filters),
+            response_type=CandidateRecommendationResponse,
+            outcome_type=AgentRecommendationOutcome,
+            publish_status=cls._publish_status,
         )
 
     async def recommend(
@@ -876,21 +782,74 @@ class AgentSearchService:
         )
         filters = self._default_filters(command.filters)
         effective_expand_factor = min(command.expand_factor, MAX_RECOMMEND_EXPAND_FACTOR)
+        query_intent = resolve_query_intent(normalized_question)
         runtime_config = {
             "expand_factor": effective_expand_factor,
             "reranker_model": None
             if not command.enable_rerank
             else command.reranker_model,
+            "query_route": query_intent.route,
         }
+        retrieval_question = (
+            query_intent.target
+            if query_intent.route == "direct_keyword"
+            else normalized_question
+        )
         started = self._clock()
-        metadata: dict[str, Any] = {}
+        metadata: dict[str, Any] = {
+            "query_route": query_intent.route,
+            "query_intent": query_intent.reason,
+        }
 
         async def execute_recommend() -> AgentRecommendationOutcome:
+            if (
+                query_intent.route == "direct_keyword"
+                and self._snapshot_router is not None
+            ):
+                (
+                    direct_recommendations,
+                    direct_metadata,
+                ) = await self._snapshot_router.direct_recommend(
+                    question=retrieval_question,
+                    top_k=command.top_k,
+                    filters=filters,
+                )
+                if direct_recommendations:
+                    response = CandidateRecommendationResponse(
+                        question=normalized_question,
+                        mode=RetrievalMode.EXPERT_DIAGNOSIS,
+                        metadata=metadata,
+                        recommendations=direct_recommendations,
+                        total_candidates=len(direct_recommendations),
+                        selected_candidates=len(direct_recommendations),
+                    )
+                    response.metadata.update(direct_metadata)
+                    response.metadata["candidate_source"] = "direct_snapshot"
+                    response.metadata["vector_search_used"] = False
+                    self._publish_status(response.metadata)
+                    metadata.update(
+                        {
+                            "status": response.metadata["status"],
+                            "reasons": response.metadata["reasons"],
+                        }
+                    )
+                    return AgentRecommendationOutcome(
+                        question=command.question,
+                        response=response,
+                        config_applied=dict(runtime_config),
+                        elapsed_ms=(self._clock() - started) * 1000,
+                        diagnostics={
+                            "min_score_explicit": command.min_score_explicit,
+                            "vector_min_score": command.vector_min_score,
+                            "rerank_min_score": command.rerank_min_score,
+                        },
+                        metadata=metadata,
+                    )
             try:
                 with search_stage_metrics("recommend", "retrieval"):
                     response = await self._run(
                         lambda: self._candidate_recommendation_service.recommend(
-                            question=normalized_question,
+                            question=retrieval_question,
                             mode=RetrievalMode.EXPERT_DIAGNOSIS,
                             participants=None,
                             max_candidates=command.top_k,
@@ -903,7 +862,7 @@ class AgentSearchService:
                     )
             except Exception as error:
                 response = CandidateRecommendationResponse(
-                    question=normalized_question,
+                    question=retrieval_question,
                     mode=RetrievalMode.EXPERT_DIAGNOSIS,
                     metadata=dict(
                         (runtime_config.get("_semantic_failure") or {})
@@ -915,13 +874,18 @@ class AgentSearchService:
             for key, value in metadata.items():
                 if key in INDEX_STATE_FIELDS:
                     response.metadata.setdefault(key, value)
+            response.question = normalized_question
+            response.metadata.update(metadata)
             _annotate_semantic_failure(response.metadata)
             if not response.recommendations:
                 # Healthy zero-candidate outcomes use the same explicit snapshot
                 # path as dependency failures. Recommendation clients therefore
                 # receive an actionable degraded result whenever the snapshot has
                 # a visible candidate, rather than an opaque empty success.
-                local_recommendations = await self._local_snapshot_recommendations(
+                (
+                    local_recommendations,
+                    snapshot_diagnostic,
+                ) = await self._local_snapshot_recommendations(
                     question=normalized_question,
                     top_k=command.top_k,
                     filters=filters,
@@ -930,7 +894,7 @@ class AgentSearchService:
                     response.recommendations = local_recommendations
                     response.total_candidates = len(local_recommendations)
                     response.selected_candidates = len(local_recommendations)
-                    response.metadata.update(self._local_snapshot_metadata)
+                    response.metadata.update(snapshot_diagnostic)
                     response.metadata["candidate_source"] = "local_snapshot"
 
             if not response.recommendations:

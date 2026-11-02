@@ -140,7 +140,7 @@ def test_agent_search_preserves_admission_reason_code_and_retry_after() -> None:
         embedding_generator=SharedAdmissionLimitedEmbedding(),
         vector_match_service=KeywordOnlyMatch(),
     )
-    outcome = asyncio.run(service.search(AgentSearchCommand(query="reader", top_k=3)))
+    outcome = asyncio.run(service.search(AgentSearchCommand(query="reader expert", top_k=3)))
 
     assert outcome.metadata["semantic_status_code"] == 429
     assert (

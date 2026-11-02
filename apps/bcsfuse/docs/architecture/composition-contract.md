@@ -291,14 +291,25 @@ degradation contract. If the embedding provider fails but the bounded keyword or
 literal branch still produces candidates, v1 search returns HTTP 200 with
 ``status="degraded"`` and ``reasons=["semantic_unavailable"]``; v1 recommendation
 returns the same fields in response ``metadata``. These degraded projections are
-not eligible for the result cache. The stable source fields also identify the
+not eligible for the result cache. When semantic admission itself fails (for
+example, the embedding gateway returns 429), the application intentionally
+short-circuits dense and Qdrant-keyword retrieval to process-local literal
+retrieval; this fast path reports ``keyword_bypassed``, not
+``keyword_unavailable``, so clients can distinguish bypass from a keyword
+dependency outage. The stable source fields also identify the
 bounded path that produced the candidates: v1 search uses
 ``source="keyword_fallback"`` for a semantic-outage keyword chain, and
 ``literal_fallback`` / ``literal_fallback_default`` for the regex chains, and
 ``local_snapshot`` when the process-local snapshot supplies the bounded result;
 v1 recommendation reports the same source choice through ``candidate_source``.
-A healthy dense-only result remains ``vector`` and a successful dense+keyword
-merge remains ``hybrid``.
+A healthy dense-only result remains ``vector``, a successful dense+keyword merge
+remains ``hybrid``, and a process-local exact lookup remains
+``direct_snapshot``. A ``direct_keyword`` route alone does not imply that source:
+only an actual direct snapshot hit reports ``candidate_source="direct_snapshot"``.
+
+The process-local literal index normalizes each published profile's searchable
+text once when the snapshot is rebuilt. Search-time queries reuse that immutable
+text; no request rebuilds NFKC-normalized text for the entire snapshot.
 
 If an authenticated request passes the shared request boundary and is admitted to
 the v1 search/recommendation application path, the delivery layer must never
@@ -424,15 +435,23 @@ unexplained HTTP 500.
 
 ### Search capacity admission and workers
 
-The composed application owns a process-wide bounded search admission pool and
-wait queue. It is configured through the `config` provider, not route code or
-raw environment access: `search.capacity.max_inflight` (default 128),
+The composed application owns process-wide, route-separated bounded search
+admission pools. They are configured through the `config` provider, not route
+code or raw environment access. Semantic search and recommendation share:
+`search.capacity.max_inflight` (default 128),
 `search.capacity.max_queue` (default 128),
 `search.capacity.queue_wait_seconds` (default 2.0), and
-`search.capacity.retry_after_seconds` (default 1). The pool is shared by
+`search.capacity.retry_after_seconds` (default 1). Deterministic identifier and
+explicit lookup requests are admitted through an independent low-latency
+keyword pool configured by
+`search.capacity.direct_keyword_max_inflight` (default 128),
+`search.capacity.direct_keyword_max_queue` (default 128), and
+`search.capacity.direct_keyword_queue_wait_seconds` (default 2.0). This prevents
+a semantic embedding burst from starving zero-embedding direct lookups while
+still bounding keyword and Qdrant concurrency. Both pools serve
 `/api/v1/search`, `/api/v1/recommend`, `/api/v2/search`, and
 `/api/v2/recommend`. A request beyond both the execution and queue budgets, or
-one that waits longer than `queue_wait_seconds`, returns HTTP 429,
+one that waits longer than its route's `queue_wait_seconds`, returns HTTP 429,
 `Retry-After`, and stable code `SEARCH_CAPACITY_EXCEEDED` before business
 execution consumes embedding, Qdrant, rerank, or durable database capacity.
 The small queue absorbs short bursts without amplifying downstream
@@ -1111,10 +1130,10 @@ Gateway authentication is an explicit composition decision read through the
 config provider at `auth.trust_gateway`, with a fail-closed default of
 `false`. `BCSFUSE_TRUST_GATEWAY` may override the YAML value while configuration
 is loaded, but route code must not read the environment directly. Enabling this
-value globally skips the local Bearer validation on every route guarded by
-`require_oss_auth`; such a deployment must expose BCSFuse only through the
-authenticated gateway and never through a direct debug, singlebox, or sidecar
-port.
+value skips local Bearer validation only when the composed application mode is
+`runtime`; `dev`, `dev_smoke`, and `test` cannot introduce this extra bypass.
+Such a runtime deployment must expose BCSFuse only through the authenticated
+gateway and never through a direct debug, singlebox, or sidecar port.
 
 The readiness endpoint reports the provider mode and readiness status. When
 registry inspection fails, it returns HTTP 503 with the exception type only;

@@ -48,6 +48,9 @@ class RegexFallbackIndex:
 
     def __init__(self, points: list[VectorPoint]):
         self._points = tuple(points)
+        self._prepared_points = tuple(
+            (point, self._searchable_text(point)) for point in self._points
+        )
 
     def _eligible(self, point: VectorPoint, filters, allowed_ids) -> bool:
         if allowed_ids is not None and point.id not in allowed_ids:
@@ -90,10 +93,9 @@ class RegexFallbackIndex:
         if not tokens:
             return []
         matches: list[tuple[float, VectorPoint]] = []
-        for point in self._points:
+        for point, text in self._prepared_points:
             if not self._eligible(point, filters, allowed_ids):
                 continue
-            text = self._searchable_text(point)
             overlap = sum(1 for token in tokens if token in text)
             if overlap:
                 score = overlap / len(tokens)

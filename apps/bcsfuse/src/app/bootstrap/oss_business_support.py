@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
@@ -51,7 +51,10 @@ class SearchRequestOSS(BaseModel):
         ..., min_length=1, max_length=4096, description="Search query"
     )
     top_k: int = Field(default=10, ge=1, le=50, description="Number of results")
-    mode: str = Field(default="auto", description="Search mode")
+    mode: Literal["auto", "fast", "balanced", "accurate"] = Field(
+        default="auto",
+        description="Explicit search policy: auto, fast, balanced, or accurate",
+    )
     min_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Minimum score threshold")
     filters: Optional[dict] = Field(default=None, description="Search filters")
 
@@ -376,7 +379,12 @@ def require_oss_auth(request: Request) -> None:
     """
     # Get auth provider from registry (NOT global)
     registry = _get_provider_registry(request)
-    if _trust_gateway_enabled(registry.get("config")):
+    context = getattr(getattr(request, "app", None), "state", None)
+    context = getattr(context, "context", None)
+    if (
+        getattr(context, "mode", None) == "runtime"
+        and _trust_gateway_enabled(registry.get("config"))
+    ):
         return
 
     auth_provider = registry.get("auth")

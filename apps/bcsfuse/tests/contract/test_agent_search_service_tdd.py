@@ -114,6 +114,7 @@ def test_search_applies_shared_default_filters_and_fast_default() -> None:
 
     assert outcome.config_applied == {
         "reranker_model": None,
+        "query_route": "semantic",
         "filters": {
             "availability": ["protected", "public"],
             "runtime_state": ["online"],
@@ -135,7 +136,7 @@ def test_search_embedding_failure_degrades_to_keyword_retrieval() -> None:
         candidate_recommendation_service=core,
     )
 
-    outcome = asyncio.run(service.search(AgentSearchCommand(query="reader", top_k=1)))
+    outcome = asyncio.run(service.search(AgentSearchCommand(query="reader assistant", top_k=1)))
 
     assert core.match_calls[0]["query_embedding"] == []
     assert outcome.metadata["semantic_unavailable"] is True
@@ -167,7 +168,7 @@ def test_embedding_rate_limit_degrades_through_literal_default() -> None:
     )
 
     outcome = asyncio.run(
-        service.search(AgentSearchCommand(query="reader", top_k=1))
+        service.search(AgentSearchCommand(query="reader assistant", top_k=1))
     )
 
     assert outcome.metadata["semantic_unavailable"] is True
@@ -315,6 +316,7 @@ def test_recommendation_use_one_service_entrypoint_with_request_config() -> None
     assert call["runtime_config"] == {
         "expand_factor": 3,
         "reranker_model": "bge-reranker-v2-m3",
+        "query_route": "semantic",
     }
     assert call["filters"] == {
         "availability": ["protected"],
@@ -687,7 +689,7 @@ def test_search_and_recommend_record_stage_durations() -> None:
     core = RecordingCore([], [], [])
     service = _service(core)
 
-    asyncio.run(service.search(AgentSearchCommand(query="stage", top_k=1)))
+    asyncio.run(service.search(AgentSearchCommand(query="stage metric", top_k=1)))
     asyncio.run(
         service.recommend(
             AgentRecommendationCommand(

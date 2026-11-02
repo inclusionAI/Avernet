@@ -110,8 +110,10 @@ auth:
 `auth.trust_gateway` defaults to `false`. `BCSFUSE_TRUST_GATEWAY` may override
 that value only while configuration is loaded; route code does not read the
 environment directly. Enable the composed value only when BCSFuse is reachable
-solely through the authenticated Avernet gateway, because it globally skips
-BCSFuse's own Bearer validation for protected routes.
+solely through the authenticated Avernet gateway, because in `runtime` mode it skips
+BCSFuse's own Bearer validation for protected routes. The bypass never widens the
+contract for `dev`, `dev_smoke`, or `test`; those modes still use their composed
+authentication provider.
 
 ### Test Tokens
 

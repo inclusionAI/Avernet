@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from search_core.plugin_api.vector_point import VectorPoint as CoreVectorPoint
+from search_core.plugin_api.vector_search_hit import VectorSearchHit
 from search_core.providers.fallback import RegexFallbackIndex
 
 from app.domain.services.vector_store_adapter import VectorStoreAdapter
@@ -41,6 +42,8 @@ class LiteralFallbackSnapshot:
         # Physical point IDs retain fragment identity so updates and deletes are exact.
         self._physical: dict[str, dict[str, Any]] = {}
         self._index = RegexFallbackIndex([])
+        self._selected_view: dict[str, dict[str, Any]] = {}
+        self._direct_aliases: dict[str, set[str]] = {}
         self.version = 0
         self.snapshot_index_version = 0
         self.snapshot_saved_at_unix = 0.0
@@ -185,6 +188,8 @@ class LiteralFallbackSnapshot:
 
     def _reindex(self) -> None:
         selected = self._selected_profiles()
+        self._selected_view = selected
+        self._direct_aliases = self._direct_alias_index(selected)
         self._index = RegexFallbackIndex([
             CoreVectorPoint(
                 id=profile_key,
@@ -195,6 +200,26 @@ class LiteralFallbackSnapshot:
         ])
         self.version += 1
         self.updated_at = time.monotonic()
+
+    @staticmethod
+    def _direct_alias_index(
+        selected: dict[str, dict[str, Any]],
+    ) -> dict[str, set[str]]:
+        aliases: dict[str, set[str]] = {}
+        for profile_key, payload in selected.items():
+            values = {
+                profile_key,
+                payload.get("profile_key"),
+                payload.get("worker_id"),
+                payload.get("staff_id"),
+                payload.get("id"),
+            }
+            for value in values:
+                normalized = str(value or "").strip().casefold()
+                if normalized:
+                    aliases.setdefault(normalized, set()).add(profile_key)
+        return aliases
+
 
     def _selected_profiles(self) -> dict[str, dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
@@ -212,10 +237,54 @@ class LiteralFallbackSnapshot:
 
     @property
     def profile_count(self) -> int:
-        return len(self._selected_profiles())
+        return len(self._selected_view)
 
     def keyword_search(self, query, limit, filters, allowed_ids):
         return self._index.keyword_search(query, limit, filters, allowed_ids)
+
+    def exact_search(self, query, limit, filters, allowed_ids=None):
+        """Return only exact identifier matches from the in-process view."""
+
+        target = str(query or "").strip().casefold()
+        if not target or limit <= 0 or allowed_ids == frozenset():
+            return []
+        profile_keys = self._direct_aliases.get(target)
+        if not profile_keys:
+            return []
+        matches: list[tuple[str, dict[str, Any]]] = []
+        for profile_key in profile_keys:
+            if allowed_ids is not None and profile_key not in allowed_ids:
+                continue
+            payload = self._selected_view.get(profile_key)
+            if payload is None:
+                continue
+            if self._payload_matches_filters(payload, filters):
+                matches.append((profile_key, dict(payload)))
+        matches.sort(key=lambda item: item[0])
+        return [
+            VectorSearchHit(
+                id=profile_key,
+                score=1.0,
+                payload=payload,
+            )
+            for profile_key, payload in matches[:limit]
+        ]
+
+    @staticmethod
+    def _payload_matches_filters(payload: dict[str, Any], filters: Any) -> bool:
+        for key, expected in (filters or {}).items():
+            if key.startswith("_"):
+                return False
+            actual = payload.get(key)
+            actual_values = actual if isinstance(actual, list) else [actual]
+            expected_values = (
+                expected
+                if isinstance(expected, (list, tuple, set, frozenset))
+                else [expected]
+            )
+            if not any(str(value) in {str(item) for item in expected_values} for value in actual_values):
+                return False
+        return True
 
     def default_search(self, limit, filters, allowed_ids=None):
         return self._index.default_search(limit, filters, allowed_ids)

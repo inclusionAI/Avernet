@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass, replace
+from typing import Any
 
 from search_core.core.ranking import reciprocal_rank_fusion
 
@@ -25,10 +26,61 @@ KEYWORD_MAX_FETCH_LIMIT = 256
 
 @dataclass(frozen=True)
 class KeywordRetrievalOutcome:
-    """Keyword candidates plus an explicit availability flag."""
+    """Keyword candidates plus explicit provenance and availability."""
 
     candidates: list[FragmentProfileCandidate]
     available: bool
+    source: str = "vector_store"
+    local_count: int = 0
+    local_keyword_sufficient: bool = False
+
+
+
+
+def local_keyword_candidates_with_status(
+    index: Any | None,
+    query: str,
+    limit: int,
+    filters: dict | None,
+    excluded: set[str],
+    allowed: set[str] | None,
+    enabled_types: set[str],
+    sufficient_limit: int | None = None,
+) -> KeywordRetrievalOutcome:
+    """Read the bounded process-local profile view before a remote lookup.
+
+    The local index is a selected-profile view, so it cannot replace every
+    fragment retrieval query. It is safe to use as the lexical branch when it
+    already has enough unique profiles for the bounded hybrid budget.
+    """
+
+    if index is None or not query.strip() or limit <= 0:
+        return KeywordRetrievalOutcome([], available=True)
+    if allowed == set() or not enabled_types:
+        return KeywordRetrievalOutcome([], available=True)
+    try:
+        hits = index.keyword_search(query, limit, filters, allowed)
+        grouped = _group_keyword_hits(
+            hits, filters, excluded, allowed, enabled_types
+        )
+        selected = list(grouped.values())[:limit]
+        return KeywordRetrievalOutcome(
+            selected,
+            available=True,
+            source="local_snapshot",
+            local_count=len(selected),
+            local_keyword_sufficient=(
+                len(selected) >= (sufficient_limit if sufficient_limit is not None else limit)
+            ),
+        )
+    except Exception as error:  # noqa: BLE001 -- local miss falls back to the store.
+        log_stage(
+            logger,
+            "local_keyword_search",
+            available=False,
+            error_type=type(error).__name__,
+        )
+        return KeywordRetrievalOutcome([], available=False, source="invalid_local")
 
 
 def keyword_candidates_with_status(

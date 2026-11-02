@@ -8,7 +8,6 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from app.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-from app.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 from app.infra.config.feature_flags import FeatureFlags
 from app.infra.worker_profiles.sources.api_profile_source import APIProfileSource
 
@@ -46,7 +45,6 @@ class _ResolvedActivation:
     worker_id: str
     profile: object
     worker_state: dict
-    current_ids: set[str]
     requests: list[_ActivationIndexRequest]
     error: BaseException | None = None
 
@@ -184,11 +182,6 @@ class ProfileActivationIndexCoordinator:
             else:
                 runtime = getattr(runtime, "value", runtime)
 
-            decomposer = ProfileFragmentDecomposer()
-            current_ids = {
-                fragment.compute_fragment_id(profile_key)
-                for fragment in decomposer.decompose(profile)
-            }
             return _ResolvedActivation(
                 worker_id=worker.id,
                 profile=profile,
@@ -196,7 +189,6 @@ class ProfileActivationIndexCoordinator:
                     "availability": worker.state.availability.value,
                     "runtime_state": runtime,
                 },
-                current_ids=current_ids,
                 requests=[request],
             )
         except Exception as error:
@@ -228,34 +220,10 @@ class ProfileActivationIndexCoordinator:
         ).build_index(profiles, worker_states=worker_states)
 
         successful_keys = set(result.indexed_profile_keys)
-        for entry in resolved:
-            entry.error = self._cleanup_entry(entry, profile_store, successful_keys)
 
         for entry in resolved:
             if entry.profile.profile_key not in successful_keys and entry.error is None:
                 entry.error = RuntimeError("activated profile indexing failed")
-
-    def _cleanup_entry(
-        self,
-        entry: _ResolvedActivation,
-        profile_store,
-        successful_keys: set[str],
-    ) -> BaseException | None:
-        if entry.profile.profile_key not in successful_keys:
-            return RuntimeError("activated profile indexing failed")
-
-        try:
-            # Only remove obsolete fragments after the complete replacement
-            # has been persisted. Enumerate/delete failure is retryable.
-            profile_store.delete_stale_fragments(
-                entry.profile.profile_key,
-                entry.current_ids,
-                entry.worker_id,
-            )
-            return None
-        except Exception as error:
-            return error
-
 
 _activation_index_coordinator = ProfileActivationIndexCoordinator()
 

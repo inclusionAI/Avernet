@@ -72,7 +72,7 @@ class SimpleReceive:
     async def __call__(self) -> dict:
         return {
             "type": "http.request",
-            "body": b'{"query":"assistant"}',
+            "body": b'{"query":"assistant semantic search"}',
             "more_body": False,
         }
 
@@ -99,7 +99,7 @@ class FailingReceive:
             self.first_chunk_read = True
             return {
                 "type": "http.request",
-                "body": b'{"query":"assistant"}',
+                "body": b'{"query":"assistant semantic search"}',
                 "more_body": True,
             }
         raise RuntimeError("request body transport failed")
@@ -111,7 +111,7 @@ class ReceiveThenDisconnect:
             self.first_chunk_read = True
             return {
                 "type": "http.request",
-                "body": b'{"query":"assistant"}',
+                "body": b'{"query":"assistant semantic search"}',
                 "more_body": True,
             }
         return {"type": "http.disconnect"}

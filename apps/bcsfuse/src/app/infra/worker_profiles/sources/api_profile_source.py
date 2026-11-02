@@ -37,6 +37,16 @@ from app.infra.config.content_embedding_config import ContentEmbeddingConfig
 logger = logging.getLogger(__name__)
 
 
+# Core API profile fields must map onto the embedding-domain fields consumed by
+# ProfileFragmentDecomposer. Without this metadata, rich soul/agents/tools text is
+# silently dropped from both vector payloads and keyword indexes.
+CORE_API_EMBEDDING_FIELDS = {
+    "soul_md": "profile",
+    "agents_md": "capabilities",
+    "tools_md": "capabilities",
+}
+
+
 class APIProfileSource(WorkerProfileSource):
     """
     API Profile Source
@@ -588,7 +598,8 @@ class APIProfileSource(WorkerProfileSource):
                         source_path="api://soul_md",
                         metadata={
                             "section": section_title,
-                            "original_file": "SOUL.md"
+                            "original_file": "SOUL.md",
+                            "embedding_field": CORE_API_EMBEDDING_FIELDS["soul_md"],
                         }
                     )
                     fragments.append(fragment)
@@ -602,7 +613,8 @@ class APIProfileSource(WorkerProfileSource):
                     source_path="api://soul_md",
                     metadata={
                         "section": "full",
-                        "original_file": "SOUL.md"
+                        "original_file": "SOUL.md",
+                        "embedding_field": CORE_API_EMBEDDING_FIELDS["soul_md"],
                     }
                 )
                 fragments.append(fragment)
@@ -616,7 +628,8 @@ class APIProfileSource(WorkerProfileSource):
                 source_path="api://agents_md",
                 metadata={
                     "section": "workflow",
-                    "original_file": "AGENTS.md"
+                    "original_file": "AGENTS.md",
+                    "embedding_field": CORE_API_EMBEDDING_FIELDS["agents_md"],
                 }
             )
             fragments.append(fragment)
@@ -630,7 +643,8 @@ class APIProfileSource(WorkerProfileSource):
                 source_path="api://tools_md",
                 metadata={
                     "section": "tools",
-                    "original_file": "TOOLS.md"
+                    "original_file": "TOOLS.md",
+                    "embedding_field": CORE_API_EMBEDDING_FIELDS["tools_md"],
                 }
             )
             fragments.append(fragment)
@@ -644,7 +658,7 @@ class APIProfileSource(WorkerProfileSource):
                 source_path="api://boot_md",
                 metadata={
                     "section": "boot",
-                    "original_file": "BOOT.md"
+                    "original_file": "BOOT.md",
                 }
             )
             fragments.append(fragment)

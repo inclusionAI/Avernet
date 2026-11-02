@@ -62,7 +62,7 @@ def test_recommendation_cache_key_uses_recall_default(monkeypatch) -> None:
         V1_RECOMMEND_RESPONSE_CACHE_OPERATION,
         index_version=7,
         material={
-            "normalized_query": "Python search engine optimization",
+            "normalized_query": "python search engine optimization",
             "top_k": 3,
             "driver_bot_id": None,
             "type": "recommend",
@@ -110,7 +110,7 @@ def test_recommendation_cache_key_without_rerank_uses_recall_default(
         V1_RECOMMEND_RESPONSE_CACHE_OPERATION,
         index_version=7,
         material={
-            "normalized_query": "Python search engine optimization",
+            "normalized_query": "python search engine optimization",
             "top_k": 3,
             "driver_bot_id": None,
             "type": "recommend",

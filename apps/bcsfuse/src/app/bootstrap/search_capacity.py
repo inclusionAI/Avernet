@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from typing import Any
 
 from fastapi.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.application.services.query_intent_policy import resolve_query_intent
+from app.application.services.query_normalizer import normalize_query_text
+from app.infra.public.observability.search_stage_metrics import (
+    search_stage_metrics,
+)
 
 MAX_SEARCH_BODY_BYTES = 64 * 1024
 
@@ -30,6 +37,9 @@ class SearchCapacitySettings:
         retry_after_seconds: float,
         max_queue: int = 128,
         queue_wait_seconds: float = 2.0,
+        direct_keyword_max_inflight: int = 128,
+        direct_keyword_max_queue: int = 128,
+        direct_keyword_queue_wait_seconds: float = 2.0,
     ):
         if max_inflight <= 0:
             raise ValueError("search capacity max_inflight must be positive")
@@ -39,10 +49,25 @@ class SearchCapacitySettings:
             raise ValueError("search capacity max_queue must not be negative")
         if queue_wait_seconds <= 0:
             raise ValueError("search capacity queue_wait_seconds must be positive")
+        if direct_keyword_max_inflight <= 0:
+            raise ValueError(
+                "direct keyword capacity max_inflight must be positive"
+            )
+        if direct_keyword_max_queue < 0:
+            raise ValueError(
+                "direct keyword capacity max_queue must not be negative"
+            )
+        if direct_keyword_queue_wait_seconds <= 0:
+            raise ValueError(
+                "direct keyword capacity queue_wait_seconds must be positive"
+            )
         self.max_inflight = max_inflight
         self.retry_after_seconds = retry_after_seconds
         self.max_queue = max_queue
         self.queue_wait_seconds = queue_wait_seconds
+        self.direct_keyword_max_inflight = direct_keyword_max_inflight
+        self.direct_keyword_max_queue = direct_keyword_max_queue
+        self.direct_keyword_queue_wait_seconds = direct_keyword_queue_wait_seconds
 
     @classmethod
     def from_context(cls, context: Any) -> "SearchCapacitySettings":
@@ -68,12 +93,59 @@ class SearchCapacitySettings:
                 "get_float",
             )
         )
+        direct_keyword_max_inflight = int(
+            _config_get(
+                context,
+                "search.capacity.direct_keyword_max_inflight",
+                128,
+                "get_int",
+            )
+        )
+        direct_keyword_max_queue = int(
+            _config_get(
+                context,
+                "search.capacity.direct_keyword_max_queue",
+                128,
+                "get_int",
+            )
+        )
+        direct_keyword_queue_wait_seconds = float(
+            _config_get(
+                context,
+                "search.capacity.direct_keyword_queue_wait_seconds",
+                2.0,
+                "get_float",
+            )
+        )
         return cls(
             max_inflight=max_inflight,
             retry_after_seconds=retry_after_seconds,
             max_queue=max_queue,
             queue_wait_seconds=queue_wait_seconds,
+            direct_keyword_max_inflight=direct_keyword_max_inflight,
+            direct_keyword_max_queue=direct_keyword_max_queue,
+            direct_keyword_queue_wait_seconds=direct_keyword_queue_wait_seconds,
         )
+
+
+
+class _AdmissionPool:
+    """Bounded inflight and waiting state for one execution route."""
+
+    def __init__(
+        self,
+        *,
+        max_inflight: int,
+        max_queue: int,
+        queue_wait_seconds: float,
+    ) -> None:
+        self.max_inflight = max_inflight
+        self.max_queue = max_queue
+        self.queue_wait_seconds = queue_wait_seconds
+        self.permits = asyncio.Semaphore(max_inflight)
+        self.inflight = 0
+        self.waiting = 0
+        self.state_lock = threading.Lock()
 
 
 _SEARCH_METRICS: dict[str, Any] | None = None
@@ -148,8 +220,9 @@ class SearchCapacityMiddleware:
 
     Capacity admission happens before business service execution. A rejected call
     receives a retry hint and never creates database, embedding, Qdrant, or
-    rerank work. The budget is intentionally shared across v1/v2 and
-    search/recommend because one event loop has one finite admission pool.
+    rerank work. Semantic search/recommendation and zero-embedding direct
+    lookups use separate bounded pools so one expensive route cannot starve the
+    other while the process still has finite total work capacity.
     """
 
     def __init__(
@@ -161,10 +234,18 @@ class SearchCapacityMiddleware:
         self.app = app
         self.settings = settings
         self._metrics = metrics or _get_search_metrics()
-        self._permits = asyncio.Semaphore(settings.max_inflight)
-        self._inflight_count = 0
-        self._waiting_count = 0
-        self._state_lock = threading.Lock()
+        self._pools = {
+            "semantic": _AdmissionPool(
+                max_inflight=settings.max_inflight,
+                max_queue=settings.max_queue,
+                queue_wait_seconds=settings.queue_wait_seconds,
+            ),
+            "direct_keyword": _AdmissionPool(
+                max_inflight=settings.direct_keyword_max_inflight,
+                max_queue=settings.direct_keyword_max_queue,
+                queue_wait_seconds=settings.direct_keyword_queue_wait_seconds,
+            ),
+        }
         self._metrics["capacity"].set(settings.max_inflight)
         self._metrics["queue_capacity"].set(settings.max_queue)
 
@@ -193,22 +274,24 @@ class SearchCapacityMiddleware:
         # Payment for business work starts only after the request body has been
         # fully loaded under the transport boundary. A slow or failed upload
         # must not consume a Qdrant/model admission slot.
-        app_receive: Receive = receive
-        if declared_size is None:
-            try:
-                messages, body_too_large = await self._read_bounded_request(receive)
-            except Exception:
-                self._metrics["body_read_errors"].labels(**labels).inc()
-                raise
-            if body_too_large:
-                response = self._reject_too_large(
-                    operation, api_version, started_at=started_at
-                )
-                await response(scope, receive, send)
-                return
-            app_receive = _replayed_receive(messages)
+        try:
+            messages, body_too_large = await self._read_bounded_request(receive)
+        except Exception:
+            self._metrics["body_read_errors"].labels(**labels).inc()
+            raise
+        if body_too_large:
+            response = self._reject_too_large(
+                operation, api_version, started_at=started_at
+            )
+            await response(scope, receive, send)
+            return
+        app_receive = _replayed_receive(messages)
+        request_route = _request_route(messages)
 
-        if not await self._admit(operation, api_version, labels):
+        pool = self._pools[request_route]
+        with search_stage_metrics(operation, "queue"):
+            admitted = await self._admit(pool, operation, api_version, labels)
+        if not admitted:
             response = self._reject(
                 operation, api_version, labels,
                 started_at=started_at,
@@ -232,30 +315,23 @@ class SearchCapacityMiddleware:
             outcome = str(status_code or 500)
             self._record(operation, api_version, outcome, time.perf_counter() - started_at)
             inflight.dec()
-            with self._state_lock:
-                self._inflight_count -= 1
-            self._permits.release()
+            self._release(pool)
 
     async def _admit(
         self,
+        pool: _AdmissionPool,
         operation: str,
         api_version: str,
         labels: dict[str, str],
     ) -> bool:
-        """Reserve one slot from the bounded execution-and-wait budget."""
+        """Reserve one slot from the route's bounded execution-and-wait budget."""
 
-        limits = self.settings.max_inflight + self.settings.max_queue
-        with self._state_lock:
-            if (
-                self._inflight_count + self._waiting_count
-                >= limits
-            ):
+        limits = pool.max_inflight + pool.max_queue
+        with pool.state_lock:
+            if pool.inflight + pool.waiting >= limits:
                 return False
-            self._waiting_count += 1
-            queued = (
-                self._inflight_count + self._waiting_count
-                > self.settings.max_inflight
-            )
+            pool.waiting += 1
+            queued = pool.inflight + pool.waiting > pool.max_inflight
 
         queued_since = time.perf_counter()
         try:
@@ -263,23 +339,28 @@ class SearchCapacityMiddleware:
                 self._metrics["queued"].labels(**labels).inc()
                 try:
                     await asyncio.wait_for(
-                        self._permits.acquire(),
-                        timeout=self.settings.queue_wait_seconds,
+                        pool.permits.acquire(),
+                        timeout=pool.queue_wait_seconds,
                     )
                 except TimeoutError:
                     return False
             else:
-                await self._permits.acquire()
+                await pool.permits.acquire()
         finally:
             if queued:
                 self._metrics["queue_wait"].labels(**labels).observe(
                     time.perf_counter() - queued_since
                 )
-            with self._state_lock:
-                self._waiting_count -= 1
-        with self._state_lock:
-            self._inflight_count += 1
+            with pool.state_lock:
+                pool.waiting -= 1
+        with pool.state_lock:
+            pool.inflight += 1
         return True
+
+    def _release(self, pool: _AdmissionPool) -> None:
+        with pool.state_lock:
+            pool.inflight -= 1
+        pool.permits.release()
     async def _read_bounded_request(self, receive: Receive) -> tuple[list[Message], bool]:
         """Consume an undeclared body while bounding total search request bytes."""
         messages = []
@@ -350,6 +431,26 @@ class SearchCapacityMiddleware:
         labels = {"operation": operation, "api_version": api_version}
         self._metrics["requests"].labels(**labels, outcome=outcome).inc()
         self._metrics["duration"].labels(**labels, outcome=outcome).observe(duration)
+
+
+def _request_route(messages: list[Message]) -> str:
+    """Classify a parsed request body without logging query content."""
+
+    body = b"".join(message.get("body", b"") for message in messages)
+    try:
+        payload = json.loads(body)
+        raw_query = payload.get("query") if isinstance(payload, dict) else None
+        raw_question = (
+            payload.get("question") if isinstance(payload, dict) else None
+        )
+        raw = raw_query or raw_question
+        if not isinstance(raw, str):
+            return "semantic"
+        normalized = normalize_query_text(raw)
+        intent = resolve_query_intent(normalized)
+        return intent.route
+    except Exception:
+        return "semantic"
 
 
 def _declared_content_length(scope: Scope) -> int | None:

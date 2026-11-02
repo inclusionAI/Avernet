@@ -90,11 +90,11 @@ async def exercise(max_inflight: int):
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         first = asyncio.create_task(
-            client.post("/api/v2/search", json={"query": "assistant"})
+            client.post("/api/v2/search", json={"query": "assistant semantic search"})
         )
         await asyncio.sleep(0.01)
         second = asyncio.create_task(
-            client.post("/api/v2/recommend", json={"question": "assistant"})
+            client.post("/api/v2/recommend", json={"question": "assistant semantic search"})
         )
         blocked.set()
         accepted, overloaded = await first, await second

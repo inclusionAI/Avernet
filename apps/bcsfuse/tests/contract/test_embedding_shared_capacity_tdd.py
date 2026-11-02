@@ -286,7 +286,7 @@ def test_cluster_quota_exhaustion_has_a_distinct_delivery_reason() -> None:
             embedding_generator=QuotaExhaustedGenerator(),
             vector_match_service=KeywordFallback(),
             candidate_recommendation_service=None,
-        ).search(AgentSearchCommand(query="reader", top_k=1))
+        ).search(AgentSearchCommand(query="reader expert", top_k=1))
     )
 
     assert outcome.metadata["semantic_reason_code"] == "embedding_quota_exhausted"

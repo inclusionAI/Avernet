@@ -256,6 +256,8 @@ class ProfileEmbeddingIndexer:
         # coalescing and can exhaust the model request quota.
         plans: list[tuple[WorkerProfile, str, str, dict]] = []
         planned_counts: dict[str, int] = {}
+        current_ids_by_profile: dict[str, set[str]] = {}
+        worker_ids_by_profile: dict[str, str] = {}
 
         # 统计有多少 profile 能找到 worker 状态
         found_count = 0
@@ -282,6 +284,11 @@ class ProfileEmbeddingIndexer:
                     )
 
                 profile_plans = self._profile_fragment_plans(profile, worker_state)
+                if profile_plans:
+                    current_ids_by_profile[profile.profile_key] = {
+                        fragment_id for fragment_id, _, _ in profile_plans
+                    }
+                    worker_ids_by_profile[profile.profile_key] = profile.staff_id
                 if not profile_plans:
                     result.failed_count += 1
                     result.errors.append(
@@ -357,6 +364,27 @@ class ProfileEmbeddingIndexer:
                 ):
                     result.indexed_count += 1
                     result.mark_profile_indexed(profile_key)
+
+        # A successful replacement is not complete while obsolete sparse
+        # fragments from the previous profile layout remain searchable. Clean
+        # them only after every current fragment for that profile was persisted.
+        cleanup_stale = getattr(self._profile_store, "delete_stale_fragments", None)
+        if callable(cleanup_stale):
+            for profile_key in list(result.indexed_profile_keys):
+                try:
+                    cleanup_stale(
+                        profile_key,
+                        current_ids_by_profile.get(profile_key, set()),
+                        worker_ids_by_profile.get(profile_key, ""),
+                    )
+                except Exception as e:
+                    error_msg = f"Error cleaning stale fragments {profile_key}: {str(e)}"
+                    result.indexed_profile_keys.remove(profile_key)
+                    result.indexed_count -= 1
+                    result.failed_count += 1
+                    result.errors.append(error_msg)
+                    result.mark_profile_failed(profile_key)
+                    logger.error("[ProfileEmbeddingIndexer] %s", error_msg)
 
         # 计算耗时
         result.duration_seconds = (datetime.now() - start_time).total_seconds()

@@ -33,6 +33,16 @@ class TestQdrantVectorStoreContract:
 
         # Import in a fresh process: reloading here replaces the class identity
         # retained by other collected tests and breaks their isinstance checks.
+        import os
+        open_core_root = Path(__file__).resolve().parents[2]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            (
+                str(open_core_root / "src"),
+                str(open_core_root / "packages/search-core/src"),
+                env.get("PYTHONPATH", ""),
+            )
+        )
         result = subprocess.run(
             [sys.executable, "-c", (
                 "from unittest.mock import patch; "
@@ -41,7 +51,8 @@ class TestQdrantVectorStoreContract:
                 "guard.start(); "
                 "import app.infra.public.vectorstores.qdrant_local_vector_store"
             )],
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=open_core_root,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -122,9 +133,13 @@ class TestQdrantVectorStoreContract:
 
         # Set PYTHONPATH to include the open-core root
         env = dict(os.environ)
-        pythonpath = str(open_core_root)
-        if "PYTHONPATH" in env:
-            pythonpath = pythonpath + os.pathsep + env["PYTHONPATH"]
+        pythonpath = os.pathsep.join(
+            (
+                str(open_core_root / "src"),
+                str(open_core_root / "packages/search-core/src"),
+                env.get("PYTHONPATH", ""),
+            )
+        )
         env["PYTHONPATH"] = pythonpath
 
         result = subprocess.run(

@@ -1,5 +1,6 @@
 """The public checkout must not silently instantiate an internal vector store."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,14 @@ import pytest
 def test_public_zdas_entrypoints_fail_closed(factory):
     # Deliberately importing the compatibility stub must not contaminate the
     # public-provider import-boundary checks in the parent pytest process.
+    open_core_root = Path(__file__).resolve().parents[2]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        (
+            str(open_core_root / "src"),
+            env.get("PYTHONPATH", ""),
+        )
+    )
     result = subprocess.run(
         [sys.executable, "-c", f"""
 from app.infra.vectorstores.qdrant_zdas_vector_store import (
@@ -23,7 +32,8 @@ except ZdasInternalOnlyProviderUnavailable as error:
 else:
     raise AssertionError("public internal-provider entrypoint did not fail closed")
 """],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=open_core_root,
+        env=env,
         capture_output=True,
         text=True,
         timeout=30,

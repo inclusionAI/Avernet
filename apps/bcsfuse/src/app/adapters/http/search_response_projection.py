@@ -12,10 +12,27 @@ from app.application.agent_search_service import (
     degraded_reasons,
 )
 from app.application.services.search_index_state import project_index_state
+from app.infra.public.observability.search_stage_metrics import (
+    search_stage_metrics,
+)
 from app.bootstrap.oss_business_routes import SearchRequestOSS
 
 
 def build_v1_search_response(
+    request: SearchRequestOSS,
+    outcome: AgentSearchOutcome,
+    *,
+    elapsed_ms: float,
+) -> dict[str, Any]:
+    """Project one application search outcome and record its stage time."""
+
+    with search_stage_metrics("search", "projection"):
+        return _build_v1_search_response(
+            request, outcome, elapsed_ms=elapsed_ms
+        )
+
+
+def _build_v1_search_response(
     request: SearchRequestOSS,
     outcome: AgentSearchOutcome,
     *,

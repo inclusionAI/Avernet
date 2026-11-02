@@ -118,7 +118,7 @@ class FailingRecommendationService:
         raise RuntimeError("private profile store detail")
 
 
-def _search_command(query: str = "reader", top_k: int = 5) -> AgentSearchCommand:
+def _search_command(query: str = "reader expert", top_k: int = 5) -> AgentSearchCommand:
     return AgentSearchCommand(query=query, top_k=top_k)
 
 
@@ -362,7 +362,7 @@ def test_search_http_admitted_semantic_outage_still_returns_stable_200(monkeypat
     app = create_bcsfuse_app(_route_context())
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/search", json={"query": "reader", "top_k": 5})
+        response = client.post("/api/v1/search", json={"query": "reader expert", "top_k": 5})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -488,7 +488,7 @@ def test_recommend_projection_failure_returns_final_envelope(monkeypatch) -> Non
 
     monkeypatch.setattr(
         recommend_routes,
-        "create_bot_recommendation_response",
+        "build_v1_recommendation_response",
         fail_projection,
     )
     app = create_bcsfuse_app(_route_context())
@@ -541,7 +541,7 @@ def test_search_projection_failure_returns_final_not_500(monkeypatch) -> None:
     app = create_bcsfuse_app(_route_context())
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/search", json={"query": "reader", "top_k": 5})
+        response = client.post("/api/v1/search", json={"query": "reader expert", "top_k": 5})
 
     assert response.status_code == 200, response.text
     body = response.json()

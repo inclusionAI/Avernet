@@ -84,6 +84,9 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   `startup_rebuild_error_type=<ExceptionName>` on the vector-store view, and
   `/ready` returns 503 with `degraded=true`. The durable vector backend can also
   supply the process-local literal snapshot without probing either Qdrant index.
+  The snapshot precomputes normalized profile text once per published index
+  version so the bounded literal path does not repeat NFKC normalization for
+  every query.
   If both dense and lexical retrieval fail, the bounded literal path first serves
   token-overlap results; when none overlap, it returns a stable default profile
   set that still honors filters, exclusions, registry state and trusted allowed
