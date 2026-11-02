@@ -67,11 +67,22 @@ def _resolve_user_identity(
     Returns:
         (user_id, nick_name) 元组
     """
-    # bot_id="all" 或 owner_id 为空时，使用当前用户身份
+    # 未传 owner_id 时先按 bot_id 解析真实归属；协作者请求由此沿用
+    # Bot owner 身份，而不是把当前协作者当作下游 Cron 服务的调用者。
+    if not owner_id and bot_id and bot_id != "all":
+        try:
+            bot = bot_service.get_bot_by_id(bot_id)
+            resolved_owner_id = bot.get("owner_id") if bot else None
+            if resolved_owner_id:
+                return resolved_owner_id, bot.get("owner_name") or resolved_owner_id
+        except Exception as e:
+            logger.warning(f"[_resolve_user_identity] Failed to resolve bot owner: {e}")
+
+    # bot_id="all"、bot_id 缺失或归属解析失败时，使用当前用户身份。
     if not owner_id or bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
-    # 协作者场景：从 bot 信息获取 owner 身份
+    # 协作者场景：调用方显式传入 owner_id，从该 owner 的 bot 信息取显示名。
     try:
         bot = bot_service.get_bot(bot_id, owner_id)
         return owner_id, bot.get("owner_name") or owner_id if bot else owner_id

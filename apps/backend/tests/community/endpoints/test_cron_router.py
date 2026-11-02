@@ -34,15 +34,29 @@ class _RecordingBotService:
     being invented on demand.
     """
 
-    def __init__(self, *, bot: dict | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        bot: dict | None = None,
+        error: Exception | None = None,
+        by_id_error: Exception | None = None,
+    ):
         self.get_bot_calls: list[tuple[str, str]] = []
+        self.get_bot_by_id_calls: list[str] = []
         self._bot = bot
         self._error = error
+        self._by_id_error = by_id_error
 
     def get_bot(self, bot_id, user_id):
         self.get_bot_calls.append((bot_id, user_id))
         if self._error is not None:
             raise self._error
+        return self._bot
+
+    def get_bot_by_id(self, bot_id):
+        self.get_bot_by_id_calls.append(bot_id)
+        if self._by_id_error is not None:
+            raise self._by_id_error
         return self._bot
 
 
@@ -132,6 +146,28 @@ class TestResolveUserIdentity:
 
         assert user_id == "u001"
         assert nick_name == "Test User"
+        assert bot_service.get_bot_calls == []
+
+    def test_collaborator_scenario_without_owner_id_resolves_bot_owner(self):
+        """When owner_id is omitted, resolve and use the Bot owner identity."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "u_owner", "owner_name": "Owner User"},
+        )
+
+        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+
+        assert user_id == "u_owner"
+        assert nick_name == "Owner User"
+        assert bot_service.get_bot_by_id_calls == ["bot1"]
         assert bot_service.get_bot_calls == []
 
     def test_collaborator_scenario_returns_owner_identity(self):
@@ -725,6 +761,25 @@ def get_cron_runs_with_limit():
 )
 def get_cron_runs_collaborator():
     """get_cron_runs with owner_id for collaborator scenario."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/cron/{task_id}/runs",
+    scenario="get_cron_runs_collaborator_without_owner_id",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        query_params={"bot_id": "bot_test"},
+        path_params={"task_id": "task_001"},
+    ),
+    seed=_seed_bot_with_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+)
+def get_cron_runs_collaborator_without_owner_id():
+    """get_cron_runs resolves the Bot owner when owner_id is omitted."""
 
 
 # =============================================================================
