@@ -55,7 +55,7 @@ async fn cached_intent(flow: &BcsMessageFlow, value: &str) -> ServiceResult<Vec<
 
 async fn lookup(flow: &BcsMessageFlow, value: &str) -> ServiceResult<Vec<Task>> {
     let prefix = prefix(value)?;
-    if flow.coordination_intents.is_some() && value.starts_with("bcs_intent_") && prefix.len() == 32 {
+    if value.starts_with("bcs_intent_") && prefix.len() == 32 {
         return cached_intent(flow, &format!("bcs_intent_{prefix}")).await;
     }
     let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(RETENTION_MS);
@@ -160,7 +160,7 @@ pub(crate) async fn status(flow: &BcsMessageFlow, refs: Vec<String>) -> ServiceR
     if refs.is_empty() || refs.len() > 20 { return Err(invalid("task_refs requires 1..20 refs")); }
     // Full intent IDs use shared cache correlation and indexed delivery ID reads.
     // Split mixed batches so these selectors never reach the JSON-prefix SQL path.
-    if flow.coordination_intents.is_some() && refs.iter().any(|value| value.starts_with("bcs_intent_") && value.len() == 43) {
+    if refs.iter().any(|value| value.starts_with("bcs_intent_") && value.len() == 43) {
         use futures::{stream, StreamExt, TryStreamExt};
         for value in &refs { prefix(value)?; }
         let unique: std::collections::BTreeSet<_> = refs.iter().cloned().collect();
