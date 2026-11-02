@@ -204,7 +204,7 @@ def _service_for_bootstrap_branch(tmp_path):
     )
 
 
-def test_bootstrap_clone_falls_back_to_oss_when_fetch_fails(tmp_path):
+def test_bootstrap_clone_does_not_fallback_after_fetch_failure(tmp_path):
     svc = _service_for_bootstrap_branch(tmp_path)
     svc._clone_bare_repo = AsyncMock()
     svc._git_fetch = AsyncMock(return_value={"success": False, "error": "fetch boom"})
@@ -215,11 +215,15 @@ def test_bootstrap_clone_falls_back_to_oss_when_fetch_fails(tmp_path):
     finally:
         svc._executor.shutdown(wait=True)
 
-    assert result == {"success": True, "method": "oss_fallback"}
-    svc._download_from_oss_and_extract.assert_awaited_once()
+
+    assert result["success"] is False
+    assert result["method"] == "failed"
+    assert "fetch boom" in result["error"]
+    svc._download_from_oss_and_extract.assert_not_awaited()
 
 
-def test_bootstrap_clone_reports_failed_when_subtree_and_oss_fail(tmp_path):
+
+def test_bootstrap_clone_reports_failed_when_post_clone_subtree_fails(tmp_path):
     svc = _service_for_bootstrap_branch(tmp_path)
     svc._clone_bare_repo = AsyncMock()
     svc._git_fetch = AsyncMock(return_value={"success": True})
@@ -232,8 +236,10 @@ def test_bootstrap_clone_reports_failed_when_subtree_and_oss_fail(tmp_path):
         svc._executor.shutdown(wait=True)
 
     assert result["success"] is False
+
     assert result["method"] == "failed"
-    assert "oss boom" in result["error"]
+    assert "bad subtree" in result["error"]
+    svc._download_from_oss_and_extract.assert_not_awaited()
 
 
 def test_bootstrap_existing_result_propagates_repair_error(tmp_path):

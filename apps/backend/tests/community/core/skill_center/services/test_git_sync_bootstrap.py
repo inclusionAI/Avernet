@@ -139,6 +139,7 @@ async def test_post_clone_failure_preserves_valid_bare_repo(tmp_path):
     async def _clone():
         svc.config.local_bare_repo.mkdir()
 
+    svc._expert_scanner = None
     async def _run_sync(_func, *_args, **_kwargs):
         raise RuntimeError("OSS upload failed")
 
@@ -155,5 +156,7 @@ async def test_post_clone_failure_preserves_valid_bare_repo(tmp_path):
 
     assert result["success"] is False
     assert svc.config.local_bare_repo.exists()
-    svc._download_from_oss_and_extract.assert_awaited_once()
+    assert result["method"] == "failed"
+    assert "OSS upload failed" in result["error"]
+    svc._download_from_oss_and_extract.assert_not_awaited()
     svc._oss_storage.sign_url.assert_not_called()

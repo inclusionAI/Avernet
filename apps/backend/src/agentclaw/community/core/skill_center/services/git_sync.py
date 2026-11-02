@@ -392,43 +392,17 @@ class GitSyncService(GitSyncSubtreeIO, GitSyncStorageIO, LifecycleBase, GitSyncS
         return result
 
     async def _bootstrap_clone_or_fallback(self) -> dict[str, Any]:
-        # Try clone first, fallback to OSS tar if failed
+        # Fall back to OSS only for the clone step. A successful bare clone has
+        # already built the bootstrap target; post-clone dependency failures must
+        # not rerun this path because the guaranteed OSS overwrite check would
+        # deliberately reject the existing bare repo and mask the real failure.
         logger.info("[GitSyncService] Bootstrap: cloning repository...")
         try:
             await self._clone_bare_repo()
             logger.info("[GitSyncService] Bootstrap: bare clone completed")
-
-            # Fetch to create FETCH_HEAD required by subtree extraction
-            fetch_result = await self._git_fetch()
-            if not fetch_result["success"]:
-                raise RuntimeError(f"Git fetch failed after clone: {fetch_result.get('error')}")
-            logger.info("[GitSyncService] Bootstrap: git fetch completed")
-
-            # Extract skills subtree so VM gets the working directory, not bare repo
-            subtree_result = await self._sync_subtree(self.config.subtrees[0])
-            if isinstance(subtree_result, dict) and not subtree_result.get("success", False):
-                raise RuntimeError(f"Skills subtree extraction failed: {subtree_result.get('error')}")
-            logger.info("[GitSyncService] Bootstrap: skills subtree extracted")
-            if self._expert_scanner is not None:
-                from agentclaw.community.core.expert_market.git_sync import sync_git_experts
-                await self._run_sync(sync_git_experts, self, fetch_result.get("fetch_head"))
-
-            # Upload to OSS so desktop VMs can download the initial tar.gz immediately.
-            # singlebox/offline 无 OSS（mock:// storage）→ enable_oss_sync=false 时跳过，
-            # 否则上传失败会误判整个 bootstrap 失败（clone 其实已成功）。
-            if self.config.enable_oss_sync:
-                logger.info("[GitSyncService] Bootstrap: uploading skills repo to OSS...")
-                await self._run_sync(self._sync_upload_skills_repo_to_oss)
-                logger.info("[GitSyncService] Bootstrap: OSS upload completed")
-                await self._run_sync(self._sync_refresh_meta_to_oss)
-                logger.info("[GitSyncService] Bootstrap: meta JSON refreshed")
-            else:
-                logger.info("[GitSyncService] Bootstrap: OSS sync disabled, skip upload/meta")
-
-            return {"success": True, "method": "clone"}
         except Exception as e:
             logger.error(
-                "[GitSyncService] Bootstrap: clone path failed (%s), "
+                "[GitSyncService] Bootstrap: clone failed (%s), "
                 "falling back to OSS tar", e,
             )
             try:
@@ -445,6 +419,41 @@ class GitSyncService(GitSyncSubtreeIO, GitSyncStorageIO, LifecycleBase, GitSyncS
                     "method": "failed",
                     "error": f"clone and fallback both failed: {fe}",
                 }
+
+        try:
+            # Fetch to create FETCH_HEAD required by subtree extraction
+            fetch_result = await self._git_fetch()
+            if not fetch_result["success"]:
+                raise RuntimeError(f"Git fetch failed after clone: {fetch_result.get('error')}")
+            logger.info("[GitSyncService] Bootstrap: git fetch completed")
+
+            # Extract skills subtree so VM gets the working directory, not bare repo
+            subtree_result = await self._sync_subtree(self.config.subtrees[0])
+            if isinstance(subtree_result, dict) and not subtree_result.get("success", False):
+                raise RuntimeError(f"Skills subtree extraction failed: {subtree_result.get('error')}")
+            logger.info("[GitSyncService] Bootstrap: skills subtree extracted")
+            if self._expert_scanner is not None:
+                from agentclaw.community.core.expert_market.git_sync import sync_git_experts
+                await self._run_sync(sync_git_experts, self, fetch_result.get("fetch_head"))
+
+            # Upload to OSS so desktop VMs can download the initial tar.gz immediately.
+            # singlebox/offline 无 OSS（mock:// storage）→ enable_oss_sync=false 时跳过。
+            if self.config.enable_oss_sync:
+                logger.info("[GitSyncService] Bootstrap: uploading skills repo to OSS...")
+                await self._run_sync(self._sync_upload_skills_repo_to_oss)
+                logger.info("[GitSyncService] Bootstrap: OSS upload completed")
+                await self._run_sync(self._sync_refresh_meta_to_oss)
+                logger.info("[GitSyncService] Bootstrap: meta JSON refreshed")
+            else:
+                logger.info("[GitSyncService] Bootstrap: OSS sync disabled, skip upload/meta")
+
+            return {"success": True, "method": "clone"}
+        except Exception as e:
+            logger.error(
+                "[GitSyncService] Bootstrap: post-clone failure (%s); "
+                "keeping the cloned bare repo", e,
+            )
+            return {"success": False, "method": "failed", "error": str(e)}
 
     async def _bootstrap_existing_result(
         self,
