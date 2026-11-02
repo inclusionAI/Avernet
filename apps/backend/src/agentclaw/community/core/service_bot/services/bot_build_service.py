@@ -104,6 +104,29 @@ logger = get_logger()
 # the publish-flow orchestration package.
 _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 
+# The NFS/transient rsync failure seen in production is a mkstemp-era
+# "Transport endpoint is not connected" error. Retry the exact command only
+# for this failure surface, and only for rsync commands where a retry is
+# idempotent (the commandees are a same-direction copy of the same source).
+_TRANSIENT_RSYNC_ATTEMPTS = 3
+_TRANSIENT_RSYNC_RETRY_DELAYS = (0.5, 1.0)
+
+
+def _is_rsync_command(cmd: list[str]) -> bool:
+    """whether this is a command that copies data with rsync."""
+    if not cmd:
+        return False
+    return bool(cmd) and (cmd[0] == "rsync" or (
+        len(cmd) > 1 and cmd[0] == "sudo" and cmd[1] == "rsync"
+    ))
+
+
+def _is_transient_nfs_failure(completed: subprocess.CompletedProcess) -> bool:
+    """whether this is the transient NFS error that can be retried."""
+    return completed.returncode == 23 and "Transport endpoint is not connected" in (
+        completed.stderr or ""
+    )
+
 # Draft restoration copies a potentially large historical workspace. Bound the
 # whole operation, rather than granting each individual command a fresh timeout.
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
@@ -1010,7 +1033,7 @@ class BotBuildService:
             ) from exc
 
         if result.returncode != 0:
-            if _is_rsync_command(cmd) and _is_transient_nfs_failure(result.stderr):
+            if _is_rsync_command(cmd) and _is_transient_nfs_failure(result):
                 for attempt in range(1, _TRANSIENT_RSYNC_ATTEMPTS):
                     logger.warning(
                         f"[BotBuildService._run_local_command] "
