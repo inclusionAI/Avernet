@@ -2604,7 +2604,23 @@ async def update_bot(
     }
     """
     try:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"[bot_router.update_bot] Invalid JSON body: {e}")
+            return ApiResponse(
+                success=False,
+                message="请求体 JSON 解析失败",
+                error_code=400,
+                data=None,
+            )
+        if not isinstance(data, dict):
+            return ApiResponse(
+                success=False,
+                message="请求体必须是 JSON 对象",
+                error_code=400,
+                data=None,
+            )
 
         # Get operator from request context; resource lookup uses resolved owner_id
         operator_id = ctx.user_id
