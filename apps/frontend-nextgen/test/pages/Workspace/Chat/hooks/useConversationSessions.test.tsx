@@ -503,7 +503,7 @@ it('resumes a deferred scope load when the pending session action finishes', asy
   );
 });
 
-it('expands managed and friend Bots exclusively, selects their first session and reuses cached sessions', async () => {
+it('expands managed and friend Bots exclusively, reuses cached sessions and never touches the selection', async () => {
   listManagedSessions.mockResolvedValue(okPage(['s1']));
   listFriendBotSessions.mockResolvedValue(okPage(['fs1']));
   const { result } = renderSessions();
@@ -516,9 +516,11 @@ it('expands managed and friend Bots exclusively, selects their first session and
     expect(useConversationStore.getState().friendBotSessionsByBotId[friendBot.bot.botId]?.items).toHaveLength(1),
   );
   expect(result.current.openBotIds).toEqual({ [friendBot.bot.botId]: true });
+  // 展开/切台解耦：展开好友 Bot 只浏览列表，主舞台的会话选中保持不变。
   expect(useConversationStore.getState()).toMatchObject({
-    selectedBotId: friendBot.bot.botId,
-    selectedSessionId: 'fs1',
+    selectedBotId: managedBot.bot.botId,
+    selectedSection: 'managed',
+    selectedSessionId: 's1',
   });
   act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
   expect(result.current.openBotIds).toEqual({ [managedBot.bot.botId]: true });
@@ -544,14 +546,17 @@ it('a late response only caches the collapsed Bot without re-expanding it', asyn
 
 describe('团队 Bot 复用管理会话', () => {
   const teamBot: ConversationBotView = { ...managedBot, section: 'team' };
-  it('展开走管理列表、自动首选、切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
+  it('展开走管理列表；切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
     listManagedSessions.mockResolvedValue(okPage(['first']));
     const { result } = renderSessions({ managedBots: [teamBot] });
     act(() => result.current.toggleBot(teamBot.bot.botId, 'team'));
-    await waitFor(() => expect(useConversationStore.getState().selectedSessionId).toBe('first'));
+    // 展开/切台解耦：列表加载完只供浏览，选中不落、不切舞台。
+    await waitFor(() =>
+      expect(useConversationStore.getState().sessionsByBotId[teamBot.bot.botId]?.sessions.items).toHaveLength(1),
+    );
+    expect(useConversationStore.getState().selectedBotId).toBeNull();
     expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1, 10, '');
     expect(listFriendBotSessions).not.toHaveBeenCalled();
-    expect(useConversationStore.getState().selectedSection).toBe('team');
     act(() => result.current.selectMineSession(teamBot.bot.botId, 'first'));
     expect(useConversationStore.getState().selectedSection).toBe('team');
     createSession.mockResolvedValue({ ok: true, data: sessionOf('new') });
@@ -571,7 +576,9 @@ describe('团队 Bot 复用管理会话', () => {
     expect(listManagedSessions).not.toHaveBeenCalled();
     expect(listFriendBotSessions).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
-    expect(useConversationStore.getState().selectedOrigin).toBe('others');
+    // 展开不写选中；来源记忆保持用户选择的 others。
+    expect(useConversationStore.getState().selectedBotId).toBeNull();
+    expect(useConversationStore.getState().originByManagedBotId[teamBot.bot.botId]).toBe('others');
   });
 });
 

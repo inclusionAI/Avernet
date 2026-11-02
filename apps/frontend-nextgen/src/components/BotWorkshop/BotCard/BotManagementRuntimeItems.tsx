@@ -65,7 +65,7 @@ export function BotManagementRuntimeItems({
         </MenuSection>
       ) : null}
       {!dormant ? (
-        <MenuSection divider>
+        <MenuSection>
           {bot.serviceMode === 'service' && publication.visible && onManagePublication ? (
             <Button
               variant="ghost"
@@ -162,11 +162,11 @@ export function BotManagementRuntimeItems({
           ) : null}
         </MenuSection>
       ) : null}
-      <MenuSection divider>
+      <MenuSection>
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start text-destructive"
+          className="w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
           leftIcon={actionIcon.delete}
           disabled={lockedByOther || !bot.actions.includes('delete')}
           onClick={() => {

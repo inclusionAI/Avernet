@@ -27,15 +27,12 @@ export function ActionHelp({ children, description }: { children: string; descri
 
 /**
  * 菜单分组（验收：按操作频次与风险分组，低风险高频在上）。
- * 组内条件项全部不满足时整组（含前置分隔线）不渲染，避免悬空分隔线。
+ * 组内条件项全部不满足时整组不渲染，避免悬空占位。
+ * 分组分割线此前落在不稳定的条件交界上（上一组末项/下一组首项都可能条件缺席），
+ * 先整体移除，待分组语义定稿后再以确定性锚点恢复。
  */
-export function MenuSection({ divider = false, children }: { divider?: boolean; children: ReactNode }) {
+export function MenuSection({ children }: { children: ReactNode }) {
   const items = Children.toArray(children).filter(Boolean);
   if (items.length === 0) return null;
-  return (
-    <>
-      {divider ? <div className="-mx-1.5 my-1 h-px bg-divider" /> : null}
-      {items}
-    </>
-  );
+  return <>{items}</>;
 }

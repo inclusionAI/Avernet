@@ -78,7 +78,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             leftIcon={<MoreVertical className="size-4" />}
           />
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-52 space-y-1 p-2">
+        {/* dmore 复核：宽 w-52→w-48 收窄；分割线缺少稳定分组逻辑先移除；sm 按钮默认 text-xs 提级为 text-sm。 */}
+        <PopoverContent align="end" className="w-48 space-y-1 rounded-lg p-1.5 [&_button]:text-sm">
           {/* 配置类：Bot 的配置与形态变更操作（验收修正：配置类同组置顶） */}
           {!dormant ? (
             <>
@@ -152,7 +153,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 ) : null}
               </MenuSection>
               {/* 日常操作（协作与查看） */}
-              <MenuSection divider>
+              <MenuSection>
                 {collaborationMode && onAuthorize ? (
                   <Button
                     variant="ghost"
@@ -213,6 +214,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                     variant="ghost"
                     size="sm"
                     className="w-full justify-start"
+                    leftIcon={actionIcon.open_folder}
                     onClick={() => {
                       setOpen(false);
                       void onAction('open_folder', bot);

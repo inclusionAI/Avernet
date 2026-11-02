@@ -37,8 +37,12 @@ const moduleNameMapper = {
 // avatar generator. Transform these package namespaces; the rest of
 // node_modules stays ignored. tnpm resolves scoped packages through physical
 // `_@scope_name@` directories, so include both normal and physical layouts.
+// @ant-design/x-markdown 携嵌套 marked@16（main 直指 lib/marked.esm.js，ESM-only）：CJS
+// 引用链 Parser.js require('marked') 落到该 ESM 文件，须转译才能在 node 环境加载。regex 按
+// 每个 /node_modules/ 段重试，嵌套路径上 x-markdown 段与 marked 段都要豁免，缺一仍不会转译。
+// 当前树根 marked@15 是 CJS（main=marked.cjs）故豁免暂不生效，升级后自动接住。
 const transformIgnorePatterns = [
-  '/node_modules/(?!@tc-chat/|_@tc-chat_|@ant-design/colors/|_@ant-design_colors@|@dicebear/|_@dicebear_|@babel/runtime/|_@babel_runtime@)',
+  '/node_modules/(?!@tc-chat/|_@tc-chat_|@ant-design/colors/|_@ant-design_colors@|@ant-design/x-markdown|_@ant-design_x-markdown@|marked/|_marked@|@dicebear/|_@dicebear_|@babel/runtime/|_@babel_runtime@)',
   '\\.pnp\\.[^\\\\/]+$',
 ];
 
@@ -63,6 +67,7 @@ module.exports = {
       transform,
       moduleNameMapper,
       transformIgnorePatterns,
+      setupFiles: ['<rootDir>/test/mocks/resizeObserverMock.js'],
       testTimeout: 30000,
     },
   ],

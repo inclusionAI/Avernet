@@ -36,6 +36,9 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   collapsedContent?: ReactNode | ((expand: () => void) => ReactNode);
   /** 挂载边缘：left=左侧栏（默认，手柄右缘、拖右变宽、含折叠态）；right=右侧副屏（手柄左缘、拖左变宽、方向语义反转、无折叠态、小屏不隐藏）。 */
   side?: 'left' | 'right';
+  /** 右侧副屏的展开/收起（chat-header-panels）：false 时宽度收 0、内容退出可交互，
+   * 面板保持挂载，经 width/opacity 过渡形成与 SDK 副屏同构的展开收起效果；左侧常驻列表不启用。 */
+  open?: boolean;
   /** 独立宽度组（默认为对话协作左栏常量）；右侧副屏按需传入。 */
   minWidth?: number;
   maxWidth?: number;
@@ -51,6 +54,7 @@ export function ResizableWorkspaceSidebar({
   className,
   collapsedContent,
   side = 'left',
+  open: openProp,
   minWidth: minWidthProp,
   maxWidth: maxWidthProp,
   defaultWidth: defaultWidthProp,
@@ -59,13 +63,14 @@ export function ResizableWorkspaceSidebar({
   ...rest
 }: ResizableWorkspaceSidebarProps) {
   const isRight = side === 'right';
+  const open = openProp ?? true;
   const minW = minWidthProp ?? WORKSPACE_SIDEBAR_MIN_WIDTH;
   const maxW = maxWidthProp ?? WORKSPACE_SIDEBAR_MAX_WIDTH;
   const defaultW = defaultWidthProp ?? WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
   const storageK = storageKeyProp ?? WORKSPACE_SIDEBAR_STORAGE_KEY;
   const sidebarRef = useRef<HTMLElement | null>(null);
   const containsTarget = useCallback((target: Node) => sidebarRef.current?.contains(target) ?? false, []);
-  useWorkspacePanelDismiss(isRight, containsTarget, onDismiss);
+  useWorkspacePanelDismiss(isRight && open, containsTarget, onDismiss);
   const contentId = `workspace-sidebar-content-${useId().replace(/:/g, '')}`;
   const [preferredWidth, setPreferredWidth] = useState(() => readStoredWidth(storageK, defaultW, minW, maxW));
   const [collapsed, setCollapsed] = useState(() => (isRight ? false : readStoredCollapsed()));
@@ -74,7 +79,10 @@ export function ResizableWorkspaceSidebar({
   const [maxWidth, setMaxWidth] = useState(maxW);
   const [dragging, setDragging] = useState(false);
   const width = clampWidth(preferredWidth, minW, maxWidth);
-  const renderedWidth = collapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : width;
+  // 收起态（右侧 open=false）宽度取 0，等价 SDK PanelArea 的 width:0/flex-basis:0；
+  // 左侧折叠态宽度独立（收起条 56px）。
+  const renderedWidth = !open ? 0 : collapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : width;
+  const contentHidden = collapsed || !open;
 
   const updatePreferredWidth = useCallback((nextWidth: number) => {
     preferredWidthRef.current = nextWidth;
@@ -179,20 +187,22 @@ export function ResizableWorkspaceSidebar({
       data-collapsed={collapsed}
       {...rest}
       className={cn(
-        'relative shrink-0 flex-col overflow-visible transition-[width] duration-300 ease-in-out',
+        'relative shrink-0 flex-col overflow-visible transition-[width,opacity] duration-300 ease-in-out',
         // 左侧栏右缘分割线按稿 lighten（1px #EEE ≈ border-border/60，与导航侧 0.5px 区分层级）+ muted 底 + lg 以下隐藏；
         // 右侧副屏左缘分割线维持全强度 token、全屏段显示、底色随 className
         isRight ? 'flex border-l border-divider' : 'hidden border-r border-divider/60 bg-muted/20 lg:flex',
+        // 右侧收起态：宽度已由 renderedWidth 取 0，透明 + 禁交互避免 0 宽残留 1px 分割线
+        !open && 'border-l-0 opacity-0 pointer-events-none',
         dragging && 'transition-none',
         className,
       )}
     >
       <div
         id={contentId}
-        aria-hidden={collapsed}
+        aria-hidden={contentHidden}
         className={cn(
           'flex min-h-0 flex-1 flex-col overflow-hidden transition-opacity duration-200',
-          collapsed && 'pointer-events-none invisible opacity-0',
+          contentHidden && 'pointer-events-none invisible opacity-0',
         )}
       >
         {children}
@@ -231,7 +241,7 @@ export function ResizableWorkspaceSidebar({
         </TooltipProvider>
       )}
 
-      {!collapsed && (
+      {!contentHidden && (
         <div
           role="separator"
           aria-label={isRight ? `调整${ariaLabel}宽度` : '调整对话协作左栏宽度'}
