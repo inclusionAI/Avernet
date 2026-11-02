@@ -53,7 +53,11 @@ pub(crate) async fn prepare_assignment(
         if caller_required {
             return Err(refused("caller lineage unavailable"));
         }
-        return Ok(None);
+        // No marks, no lineage — fall through to the session-capture
+        // fallback (spec L62): an ordinary master whose run lacks the
+        // protected-dispatch marks can still mint identity material from
+        // the session's relay capture.
+        return prepare_session_capture_fallback(flow, command, invocation, now).await;
     };
     let context = match &flow.bot_run_context {
         Some(port) => port.get_context(&command.run_id).await,
@@ -158,8 +162,11 @@ async fn prepare_workflow_parent_assignment(
         .as_ref()
         .and_then(|index| index.current(parent_run, now))
     else {
-        // No runtime lineage either: a legacy/no-row run — ordinary task.
-        return Ok(None);
+        // No runtime lineage: fall through to the session-capture fallback
+        // (spec L62) before settling on an ordinary task. The relay capture
+        // alone is sufficient identity material — the human spoke in this
+        // session, and the relay ledger redeems at dispatch time.
+        return prepare_session_capture_fallback(flow, command, invocation, now).await;
     };
     let context = match &flow.bot_run_context {
         Some(port) => port.get_context(&command.run_id).await,
@@ -199,6 +206,83 @@ async fn prepare_workflow_parent_assignment(
         parent_run_id: parent_run.to_owned(),
         parent_attempt,
         parent_bot_id,
+        invocation_id: invocation.to_string(),
+    }))
+}
+
+/// Spec L62 (relay-as-identity-source): fallback when the managed row
+/// lacks `caller_required` marks and no orchestration lineage exists
+/// (an ordinary master, not caller-ON), but the session holds a live
+/// owner→caller relay capture. The identity material comes from the
+/// relay ledger's per-turn bounded redemption AT DISPATCH TIME (the
+/// dispatch already checks its own budget), not from the managed row.
+///
+/// This supports "master in owner mode (not caller-enabled), worker
+/// caller-enabled" chains: the human identification is keyed to the
+/// session (the human spoke here), not to the master's protocol entry
+/// point, so any bot dispatching tasks within this session can carry
+/// the identity as long as the relay is assembled and the capture is
+/// live. This is additive — all existing paths are unchanged.
+async fn prepare_session_capture_fallback(
+    flow: &crate::BcsMessageFlow,
+    command: &BotEventCommand,
+    invocation: &str,
+    now: i64,
+) -> ServiceResult<Option<CallerDelegationAssignment>> {
+    // Gate 1: relay assembly must exist in this composition.
+    let Some(relay) = flow.caller_relay.as_ref() else {
+        return Ok(None);
+    };
+    // Gate 2: the session must have a live owner identity capture (the
+    // human spoke in this session — the identity is theirs, not the
+    // master's; `has_live_capture` is non-consuming).
+    let Some(session_id) = command
+        .bcs_session_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(None);
+    };
+    if !relay
+        .ledger
+        .has_live_capture(&bcs_config::resolve_env_str(), session_id, now)
+    {
+        return Ok(None);
+    }
+    // Gate 3: the dispatching master's execution context must still be
+    // alive — a terminal or expired run must not mint identity material.
+    let context = match &flow.bot_run_context {
+        Some(port) => port.get_context(&command.run_id).await,
+        None => None,
+    };
+    match context {
+        Some(context) => {
+            if context.terminal
+                || context.deadline_ms <= now as u64
+                || context.bot_id != command.bot_id
+                || context.group_id != command.group_id
+            {
+                return Ok(None);
+            }
+        }
+        None => return Ok(None),
+    }
+    // Live capture + live run: mint the delegation. The identity itself
+    // flows from the relay ledger at dispatch time (budget per capture:
+    // RELAY_PER_TURN redeems, expiry-bound). We mint only the non-secret
+    // association metadata here (spec L62: identity material never travels
+    // through the middle bot).
+    tracing::debug!(
+        bot_id = %command.bot_id,
+        group_id = %command.group_id,
+        run_id = %command.run_id,
+        session_id = %session_id,
+        "audit: session-capture delegation fallback fired (spec L62)"
+    );
+    Ok(Some(CallerDelegationAssignment {
+        parent_run_id: command.run_id.to_string(),
+        parent_attempt: 1,
+        parent_bot_id: command.bot_id.clone(),
         invocation_id: invocation.to_string(),
     }))
 }
