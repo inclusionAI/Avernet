@@ -121,9 +121,11 @@ pub use bcs_group_store::GroupBuilder;
 pub use bcs_routing::MessageRouter;
 
 // Server modules
+pub mod api_auth_registry;
 pub mod auth_wiring;
 pub mod bot_authority_wiring;
 mod bot_ws_admission_config;
+mod api_auth_config_values;
 mod config;
 mod collaboration_drafts;
 mod config_loader;

@@ -40,6 +40,12 @@ use logging::default_true;
 pub mod auth;
 pub use auth::{AuthChainConfig, AuthSdkConfig, AuthSdkEnvView, OAuthSettings, ProviderSettings};
 
+pub mod api_auth;
+pub use api_auth::{
+    ApiAuthConfig, ApiConfig, RESERVED_API_AUTH_FIELD_NAMES, is_valid_api_source_name,
+    validate_idle_timeout_minutes,
+};
+
 // ---------------------------------------------------------------------------
 // Manifest
 // ---------------------------------------------------------------------------
