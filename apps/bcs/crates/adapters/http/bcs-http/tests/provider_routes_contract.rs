@@ -3528,3 +3528,4 @@ async fn register_and_patch_provider_manage_caller_capabilities() {
         "the rejection names the missing mandatory field: {body:?}"
     );
 }
+

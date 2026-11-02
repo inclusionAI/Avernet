@@ -330,3 +330,4 @@ async fn non_terminal_chat_events_never_scan_for_the_frame() {
     assert_eq!(task_dispatch_count(&h).await, 0, "a failed claim never dispatched");
     assert!(h.intents.receipt.lock().await.is_none());
 }
+

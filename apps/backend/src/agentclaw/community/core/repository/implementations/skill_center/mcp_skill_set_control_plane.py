@@ -476,3 +476,4 @@ class McpSkillSetControlPlaneCommands:
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, engine_type: str | None = None) -> set[str]:
         with self._db.orm_session() as session:
             return self._mcp_installations(session, bot_id, owner_id)
+

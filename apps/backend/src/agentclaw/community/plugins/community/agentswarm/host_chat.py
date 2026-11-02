@@ -10,6 +10,10 @@ callers and tests keep importing from ``agentclaw...agentswarm.host``.
 """
 from __future__ import annotations
 
+from agentclaw.community.log import get_logger
+
+logger = get_logger("agentswarm")
+
 import asyncio
 import atexit
 import concurrent.futures
@@ -19,12 +23,8 @@ import threading
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from agentclaw.community.log import get_logger
-
 if TYPE_CHECKING:
     from agentclaw.community.core.agentswarm.domain.models import BotId
-
-logger = get_logger("agentswarm")
 
 # Upper bound on one engine chat round trip. It follows the swarm's own
 # per-attempt task budget (``orchestration.per_attempt_timeout``, 1800s

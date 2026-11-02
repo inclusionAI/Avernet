@@ -398,3 +398,4 @@ fn caller_snapshot_from_extracted(
 pub(crate) fn caller_cache_key(bot_id: &str, env: &str) -> String {
     format!("{env}\u{1}{bot_id}")
 }
+
