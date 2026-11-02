@@ -130,8 +130,9 @@ async def get_bot_binding_public(
                 data=None,
             )
 
-        bot = {**items[0], "template_config": items[0].get("template_config")}
-        if bot["template_config"] is None:
+        bot = dict(items[0])
+        if bot.get("template_config") is None:
+            bot.pop("template_config", None)
             template = template_repo.get_by_bot_id(bot_id)
             if template is not None:
                 bot["template_config"] = template.get("ext")

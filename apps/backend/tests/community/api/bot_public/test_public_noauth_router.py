@@ -172,6 +172,20 @@ class TestGetBotBindingPublic:
         assert "token" not in bot["ext"]
         assert bot["ext"]["arch_domain"] == "测试架构域"
 
+    def test_template_config_omitted_when_template_missing(
+        self, client, mock_bot_repo, mock_template_repo
+    ):
+        mock_bot_repo.list_by_conditions.return_value = (
+            1,
+            [{"bot_id": "arch_001", "device_id": "device_001", "binding_id": 1001}],
+        )
+        mock_template_repo.get_by_bot_id.return_value = None
+
+        resp = client.get("/api/public/bots/arch_001/binding")
+
+        assert resp.status_code == 200
+        assert "template_config" not in resp.json()["data"]
+
     def test_not_found(self, client, mock_bot_repo):
         mock_bot_repo.list_by_conditions.return_value = (0, [])
 
