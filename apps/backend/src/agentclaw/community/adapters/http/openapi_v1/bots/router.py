@@ -113,6 +113,7 @@ from agentclaw.community.core.workspace.constants import (
     INTERNAL_ENGINE_TYPES,
     _get_engine_types,
 )
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -239,6 +240,8 @@ def _to_bot(
     engine = d.get("active_engine") or ""
     has_template = d.get("template_type") not in (None, "")
     return Bot(
+        entity_id=d.get("entity_id") or "",
+        bcn_bot_id=bcn_bot_reference(d),
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
@@ -300,6 +303,7 @@ def _resolve_row_spaces(
 def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
     """Project a Bot record onto the deliberately display-only batch contract."""
     return BotMetadata(
+        bcn_bot_id=bcn_bot_reference(d),
         bot_id=d["bot_id"],
         owner_id=d.get("owner_id") or "",
         bot_name=d.get("bot_name") or "",

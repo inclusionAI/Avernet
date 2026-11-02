@@ -413,3 +413,21 @@ Owner consumer/HTTP 契约、相关协作者/Space 间接触发回归、配置/D
 
 尚未运行任何实现单测、架构测试、singlebox 或外部部署验收，因为本轮没有实现。
 后续实施 PR/commit 和实际测试结果由实施阶段补充；不得将本设计批准视为功能已交付。
+
+## 2026-11-02 已授权兼容补齐
+
+本次用户明确授权的新范围取代上文“不调整前端/不新增 HTTP 管理接口”对本轮的限制：
+补齐已有新老前端使用稳定 BCN 地址，增加仅登录态 super_admin 可调用的单 Bot
+补订正提交接口；不增加 Owner 修改入口、不执行历史订正、不增加持久投递保证。
+
+- Owner/managers 使用同一注册地址规则：服务 Bot 的 entity 或转换时保留地址；
+  个人/default/desktop 保持旧注册地址。事实读取携带真实 Bot 类型与保留地址。
+- 列表/详情、协作目录、display metadata 增量返回 `bcn_bot_id`，原 Owner 字段语义不变。
+  前端可兼容未返回该字段的旧服务器；不新增转交 UI。
+- `POST /api/bots/owner-handoffs/bcn-repair` 仅接收正整数 `bot_pk`，认证管理员读取
+  当前事实提交同一同步运行时。202 仅代表入队/合并，不代表 BCN 已完成更新。
+- 既有转交接口支持已配置 `admin.super_admin` 代交接，记录真实操作者，仍执行
+  服务 Bot、Space、审批与凭证校验。不得接受客户端声明的管理员/actor 权限。
+- OCB 本轮只开启预发 ownership；正式环境保持关闭，历史数据订正另行操作。
+
+操作说明与验收项见 [operations](../../docs/bot-ownership-sync-operations.md)。

@@ -1,13 +1,18 @@
 """Ownership composition reuses the manager stack, dispatcher and worker loop."""
+
 from injector import Binder, Module, provider, singleton
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
 from agentclaw.community.api.bot_ownership_sync import BotOwnershipSyncProtocol
+from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
     BotManagerSyncDispatcher,
 )
 from agentclaw.community.core.bot_management.ownership_sync.notifications import (
     DisabledBotOwnershipSync,
+)
+from agentclaw.community.core.bot_management.ownership_sync.operations import (
+    OwnershipSyncOperations,
 )
 from agentclaw.community.core.bot_management.ownership_sync.repair import (
     DisabledOwnershipSyncRepair,
@@ -19,6 +24,7 @@ from agentclaw.community.core.bot_management.ownership_sync.service import (
 from agentclaw.community.core.repository.implementations.bot.ownership_sync import (
     SqlOwnershipSyncReadRepository,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.ownership_sync import (
     OwnershipSyncReadRepository,
 )
@@ -39,9 +45,12 @@ class BotOwnershipSyncModule(Module):
     def ownership_sync_service(self) -> BotOwnershipSyncService:
         stack = self.__injector__.get(ManagerSyncStack)
         if stack.ownership is None:
-            raise RuntimeError("ownership sync unavailable: " + (stack.reason or "disabled"))
+            raise RuntimeError(
+                "ownership sync unavailable: " + (stack.reason or "disabled")
+            )
         return BotOwnershipSyncService(
-            self.__injector__.get(OwnershipSyncReadRepository), stack.ownership,
+            self.__injector__.get(OwnershipSyncReadRepository),
+            stack.ownership,
         )
 
     @singleton
@@ -70,3 +79,13 @@ class BotOwnershipSyncModule(Module):
             reader=self.__injector__.get(OwnershipSyncReadRepository),
             notifier=self.__injector__.get(BotOwnershipSyncProtocol),
         )
+
+    @singleton
+    @provider
+    def ownership_operations(
+        self,
+        bots: BotRepository,
+        repair: OwnershipSyncRepairService,
+        config: ManagerSyncConfig,
+    ) -> OwnershipSyncOperations:
+        return OwnershipSyncOperations(bots, repair, super_admin(), config.env)
