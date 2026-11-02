@@ -1,5 +1,7 @@
 # 01 — Interface and State Model
 
+[简体中文](01-interface-and-state-model.zh-CN.md)
+
 - Parent: [BCN Cloud Orchestration for Personal Agents](README.md)
 - Status: Draft for team review
 

@@ -1,5 +1,7 @@
 # 03 — Execution Correctness
 
+[简体中文](03-execution-correctness.zh-CN.md)
+
 - Parent: [BCN Cloud Orchestration for Personal Agents](README.md)
 - Status: Draft for team review
 

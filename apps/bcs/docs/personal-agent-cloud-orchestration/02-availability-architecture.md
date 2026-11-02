@@ -1,5 +1,7 @@
 # 02 — Availability Architecture
 
+[简体中文](02-availability-architecture.zh-CN.md)
+
 - Parent: [BCN Cloud Orchestration for Personal Agents](README.md)
 - Status: Draft for team review
 

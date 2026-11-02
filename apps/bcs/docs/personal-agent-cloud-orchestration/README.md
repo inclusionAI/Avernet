@@ -1,5 +1,7 @@
 # BCN Cloud Orchestration for Personal Agents
 
+[简体中文](README.zh-CN.md)
+
 - Date: 2026-10-31
 - Status: **Draft for team review**
 - Scope: the **Cloud track** of the BCN ↔ personal-agent integration — BCN runs

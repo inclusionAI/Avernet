@@ -1,5 +1,7 @@
 # 04 — Supply-Agent Compliance
 
+[简体中文](04-supply-agent-compliance.zh-CN.md)
+
 - Parent: [BCN Cloud Orchestration for Personal Agents](README.md)
 - Status: Draft for team review
 
