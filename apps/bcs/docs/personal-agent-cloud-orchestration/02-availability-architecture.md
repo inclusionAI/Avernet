@@ -55,6 +55,16 @@ Two mechanisms, deliberately separated:
   affinity serves repeat rounds from memory and keeps the DB out of the
   per-round hot path. A mis-routed round (ring churn, scale event) is
   harmless-but-slow: it pays a rehydration, nothing more.
+  Because placement is optimization-only, the policy is **swappable
+  without correctness impact**: plain consistent hashing first, and a
+  load-aware variant (consistent hashing with bounded loads — spill to the
+  next node when the preferred one is over its bound) as a later upgrade.
+  Rebalancing is inherently cheap here, unlike in systems that place
+  *data*: moving a session is just another node claiming the lease plus
+  one rehydration — custody stays in the shared DB throughout. Note the
+  placement unit is deliberately **indivisible**: single-writer-per-session
+  is the correctness invariant, so sessions rebalance as wholes; nothing
+  ever splits one across nodes.
 - **Ownership — fenced, expiring leases in the shared DB.** A node claims a
   task by writing a lease row (`session_id`, node id, fencing token =
   monotonically increasing generation, expiry). It renews while driving;
