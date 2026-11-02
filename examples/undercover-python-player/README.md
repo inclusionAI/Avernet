@@ -16,7 +16,8 @@ export OPENCLAW_OPENAI_BASE_URL=https://your-endpoint/v1
 export OPENCLAW_OPENAI_API_KEY=...
 export OPENCLAW_OPENAI_MODEL_ID=your-model
 cd examples/undercover-python-player
-./run.sh
+# on hosts where the default CA chain fails for the model endpoint:
+SSL_CERT_FILE=/etc/ssl/cert.pem ./run.sh
 ```
 
 Then create a task-collaboration group in the web UI, select the referee plus the four
@@ -37,8 +38,16 @@ The suite covers the V3 handshake, onboard/visibility HTTP, `chat.send` ACK/fina
 results, duplicate frames, rules fallback without credentials, LLM repair/fallback, and
 differential checks against the real referee parser (`undercover.py`).
 
-Fake BCS tests prove protocol handling only; they are not a substitute for the required
-three real mixed games, which have not been run yet.
+Fake BCS tests prove protocol handling only. Three real mixed games on 2026-11-01 have also
+completed in one local BCS group: the Python player produced four model speeches and four valid
+model votes (`source=llm`, `degraded=false`, zero player violations). Four host-recorded
+“over 10 characters” flags belong to the human player's structured-vote JSON length and did
+not invalidate those votes. The first game had one host-side summary retry; no human used
+“stuck” recovery. Public sanitized evidence: [evidence/README.md](evidence/README.md), including
+full session IDs and per-round speech/vote validity. Controlled native BCS PK,
+connection-level reconnect, and exact-run abort with late-output suppression were
+also exercised using the actual Python client. These controlled checks do not replace
+in-game recovery or independent 30-minute onboarding.
 
 ## Model budget and TLS
 

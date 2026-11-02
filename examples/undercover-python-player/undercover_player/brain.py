@@ -98,11 +98,12 @@ def _fallback_speech(word: str, seed: int) -> str:
 
 
 def _fallback_vote(task: GameTask, seed: int) -> str:
+    # 常规投票缺少可靠模型判断时明确弃权，避免把随机票伪装成推理结果。
+    if task.allow_abstain:
+        return "我弃权"
     candidates = [seat for seat in task.legal_targets if seat != task.seat]
     if candidates:
         return f"我投{candidates[seed % len(candidates)]}号"
-    if task.allow_abstain:
-        return "我弃权"
     # PK 正常一定有候选；真的没有时也不能弃权，给一个明确无效票会被主持人作废，
     # 但比空回复更能暴露数据问题。
     return "我弃权"
@@ -126,7 +127,7 @@ class RulesBrain:
         if task.kind == TaskKind.VOTE_START:
             return Answer(vote_start_text(), "rules", "fixed vote-start phrase")
         if task.kind == TaskKind.VOTE:
-            return Answer(_fallback_vote(task, seed), "rules", "deterministic vote")
+            return Answer(_fallback_vote(task, seed), "rules", "explicit abstention or deterministic PK vote")
         if task.kind == TaskKind.EULOGY:
             return Answer(_fallback_eulogy(task, seed), "rules", "deterministic eulogy")
         if task.kind == TaskKind.SPEECH:

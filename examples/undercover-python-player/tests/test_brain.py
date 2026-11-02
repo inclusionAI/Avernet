@@ -93,6 +93,7 @@ class BrainTests(unittest.TestCase):
         normal = parse_task(state_machine_text("vote_3", vote_instruction()))
         answer = asyncio.run(RulesBrain().answer(normal, "run-2"))
         self.assertIsNone(validate_answer(normal, answer.text))
+        self.assertEqual(answer.text, "我弃权")
         pk = parse_task(state_machine_text("vote_3", vote_instruction(pk=True, targets=(1, 2))))
         pk_answer = asyncio.run(RulesBrain().answer(pk, "run-3"))
         self.assertIsNone(validate_answer(pk, pk_answer.text))
@@ -216,6 +217,22 @@ class BrainTests(unittest.TestCase):
         hint = _tls_hint(error)
         self.assertIn("SSL_CERT_FILE=/etc/ssl/cert.pem", hint)
         self.assertIn("never disable verification", hint)
+
+    def test_vote_llm_failure_degrades_to_explicit_abstention(self) -> None:
+        fake = FakeOpenAI([(500, "{}")])
+        try:
+            config = self._config(
+                llm_base_url=f"http://127.0.0.1:{fake.port}/v1",
+                llm_api_key="test-key",
+                llm_model="deepseek-flash",
+            )
+            task = parse_task(state_machine_text("vote_3", vote_instruction()))
+            answer = asyncio.run(HybridBrain(config).answer(task, "run-vote-degraded"))
+            self.assertEqual(answer.source, "rules")
+            self.assertEqual(answer.text, "我弃权")
+            self.assertIsNone(validate_answer(task, answer.text))
+        finally:
+            fake.close()
 
     def test_llm_failure_falls_back_to_rules(self) -> None:
         fake = FakeOpenAI([(500, "{}")])

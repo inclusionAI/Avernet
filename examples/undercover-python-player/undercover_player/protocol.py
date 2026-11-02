@@ -183,6 +183,7 @@ class Run:
     aborted: bool = False
     result: str | None = None
     final_sent: bool = False
+    terminal_event_sent: bool = False
     started_at_ms: int = field(default_factory=now_ms)
     task: asyncio.Task[None] | None = field(default=None, repr=False, compare=False)
     terminal_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)

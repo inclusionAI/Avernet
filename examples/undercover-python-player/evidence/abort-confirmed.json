@@ -1,0 +1,29 @@
+{
+  "evidence_kind": "real isolated BCS and actual CPython BcnClient state-machine cancel",
+  "date": "2026-11-02",
+  "bcs_branch": "codex/bcs-state-machine-cancel",
+  "bcs_port": 21001,
+  "setup": "temporary local BCS data and two temporary Bot identities; gate task waits until released",
+  "session_id": "bcs_grp_1ac0a6cc6a1043aa828273fce610cf86:7f5f9988",
+  "state_machine_run_id": "sm-0e70c87f-bef4-4546-a083-d41ba1a5da46",
+  "bot_run_id": "smnode-sm-0e70c87f-bef4-4546-a083-d41ba1a5da46-gate-0",
+  "start_http_status": 202,
+  "cancel_http_status": 200,
+  "cancel_run_status": "aborted",
+  "run_status_after_gate_release": "aborted",
+  "received_chat_abort": {
+    "count": 1,
+    "run_id": "smnode-sm-0e70c87f-bef4-4546-a083-d41ba1a5da46-gate-0",
+    "session_key": "bcs_grp_1ac0a6cc6a1043aa828273fce610cf86:7f5f9988"
+  },
+  "player_events": [
+    {"event": "task_received", "ts_ms": 1793557316537},
+    {"event": "abort_requested", "ts_ms": 1793557317543},
+    {"event": "task_cancelled", "ts_ms": 1793557317543},
+    {"event": "aborted", "ts_ms": 1793557317544}
+  ],
+  "final_sent_after_cancel": false,
+  "player_chat_final_frames": 0,
+  "scope": "controlled state-machine gate, not one of the three human mixed-table games",
+  "redaction": "no token, credential, secret word, raw group data, or local absolute path"
+}

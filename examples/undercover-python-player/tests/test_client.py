@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import stat
 import tempfile
 import threading
@@ -150,7 +152,8 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         run_id = "smnode-run-1-vote_3-0"
         await self._send(state_machine_text("vote_3", vote_instruction()), run_id)
         frame = await self.fake.wait_for_final(run_id)
-        self.assertIn(frame["payload"]["content"], {"我投1号", "我投2号", "我投4号"})
+        # 无模型/模型失败时常规票明确弃权，不再伪造确定性推理票。
+        self.assertEqual(frame["payload"]["content"], "我弃权")
 
         pk_id = "smnode-run-2-vote_3-0"
         await self._send(
@@ -506,6 +509,105 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(finals, [])
 
+    async def test_unknown_state_machine_node_returns_explicit_error(self) -> None:
+        client = await self._start(RulesBrain())
+        run_id = "unrecognized-sm-node-1"
+        text = state_machine_text("mystery_node", "这是一条无法识别的节点指令")
+        await self.fake.send(chat_send_frame(text, run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        error = await self.fake.wait_for(
+            lambda frame: (
+                frame.get("type") == "event"
+                and frame.get("event") == "chat"
+                and isinstance(frame.get("payload"), dict)
+                and frame["payload"].get("runId") == run_id
+                and frame["payload"].get("state") == "error"
+            ),
+            timeout=2,
+        )
+        self.assertEqual(error["payload"].get("errorCode"), "UNRECOGNIZED_NODE")
+        await asyncio.sleep(0.1)
+        finals = [
+            item for item in client.sent_frames
+            if item.get("type") == "event" and item.get("payload", {}).get("runId") == run_id
+            and item["payload"].get("state") == "final"
+        ]
+        self.assertEqual(finals, [])
+        records = [
+            json.loads(line) for line in client.event_log.path.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
+        self.assertTrue(any(item.get("event") == "task_unrecognized" for item in records))
+        self.assertTrue(any(item.get("event") == "terminal_error_sent" for item in records))
+
+    async def test_session_memory_does_not_mix_words_across_sessions(self) -> None:
+        client = await self._start(RulesBrain())
+        session_a = "bcs_grp_a:aaaaaaaa"
+        session_b = "bcs_grp_b:bbbbbbbb"
+        a_run = "smnode-a-speak_1-0"
+        b_run = "smnode-b-speak_2-0"
+        await self.fake.send(
+            chat_send_frame(
+                state_machine_text("speak_1", speech_instruction(word="苹果", seat=1)),
+                run_id=a_run,
+                session_key=session_a,
+                session_id=session_a,
+            )
+        )
+        await self.fake.wait_for_response(a_run)
+        await self.fake.wait_for_final(a_run)
+        await self.fake.send(
+            chat_send_frame(
+                state_machine_text("speak_2", speech_instruction(word="香蕉", seat=2)),
+                run_id=b_run,
+                session_key=session_b,
+                session_id=session_b,
+            )
+        )
+        await self.fake.wait_for_response(b_run)
+        await self.fake.wait_for_final(b_run)
+
+        eulogy_run = "eulogy-session-a"
+        await self.fake.send(
+            chat_send_frame(
+                EULOGY_TEXT,
+                run_id=eulogy_run,
+                session_key=session_a,
+                session_id=session_a,
+                timeout_ms=None,
+            )
+        )
+        await self.fake.wait_for_response(eulogy_run)
+        await self.fake.wait_for_final(eulogy_run)
+        records = [
+            json.loads(line)
+            for line in client.event_log.path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        completed = next(item for item in records if item.get("event") == "task_completed" and item.get("run_id") == eulogy_run)
+        expected = hashlib.sha256("苹果".encode()).hexdigest()[:12]
+        self.assertEqual(completed.get("word_hash"), expected)
+
+    async def test_unknown_task_is_logged_with_duration(self) -> None:
+        client = await self._start(RulesBrain())
+        run_id = "unrecognized-task-1"
+        await self.fake.send(chat_send_frame("这是一条无法识别的节点任务", run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        final = await self.fake.wait_for_final(run_id)
+        self.assertEqual(final["payload"]["content"], "我只处理谁是卧底节点任务。")
+        await asyncio.sleep(0.1)
+        records = [
+            json.loads(line)
+            for line in client.event_log.path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        unrecognized = [item for item in records if item.get("event") == "task_unrecognized"]
+        self.assertEqual(len(unrecognized), 1)
+        self.assertEqual(unrecognized[0]["run_id"], run_id)
+        completed = [item for item in records if item.get("event") == "task_completed"]
+        self.assertEqual(len(completed), 1)
+        self.assertIsInstance(completed[0].get("duration_ms"), int)
+        self.assertGreaterEqual(completed[0]["duration_ms"], 0)
+
     async def test_rules_brain_works_without_model_credentials(self) -> None:
         config = self._config()
         self.assertFalse(config.llm_enabled())
@@ -513,7 +615,7 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         run_id = "smnode-run-1-vote_3-0"
         await self._send(state_machine_text("vote_3", vote_instruction()), run_id)
         frame = await self.fake.wait_for_final(run_id)
-        self.assertIn(frame["payload"]["content"], {"我投1号", "我投2号", "我投4号"})
+        self.assertEqual(frame["payload"]["content"], "我弃权")
 
 
 if __name__ == "__main__":

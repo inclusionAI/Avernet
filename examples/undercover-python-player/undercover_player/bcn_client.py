@@ -43,7 +43,7 @@ from .protocol import (
     parse_chat_send,
     request_frame,
 )
-from .store import EventLog, HistoryStore, TokenStore
+from .store import EventLog, HistoryStore, SessionMemory, TokenStore
 from .tasks import GameTask, TaskKind, TaskParseError, parse_task, vote_start_text
 
 LOGGER = logging.getLogger("undercover_player")
@@ -54,6 +54,10 @@ _FRAME_HISTORY = 1000
 _ABORT_GRACE_SECONDS = 5.0
 _ABORT_LOCK_SECONDS = 2.0
 _ABORT_RESPONSE_TIMEOUT = _ABORT_GRACE_SECONDS + _ABORT_LOCK_SECONDS + 1.0
+# 会话级状态只保留有限数量的会话，并给长时间空闲会话设置 TTL；活跃 run 由清理逻辑保护。
+_HISTORY_MAX_SESSIONS = 64
+_SESSION_MEMORY_MAX_SESSIONS = 128
+_SESSION_STATE_TTL_SECONDS = 6 * 60 * 60
 
 
 def _abort_error(code: str, message: str) -> dict[str, object]:
@@ -85,7 +89,14 @@ class BcnClient:
         self.brain = brain if brain is not None else build_brain(config)
         self.token_store = token_store or TokenStore(config.token_file)
         self.event_log = event_log or EventLog(config.log_dir)
-        self.history = history or HistoryStore()
+        self.history = history or HistoryStore(
+            max_sessions=_HISTORY_MAX_SESSIONS,
+            ttl_seconds=_SESSION_STATE_TTL_SECONDS,
+        )
+        self._memory = SessionMemory(
+            max_sessions=_SESSION_MEMORY_MAX_SESSIONS,
+            ttl_seconds=_SESSION_STATE_TTL_SECONDS,
+        )
         self.registry = RunRegistry()
         self.connected = asyncio.Event()
         self.stopped = asyncio.Event()
@@ -95,7 +106,6 @@ class BcnClient:
         self._ws: Any = None
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._aux_tasks: set[asyncio.Task[None]] = set()
-        self._memory: dict[str, tuple[int | None, str | None]] = {}
         self._send_lock = asyncio.Lock()
         self._stopping = False
 
@@ -413,7 +423,7 @@ class BcnClient:
                     _abort_error(RUN_NOT_ABORTABLE, "final delivery is still in flight"),
                 )
                 return
-            if run.terminal and run.final_sent:
+            if run.terminal and run.terminal_event_sent:
                 # final 已经发出，取消请求按协议幂等成功，但不能谎称这次取消生效。
                 result = {"ok": True, "payload": {"aborted": False, "aborted_run_ids": []}}
             else:
@@ -468,7 +478,8 @@ class BcnClient:
             await self._send(error_response(frame_id, INVALID_REQUEST, "chat.history requires session_key"))
             return
         limit = params.get("limit") if isinstance(params, dict) else None
-        messages = self.history.messages(session_key)
+        active_sessions = self._active_session_keys()
+        messages = self.history.messages(session_key, active_session_keys=active_sessions)
         if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
             messages = messages[-limit:]
         await self._send(
@@ -485,8 +496,10 @@ class BcnClient:
     # ------------------------------------------------------------- generation
 
     async def _process_run(self, run: Run) -> None:
+        started_ms = now_ms()
         try:
-            known_seat, known_word = self._memory.get(run.session_id, (None, None))
+            known = self._memory.get(run.session_id, active_session_keys=self._active_session_keys())
+            known_seat, known_word = known if known is not None else (None, None)
             try:
                 task = parse_task(run.chat.text, known_word=known_word, known_seat=known_seat)
             except TaskParseError:
@@ -497,9 +510,11 @@ class BcnClient:
                     raw_text=run.chat.text,
                 )
             if task.seat is not None or task.word is not None:
-                self._memory[run.session_id] = (
+                self._memory.remember(
+                    run.session_id,
                     task.seat if task.seat is not None else known_seat,
                     task.word if task.word is not None else known_word,
+                    active_session_keys=self._active_session_keys(),
                 )
             self._log(
                 "task_received",
@@ -512,6 +527,39 @@ class BcnClient:
                 is_pk=task.is_pk,
                 deadline_ms=run.deadline_ms,
             )
+            if task.kind == TaskKind.UNKNOWN:
+                self._log("task_unrecognized", run_id=run.run_id, session_id=run.session_id, node_id=task.node_id)
+                if "[State Machine Task]" in run.chat.text:
+                    # 游戏协作节点必须明确失败，绝不能给主持人一个看似成功的 final。
+                    await self._send_error(
+                        run,
+                        "UNRECOGNIZED_NODE",
+                        "state machine node task could not be recognized",
+                    )
+                else:
+                    # 普通聊天没有游戏节点语义；给一句保守的拒绝，不伪装成任务完成。
+                    text = "我只处理谁是卧底节点任务。"
+                    sent = await self._send_final(run, text)
+                    if sent:
+                        self.history.append(
+                            run.session_key,
+                            text,
+                            session_id=run.session_id,
+                            active_session_keys=self._active_session_keys(),
+                        )
+                        self._log(
+                            "task_completed",
+                            run_id=run.run_id,
+                            session_id=run.session_id,
+                            kind="unknown",
+                            source="rules",
+                            chars=len(text),
+                            word_hash=None,
+                            degraded=True,
+                            duration_ms=max(0, now_ms() - started_ms),
+                        )
+                        self._log("chat_unrecognized", run_id=run.run_id, session_id=run.session_id, chars=len(text))
+                return
             if task.kind == TaskKind.ONBOARDING:
                 self.registry.mark_terminal(run)
                 return
@@ -539,7 +587,12 @@ class BcnClient:
             sent = await self._send_final(run, text)
             if not sent:
                 return
-            self.history.append(run.session_key, text, session_id=run.session_id)
+            self.history.append(
+                run.session_key,
+                text,
+                session_id=run.session_id,
+                active_session_keys=self._active_session_keys(),
+            )
             self._log(
                 "task_completed",
                 run_id=run.run_id,
@@ -549,6 +602,7 @@ class BcnClient:
                 chars=len(text),
                 word_hash=self._word_hash(task.word),
                 degraded=answer.source != "llm",
+                duration_ms=max(0, now_ms() - started_ms),
             )
         except asyncio.CancelledError:
             self._log("task_cancelled", run_id=run.run_id)
@@ -561,6 +615,15 @@ class BcnClient:
         finally:
             if not run.terminal:
                 self.registry.mark_terminal(run, aborted=run.aborted)
+            self._prune_session_state()
+
+    def _active_session_keys(self) -> set[str]:
+        return {run.session_id for run in self.registry.active()}
+
+    def _prune_session_state(self) -> None:
+        active = self._active_session_keys()
+        self._memory.prune(active)
+        self.history.prune(active)
 
     async def _answer(self, task: GameTask, run: Run) -> Answer:
         try:
@@ -592,6 +655,38 @@ class BcnClient:
             return "嗯，不太好说。"
         return None
 
+    async def _send_error(self, run: Run, error_code: str, error_message: str) -> bool:
+        """发送明确的失败终态；游戏节点无法识别时使用，而不是编造成功 final。"""
+
+        async with run.terminal_lock:
+            if run.aborted or run.terminal:
+                self._log("error_suppressed_aborted", run_id=run.run_id)
+                return False
+            if run.expired():
+                self.registry.mark_terminal(run)
+                self._log("error_suppressed_expired", run_id=run.run_id)
+                return False
+            seq = run.next_seq()
+            frame = chat_event_frame(
+                run_id=run.run_id,
+                session_id=run.session_id,
+                seq=seq,
+                state="error",
+                error_code=error_code,
+                error_message=error_message,
+            )
+            await self._send(frame)
+            run.terminal_event_sent = True
+            self.registry.mark_terminal(run)
+            self._log(
+                "terminal_error_sent",
+                run_id=run.run_id,
+                session_id=run.session_id,
+                seq=seq,
+                error_code=error_code,
+            )
+            return True
+
     async def _send_final(self, run: Run, text: str) -> bool:
         """在 run 级锁内做最后一次 aborted/expired 检查并发送 final。
 
@@ -616,6 +711,7 @@ class BcnClient:
             )
             await self._send(frame)
             run.final_sent = True
+            run.terminal_event_sent = True
             self.registry.mark_terminal(run, result=text)
             self._log("final_sent", run_id=run.run_id, session_id=run.session_id, seq=seq, chars=len(text))
             return True
@@ -640,6 +736,7 @@ class BcnClient:
             task.cancel()
         self._tasks.clear()
         self._aux_tasks.clear()
+        self._prune_session_state()
         self._log("runs_cancelled", reason=reason)
 
     def _word_hash(self, word: str | None) -> str | None:

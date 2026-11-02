@@ -9,7 +9,9 @@
 - 协议：BCN Bot WebSocket V3（`/ws/bot`）
 - 依赖：Python 3.12+、`websockets>=15,<17`（由 `uv` 管理）
 - 已通过离线测试：fake BCS 握手/任务/abort/过期结果/无密钥兜底 + 真实主持人解析器差分；
-- **尚未运行真实三局**：本机缺 Rust/protoc/OpenClaw、模型凭证和人类玩家，详见文末限制。
+- 已完成三局真实混合牌桌对局（同一协作群、三个独立会话）：老陈共 4 次发言、4 张有效票，
+  8 个实际任务均为模型生成且未降级；主持人记录老陈违规 0。另有 1 次 `vote_start`
+  规则任务不计票。公开脱敏证据见 [evidence/](evidence/README.md)。
 
 ## 1. 它做什么
 
@@ -29,7 +31,10 @@ BCS/主持人 --chat.send(节点指令)--> 本玩家
   `RUN_NOT_ABORTABLE`（retryable），不谎称取消。确认在后台完成，接收循环不被慢生成阻塞；
   取消后该 run 的迟到输出（包括 `to_thread` 里继续跑的 HTTP 结果）不会再发 final。
 - 节点超时（`timeout_ms`，玩家节点默认 420s）后结果直接丢弃，不污染下一节点。
-- 重复 `chat.send` 只 ACK，不重复生成。
+- 重复 `chat.send` 只 ACK，不重复生成；`HistoryStore` 与 session 记忆有会话数/TTL 上限，
+  活跃 run 的会话不会被清理，跨会话词不串。
+- 游戏 state machine 节点无法识别时发送明确的 `state=error`，不伪造成功 final；
+  普通聊天无法识别时只回一句保守拒绝。
 - 心跳：60s `bot.status`；断线指数退避重连；持久化 token 复用身份。
 - 首次连接自动 HTTP onboard（名称/能力）并设 `visibility=public`。
 
@@ -65,25 +70,33 @@ export OPENCLAW_OPENAI_MODEL_ID=your-model
 ./singlebox/singlebox.sh start bcs_frontend
 curl --fail http://127.0.0.1:21000/health
 
-# 只起主持人 + 其余 4 个玩家；被替换的老陈不再启动
-BOTS_EXCLUDED_PROFILE_SOURCE=player-laochen \
-  ./singlebox/singlebox.sh start bots \
-  --profile-dir singlebox/agents/6bots_undercover_game_profile
+# 在临时 profile 中排除原 OpenClaw 老陈；不改仓库原文件
+PROFILE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/avernet-undercover-XXXXXX")
+cp -R singlebox/agents/6bots_undercover_game_profile/. "$PROFILE_DIR/"
+jq '.bots |= map(select(.source != "player-laochen"))' "$PROFILE_DIR/bots.json" > "$PROFILE_DIR/bots.filtered.json"
+mv "$PROFILE_DIR/bots.filtered.json" "$PROFILE_DIR/bots.json"
+test "$(jq '.bots | length' "$PROFILE_DIR/bots.json")" = 5
+# 确保 30801-30841 端口空闲；若已有同一牌桌在运行，先按 2.5 停止
+./singlebox/singlebox.sh check bots --profile-dir "$PROFILE_DIR"
+./singlebox/singlebox.sh start bots --profile-dir "$PROFILE_DIR"
 
 ./singlebox/singlebox.sh status bcs_frontend
-./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/6bots_undercover_game_profile
+./singlebox/singlebox.sh status bots --profile-dir "$PROFILE_DIR"
 ```
 
-> `BOTS_EXCLUDED_PROFILE_SOURCE` 是 singlebox 内部过滤开关（`singlebox/modules/bots.sh`
-> 的 `bots_dynamic_specs/count` 使用，`singlebox/verity/test_hybrid.sh` 也用它）。
-> 若你的版本不生效，回退方案：复制 profile 到临时目录，用 `jq` 从 `bots.json` 删掉
-> `source=player-laochen` 的条目，再对临时目录执行 `start bots --profile-dir`；不要改原 profile。
+> **不要使用 `BOTS_EXCLUDED_PROFILE_SOURCE`**：当前 `singlebox.sh` 会在 `start/check bots`
+> 路径把它当成 Claude hybrid 参数，报 `--exclusive-profile-dir and --claude-profile-dir
+> must be provided together`。本机已验证临时 profile 方式：5 个 OpenClaw Bot 以 30801-30841
+> 运行，`status bots` 能识别，原 `singlebox/agents/6bots_undercover_game_profile/` 未被修改。
+> 保留 `PROFILE_DIR` 变量到本次终端会话结束；停机时必须使用同一个目录。
 
 ### 2.3 启动纯 Python 玩家
 
 ```bash
 cd examples/undercover-python-player
-./run.sh
+# 本机 Python 3.12 默认 CA 对 DeepSeek 服务会 CERTIFICATE_VERIFY_FAILED：
+SSL_CERT_FILE=/etc/ssl/cert.pem ./run.sh
+# 若你的机器默认 CA 正常，可直接 ./run.sh；不要关闭证书校验。
 ```
 
 可用参数/环境变量：
@@ -140,9 +153,12 @@ SSL_CERT_FILE=/etc/ssl/cert.pem ./run.sh
 
 ### 2.5 玩完清理
 
+先回到仓库根目录，再停止临时 profile 的 5 个 Bot（`PROFILE_DIR` 必须是本次启动用的同一路径）：
+
 ```bash
-# Ctrl-C 停止纯 Python 玩家
-./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/6bots_undercover_game_profile
+# 在 examples/undercover-python-player 里 Ctrl-C 停止纯 Python 玩家
+cd /path/to/Avernet
+./singlebox/singlebox.sh stop bots --profile-dir "$PROFILE_DIR"
 ./singlebox/singlebox.sh stop bcs_frontend
 ```
 
@@ -202,7 +218,7 @@ uv run --with websockets --with pytest pytest -q
 uv run --with ruff ruff check undercover_player tests
 ```
 
-覆盖：
+当前 70 项离线测试，覆盖：
 
 - fake BCS 真实 WebSocket：握手、onboard/visibility HTTP、chat.send ACK、final、inject、history；
 - 发言/投票/PK/预备/遗言任务解析与输出；
@@ -226,18 +242,34 @@ fake BCS 只证明本玩家对协议的处理正确，**不等于**真实三局�
 - 日志是 JSONL，不含 token；词只记录 sha256 前 12 位，不记录原文。
 - `delivery-2611/` 与对局日志不提交到上游仓库。
 
-## 6. 3 局验收记录方法
+## 6. 三局验收结果与公开证据
 
-每局保存：
+2026-11-01 在本机同一协作群 `bcs_grp_93c843085d6d4c0ab2fae3765e112763` 完成三局，
+三份主持人状态均为 `FINISHED` 且已 `reveal`：
 
-1. 本玩家 `~/.avernet/undercover-python-player/logs/<session>.jsonl`；
-2. 主持人局状态：`$BOT_DATA_DIR/undercover-game/<session>.json`（主持人 bot 的数据目录；
-   也可在相应目录 `find . -path '*undercover-game/*.json'`）；
-3. 页面聊天记录/副屏录屏。
+| 局 | 会话 ID | 老陈座位/身份 | 轮次 | 结果 |
+| --- | --- | --- | ---: | --- |
+| 1 | `bcs_grp_93c843085d6d4c0ab2fae3765e112763:cf21c17e` | 1 号 / 平民 | 1 | 平民胜；3 号卧底 4:2 出局 |
+| 2 | `bcs_grp_93c843085d6d4c0ab2fae3765e112763:11491aca` | 4 号 / 卧底 | 1 | 平民胜；老陈首轮最高票出局 |
+| 3 | `bcs_grp_93c843085d6d4c0ab2fae3765e112763:eaf8480f` | 6 号 / 平民 | 2 | 平民胜；第 2 轮卧底出局 |
 
-统计口径：以主持人状态里的 `speeches[].violation`、`votes[].violation/note` 为准；
-本玩家日志中的 guard 结果作为事前拦截对照。目标：3 局投票 100% 有效票或明确弃权；
-发言违规为 0 或如实列出；主持人无需“卡住了”。
+老陈合计 4 次发言、4 张有效票，8 个实际任务都是 `source=llm`、`degraded=false`；
+主持人记录老陈违规 0。其他玩家有 4 条“超过 10 字”记录，来自人类副屏结构化投票 JSON
+字符串长度，票本身仍有效并计入——不是老陈违规，也不应写成无效票。第一局主持人在
+发言汇总节点有一次参数形状错误后自动重试成功；三局均没有人类发送“卡住了”解卡。
+
+公开脱敏证据（可提交）：
+
+- [evidence/README.md](evidence/README.md)：来源、脱敏范围、限制；
+- [evidence/three-games.json](evidence/three-games.json)：完整会话 ID、逐轮老陈发言/投票、
+  有效性、模型源、违规统计、派生的任务耗时；
+- [evidence/timeline.json](evidence/timeline.json) / [timeline.md](evidence/timeline.md)：
+  阶段顺序（非严格时序）时间线，含一致性校验；
+- [evidence/reconnect.json](evidence/reconnect.json) / [reconnect.md](evidence/reconnect.md)：
+  真实 BCS 连接层断线重连；
+- [evidence/player-events.jsonl](evidence/player-events.jsonl)：三局相关玩家事件脱敏流。
+
+完整原始主持人状态含全员词语/身份，不提交；公开证据只保留终局后可公开字段。
 
 ## 7. 排障
 
@@ -247,13 +279,26 @@ fake BCS 只证明本玩家对协议的处理正确，**不等于**真实三局�
 | `already_connected` | 同一 bot 还有旧连接；等旧连接清理或重启旧进程 |
 | 群里找不到玩家 | 确认 onboard 成功、`visibility=public`、名字是 `玩家稳健老陈` |
 | 主持人说节点超时 | 看日志是否 `brain_timeout`/`degraded`；模型是否可用 |
-| 开局后本玩家不动 | 确认 `BOTS_EXCLUDED_PROFILE_SOURCE` 生效；若未生效按 2.2 回退方案处理 |
+| 开局后本玩家不动 | 确认用 2.2 的临时 profile；不要用 `BOTS_EXCLUDED_PROFILE_SOURCE`（会触发 hybrid 校验） |
 | 规则兜底句很机械 | 正常；真实对局请配置模型 |
 
 ## 8. 当前限制（如实说明）
 
-- 真实 BCS/OpenClaw/模型/人类玩家三局**尚未运行**；本机缺 `cargo/protoc/openclaw` 与模型配置。
-- `chat.abort`/迟到结果只有 fake BCS 单测证据，没有真实取消录屏。
-- 30 分钟接入指标尚未实测；首次构建时间需排除。
+- 三局真实对局已完成（证据见 [evidence/](evidence/README.md)）；老陈 4 次发言、4 张有效票
+  全部为模型生成；老陈违规 0。其他玩家的 4 条“超过 10 字”是人类结构化票长度误报，
+  票本身有效，已在 evidence 中单独记录。
+- 第一局主持人在发言汇总节点有一次自动重试；三局均未要求人类发送“卡住了”。
+- **30 分钟独立接入验证仍未完成**：尚未由未参与开发的同学从干净 shell 计时实测；
+  首次 `cargo build`/`npm install`/OpenClaw 安装不计入计时。
+- 真实 BCS 连接层断线重连已保存证据（`evidence/reconnect.*`）；游戏内断线恢复未验证。
+- 真实 BCS 原生 state machine 的受控 PK 测试已保存证据（`evidence/pk-controlled.*`）：
+  seat1 是实际 CPython `BcnClient`，真实收到 V3 `chat.send` 并发出 PK 发言/投票 final；
+  其余 4 个 Bot 是脚本化测试 Bot。它不是已完成三局里的主持人 PK。
+- 修复前的 BCS state-machine cancel 未向 Bot 下发 `chat.abort`（`evidence/abort-boundary.*`）。
+  独立 BCS 分支 `codex/bcs-state-machine-cancel` 修复后，在隔离服务上用实际 CPython
+  `BcnClient` 验证了精确 `chat.abort` 与迟到 final 抑制（`evidence/abort-confirmed.*`）。
+  该服务端修复须单独合并/部署；三局真实牌桌本身没有触发取消。
 - 不支持 `chat.history` 的完整对话回放，只返回本玩家最近的助手输出。
 - 只替换人类牌桌中的 `玩家稳健老陈`；不支持同时替换多个玩家。
+- 常规投票遇到模型失败时明确弃权；PK 不允许弃权，仍会在合法候选中确定性选择。
+  日志的 `source=rules`/`degraded=true` 用于区分兜底和模型结果。
