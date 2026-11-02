@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_37e6156c8d1083 6,57-64,67,106-111,271-290,293-310,317-380,428-434,452-453,476-477,497-499,716,718,726,728,733-738,753-754,763
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_cc8d18516edd57 155-163,217-219,242-246,255-260,370-371,381-383,420-428,430-431,437-439,520-580
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b6c52b8cdba0ae8f43803661c233bdf1f7243f0",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

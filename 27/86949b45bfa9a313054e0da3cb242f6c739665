@@ -1,0 +1,21 @@
+devops/hook/check_secrets.py
+  s_cecdc98e721f4b::t_432e86a7e9fc4a 93-104,124-128,242-307,310,318-319,322-323,346,409-450,466-470,475-476
+devops/hook/test_check_secrets.py
+  s_cecdc98e721f4b::t_e9393994516385 1-2,32-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2786949b45bfa9a313054e0da3cb242f6c739665",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

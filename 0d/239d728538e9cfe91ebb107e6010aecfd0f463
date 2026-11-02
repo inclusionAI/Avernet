@@ -1,0 +1,18 @@
+apps/backend/tests/community/endpoints/test_bot_public_risk.py
+  h_b419236b0792fa 70-76
+devops/hook/check_secrets.py
+  h_b419236b0792fa 203-223,259-260,285,364-367
+devops/hook/test_check_secrets.py
+  h_b419236b0792fa 92-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d239d728538e9cfe91ebb107e6010aecfd0f463",
+  "prompts": {},
+  "humans": {
+    "h_b419236b0792fa": {
+      "author": "hongwei.quhw <hongwei.quhw@antfin.com>"
+    }
+  }
+}
