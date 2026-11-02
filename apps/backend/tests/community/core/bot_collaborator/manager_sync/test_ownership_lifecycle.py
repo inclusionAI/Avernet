@@ -66,22 +66,29 @@ def assert_closed(lifecycle, dispatcher, manager, owner):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("manager_fail,owner_fail", [(False, False), (True, False), (False, True), (True, True)])
-async def test_both_clients_close_on_delivery_loop_even_if_one_fails(manager_fail, owner_fail, caplog):
+@pytest.mark.parametrize("separate_rounds", [False, True], ids=["coalesced", "separate"])
+async def test_both_clients_close_on_delivery_loop_even_if_one_fails(
+    manager_fail, owner_fail, separate_rounds, caplog,
+):
     lifecycle, dispatcher, manager, owner, managers_service, owner_service = make_lifecycle(
         manager_fail=manager_fail, owner_fail=owner_fail,
     )
+    args = dict(bot_pk=7, env="dev", avernet_tenant="a", reason=SyncReason.OWNER_HANDOFF)
+    assert dispatcher.request_sync(**args) is SubmissionResult.QUEUED
+    if not separate_rounds:
+        assert dispatcher.request_ownership_sync(**args) is SubmissionResult.COALESCED
     await lifecycle.startup()
     try:
-        args = dict(bot_pk=7, env="dev", avernet_tenant="a", reason=SyncReason.OWNER_HANDOFF)
-        assert dispatcher.request_sync(**args) is SubmissionResult.QUEUED
-        assert dispatcher.request_ownership_sync(**args) in (
-            SubmissionResult.QUEUED, SubmissionResult.COALESCED,
-        )
+        if separate_rounds:
+            assert await dispatcher.drain(5)
+            assert dispatcher.request_ownership_sync(**args) is SubmissionResult.QUEUED
         assert await dispatcher.drain(5)
     finally:
         await lifecycle.shutdown()
     assert_closed(lifecycle, dispatcher, manager, owner)
-    assert managers_service.loops == owner_service.loops == owner.loops
+    assert owner_service.loops == owner.loops
+    # Confirmed ownership refreshes managers even if their initial round finished.
+    assert managers_service.loops == owner.loops * (2 if separate_rounds else 1)
     assert ("worker_loop_stop_failed" in caplog.text) is (manager_fail or owner_fail)
     await lifecycle.shutdown()
     assert len(owner.loops) == 1
@@ -150,7 +157,10 @@ async def test_startup_race_keeps_one_loop_and_waits_before_closing(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_real_http_pools_are_created_and_closed_only_on_shared_worker_loop(monkeypatch):
+@pytest.mark.parametrize("separate_rounds", [False, True], ids=["coalesced", "separate"])
+async def test_real_http_pools_are_created_and_closed_only_on_shared_worker_loop(
+    monkeypatch, separate_rounds,
+):
     import httpx
 
     from agentclaw.community.core.bot_collaborator.manager_sync.service import BotManagerSyncService
@@ -160,10 +170,11 @@ async def test_real_http_pools_are_created_and_closed_only_on_shared_worker_loop
     from agentclaw.community.plugins.community.bcs_managers import HttpBcsManagersPlugin
     from agentclaw.community.plugins.community.bcs_ownership import HttpBcsOwnershipPlugin
 
-    clients, created, closed, delivered = [], [], [], []
+    clients, created, closed, delivered, delivered_paths = [], [], [], [], []
 
     def respond(request):
         delivered.append(asyncio.get_running_loop())
+        delivered_paths.append(request.url.path.rsplit("/", 1)[-1])
         data = (
             {"bot_id": "bot:entity", "owner_user_id": "owner",
              "previous_owner_user_id": None, "changed": False}
@@ -197,17 +208,27 @@ async def test_real_http_pools_are_created_and_closed_only_on_shared_worker_loop
     )
     lifecycle = BotManagerSyncLifecycle(dispatcher, managers, ownership=owner)
     assert clients == []
+    args = dict(bot_pk=7, env="dev", avernet_tenant="a", reason=SyncReason.OWNER_HANDOFF)
+    if not separate_rounds:
+        assert dispatcher.request_sync(**args) is SubmissionResult.QUEUED
+        assert dispatcher.request_ownership_sync(**args) is SubmissionResult.COALESCED
     await lifecycle.startup()
     try:
-        assert clients == []  # startup alone does not allocate an HTTP pool
-        args = dict(bot_pk=7, env="dev", avernet_tenant="a", reason=SyncReason.OWNER_HANDOFF)
-        assert dispatcher.request_sync(**args) is SubmissionResult.QUEUED
-        dispatcher.request_ownership_sync(**args)
+        if separate_rounds:
+            assert clients == []  # startup alone does not allocate an HTTP pool
+            assert dispatcher.request_sync(**args) is SubmissionResult.QUEUED
+            assert await dispatcher.drain(5)
+            assert dispatcher.request_ownership_sync(**args) is SubmissionResult.QUEUED
         assert await dispatcher.drain(5)
     finally:
         await lifecycle.shutdown()
     assert len(clients) == 2 and all(client.is_closed for client in clients)
-    assert created == delivered == closed
+    assert created == closed
+    assert delivered_paths == (
+        ["managers", "ownership", "managers"]
+        if separate_rounds else ["ownership", "managers"]
+    )
+    assert all(loop is created[0] for loop in delivered)
     assert created[0] is created[1] and created[0] is not asyncio.get_running_loop()
     assert created[0].is_closed()
     assert managers._client is None and owner._client is None

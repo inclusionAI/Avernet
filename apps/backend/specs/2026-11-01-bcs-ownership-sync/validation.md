@@ -660,3 +660,34 @@ unmet PASS steps unchecked; do not merge on the basis of focused results alone.
 Real external AAC/credential-retirement/device acceptance remains unrun because
 only the isolated local protocol fixture was provisioned, not those deployment
 credentials or devices.
+
+## PR #3425 CI lifecycle-test correction (2026-11-02)
+
+The first remote Backend unit run (`41396836062`, head `49ad733deb`) failed
+one lifecycle assertion: the test compared service/close loop lists including
+their lengths. A managers round can finish before Owner admission; confirmed
+Owner delivery then correctly triggers a second managers round. The sibling
+HTTP-pool test made the same incorrect assumption about delivery/client counts.
+No production behavior, gate, threshold, or skip was changed.
+
+Both tests now explicitly exercise coalesced admission before worker startup
+and separate admission after the first managers round drains. They assert exact
+round counts / HTTP endpoint order independently of shared-loop affinity and
+retain pool closure, thread cleanup, idempotent shutdown, and close-failure checks.
+
+Validation on the rebased branch:
+
+- Deterministic reproduction with the old assertions: **5 failed, 10 passed**;
+  all five separate-round cases exposed the same cardinality assumption.
+- Owner/managers Core suites: **285 passed**.
+- Lifecycle suite: **15 passed**, repeated successfully in **10 independent runs**.
+- Official complete Backend CI (`BACKEND_CI_PYTEST_WORKERS=4 bash
+  apps/backend/scripts/ci_test.sh --base origin/dev --head HEAD`): **28,830 passed,
+  40 skipped, 6 subtests passed**, 378.47s; total line coverage **90.84%**,
+  changed-line coverage **99.59% (490/492)**; gate exit 0.
+- Official Python SAST and `git diff --check`: passed; changed test file 293 lines.
+- Independent review approved with no actionable findings and independently
+  reran the 15 lifecycle cases.
+- The original-head remote Singlebox run (`41396836106`) completed successfully.
+  That is newer CI evidence than the earlier local all-module failures above,
+  not a claim that this test-only follow-up's remote checks have already passed.
