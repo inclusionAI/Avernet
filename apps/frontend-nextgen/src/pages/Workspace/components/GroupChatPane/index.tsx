@@ -216,6 +216,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onInsertDraft={composerVisible ? insertDraft : undefined}
         />
         <GroupChatCollabPanel
+          group={group}
           panel={collabPanel}
           session={session}
           messages={messages}

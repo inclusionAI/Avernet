@@ -50,7 +50,7 @@ export function useMessageDeliveries(
       store.upsertDelivery(sessionId, delivery);
 
       // 终态投递延迟移除
-      if (!isActiveDelivery(delivery.status)) {
+      if (!delivery.task && !isActiveDelivery(delivery.status)) {
         const existingTimer = terminalTimersRef.current.get(delivery.delivery_id);
         if (existingTimer) clearTimeout(existingTimer);
         const timer = setTimeout(() => {
