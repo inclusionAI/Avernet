@@ -469,23 +469,19 @@ def test_hundred_online_ids_do_not_scan_disabled_history(observation):
     assert max(counts) - min(counts) < 200, counts
 
 
-def test_in_place_restart_uses_current_native_workflow_and_rejects_old_callback(
-    observation,
-):
+def test_plain_restart_preserves_existing_publication_selection(observation):
     db, observer, _ = observation
     assert observer.record_build_selection(publication_id=101)
     terminal(db)
-    stale = observer.observe_online_selection(publication_id=101)
-    assert observer.project_online_selection(publication_id=101, observed=stale)
+    assert project(observer, publication_id=101)
     with db.orm_session() as session:
         session.get(Publication, 101).ext = json.dumps(
             {"publish": {"online": 301}, "restart": {"online": 305}}
         )
-    reader = BotKnowledgeStageSelection(db)
-    assert reader.read(bot=source(db), runtime_stage="online")["kb_ids"] is None
-    assert not observer.project_online_selection(publication_id=101, observed=stale)
-    assert project(observer, publication_id=101)
-    assert reader.read(bot=source(db), runtime_stage="online")["kb_ids"] == ["kb"]
+    # A restart is not a new publication and must not recopy/endorse snapshots.
+    assert BotKnowledgeStageSelection(db).read(bot=source(db), runtime_stage="online")[
+        "kb_ids"
+    ] == ["kb"]
 
 
 def test_concurrent_auxiliary_writers_never_leave_partial_projection(observation):

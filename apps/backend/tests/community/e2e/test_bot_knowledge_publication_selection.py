@@ -174,9 +174,10 @@ def test_unknown_auxiliary_state_is_exact_empty_page_without_error_details(
                 {"config_value": "invalid snapshot: internal database detail"}
             )
     elif failure == "storage":
+        # Hold the local DatabasePlugin session lock: engine-level DDL races
+        # native background Sessions on SQLite's shared StaticPool connection.
         with db.orm_session() as session:
-            engine = session.get_bind()
-        BotCommonConfig.__table__.drop(engine)
+            BotCommonConfig.__table__.drop(session.connection())
     before = catalog.mock_calls[:]
     response = get(client, route, stage)
     assert response.status_code == 200, response.text

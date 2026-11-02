@@ -108,7 +108,7 @@ Only a valid last_recorded observation with an empty ID list means all-off.
 The native publication remains the version authority. Never infer a version from
 the highest stored snapshot or substitute a draft into an online/verify read.
 
-After actual ONLINE BaaS SUCCESS, the existing progress/restart poll attempts a
+After actual ONLINE BaaS SUCCESS, the existing publication progress poll attempts a
 best-effort projection in its own `transactional_orm_session` auxiliary unit. That transaction writes
 only common-config plus at most 200 binding IDs from the old/new selections.
 It never modifies draft enabled, revision or updated_by on existing rows, never
@@ -121,8 +121,9 @@ space/flag filtering. Missing rows use one tenant-stamped bounded bulk insert;
 identical projection replays do not write business rows. The poll captures a
 bounded native workflow/rollback identity before its existing native sync call;
 projection requires that same identity, so a delayed callback cannot sign a
-new rollback token even if no marker was previously saved. In-place restart
-identities include the native restart.online workflow. Identity-read failure
+new rollback token even if no marker was previously saved. Plain in-place
+restart redeploys the same publication and does not resample, copy selections
+or endorse rollback tokens; its poll has no knowledge dependency. Identity-read failure
 merely skips the auxiliary projection; native sync still runs.
 No new worker, retry, ledger, task or table is added. No ext fields are added.
 
@@ -198,3 +199,7 @@ transaction locks and re-resolves both Bot and space after the external grant
 check. A real intervening move is rejected, while normalizing NULL to the same
 personal space preserves selections and CAS revisions. Limits, binding pages
 and runtime selection reads use the same effective scope.
+
+A recreate/retry that changes native publication identity but does not pass a
+publication progress observation may leave this optional display empty. There
+is deliberately no compensation or restart-specific knowledge transaction.

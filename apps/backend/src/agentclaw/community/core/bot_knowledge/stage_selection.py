@@ -27,13 +27,12 @@ logger = get_logger()
 
 def _workflow(publication) -> int:
     ext = json.loads(publication.ext or "{}")
-    # Native in-place restarts write restart.online; recreate/release writes
-    # publish.online. Both are native BaaS workflow IDs with monotonic identity.
-    values = [ext.get(section, {}).get("online") for section in ("publish", "restart")]
-    valid = [value for value in values if type(value) is int and value > 0]
-    if not valid:
+    # A plain restart redeploys the same publication; it must not mint a new
+    # selection identity or endorse a newly admitted rollback.
+    value = ext.get("publish", {}).get("online")
+    if type(value) is not int or value <= 0:
         raise ValueError("missing native online workflow")
-    return max(valid)
+    return value
 
 
 def _rollback_token(session, publication):

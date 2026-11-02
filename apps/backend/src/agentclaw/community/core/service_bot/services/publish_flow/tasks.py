@@ -690,12 +690,10 @@ class PublishRestartPollHandler(_PublishTaskBase):
         *,
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
-        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
         poll_delay_seconds: float = _RESTART_POLL_DELAY_SECONDS,
     ) -> None:
         super().__init__(flow=flow, task_queue_service=task_queue_service)
         self._poll_delay = poll_delay_seconds
-        self._selection_provider = selection_provider
 
     @property
     def task_type(self) -> str:
@@ -713,13 +711,9 @@ class PublishRestartPollHandler(_PublishTaskBase):
         if not self._flow.is_restart_in_progress(publish_id):
             return Complete()
 
-        observed = (_observe_online_selection(self._selection_provider, publish_id)
-                    if _status in {PublishStatus.SUCCESS, PublishStatus.ONLINE_PUB} else None)
         sync_result = self._flow.sync_restart_progress(publish_id)
         baas_status = (sync_result.data or {}).get("status", "")
         if baas_status == "SUCCESS":
-            if getattr(sync_result, "status", None) == PublishStatus.SUCCESS:
-                _project_online_selection(self._selection_provider, publish_id, observed)
             return Complete()
         if baas_status == "FAILED":
             # The sync already marked the record FAILED with ext.error_message —
@@ -844,8 +838,7 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishRestartPollHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service,
-                selection_provider=self._selection_provider
+                flow=self._flow, task_queue_service=self._task_queue_service
             )
         )
         self._registry.register(

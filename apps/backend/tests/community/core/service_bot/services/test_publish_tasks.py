@@ -371,7 +371,7 @@ def _restart_handlers(flow):
     return (
         PublishRestartHandler(flow=flow, task_queue_service=tq),
         PublishRestartPollHandler(
-            flow=flow, task_queue_service=tq, selection_provider=Mock(), poll_delay_seconds=1.0
+            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
         ),
         tq,
     )

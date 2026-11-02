@@ -310,9 +310,11 @@ arguments retain the existing provider call/default behavior.
 
 The verify-flow task captures knowledge selection at BUILDING entry through a
 lazy ordinary Service API. After a real online deployment reports terminal BaaS
-SUCCESS, progress/restart polling may project the target version to existing
+SUCCESS, publication progress polling may project the target version to existing
 online selection fields. Rollback follows the same target-deploy completion;
-its early native SUCCESS admission flip never triggers the projection.
+its early native SUCCESS admission flip never triggers the projection. Plain
+restart polling does not invoke knowledge observers: restarting the same version
+must not bless a newly admitted rollback or recopy its auxiliary selection.
 Each observer call is failure-isolated outside native phase calls and outside
 native transactions. Provider/encoding/storage failures do not change native
 Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,

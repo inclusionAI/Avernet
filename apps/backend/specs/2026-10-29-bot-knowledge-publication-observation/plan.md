@@ -24,16 +24,19 @@ class BotKnowledgeStageSelection:
     def read(self, *, bot, runtime_stage): ...
     def project_online(self, *, publication_id): ...
 # core/service_bot/services/publish_flow/tasks.py
-# existing progress/restart polls: native terminal result first, isolated observer second
+# existing progress poll: pre-sync identity, native terminal result, isolated projection
 ```
 历史记录格式复用 publication_selection.py，线上标记使用相同 tenant/env/source_pk 坐标、config_key=projection:online。前后最多200 ID，原有草稿CAS元数据保持不变。绑定不存在时一次有界 Core bulk insert 插入 disabled/revision0 的线上投影行，显式从受 tenant guard 的源 Bot 盖章租户，不伪造草稿编辑。online读取以完整唯一键 tenant/env/bot_pk/kb_id IN 定位，再按space/online_enabled过滤，避免扫描禁用历史；相同投影重放不写DML。
 
 ## Risks & Mitigations
 - 原生 SUCCESS 在回滚准入时可提前出现：投影触发必须来自实际 progress SUCCESS，而非状态扫描。来源标记还匹配原生 rollback_restored_from 与被降级版本已有 rollback.rolled_back_at/target_publish_id，避免旧标记在准入时提前复活；不增加原生ext字段。
-- 晚到回调：online poll在原生sync前捕获有界workflow/rollback身份（Publication主键读；回滚时追加1次origin主键读），失败仍执行原生sync；辅助事务锁标记后重新核对原身份/current publication/source/status/workflow/token。不允许旧回调在缺marker时为新回滚补签。原生in-place restart使用restart.online，因此workflow取publish.online和restart.online中有效的新标识；读取时再验证来源标记，不把旧投影视作新版本。
+- 晚到回调：online poll在原生sync前捕获有界workflow/rollback身份（Publication主键读；回滚时追加1次origin主键读），失败仍执行原生sync；辅助事务锁标记后重新核对原身份/current publication/source/status/workflow/token。不允许旧回调在缺marker时为新回滚补签。仅版本发布progress poll触发投影；普通restart不复制知识配置，也不为回滚签新token，已有有效版本marker保持不变。读取时再验证publish.online及回滚来源标记，不把旧投影视作新版本。
 - 历史缺失/存储异常：内部保留 unrecorded/unavailable 用于诊断，对外正常空页；不回退草稿、不默认 false、不写回关闭。普通权限/参数/provider错误继续按原契约处理。
 - 快照不是授权：始终与当前 provider grant 页相交，保留会话原生 admission。
 - 共享 DB 等待：不新增线程/重试，不声称硬超时隔离。
+
+## Restart boundary
+普通同版本in-place restart不是新发布，不新增知识observer调用、不重采样、不改变已有有效选择。真正rollback由execute_rollback写新publish.online并进入ONLINE_PUB，实际成功后由progress poll投影。若recreate/retry改变身份却没有该发布完成观测，按best-effort保守空页；不为其新增补偿链路。
 
 ## Test Strategy
 真实SQLite记录和服务入口覆盖空选择、缺失、损坏、跨tenant/space、草稿/预发/线上隔离、回滚、晚到回调、投影失败、CAS不变、当前授权撤销。保留个人Bot响应兼容；运行HTTP/DI/architecture与相关完整模块。前端额外验证stage参数、未知空列表无提示与lazy conversation，以及team entity与真实Owner分离。
