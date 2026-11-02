@@ -85,8 +85,9 @@ def _resolve_user_identity(
         except Exception as e:
             logger.warning(f"[_resolve_user_identity] Failed to resolve bot owner: {e}")
 
-    # bot_id="all"、default、缺失、歧义或归属解析失败时，使用当前用户身份。
-    if not owner_id or bot_id == "all" or bot_id == "default":
+    # bot_id="all"、缺失、歧义或归属解析失败时，使用当前用户身份。
+    # 显式 owner_id + default 仍沿用调用方指定的 owner 语义。
+    if not owner_id or bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
     # 协作者场景：调用方显式传入 owner_id，从该 owner 的 bot 信息取显示名。

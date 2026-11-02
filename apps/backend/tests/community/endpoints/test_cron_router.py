@@ -47,7 +47,7 @@ class _RecordingBotService:
         self._bot = bot
         self._error = error
         self._total = 1 if total is None else total
-        self._error = unique_error
+        self._unique_error = unique_error
 
     def get_bot(self, bot_id, user_id):
         self.get_bot_calls.append((bot_id, user_id))
@@ -57,8 +57,8 @@ class _RecordingBotService:
 
     def list_bots_by_conditions(self, **kwargs):
         self.list_bots_by_conditions_calls.append(kwargs)
-        if self._error is not None:
-            raise self._error
+        if self._unique_error is not None:
+            raise self._unique_error
         page = {"total": self._total}
         if self._total:
             page["items"] = [self._bot]
@@ -218,6 +218,20 @@ class TestResolveUserIdentity:
         }]
         assert bot_service.get_bot_calls == []
 
+    def test_explicit_owner_with_default_keeps_requested_owner(self):
+        """Admin supplied explicit owner identity remains the cron caller."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = self.make_collaborator()
+
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity("u_owner", "default", user, bot_service)
+
+        assert user_id == "u_owner"
+        assert nick_name == "u_owner"
+        assert bot_service.get_bot_calls == [("default", "u_owner")]
+        assert bot_service.list_bots_by_conditions_calls == []
 
     def test_collaborator_scenario_returns_owner_identity(self):
         """When owner_id is set, returns owner's identity from bot info."""
