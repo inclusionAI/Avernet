@@ -122,6 +122,7 @@ pub use bcs_routing::MessageRouter;
 
 // Server modules
 pub mod api_auth_registry;
+pub mod api_auth_ports;
 pub mod auth_wiring;
 pub mod bot_authority_wiring;
 mod bot_ws_admission_config;

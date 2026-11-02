@@ -122,6 +122,12 @@ pub trait OAuthSessionPort: Send + Sync {
 /// browser nonce with per-provider states; consume is an atomic
 /// match-and-invalidate of the WHOLE batch. Store failures map to
 /// [`ApplicationError`] categories and yield no usable URLs.
+///
+/// Byte-identity rule: the exact per-provider callback compared at
+/// consume time is `{callback_base}/{provider}` exactly as it was stored
+/// at issue time — EVERY caller (application orchestration, bridges,
+/// delivery) derives it through the same join, with no side-specific
+/// re-normalization, or the match will reject a genuine callback.
 #[async_trait]
 pub trait PendingOAuthLoginPort: Send + Sync {
     /// Issue a fresh pending-login batch under one flow namespace.

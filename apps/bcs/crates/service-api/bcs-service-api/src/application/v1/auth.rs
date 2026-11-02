@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::application::RequestAuthHeaders;
 
+use super::identity::AuthenticatedCaller;
 use super::ApplicationError;
 
 /// REQUIRED browser binding of every OAuth callback (plan §8.4): the
@@ -37,7 +38,10 @@ pub struct BoundOAuthLogin {
 /// actual `Set-Cookie` encoding (including the production
 /// `__Host-bcs_oauth_login` challenge name); these variants never embed
 /// raw `HeaderValue`s.
-#[derive(Clone)]
+///
+/// `PartialEq` is for exact instruction-sequence assertions only
+/// (`Debug` stays redacted).
+#[derive(Clone, PartialEq, Eq)]
 pub enum BrowserCookieChange {
     /// Write the fresh browser nonce challenge (host-only, HttpOnly,
     /// Secure, SameSite=Lax, Path=/, Max-Age=300 in production).
@@ -116,15 +120,31 @@ pub struct BuildLoginUrls {
     pub callback_base_url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct AuthProviderUrl {
     pub name: String,
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct AuthProviderUrlList {
     pub providers: Vec<AuthProviderUrl>,
+}
+
+// Plan §8.4 credential-log red line: the authorize URL embeds the issued
+// one-time state, so Debug prints only the type shape — never the URL.
+impl fmt::Debug for AuthProviderUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AuthProviderUrl { .. }")
+    }
+}
+
+impl fmt::Debug for AuthProviderUrlList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthProviderUrlList")
+            .field("providers", &self.providers.len())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -196,4 +216,102 @@ pub trait AuthService: Send + Sync {
         -> Result<SessionRenewal, ApplicationError>;
 
     async fn logout(&self, request: LogoutSession) -> Result<LogoutResult, ApplicationError>;
+}
+
+/// REQUIRED presentation of an existing login-session credential (V1 API
+/// auth plan §8.5). Delivery extracts the cookie and hands the raw token
+/// over inside this struct; the application layer never parses a
+/// `Cookie` header itself. Debug prints only the type name and elision
+/// markers — the bearer token is never formattable (plan §8.4).
+#[derive(Clone)]
+pub struct PresentedSession {
+    pub token: String,
+}
+
+impl fmt::Debug for PresentedSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PresentedSession").finish_non_exhaustive()
+    }
+}
+
+/// Human projection query on an ALREADY-authenticated caller (V1 API
+/// auth plan): the delivery layer's verified credential chain produced
+/// `caller`; `provider_label` and `avatar` are trusted-adapter DISPLAY
+/// data carried verbatim for the response body — they are never treated
+/// as authority. Only Human callers are projectable; there is no second
+/// chain execution behind this query.
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUserQuery {
+    pub caller: AuthenticatedCaller,
+    pub provider_label: String,
+    pub avatar: Option<String>,
+}
+
+/// Successful-callback payload: only the configured same-origin redirect
+/// location. The session install and challenge cleanup travel exclusively
+/// through the reply's `cookie_changes` (plan §8.4).
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthRedirectLocation {
+    pub location: String,
+}
+
+/// Refresh payload: the rotated session credential lives only in the
+/// reply's cookie instructions, never in a JSON body field.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionRenewalData {}
+
+/// Logout payload: logout carries no body data at all.
+#[derive(Debug, Clone, Serialize)]
+pub struct LogoutData {}
+
+/// Transport-neutral secure OAuth orchestration contract (V1 API auth
+/// plan, Task 10). TEMPORARY NAME: Task 11 atomically replaces the
+/// active `AuthService` surface above with this trait and restores the
+/// stable name `AuthService`; until then both coexist and delivery still
+/// routes through the old entry.
+///
+/// Beyond the different input/output shapes, the contract differs from
+/// the legacy trait in three binding ways:
+/// - login flows answer with [`AuthFlowReply`]: cookie instructions are
+///   returned on BOTH success and failure so cleanup is never lost;
+/// - `complete_login` demands the REQUIRED browser binding (a rejected
+///   consume still changes no cookies — the initiating browser keeps its
+///   batch; anything after a successful consume always clears the
+///   temporary challenge);
+/// - session flows take [`PresentedSession`] instead of raw Headers:
+///   parsing cookies is delivery's job, never the application's.
+#[async_trait]
+pub trait SecureAuthService: Send + Sync {
+    /// Issue the browser-bound provider authorize-URL batch: keeps the
+    /// provider chain (subsequence) order and returns ONE
+    /// `SetLoginChallenge` instruction carrying the fresh window.
+    async fn login_urls(
+        &self,
+        request: BuildLoginUrls,
+    ) -> AuthFlowReply<AuthProviderUrlList>;
+
+    /// Complete the OAuth callback under the browser binding, in order:
+    /// validate enabled provider + required code → consume the pending
+    /// state → exchange the code → install the strict session.
+    async fn complete_login(
+        &self,
+        command: BoundOAuthLogin,
+    ) -> AuthFlowReply<AuthRedirectLocation>;
+
+    /// Project the already-authenticated Human caller; display-only.
+    async fn current_user(
+        &self,
+        query: AuthenticatedUserQuery,
+    ) -> Result<AuthUserInfo, ApplicationError>;
+
+    /// Rotate the presented session; the rotated credential arrives as a
+    /// `SetSession` cookie instruction.
+    async fn refresh_session(
+        &self,
+        session: PresentedSession,
+    ) -> AuthFlowReply<SessionRenewalData>;
+
+    /// Revoke the presented session when there is one; `None` (no cookie)
+    /// is a valid idempotent success boundary that skips the port.
+    async fn logout(&self, session: Option<PresentedSession>) -> AuthFlowReply<LogoutData>;
 }

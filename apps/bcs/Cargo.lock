@@ -623,6 +623,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-app-auth"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bcs-app-bot"
 version = "0.1.4-beta.3"
 dependencies = [

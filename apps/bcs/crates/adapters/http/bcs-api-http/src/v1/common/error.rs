@@ -113,6 +113,13 @@ pub fn application_error_response(
         ApplicationError::BadGateway { code, message } => {
             (StatusCode::BAD_GATEWAY, 50_200, code, message)
         }
+        // Auth-flow dependency outage (V1 API auth plan, spec §7.4):
+        // 503 / 50300 with the stable `auth_dependency_unavailable`
+        // error-code family; the existing BadGateway 502 mapping above
+        // is untouched.
+        ApplicationError::Unavailable { code, message } => {
+            (StatusCode::SERVICE_UNAVAILABLE, 50_300, code, message)
+        }
         ApplicationError::Internal(detail) => {
             tracing::error!(
                 request_id = %request_id.0,
@@ -264,6 +271,16 @@ mod tests {
                 50_000,
                 "internal_error",
                 "Internal server error",
+            ),
+            (
+                ApplicationError::unavailable(
+                    "auth_dependency_unavailable",
+                    "session identity store unavailable",
+                ),
+                StatusCode::SERVICE_UNAVAILABLE,
+                50_300,
+                "auth_dependency_unavailable",
+                "session identity store unavailable",
             ),
         ];
         let request_id = RequestId("request-123".to_string());

@@ -40,6 +40,14 @@ pub enum ApplicationError {
     Unprocessable { code: String, message: String },
     #[error("{code}: {message}")]
     BadGateway { code: String, message: String },
+    /// An auth-flow backing dependency (pending-login store, session
+    /// identity store, verifier) is unreachable. Carries a stable
+    /// sanitized `code`/`message` pair only — never underlying storage,
+    /// endpoint, or credential text. Distinct from `BadGateway` (kept for
+    /// the existing Bot identity store 502 family); the HTTP envelope
+    /// maps this to 503 / 50300 / `auth_dependency_unavailable`.
+    #[error("{code}: {message}")]
+    Unavailable { code: String, message: String },
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -93,6 +101,14 @@ impl ApplicationError {
 
     pub fn bad_gateway(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::BadGateway {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Dependency-unreachable failure with a stable sanitized code.
+    pub fn unavailable(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Unavailable {
             code: code.into(),
             message: message.into(),
         }
@@ -175,6 +191,7 @@ impl ApplicationError {
             | Self::PayloadTooLarge { code, .. }
             | Self::Unprocessable { code, .. }
             | Self::BadGateway { code, .. } => code,
+            Self::Unavailable { code, .. } => code,
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden(_) => "forbidden",
             Self::ForbiddenCode { code, .. } => code,
