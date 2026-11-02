@@ -16,6 +16,7 @@ import { SessionHistorySearchPanel } from './components/SessionHistorySearchPane
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
 import { useChatEngineVersionNotice } from './hooks/useChatEngineVersionNotice';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
+import type { ChatHeaderPanelKind } from './hooks/useChatHeaderPanels';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
 import type { ConversationSessionsModel } from './hooks/useConversationSessions.types';
@@ -133,16 +134,25 @@ export function StandardConversationStageContainer({
       notice={engineVersionNotice.notice}
     />
   );
-  const headerRightPanels =
-    headerPanels.openPanel === 'detail' ? (
-      <ChatHeaderRightPanel title="会话详情" onClose={headerPanels.closePanel}>
-        <SessionDetailPanel session={interactiveModel.selectedSession} />
-      </ChatHeaderRightPanel>
-    ) : headerPanels.openPanel === 'history' ? (
-      <ChatHeaderRightPanel title="历史消息" onClose={headerPanels.closePanel}>
+  // 头部右缘内联副屏（chat-header-panels）：单容器常挂、经 open 开合对话区让宽（与 SDK 副屏
+  // 同构，无抽屉蒙层）；renderPanelKind 记住最近一次打开的面板，收起过渡期间内容不闪切。
+  const openPanel = headerPanels.openPanel;
+  const renderPanelKindRef = useRef<ChatHeaderPanelKind>('detail');
+  if (openPanel) renderPanelKindRef.current = openPanel;
+  const renderPanelKind = openPanel ?? renderPanelKindRef.current;
+  const headerRightPanel = (
+    <ChatHeaderRightPanel
+      open={openPanel !== null}
+      title={renderPanelKind === 'history' ? '历史消息' : '会话详情'}
+      onClose={headerPanels.closePanel}
+    >
+      {renderPanelKind === 'history' ? (
         <SessionHistorySearchPanel search={headerPanels.historySearch} onLocate={headerPanels.locateMessage} />
-      </ChatHeaderRightPanel>
-    ) : null;
+      ) : (
+        <SessionDetailPanel session={interactiveModel.selectedSession} />
+      )}
+    </ChatHeaderRightPanel>
+  );
 
   return (
     <>
@@ -150,7 +160,7 @@ export function StandardConversationStageContainer({
         model={interactiveModel}
         onOpenSessionList={onOpenSessionList}
         headerActions={headerActions}
-        headerRightPanels={headerRightPanels}
+        headerRightPanels={headerRightPanel}
         highlightMessageId={headerPanels.highlightMessageId}
         sidePaneOpen={headerPanels.sidePaneOpen}
         onToggleSidePane={headerPanels.toggleSidePane}

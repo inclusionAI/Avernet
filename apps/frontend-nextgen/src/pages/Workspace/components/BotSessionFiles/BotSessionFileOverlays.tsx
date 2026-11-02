@@ -3,7 +3,7 @@ import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { UseBotSessionFileUploadResult } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import type { UseBotSessionFilesResult } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import { WorkspaceOverlayPanel } from '../WorkspaceOverlayPanel';
+import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { BotSessionFilesPanel } from './BotSessionFilesPanel';
 import { BotUploadFilesModal } from './UploadFilesModal';
 
@@ -24,7 +24,11 @@ interface BotSessionFileOverlaysProps {
   onReference(file: BotSessionFileView): void;
 }
 
-/** 文件覆盖层只负责展示；运行阶段和所有业务回调由会话 Hook 传入。 */
+/**
+ * 文件副屏容器 + 资源管理面板：覆盖层只负责展示；运行阶段和所有业务回调由会话 Hook 传入。
+ * aside 常挂、drawerOpen 开合（对话区内联展开/收起，与头部右缘副屏及 SDK 副屏同构，无抽屉蒙层）；
+ * BotSessionFilesPanel 保持「挂载 == 打开」的列表刷新语义，仅展开态渲染。
+ */
 export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
   const { botId, sessionId, userId, ownerId, stage, files, upload } = props;
   return (
@@ -41,13 +45,15 @@ export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
         onAddToSession={props.onAddToSession}
         removeTask={upload.removeTask}
       />
-      {props.drawerOpen && (
-        <WorkspaceOverlayPanel
-          ariaLabel="资源管理面板"
-          onDismiss={props.onCloseDrawer}
-          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-          className="z-30 bg-background"
-        >
+      <ResizableWorkspaceSidebar
+        ariaLabel="资源管理面板"
+        side="right"
+        open={props.drawerOpen}
+        onDismiss={props.drawerOpen ? props.onCloseDrawer : undefined}
+        {...WORKSPACE_RIGHT_PANEL_LAYOUT}
+        className="bg-background"
+      >
+        {props.drawerOpen ? (
           <BotSessionFilesPanel
             readyFiles={files.readyFiles}
             isLoadingList={files.isLoadingList}
@@ -63,8 +69,8 @@ export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
             onDownload={(file) => void files.downloadFile(file)}
             onReference={props.onReference}
           />
-        </WorkspaceOverlayPanel>
-      )}
+        ) : null}
+      </ResizableWorkspaceSidebar>
     </>
   );
 }

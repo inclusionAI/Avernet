@@ -37,17 +37,17 @@ function NavigationButton<T extends string>({
             variant="ghost"
             size="icon"
             className={cn(
-              'h-16 w-[60px] flex-col gap-1 rounded-lg text-xs font-normal text-muted-foreground',
+              'size-11 flex-col gap-1 rounded-lg text-[13px] font-normal text-muted-foreground',
               active && 'bg-muted text-foreground hover:bg-muted hover:text-foreground',
             )}
             aria-label={item.label}
             onClick={onClick}
           >
             {item.icon}
-            <span>{item.shortLabel ?? item.label.slice(0, 2)}</span>
+            <span className="leading-4">{item.shortLabel ?? item.label.slice(0, 2)}</span>
           </Button>
         </TooltipTrigger>
-        {item.label.length > 2 ? <TooltipContent side="right">{item.label}</TooltipContent> : null}
+        <TooltipContent side="right">{item.label}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -66,7 +66,7 @@ export function DetailNavigation<T extends string, U extends string>({
     <nav
       aria-label="Bot 编辑模块"
       className={cn(
-        'bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-divider bg-card py-3',
+        'bot-editor-nav app-scrollbar flex w-12 shrink-0 flex-col items-center gap-3 overflow-y-auto border-r border-divider bg-card py-3',
         hidden && 'hidden',
       )}
     >
@@ -78,6 +78,8 @@ export function DetailNavigation<T extends string, U extends string>({
           onClick={() => onTabChange(item.key)}
         />
       ))}
+      {/* artboard-047:主/更多两组之间为 24×1 短分隔线(而不是整列长线)。 */}
+      {moreTabs.length && mainTabs.length ? <span aria-hidden className="h-px w-6 bg-divider" /> : null}
       {moreTabs.map((item) => (
         <NavigationButton
           key={item.key}

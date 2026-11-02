@@ -16,6 +16,8 @@ import React from 'react';
  *
  * 标签统一用中性(default)底色，不再按引擎/部署/服务化涂装彩色，避免标签列表过杂；
  * 健康状态仍只由「状态」列表达。
+ * 验收（bot-list 复核）：标签单行横铺不换行，chip 不压缩变形，超出列宽直接裁切
+ * （配合 useBotTableColumns 中标签列宽加大）。
  */
 export interface BotTagsCellProps {
   bot: BotDomain;
@@ -30,7 +32,7 @@ const BotTagsCell: React.FC<BotTagsCellProps> = ({ bot, engineVersionState, onOp
     : bot.runtime.engine;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex items-center gap-1.5 overflow-hidden [&>*]:shrink-0">
       <Badge tone="neutral">{engineLabel}</Badge>
       <Badge tone="neutral">
         {bot.deployment === 'local' ? (
