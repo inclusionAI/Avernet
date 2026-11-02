@@ -1,5 +1,5 @@
 import { getCapabilities } from '@/capabilities';
-import type { BotManagementVerb } from '@/domain/botWorkshop';
+import { useBotWorkshopActions } from './useBotWorkshopActions';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
@@ -12,9 +12,7 @@ import {
   getBotActionAvailability,
   getInventoryActionAvailability,
 } from '@/services/botWorkshop';
-import { botManagementActionService } from '@/services/botWorkshop/botManagementActionService';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
-import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -107,48 +105,12 @@ export function useBotWorkshop() {
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
   useVisibleInterval(
     refreshVisibleList,
-    30_000,
+    state.items.some((bot) => bot.rawStatus?.toUpperCase() === 'REACTIVATING') ? 5_000 : 30_000,
     requestIdentity.ready && spaceInitialized && Boolean(spaceId) && !createFlow.creating && !createFlow.authorization,
   );
   const accessControl = useBotWorkshopAccess(currentOpenApiUserId, load);
   const openHealthCheck = useBotWorkshopHealthCheck(currentOpenApiUserId);
-  const runAction = useCallback(
-    async (action: BotManagementVerb, bot: BotDomain) => {
-      try {
-        if (bot.runtime?.engine === 'teclaw' && ['restart', 'engine_restart', 'restart_publish'].includes(action))
-          throw new Error('TeClaw 暂不支持重启操作');
-        await botManagementActionService.run(action, bot);
-        if (action === 'delete' && bot.deployment === 'local') {
-          useWorkspaceStore.setState((workspace) => {
-            const expandedBotIds = { ...workspace.expandedBotIds };
-            const expandedBotSectionKey = { ...workspace.expandedBotSectionKey };
-            delete expandedBotIds[bot.id];
-            delete expandedBotSectionKey[bot.id];
-            return {
-              expandedBotIds,
-              expandedBotSectionKey,
-              selectedBotSessionId: workspace.expandedBotIds[bot.id] ? null : workspace.selectedBotSessionId,
-              lastSessionByIdentity: Object.fromEntries(
-                Object.entries(workspace.lastSessionByIdentity).map(([id, memo]) => [
-                  id,
-                  memo.expandedBotId === bot.id
-                    ? { ...memo, expandedBotId: null, botSessionId: null, botSectionKey: null }
-                    : memo,
-                ]),
-              ),
-            };
-          });
-        }
-        toast.success(botManagementActionService.successMessage(action));
-        await load();
-      } catch (error) {
-        const fallback = action === 'delete' ? 'Bot 删除失败，请稍后重试' : '操作失败';
-        toast.error(getBotManagementErrorMessage(action, error, fallback));
-        throw error;
-      }
-    },
-    [load],
-  );
+  const runAction = useBotWorkshopActions(load, currentOpenApiUserId);
   const locks = useBotWorkshopLocks(load);
   const canEnterDetail = useCallback(
     (bot: BotDomain) => canEnterBotDetail(bot, currentOpenApiUserId),

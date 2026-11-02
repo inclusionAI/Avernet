@@ -255,7 +255,7 @@ export type BotInventoryAction =
   | 'open_folder';
 
 /** 卡片管理菜单可分发的动词（菜单路由键），是 BotInventoryAction 中管理类动词的子集。 */
-export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish' | 'open_folder';
+export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish' | 'open_folder' | 'activate';
 
 /** 重启发布的发布阶段：仅 prestable/online 存在已发布 runtime（Avernet #1911 词表口径）。 */
 export type BotPublishRestartStage = 'prestable' | 'online';
