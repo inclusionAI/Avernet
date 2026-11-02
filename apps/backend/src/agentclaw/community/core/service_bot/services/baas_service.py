@@ -3670,7 +3670,9 @@ class BaasService:  # pragma: no cover
             HttpConnectionInfo: HTTP 连接信息 (http_url, token)
 
         Raises:
-            BaasServiceError: BaaS 不可达 / 404 / 5xx / 网络 / 超时 / 业务 code≠0
+            BaasServiceError: BaaS 不可达 / 404 / 5xx / 网络 / 超时 / 业务 code≠0。
+                其中 BaaS 结构化 ``NO_ACTIVE_DEVICES`` 响应转为
+                :class:`BaasNoActiveDevicesError`，与 ws-info 契约保持相同。
         """
         # 从 DeviceBindingRepository 获取 device_id
         device_binding_repo = self._device_binding_repo
@@ -3730,6 +3732,20 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            # BaaS 明确下发结构化设备离线契约时，复用 ws-info 的窄错误分支；
+            # 该响应是正常的“设备未就绪”业务状态，不能进入通用 500。
+            if _is_no_active_devices_response(e.response):
+                logger.info(
+                    "[BaasService.get_http_info] no active device: "
+                    "status=%s bind_id=%s device_id=%s",
+                    e.response.status_code,
+                    bind_id,
+                    device_id,
+                )
+                raise BaasNoActiveDevicesError(
+                    status_code=e.response.status_code
+                ) from e
+
             logger.error(
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
