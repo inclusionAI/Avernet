@@ -34,8 +34,9 @@ export interface ConversationBotItemProps {
   expanded: boolean;
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
-  /** 该 Bot 是否为当前舞台所属 Bot(跨 section 判定由装配层完成):名称点亮品牌蓝作行锚点,
-   *  与其下会话胶囊形成「Bot → 会话」两级选中语义(2026-10-22 体验精修)。 */
+  /** 该 Bot 是否为当前舞台所属 Bot(跨 section 判定由装配层完成):名称点亮 #09090B
+   *  (text-foreground)作行锚点——收起时其下选中会话不可见,Bot 名顶位承载选中语义,
+   *  与其下会话的灰阶选中胶囊形成「Bot → 会话」两级中性层次(2026-11-02 稿)。 */
   botSelected?: boolean;
   origin: ConversationOrigin;
   /** 生效读取范围(managed mine 用;friend 读 scopeByFriendBotId)。 */
@@ -190,11 +191,13 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               className={cn(
                 // 名称 13px 常规字重:与会话标题同规格(13px/18px),去 Bot 名的
                 // 加粗强调——层级交由头像/缩进/选中态承载,列表更静;
-                // 选中态 text-primary 依旧经由 botSelected 后发覆盖。
+                // 选中态颜色依旧经由 botSelected 后发覆盖。
                 'min-w-0 truncate text-[13px] font-normal leading-[18px] tracking-[-0.08px] text-content-strong',
-                // 舞台所属 Bot 名称点亮品牌蓝(与 shell 主导航激活态同语言,2026-10-22);
+                // 舞台所属 Bot 名称点亮 #09090B(2026-11-02 稿:品牌蓝与目录灰阶
+                // 落差过大,回归中性深 text-foreground,与会话选中同语言;
+                // 收起时下挂选中会话不可见,由 Bot 名顶位承载);
                 // 不可用行维持灰名,不与禁用态打架。
-                botSelected && !unavailable && 'text-primary',
+                botSelected && !unavailable && 'text-foreground',
               )}
             >
               {bot.displayName}

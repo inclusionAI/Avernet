@@ -1,4 +1,4 @@
-import { Button, IconButton } from '@/components/ui';
+import { Button, IconButton, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { ChevronRight, Copy, FolderOpen } from 'lucide-react';
@@ -56,7 +56,7 @@ export function ChatPanelHeader({
 
   return (
     <ChatLayout.Header
-      className="flex h-12 items-center justify-between border-b border-divider bg-card px-3 sm:px-4"
+      className="flex h-12 items-center justify-between bg-card px-3 sm:px-4"
       slotRight={
         actions ??
         (onManageFiles ? (
@@ -87,22 +87,29 @@ export function ChatPanelHeader({
           <div
             role="group"
             aria-label={`对话 ${sessionTitle ?? target.name}`}
-            className="flex h-8 min-w-0 items-center gap-2 rounded-[10px] border border-border bg-card px-2.5"
+            className="flex h-8 min-w-0 items-center gap-2 rounded-[10px] bg-card px-2.5"
           >
             <h2 className="m-0 min-w-0 shrink truncate text-[13px] font-normal leading-[18px] text-content-strong">
               {sessionTitle ?? target.name}
             </h2>
             {sessionCode ? (
-              <Button
-                variant="ghost"
-                onClick={() => void copySessionId()}
-                aria-label={`复制会话 ID ${sessionCode}`}
-                title={sessionCode}
-                className="h-5 min-w-0 max-w-[180px] shrink-[2] gap-1 rounded-full bg-secondary px-2 text-[11px] font-normal text-foreground/85 transition-colors hover:bg-foreground/10 hover:text-foreground"
-              >
-                <span className="min-w-0 truncate">{sessionCode}</span>
-                <Copy className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-              </Button>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void copySessionId()}
+                      aria-label={`复制会话 ID ${sessionCode}`}
+                      className="h-5 min-w-0 max-w-[180px] shrink-[2] gap-1 rounded-full bg-secondary px-2 text-[11px] font-normal text-foreground/85 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                    >
+                      <span className="min-w-0 truncate">{sessionCode}</span>
+                      <Copy className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                    </Button>
+                  </TooltipTrigger>
+                  {/* 胶囊内 ID 截断，气泡补全量（原原生 title 展示型迁移，unify-tooltip-antd） */}
+                  <TooltipContent>{sessionCode}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : null}
           </div>
           {/* 连接状态为运行时数据；弱呈现 = 色点（tone 语义）+ 弱灰文字，不与标题抢视觉。 */}

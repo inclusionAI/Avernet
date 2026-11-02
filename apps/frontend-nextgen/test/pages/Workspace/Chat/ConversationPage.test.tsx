@@ -263,6 +263,17 @@ describe('ConversationPage(Task 8 组合页)', () => {
 
     render(<ConversationPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
+    // 展开/切台解耦:行点击只展开目录;空态舞台经深链式选中(sessionId=null)进入。
+    act(() => {
+      useConversationStore.setState({
+        selectedBotId: 'coding-bot:2088',
+        selectedSection: 'managed',
+        selectedOrigin: 'mine',
+        selectedScope: 'all',
+        selectedSessionId: null,
+        selectedFriendUserId: null,
+      });
+    });
 
     expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
@@ -338,6 +349,17 @@ describe('ConversationPage(Task 8 组合页)', () => {
 
     render(<ConversationPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
+    // 解耦后空态舞台经深链式选中进入;断言 Embedded 宿主仍被预载。
+    act(() => {
+      useConversationStore.setState({
+        selectedBotId: 'coding-bot:2088',
+        selectedSection: 'managed',
+        selectedOrigin: 'mine',
+        selectedScope: 'all',
+        selectedSessionId: null,
+        selectedFriendUserId: null,
+      });
+    });
 
     expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
     expect(preload).toHaveBeenCalledTimes(1);
@@ -605,9 +627,20 @@ describe('CollaborationPage(Task 8 组合页)', () => {
   });
 });
 
-it('expanding a Bot with no sessions replaces the chat stage with its creation prompt', async () => {
+it('deep-linking into a Bot with no sessions replaces the chat stage with its creation prompt', async () => {
   render(<ConversationPage />);
   fireEvent.click(await screen.findByRole('button', { name: '管理 Bot' }));
+  // 展开/切台解耦:行点击只展开目录;空态舞台经深链式选中(sessionId=null)进入。
+  act(() => {
+    useConversationStore.setState({
+      selectedBotId: 'bot-a:1',
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: null,
+      selectedFriendUserId: null,
+    });
+  });
   expect(await screen.findByText('管理 Bot 暂无会话')).toBeInTheDocument();
   expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
   expect(mockUseBotChat).toHaveBeenLastCalledWith(null, null, expect.anything(), undefined, '101');
