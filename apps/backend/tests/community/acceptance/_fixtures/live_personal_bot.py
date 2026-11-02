@@ -46,6 +46,7 @@ def wait_bot_ready(
 def create_live_personal_bot(
     client: httpx.Client,
     *,
+    request: pytest.FixtureRequest,
     user_id: str,
     bot_name_prefix: str,
     engine_type: str = "openclaw",
@@ -65,6 +66,21 @@ def create_live_personal_bot(
         )
     )
     bot = create_payload["data"]["bot"]
+    # Register before readiness: a failed publish can also leave a live runtime.
+    # The original client may already be closed when pytest runs finalizers.
+    def release_created_device() -> None:
+        with httpx.Client(base_url=str(client.base_url),
+                          headers={"x-user-id": user_id}, timeout=60.0) as cleanup:
+            latest = assert_success(cleanup.get(f"/api/bots/{bot['bot_id']}"))["data"]
+            # Dormant reactivation can allocate a replacement binding.
+            for binding_id in {bot["binding_id"], latest["binding_id"]} - {None}:
+                path = f"/api/v1/devices/{binding_id}"
+                binding = assert_success(cleanup.get(path))["data"]
+                if binding["status"] != "RELEASED":
+                    assert_success(cleanup.post(path + "/release", json={
+                        "release_reason": "acceptance test finished"}))
+
+    request.addfinalizer(release_created_device)
     ready = wait_bot_ready(client, bot["bot_id"])
     assert ready["device_provider"] == "baas", ready
     return bot

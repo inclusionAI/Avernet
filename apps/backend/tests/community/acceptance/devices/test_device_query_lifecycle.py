@@ -147,14 +147,14 @@ def test_devices_lifecycle_baseline(live_backend, acceptance_fs_root):
 
 
 @pytest.mark.acceptance
-def test_device_live_baas_provider_lifecycle(live_backend):
+def test_device_live_baas_provider_lifecycle(live_backend, request):
     """Create a real BaaS runtime, inspect its device, then release it."""
     user_id = fresh_id("device_owner")
     headers = {"x-user-id": user_id}
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="Device Acceptance",
             bot_desc="device live lifecycle acceptance bot",

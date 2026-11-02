@@ -52,7 +52,7 @@ def _poll_until_terminal(client: httpx.Client, scan_id: int) -> dict:
 
 @pytest.mark.acceptance
 def test_diagnose_tools_mcp_format_runs_prompt_helpers(
-    live_backend, acceptance_fs_root
+    live_backend, acceptance_fs_root, request
 ):
     """A bot with TOOLS.md + an activated schema-bearing MCP runs D-TOOLS-002
     through the prompt-slimming helpers and completes (LLM-disabled → LLM01)."""
@@ -61,7 +61,7 @@ def test_diagnose_tools_mcp_format_runs_prompt_helpers(
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client, user_id=user_id, bot_name_prefix="toolsdiag",
+            client, request=request, user_id=user_id, bot_name_prefix="toolsdiag",
         )
         bot_id = bot["bot_id"]
 
