@@ -250,7 +250,7 @@ class TestBootstrapSchemaOwnership:
         # create_engine is lazy, so this needs no reachable server. Without the
         # flag the index keys would exceed InnoDB's cap and CREATE INDEX fails.
         calls = self._record_create_all(monkeypatch)
-        database = CommunitySqliteDatabase(
+        database = CommunityDatabase(
             "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4"
         )
 
