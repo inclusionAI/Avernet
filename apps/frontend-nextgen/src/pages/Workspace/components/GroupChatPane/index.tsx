@@ -150,9 +150,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
       userIdentityId,
       userIdentityName,
     });
-  if (!group) {
-    return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
-  }
+  if (!group) return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
 
   const showError = supportState.phase === 'error';
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
@@ -214,6 +212,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onInsertDraft={composerVisible ? insertDraft : undefined}
         />
         <GroupChatCollabPanel
+          connected={connectionStatus === 'connected'}
           group={group}
           panel={collabPanel}
           session={session}

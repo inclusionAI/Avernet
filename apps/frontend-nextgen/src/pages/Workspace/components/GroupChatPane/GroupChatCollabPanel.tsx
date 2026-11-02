@@ -16,7 +16,9 @@ export function GroupChatCollabPanel({
   processingDeliveries,
   cancellingDeliveryIds,
   onCancelDelivery,
+  connected = true,
 }: {
+  connected?: boolean;
   panel: CollabPanelState;
   session: SessionView | null;
   group: GroupView | null;
@@ -48,7 +50,7 @@ export function GroupChatCollabPanel({
               cancellingDeliveryIds={cancellingDeliveryIds}
               onCancelDelivery={onCancelDelivery}
             />
-            <ManagerWorkerTasks key={session.sessionId} session={session} messages={messages} />
+            <ManagerWorkerTasks key={session.sessionId} session={session} messages={messages} connected={connected} />
           </div>
         </div>
         <CollabPanel panel={panel} />

@@ -8,8 +8,8 @@ import { Check, ChevronRight, ChevronUp, CircleHelp, Clock3, LoaderCircle, X } f
 import { useEffect, useRef, useState } from 'react';
 import { GroupTaskRow } from './GroupTaskRow';
 
-export function ManagerWorkerTasks({ session, messages }: { session: SessionView; messages: ChatMessage[] }) {
-  const model = useManagerWorkerTasks(session.sessionId, messages, session.participants);
+export function ManagerWorkerTasks({ session, messages, connected = true }: { session: SessionView; messages: ChatMessage[]; connected?: boolean }) {
+  const model = useManagerWorkerTasks(session.sessionId, messages, session.participants, connected);
   const [open, setOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [container, setContainer] = useState<HTMLElement>();

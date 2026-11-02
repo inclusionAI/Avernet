@@ -7,7 +7,7 @@ import type { ChatMessage } from '@tc-chat/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /** Session-scoped, rebuildable task projection. Never infer completion from an individual text segment. */
-export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[], participants: ParticipantView[]) {
+export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[], participants: ParticipantView[], connected = true) {
   const deliveries = useMessageDeliveryStore((state) => state.deliveriesBySessionId[sessionId]);
   const baseTasks = useMemo(
     () => projectGroupTasks(Object.values(deliveries ?? {}), messages, participants),
@@ -32,8 +32,9 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
   const [statusState, setStatusState] = useState<{ sessionId: string; rows: Record<string, TaskStatusSnapshot> }>({ sessionId, rows: {} });
   const tasks = useMemo(() => applyTaskStatuses(baseTasks, statusState.sessionId === sessionId ? statusState.rows : {}), [baseTasks, statusState, sessionId]);
   // Query at most 100 loaded assignments, newest first; do not poll arbitrary historical refs.
-  const taskRefs = JSON.stringify(baseTasks.filter((task) => task.intentId).slice(0, 100).map((task) => task.intentId));
+  const taskRefs = JSON.stringify(tasks.filter((task) => task.intentId && !isTerminalTask(task.status)).slice(0, 100).map((task) => task.intentId));
   useEffect(() => {
+    if (!connected || taskRefs === '[]') return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
@@ -57,7 +58,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     };
     void refresh();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [sessionId, taskRefs, clearConfirmed]);
+  }, [sessionId, taskRefs, connected, clearConfirmed]);
   const [read, setRead] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(Date.now);
@@ -83,22 +84,28 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     observedRuns.current = signatures;
     if (Object.keys(updates).length) setStreamActivity((previous) => ({ ...previous, ...updates }));
   }, [messages]);
-  // Source IDs, rather than streaming content, drive recovery queries (bounded by the API's 100-ID limit).
-  const messageIds = JSON.stringify([...new Set([
-    ...tasks.filter((task) => !isTerminalTask(task.status)).map((task) => task.sourceMessageId),
-    ...messages.map((message) => message.id).slice(-100),
-  ])]);
+  // Scan each loaded history source once per connection. Only unfinished tasks recur.
+  const historyIds = JSON.stringify([...new Set(messages.map((message) => message.id))]);
+  const activeIds = JSON.stringify([...new Set(tasks.filter((task) => !isTerminalTask(task.status)).map((task) => task.sourceMessageId))]);
+  const recoveredSources = useRef(new Set<string>());
+  useEffect(() => { recoveredSources.current.clear(); }, [sessionId, connected]);
   useEffect(() => {
+    if (!connected) return;
+    const loadedSources: string[] = JSON.parse(historyIds);
+    const activeSources: string[] = JSON.parse(activeIds);
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       const started = ++requestSequence.current;
       const startedAt = Date.now();
-      const ids = JSON.parse(messageIds) as string[];
+      const historical = loadedSources.filter((id) => !recoveredSources.current.has(id));
+      const ids = [...new Set([...historical, ...activeSources])];
       try {
         if (ids.length) {
           const rows = (await queryTaskDeliveries(sessionId, ids)).filter((row) => started > (cancellationBarrier.current.get(completeIntentId(row.task?.intent_id) ?? `delivery:${row.delivery_id}`) ?? -1));
           if (!disposed) {
+            for (const id of historical) recoveredSources.current.add(id);
+            setError((previous) => previous === '任务状态更新失败，正在重试' ? undefined : previous);
             for (const row of rows) if (row.task) useMessageDeliveryStore.getState().upsertDelivery(sessionId, row);
             const confirmed = projectGroupTasks(rows, [], []).filter((task) => task.status !== 'unknown').map(taskIdentity);
             clearConfirmed(confirmed, started);
@@ -120,7 +127,9 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       } catch {
         if (!disposed) setError('任务状态更新失败，正在重试');
       } finally {
-        if (!disposed) timer = setTimeout(refresh, 10_000);
+        if (!disposed && (activeSources.length > 0 || loadedSources.some((id) => !recoveredSources.current.has(id)))) {
+          timer = setTimeout(refresh, 10_000);
+        }
       }
     };
     void refresh();
@@ -128,7 +137,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       disposed = true;
       clearTimeout(timer);
     };
-  }, [sessionId, messageIds, clearConfirmed]);
+  }, [sessionId, historyIds, activeIds, connected, clearConfirmed]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);

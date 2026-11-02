@@ -133,12 +133,13 @@ it('refreshes durations each second from original server timestamps', () => {
 });
 
 it('bounds recent terminal history without evicting active or uncertain tasks', () => {
-  insert(row('T-active', 'running'), row('T-unknown', 'cancel_unknown'));
+  insert(row('T-active', 'running'), row('T-unknown', 'cancel_unknown'), row('T-expired', 'expired'));
   for (let index = 0; index < 110; index++) insert(row(`T-done-${index}`, 'completed'));
   const rows = Object.values(useMessageDeliveryStore.getState().deliveriesBySessionId.s1);
   expect(rows.filter((r) => r.status === 'completed')).toHaveLength(100);
   expect(rows.some((r) => r.status === 'running')).toBe(true);
   expect(rows.some((r) => r.status === 'cancel_unknown')).toBe(true);
+  expect(rows.some((r) => r.status === 'expired')).toBe(true);
 });
 
 it('updates recent activity when another streaming segment arrives without restarting task duration', () => {
@@ -271,7 +272,7 @@ it('isolates cancellation, pending state and unread results for colliding displa
   const view = renderHook(() => useManagerWorkerTasks('s1', messages, participants));
   await act(async () => { await Promise.resolve(); });
   expect(view.result.current.tasks).toHaveLength(2);
-  expect(queryWorkerTasks).toHaveBeenCalledWith(ids);
+  expect(queryWorkerTasks).toHaveBeenCalledWith(expect.arrayContaining(ids));
   let finish!: (value: { ref: string; status: 'cancelled' }) => void;
   jest.mocked(cancelWorkerTask).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   let first!: Promise<void>;
@@ -344,4 +345,75 @@ it.each(['late status', 'already_finished', 'network failure'])('preserves a com
   expect(view.result.current.tasks[0]).toMatchObject({ status: 'completed', finishedAt: completed.task!.finished_at });
   expect(view.result.current.unread).toHaveLength(1);
   view.unmount();
+});
+
+
+it('recovers history once, reads newly loaded sources, and recovers again after reconnect', async () => {
+  jest.useFakeTimers();
+  try {
+    query.mockClear();
+    const messages = Array.from({ length: 100 }, (_, index) => ({ id: `history-${index}`, role: 'user', content: '', status: 'done' })) as never[];
+    const participants: never[] = [];
+    const view = renderHook(({ history, connected }) => useManagerWorkerTasks('s1', history, participants, connected),
+      { initialProps: { history: messages, connected: true } });
+    await act(async () => { await Promise.resolve(); });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][1]).toHaveLength(100);
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(query).toHaveBeenCalledTimes(1);
+    const older = { id: 'older', role: 'user', content: '', status: 'done' } as never;
+    await act(async () => { view.rerender({ history: [older, ...messages], connected: true }); });
+    expect(query).toHaveBeenLastCalledWith('s1', ['older']);
+    await act(async () => { view.rerender({ history: [older, ...messages], connected: false }); });
+    await act(async () => { jest.advanceTimersByTime(30_000); });
+    expect(query).toHaveBeenCalledTimes(2);
+    await act(async () => { view.rerender({ history: [older, ...messages], connected: true }); });
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls[2][1]).toHaveLength(101);
+    view.unmount();
+  } finally { jest.useRealTimers(); }
+});
+
+it('keeps recovering an old uncertain expired task and stops after confirmed completion', async () => {
+  jest.useFakeTimers();
+  try {
+    const expired = row('old-expired', 'expired');
+    insert(expired);
+    for (let index = 0; index < 110; index++) insert(row(`done-${index}`, 'completed'));
+    query.mockResolvedValue([expired]);
+    query.mockClear();
+    const messages = [{ id: 'recent-message', role: 'user', content: '', status: 'done' }] as never[];
+    const participants: never[] = [];
+    const view = renderHook(() => useManagerWorkerTasks('s1', messages, participants));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.result.current.tasks.find((task) => task.deliveryId === expired.delivery_id)?.status).toBe('unknown');
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(query).toHaveBeenLastCalledWith('s1', [expired.message_id]);
+    query.mockResolvedValue([]);
+    insert({ ...expired, status: 'completed', state_version: 2 });
+    await act(async () => { await Promise.resolve(); });
+    const calls = query.mock.calls.length;
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(query).toHaveBeenCalledTimes(calls);
+    view.unmount();
+  } finally { jest.useRealTimers(); }
+});
+
+it('retries a failed initial history recovery before marking the source recovered', async () => {
+  jest.useFakeTimers();
+  try {
+    query.mockClear();
+    query.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValue([]);
+    const messages = [{ id: 'retry-source', role: 'user', content: '', status: 'done' }] as never[];
+    const participants: never[] = [];
+    const view = renderHook(() => useManagerWorkerTasks('s1', messages, participants));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenLastCalledWith('s1', ['retry-source']);
+    expect(view.result.current.error).toBeUndefined();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(query).toHaveBeenCalledTimes(2);
+    view.unmount();
+  } finally { jest.useRealTimers(); }
 });
