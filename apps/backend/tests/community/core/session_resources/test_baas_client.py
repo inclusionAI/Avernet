@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileTransferNotDoneError,
     SessionFileUpstreamUnavailableError,
     SessionResourceBaasClient,
 )
@@ -142,3 +143,41 @@ def test_legacy_session_complete_normalizes_upstream_failure():
             bot_uuid="bot-uuid-1",
             transfer_id="transfer/value",
         )
+
+
+def test_session_complete_maps_baas_409_to_not_done(caplog):
+    caplog.set_level("WARNING")
+
+    client = SessionResourceBaasClient(_UploadErrorHttp(status_code=409))
+
+    with pytest.raises(
+        SessionFileTransferNotDoneError,
+        match="session_file_transfer_not_done",
+    ):
+        client.complete_session_upload(
+            tenant="tenant-1",
+            session_id="session/value",
+            transfer_id="transfer/value",
+        )
+
+    assert "upstream_status=409" in caplog.text
+    assert "upstream diagnostic must not reach callers" not in caplog.text
+
+
+def test_legacy_complete_maps_baas_409_to_not_done(caplog):
+    caplog.set_level("WARNING")
+
+    client = SessionResourceBaasClient(_UploadErrorHttp(status_code=409))
+
+    with pytest.raises(
+        SessionFileTransferNotDoneError,
+        match="session_file_transfer_not_done",
+    ):
+        client.complete_legacy_upload(
+            tenant="tenant-1",
+            bot_uuid="bot-uuid-1",
+            transfer_id="transfer/value",
+        )
+
+    assert "upstream_status=409" in caplog.text
+    assert "upstream diagnostic must not reach callers" not in caplog.text

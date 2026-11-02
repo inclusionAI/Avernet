@@ -232,9 +232,10 @@ def _service(
     default_tenant="configured-tenant",
     bot_repository=None,
     bot_friend_repository=None,
+    http=None,
 ):
     repo = _Repo()
-    http = _HttpClient(complete_status=complete_status)
+    http = http or _HttpClient(complete_status=complete_status)
     service = SessionResourceService(
         repository=repo,
         baas_client=SessionResourceBaasClient(http),

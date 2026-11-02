@@ -23,6 +23,7 @@ from agentclaw.community.api.tc_resource_ready_observer import (
     TcResourceReadyObserverProtocol,
 )
 from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileTransferNotDoneError,
     SessionFileUpstreamUnavailableError,
 )
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
@@ -47,6 +48,8 @@ def _resource(record: SessionResourceRecord) -> dict:
 
 def _domain_error(exc: ValueError) -> HTTPException:
     code = str(exc)
+    if isinstance(exc, SessionFileTransferNotDoneError):
+        return HTTPException(status_code=409, detail=code)
     if isinstance(exc, SessionFileUpstreamUnavailableError):
         return HTTPException(status_code=502, detail=code)
     if code == "resource_not_found":
