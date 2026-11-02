@@ -207,6 +207,66 @@ class TestGenerateOpenClawStageConfigs:
             target_dir=target_dir,
         )
 
+    def test_build_passes_current_bot_owner_to_openclaw_config_generation(self, tmp_path: Path):
+        @dataclass
+        class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
+            plan: EngineBuildPlan
+
+            def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
+                return self.plan
+
+        plan = EngineBuildPlan(
+            engine_type="openclaw",
+            source_root_name="workspace",
+            migration_subpath="openclaw",
+            workspace_subdir="workspace",
+            mcp_config_relpath="workspace/config/mcporter.json",
+            skill_source_relpath="workspace/skills",
+            skill_target_relpath="workspace/skills",
+            rsync_excludes=[],
+        )
+
+        service = _make_service()
+        service._resolve_sandbox_provider = MagicMock(return_value=DummyProvider(plan))
+        service._get_device_binding_repo = MagicMock(return_value=MagicMock(get_by_id=MagicMock(return_value=None)))
+        service._path_factory = MagicMock()
+        source_dir = tmp_path / "source"
+        source_dir.mkdir(exist_ok=True)
+        service._path_factory.get_bot_engine_dir.return_value = source_dir
+        service._migrate_bot_instance = MagicMock(return_value=True)
+        service._generate_mcp_config = MagicMock(return_value=True)
+        service._generate_openclaw_stage_configs = MagicMock(return_value=True)
+
+        import agentclaw.community.core.service_bot.services.bot_build_service as build_module
+
+        original_get_bot_dir = build_module.get_bot_dir
+        build_module.get_bot_dir = MagicMock(return_value=tmp_path / "target-root")
+        try:
+            result = service.build(
+                bot={
+                    "bot_id": "bot-1",
+                    "entity_id": "legacy-owner-1",
+                    "owner_id": "current-owner-1",
+                    "entity_type": "staff",
+                    "device_id": "device-1",
+                },
+                version=3,
+            )
+        finally:
+            build_module.get_bot_dir = original_get_bot_dir
+
+        target_dir = tmp_path / "target-root" / "3" / "openclaw"
+        assert result["success"] is True
+        assert result["openclaw_configs_success"] is True
+        service._generate_openclaw_stage_configs.assert_called_once_with(
+            bot_id="bot-1",
+            owner_id="current-owner-1",
+            target_dir=target_dir,
+        )
+
     def test_build_marks_failure_when_openclaw_config_generation_fails(self, tmp_path: Path):
         @dataclass
         class DummyProvider:
