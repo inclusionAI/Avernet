@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
@@ -295,7 +295,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     @abstractmethod
     def claim_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
-        config: McpConfigWriteIntent, platform_default_codes: frozenset[str],
+        config: McpConfigWriteIntent[dict[str, Any]], platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:

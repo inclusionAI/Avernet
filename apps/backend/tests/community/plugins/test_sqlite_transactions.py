@@ -5,14 +5,20 @@ import asyncio
 import pytest
 from sqlalchemy import text
 
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.di.config_community import CommunityDatabaseConfig
+from agentclaw.community.di.local_skill_security_config import LocalSkillSecurityObservationConfig
+from agentclaw.community.di.modules.infrastructure.community.database import CommunityDatabaseModule
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 from agentclaw.community.plugins.local import database as local_database
 
 
 @pytest.fixture(params=["community", "local"])
 def database(request, tmp_path):
     if request.param == "community":
-        plugin = CommunityDatabase(f"sqlite:///{tmp_path}/transactions.db")
+        plugin = CommunityDatabaseModule().database(
+            CommunityDatabaseConfig(url=f"sqlite:///{tmp_path}/transactions.db"),
+            LocalSkillSecurityObservationConfig(enabled=False),
+        )
     else:
         local_database.reset_for_tests()
         plugin = local_database.SqliteDB()
@@ -62,8 +68,8 @@ def test_successful_savepoint_is_committed_and_foreign_keys_still_cascade(databa
 def community_pair(tmp_path):
     from sqlalchemy import event
 
-    first = CommunityDatabase(f"sqlite:///{tmp_path}/concurrent.db")
-    other = CommunityDatabase(first._url)
+    first = CommunitySqliteDatabase(f"sqlite:///{tmp_path}/concurrent.db")
+    other = CommunitySqliteDatabase(first._url)
 
     @event.listens_for(other._engine, "connect")
     def reject_contending_writes_without_waiting(connection, _record):

@@ -23,7 +23,7 @@ from agentclaw.community.core.repository.implementations.work_orders.work_order 
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 from tests.community.core.space_knowledge.test_membership_real_database import (
     BoundedSink,
     create_space,
@@ -59,7 +59,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
             session.add(order)
             session.flush()
             order_id = order.id
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     sink = BoundedSink()
     sync = synchronizer(database, sink)
     roster_read, release, write_attempted, committed = (Event() for _ in range(4))
@@ -159,7 +159,7 @@ def test_source_deleted_before_activation_guard_is_not_resurrected(
             assert release.wait(timeout=5)
     sink = BoundedSink()
     sync = synchronizer(database, sink)
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             activation = pool.submit(
@@ -201,7 +201,7 @@ def test_sqlite_guard_contention_propagates_bounded_failure(database):
     from sqlalchemy.exc import OperationalError
 
     space_id, _ = create_space(database)
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
 
     @event.listens_for(other._engine, "connect")
     def short_busy_timeout(connection, record):

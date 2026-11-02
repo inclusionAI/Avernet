@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from agentclaw.community.core.ports.mcp_config import McpConfigDirective
+from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig
 
 from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
@@ -43,7 +43,7 @@ def compile_mcp(entries: Sequence[Mapping[str, Any]]) -> Declaration[DesiredMcpS
         config = entry.get("config")
         try:
             override = (
-                McpConfigDirective.PRESERVE
+                PreserveMcpConfig()
                 if "config" not in entry
                 else McpOverride.from_config(config) if isinstance(config, Mapping) and config else None
             )

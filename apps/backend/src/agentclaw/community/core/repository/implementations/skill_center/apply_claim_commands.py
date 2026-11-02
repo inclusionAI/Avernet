@@ -14,7 +14,9 @@ activation routes.
 
 from __future__ import annotations
 
-from agentclaw.community.core.ports.mcp_config import McpConfigDirective, McpConfigWriteIntent
+from typing import Any
+
+from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig, McpConfigWriteIntent
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import Skill
@@ -218,7 +220,7 @@ class ApplyClaimCommands:
         bot_id: str,
         owner_id: str,
         server_code: str,
-        config: McpConfigWriteIntent,
+        config: McpConfigWriteIntent[dict[str, Any]],
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
@@ -245,7 +247,7 @@ class ApplyClaimCommands:
                 server_code=server_code,
             )
             override_changed = (
-                False if config is McpConfigDirective.PRESERVE else
+                False if isinstance(config, PreserveMcpConfig) else
                 bot_mcp_configs.replace(
                     session,
                     bot_id=bot_id,

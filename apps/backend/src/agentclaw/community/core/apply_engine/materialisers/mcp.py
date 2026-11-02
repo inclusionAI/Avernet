@@ -41,7 +41,7 @@ from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
 from agentclaw.community.core.mcp.config_comparison import comparable_config
-from agentclaw.community.core.ports.mcp_config import McpConfigDirective
+from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -102,7 +102,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     )
                 )
                 continue
-            preserve = entry.override is McpConfigDirective.PRESERVE
+            preserve = isinstance(entry.override, PreserveMcpConfig)
             if preserve:
                 normalized_config = self._activation.get_mcp_overrides(
                     bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
@@ -125,7 +125,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
             intents.append(
                 Intent(
                     server_code,
-                    McpConfigDirective.PRESERVE if preserve else normalized_config,
+                    PreserveMcpConfig() if preserve else normalized_config,
                 )
             )
 
@@ -208,7 +208,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     if intent.identity not in effective_current
                     else (
                         EntryOutcome.UNCHANGED.value
-                        if intent.value is McpConfigDirective.PRESERVE
+                        if isinstance(intent.value, PreserveMcpConfig)
                         or comparable_config(overrides.get(intent.identity))
                         == comparable_config(intent.value)
                         else EntryOutcome.UPDATED.value
@@ -218,7 +218,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     intent.identity not in direct
                     # An explicit value must also consume legacy aliases even
                     # when its public effective outcome is unchanged.
-                    or intent.value is not McpConfigDirective.PRESERVE
+                    or not isinstance(intent.value, PreserveMcpConfig)
                 ),
             )
             for intent in intents

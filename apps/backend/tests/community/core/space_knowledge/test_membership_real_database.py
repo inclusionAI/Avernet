@@ -52,12 +52,12 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderNotificationModel,
 )
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 
 
 @pytest.fixture
 def database(tmp_path):
-    db = CommunityDatabase(f"sqlite:///{tmp_path / 'membership.db'}")
+    db = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'membership.db'}")
     Base.metadata.create_all(db._engine)
     yield db
     db._engine.dispose()
@@ -270,7 +270,7 @@ def test_overlimit_approval_rolls_back_members_order_approver_and_notices(
 
 def test_two_real_connections_can_activate_same_space(database):
     space_id, _ = create_space(database)
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     barrier = Barrier(2)
 
     def racing_lock(_conn, _cursor, statement, _parameters, _context, _many):
@@ -394,7 +394,7 @@ def test_concurrent_new_spaces_skip_retired_scope_across_connections(database):
     SpaceManagementRepository(database, effects=KnowledgeSpacePersistenceEffects()).delete_team(
         space_id=old_id, with_members=True, env="pre"
     )
-    other = CommunityDatabase(database._url)
+    other = CommunitySqliteDatabase(database._url)
     barrier = Barrier(2)
 
     def create(db, owner, personal):
@@ -504,10 +504,10 @@ def test_first_activation_is_idempotent_across_real_processes(database, tmp_path
         import sys
         import time
         from agentclaw.community.core.repository.implementations.spaces import knowledge_sync
-        from agentclaw.community.plugins.community.database import CommunityDatabase
+        from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
         from sqlalchemy import event
 
-        database = CommunityDatabase(sys.argv[1])
+        database = CommunitySqliteDatabase(sys.argv[1])
         barrier = Path(sys.argv[3])
         @event.listens_for(database._engine, "before_cursor_execute")
         def race(_conn, _cursor, statement, _parameters, _context, _many):

@@ -42,7 +42,8 @@ The Direct MCP claim's Installation and explicit configuration write must roll
 back together on a persistence failure. Real failure injection exposed Python
 SQLite's legacy transaction mode releasing an Installation SAVEPOINT before
 an outer transaction had begun, leaving that Installation committed after a
-later configuration INSERT failed. Both community and local SQLite plugins
+later configuration INSERT failed. The composition root selects a dedicated community SQLite plugin; it and the
+local SQLite plugin
 explicitly start `BEGIN IMMEDIATE` when entering `transactional_orm_session`,
 before application reads or SAVEPOINTs. Ordinary `orm_session` keeps its prior
 read behavior, and existing guarded lifecycle callers retain their own explicit
@@ -118,5 +119,14 @@ values and rolling back normalization, owner and journal changes together on
 failure. Ordinary configuration reads do not query the optional handoff schema;
 this does not enable the handoff feature or add a product entrypoint.
 
-`McpConfigWriteIntent` names the existing internal preserve/clear/replace type
-alias. It is not a new entity, persisted action or YAML/Genome field.
+`McpConfigWriteIntent[T]` is the shared internal preserve/clear/replace contract:
+a value of T replaces, None clears, and an immutable `PreserveMcpConfig` marker
+performs no write. T is McpOverride in Desired State and a validated mapping at
+the persistence port. McpOverride describes the configuration value, not an
+operation. No single-member action enum, new entity, persisted action or
+YAML/Genome field is introduced. Copying an intent preserves its meaning.
+
+A publicly unchanged Apply entry may still claim configuration to consume safe
+legacy aliases. Only an effective supply/configuration change needs MCP
+projection. Other commands retain repeated reconciliation after failed Runtime
+delivery even when the stored Desired State has not changed.

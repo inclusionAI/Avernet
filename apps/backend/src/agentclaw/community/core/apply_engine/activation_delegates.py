@@ -173,7 +173,7 @@ class _DelegatingActivation(ActivationPort):
         self,
         *,
         server_code: str,
-        config: McpConfigWriteIntent,
+        config: McpConfigWriteIntent[dict[str, Any]],
         bot_id: str,
         owner_id: str,
         actor_id: str,

@@ -393,7 +393,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self,
         *,
         server_code: str,
-        config: McpConfigWriteIntent,
+        config: McpConfigWriteIntent[dict[str, Any]],
         bot_id: str,
         owner_id: str,
         actor_id: str,
@@ -428,6 +428,8 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=mutation,
                 scope_from_result=mcp_claim_scope,
+                # Explicit config still reaches the claim to consume aliases.
+                # Only an effective supply/config delta requires MCP delivery.
                 skip_projection_when_unchanged=True,
             )
             self._log_manifest_source_transitions(

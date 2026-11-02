@@ -497,3 +497,24 @@ async def test_scoped_same_account_duplicate_bot_id_is_refused_without_changing_
     assert world.config.get_bot_override(bot_id="bot-1", owner_id="entity-2", server_code="mcp.test") == {
         "headers": {"X-Two": "keep"},
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("copy_kind", ["deepcopy", "pickle"])
+async def test_copied_preserve_declaration_keeps_saved_override(copy_kind):
+    import copy
+    import pickle
+
+    from agentclaw.community.core.apply_engine.desired_state import DesiredState
+    from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
+
+    world = McpWorld()
+    saved = {"headers": {"X-Saved": "retained"}}
+    await world.apply_manifest([{"server_code": "mcp.test", "config": saved}])
+    declaration = compile_mcp([{"server_code": "mcp.test"}])
+    copied = (
+        copy.deepcopy(declaration) if copy_kind == "deepcopy"
+        else pickle.loads(pickle.dumps(declaration))
+    )
+    await world.apply_state(DesiredState(mcp=copied))
+    assert (await world.state_reader.mcp_servers(world.ref))[0].override == saved
