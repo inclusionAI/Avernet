@@ -202,7 +202,14 @@ mechanism fails closed: a malformed file, an unknown structure, or an expired
 entry fails the gate instead of being silently applied or silently ignored;
 an entry matching no changed files prints a cleanup notice; an absent file
 means no waivers. This mirrors the E2E gate's `--changed-skip-regex` skip
-semantics, but as an explicit, owned, reviewed, time-bounded list.
+semantics, but as an explicit, owned, reviewed, time-bounded list. A
+directory-prefix entry exempts ALL changed lines of every file under the
+prefix — including future edits by other PRs — until its expiry, so entries
+must be scoped as narrowly as the change class allows and expiry is the
+enforcement that forces scope re-review. Entries are valid through and
+including `expires`, compared against the runner's local calendar date (UTC
+on GitHub runners); an expired entry fails the gate, so a lapsed entry can
+only fail early, never bypass.
 
 ---
 

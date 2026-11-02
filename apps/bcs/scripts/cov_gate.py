@@ -81,8 +81,10 @@ def load_waivers(path):
         return [], None
     except (OSError, json.JSONDecodeError) as e:
         return [], "cannot read or parse %s: %s" % (path, e)
+    version = data.get("version") if isinstance(data, dict) else None
     if (not isinstance(data, dict) or set(data) != {"version", "waivers"}
-            or data["version"] != 1 or not isinstance(data["waivers"], list)):
+            or not isinstance(version, int) or isinstance(version, bool)
+            or version != 1 or not isinstance(data["waivers"], list)):
         return [], ('%s must be {"version": 1, "waivers": [...]}' % path)
     waivers = []
     for i, entry in enumerate(data["waivers"]):
@@ -91,6 +93,9 @@ def load_waivers(path):
                        for k in WAIVER_KEYS)):
             return [], ("waivers[%d] in %s needs non-empty string fields "
                         "path/reason/owner/expires" % (i, path))
+        if any("\n" in entry[k] or "\r" in entry[k] for k in WAIVER_KEYS):
+            return [], ("waivers[%d] (%r) in %s must not contain line breaks"
+                        % (i, entry["path"], path))
         m = _EXPIRY.match(entry["expires"])
         try:
             date = datetime.date(int(m[1]), int(m[2]), int(m[3])) if m else None

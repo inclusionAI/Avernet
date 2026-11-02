@@ -146,6 +146,23 @@ class BcsCovGateWaiverTest(unittest.TestCase):
         self.assertIn('Changed-line coverage 0.00% is below the required 80.00%',
                       result.stdout)
 
+    def test_waived_covered_lines_leave_numerator_and_denominator(self) -> None:
+        self.write_testresult(moved_hits=1, a_hits=1)
+        waivers = Path(self.temporary.name) / 'covered-waived.json'
+        waivers.write_text(json.dumps({'version': 1,
+                                       'waivers': [_entry('src/moved.rs')]}))
+        result = self.run_gate(waivers_path=str(waivers))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('[changed-line-cov] waived 1 file(s) / '
+                      f'{MOVED_LINES} instrumentable changed line(s)',
+                      result.stdout)
+        # The 10 waived lines were covered, but must drop out of the
+        # numerator too — otherwise covered would exceed the denominator.
+        self.assertIn(f'changed-instrumentable-lines={A_ADDED_LINES} '
+                      f'covered={A_ADDED_LINES} -> 100.00%', result.stdout)
+        self.assertIn('Changed-line coverage 100.00% (requirement: >=80.00%) — OK',
+                      result.stdout)
+
     def test_expired_waiver_fails_closed_and_no_longer_exempts(self) -> None:
         self.write_testresult(moved_hits=0, a_hits=0)
         waivers = Path(self.temporary.name) / 'expired.json'
@@ -167,6 +184,9 @@ class BcsCovGateWaiverTest(unittest.TestCase):
             'invalid-json': '{not json',
             'not-an-object': json.dumps([{'version': 1}]),
             'wrong-version': json.dumps({'version': 2, 'waivers': []}),
+            'version-true': json.dumps({'version': True, 'waivers': []}),
+            'version-float': json.dumps({'version': 1.0, 'waivers': []}),
+            'version-string': json.dumps({'version': '1', 'waivers': []}),
             'top-level-extra-key': json.dumps({'version': 1, 'waivers': [],
                                                'extra': 1}),
             'entry-not-object': json.dumps({'version': 1, 'waivers': ['src/moved.rs']}),
@@ -175,6 +195,9 @@ class BcsCovGateWaiverTest(unittest.TestCase):
             'empty-field': json.dumps({'version': 1,
                                        'waivers': [_entry('src/moved.rs')
                                                    | {'reason': ''}]}),
+            'newline-in-field': json.dumps({'version': 1,
+                                            'waivers': [_entry('src/moved.rs')
+                                                        | {'reason': 'one\ntwo'}]}),
             'bad-date-format': json.dumps({'version': 1,
                                            'waivers': [_entry('src/moved.rs',
                                                               '2099/01/01')]}),
@@ -189,6 +212,9 @@ class BcsCovGateWaiverTest(unittest.TestCase):
                 result = self.run_gate(waivers_path=str(path))
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn('coverage waiver list unusable', result.stdout)
+                if name == 'newline-in-field':
+                    self.assertIn("waivers[0] ('src/moved.rs')", result.stdout)
+                    self.assertIn('must not contain line breaks', result.stdout)
 
     def test_stale_waiver_notifies_cleanup_and_passes(self) -> None:
         self.write_testresult(moved_hits=1, a_hits=1)
