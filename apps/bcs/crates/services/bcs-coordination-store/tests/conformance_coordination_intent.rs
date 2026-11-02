@@ -121,3 +121,18 @@ async fn uncertain_claim_does_not_execute_and_finish_retries_only_receipt() {
         }
     }
 }
+
+#[tokio::test]
+async fn task_correlation_is_shared_immutable_and_read_only() {
+    let (store, cache) = fixture().await;
+    assert!(store.task_result(ID).await.unwrap().is_none());
+    assert!(store.task_delivery(ID).await.unwrap().is_none());
+    store.record_task_delivery(ID, "delivery-1").await.unwrap();
+    let other = CoordinationCacheStore::new(cache.clone());
+    assert_eq!(other.task_delivery(ID).await.unwrap().as_deref(), Some("delivery-1"));
+    other.record_task_delivery(ID, "delivery-1").await.unwrap();
+    assert!(other.record_task_delivery(ID, "delivery-2").await.is_err());
+    assert!(cache.get_value(&format!("bcs:coordination:v2:{ID}:claim")).await.unwrap().is_none());
+    cache.delete(&format!("bcs:coordination:v2:{ID}:delivery")).await.unwrap();
+    assert!(other.task_delivery(ID).await.unwrap().is_none());
+}

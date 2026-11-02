@@ -30,8 +30,34 @@ async fn legacy_suppressions(flow: &BcsMessageFlow, prefixes: &[String]) -> Serv
 }
 
 enum Task { Uncertain, Rejected, Managed(PersistedMessageDelivery), Legacy(TaskEntry) }
+async fn cached_intent(flow: &BcsMessageFlow, value: &str) -> ServiceResult<Vec<Task>> {
+    use bcs_service_api::port::CoordinationStatus;
+    let Some(port) = &flow.coordination_intents else { return Ok(vec![Task::Uncertain]); };
+    if let Some(id) = port.task_delivery(value).await? {
+        if let Some(service) = &flow.managed_deliveries {
+            let rows = service.lookup(DeliveryLookup::Id(id)).await
+                .map_err(|_| ServiceError::InternalError("task delivery lookup unavailable".into()))?;
+            if let Some(row) = rows.into_iter().next() { return Ok(vec![Task::Managed(row)]); }
+        }
+        return Ok(vec![Task::Uncertain]);
+    }
+    if let Some(result) = port.task_result(value).await? {
+        if result.status == CoordinationStatus::Failed { return Ok(vec![Task::Rejected]); }
+        if let Some(id) = result.task_id {
+            if let Some(entry) = flow.task_store.get(&id).await {
+                // Managed tasks require their authoritative delivery row.
+                if !entry.managed { return Ok(vec![Task::Legacy(entry)]); }
+            }
+        }
+    }
+    Ok(vec![Task::Uncertain])
+}
+
 async fn lookup(flow: &BcsMessageFlow, value: &str) -> ServiceResult<Vec<Task>> {
     let prefix = prefix(value)?;
+    if flow.coordination_intents.is_some() && value.starts_with("bcs_intent_") && prefix.len() == 32 {
+        return cached_intent(flow, &format!("bcs_intent_{prefix}")).await;
+    }
     let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(RETENTION_MS);
     let legacy_intents = legacy_suppressions(flow, std::slice::from_ref(&prefix)).await?;
     let rows = match &flow.managed_deliveries {
@@ -132,6 +158,26 @@ async fn view(flow: &BcsMessageFlow, value: String, task: &Task) -> View {
 }
 pub(crate) async fn status(flow: &BcsMessageFlow, refs: Vec<String>) -> ServiceResult<Vec<View>> {
     if refs.is_empty() || refs.len() > 20 { return Err(invalid("task_refs requires 1..20 refs")); }
+    // Full intent IDs use shared cache correlation and indexed delivery ID reads.
+    // Split mixed batches so these selectors never reach the JSON-prefix SQL path.
+    if flow.coordination_intents.is_some() && refs.iter().any(|value| value.starts_with("bcs_intent_") && value.len() == 43) {
+        use futures::{stream, StreamExt, TryStreamExt};
+        for value in &refs { prefix(value)?; }
+        let unique: std::collections::BTreeSet<_> = refs.iter().cloned().collect();
+        let resolved: BTreeMap<String, View> = stream::iter(unique)
+            .map(|value| async move {
+                let tasks = lookup(flow, &value).await?;
+                let item = match tasks.as_slice() {
+                    [] => View::new(value.clone(), S::NotFound),
+                    [task] => view(flow, value.clone(), task).await,
+                    _ => View::new(value.clone(), S::Ambiguous),
+                };
+                Ok::<_, ServiceError>((value, item))
+            })
+            .buffered(4)
+            .try_collect().await?;
+        return Ok(refs.into_iter().map(|value| resolved[&value].clone()).collect());
+    }
     let prefixes = refs.iter().map(|value| prefix(value)).collect::<ServiceResult<std::collections::BTreeSet<_>>>()?;
     let prefixes: Vec<_> = prefixes.into_iter().collect();
     let legacy_intents = legacy_suppressions(flow, &prefixes).await?;

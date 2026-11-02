@@ -487,3 +487,23 @@ async fn application_task_handles_translate_core_failures_and_preserve_results()
     assert_eq!(result.task_ref, reference);
     assert_eq!(result.status, S::Cancelled);
 }
+
+#[tokio::test]
+async fn cached_intent_reads_authoritative_delivery_after_restart() {
+    let mut f = Fixture::new().await;
+    let cache = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+    let port = Arc::new(bcs_coordination_store::CoordinationCacheStore::new(cache));
+    f.flow = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+        |flow| flow.with_coordination_intents(Some(port.clone()))).await;
+    let reference = "bcs_intent_11111111000000000000000000000000";
+    assert_eq!(state(&f, reference).await, S::Unknown);
+    let row = assign(&f, "11111111000000000000000000000000", None).await;
+    assert_eq!(state(&f, reference).await, S::Queued);
+    let row = f.start(&row).await;
+    let row = f.transition(&row, Event::Accepted).await;
+    assert_eq!(state(&f, reference).await, S::Running);
+    f.flow.handle_bot_event(final_event(&row)).await.unwrap();
+    let restarted = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+        |flow| flow.with_coordination_intents(Some(port))).await;
+    assert_eq!(restarted.task_status(vec![reference.into()]).await.unwrap()[0].status, S::Completed);
+}
