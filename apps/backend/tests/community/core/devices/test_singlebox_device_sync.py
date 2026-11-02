@@ -37,6 +37,7 @@ def test_singlebox_skips_filter_servers_but_delegates_other_methods():
         transport_protocol=None,
         url_override=None,
         strict_transport_protocol=False,
+        engine_type=None,
     )
     delegate.sync_remove_mcp.assert_called_once_with("mcp.example")
     delegate.has_mcp.assert_called_once_with("mcp.example")
