@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/modules/archive/server/routes/__tests__/auto-heal-write-security.test.ts
+  h_5f06d4d8b4bdd5 134,146-167
+apps/evolverun/clawweb/internal/modules/archive/server/routes/auto-heal.ts
+  h_5f06d4d8b4bdd5 6,106-108,110,252,257-266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0acbf9d12f2a873517a3ba84dc1f75a059cc0487",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
