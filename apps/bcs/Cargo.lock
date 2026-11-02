@@ -632,6 +632,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-service-api",
+ "bcs-test-support",
  "time",
  "tokio",
  "tracing",

@@ -117,5 +117,9 @@ pub use oauth_session_engine::oauth_session_engine_contract_tests;
 ///
 /// Drivers pass the store under test (the memory store now; Task 13's
 /// shared persistence store later); the harness owns the sequence and
-/// the asserts.
-pub use pending_oauth_login::pending_oauth_login_contract_tests;
+/// the asserts. `pending_o_auth_login_store_contract_tests` is the
+/// R25-gate-canonical name; the human-spelled alias stays exported for
+/// existing importers.
+pub use pending_oauth_login::{
+    pending_oauth_login_contract_tests, pending_o_auth_login_store_contract_tests,
+};

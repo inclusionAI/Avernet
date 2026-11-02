@@ -3,9 +3,9 @@
 ## Provides
 
 - `AuthApplicationService`, the transport-neutral implementation of the
-  service-api `AuthService` contract (temporary name; Task 11
-  atomically replaces the legacy `AuthService` surface with it and
-  restores the stable `AuthService` name).
+  service-api `AuthService` contract (the Task 11 atomic swap replaced the
+  legacy `AuthService` surface with it and restored the stable
+  `AuthService` trait).
 - `login_urls`: the browser-bound authorize-URL batch. One pending-login
   batch per initiating browser, provider chain (subsequence) order
   preserved, exactly one `SetLoginChallenge` cookie instruction whose
@@ -90,9 +90,11 @@
 
 - `cargo test --package bcs-app-auth` — all integration suites:
   `login_flow` (binding order + cookie instructions), `session_flow`
-  (projection/refresh/logout), `conformance` (central harness: every
-  port method reached with recorded arguments; rejected paths never
-  touch the next port), `log_redaction` (DEBUG-captured category-only
+  (projection/refresh/logout), `conformance` (every port method reached
+  with recorded arguments; rejected paths never touch the next port),
+  `conformance_auth_service` (R25 central
+  `bcs-test-support::contract::application::auth_service_contract_tests`
+  over the real service), `log_redaction` (DEBUG-captured category-only
   output). Ports get fake doubles in `tests/support/` that record every
   call.
 - `cargo check --package bcs --all-targets` keeps the bootstrap bridge

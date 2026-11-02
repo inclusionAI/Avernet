@@ -704,3 +704,26 @@ joined from the identity row. Concrete implementations prove conformance
 against the shared `bcs-test-support` harness
 (`auth_session_repo_port_contract_tests`), which takes any
 `AuthSessionRepoPort` trait object and a scope.
+
+## V1 auth application ports and AuthService
+
+`port::oauth` is the ONLY surface the auth application layer consumes for
+login, transport-neutral by construction: `OAuthProviderPort` (chain-ordered
+provider names, authorize-URL build with the exact per-provider callback,
+one-time code exchange whose third-party errors are lowered to stable
+`ApplicationError` categories, never raw provider text), `OAuthSessionPort`
+(atomic install for a completed browser-bound login, rotation, and
+idempotent session-instance revoke), and `PendingOAuthLoginPort` (the
+issue/consume mirror of plugin-api's `PendingOAuthLoginStore`, with the
+byte-identical `{callback_base}/{provider}` join on both sides). `application::v1::AuthService`
+orchestrates them for the OpenAPI V1 facade (`login_urls`, `complete_login`,
+`current_user`, `refresh_session`, `logout`): its `AuthFlowReply` carries
+transport-neutral cookie instructions — one `SetLoginChallenge` on URL
+discovery, session-install plus challenge-clear on callback success — plus
+the failure classes the API chain pins (lost login race → 409, lost rotation
+race → 401, dependency outage → 503 `auth_dependency_unavailable`, and
+logout never reports success after a failed revoke). No delivery type crosses
+into this contract; the HTTP adapter encodes `BrowserCookieChange` into
+separate `Set-Cookie` headers and the rest of BCS keeps consuming
+`AuthenticatedCaller` unchanged. Wire contract:
+`api-contracts/v1/authentication/contract.md`.

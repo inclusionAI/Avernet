@@ -24,6 +24,13 @@ provides:
   - LocalAuthConfig
   - extract_session_cookie
   - BCS_SESSION_COOKIE
+  # V1 API auth plugin chain (2026-11) — strict, environment-scoped session
+  # contracts beside the legacy ones above:
+  - AuthSessionIdentityPort  # strict install/rotate/revoke + ensure_identity (session.rs)
+  - SessionScope/SessionVersion/SessionSnapshot  # scope-addrs + CAS version vocabulary
+  - SessionAuthError       # closed categories: Invalid/Forbidden/Unavailable/Internal/Conflict
+  - PendingOAuthLoginStore # browser-bound one-time OAuth login state (login_state.rs)
+  - OAuthSessionClaims     # redacted-Debug strict claims type carried via bcs-jwt
 consumes:
   - axum::http::HeaderMap   # transport type currently in the AuthPlugin signature (see note)
 internal_dependencies: []   # leaf contract crate; depends only on external crates

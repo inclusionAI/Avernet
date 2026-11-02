@@ -601,3 +601,13 @@ schemas identical. SQLite splits the file with the shared
 `split_sql_statements` splitter and column-guards each `ADD COLUMN` so a
 partially applied step resumes cleanly; bcs-admin applies the MySQL file and
 records the version plus the file checksum itself.
+
+**MySQL strict mode is mandatory for these deployments.** The session token
+hash persisted under `token` (and the new `session_id`) is exactly 64
+characters — SHA-256 hex in the pre-existing `varchar(64)` column, with
+zero headroom. A permissive (non-strict) SQL mode silently truncates longer
+values instead of failing the write, which a deployment must never accept:
+a truncated stored hash no longer certifies the credential it was written
+for. Provision the database with a strict SQL mode (e.g.
+`STRICT_TRANS_TABLES`) and keep statements that would overflow failing
+loudly.

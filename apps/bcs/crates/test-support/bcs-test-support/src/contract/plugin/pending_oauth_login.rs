@@ -38,6 +38,16 @@ use bcs_auth_api::login_state::{
 /// store under test.
 #[allow(clippy::expect_used, reason = "test harness — panic on failure is the contract")]
 pub async fn pending_oauth_login_contract_tests(store: Arc<dyn PendingOAuthLoginStore>) {
+    pending_o_auth_login_store_contract_tests(store).await
+}
+
+/// The R25-gate-canonical entry for the same contract: the conformance
+/// gate derives harness names by `to_snake` of the trait name
+/// (`PendingOAuthLoginStore` → this identifier). Drivers should prefer
+/// this name; the human-spelled alias above keeps existing imports
+/// working.
+#[allow(clippy::expect_used, reason = "test harness — panic on failure is the contract")]
+pub async fn pending_o_auth_login_store_contract_tests(store: Arc<dyn PendingOAuthLoginStore>) {
     const CALLBACK_BASE: &str = "https://bcs.example.com/openapi/v1/auth/callback";
     const EXACT_GITHUB: &str = "https://bcs.example.com/openapi/v1/auth/callback/github";
     const EXACT_GOOGLE: &str = "https://bcs.example.com/openapi/v1/auth/callback/google";
