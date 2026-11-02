@@ -241,7 +241,6 @@ from agentclaw.community.core.mcp.errors import (
     McpServerNotFoundError,
     McpSyncFailedError,
 )
-from agentclaw.community.core.task.task_config.errors import TaskConfigValueError
 from agentclaw.community.core.resources.service import (
     DirectoryTooLargeError,
     DuplicateResourceError,
@@ -788,11 +787,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     McpServerNotFoundError: (404, "Not found"),
     McpHeadersInvalidError: (400, "Invalid MCP headers"),
     McpConfigValueError: (400, "Invalid MCP configuration"),
-    # task_config: a config_value/match-value shape that does not match the
-    # declared or stored config_type (spec 2026-11-02). Subclasses ValueError so
-    # the service unit tests asserting pytest.raises(ValueError) still hold; a
-    # bare ValueError would re-raise past @envelope_errors to the 500 handler.
-    TaskConfigValueError: (400, "Invalid task config value"),
     McpSyncFailedError: (502, "Device sync failed"),
     McpMarketUnavailableError: (502, "MCP service error"),
     # Base class LAST: the bot mappings above subclass BotServiceError (the

@@ -81,7 +81,7 @@ def set_error():
         json_body={"config_name": "fl", "config_type": "bool", "config_value": "true"},
     ),
     expect=ExpectError(
-        status=400, json_contains={"message": "Invalid task config value"}
+        status=400, json_contains={"message": "Bad request"}
     ),
 )
 def set_form_mismatch():

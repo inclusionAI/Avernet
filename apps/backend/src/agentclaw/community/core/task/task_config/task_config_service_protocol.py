@@ -3,8 +3,10 @@
 ``config_value`` (set_config) / ``value`` (match) are intentionally untyped:
 their shape is governed by ``config_type`` (single_string -> str, bool -> bool,
 set -> list[str] on write / str on match). The concrete service validates
-shape and raises ``ValueError`` on mismatch; the router relies on pydantic
-for the request-body layer and on ``@envelope_errors`` for the rest.
+shape and raises the task surface's existing 400-mapped bad-request leaf
+(``CallbackCorrelationError``) on mismatch, so ``@envelope_errors`` maps it to
+400 rather than letting it escape to the generic 500 handler; the router relies
+on pydantic for the request-body layer.
 """
 
 from __future__ import annotations
@@ -34,5 +36,5 @@ class TaskConfigServiceProtocol(Protocol):
     @abstractmethod
     def match(self, *, config_name: str, value: Any, env: str) -> bool:
         """按存储的 ``config_type`` 判定 ``value`` 是否匹配该配置;未知配置名
-        返回 ``False``;形态不符抛 ``ValueError``。只回布尔,不回存储值。"""
+        返回 ``False``;形态不符抛 ``CallbackCorrelationError``。只回布尔,不回存储值。"""
         ...

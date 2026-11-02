@@ -9,9 +9,17 @@ Owns the ``config_type`` semantics the repository does not interpret:
 
 Anti-goal guard (ReviewFocus #5): match validates the input shape BEFORE
 comparing, so a stored ``bool`` config matched against the string ``"true"``
-raises ``ValueError`` rather than silently equal-comparing. ``isinstance(x,
-bool)`` is checked before any ``int`` consideration (``bool`` subclasses
-``int``), so a stored ``bool`` is never matched by an ``int`` either.
+raises ``CallbackCorrelationError`` rather than silently equal-comparing.
+``isinstance(x, bool)`` is checked before any ``int`` consideration (``bool``
+subclasses ``int``), so a stored ``bool`` is never matched by an ``int``
+either.
+
+Form/shape mismatches are raised as ``CallbackCorrelationError`` — the task
+surface's existing 400-mapped bad-request leaf in ``ENVELOPE_ERRORS`` (``400,
+"Bad request"``), per spec §value-encode. A bare ``ValueError`` would re-raise
+past ``@envelope_errors`` to the generic 500 handler (wrong status on a normal
+client mistake); this reuses the existing mapped leaf rather than introducing
+a dedicated exception.
 
 ``config_value`` is serialized with ``ensure_ascii=False`` so Chinese config
 strings round-trip without escape churn. Unknown config names -> ``False``
@@ -26,7 +34,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.task.task_config.errors import TaskConfigValueError
+from agentclaw.community.core.errors import CallbackCorrelationError
 from agentclaw.community.core.task.task_config.repository_protocol import (
     TaskConfigRepositoryProtocol,
 )
@@ -41,18 +49,18 @@ _VALID_CONFIG_TYPES = frozenset({"single_string", "bool", "set"})
 
 
 def _validate_config_value(config_type: str, config_value: Any) -> None:
-    """Raise TaskConfigValueError if config_value does not match the shape
+    """Raise CallbackCorrelationError if config_value does not match the shape
     config_type names."""
     if config_type == "single_string":
         if not isinstance(config_value, str):
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 f"config_type=single_string requires str config_value, got "
                 f"{type(config_value).__name__}"
             )
     elif config_type == "bool":
         # bool is a subclass of int — check bool explicitly first.
         if not isinstance(config_value, bool):
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 f"config_type=bool requires bool config_value, got "
                 f"{type(config_value).__name__}"
             )
@@ -60,7 +68,7 @@ def _validate_config_value(config_type: str, config_value: Any) -> None:
         if not isinstance(config_value, list) or not all(
             isinstance(e, str) for e in config_value
         ):
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 "config_type=set requires list[str] config_value, got "
                 f"{type(config_value).__name__}"
             )
@@ -68,7 +76,7 @@ def _validate_config_value(config_type: str, config_value: Any) -> None:
 
 
 def _validate_match_value(config_type: str, value: Any) -> None:
-    """Raise TaskConfigValueError if the match input shape does not match
+    """Raise CallbackCorrelationError if the match input shape does not match
     config_type.
 
     single_string / set require a str input (set tests a single element);
@@ -76,13 +84,13 @@ def _validate_match_value(config_type: str, value: Any) -> None:
     """
     if config_type in ("single_string", "set"):
         if not isinstance(value, str):
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 f"config_type={config_type} requires str match value, got "
                 f"{type(value).__name__}"
             )
     elif config_type == "bool":
         if not isinstance(value, bool):
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 f"config_type=bool requires bool match value, got "
                 f"{type(value).__name__}"
             )
@@ -105,7 +113,7 @@ class TaskConfigService(TaskConfigServiceProtocol):
         operator: str | None = None,
     ) -> int:
         if config_type not in _VALID_CONFIG_TYPES:
-            raise TaskConfigValueError(
+            raise CallbackCorrelationError(
                 f"config_type must be one of {sorted(_VALID_CONFIG_TYPES)}, got {config_type!r}"
             )
         _validate_config_value(config_type, config_value)

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.errors import CallbackCorrelationError
 from agentclaw.community.core.task.task_config.service import TaskConfigService
 
 
@@ -72,22 +73,22 @@ def test_match_single_string_and_bool():
 
 
 def test_set_invalid_type_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(CallbackCorrelationError):
         _svc().set_config(config_name="x", config_type="bogus", config_value="y", env="pre")
 
 
 def test_set_value_shape_mismatch_raises():
     s = _svc()
-    with pytest.raises(ValueError):
+    with pytest.raises(CallbackCorrelationError):
         s.set_config(config_name="x", config_type="set", config_value="not_a_list", env="pre")
-    with pytest.raises(ValueError):
+    with pytest.raises(CallbackCorrelationError):
         s.set_config(config_name="y", config_type="bool", config_value="not_bool", env="pre")
 
 
 def test_match_rejects_value_type_mismatch():
     s = _svc()
     s.set_config(config_name="fl", config_type="bool", config_value=True, env="pre")
-    with pytest.raises(ValueError):
+    with pytest.raises(CallbackCorrelationError):
         s.match(config_name="fl", value="true", env="pre")  # RF #5: no silent coercion
 
 
