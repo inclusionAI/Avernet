@@ -40,7 +40,7 @@ async def test_publish_eval_env_handler(resource_services):
     assert result.data.bot_uuid == "eval-bot"
     assert result.data.baas_bot_status is None
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1", resource_spec=None,
+        publish_id=7, operator="actor", biz_id="task-1", device_count=1, resource_spec=None,
     )
 
 
@@ -284,5 +284,6 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id="task-1",
+        device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )

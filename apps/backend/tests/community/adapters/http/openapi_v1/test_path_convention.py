@@ -114,6 +114,7 @@ _BOT_FREE = frozenset(
         # component namespace, not one bot — the same literal the retiring
         # routines shim already keeps there.
         "routines",
+        "service-envs",
         "spaces",
         # Repo catalog is tenant-wide but follows the Skill namespace as
         # requested by its public contract: /bots/skills/repository/... .
