@@ -22,6 +22,11 @@
 - **Done when:** 记录实际测试结果和未验证范围，不复用旧绿灯。
 - **Verification:** final code/test e0d4f4a468完整Backend CI 28095 passed / 40 skipped / 6 subtests，覆盖率90.72%，变更93.37%，原门禁通过；整体复审发现的空间准入P2已修复，真实HTTP8个新增权限回归和24个状态HTTP用例通过。正常github/dev pre-push通过；保留scanner组合测试43 passed / 1 failed的已复现Release基线问题及真实DB延迟/锁竞争边界。验证文档保留失败证据；仅授权更新原PR，不合并或部署。
 
+## Dev-target correction (2026-11-02)
+- [x] Port only the reviewed feature net diff onto dev; keep dev existing scanner/type imports and native restart comment.
+- [x] Fresh full Backend CI: 28953 passed / 40 skipped / 6 subtests, changed coverage 93.33%; independent delta review 327 passed, no P2+; public composer 7 passed.
+- [x] Rebase onto dev@7cfeb03d without conflicts; tested backend bytes unchanged. Create a new dev-targeted PR; original #3293 is already merged into Release, not reverted by this delivery.
+
 ## Groups
 - Group A: Tasks 1, 2
 - Group B: Task 3
