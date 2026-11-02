@@ -281,7 +281,9 @@ async def upload_skill(
     except HTTPException:
         raise
     except (ValueError, LocalSkillInvalidPackageError, LocalSkillTooLargeError) as e:
-        logger.error(f"[skills.upload_skill] Validation error: {e}")
+        logger.error(
+            f"[skills.upload_skill] Validation error: {type(e).__name__}: {e}"
+        )
         return _build_upload_error_response(e)
     except Exception as e:
         logger.error(f"[skills.upload_skill] Unexpected error: {e}", exc_info=True)
