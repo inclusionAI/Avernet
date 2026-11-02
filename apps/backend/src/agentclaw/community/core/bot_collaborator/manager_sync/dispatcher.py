@@ -1,8 +1,8 @@
-"""Bounded in-process dispatcher for best-effort manager projections.
+"""Bounded in-process dispatcher for best-effort owner/manager projections.
 
 Admission is memory-only. Workers run on the lifecycle's dedicated asyncio
-loop, merge notifications per ``SyncKey``, and schedule one dirty rerun when a
-notification arrives during an active round. No state coordinates replicas.
+loop, union explicit work kinds per ``SyncKey``, and preserve pending work
+that arrives during an active round. No state coordinates replicas.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import asyncio
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agentclaw.community.core.bot_collaborator.manager_sync.diagnostics import (
     SyncDiagnostics,
@@ -21,6 +21,9 @@ from agentclaw.community.core.bot_collaborator.manager_sync.diagnostics import (
 from agentclaw.community.core.bot_collaborator.manager_sync.service import (
     BotManagerSyncService,
 )
+from agentclaw.community.core.bot_management.ownership_sync.service import (
+    BotOwnershipSyncService,
+)
 from agentclaw.community.core.repository.protocols.bot.manager_sync import (
     ManagerSyncReadRepository,
 )
@@ -28,7 +31,9 @@ from agentclaw.community.kernel.bot_manager_sync import (
     SpaceChange,
     SubmissionResult,
     SyncKey,
+    SyncOutcome,
     SyncReason,
+    SyncWorkKind,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -59,7 +64,7 @@ class DispatcherPolicy:
 @dataclass
 class QueueEntry:
     running: bool = False
-    dirty: bool = False
+    pending: set[SyncWorkKind] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -90,7 +95,7 @@ class DisabledBotManagerSync:
 
 
 class BotManagerSyncDispatcher:
-    """Merge and execute bounded local manager-sync work."""
+    """Merge and execute bounded local owner/manager-sync work."""
 
     def __init__(
         self,
@@ -100,8 +105,10 @@ class BotManagerSyncDispatcher:
         *,
         env: str = "",
         diagnostics: SyncDiagnostics | None = None,
+        ownership_service: BotOwnershipSyncService | None = None,
     ) -> None:
         self._service = service
+        self._ownership_service = ownership_service
         self._reader = reader
         self._policy = policy or DispatcherPolicy()
         self._env = env
@@ -142,6 +149,42 @@ class BotManagerSyncDispatcher:
             self._note_rejected(key, rejection, "submission")
         else:
             self._note_admitted(key, result, reason)
+        return result
+
+    def request_ownership_sync(
+        self,
+        *,
+        bot_pk: int,
+        env: str,
+        avernet_tenant: str,
+        reason: SyncReason,
+    ) -> SubmissionResult:
+        """Admit explicit Owner work without reading facts or doing I/O."""
+
+        key = SyncKey(avernet_tenant, env, bot_pk)
+        if self._ownership_service is None:
+            self._note_admitted(
+                key,
+                SubmissionResult.DISABLED,
+                reason,
+                work_kind=SyncWorkKind.OWNERSHIP,
+            )
+            return SubmissionResult.DISABLED
+        with self._mutex:
+            if not self._closed and self._env and env != self._env:
+                result = SubmissionResult.REJECTED
+                rejection = SyncRejection.ENV_MISMATCH
+            else:
+                result = self._admit_locked(
+                    key, honor_closed=True, work_kind=SyncWorkKind.OWNERSHIP
+                )
+                rejection = self._rejection_for_locked(result)
+        if rejection is not None:
+            self._note_rejected(
+                key, rejection, "submission", work_kind=SyncWorkKind.OWNERSHIP
+            )
+        else:
+            self._note_admitted(key, result, reason, work_kind=SyncWorkKind.OWNERSHIP)
         return result
 
     def request_space_sync(self, change: SpaceChange) -> SubmissionResult:
@@ -249,18 +292,23 @@ class BotManagerSyncDispatcher:
                 attached=self._loop is not None,
             )
 
-    def _admit_locked(self, key: SyncKey, *, honor_closed: bool) -> SubmissionResult:
+    def _admit_locked(
+        self,
+        key: SyncKey,
+        *,
+        honor_closed: bool,
+        work_kind: SyncWorkKind = SyncWorkKind.MANAGERS,
+    ) -> SubmissionResult:
         """Admit direct work or work from an already-accepted Space hint."""
         if honor_closed and self._closed:
             return SubmissionResult.REJECTED
         entry = self._entries.get(key)
         if entry is not None:
-            if entry.running:
-                entry.dirty = True
+            entry.pending.add(work_kind)
             return SubmissionResult.COALESCED
         if self._capacity_used_locked() >= self._policy.max_keys:
             return SubmissionResult.REJECTED
-        self._entries[key] = QueueEntry()
+        self._entries[key] = QueueEntry(pending={work_kind})
         self._ready.append(key)
         self._schedule_wakeup_locked()
         return SubmissionResult.QUEUED
@@ -321,9 +369,31 @@ class BotManagerSyncDispatcher:
             return None
 
     async def _run_key(self, key: SyncKey) -> None:
+        with self._mutex:
+            entry = self._entries[key]
+            pending = set(entry.pending)
+            entry.pending.clear()
         try:
             with avernet_tenant_scope(key.avernet_tenant):
-                await self._service.sync_once(key)
+                run_managers = SyncWorkKind.MANAGERS in pending
+                if SyncWorkKind.OWNERSHIP in pending:
+                    try:
+                        assert self._ownership_service is not None
+                        outcome = await self._ownership_service.sync_once(key)
+                        # A fresh manager round in this running slot also fulfills
+                        # any managers work already present in the snapshot.
+                        run_managers |= outcome is SyncOutcome.CONFIRMED
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.error(
+                            "[OWNERSHIP-SYNC] round_failed tenant=%s env=%s bot_pk=%s",
+                            key.avernet_tenant,
+                            key.env,
+                            key.bot_pk,
+                        )
+                if run_managers:
+                    await self._service.sync_once(key)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -337,9 +407,8 @@ class BotManagerSyncDispatcher:
             with self._mutex:
                 entry = self._entries.get(key)
                 if entry is not None:
-                    if entry.dirty:
+                    if entry.pending:
                         entry.running = False
-                        entry.dirty = False
                         self._ready.append(key)
                         self._schedule_wakeup_locked()
                     else:
@@ -418,20 +487,34 @@ class BotManagerSyncDispatcher:
             )
 
     def _note_admitted(
-        self, key: SyncKey, result: SubmissionResult, reason: SyncReason
+        self,
+        key: SyncKey,
+        result: SubmissionResult,
+        reason: SyncReason,
+        *,
+        work_kind: SyncWorkKind = SyncWorkKind.MANAGERS,
     ) -> None:
         self._diagnostics.record(
             SyncEvent.SUBMIT_ADMITTED,
             key=key,
             outcome=result,
             reason=reason,
+            work_kind=work_kind,
         )
 
-    def _note_rejected(self, key: SyncKey, reason: SyncRejection, scope: str) -> None:
+    def _note_rejected(
+        self,
+        key: SyncKey,
+        reason: SyncRejection,
+        scope: str,
+        *,
+        work_kind: SyncWorkKind = SyncWorkKind.MANAGERS,
+    ) -> None:
         self._diagnostics.record(
             SyncEvent.SUBMIT_REJECTED,
             key=key,
             outcome=reason,
+            work_kind=work_kind,
         )
         logger.warning(
             "[MANAGER-SYNC] submit_rejected scope=%s reason=%s tenant=%s "
