@@ -2,6 +2,8 @@
 
 import math
 
+from qdrant_client import models
+
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.index_lock import IndexLock
@@ -15,6 +17,9 @@ class QdrantRetrievalIndex:
 
     Local rebuilds its sparse index from dense payloads at startup. Server keeps
     both collections persistent and allows concurrent reads; writes are exclusive.
+    keyword_index_fields optionally provisions keyword payload indexes on both
+    Server collections at startup. Local ignores this performance-only option.
+    Existing incompatible field indexes or provisioning failures fail startup.
     """
 
     def __init__(
@@ -25,6 +30,7 @@ class QdrantRetrievalIndex:
         collection_name: str = "search",
         connection: QdrantConnection = LOCAL_QDRANT,
         read_timeout_seconds: float = 0.0,
+        keyword_index_fields: frozenset[str] = frozenset(),
     ):
         if not math.isfinite(read_timeout_seconds) or read_timeout_seconds < 0:
             raise ValueError("read timeout must be finite and nonnegative")
@@ -50,6 +56,7 @@ class QdrantRetrievalIndex:
             self._dense._ensure_client()
             self._keyword._ensure_client()
             if connection.mode == "server":
+                self._ensure_keyword_indexes(keyword_index_fields)
                 return
             offset = None
             while True:
@@ -76,6 +83,25 @@ class QdrantRetrievalIndex:
         except Exception:
             self.close()
             raise
+
+    def _ensure_keyword_indexes(self, fields):
+        # Startup only. Local supports filtering but has no payload indexes.
+        if not fields:
+            return
+        for store in (self._dense, self._keyword):
+            schema = store._client.get_collection(store.collection_name).payload_schema
+            for field in sorted(fields):
+                existing = schema.get(field)
+                if existing is not None:
+                    if existing.data_type != models.PayloadSchemaType.KEYWORD:
+                        raise ValueError(f"filter index must be keyword: {field}")
+                    continue
+                store._client.create_payload_index(
+                    collection_name=store.collection_name,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                    wait=True,
+                )
 
     def upsert(self, points: list[VectorPoint]) -> None:
         if not points:
