@@ -115,7 +115,7 @@ class TestResolveUserIdentity:
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        # bot_service should not be called when owner_id is None
+        # Current-user branch is used when no Bot ID is provided.
         assert bot_service.get_bot_calls == []
 
     def test_owner_scenario_with_empty_owner_id(self):
