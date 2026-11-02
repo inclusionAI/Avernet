@@ -163,6 +163,64 @@ def test_run_local_command_retries_transient_nfs_rsync_failure_exhausted(monkeyp
     assert sleeps == [0.5, 1.0]
 
 
+def test_rsync_command_recognition_rejects_empty_command():
+    assert module._is_rsync_command([]) is False
+
+
+def test_run_local_command_retry_preserves_command_not_found(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    failed = subprocess.CompletedProcess(
+        ["rsync"],
+        23,
+        "",
+        "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+    )
+    monkeypatch.setattr(
+        module.subprocess, "run", MagicMock(side_effect=[failed, FileNotFoundError()])
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(module.BotBuildMigrationError, match="rsync command not found"):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync",
+            error_message="rsync failed",
+        )
+    assert sleeps == [0.5]
+
+
+def test_run_local_command_retry_preserves_timeout(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    failed = subprocess.CompletedProcess(
+        ["rsync"],
+        23,
+        "",
+        "rsync: mkstemp failed: Transport endpoint is not connected (107)",
+    )
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        MagicMock(
+            side_effect=[failed, subprocess.TimeoutExpired(cmd=["rsync"], timeout=1800)]
+        ),
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    with pytest.raises(
+        module.BotBuildMigrationError,
+        match="restore draft workspace failed: command timed out after 1800 seconds",
+    ):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+            timeout_seconds=1800,
+        )
+    assert sleeps == [0.5]
+
+
 def test_run_local_command_retries_transient_nfs_failure_pending(monkeypatch):
     svc = object.__new__(BotBuildService)
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 23, "", "boom"))
