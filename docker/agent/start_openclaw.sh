@@ -84,6 +84,21 @@ else
     warn "Heartbeat template missing at $HEARTBEAT_TEMPLATE - keeping existing file"
 fi
 
+# --- Step 1b: Normalize cron store ownership ---
+
+# OpenClaw runs as admin, but some deployments may provision part of the
+# persistent OpenClaw state as another uid. `cron.list` reads the state dir
+# strictly -- it does not fall back just because the contents are missing --
+# so restore only the narrowly scoped cron subtree before anything runs. The
+# root-owned helper is allow-listed in sudoers with no arguments.
+section "Step 1b: Normalizing OpenClaw cron store ownership..."
+CRON_DIR="/home/admin/.openclaw/cron"
+if sudo -n /usr/local/bin/normalize-openclaw-cron; then
+    success "OpenClaw cron store ownership verified in ${CRON_DIR}"
+else
+    warn "OpenClaw cron store ownership could not be normalized in ${CRON_DIR} - cron.list may fail with EACCES"
+fi
+
 # --- Step 2: Generate and patch ~/.openclaw/openclaw.json ---
 
 section "Step 2: Configuring openclaw provider config..."

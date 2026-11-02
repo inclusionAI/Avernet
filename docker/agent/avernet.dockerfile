@@ -400,6 +400,12 @@ COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
 COPY docker/agent/start_openclaw.sh /usr/local/bin/start_openclaw.sh
 COPY docker/agent/start_claude_code.sh /usr/local/bin/start_claude_code.sh
 
+# Root-owned ownership repair for the tiny OpenClaw cron subtree only.
+# start_openclaw.sh invokes it once before the engine starts OpenClaw, so a
+# persistent volume provisioned as another uid cannot make cron.list fail with
+# EACCES. The helper has no arguments, so the sudo rule cannot widen to chown.
+COPY docker/agent/normalize-openclaw-cron.sh /usr/local/bin/normalize-openclaw-cron
+
 # Entrypoint: pre-init, config generation from template, then execs supervisord.
 COPY docker/agent/avernet-entrypoint.sh /usr/local/bin/avernet-entrypoint
 RUN chmod +x /usr/local/bin/avernet-entrypoint \
@@ -407,7 +413,15 @@ RUN chmod +x /usr/local/bin/avernet-entrypoint \
              /usr/local/bin/start_openclaw.sh \
              /usr/local/bin/start_claude_code.sh \
              /usr/local/bin/util.sh \
-             /usr/local/bin/merge-config
+             /usr/local/bin/merge-config \
+             /usr/local/bin/normalize-openclaw-cron
+
+# Restrict sudo to supervisorctl plus the argumentless ownership helper above.
+# Keeping chown out of sudoers means the helper's scope stays fixed in the
+# root-owned script and cannot be widened from the admin startup path.
+RUN echo 'admin ALL=(root) NOPASSWD: /usr/local/bin/normalize-openclaw-cron ""' \
+    > /etc/sudoers.d/admin-openclaw-cron \
+    && chmod 0440 /etc/sudoers.d/admin-openclaw-cron
 
 EXPOSE 20003
 
