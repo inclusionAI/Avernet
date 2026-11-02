@@ -94,10 +94,10 @@ class _FakeFlow:
 def _handlers(flow):
     tq = Mock()
     return (
-        PublishVerifyFlowHandler(flow=flow, task_queue_service=tq),
+        PublishVerifyFlowHandler(flow=flow, task_queue_service=tq, selection_provider=Mock()),
         PublishOnlineReleaseHandler(flow=flow, task_queue_service=tq),
         PublishProgressPollHandler(
-            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
+            flow=flow, task_queue_service=tq, selection_provider=Mock(), poll_delay_seconds=1.0
         ),
         tq,
     )
@@ -576,3 +576,102 @@ def test_eval_teardown_proceeds_when_existence_check_raises():
     outcome = handler.handle({"publish_id": 1, "bot_uuid": "BOT-X", "operator": "op"})
     assert isinstance(outcome, Complete)
     assert flow.teardown_called is True
+
+
+@pytest.mark.parametrize("failure", ["provider", "record", "not_recorded"])
+def test_observation_failure_does_not_fail_native_build(failure):
+    flow = _FakeFlow(PublishStatus.BUILDING)
+    tq = Mock()
+    observation = Mock()
+    provider = Mock(return_value=observation)
+    if failure == "provider":
+        provider.side_effect = RuntimeError("provider unavailable")
+    elif failure == "record":
+        observation.record_build_selection.side_effect = RuntimeError("write unavailable")
+    else:
+        observation.record_build_selection.return_value = False
+    handler = PublishVerifyFlowHandler(flow=flow, task_queue_service=tq,
+                                      selection_provider=provider)
+    assert isinstance(handler.handle({"publish_id": 1, "operator": "op"}), Complete)
+    assert flow.calls == ["build", "verify_release"]
+    assert flow.status == PublishStatus.VALIDATE_PUB.value
+    tq.enqueue.assert_called_once()
+
+
+def test_observation_runs_before_build_and_does_not_hide_real_build_failure():
+    flow = _FakeFlow(PublishStatus.BUILDING, build_fails=True)
+    observation = Mock()
+    observation.record_build_selection.side_effect = lambda **kw: flow.calls.append("observe")
+    tq = Mock()
+    handler = PublishVerifyFlowHandler(flow=flow, task_queue_service=tq,
+                                      selection_provider=lambda: observation)
+    assert isinstance(handler.handle({"publish_id": 1, "operator": "op"}), Fail)
+    assert flow.calls == ["observe", "build"]
+    tq.enqueue.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [PublishStatus.BUILT, PublishStatus.VALIDATE_PUB,
+                                    PublishStatus.VALIDATING, PublishStatus.SUCCESS])
+def test_completed_build_replay_does_not_record_selection(status):
+    flow = _FakeFlow(status)
+    provider = Mock(side_effect=AssertionError("must not resolve"))
+    handler = PublishVerifyFlowHandler(flow=flow, task_queue_service=Mock(),
+                                      selection_provider=provider)
+    assert isinstance(handler.handle({"publish_id": 1, "operator": "op"}), Complete)
+    provider.assert_not_called()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_online_projection_runs_only_after_actual_native_terminal_progress(fails):
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    selection.project_online_selection.side_effect = RuntimeError("optional failed") if fails else None
+    def sync(publish_id):
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, message="deployed", data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    selection.project_online_selection.assert_called_once_with(
+        publication_id=1, observed=selection.observe_online_selection.return_value
+    )
+    assert flow.status == PublishStatus.SUCCESS.value
+
+
+def test_native_pending_and_failure_never_project_online_selection():
+    for target in [None, PublishStatus.FAILED]:
+        flow = _FakeFlow(PublishStatus.ONLINE_PUB, sync_to=target)
+        provider = Mock()
+        handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=provider)
+        handler.handle({"publish_id": 1})
+        provider.return_value.project_online_selection.assert_not_called()
+
+
+def test_optional_identity_failure_never_blocks_native_terminal_progress():
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    selection.observe_online_selection.side_effect = RuntimeError("optional read failed")
+    def sync(publish_id):
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    assert flow.status == PublishStatus.SUCCESS.value
+    selection.project_online_selection.assert_not_called()
+
+
+def test_projection_uses_identity_observed_before_native_sync_not_late_re_read():
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    original = {"workflow_id": 301, "rollback_token": None}
+    selection.observe_online_selection.return_value = original
+    def sync(publish_id):
+        selection.observe_online_selection.return_value = {"workflow_id": 305, "rollback_token": [2, "new"]}
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    selection.observe_online_selection.assert_called_once_with(publication_id=1)
+    selection.project_online_selection.assert_called_once_with(publication_id=1, observed=original)

@@ -156,3 +156,7 @@ class ConversationKnowledgeItem(BaseModel):
 class ConversationKnowledgePage(BaseModel):
     items: list[ConversationKnowledgeItem]
     next_cursor: int | None
+
+    selection_status: str | None = None
+    publication_id: int | None = None
+    captured_at: str | None = None
