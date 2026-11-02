@@ -90,17 +90,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         cell: (bot) => <BotVersionCell bot={bot} />,
       },
       {
-        id: 'tags',
-        header: 'Bot 标签',
-        width: 'w-[clamp(120px,10vw,160px)]',
-        cell: (bot) => {
-          const key = botTableEngineVersionKey(bot);
-          return (
-            <BotTagsCell bot={bot} engineVersionState={engineVersionStates[key]} onOpenEngineInfo={onOpenEngineInfo} />
-          );
-        },
-      },
-      {
         id: 'containers',
         header: '容器信息',
         width: 'w-[clamp(108px,9vw,128px)]',
@@ -115,6 +104,18 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
           ) : (
             <span>—</span>
           ),
+      },
+      {
+        // 标签单行横铺：下限覆盖引擎+部署+服务化 3 chip（~200px），上限兜住 4 chip 极值
+        id: 'tags',
+        header: 'Bot 标签',
+        width: 'w-[clamp(200px,16vw,264px)]',
+        cell: (bot) => {
+          const key = botTableEngineVersionKey(bot);
+          return (
+            <BotTagsCell bot={bot} engineVersionState={engineVersionStates[key]} onOpenEngineInfo={onOpenEngineInfo} />
+          );
+        },
       },
       ...(showOwner
         ? [

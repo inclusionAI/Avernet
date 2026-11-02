@@ -92,13 +92,17 @@ it('对话资源面板点击外部收起，入口再次点击不会先关闭又�
   render(<Fixture />);
   const trigger = screen.getByText('资源入口');
   fireEvent.click(trigger);
-  expect(screen.getByLabelText('资源管理面板')).toBeInTheDocument();
+  // 内联副屏常挂：展开/收起用宽度表达，关闭不再卸载容器。
+  const drawer = screen.getByLabelText('资源管理面板');
+  expect(drawer).toHaveStyle({ width: '380px' });
   fireEvent.pointerDown(trigger);
   fireEvent.click(trigger);
-  expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
+  expect(drawer).toHaveStyle({ width: '0px' });
+  expect(drawer).toHaveClass('opacity-0', 'pointer-events-none');
   fireEvent.click(trigger);
+  expect(drawer).toHaveStyle({ width: '380px' });
   fireEvent.pointerDown(screen.getByText('聊天消息'));
-  expect(screen.queryByLabelText('资源管理面板')).not.toBeInTheDocument();
+  expect(drawer).toHaveStyle({ width: '0px' });
 });
 
 it.each([
