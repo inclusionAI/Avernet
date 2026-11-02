@@ -78,8 +78,11 @@ The mixed fleet is permanent, so BCN must *know* and *enforce*, per bot:
 Non-compliant agents are therefore *scoped, not blocked* — they participate
 fully in search/summarize/plan steps and unlock transactional steps when they
 pass conformance. This is also the honest answer to "what about agents we
-don't control": they cannot be made safe by our engineering, so they are not
-offered unsafe work.
+don't control": they cannot be made safe by our engineering, so they are
+never dispatched the one unit that can be unsafe — a workflow **step** whose
+side-effect class is `external_side_effect`. The unit of "work" here is the
+BCN workflow step (one YAML node → one dispatch), and the classification is
+declared on the node itself (Doc 03 §4), validated with the workflow.
 
 ## Costs and risks
 

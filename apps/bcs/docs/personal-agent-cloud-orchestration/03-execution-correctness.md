@@ -32,8 +32,9 @@ since a retry landing on another node (or a failed-over probe) looks new.
 ### 1. Write-ahead dispatch intent, keyed by the client
 
 The identifier recovery keys on must be **chosen by BCN and durably recorded
-before the request leaves**; the server-assigned task id is a cached
-convenience learned later.
+before the request leaves**; the A2A task id that the *supply agent* assigns
+(the agent is the A2A server in the BCN→agent pairing — see Doc 01's
+identifier table) is a cached convenience learned later.
 
 ```
 idem_key = f(run_id, step_id, attempt)           # deterministic; run_id is
@@ -85,24 +86,46 @@ queryable via `GetTask`. On takeover, for every dispatch record not terminal:
 | `DISPATCHED` | task `working` / `input-required` | subscribe and wait |
 | `DISPATCHED` | task `completed` / `failed` | fetch result, advance — **no re-execution** |
 
+Scope of this protocol: it presupposes a **profile-verified agent** — which
+the dispatch gate (Doc 04) guarantees for every side-effecting step, since
+such steps are never dispatched to an agent without verified dedup. A
+baseline-tier agent holds only `read_only`/idempotent steps, where a blind
+resend is harmless and none of this machinery is needed. Said plainly:
+**dedup is the safety; the probe adds information** (the recovered task id
+and outcome), never protection.
+
 Two probe styles, both required in the profile:
 
 - **Idempotent resend**: same request, same key — the agent either recognizes
   the key (returns the existing task) or treats it as first delivery. Used
   inside the dedup window.
-- **Probe-first ("retry-only")**: a flag meaning *execute only if you have
-  seen this key; otherwise refuse and say so*. A refusal is proof of
-  non-arrival. This is the engine-A2A design's D14 mechanism, adopted as-is;
-  it exists because a bare resend outside the window is indistinguishable
-  from a new request.
+- **Probe-first ("retry-only")**: a flag meaning *this is a retry of
+  something you should already know — never execute it as new*. If the key
+  is known, the agent returns the existing task's current state (which may
+  be done, in-flight, or failed — "known" means the request *arrived*
+  before, not that it completed); if the key is unknown, the agent
+  **refuses instead of executing**, and that refusal is proof of
+  non-arrival. Nothing new executes on either branch — it is a query shaped
+  like a request. This is the engine-A2A design's D14 mechanism, adopted
+  as-is; it exists because a bare resend outside the window is
+  indistinguishable from a new request.
 
-Corollaries: no inbound queue is needed inside BCN — the agent's task store
-is the buffer, and it keeps accumulating results even while BCN is down
-(results wait; no retry storm against a dead service). BCN's own half of the
-bargain is persist-before-ack, so an acknowledged result is never re-asked.
-An asynchronously delivered "response" is, on the wire, a new inbound
-request; dedup applies to any inbound message regardless of semantic role, so
-BCN keeps its own (shared, durable) seen-set for caller and agent retries.
+Three corollaries of the pull model:
+
+- **No inbound queue inside BCN.** The agent's task store is the buffer; it
+  keeps accumulating results even while BCN is down, and a dead BCN is
+  never hammered by delivery retries.
+- **Persist-before-ack on BCN's inbound side.** When a supply agent
+  delivers a result, BCN writes it to the shared DB *before* sending the
+  receipt acknowledgement back to the agent. That ack is what tells the
+  agent it may stop retrying (and, past the retention window, forget). The
+  reverse order would be a loss window: ack, crash before persisting, and
+  the result is gone — the agent saw the ack and will never resend.
+- **BCN dedups its own inbound traffic too.** On the wire, an
+  asynchronously delivered "response" is just another inbound request (a
+  POST, a frame), and both callers and agents retry when an ack is lost —
+  so BCN keeps its own durable, shared seen-set and answers redelivery
+  with the original outcome instead of processing it twice.
 
 ### 3. The BCN A2A profile
 
@@ -120,7 +143,7 @@ fork; vanilla A2A traffic flows unchanged:
 | Probe semantics | idempotent-resend inside the window; retry-only flag honored with atomic known/unknown judgment |
 | Retention floor | terminal task state **and** the key seen-set retained ≥ the agreed window; within it, "task not found" provably means "never arrived" |
 | Window sizing | ≥ worst-case (**max in-flight delivery delay of one attempt** — dispatch timeout × retry budget + max network/queue delay — + lease TTL + takeover RTO + reconciliation sweep) with margin; one clock for both retentions. The first term is what makes "not found ⇒ never arrived" sound: without it, a zombie's late original send can land *after* the window closes, age out of the seen-set, and re-execute as a "new" request. Senders must therefore also bound an attempt's total send-with-retries lifetime, so this term is finite by construction |
-| Declaration | extension URI in the AgentCard / registration capability flag (Doc 04) |
+| Declaration | how an agent claims profile support: it lists the profile's extension URI in its AgentCard (A2A's standard mechanism for advertising optional capabilities), or sets an equivalent capability flag at registration for agents on today's frame channels; BCN records the claim and trusts it only after conformance verification (Doc 04) |
 | Escape hatch | a probe landing **outside** the window is undecidable: no automatic resend of side-effecting steps — surface "outcome unknown, verify" to the caller for reconciliation |
 
 Scope note: this profile is **this project's deliverable**. It builds on the
