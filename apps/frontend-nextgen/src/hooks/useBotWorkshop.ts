@@ -139,12 +139,12 @@ export function useBotWorkshop() {
     },
     openTaskInstances: (bot: BotDomain) => {
       const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
-      history.push(`/bot-workshop/task-instances?${params.toString()}`);
+      if (bot.ownerId) params.set('owner_id', bot.ownerId);
+      history.push(`/bot-workshop/scheduled-tasks?${params.toString()}`);
     },
-    // inventory 仅在 Owner 或显式协作者时暴露 edit；空间普通成员只有 view/chat，
-    // 不应显示受协作者权限保护的任务实例入口。
+    // 可见用户可进入；管理操作另行校验 ADMIN/OWNER 与编辑锁。
     canOpenTaskInstances: (bot: BotDomain) =>
-      Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+      Boolean(currentOpenApiUserId && (bot.actions.includes('view') || bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     containerUserId: requestIdentity.userId,
     canViewContainers: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     canRestartContainer: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),

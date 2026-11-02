@@ -165,11 +165,13 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/bot-workshop/task-instances',
-    title: '任务实例',
+    title: '定时任务',
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
   },
+  { path: '/bot-workshop/scheduled-tasks', title: '定时任务', section: 'bot', navKey: 'bot-workshop', openCore: true },
+  { path: '/bot-workshop/scheduled-tasks/detail', title: '定时任务详情', section: 'bot', navKey: 'bot-workshop', openCore: true },
   // split-admin-space-ticket-pages：管理后台单页拆分——两页面均不占导航位（故不设 navKey，
   // 侧栏不因路由高亮任何菜单项）；section 取 legacy 保持分段语义完备。原 /admin 系列 meta 随单页壳退役。
   {

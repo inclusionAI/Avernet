@@ -1,6 +1,7 @@
 import type {
   BotCapabilitySet,
   BotEditorMcp,
+  BotEditorRoutine,
   BotEditorRoutineInput,
   BotEditorSkill,
   BotEngineConfig,
@@ -9,15 +10,7 @@ import type {
 import { botEditorController, type SkillDto, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
-import {
-  dataOr,
-  mapPublication,
-  mapResource,
-  mapRoutine,
-  mapScreen,
-  mapSkill,
-  toRoutineWrite,
-} from './botEditorMappers';
+import { dataOr, mapPublication, mapResource, mapScreen, mapSkill, toRoutineWrite } from './botEditorMappers';
 import { desktopCapabilityPolicy } from './desktopCapabilityPolicy';
 import { isImageResourcePath } from './resourcePreview';
 
@@ -83,12 +76,11 @@ export const botEditorService = {
   },
   async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '') {
     const policy = desktopCapabilityPolicy(deployment, engine);
-    const [skills, skillSetResources, resources, screens, routines, engineStatus, mcps] = await Promise.allSettled([
+    const [skills, skillSetResources, resources, screens, engineStatus, mcps] = await Promise.allSettled([
       listAllLocalBotSkills(botId, ownerId),
       botEditorController.listSkillSetResources(botId, ownerId),
       botEditorService.listResources(botId, '', ownerId),
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
-      policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
       botEditorController.listBotMcps(botId, ownerId),
     ]);
@@ -129,21 +121,32 @@ export const botEditorService = {
       sets.push(...details);
     }
     const capabilityFailures = [
-      ...(skills.status === 'rejected' ? [`本地 Skill：${skills.reason instanceof Error ? skills.reason.message : '加载失败'}`] : []),
-      ...(mcps.status === 'rejected' ? [`MCP：${mcps.reason instanceof Error ? mcps.reason.message : '加载失败'}`] : []),
+      ...(skills.status === 'rejected'
+        ? [`本地 Skill：${skills.reason instanceof Error ? skills.reason.message : '加载失败'}`]
+        : []),
+      ...(mcps.status === 'rejected'
+        ? [`MCP：${mcps.reason instanceof Error ? mcps.reason.message : '加载失败'}`]
+        : []),
     ];
     return {
       skills: skills.status === 'fulfilled' ? skills.value.map(mapSkill) : [],
       skillSets: sets,
-      mcps: mcps.status === 'fulfilled' ? (mcps.value.data ?? []).map((item): BotEditorMcp => ({
-        serverCode: item.server_code, name: item.server_code, active: item.active,
-      })) : [],
+      mcps:
+        mcps.status === 'fulfilled'
+          ? (mcps.value.data ?? []).map(
+              (item): BotEditorMcp => ({
+                serverCode: item.server_code,
+                name: item.server_code,
+                active: item.active,
+              }),
+            )
+          : [],
       availableMcps: [],
       marketSkills: [],
       workshopSkills: [],
       resources: resources.status === 'fulfilled' ? resources.value : [],
       screens: screens.status === 'fulfilled' ? dataOr(screens.value.data?.items, []).map(mapScreen) : [],
-      routines: routines.status === 'fulfilled' ? dataOr(routines.value.data?.items, []).map(mapRoutine) : [],
+      routines: [] as BotEditorRoutine[],
       engineStatus:
         engineStatus.status === 'fulfilled'
           ? {
@@ -154,9 +157,8 @@ export const botEditorService = {
           : undefined,
       ...(capabilityFailures.length ? { capabilityLoadError: capabilityFailures.join('；') } : {}),
       errors:
-        [skills, skillSetResources, resources, screens, routines, engineStatus, mcps].filter(
-          (item) => item.status === 'rejected',
-        ).length + skillSetDetailErrors,
+        [skills, skillSetResources, resources, screens, engineStatus, mcps].filter((item) => item.status === 'rejected')
+          .length + skillSetDetailErrors,
     };
   },
   async searchSkillCenterSkills(keyword: string, page: number, pageSize = 20) {
