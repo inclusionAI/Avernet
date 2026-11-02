@@ -35,6 +35,8 @@ the current request's env.
 """
 from __future__ import annotations
 
+import json
+
 from typing import Iterator, Sequence
 
 from injector import inject
@@ -127,11 +129,19 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
         eligible_user_ids = self._eligible_user_ids(
             session, bot, key.env, [user_id for user_id, _role in rows]
         )
+        try:
+            ext = json.loads(bot.ext or "{}")
+        except ValueError as exc:
+            raise SnapshotUnavailable("invalid_bot_ext") from exc
+        if not isinstance(ext, dict):
+            raise SnapshotUnavailable("invalid_bot_ext")
         return SyncFacts(
             key=key,
             bot_id=bot.bot_id,
             entity_id=bot.entity_id,
             owner_id=bot.owner_id,
+            bot_type=bot.bot_type,
+            bcn_provider_bot_ref=ext.get("bcn_provider_bot_ref"),
             collaborators=tuple(
                 CollaboratorFact(
                     user_id=user_id,

@@ -20,6 +20,8 @@ class OwnershipFacts:
     bot_id: str
     entity_id: str
     owner_id: str
+    bot_type: str | None  # NULL is the existing legacy non-service registration.
+    bcn_provider_bot_ref: str | None = None
 
 
 @dataclass(frozen=True)

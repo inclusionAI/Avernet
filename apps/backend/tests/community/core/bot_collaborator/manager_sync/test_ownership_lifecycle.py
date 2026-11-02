@@ -200,8 +200,8 @@ async def test_real_http_pools_are_created_and_closed_only_on_shared_worker_loop
     managers, owner = HttpBcsManagersPlugin(**kwargs), HttpBcsOwnershipPlugin(**kwargs)
     key = SyncKey("a", "dev", 7)
     manager_reader, owner_reader = Mock(), Mock()
-    manager_reader.read_facts.return_value = SyncFacts(key, "bot", "entity", "owner", ())
-    owner_reader.read_facts.return_value = OwnershipFacts(key, "bot", "entity", "owner")
+    manager_reader.read_facts.return_value = SyncFacts(key, "bot", "entity", "owner", (), bot_type="service")
+    owner_reader.read_facts.return_value = OwnershipFacts(key, "bot", "entity", "owner", bot_type="service")
     dispatcher = BotManagerSyncDispatcher(
         BotManagerSyncService(manager_reader, managers), manager_reader,
         ownership_service=BotOwnershipSyncService(owner_reader, owner),

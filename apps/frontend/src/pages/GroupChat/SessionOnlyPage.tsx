@@ -6,6 +6,7 @@
  * 入口：InviteJoin 加入成功后跳转
  */
 
+import { botReference } from './botReference';
 import { engineAdapterFactory } from '@/adapters/engine/EngineAdapterFactory';
 import { useExt } from '@/capabilities';
 import Empty from '@/components/Empty';
@@ -47,7 +48,7 @@ function convertBotsToTabItems(
       });
     })
     .map((bot) => ({
-      bot_uuid: `${bot.bot_id}:${bot.entity_id}`,
+      bot_uuid: botReference(bot),
       bot_name: bot.bot_name,
       avatar_url: bot.ext?.avatar_url ?? undefined,
       summary: bot.bot_desc ?? undefined,

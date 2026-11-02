@@ -641,3 +641,28 @@ def test_finish_failure_does_not_submit_manager_sync(world, monkeypatch):
     monkeypatch.setattr(world.repo, "finish", failing)
     assert not world.service().step(op)
     world.manager_sync.request_sync.assert_not_called()
+
+
+def test_configured_admin_can_handoff_for_absent_owner_and_is_audited(world):
+    service = world.service(
+        OwnerHandoffPolicy(
+            enabled=True,
+            recovery_enabled=True,
+            administrators=frozenset({"ops"}),
+        )
+    )
+    created = service.create(
+        bot_pk=world.bot["id"],
+        actor_id="ops",
+        new_owner_id="B",
+        request_key="admin-handoff",
+    )
+    op = created["operation_id"]
+    for _ in range(12):
+        if service.step(op):
+            break
+    result = service.get(operation_id=op, actor_id="ops")
+    assert result["phase"] == "SUCCEEDED"
+    assert result["actor_id"] == "ops"
+    assert result["old_owner_id"] == "A"
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "B"

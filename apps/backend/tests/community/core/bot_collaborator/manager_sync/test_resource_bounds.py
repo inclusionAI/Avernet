@@ -246,8 +246,8 @@ async def test_same_bot_pk_in_two_tenants_delivers_independently():
     key_a = SyncKey("tenant-a", "dev", 7)
     key_b = SyncKey("tenant-b", "dev", 7)
     facts_by_key = {
-        key_a: SyncFacts(key_a, "bot", "entity", "owner", ()),
-        key_b: SyncFacts(key_b, "bot", "entity", "owner", ()),
+        key_a: SyncFacts(key_a, "bot", "entity", "owner", (), bot_type="service"),
+        key_b: SyncFacts(key_b, "bot", "entity", "owner", (), bot_type="service"),
     }
     plugin = RecordingBcsManagersPlugin()
     service = BotManagerSyncService(TenantReader(facts_by_key), plugin)

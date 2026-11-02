@@ -148,7 +148,7 @@ async function loadMetadataFriendDetails(
     },
   );
   const detailsByKey = new Map(
-    (botResp.data?.items ?? []).map((bot) => [bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id, bot]),
+    (botResp.data?.items ?? []).map((bot) => [bot.bcn_bot_id || (bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id), bot]),
   );
   return friendIds.map((friendId) => {
     const detail = detailsByKey.get(friendId);
