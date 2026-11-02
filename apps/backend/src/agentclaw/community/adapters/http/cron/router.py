@@ -56,28 +56,40 @@ def _resolve_user_identity(
     user: AuthenticatedUser,
     bot_service: BotServiceProtocol,
 ) -> tuple[str, str]:
-    """解析有效的用户身份。
+    """解析 Relay 资源定位身份。
+
+    协作者拦截器已完成授权。写入/读取 Relay 时必须使用目标 Bot 的当前
+    Owner 定位资源，而不是受权调用者身份；否则合法共享 Bot 会命中
+    owner-scoped ``BotNotFoundError``。历史 ``owner_id`` 定位必须兼容
+    Owner handoff 后的现任 Owner，避免 owner-scoped 资源跟随可写身份漂移。
 
     Args:
-        owner_id: Bot 拥有者工号（协作者场景）
-        bot_id: Bot ID
-        user: 当前登录用户
-        bot_service: Bot 服务（用于获取 owner 信息）
+        owner_id: 请求显式的 Bot 拥有者定位（协作者/owner兼容场景）。
+        bot_id: 目标 Bot ID；``"all"`` 不是稳定资源地址。
+        user: 当前登录用户。
+        bot_service: Bot 服务（用于获取 identity / address）。
 
     Returns:
-        (user_id, nick_name) 元组
+        ``(user_id, nick_name)``；nick_name 优先使用 Bot 当前 Owner 名称。
     """
-    # bot_id="all" 或 owner_id 为空时，使用当前用户身份
-    if not owner_id or bot_id == "all":
+    if not bot_id or bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
-    # 协作者场景：从 bot 信息获取 owner 身份
     try:
-        bot = bot_service.get_bot(bot_id, owner_id)
-        return owner_id, bot.get("owner_name") or owner_id if bot else owner_id
+        # No explicit locator: the interceptor authorized the stored Bot by
+        # its real owner. Read that stored identity once and use it for Relay.
+        if not owner_id:
+            bot = bot_service.get_bot_by_id(bot_id)
+            user_id = str(bot.get("owner_id") or user.staffId) if bot else user.staffId
+        # Explicit legacy owner_id may refer to the historical owner as well as
+        # the current owner. Keep that through the address resolver contract.
+        else:
+            bot = bot_service.get_bot_by_address(bot_id, owner_id)
+            user_id = str(bot.get("owner_id") or owner_id)
+        return user_id, (bot.get("owner_name") or user_id) if bot else user_id
     except Exception as e:
         logger.warning(f"[_resolve_user_identity] Failed to get bot: {e}")
-        return owner_id, owner_id
+        return owner_id or user.staffId, owner_id or user.staffId
 
 
 def _target_parameters(runtime_stage, device_uuid, operator_id, user):
