@@ -399,6 +399,63 @@ class TestDeleteProviderBot:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="pre",
     )
+    def test_409_retirement_cleanup_pending_returns_pending_not_raises(
+        self, _mock_env, service, http, caplog
+    ):
+        # BCN spec §7.1：DELETE 提交 retirement 后 post-commit 外部清理失败回 409
+        # retirement_cleanup_pending —— retirement 已提交且不可回滚，属已处理终态。
+        body_text = (
+            "retirement_cleanup_pending: bot 20261020_c49a30si:500172 "
+            "retirement is committed; retry the external cleanup"
+        )
+        resp = _ok_response(409, {"error": body_text, "status": 409})
+        resp.text = body_text
+        http.set_response("delete", resp)
+
+        with caplog.at_level(
+            "WARNING",
+            logger="agentclaw.community.core.bot_management.services.bcn_service",
+        ):
+            result = service.delete_provider_bot(
+                teamclaw_bot_uuid="20261020_c49a30si",
+                owner_workno="500172",
+            )
+
+        assert result["deleted"] is False
+        assert result["retirement_cleanup_pending"] is True
+        assert result["provider_id"] == "prv_40354c8a"
+        assert result["provider_bot_ref"] == "20261020_c49a30si:500172"
+        # 不应产生 ERROR 级别日志（避免生产 CDO 新增异常噪声）
+        assert not any(
+            r.levelname == "ERROR" and "delete_provider_bot" in r.message for r in caplog.records
+        )
+        assert any(
+            r.levelname == "WARNING" and "cleanup pending" in r.message for r in caplog.records
+        )
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="pre",
+    )
+    def test_409_unrelated_error_still_raises_BcnServiceError(
+        self, _mock_env, service, http
+    ):
+        # 仅 retirement_cleanup_pending 的 409 被约定为终态；其余 409 仍按失败抛出，
+        # 避免掩盖未知冲突。
+        resp = _ok_response(409, {"error": "some_other_conflict", "status": 409})
+        resp.text = "some_other_conflict"
+        http.set_response("delete", resp)
+
+        with pytest.raises(BcnServiceError):
+            service.delete_provider_bot(
+                teamclaw_bot_uuid="bot-uuid",
+                owner_workno="123",
+            )
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="pre",
+    )
     def test_4xx_raises_BcnServiceError(self, _mock_env, service, http):
         http.set_response("delete", _ok_response(400))
 
