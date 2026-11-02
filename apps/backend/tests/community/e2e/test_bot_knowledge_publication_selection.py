@@ -196,3 +196,43 @@ def test_missing_snapshot_does_not_suppress_normal_source_authorization(stage_ht
         headers={"x-user-id": _OWNER_ID},
     )
     assert response.status_code == 404, response.text
+
+
+@pytest.mark.parametrize("stage", ["verify", "online"])
+@pytest.mark.parametrize("failure", ["missing", "corrupt", "storage", "recorded"])
+def test_available_stage_preserves_space_admission_even_when_snapshot_unknown(
+    stage_http, stage, failure
+):
+    from agentclaw.community.core.spaces.repository.models import (
+        SpaceMemberModel,
+        SpaceModel,
+    )
+    from agentclaw.community.plugin_api.models import BotCommonConfig
+
+    client, observer, db, catalog = stage_http
+    if failure != "missing":
+        assert observer.record_build_selection(publication_id=101)
+    with db.orm_session() as session:
+        publication = session.get(BotPublishModel, 101)
+        publication.status = "validating" if stage == "verify" else "success"
+        publication.ext = json.dumps({"publish": {"online": 901}})
+    if stage == "online" and failure != "missing":
+        assert project(observer, publication_id=101)
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id=_BOT_ID).one()
+        space = session.get(SpaceModel, bot.space_id)
+        space.space_type = "PERSONAL"
+        space.personal_owner_id = _OWNER_ID
+        session.query(SpaceMemberModel).filter_by(
+            space_id=space.id, user_id=_OWNER_ID
+        ).delete()
+        if failure == "corrupt":
+            session.query(BotCommonConfig).update({"config_value": "invalid"})
+        elif failure == "storage":
+            BotCommonConfig.__table__.drop(session.connection())
+    before = catalog.mock_calls[:]
+    for requested_stage in ("draft", stage):
+        response = get(client, "available", requested_stage)
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"]["code"] == "SPACE_MEMBER_REQUIRED"
+    assert catalog.mock_calls == before
