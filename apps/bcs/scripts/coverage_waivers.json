@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "waivers": [
+    {
+      "path": "crates/tools/bcs-cli/src/cli/",
+      "reason": "Behavior-preserving decomposition of the bcs-cli entry (PR #3280): contents relocated byte-faithfully from main.rs (token-level audit-verified); relocated executor bodies are behavior-covered by the E2E changed-line gate (68.58% > 60%) instead of unit tests. See docs/arch/ci.enforce.md waiver rules.",
+      "owner": "zhangwu.zh",
+      "expires": "2026-12-02"
+    },
+    {
+      "path": "crates/tools/bcs-cli/src/main.rs",
+      "reason": "Same Unit 3 decomposition: rewritten root entry (341 lines) of the pure-move; unchanged product behavior.",
+      "owner": "zhangwu.zh",
+      "expires": "2026-12-02"
+    }
+  ]
+}

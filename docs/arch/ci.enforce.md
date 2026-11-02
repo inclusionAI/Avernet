@@ -179,6 +179,31 @@ Waivers are allowed only for explicit invariant violations.
 - PRs claiming exceptions without waiver are rejected
 - expired waivers trigger review failure or warning escalation
 
+### Implemented instance: BCS changed-line coverage waivers
+
+The BCS unit-test changed-line gate (`apps/bcs/scripts/cov_gate.py`, invoked
+by `.github/workflows/unit-tests.yml` and the local pre-push hook) enforces
+its per-change threshold with an expiring waiver list stored at
+`apps/bcs/scripts/coverage_waivers.json`. The list grants bounded exemptions
+for change classes whose behavior coverage is verified by another gate — for
+example a token-level-audited behavior-preserving relocation whose execution
+coverage is carried by the E2E changed-line gate instead of unit tests.
+Each entry names:
+
+- `path` — a path relative to `apps/bcs/`; a trailing `/` makes it a directory
+  prefix match, any other value must match a changed file exactly
+- `reason` — why the lines are exempt and where their behavior is covered
+- `owner` — who renews the entry or restores unit coverage
+- `expires` — the `YYYY-MM-DD` deadline; expiry is the review/removal date
+
+At run time the gate subtracts the instrumentable changed lines of matching
+files from the changed-line denominator before applying the threshold. The
+mechanism fails closed: a malformed file, an unknown structure, or an expired
+entry fails the gate instead of being silently applied or silently ignored;
+an entry matching no changed files prints a cleanup notice; an absent file
+means no waivers. This mirrors the E2E gate's `--changed-skip-regex` skip
+semantics, but as an explicit, owned, reviewed, time-bounded list.
+
 ---
 
 ## I. Red-Flag Detection
