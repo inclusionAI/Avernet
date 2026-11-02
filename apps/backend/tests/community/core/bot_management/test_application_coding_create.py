@@ -469,6 +469,7 @@ def _create_bot_service() -> BotService:
         workspace_hosting_service=MagicMock(),
         collaborator_repo=MagicMock(),
         restart_lock_repo=MagicMock(),
+        manifest_apply_lock_repo=MagicMock(),
         teclaw_provision_service_provider=lambda: MagicMock(
             is_teclaw=MagicMock(return_value=False)
         ),

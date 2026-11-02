@@ -58,6 +58,7 @@ def _make_service(
         workspace_hosting_service=MagicMock(),
         collaborator_repo=MagicMock(spec=CollaboratorRepositoryProtocol),
         restart_lock_repo=MagicMock(spec=BotRestartLockRepositoryProtocol),
+        manifest_apply_lock_repo=MagicMock(),
         teclaw_provision_service_provider=MagicMock(),
         device_status_client=MagicMock(),
         cron_auto_setup_service_provider=cron_provider,

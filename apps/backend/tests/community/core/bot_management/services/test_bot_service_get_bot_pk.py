@@ -47,6 +47,7 @@ def _make_bot_service(repository, device_service_provider, template_service) -> 
         workspace_hosting_service=MagicMock(),
         collaborator_repo=MagicMock(),
         restart_lock_repo=MagicMock(),
+        manifest_apply_lock_repo=MagicMock(),
         teclaw_provision_service_provider=lambda: MagicMock(),
         device_status_client=MagicMock(),
         cron_auto_setup_service_provider=lambda: MagicMock(),
