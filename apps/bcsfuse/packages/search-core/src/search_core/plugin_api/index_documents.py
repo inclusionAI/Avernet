@@ -1,5 +1,6 @@
 """Durable, business-opaque retrieval documents; independent of a vector engine."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -37,6 +38,25 @@ class IndexDocument:
     is_deleted: bool = False
     version: int = 0
     modified_at: float = 0.0
+    # None preserves legacy payload labels; {} explicitly clears filter labels.
+    filters: dict[str, tuple[str, ...]] | None = None
+
+    def to_index_point(self, filter_fields: Iterable[str] = ()) -> VectorPoint:
+        """Project durable filter values into the engine's flat payload.
+
+        The application supplies its filter field names so explicit empty filters
+        also remove labels left in payload by older writers. No model work occurs.
+        """
+        if self.filters is None:
+            return self.point
+        payload = {
+            k: v for k, v in self.point.payload.items() if k not in filter_fields
+        }
+        for key, values in self.filters.items():
+            if key in payload:
+                raise ValueError("filter field conflicts with document payload")
+            payload[key] = list(values)
+        return self.point.model_copy(update={"payload": payload})
 
     @property
     def id(self):

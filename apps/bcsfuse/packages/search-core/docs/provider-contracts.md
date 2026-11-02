@@ -47,3 +47,26 @@ without a separately defined consumer recovery protocol.
 application used by both TC and Agent Search. A change checkpoint advances only
 after the complete batch succeeds. TC retains its legacy SQL, locks and schedule;
 new providers do not require migrating existing TC tables.
+
+For new MySQL-compatible deployments, `gmt_create` and `gmt_modify` are
+`TIMESTAMP(6)`, with database initialization and automatic modification time.
+The SQL adapter projects modification time through `UNIX_TIMESTAMP` and binds
+write/range values through `FROM_UNIXTIME`; the service-facing cursor remains
+epoch seconds. Range predicates keep the indexed column unwrapped. SQLite retains
+its existing numeric schema. Deploy this adapter with its matching timestamp DDL;
+existing numeric MySQL columns require an explicit data migration, not a direct
+type change or merely rerunning `CREATE TABLE IF NOT EXISTS`.
+
+`IndexDocument.filters` stores structured pre-filter labels separately from its
+text/association payload. Applications choose the allowed fields during conversion;
+the SQL provider only persists them. `to_index_point(filter_fields)` projects these
+labels into the engine payload used by both dense and keyword retrieval. Configured
+filter fields are removed from legacy payload before applying explicit filter values.
+`None` / SQL NULL preserves legacy payload labels; `{}` means explicitly no labels.
+Neither recovery nor filter-only changes require generating new vectors.
+
+SQLite initialization adds the nullable column to existing local databases. MySQL
+tables must receive the nullable `filters JSON` column before deploying the adapter.
+Existing rows need no bulk rewrite. Applications must supply their legacy filter
+field names when projecting explicitly cleared labels. TC's legacy provider, schema
+and behavior are unchanged.
