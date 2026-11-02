@@ -133,3 +133,39 @@ def test_server_retains_both_collections_and_rejects_dimension_change(index, tmp
             connection=index.connection,
         )
     assert index.keyword_search("支付", 1, {}, None)[0].id == "a"
+
+
+def test_keyword_field_indexes_are_created_for_both_server_collections(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import search_core.providers.qdrant_index as module
+    from qdrant_client import models
+
+    stores = []
+    for name in ("test", "test_keywords"):
+        client = Mock()
+        client.get_collection.return_value = SimpleNamespace(payload_schema={})
+        store = Mock(collection_name=name, _client=client)
+        stores.append(store)
+    monkeypatch.setattr(module, "dense_store", lambda **kw: stores[0])
+    monkeypatch.setattr(module, "QdrantKeywordIndex", lambda **kw: stores[1])
+    index = QdrantRetrievalIndex(
+        path=str(tmp_path),
+        dimension=2,
+        collection_name="test",
+        connection=QdrantConnection(mode="server", url="http://127.0.0.1:6333"),
+        keyword_index_fields=frozenset({"kind"}),
+    )
+    try:
+        for store in stores:
+            store._client.create_payload_index.assert_called_once_with(
+                collection_name=store.collection_name,
+                field_name="kind",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+    finally:
+        index.close()
