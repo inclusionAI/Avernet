@@ -44,11 +44,11 @@ async def test_runtime_readiness_probes_real_adapter_for_both_endpoints(monkeypa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("url", [None, "ws://wrong-device"])
-async def test_runtime_readiness_without_address_cannot_use_fake_health(url):
+@pytest.mark.parametrize("url,target", [(None, None), ("ws://wrong-device", None), (None, 1)])
+async def test_runtime_readiness_without_address_cannot_use_fake_health(url, target):
     transport = InMemoryDeviceAdapterTransport(default_adapter_url="http://shared-adapter:20003")
     with pytest.raises(ValueError, match="no per-device adapter address"):
-        await transport.invoke({"probe_runtime_readiness": True, "url": url}, "GET", "/health")
+        await transport.invoke({"probe_runtime_readiness": True, "url": url, "target": target}, "GET", "/health")
 
 
 @pytest.mark.asyncio

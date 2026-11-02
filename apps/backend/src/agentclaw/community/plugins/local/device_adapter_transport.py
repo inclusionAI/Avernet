@@ -346,8 +346,9 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         timeout: float | None = None,
     ) -> dict[str, Any]:
         probe_url = conn_info.get("url")
+        probe_target = conn_info.get("target")
         if (conn_info.get("probe_runtime_readiness") is True
-                and not conn_info.get("target")
+                and not (isinstance(probe_target, str) and probe_target)
                 and not (isinstance(probe_url, str) and probe_url.startswith(("http://", "https://")))):
             raise ValueError("runtime readiness probe has no per-device adapter address")
         proxied_adapter_url = self._proxied_adapter_url(conn_info, path)
