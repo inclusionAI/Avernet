@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -38,20 +38,44 @@ router = APIRouter(prefix="/config", tags=["task-config"])
 
 
 class TaskConfigSetRequest(BaseModel):
-    """Set/upsert request. ``config_value`` shape is validated by the service
-    per ``config_type`` (pydantic only accepts the union here)."""
+    """Set or upsert request. config_value shape is validated by the service
+    per config_type; pydantic only accepts the union here."""
 
-    config_name: str
-    config_type: Literal["single_string", "bool", "set"]
-    config_value: str | bool | list[str]
+    config_name: str = Field(
+        ..., description="The config name to write; a (config_name, env) row is upserted whole."
+    )
+    config_type: Literal["single_string", "bool", "set"] = Field(
+        ...,
+        description=(
+            "How config_value is interpreted and how match compares: "
+            "single_string is exact string equality, bool is boolean equality, "
+            "set is membership of a string element."
+        ),
+    )
+    config_value: str | bool | list[str] = Field(
+        ...,
+        description=(
+            "The value to store (JSON-encoded by the service): a string for "
+            "single_string, a bool for bool, a list of strings for set."
+        ),
+    )
 
 
 class TaskConfigMatchRequest(BaseModel):
-    """Match request. ``value`` is the single value to test; its expected
-    shape is governed by the stored row's ``config_type`` (service layer)."""
+    """Match request. value is the single value to test; its expected shape is
+    governed by the stored row's config_type at the service layer."""
 
-    config_name: str
-    value: str | bool
+    config_name: str = Field(
+        ...,
+        description="The config name to read; an unknown name returns matched false (not an error).",
+    )
+    value: str | bool = Field(
+        ...,
+        description=(
+            "The single value to test: a string for single_string equality or "
+            "set membership, a bool for bool equality."
+        ),
+    )
 
 
 @router.post("/set", response_model=Envelope[dict])

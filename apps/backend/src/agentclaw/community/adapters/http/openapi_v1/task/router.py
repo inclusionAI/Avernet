@@ -381,11 +381,13 @@ async def match_task_config_public(
     principal: PrincipalDep,
     service: TaskConfigServiceProtocol = Injected(TaskConfigServiceProtocol),  # noqa: B008
 ) -> Envelope[dict]:
-    """公开面 task_config 看板匹配(spec 2026-11-02):按存行 config_type 判定
-    value 是否匹配,只回布尔、不回存储值。与内部面 ``/api/v1/collaboration/tasks/
-    config/match`` 共用同一 ``TaskConfigServiceProtocol`` 单例;env 由后端按当前
-    部署上下文取,不入接口参数(环境隔离)。admission = OPEN,authorization = NoCheck
-    (match 不针对某个 bot 资源,任意已认证 principal 可读)。"""
+    """Public typed-config match probe (spec 2026-11-02). Returns whether
+    value matches the stored row for config_name under that row's config_type,
+    replying matched only and never the stored config value itself. env is
+    resolved server-side from the deployment context and is never a request
+    parameter, so pre and prod stay isolated. admission is OPEN and
+    authorization is NoCheck: match does not address a bot resource, so any
+    authenticated principal may read."""
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     env = env_utils.get_current_env()
     matched = service.match(
