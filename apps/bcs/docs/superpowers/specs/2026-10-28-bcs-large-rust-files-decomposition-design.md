@@ -245,6 +245,10 @@ Session File复用Session分支已经创建的client，Health/Connect仍保留�
 `runtime.rs` 保留 `CollaborationRuntime` 字段、`new`、现有 `with_*` builder、
 配置常量与模块装配。保持同一组 Arc、功能开关和可选 port，不建立子组件状态副本。
 
+2026-11-02 第 5 单元规划基准为 `2adc74324c`：入口 7,182 行、Service impl
+2,531 行（43 方法）；20 个构造/builder 与两个 caller policy resolver 类型及原实现
+留在根。新增的 caller association/relay 逻辑纳入保持性审计，不按早期快照遗漏。
+
 新模块放 `runtime/`，均作为 `runtime` 的直接子模块；现有 `runtime_*.rs`
 通过原 `#[path]` 保持原逻辑父级，避免连带重写它们的 `super::*` 和可见性。
 
@@ -267,21 +271,25 @@ Session File复用Session分支已经创建的client，Health/Connect仍保留�
 | `runtime/events.rs` | public event、panel/bot 发布、persist panel、事件 payload/metadata 与时间转换 |
 | `runtime/opening.rs` | opening message 获取、默认构造、模板渲染与 Run override |
 | `runtime/logging.rs` | 既有 dispatch/delivery/terminal/timeout 生命周期日志辅助，保留 target 与字段 |
+| `runtime/caller.rs` | 原 instance association release/rearm 生命周期；builder/resolver 留根，submission relay 留 start 原正文 |
 | `runtime/tests.rs` | 原 7 个内联测试及局部 fake；不把测试 port 引入运行路径 |
 
 现有 Judge/dispatch/opening/history/publication/terminal-IM 恢复模块继续负责
 原来的持久化检查点工作；新模块负责从原 `runtime.rs` 提取的编排，不再实现一套恢复算法。
 现有 `runtime_observability.rs` 继续负责 Loop instrumentation；通用生命周期日志
 不混入它的指标职责。
+35 处待搬移的隐式 tracing target 用根私有 `RUNTIME_LOG_TARGET = module_path!()`
+显式保留；既有 `MSG_LOG_TARGET` 与 timeout scanner target 不修改。
 
 ### 6.2 超长 trait 实现的处理
 
-原 Service API 实现有 2,375 行，不能原样搬到一个仍然超限的 `service.rs`。
+第 5 单元当前 Service API 实现有 2,531 行，不能原样搬到一个仍然超限的 `service.rs`。
 将有完整业务流程的 method body 提取为职责模块中的 inherent 方法，
 trait method 保留同签名的直接委托，不新增内部 trait、动态 dispatch 或错误封装。
 
 内部委托命名体现操作，例如 `start_run_impl`；不得与 trait 方法同名后又递归调用自己。
-短小、仅返回投影的 trait method 可以直接保留。不能为了降低行数把所有方法压成单行，
+当前计划提取 24 个长方法，19 个短方法原文保留；全部 43 个 Service 方法仍在唯一 impl 中。
+不能为了降低行数把所有方法压成单行，
 也不能通过新增大量总被调用的空转发函数美化 method coverage。
 
 不改变 `async_trait` 入口的 Send/生命周期契约；提取后必须重新验证这些编译约束。
@@ -570,3 +578,9 @@ cargo test -p bcs-collaboration-store --test mysql_store \
 [Collaboration Store 实施计划](../plans/2026-10-29-bcs-collaboration-store-decomposition-implementation-plan.md)。
 规划已验证原版及临时拆分副本的 Store 默认/all-features 测试；真实 MySQL、交叉套件、
 架构与统一 E2E 门禁仍待实施阶段执行，不代表第 4 单元已落地。
+
+第 5 单元计划见 [Runtime 实施计划](../plans/2026-11-02-bcs-runtime-decomposition-implementation-plan.md)。
+当前规划固定 20 文件范围；原版及临时副本默认/all-features Runtime 套件各 370 项通过，
+281 项 progression 身份保留，7 个重启入口的 76 child phases 及持久化摘要一致。
+这些是规划工具与模块边界验证，尚未在工作区实施。完整 workspace、架构、unit
+changed-line >=80% 与统一 E2E changed-line >60% 均须在实施时分别实测；不新增 waiver。
