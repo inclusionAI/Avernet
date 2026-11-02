@@ -3,6 +3,7 @@
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
     BotPublishServiceError,
+    EvalBindingNotFoundError,
     BotNotFoundError,
     BotNotServiceTypeError,
     PublishAlreadyExistsError,
@@ -43,6 +44,7 @@ from agentclaw.community.core.service_bot.services.publish_flow_service import (
 __all__ = [
     "BotPublishService",
     "BotPublishServiceError",
+    "EvalBindingNotFoundError",
     "BotNotFoundError",
     "BotNotServiceTypeError",
     "PublishAlreadyExistsError",
