@@ -64,3 +64,11 @@ class DeviceAlreadyExistsError(DeviceDomainError):
 class DeviceLimitExceededError(DeviceDomainError):
     """超过设备数量上限"""
     pass
+
+
+class ConnInfoBuildError(RuntimeError):
+    """ConnInfoBuilder 调底层(baas /http-info、arca proxy 等)失败。"""
+
+
+class DeviceConnectionUnavailableError(ConnInfoBuildError):
+    """A transient provider connection failure with unknown device state."""
