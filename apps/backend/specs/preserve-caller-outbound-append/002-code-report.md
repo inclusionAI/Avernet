@@ -6,13 +6,13 @@ Owner Passport refresh and bootstrap build generic outbound headers and call `Ba
 Allowed changes: the existing outbound method, its Protocol, necessary Teclaw call-site compatibility, focused behavioral tests. No credentials, deployment, OCB/gitlink, lifecycle refactor, new service or dependency.
 
 ## Implementation
-- `BaasService.update_device_outbound_rule` adds keyword-only `mode: Literal["append", "replace"] = "append"` and explicitly sends the mode query parameter, keeping payload serialization, 30-second timeout and return behavior.
-- Teclaw global rules keep explicit `replace` in publish and single-device/batch header update paths. Its session-scoped append requires a session key and cannot substitute for global updates.
+- `BaasService.update_device_outbound_rule` adds keyword-only `mode: Literal["append", "replace"] = "append"` and sends a mode query parameter only for append; replacement omits the query entirely, keeping payload serialization, 30-second timeout and return behavior.
+- Teclaw global rules select `replace` internally in publish and single-device/batch header update paths; the HTTP request omits mode to retain the upstream default. Its session-scoped append requires a session key and cannot substitute for global updates.
 - The service Protocol declares the same keyword contract.
 - Success returns True only after HTTP status validation and business code zero. HTTP failures still become BaasServiceError, while transport, JSON and business failures retain their original exception types. Existing exception message semantics remain; raw response bodies are removed from boundary logs.
 
 ## Diagnostic events
-`baas_outbound_update_requested`: system=baas, operation, PUT route, physical device, mode, rule descriptors (domains/header/action). Rule values and placeholders are never logged.
+`baas_outbound_update_requested`: system=baas, operation, PUT route, physical device, mode, mode_query_present, rule descriptors (domains/header/action). Rule values and placeholders are never logged.
 
 `baas_outbound_update_succeeded`: device, mode, HTTP status, business result code, duration_ms.
 
@@ -27,7 +27,7 @@ Runtime: existing `ocb/apps/backend/.venv/bin/python`; PYTHONPATH explicitly poi
 - tests/community/core/service_bot/services/test_caller_identity_outbound.py
 - tests/community/core/devices/services/test_baas_device_service.py
 
-Result: **112 passed**, 21 existing deprecation warnings, no skips. New transport tests cover request shape, independent Caller preservation, repeated Owner upsert, explicit replace, HTTP/business/timeout/invalid-JSON failures and credential-free logs. The test transport models the user-confirmed upstream append contract; it is not live BaaS implementation verification.
+Result: **112 passed**, 21 existing deprecation warnings, no skips. New transport tests cover request shape, independent Caller preservation, repeated Owner upsert, replacement with no query, HTTP/business/timeout/invalid-JSON failures and credential-free logs. The test transport models the user-confirmed upstream append contract; it is not live BaaS implementation verification.
 
 Ruff on all changed production and test Python files: PASS. `git diff --check`: PASS. Coverage rerun: 112 passed; the existing repository coverage exclusions omit update_device_outbound_rule, so no method coverage percentage can be claimed from this run. Focused aggregate: 155/221 (70.14%); this is not the repository-wide coverage gate. Independent reviewer/regression reports are maintained separately.
 

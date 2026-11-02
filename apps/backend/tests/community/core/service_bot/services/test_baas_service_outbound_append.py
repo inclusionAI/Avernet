@@ -106,7 +106,7 @@ def test_failed_update_preserves_exception_contract_and_safe_logs(failure, caplo
 @pytest.mark.unit
 def test_explicit_replace_retains_teclaw_global_contract():
     def transport(request):
-        assert dict(request.url.params) == {"mode": "replace"}
+        assert not request.url.query
         return httpx.Response(200, json={"code": 0})
 
     with httpx.Client(base_url="https://baas.test", transport=httpx.MockTransport(transport)) as client:

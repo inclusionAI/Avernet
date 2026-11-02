@@ -3089,7 +3089,7 @@ class BaasService:  # pragma: no cover
         """更新 PaaS 设备的出站 header 规则。
 
         默认使用 append 模式去重替换匹配规则，保留独立下发的其他 header。
-        Teclaw 全局规则更新显式使用 replace（其 append 仅支持 session 规则）。
+        Teclaw 全局规则使用默认替换语义，不发送 mode 参数（append 仅支持 session 规则）。
         调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append
 
         Args:
@@ -3114,13 +3114,13 @@ class BaasService:  # pragma: no cover
         result_code = None
         logger.info(
             "baas_outbound_update_requested system=baas operation=update_device_outbound_rule "
-            "method=PUT route=%s paas_device_id=%s mode=%s rules=%s",
-            route, paas_device_id, mode, rules,
+            "method=PUT route=%s paas_device_id=%s mode=%s mode_query_present=%s rules=%s",
+            route, paas_device_id, mode, mode == "append", rules,
         )
         try:
             response = self._http.put(
                 route,
-                params={"mode": mode},
+                **({"params": {"mode": "append"}} if mode == "append" else {}),
                 json=payload,
                 timeout=30.0,
             )
