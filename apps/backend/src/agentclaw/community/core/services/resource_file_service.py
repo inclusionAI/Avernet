@@ -427,6 +427,9 @@ class ResourceFileService(ResourceFilePort):
         if entries is None:
             return []
 
+        # ``readonly`` is advisory, not a visibility rule: it preserves dotfiles,
+        # root identity files, and system-side data from the engine here, and the
+        # top-level HTTP app decides whether to filter or expose those fields.
         items: list[dict[str, Any]] = []
         for e in entries:
             name = e.get("name", "")

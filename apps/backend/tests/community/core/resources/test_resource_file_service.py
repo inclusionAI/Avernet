@@ -172,6 +172,28 @@ async def test_subdir_listing_preserves_hidden_names():
     assert [i["name"] for i in items] == [".cache", "state"]
 
 
+@pytest.mark.asyncio
+async def test_list_dir_marks_the_nested_readonly_prefix_and_visible_dots():
+    """``readonly`` is policy metadata, not a filter flag.
+
+    Path rules are computed by ``is_readonly`` *after* the engine's own entries
+    are known; the top-level adapter decides whether a public listing should
+    expose those paths at all.
+    """
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": ".env", "is_dir": False, "relative_path": ".env"},
+        {"name": "skill", "is_dir": False, "relative_path": "business/skill"},
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+    items = await svc.list_dir(**_COORDS, path="skills-pool/skills-repo")
+    assert [item["path"] for item in items] == [
+        "skills-pool/skills-repo/.env",
+        "skills-pool/skills-repo/business/skill",
+    ]
+    assert [item["readonly"] for item in items] == [True, True]
+
+
 # ── read / download-limit forwarding ─────────────────────────────────────────
 
 
