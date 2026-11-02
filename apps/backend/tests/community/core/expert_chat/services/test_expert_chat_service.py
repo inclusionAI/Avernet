@@ -1645,7 +1645,9 @@ class TestGetConnection:
         svc._get_connection(bot, "owner1")
 
         # bot_id 显式 keyword 传给 resolver,供下游 _build_binding_ctx 做 owner 校验
-        resolver.resolve_for_binding.assert_called_once_with(42, "owner1", bot_id="svc-bot")
+        resolver.resolve_for_binding.assert_called_once_with(
+            42, "owner1", bot_id="svc-bot", connection_identity="owner1"
+        )
         # by-bot 入口未被调
         resolver.resolve_for_bot.assert_not_called()
 

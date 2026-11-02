@@ -147,8 +147,22 @@ class ExpertChatSessionRuntimeMixin:
             f"[ExpertChatService] Resolving device context: bot={bot_id}, "
             f"owner={owner_id}, user={user_id}, binding_id={binding_id}"
         )
+        # HTTP friend authorization neither upgrades the friend nor opens the
+        # legacy operator gate directly. The authorized friend owns their
+        # session, while the addressed private runtime remains owned by the
+        # Bot owner. Resolver keeps ``ctx.user_id`` equal to ``user_id`` for
+        # session affinity/audit and only substitutes the verified Bot owner
+        # for the legacy v2 connection authorization on ARCA/local devices.
+        connection_identity = (
+            str(owner_id) if bcn_friend_authorized and owner_id else user_id
+        )
         try:
-            ctx = self._resolver.resolve_for_binding(binding_id, user_id, bot_id=bot_id)
+            ctx = self._resolver.resolve_for_binding(
+                binding_id,
+                user_id,
+                bot_id=bot_id,
+                connection_identity=connection_identity,
+            )
         except DeviceNotBoundError as error:
             logger.warning(
                 "[ExpertChatService] Bot has no active binding: %s: %s",

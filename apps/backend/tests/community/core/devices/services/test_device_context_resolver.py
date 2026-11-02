@@ -193,6 +193,131 @@ def test_resolve_for_binding_raises_on_unknown_provider(
         resolver.resolve_for_binding(103, "user-1", bot_id="bot-103")
 
 
+def test_resolve_for_bot_omitted_connection_identity_keeps_operator_for_legacy_v2(
+    resolver, fake_binding_repo, builders
+):
+    """The legacy by-bot path also keeps its original operator fallback."""
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(
+        112, "local"
+    )
+    resolver.resolve_for_bot("bot-112", "operator")
+
+    call = builders["local"].build.call_args
+    assert call.args[0].id == 112
+    assert call.args[1] == "operator"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_binding_connection_identity_routes_only_to_legacy_v2_builders(
+    resolver, fake_binding_repo, builders
+):
+    """connection_identity is isolated to providers backed by legacy v2.
+
+    ARCA/local use the owner to pass the unresolved device gate, while
+    BaaS/teclaw connection affinity continues using the operator id.
+    """
+    fake_binding_repo.get_by_id.return_value = _mock_binding(104, "arca")
+    resolver.resolve_for_binding(
+        104, "friend", bot_id="b-1", connection_identity="owner"
+    )
+    call = builders["arca"].build.call_args
+    assert call.args[0].id == 104
+    assert call.args[1] == "owner"
+    assert call.kwargs == {"device_uuid": None}
+
+    fake_binding_repo.get_by_id.return_value = _mock_binding(105, "baas")
+    resolver.resolve_for_binding(
+        105, "friend", bot_id="b-2", connection_identity="owner"
+    )
+    call = builders["baas"].build.call_args
+    assert call.args[0].id == 105
+    assert call.args[1] == "friend"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_binding_omitted_connection_identity_keeps_operator_for_legacy_v2(
+    resolver, fake_binding_repo, builders
+):
+    """Existing resolver callers must not send None to ARCA/local legacy v2."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(107, "arca")
+    resolver.resolve_for_binding(107, "operator", bot_id="b-3")
+
+    call = builders["arca"].build.call_args
+    assert call.args[0].id == 107
+    assert call.args[1] == "operator"
+    assert call.kwargs == {"device_uuid": None}
+
+    fake_binding_repo.get_by_id.return_value = _mock_binding(108, "local")
+    resolver.resolve_for_binding(108, "operator", bot_id="b-4")
+
+    call = builders["local"].build.call_args
+    assert call.args[0].id == 108
+    assert call.args[1] == "operator"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_binding_local_supports_explicit_owner_identity(
+    resolver, fake_binding_repo, builders
+):
+    """Local binding resolution keeps the same guarded owner override."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(110, "local")
+    resolver.resolve_for_binding(
+        110, "friend", bot_id="b-6", connection_identity="owner"
+    )
+
+    call = builders["local"].build.call_args
+    assert call.args[0].id == 110
+    assert call.args[1] == "owner"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_binding_empty_connection_identity_falls_back_to_operator(
+    resolver, fake_binding_repo, builders
+):
+    """Empty overrides cannot erase the legacy operator identity."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(111, "local")
+    resolver.resolve_for_binding(
+        111, "operator", bot_id="b-7", connection_identity=""
+    )
+
+    call = builders["local"].build.call_args
+    assert call.args[0].id == 111
+    assert call.args[1] == "operator"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_binding_teclaw_ignores_connection_identity(
+    resolver, fake_binding_repo, builders
+):
+    """Only legacy v2 builders may change the device-connection subject."""
+    fake_binding_repo.get_by_id.return_value = _mock_binding(109, "teclaw")
+    resolver.resolve_for_binding(
+        109, "operator", bot_id="b-5", connection_identity="owner"
+    )
+
+    call = builders["teclaw"].build.call_args
+    assert call.args[0].id == 109
+    assert call.args[1] == "operator"
+    assert call.kwargs == {"device_uuid": None}
+
+
+def test_resolve_for_bot_connection_identity_routes_only_to_legacy_v2_builders(
+    resolver, fake_binding_repo, builders
+):
+    """By-bot resolution carries the same provider isolation."""
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(
+        106, "local"
+    )
+    ctx = resolver.resolve_for_bot(
+        "bot-106", "friend", connection_identity="owner"
+    )
+    call = builders["local"].build.call_args
+    assert call.args[0].id == 106
+    assert call.args[1] == "owner"
+    assert call.kwargs == {"device_uuid": None}
+    assert ctx.user_id == "friend"
+
+
 # ── resolve_for_binding_invoke(binding 路由入口) ──
 
 def test_resolve_for_binding_invoke_builds_baas_routing_context_without_builder(

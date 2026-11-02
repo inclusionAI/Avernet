@@ -29,8 +29,24 @@ from agentclaw.community.core.devices.services.device_context import (
 
 
 _BINDING_ROUTED_PROVIDERS = frozenset({"baas", "teclaw"})
+# Two providers reuse ``DeviceService.get_device_connection_v2``, which still
+# performs the legacy owner/public/collaborator gate. Callers that have already
+# adjudicated a different policy (notably the run-time friend-chat route)
+# may name the account that owns the addressed connection without changing
+# the operator identity used for session affinity and audit.
+_LEGACY_CONNECTION_IDENTITY_PROVIDERS = frozenset({"arca", "local"})
 _DEFAULT_ENGINE_PORT = 20003
 _DEFAULT_ENGINE_TYPE = "openclaw"
+
+
+# Only legacy v2-backed builders need an explicitly adjudicated device subject.
+# Never let an unset/empty override erase the caller/operator identity.
+def _connection_identity(
+    provider: str, connection_identity: str | None, operator_id: str
+) -> str:
+    if provider in _LEGACY_CONNECTION_IDENTITY_PROVIDERS:
+        return connection_identity or operator_id
+    return operator_id
 
 
 class DeviceContextResolver:
@@ -59,16 +75,28 @@ class DeviceContextResolver:
         }
 
     def resolve_for_bot(
-        self, bot_id: str, user_id: str, *, device_uuid: str | None = None
+        self,
+        bot_id: str,
+        user_id: str,
+        *,
+        device_uuid: str | None = None,
+        connection_identity: str | None = None,
     ) -> DeviceContext:
         """resolve bot → DeviceContext。
 
         Args:
             bot_id: 业务 bot ID
-            user_id: 操作者身份(用于权限/审计,内部用作 device_affinity)
+            user_id: caller/operator identity. It remains ``ctx.user_id`` for
+                session affinity and audit by every provider.
             device_uuid: 可选设备 UUID,用于多实例场景锁定特定实例;不传则由
                 provider 自动选活跃实例(单实例 provider 忽略)。命不中时底层 builder
                 抛 ``ConnInfoBuildError`` — **不静默回落**到其它实例。
+            connection_identity: optional underlying device-connection subject.
+                Only ARCA/Local use it for the legacy v2 authorization gate,
+                otherwise operator identity is unchanged. Callers must already
+                have adjudicated the right to use that subject (for example a
+                verified BCN friend). ``ctx.user_id`` is **not** replaced.
+                ``None``/empty means use the operator.
 
         Raises:
             DeviceNotBoundError: bot 无 active binding(未 apply / 已 release)
@@ -88,7 +116,13 @@ class DeviceContextResolver:
             )
 
         builder = self._builders[provider]
-        raw_conn_info = builder.build(binding, user_id, device_uuid=device_uuid)
+        raw_conn_info = builder.build(
+            binding,
+            _connection_identity(
+                provider, connection_identity, user_id
+            ),
+            device_uuid=device_uuid,
+        )
         conn_info = self._normalize_schema(raw_conn_info, provider)
 
         bot = self._bot_repository.get_by_id_and_owner(bot_id, user_id)
@@ -106,8 +140,13 @@ class DeviceContextResolver:
         )
 
     def resolve_for_binding(
-        self, binding_id: int, operator_id: str, *, bot_id: str,
+        self,
+        binding_id: int,
+        operator_id: str,
+        *,
+        bot_id: str,
         device_uuid: str | None = None,
+        connection_identity: str | None = None,
     ) -> DeviceContext:
         """resolve binding_id → DeviceContext。
 
@@ -118,7 +157,9 @@ class DeviceContextResolver:
 
         Args:
             binding_id: 已知 binding 主键
-            operator_id: 操作者身份(用于 builder 内部 device_affinity / 审计)
+            operator_id: caller/operator identity. It remains ``ctx.user_id``
+                for session affinity and audit by every provider; for Baas/
+                Teclaw it is also the original device connection identity.
             bot_id: caller 持有的 bot_id(keyword-only)。透传到 ``ctx.bot_id``,
                 供下游(如 ``skill_center_module._build_binding_ctx``)做 owner
                 校验 + ``LocalDeviceFileSystem`` BaaS-mode 的 binding context 构建。
@@ -126,6 +167,12 @@ class DeviceContextResolver:
             device_uuid: 可选设备 UUID,用于多实例场景锁定特定实例;不传则由
                 provider 自动选活跃实例(单实例 provider 忽略)。命不中时底层 builder
                 抛 ``ConnInfoBuildError`` — **不静默回落**到其它实例。
+            connection_identity: optional underlying device-connection subject.
+                Only ARCA/Local use it for the legacy v2 authorization gate,
+                otherwise operator identity is unchanged. Callers must already
+                have adjudicated the right to use that subject (for example a
+                verified BCN friend). ``ctx.user_id`` is **not** replaced.
+                ``None``/empty means use the operator.
 
         Raises:
             DeviceNotBoundError: binding_id 不存在
@@ -146,7 +193,13 @@ class DeviceContextResolver:
             )
 
         builder = self._builders[provider]
-        raw_conn_info = builder.build(binding, operator_id, device_uuid=device_uuid)
+        raw_conn_info = builder.build(
+            binding,
+            _connection_identity(
+                provider, connection_identity, operator_id
+            ),
+            device_uuid=device_uuid,
+        )
         conn_info = self._normalize_schema(raw_conn_info, provider)
 
         bot = self._bot_repository.get_by_binding_id(binding_id)
