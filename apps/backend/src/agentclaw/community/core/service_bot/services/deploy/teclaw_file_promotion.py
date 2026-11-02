@@ -36,9 +36,11 @@ being recomputed — the platform hashed those exact bytes when it installed the
 Gathering them from the engine would also be circular on the one path that
 matters: a bot created from a manifest has tools before it has a container.
 """
+
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 
 from agentclaw.community.log import get_logger
@@ -74,11 +76,48 @@ _BOT_DATA_STORE = "bot-data"
 # which the source-of-truth contract below turns into a hard build failure.
 # Skipping them by path segment (at any depth) avoids both problems.
 _EXCLUDED_DIR_SEGMENTS = frozenset({"node_modules"})
+_LOCAL_SKILL_STAGING_RE = re.compile(r"^\.([A-Za-z0-9-]+)\.(?:apply|rollback)-[0-9a-f]{6,}$")
+_LOCAL_SKILL_STAGING_RE = re.compile(
+    r"^\.([A-Za-z0-9-]+)\.(?:apply|rollback)-[0-9a-f]{6,}$"
+)
 
 
 def _has_excluded_segment(engine_path: str) -> bool:
     """True if any path segment of ``engine_path`` names an excluded directory."""
     return not _EXCLUDED_DIR_SEGMENTS.isdisjoint(engine_path.split("/"))
+
+
+def _is_local_skill_path(logical_path: str) -> bool:
+    """Whether a listed read target can be updated by a local-package publish."""
+    return logical_path.startswith("workspace/skills-local/")
+
+
+def _is_hidden_local_skill_staging_path(engine_path: str) -> bool:
+    """Whether an engine path is inside a local-package stage/rollback directory.
+
+    The Teclaw local-package publisher stages under a direct
+    ``skills-local/.<name>.apply-*`` sibling and moves a rollback under
+    ``.<name>.rollback-*`` while it replaces a complete package. These are
+    implementation state, not content. This regex is intentionally narrow: it does
+    not silence reads of nested packages and does not turn ``skills-local`` into a
+    generic ``node_modules`` exclusion.
+    """
+    # Paths start with the engine-relative ``/``: parts[0] is an empty token.
+    parts = engine_path.split("/")
+    if len(parts) < 5 or parts[2] != "skills-local":
+        return False
+    return _LOCAL_SKILL_STAGING_RE.fullmatch(parts[3]) is not None
+
+
+def _is_still_listed_file(entries, path: str) -> bool:
+    """Whether a fresh listing still reports ``path`` as a file."""
+    return any(
+        entry.get("path") == path and entry.get("is_dir") is not True
+        for entry in entries
+    )
+
+
+_MAX_LOCAL_SKILL_READ_RETRIES = 2
 
 
 class TeclawFilePromotionError(Exception):
@@ -177,7 +216,9 @@ class TeclawFilePromotion:
                 if engine_path != f"/{ns}" and not engine_path.startswith(f"/{ns}/"):
                     logger.warning(
                         "[TeclawFilePromotion] listing for ns=%s returned "
-                        "out-of-namespace path %r; skipping", ns, engine_path,
+                        "out-of-namespace path %r; skipping",
+                        ns,
+                        engine_path,
                     )
                     continue
                 # Regenerable dependency/build dirs (``node_modules``) are not
@@ -188,13 +229,38 @@ class TeclawFilePromotion:
                 # end-of-sweep summary covers what was actually staged.
                 if _has_excluded_segment(engine_path):
                     continue
+                if _is_hidden_local_skill_staging_path(engine_path):
+                    logger.debug(
+                        "[TeclawFilePromotion] skipping internal local-package path %s",
+                        engine_path,
+                    )
+                    continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
                 content = await device_fs.read_file(logical)
+                if content is None and _is_local_skill_path(logical):
+                    for retry in range(_MAX_LOCAL_SKILL_READ_RETRIES):
+                        refreshed = await device_fs.list_dir(ns, recursive=True)
+                        if refreshed is None:
+                            raise TeclawFilePromotionError(
+                                f"teclaw promotion: list_dir failed for namespace "
+                                f"{ns!r} (engine unreachable/error) — refusing to "
+                                f"ship an incomplete snapshot for {engine_path}"
+                            )
+                        if _is_still_listed_file(refreshed, engine_path):
+                            content = await device_fs.read_file(logical)
+                            if content is not None:
+                                break
+                        else:
+                            logger.info(
+                                "[TeclawFilePromotion] skipping excluded local skill path %s",
+                                engine_path,
+                            )
+                            break
                 if content is None:
                     raise TeclawFilePromotionError(
                         f"teclaw promotion: source file unreadable: {engine_path}"
                     )
-                rel = logical[len(ns):].lstrip("/")  # "sub/x.csv"
+                rel = logical[len(ns) :].lstrip("/")  # "sub/x.csv"
                 ref_path = f"{rel_root}/{ns}/{rel}"
                 oss_key = f"{store_base}/{ref_path}"
                 ok = await asyncio.to_thread(self._oss.put_object, oss_key, content)
@@ -217,14 +283,22 @@ class TeclawFilePromotion:
         # other coroutine on the worker for the length of the transfer.
         out.cli_tools = await asyncio.to_thread(
             self._promote_cli_tools,
-            env=env, entity_type=entity_type, entity_id=entity_id,
-            bot_id=bot_id, publish_id=publish_id, stage=stage,
+            env=env,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            publish_id=publish_id,
+            stage=stage,
         )
 
         logger.info(
             "[TeclawFilePromotion] staged bot=%s publish_id=%s stage=%s: "
             "%d resource(s), %d identity file(s), %d cli tool(s)",
-            bot_id, publish_id, stage, len(out.resources), len(out.identity_files),
+            bot_id,
+            publish_id,
+            stage,
+            len(out.resources),
+            len(out.identity_files),
             len(out.cli_tools),
         )
         return out
@@ -253,9 +327,7 @@ class TeclawFilePromotion:
             entity_type=entity_type, entity_id=entity_id, bot_id=bot_id
         )
         refs: list[dict[str, object]] = []
-        for record in self._cli_tools.list(
-            env=env, entity_id=entity_id, bot_id=bot_id
-        ):
+        for record in self._cli_tools.list(env=env, entity_id=entity_id, bot_id=bot_id):
             try:
                 staged = self._cli_tool_store.copy_to_stage(
                     scope,
@@ -269,16 +341,18 @@ class TeclawFilePromotion:
                     f"teclaw promotion: could not stage CLI tool {record.name!r}: "
                     f"{error}"
                 ) from error
-            refs.append({
-                "name": record.name,
-                "store": BOT_DATA_STORE,
-                "path": staged.ref_path,
-                # From the table, not recomputed: the platform hashed these exact
-                # bytes when it installed them, and the engine uses the md5 as a
-                # change test rather than an integrity gate.
-                "md5": record.md5,
-                "version": record.version,
-            })
+            refs.append(
+                {
+                    "name": record.name,
+                    "store": BOT_DATA_STORE,
+                    "path": staged.ref_path,
+                    # From the table, not recomputed: the platform hashed these exact
+                    # bytes when it installed them, and the engine uses the md5 as a
+                    # change test rather than an integrity gate.
+                    "md5": record.md5,
+                    "version": record.version,
+                }
+            )
         return refs
 
 
