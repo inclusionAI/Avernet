@@ -74,6 +74,25 @@ def set_error():
 
 @endpoint_test(
     method="POST",
+    path=_SET_PATH,
+    scenario="form_mismatch",
+    input=CaseInput(
+        headers=_HEADERS,
+        json_body={"config_name": "fl", "config_type": "bool", "config_value": "true"},
+    ),
+    expect=ExpectError(
+        status=400, json_contains={"message": "Invalid task config value"}
+    ),
+)
+def set_form_mismatch():
+    """config_value shape (str) mismatches config_type=bool at the service layer
+    (pydantic accepts the str|bool|list[str] union) → mapped domain 400, not 500.
+    Pins spec §value-encode: service form mismatches surface as a mapped bad-request
+    domain exception via @envelope_errors, not an unmapped 500."""
+
+
+@endpoint_test(
+    method="POST",
     path=_MATCH_PATH,
     scenario="happy",
     seed=_seed_set,

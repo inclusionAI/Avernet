@@ -26,6 +26,7 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.core.task.task_config.errors import TaskConfigValueError
 from agentclaw.community.core.task.task_config.repository_protocol import (
     TaskConfigRepositoryProtocol,
 )
@@ -40,17 +41,18 @@ _VALID_CONFIG_TYPES = frozenset({"single_string", "bool", "set"})
 
 
 def _validate_config_value(config_type: str, config_value: Any) -> None:
-    """Raise ValueError if config_value does not match the shape config_type names."""
+    """Raise TaskConfigValueError if config_value does not match the shape
+    config_type names."""
     if config_type == "single_string":
         if not isinstance(config_value, str):
-            raise ValueError(
+            raise TaskConfigValueError(
                 f"config_type=single_string requires str config_value, got "
                 f"{type(config_value).__name__}"
             )
     elif config_type == "bool":
         # bool is a subclass of int — check bool explicitly first.
         if not isinstance(config_value, bool):
-            raise ValueError(
+            raise TaskConfigValueError(
                 f"config_type=bool requires bool config_value, got "
                 f"{type(config_value).__name__}"
             )
@@ -58,7 +60,7 @@ def _validate_config_value(config_type: str, config_value: Any) -> None:
         if not isinstance(config_value, list) or not all(
             isinstance(e, str) for e in config_value
         ):
-            raise ValueError(
+            raise TaskConfigValueError(
                 "config_type=set requires list[str] config_value, got "
                 f"{type(config_value).__name__}"
             )
@@ -66,20 +68,21 @@ def _validate_config_value(config_type: str, config_value: Any) -> None:
 
 
 def _validate_match_value(config_type: str, value: Any) -> None:
-    """Raise ValueError if the match input shape does not match config_type.
+    """Raise TaskConfigValueError if the match input shape does not match
+    config_type.
 
     single_string / set require a str input (set tests a single element);
     bool requires a real bool — ``"true"`` is a str and must NOT pass.
     """
     if config_type in ("single_string", "set"):
         if not isinstance(value, str):
-            raise ValueError(
+            raise TaskConfigValueError(
                 f"config_type={config_type} requires str match value, got "
                 f"{type(value).__name__}"
             )
     elif config_type == "bool":
         if not isinstance(value, bool):
-            raise ValueError(
+            raise TaskConfigValueError(
                 f"config_type=bool requires bool match value, got "
                 f"{type(value).__name__}"
             )
@@ -102,7 +105,7 @@ class TaskConfigService(TaskConfigServiceProtocol):
         operator: str | None = None,
     ) -> int:
         if config_type not in _VALID_CONFIG_TYPES:
-            raise ValueError(
+            raise TaskConfigValueError(
                 f"config_type must be one of {sorted(_VALID_CONFIG_TYPES)}, got {config_type!r}"
             )
         _validate_config_value(config_type, config_value)
