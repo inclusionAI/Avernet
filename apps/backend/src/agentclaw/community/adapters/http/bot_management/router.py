@@ -16,6 +16,7 @@ import json
 from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
+from starlette.requests import ClientDisconnect
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
@@ -2022,6 +2023,12 @@ async def search_bots(
             success=True,
             data=result,
         )
+
+    except ClientDisconnect:
+        logger.info(
+            "[bot_router.search_bots] request cancelled by client, not search error"
+        )
+        return Response(status_code=499)
 
     except Exception as e:
         logger.error(f"[bot_router.search_bots] Error: {e}")
