@@ -289,8 +289,9 @@ fake BCS 只证明本玩家对协议的处理正确，**不等于**真实三局�
   全部为模型生成；老陈违规 0。其他玩家的 4 条“超过 10 字”是人类结构化票长度误报，
   票本身有效，已在 evidence 中单独记录。
 - 第一局主持人在发言汇总节点有一次自动重试；三局均未要求人类发送“卡住了”。
-- **30 分钟独立接入验证仍未完成**：尚未由未参与开发的同学从干净 shell 计时实测；
-  首次 `cargo build`/`npm install`/OpenClaw 安装不计入计时。
+- 一位未参与开发的同学反馈：按本说明在自己的本地牌桌独立接入，接入耗时在 30 分钟内；
+  接入加后续游玩共 30 多分钟，过程没有遇到问题。这是使用者口述反馈，未提供精确计时或环境记录。
+  首次 `cargo build`/`npm install`/OpenClaw 安装不计入接入计时。
 - 真实 BCS 连接层断线重连已保存证据（`evidence/reconnect.*`）；游戏内断线恢复未验证。
 - 真实 BCS 原生 state machine 的受控 PK 测试已保存证据（`evidence/pk-controlled.*`）：
   seat1 是实际 CPython `BcnClient`，真实收到 V3 `chat.send` 并发出 PK 发言/投票 final；

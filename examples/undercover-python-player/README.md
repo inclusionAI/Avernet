@@ -48,6 +48,9 @@ full session IDs and per-round speech/vote validity. Controlled native BCS PK,
 connection-level reconnect, and exact-run abort with late-output suppression were
 also exercised using the actual Python client. These controlled checks do not replace
 in-game recovery or independent 30-minute onboarding.
+A student who did not develop the player reported following the Chinese guide to connect it
+to their own local table within 30 minutes, then playing without issues. Setup and play
+together lasted over 30 minutes; exact timing and environment logs were not supplied.
 
 ## Model budget and TLS
 
