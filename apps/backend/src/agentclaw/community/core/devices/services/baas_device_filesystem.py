@@ -31,6 +31,13 @@ logger = get_logger()
 # never "that file does not exist".
 _PROXY_ROUTING_ERRORS = frozenset({"BOT_NOT_FOUND", "NO_DEVICES_FOUND"})
 
+# ``read_file`` is read-only and idempotent at the transport boundary. A short
+# bounded retry mirrors the existing transient-retry precedent on the symlink
+# path while preserving ``DeviceFileSystem`` read semantics for absence vs
+# unavailability.
+_RETRYABLE_READ_STATUS_CODES = frozenset({502, 503, 504})
+_READ_RETRY_DELAYS_SECONDS = (1, 2, 4)
+
 
 def _is_proxy_routing_failure(response: httpx.Response) -> bool:
     """True when a 404 came from the transparent proxy rather than from the device.
@@ -103,48 +110,57 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             "[%s.read_file] bot_uuid=%s file=%s",
             type(self).__name__, self._bot_uuid, file_path,
         )
-        try:
-            resp = await asyncio.to_thread(
-                self._transport.post,
-                "/api/file/read",
-                json={"file_path": file_path},
-            )
-            resp.raise_for_status()
-            return resp.content
-        except httpx.HTTPStatusError as e:
-            # A 404 *from the device* is it answering "no such file", which the
-            # ``DeviceFileSystem.read_file`` contract represents as ``None`` — the
-            # same mapping ``TeclawDeviceFileSystem.read_file`` and
-            # ``LocalDeviceFileSystem._baas_read_file`` (same ``/api/file/read``
-            # endpoint) already apply. Keeping it here means core callers never have
-            # to know this provider speaks HTTP.
-            #
-            # Not every 404 is the device's, though: on the desktop path the
-            # transparent proxy answers 404 for its own routing failures, which mean
-            # the bot/device is gone. Those must keep raising — see
-            # ``_is_proxy_routing_failure``.
-            #
-            # Every other status propagates too, which is the point of the guard this
-            # replaces: a swallowed 401 (missing x-proxypass-token) used to return
-            # empty content that callers treated as "file gone", silently dropping
-            # promoted files at draft→verify. Translating *only* a verified
-            # device-level 404 keeps that failure impossible while honouring the
-            # contract — absence and unavailability stay distinguishable.
-            if e.response.status_code == 404 and not _is_proxy_routing_failure(
-                e.response
-            ):
-                logger.debug(
-                    "[%s.read_file] not found: %s", type(self).__name__, file_path
+        response = await self._post_read_file(file_path)
+        if response is None:
+            return None
+        return response.content
+
+    async def _post_read_file(self, file_path: str) -> httpx.Response | None:
+        """Issue the read request with a bounded transient retry.
+
+        Return ``None`` only when the transport confirms an ordinary device 404.
+
+        The transport boundary is read-only, so replaying a transient 5xx cannot
+        double-apply anything. Keep the short backoff local to ``read_file`` for
+        now: this class has several leaf methods with distinct side-effect
+        contracts, and widening or moving the retry would require rechecking
+        every one of those operations before doing so.
+        """
+        for attempt, delay_seconds in enumerate(
+            (*_READ_RETRY_DELAYS_SECONDS, None), start=1
+        ):
+            try:
+                resp = await asyncio.to_thread(
+                    self._transport.post,
+                    "/api/file/read",
+                    json={"file_path": file_path},
                 )
-                return None
-            logger.error(
-                "[%s.read_file] HTTP %d: %s",
-                type(self).__name__, e.response.status_code, file_path,
-            )
-            raise
-        except Exception as e:
-            logger.error("[%s.read_file] error: %s", type(self).__name__, e)
-            raise
+                resp.raise_for_status()
+                return resp
+            except httpx.HTTPStatusError as e:
+                if (
+                    e.response.status_code == 404
+                    and not _is_proxy_routing_failure(e.response)
+                ):
+                    logger.debug(
+                        "[%s.read_file] not found: %s",
+                        type(self).__name__, file_path,
+                    )
+                    return None
+
+                if (
+                    e.response.status_code not in _RETRYABLE_READ_STATUS_CODES
+                    or delay_seconds is None
+                ):
+                    raise
+                logger.warning(
+                    "[%s.read_file] transient failure; retrying file=%s attempt=%d delay_seconds=%d status=%d",
+                    type(self).__name__, file_path, attempt, delay_seconds,
+                    e.response.status_code,
+                )
+            await asyncio.sleep(delay_seconds)
+
+        raise AssertionError("BaaS read retry loop must return or raise")
 
     async def write_file(self, file_path: str, content: bytes) -> None:
         """Must raise on failure — caller relies on it as upload-failed signal."""

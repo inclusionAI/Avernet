@@ -3,7 +3,7 @@
 8 个 file 方法走 transport.post / transport.post_multipart。write_file 是
 multipart,其他都是 json POST。
 """
-from unittest.mock import MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
@@ -16,6 +16,14 @@ def _conn_info() -> dict:
         "engine_port": 20003,
         "tenant": "team_claw",
     }
+
+
+def _read_response(status_code: int, *, content: bytes = b"recovered"):
+    return httpx.Response(
+        status_code=status_code,
+        content=content,
+        request=httpx.Request("POST", "http://fake/api/file/read"),
+    )
 
 
 def _ok_response(*, json_body=None, content=None):
@@ -117,6 +125,71 @@ async def test_read_file_returns_none_on_json_404_that_is_not_a_proxy_error():
 
 
 @pytest.mark.asyncio
+async def test_read_file_retries_transient_5xx():
+    """The transport-level read replay is bounded and redispatches the same path.
+
+    The bug was a one-shot 502 surfacing a transient BaaS/proxy blip as a hard read
+    failure. The retry is deliberately limited to read-only transport hits and uses
+    the same 1/2/4s backoff pattern as the symlink path.
+    """
+    from agentclaw.community.core.devices.services.baas_device_filesystem import (
+        BaasDeviceFileSystem,
+    )
+    for status in (502, 503, 504):
+        transport = _make_transport()
+        transport.post.side_effect = [
+            _read_response(status, content=b"bad gateway"),
+            _read_response(200, content=b"recovered"),
+        ]
+        fs = BaasDeviceFileSystem(
+            transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+        )
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            content = await fs.read_file("/foo")
+        assert content == b"recovered"
+        assert mock_sleep.await_count == 1
+        assert transport.post.call_count == 2
+        assert transport.post.call_args_list == [
+            call("/api/file/read", json={"file_path": "/foo"}),
+            call("/api/file/read", json={"file_path": "/foo"}),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_read_file_does_not_retry_on_404():
+    """A verified missing file is still absence, not a transient 5xx to replay."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import (
+        BaasDeviceFileSystem,
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [
+        _read_response(404, content=b"not found"),
+        _read_response(200, content=b"should not reach"),
+    ]
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    assert await fs.read_file("/missing") is None
+    transport.post.assert_called_once_with("/api/file/read", json={"file_path": "/missing"})
+
+
+@pytest.mark.asyncio
+async def test_read_file_fails_after_bounded_transient_retries():
+    """After 1/2/4s, an unrecovered 502 still surfaces exactly what the caller saw."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import (
+        BaasDeviceFileSystem,
+    )
+    transport = _make_transport()
+    error = _read_response(502, content=b"bad gateway")
+    transport.post.side_effect = [error] * 4
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with pytest.raises(httpx.HTTPStatusError) as exc:
+            await fs.read_file("/foo")
+    assert exc.value.response.status_code == 502
+    assert transport.post.call_count == 4
+    assert mock_sleep.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_read_file_raises_on_5xx():
     """A server failure is unavailability, not absence — it must not read as None.
 
@@ -132,7 +205,8 @@ async def test_read_file_raises_on_5xx():
         transport = _make_transport(response=err_resp)
         fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
         with pytest.raises(httpx.HTTPStatusError):
-            await fs.read_file("/foo")
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                await fs.read_file("/foo")
 
 
 @pytest.mark.asyncio
