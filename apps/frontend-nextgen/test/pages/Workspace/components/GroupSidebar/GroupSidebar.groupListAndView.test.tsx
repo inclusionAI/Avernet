@@ -122,8 +122,10 @@ describe('GroupSidebar', () => {
     const onToggleGroupExpanded = jest.fn();
     render(<GroupSidebar {...makeProps({ onSelectGroup, onToggleGroupExpanded })} />);
     fireEvent.click(screen.getByText('主站群'));
-    expect(onSelectGroup).toHaveBeenCalledWith('g1');
+    // 展开/切台解耦（2026-11-02）：点击群行只展开/收起会话列表，
+    // 不再抢占右侧主舞台的选中群。
     expect(onToggleGroupExpanded).toHaveBeenCalledWith('g1');
+    expect(onSelectGroup).not.toHaveBeenCalled();
   });
 
   it('协作群管理菜单的每个操作都使用统一图标', () => {

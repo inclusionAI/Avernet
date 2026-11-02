@@ -163,12 +163,12 @@ describe('ConversationBotItem 操作区', () => {
     expect(collapsedColumn.className).toContain('group-has-[[data-state=open]]:pr-[122px]');
   });
 
-  it('当前舞台所属 Bot 名称点亮品牌蓝(行锚点,与会话胶囊两级选中)', () => {
+  it('当前舞台所属 Bot 名称点亮 #09090B(行锚点,与会话胶囊两级选中;2026-11-02 回归中性深)', () => {
     const { container, rerender } = renderBotItem({ botSelected: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title).toHaveClass('text-primary');
+    expect(title).toHaveClass('text-foreground');
     // 名称规格与会话标题一致(2026-10-22 需求):13px 常规字重,目录不再加粗强调。
     expect(title).toHaveClass('text-[13px]', 'font-normal');
     // 非舞台 Bot 保持常规灰名。
@@ -176,7 +176,7 @@ describe('ConversationBotItem 操作区', () => {
     const plainTitle = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(plainTitle).not.toHaveClass('text-primary');
+    expect(plainTitle).not.toHaveClass('text-foreground');
   });
 });
 

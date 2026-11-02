@@ -146,7 +146,10 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('bg-gray-');
     expect(html).not.toContain('animate-pulse');
     expect(html).toContain('>Bot UUID<');
-    expect(html).toContain('title="20260825_mbu0ey8f:900004"');
+    // unify-tooltip-antd：截断 UUID 的完整值由统一 Tooltip 承载（个 hover 打开），
+    // 原生 title= 已按 spec 治理规则迁移移除；关闭态不渲染 Portal 内气泡属预期。
+    expect(html).not.toContain('title="20260825_mbu0ey8f:900004"');
+    expect(html).toContain('>20260825_mbu0ey8f:900004</code>');
     expect(html).not.toContain('Bot ID：20260825_mbu0ey8f:900004');
     expect(html).toContain('aria-label="复制 产品协作助手 的 Bot UUID"');
     expect(html).toContain('参与协作群聊');
