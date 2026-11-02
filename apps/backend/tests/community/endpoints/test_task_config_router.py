@@ -11,8 +11,14 @@ flip the handler's env and turn a present-config match into ``matched: False``).
 
 from __future__ import annotations
 
+import time
+
+import jwt
+
+from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.task.task_config_service import TaskConfigServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -92,3 +98,94 @@ def match_happy():
 )
 def match_error():
     """Missing ``value`` is rejected by the request schema (422)."""
+
+
+# ── Public openapi surface: POST /openapi/v1/collaboration/tasks/config/match ──
+# require_principal (Gateway-signed X-Avernet-Principal): the happy case needs a
+# configured principal verifier + a seeded config; the unauthenticated case has
+# no principal header → 401 (mirroring the existing /execute unauthenticated
+# case in test_openapi_task_endpoints.py — exact same _Secret/_Resolver shape).
+_OPENAPI_MATCH_PATH = "/openapi/v1/collaboration/tasks/config/match"
+_PUB_KEY = "public-task-framework-signing-key-32b"
+_PUB_CALLER = "task-config-caller"
+
+
+class _PubSecret:
+    secret_user = "test"
+    secret_value = _PUB_KEY
+
+
+class _PubResolver:
+    def get_secret(self, _secret_name: str) -> _PubSecret:
+        return _PubSecret()
+
+
+def _boot_verifier(_world) -> None:
+    init_principal_verifier_config(_PubResolver(), "test-key", strict=False)
+
+
+def _pub_principal() -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 3600,
+            "principals": [
+                {
+                    "type": "user",
+                    "subject": {"id": _PUB_CALLER, "username": "task-config@example.test"},
+                }
+            ],
+        },
+        _PUB_KEY,
+        algorithm="HS256",
+    )
+
+
+def _openapi_headers() -> dict[str, str]:
+    return {PRINCIPAL_HEADER: _pub_principal()}
+
+
+def _seed_set_and_verify(world) -> None:
+    """Boot the principal verifier, then seed the config the happy case matches
+    (in the handler's env = get_current_env())."""
+    _boot_verifier(world)
+    svc = world.get(TaskConfigServiceProtocol)
+    svc.set_config(
+        config_name="skill_set",
+        config_type="set",
+        config_value=["bot_a"],
+        env=get_current_env(),
+        operator="seeder",
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=_OPENAPI_MATCH_PATH,
+    scenario="happy",
+    seed=_seed_set_and_verify,
+    input=CaseInput(
+        headers=_openapi_headers(),
+        json_body={"config_name": "skill_set", "value": "bot_a"},
+    ),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"matched": True}}
+    ),
+)
+def openapi_match_happy():
+    """Public match with a signed principal -> matched: True."""
+
+
+@endpoint_test(
+    method="POST",
+    path=_OPENAPI_MATCH_PATH,
+    scenario="error",
+    seed=_boot_verifier,
+    input=CaseInput(json_body={"config_name": "skill_set", "value": "bot_a"}),
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def openapi_match_unauthenticated():
+    """No principal header → 401 (require_principal reject)."""
