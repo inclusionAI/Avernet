@@ -164,6 +164,16 @@ struct HoldFirstTxGate {
 }
 
 impl HoldFirstTxGate {
+    async fn wait_until_held(&self) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while self.entries.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("sync reached its transaction entry");
+    }
+
     async fn enter(&self) {
         if self.entries.fetch_add(1, Ordering::SeqCst) == 0 {
             while !self.release.load(Ordering::SeqCst) {
@@ -306,4 +316,124 @@ async fn initiation_racing_the_sync_is_closed_by_the_retry() {
     assert_eq!(rows[0].sequence, 0);
     assert_eq!(rows[1].action, "transfer_invalidate");
     assert_eq!(rows[1].sequence, 1);
+}
+
+#[tokio::test]
+async fn manager_granted_after_pre_read_is_stripped_by_the_swap() {
+    use bcs_service_api::types::bot_authority::{ManagerEdit, ManagerEditAction};
+
+    let gate = StdArc::new(HoldFirstTxGate::default());
+    let db: StdArc<dyn DbPlugin> = StdArc::new(HoldFirstSqlite {
+        inner: LocalSqliteDbPlugin::new().expect("local sqlite"),
+        gate: gate.clone(),
+    });
+    let fixture =
+        bcs_test_support::bot_authority_sqlite::new_fixture_with_db(ENV, db).await;
+    let bot = "bot_sync_manager_race";
+    fixture.seed_bot(ENV, bot, 1).await;
+    fixture.seed_human(ENV, "next").await;
+    fixture.grant_edge(ENV, bot, "human_own", BotAccessRelation::Owner).await;
+    let repo = fixture.authority_repo();
+    let sync = tokio::spawn(async move {
+        repo.sync_ownership(ownership_sync_command(bot, "next", "sync-manager-race"))
+            .await
+    });
+    gate.wait_until_held().await;
+    fixture.authority_repo().edit_manager(ManagerEdit {
+        bot_id: bot.to_string(),
+        user_id: "human_next".to_string(),
+        action: ManagerEditAction::Grant,
+        mutation: human_mutation("manager-race-grant".to_string(), "own"),
+    }).await.expect("concurrent manager grant");
+    gate.release.store(true, Ordering::SeqCst);
+    assert!(sync.await.expect("sync task").expect("sync result").changed);
+    assert_eq!(gate.entries.load(Ordering::SeqCst), 3, "grant plus two sync attempts");
+    assert_eq!(fixture.ownership_version(ENV, bot).await, 2);
+    // The managers read excludes the owner, so inspect the actual stored edge.
+    let rows = fixture.db.query(DbStatement::new(
+        "SELECT from_id FROM edge_grants \
+         WHERE grant_kind = 'manager' AND status = 'approved'",
+    )).await.expect("stored manager edges");
+    assert!(rows.is_empty(), "new owner's manager edge survived: {rows:?}");
+}
+
+#[tokio::test]
+async fn corrupt_old_owner_is_rejected_without_writes() {
+    let fixture = new_fixture(ENV).await;
+    let bot = "bot_sync_corrupt_owner";
+    fixture.seed_bot(ENV, bot, 1).await;
+    fixture.seed_human(ENV, "next").await;
+    fixture.grant_edge(ENV, bot, "bot_not_a_human", BotAccessRelation::Owner).await;
+    let before = fixture.db.query(DbStatement::new("SELECT * FROM edge_grants"))
+        .await.expect("edges before");
+    let err = fixture.authority_repo().sync_ownership(
+        ownership_sync_command(bot, "next", "sync-corrupt-owner"),
+    ).await.expect_err("corrupt owner rejected");
+    assert!(err.to_string().contains("bot_owner_integrity"), "{err}");
+    assert_eq!(fixture.ownership_version(ENV, bot).await, 1);
+    assert!(fixture.audit_rows(ENV).await.is_empty());
+    assert_eq!(
+        fixture.db.query(DbStatement::new("SELECT * FROM edge_grants"))
+            .await.expect("edges after"),
+        before,
+    );
+}
+
+#[tokio::test]
+async fn ownership_audits_preserve_escaped_user_ids() {
+    let fixture = new_fixture(ENV).await;
+    let bot = "bot_sync_escaped_audit";
+    let old = "old\"\\user";
+    let next = "next\"\\user";
+    fixture.seed_bot(ENV, bot, 1).await;
+    fixture.seed_human(ENV, next).await;
+    fixture.grant_edge(ENV, bot, &human_actor_id(old), BotAccessRelation::Owner).await;
+    fixture.authority_repo().sync_ownership(
+        ownership_sync_command(bot, next, "sync-escaped-audit"),
+    ).await.expect("ownership sync");
+    let rows = fixture.audit_rows(ENV).await;
+    assert_eq!(rows.len(), 1);
+    let before: serde_json::Value = serde_json::from_str(
+        rows[0].before_state.as_deref().expect("before state"),
+    ).expect("valid before JSON");
+    let after: serde_json::Value = serde_json::from_str(
+        rows[0].after_state.as_deref().expect("after state"),
+    ).expect("valid after JSON");
+    assert_eq!(before, serde_json::json!({"owner": human_actor_id(old), "version": 1}));
+    assert_eq!(after, serde_json::json!({"owner": human_actor_id(next), "version": 2}));
+}
+
+#[tokio::test]
+async fn retirement_before_the_transaction_returns_unchanged() {
+    let gate = StdArc::new(HoldFirstTxGate::default());
+    let db: StdArc<dyn DbPlugin> = StdArc::new(HoldFirstSqlite {
+        inner: LocalSqliteDbPlugin::new().expect("local sqlite"),
+        gate: gate.clone(),
+    });
+    let fixture =
+        bcs_test_support::bot_authority_sqlite::new_fixture_with_db(ENV, db).await;
+    let bot = "bot_sync_retirement_race";
+    fixture.seed_bot(ENV, bot, 1).await;
+    fixture.seed_human(ENV, "next").await;
+    fixture.grant_edge(ENV, bot, "human_own", BotAccessRelation::Owner).await;
+    let repo = fixture.authority_repo();
+    let sync = tokio::spawn(async move {
+        repo.sync_ownership(ownership_sync_command(bot, "next", "sync-retirement-race"))
+            .await
+    });
+    gate.wait_until_held().await;
+    // Commit the retirement's tombstone and edge revocations atomically.
+    fixture.db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "UPDATE bcs_bots SET is_deleted = 1 WHERE actor_kind = 'bot'",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "UPDATE edge_grants SET status = 'revoked' \
+             WHERE grant_kind IN ('owner', 'manager')",
+        )),
+    ]).await.expect("committed retirement");
+    gate.release.store(true, Ordering::SeqCst);
+    let result = sync.await.expect("sync task").expect("retired bot is a no-op");
+    assert_eq!(result, bcs_service_api::types::bot_authority::OwnershipChange::unchanged(bot));
+    assert!(fixture.audit_rows(ENV).await.is_empty());
 }

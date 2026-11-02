@@ -43,7 +43,7 @@ const MAX_RETRIES: u32 = 3;
 /// Frozen audit state JSON for the swap row (key order pinned by
 /// the contract harness): the owner actor + the version it held.
 fn ownership_audit_state(owner_actor: &str, version: u64) -> String {
-    format!("{{\"owner\":\"{owner_actor}\",\"version\":{version}}}")
+    serde_json::json!({"owner": owner_actor, "version": version}).to_string()
 }
 
 impl DbBotAuthorityStore {
@@ -90,8 +90,9 @@ impl DbBotAuthorityStore {
         // data; the underlying DbError only).
         let mut conflicts: Vec<String> = Vec::new();
         for attempt in 0..=MAX_RETRIES {
-            // Preparation reads (re-verified by in-tx guards).
-            let owner = self.pre_read_owner(bot_id).await?;
+            // Propagate read failures immediately, but classify owner integrity
+            // only after checking liveness: retirement also revokes the owner.
+            let owners = self.approved_owner_rows(bot_id).await?;
             // A legit retirement/tombstone can commit between the
             // lenient classification and this attempt: the SAME
             // live-row lens now reads `None` — re-enter the
@@ -108,18 +109,28 @@ impl DbBotAuthorityStore {
                 );
                 return Ok(OwnershipChange::unchanged(bot_id));
             };
+            if version == 0 {
+                return Err(super::not_initialized_error(bot_id));
+            }
+            let owner = match owners.as_slice() {
+                [owner] => owner.clone(),
+                [] => return Err(super::owner_integrity_error(format!(
+                    "bot {bot_id} has no approved owner edge"
+                ))),
+                _ => return Err(super::owner_integrity_error(format!(
+                    "bot {bot_id} has {} approved owner edges", owners.len()
+                ))),
+            };
+            // Validate the response identity before any mutation can commit.
+            let old_user = human_user_id_of_actor(&owner).ok_or_else(|| {
+                super::owner_integrity_error(format!(
+                    "owner edge subject '{owner}' is not a Human actor id"
+                ))
+            })?;
             // 幂等判定先于一切目标校验（设计 §5.1 步骤 3）：
             // 重放当前 owner 永不写状态，也不依赖目标的存活性。
             if target == owner {
-                // Corrupt non-`human_` owner edge: the pinned
-                // integrity error (owner shape, same message lens
-                // as the read paths), never a write-command panic.
-                let owner_user = human_user_id_of_actor(&owner).ok_or_else(|| {
-                    super::owner_integrity_error(format!(
-                        "owner edge subject '{owner}' is not a Human actor id"
-                    ))
-                })?;
-                return Ok(OwnershipChange::unchanged_with_owner(bot_id, &owner_user));
+                return Ok(OwnershipChange::unchanged_with_owner(bot_id, &old_user));
             }
             // 目标两阶段判定（设计 §5.1 步骤 4；只在真实切换
             // 可能发生时执行）：
@@ -184,15 +195,6 @@ impl DbBotAuthorityStore {
                 .await
             {
                 Ok(_) => {
-                    // Corrupt non-`human_` owner shape: the swap
-                    // already committed, so surface the pinned
-                    // integrity code — a post-commit panic would be
-                    // an undefined-outcome hole.
-                    let Some(old_user) = human_user_id_of_actor(&owner) else {
-                        return Err(super::owner_integrity_error(format!(
-                            "owner edge subject '{owner}' is not a Human actor id"
-                        )));
-                    };
                     return Ok(OwnershipChange {
                         bot_id: bot_id.to_string(),
                         owner_user_id: Some(target_user),
@@ -339,7 +341,9 @@ impl DbBotAuthorityStore {
                 0,
             );
         }
-        if target_mgr_approved == 1 {
+        // Zero is a snapshot too: a manager grant can commit after pre-read
+        // without changing the owner/version. Retry if either count drifted.
+        for (actor, expected) in [(target, target_mgr_approved), (owner, old_mgr_approved)] {
             builder.push_count_guard(
                 format!(
                     "SELECT COUNT(*) AS c FROM edge_grants \
@@ -351,26 +355,9 @@ impl DbBotAuthorityStore {
                 vec![
                     DbTransactionParam::value(self.env_param()),
                     builder.bot_ref(),
-                    DbTransactionParam::value(DbValue::from(target)),
+                    DbTransactionParam::value(DbValue::from(actor)),
                 ],
-                1,
-            );
-        }
-        if old_mgr_approved == 1 {
-            builder.push_count_guard(
-                format!(
-                    "SELECT COUNT(*) AS c FROM edge_grants \
-                     WHERE env = ? AND {} AND grant_kind = 'manager' \
-                       AND grant_ref_id = 0 AND rules IS NULL \
-                       AND status = 'approved' AND {}{lock}",
-                    self.to_id_eq(), self.from_id_eq(),
-                ),
-                vec![
-                    DbTransactionParam::value(self.env_param()),
-                    builder.bot_ref(),
-                    DbTransactionParam::value(DbValue::from(owner)),
-                ],
-                1,
+                expected,
             );
         }
         // Pending identity re-guard (mirror run_close_tx's

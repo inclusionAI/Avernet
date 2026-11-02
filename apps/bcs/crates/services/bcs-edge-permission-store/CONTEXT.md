@@ -60,6 +60,15 @@ SQLite query/row counts do not establish MySQL EXPLAIN or lock/contention result
 
 ## Runtime ownership
 
+Ownership sync guards both the target's and previous owner's approved manager
+counts, including zero, under the Bot row lock. This adds at most two bounded
+count queries per transaction; owner and Bot liveness pre-read query counts
+stay unchanged. The command still uses at most four transaction attempts and
+the existing ten-second transaction deadline. A manager grant racing pre-read
+forces a fresh attempt; retirement is classified before owner-integrity errors.
+Owner identity validation finishes before any write, and ownership audit states
+use JSON serialization while preserving the existing field order.
+
 Authority writes are the only permission-scope writers here; audit rows
 append with a monotonic per-mutation sequence. Reads never audit.
 Store-level error surfaces re-desensitize (stable codes), exposing no

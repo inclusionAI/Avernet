@@ -44,7 +44,7 @@ const REASON_OWNERSHIP_SYNC: &str = "ownership_sync";
 /// Frozen audit state JSON — byte-identical to the SQL spelling
 /// (the harness pins the bytes across stores).
 fn ownership_audit_state(owner_actor: &str, version: u64) -> String {
-    format!("{{\"owner\":\"{owner_actor}\",\"version\":{version}}}")
+    serde_json::json!({"owner": owner_actor, "version": version}).to_string()
 }
 
 /// Memory ownership sync: one write-guard span carries the
@@ -93,6 +93,17 @@ pub(super) async fn ownership_sync_impl(
     // seeds via S08) discards the clone, so nothing
     // half-written can leak.
     let mut state_guard = repo.authority.write().await;
+    // Retirement takes the same guard and may have completed after the first
+    // liveness read. Its revoked owner is a missing Bot, not corrupt ownership.
+    if memory_bot_ctx_opt(repo, &command.bot_id).await?.is_none() {
+        warn!(
+            env = %ctx.env,
+            bot_id = %ctx.bot_id,
+            mutation_id = %mutation_id,
+            "ownership sync target bot was retired; returning unchanged"
+        );
+        return Ok(OwnershipChange::unchanged(&ctx.bot_id));
+    }
     // The live-Human registry snapshot is read INSIDE the span
     // (lock order authority → bots → deleted IDs, the same
     // order the manager/transfer commands document): a
@@ -102,21 +113,15 @@ pub(super) async fn ownership_sync_impl(
     let mut staged = state_guard.clone();
     let version = memory_require_initialized(&staged, &ctx)?;
     let owner = memory_state_owner(&staged, &ctx);
+    let old_user = human_user_id_of_actor(&owner).ok_or_else(|| {
+        owner_integrity_error_message(format!(
+            "owner edge subject '{owner}' is not a Human actor id"
+        ))
+    })?;
     // 幂等判定先于一切目标校验（设计 §5.1 步骤 3）：重放当前
     // owner 永不写状态，也不依赖目标的存活性。
     if target == owner {
-        // Deliberate deviation from the plan snippet (Task-4
-        // SQL-review carryover): never `.expect` the owner
-        // actor shape in a write command — a corrupt
-        // non-`human_` owner edge surfaces the pinned
-        // integrity error with the SAME message lens as the
-        // SQL store's idempotent leg (byte-identical detail).
-        let Some(owner_user) = human_user_id_of_actor(&owner) else {
-            return Err(owner_integrity_error_message(format!(
-                "owner edge subject '{owner}' is not a Human actor id"
-            )));
-        };
-        return Ok(OwnershipChange::unchanged_with_owner(&ctx.bot_id, &owner_user));
+        return Ok(OwnershipChange::unchanged_with_owner(&ctx.bot_id, &old_user));
     }
     // 目标两阶段判定（设计 §5.1 步骤 4；只在真实切换可能发生
     // 时执行）：actor 形态须剥离回非空无空白的 user id，且其
@@ -255,17 +260,6 @@ pub(super) async fn ownership_sync_impl(
     // lose this commit.
     *state_guard = staged;
 
-    // Deliberate deviation from the plan snippet (Task-4
-    // SQL-review carryover, mirroring the SQL store's
-    // post-commit site): the swap has ALREADY committed, so a
-    // corrupt non-`human_` owner shape surfaces the pinned
-    // integrity error here — never a write-command panic (a
-    // post-commit panic would be an undefined-outcome hole).
-    let Some(old_user) = human_user_id_of_actor(&owner) else {
-        return Err(owner_integrity_error_message(format!(
-            "owner edge subject '{owner}' is not a Human actor id"
-        )));
-    };
     Ok(OwnershipChange {
         bot_id: ctx.bot_id.clone(),
         owner_user_id: Some(target_user),
@@ -444,5 +438,85 @@ mod tests {
             err.to_string().contains("bot_owner_integrity"),
             "pinned integrity code, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn corrupt_old_owner_is_rejected_without_writes() {
+        let repo = MemoryBotRepo::new();
+        let env = resolve_env();
+        let bot = "bot_sync_corrupt_owner_mem";
+        seed_bot(&repo, bot, 1).await;
+        seed_live_human(&repo, &env, "next").await;
+        repo.authority_state().write().await.edges.insert(
+            (env.clone(), bot.to_string(), "bot_not_a_human".to_string(),
+             MemoryAuthorityEdgeKind::Owner),
+            (MemoryAuthorityEdgeStatus::Approved, 0),
+        );
+        let edges_before = repo.authority_state().read().await.edges.clone();
+        let err = repo.sync_ownership(command(bot, "next", "sync-corrupt-owner-mem"))
+            .await.expect_err("corrupt owner rejected");
+        assert!(err.to_string().contains("bot_owner_integrity"), "{err}");
+        let state = repo.authority_state().read().await;
+        assert_eq!(state.ownership_versions.get(&(env, bot.to_string())), Some(&1));
+        assert_eq!(state.edges, edges_before);
+        assert!(state.audit.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ownership_audits_preserve_escaped_user_ids() {
+        let repo = MemoryBotRepo::new();
+        let env = resolve_env();
+        let bot = "bot_sync_escaped_audit_mem";
+        let old = "old\"\\user";
+        let next = "next\"\\user";
+        seed_bot(&repo, bot, 1).await;
+        seed_live_human(&repo, &env, old).await;
+        seed_live_human(&repo, &env, next).await;
+        grant_edge(&repo, &env, bot, old, MemoryAuthorityEdgeKind::Owner).await;
+        repo.sync_ownership(command(bot, next, "sync-escaped-audit-mem"))
+            .await.expect("ownership sync");
+        let state = repo.authority_state().read().await;
+        assert_eq!(state.audit.len(), 1);
+        let before: serde_json::Value = serde_json::from_str(
+            state.audit[0].before_state.as_deref().expect("before state"),
+        ).expect("valid before JSON");
+        let after: serde_json::Value = serde_json::from_str(
+            &state.audit[0].after_state,
+        ).expect("valid after JSON");
+        assert_eq!(before, serde_json::json!({"owner": human_actor_id(old), "version": 1}));
+        assert_eq!(after, serde_json::json!({"owner": human_actor_id(next), "version": 2}));
+    }
+
+    #[tokio::test]
+    async fn retirement_while_waiting_for_the_write_guard_returns_unchanged() {
+        let repo = MemoryBotRepo::new();
+        let env = resolve_env();
+        let bot = "bot_sync_retirement_race_mem";
+        seed_bot(&repo, bot, 1).await;
+        for user in ["own", "next"] {
+            seed_live_human(&repo, &env, user).await;
+        }
+        grant_edge(&repo, &env, bot, "own", MemoryAuthorityEdgeKind::Owner).await;
+        let retirement_mutation = AuthorityMutation {
+            mutation_id: "retirement-race-mem".to_string(),
+            actor: AuthorityActor::Human { user_id: "own".to_string() },
+        };
+        let guard = repo.authority_state().write().await;
+        let mut retire = tokio_test::task::spawn(
+            repo.retire_core_state(bot, &retirement_mutation),
+        );
+        tokio_test::assert_pending!(retire.poll());
+        let mut sync = tokio_test::task::spawn(
+            repo.sync_ownership(command(bot, "next", "sync-retirement-race-mem")),
+        );
+        // Both commands have read the live Bot and now wait for authority.
+        tokio_test::assert_pending!(sync.poll());
+        drop(guard);
+        assert!(tokio_test::assert_ready!(retire.poll()).expect("retirement"));
+        let result = tokio_test::assert_ready!(sync.poll()).expect("retired bot is a no-op");
+        assert_eq!(result, OwnershipChange::unchanged(bot));
+        let state = repo.authority_state().read().await;
+        assert_eq!(state.audit.len(), 1, "only the retirement is audited");
+        assert_eq!(state.audit[0].mutation_id, retirement_mutation.mutation_id);
     }
 }
