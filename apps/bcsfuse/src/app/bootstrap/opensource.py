@@ -282,6 +282,30 @@ class IndexLeaseSettings:
             raise ValueError("lease_seconds must exceed stale_after_seconds")
 
 
+def resolve_runtime_qdrant_connections() -> tuple[
+    "QdrantConnection", "QdrantConnection"
+]:
+    """Fail closed if runtime composition would use per-pod local Qdrant.
+
+    Local mode remains valid for explicit dev/dev_smoke deployment, but runtime
+    is the serving composition. A stale deployment variable such as
+    ``QDRANT_MODE=local`` must stop assembly rather than silently recreating
+    the local-file lock that server mode removes.
+    """
+
+    mode = str(os.getenv("QDRANT_MODE", "server")).strip().lower()
+    if mode != "server":
+        raise ValueError(
+            "runtime provider mode requires QDRANT_MODE=server; "
+            "local Qdrant is reserved for dev/dev_smoke"
+        )
+    dense = QdrantConnection.from_mapping(os.environ, default_mode="server")
+    keyword = QdrantConnection.keyword_from_mapping(os.environ, fallback=dense)
+    if dense.mode != "server" or keyword.mode != "server":
+        raise ValueError("runtime dense and keyword Qdrant modes must be server")
+    return dense, keyword
+
+
 def resolve_index_lease_settings(config) -> IndexLeaseSettings:
     # A short lease bounds worst-case owner takeover. Longer leases remain an
     # explicit deployment choice, but the public default fails over quickly.
@@ -446,14 +470,12 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
     from app.infra.config.data_paths import resolve_data_path
     qdrant_path = os.getenv("QDRANT_LOCAL_PATH") or resolve_data_path("data/qdrant_storage")
-    qdrant_connection = QdrantConnection.from_mapping(
-        os.environ, default_mode="server"
+    qdrant_connection, keyword_qdrant_connection = (
+        resolve_runtime_qdrant_connections()
     )
     vector_store = QdrantMySQLVectorStore(
         connection=qdrant_connection,
-        keyword_connection=QdrantConnection.keyword_from_mapping(
-            os.environ, fallback=qdrant_connection
-        ),
+        keyword_connection=keyword_qdrant_connection,
         collection_name=config.get("vector.qdrant.collection", "bcsfuse_profiles"),
         qdrant_path=qdrant_path,
         dimension=embedding_defaults.dimension,

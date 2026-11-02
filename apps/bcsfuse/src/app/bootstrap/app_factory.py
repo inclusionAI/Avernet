@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
@@ -442,7 +443,11 @@ def create_bcsfuse_app(
                     if shared_cache_reader is not None:
                         await shared_cache_reader.close()
                 finally:
-                    await startup_provider.shutdown()
+                    try:
+                        for shared_cache_writer in shared_cache_writers:
+                            await shared_cache_writer.close()
+                    finally:
+                        await startup_provider.shutdown()
 
     # CRITICAL: Share application context with fusion_dependencies to avoid
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
@@ -512,22 +517,47 @@ def create_bcsfuse_app(
     resilience_cache = AgentSearchResilienceCache.from_context(context)
     execution_budget = AgentSearchExecutionBudget.from_context(context)
     shared_response_cache = context.registry.get("shared_response_cache")
+    shared_cache_reader = None
+    shared_cache_writers: list[Any] = []
+    search_cache_writer = None
+    recommend_cache_writer = None
     if shared_response_cache is not None:
+        from app.adapters.http.shared_response_cache_writer import (
+            BoundedSharedResponseCacheWriter,
+            DEFAULT_L2_WRITE_TIMEOUT_SECONDS,
+            DEFAULT_L2_WRITE_TTL_SECONDS,
+        )
+
         shared_cache_reader = BoundedSharedResponseCacheReader(
             shared_response_cache=shared_response_cache
         )
+        search_cache_writer = BoundedSharedResponseCacheWriter(
+            shared_response_cache=shared_response_cache,
+            operation="search",
+            ttl_seconds=DEFAULT_L2_WRITE_TTL_SECONDS,
+            timeout_seconds=DEFAULT_L2_WRITE_TIMEOUT_SECONDS,
+        )
+        recommend_cache_writer = BoundedSharedResponseCacheWriter(
+            shared_response_cache=shared_response_cache,
+            operation="recommend",
+            ttl_seconds=DEFAULT_L2_WRITE_TTL_SECONDS,
+            timeout_seconds=DEFAULT_L2_WRITE_TIMEOUT_SECONDS,
+        )
+        shared_cache_writers = [search_cache_writer, recommend_cache_writer]
     app.state.agent_search_result_cache = result_cache
     app.state.local_retrieval_snapshot = local_retrieval_snapshot
     app.state.agent_search_resilience_cache = resilience_cache
     app.state.agent_search_execution_budget = execution_budget
     app.state.shared_response_cache = shared_response_cache
     app.state.shared_cache_reader = shared_cache_reader
+    app.state.shared_cache_writers = shared_cache_writers
     app.add_middleware(
         SearchResponseCacheMiddleware,
         result_cache=result_cache,
         require_auth=require_oss_auth,
         shared_response_cache=shared_response_cache,
         shared_cache_reader=shared_cache_reader,
+        shared_cache_writer=search_cache_writer,
     )
     app.add_middleware(
         RecommendationResponseCacheMiddleware,
@@ -535,6 +565,7 @@ def create_bcsfuse_app(
         require_auth=require_oss_auth,
         shared_response_cache=shared_response_cache,
         shared_cache_reader=shared_cache_reader,
+        shared_cache_writer=recommend_cache_writer,
     )
     app.add_middleware(TraceIdMiddleware)
 

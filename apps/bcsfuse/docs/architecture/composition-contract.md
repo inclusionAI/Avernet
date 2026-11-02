@@ -547,7 +547,10 @@ The runtime MySQL L2 applies the same recommendation restriction. It never
 reads or writes group-context requests. A valid non-group L2 hit is promoted
 into L1, the current trace identifier is rewritten for the caller, and the
 response is returned before admission. L2 read, write, and payload-validation
-errors are visible as metrics and replay the original downstream semantics.
+errors are visible as metrics and replay the original downstream semantics. The
+application owns one bounded writer per search and recommendation operation and
+closes both after draining accepted work during application shutdown, so restarts
+do not leak optional L2 workers.
 
 ### Search dependency metrics
 

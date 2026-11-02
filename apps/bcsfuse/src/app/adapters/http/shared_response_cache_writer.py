@@ -13,6 +13,8 @@ from app.infra.public.observability.shared_response_cache_metrics import (
 
 DEFAULT_L2_WRITE_QUEUE_SIZE = 128
 DEFAULT_L2_WRITE_WORKERS = 2
+DEFAULT_L2_WRITE_TTL_SECONDS = 300.0
+DEFAULT_L2_WRITE_TIMEOUT_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -44,15 +46,27 @@ class BoundedSharedResponseCacheWriter:
 
         self._shared_response_cache = shared_response_cache
         self._operation = operation
+        self._closed = False
         self._ttl_seconds = ttl_seconds
         self._timeout_seconds = timeout_seconds
         self._queue: asyncio.Queue[_WriteJob] = asyncio.Queue(maxsize=queue_size)
         self._worker_count = worker_count
         self._workers: set[asyncio.Task[None]] = set()
 
+    @property
+    def operation(self) -> str:
+        return self._operation
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
+
     def submit(self, *, key: str, payload: bytes, index_version: int) -> bool:
         """Enqueue one write, never wait, and explicitly report a full queue."""
 
+        if self._closed:
+            record_shared_response_cache_error(self._operation, stage="enqueue")
+            return False
         self._ensure_workers()
         try:
             self._queue.put_nowait(
@@ -67,7 +81,12 @@ class BoundedSharedResponseCacheWriter:
         await self._queue.join()
 
     async def close(self) -> None:
+        """Drain accepted writes, stop workers, and make close idempotent."""
+
+        if self._closed:
+            return
         await self.wait_idle()
+        self._closed = True
         for worker in tuple(self._workers):
             worker.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
@@ -114,4 +133,6 @@ __all__ = [
     "BoundedSharedResponseCacheWriter",
     "DEFAULT_L2_WRITE_QUEUE_SIZE",
     "DEFAULT_L2_WRITE_WORKERS",
+    "DEFAULT_L2_WRITE_TTL_SECONDS",
+    "DEFAULT_L2_WRITE_TIMEOUT_SECONDS",
 ]

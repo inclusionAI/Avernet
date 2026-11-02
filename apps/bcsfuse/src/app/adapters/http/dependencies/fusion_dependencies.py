@@ -720,19 +720,12 @@ def _get_embedding_generator():
 
 def _get_vector_match_service():
     """
-    获取 Vector Match Service 实例 - Open-Core (Local Only)
+    Compose Vector Match Service only from the application context registry.
 
-    需要 embedding generator 和向量索引数据。
-    如果向量存储为空，返回 None。
-
-    Open-core版本统一使用 QdrantLocalVectorStore (Qdrant + 本地文件持久化)
-
-    IMPORTANT: This function now uses the shared vector_store from the application
-    context registry to avoid Qdrant embedded client lock errors. It NO LONGER creates
-    its own QdrantLocalVectorStore instance.
-
-    Returns:
-        WorkerVectorMatchService 或 None
+    The transport adapter must never invent a private Qdrant instance. Runtime
+    exchanges the composed Qdrant Server store, while local modes exchange the
+    composed local store. A missing composed vector store is a startup error,
+    not an implicit fallback that can create a second file lock.
     """
     global _vector_match_service, _retrieval_branch_runner
     if _vector_match_service is None:
@@ -747,47 +740,23 @@ def _get_vector_match_service():
             # CRITICAL FIX: Use shared vector_store from provider registry to avoid
             # Qdrant embedded client concurrent access lock error
             # See: Phase F of OPENCORE-P1-LOCAL-MACOS-DEEP-BUSINESS-E2E-WITH-REAL-SERVICES
-            vector_store = None
-
-            # Try to get from global app context first (preferred)
-            if _app_context is not None:
-                vector_store = _app_context.registry.get('vector_store')
-                if vector_store:
-                    logger.info(
-                        "[LOCAL_QDRANT_SINGLETON] component=VectorMatchService "
-                        f"vector_store_id={id(vector_store)} "
-                        f"storage_path={getattr(vector_store, 'path', 'N/A')} "
-                        f"collection={getattr(vector_store, 'collection_name', 'N/A')} "
-                        f"source=registry"
-                    )
-                else:
-                    logger.warning("[VectorMatch] ⚠️ App context exists but vector_store not in registry")
-
-            # Fallback: create standalone instance (NOT recommended for embedded Qdrant)
+            if _app_context is None:
+                raise RuntimeError(
+                    "VECTOR_STORE_REQUIRED: application context was not composed; "
+                    "refusing to create a standalone local Qdrant store"
+                )
+            vector_store = _app_context.registry.get("vector_store")
             if vector_store is None:
-                logger.error("=" * 80)
-                logger.error("❌ [VectorMatch] CRITICAL: No shared vector_store found in app context!")
-                logger.error("❌ [VectorMatch] Creating standalone QdrantLocalVectorStore instance.")
-                logger.error("❌ [VectorMatch] This WILL cause Qdrant embedded client lock errors if:")
-                logger.error("❌ [VectorMatch]   - Search endpoint uses registry vector_store")
-                logger.error("❌ [VectorMatch]   - Activation indexing uses this standalone instance")
-                logger.error("❌ [VectorMatch] RECOMMENDATION: Call set_app_context() during app startup")
-                logger.error("=" * 80)
-
-                from app.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
-                # Priority: QDRANT_LOCAL_PATH env var > resolve_data_path fallback
-                storage_path = os.getenv("QDRANT_LOCAL_PATH") or resolve_data_path("data/qdrant_storage")
-                vector_store = QdrantLocalVectorStore(
-                    collection_name="bcsfuse_profiles",
-                    path=storage_path,
-                    dimension=dimension,
+                raise RuntimeError(
+                    "VECTOR_STORE_REQUIRED: composed context has no vector_store provider"
                 )
-                logger.warning(
-                    "[LOCAL_QDRANT_SINGLETON] component=VectorMatchService "
-                    f"vector_store_id={id(vector_store)} "
-                    f"storage_path={storage_path} "
-                    f"source=created WARNING=STANDALONE_FALLBACK dimension={dimension}"
-                )
+            logger.info(
+                "[VECTOR_STORE_COMPOSITION] component=VectorMatchService "
+                f"dimension={dimension} "
+                f"vector_store_type={type(vector_store).__name__} "
+                f"vector_store_id={id(vector_store)} "
+                "source=registry"
+            )
 
             metadata_store = FileMetadataStoreAdapter()
 
@@ -833,13 +802,15 @@ def _get_vector_match_service():
             except Exception as e:
                 logger.warning("[VectorMatch] ⚠️ Failed to inject profile content store: %s", e)
 
-            logger.info(f"[Open-Core] Vector match service created (dimension={dimension}, mode=local)")
+            logger.info("[Open-Core] Vector match service created from composed vector store (dimension=%s)", dimension)
 
         except Exception as e:
-            logger.error(f"❌ [VectorMatch] Failed to create vector match service: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return None
+            logger.error(
+                "[VectorMatch] Failed to create service from composed providers: %s",
+                e,
+                exc_info=True,
+            )
+            raise
     return _vector_match_service
 
 

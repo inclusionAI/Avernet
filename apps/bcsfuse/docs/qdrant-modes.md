@@ -34,7 +34,7 @@ these volumes contain records you need to keep.
 
 | Setting | Default / meaning |
 | --- | --- |
-| `QDRANT_MODE` | `local` for direct dev; `server` for runtime and Docker |
+| `QDRANT_MODE` | `local` for direct dev; `server` is required by runtime and Docker. Runtime assembly fails closed if it is explicitly set to anything other than `server` |
 | `QDRANT_URL` | Required in Server mode; HTTP(S) URL, no embedded credentials |
 | `QDRANT_PREFER_GRPC` | `true`; use `false` to compare REST transport |
 | `QDRANT_GRPC_PORT` | `6334` |

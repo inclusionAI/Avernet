@@ -125,6 +125,7 @@ class SearchResponseCacheMiddleware:
         shared_response_cache: Any | None = None,
         shared_cache_reader: BoundedSharedResponseCacheReader | None = None,
         shared_cache_read_concurrency: int = DEFAULT_L2_READ_CONCURRENCY,
+        shared_cache_writer: BoundedSharedResponseCacheWriter | None = None,
         shared_cache_ttl_seconds: float = DEFAULT_L2_TTL_SECONDS,
         shared_cache_timeout_seconds: float = DEFAULT_L2_TIMEOUT_SECONDS,
         shared_cache_write_queue_size: int = DEFAULT_L2_WRITE_QUEUE_SIZE,
@@ -144,10 +145,9 @@ class SearchResponseCacheMiddleware:
             )
         self._shared_cache_ttl_seconds = shared_cache_ttl_seconds
         self._shared_cache_timeout_seconds = shared_cache_timeout_seconds
-        self._l2_writer = (
-            None
-            if shared_response_cache is None
-            else BoundedSharedResponseCacheWriter(
+        self._l2_writer = None
+        if shared_response_cache is not None:
+            self._l2_writer = shared_cache_writer or BoundedSharedResponseCacheWriter(
                 shared_response_cache=shared_response_cache,
                 operation="search",
                 ttl_seconds=shared_cache_ttl_seconds,
@@ -155,7 +155,6 @@ class SearchResponseCacheMiddleware:
                 queue_size=shared_cache_write_queue_size,
                 worker_count=shared_cache_write_workers,
             )
-        )
         self._response_burst = ResponseBurstSingleflight()
 
     async def _coalesce(
