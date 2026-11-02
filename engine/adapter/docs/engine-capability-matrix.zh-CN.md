@@ -20,7 +20,7 @@
 
 `file.write` 目前没有独立的 `FileService` 方法或 API 路由；现有写入操作由
 `file.upload` 承担，因此所有引擎的 `file.write` 都按 ❌ 记录。协议定义见
-`<src>/core/file/protocol.py:31-91`，路由见 `<src>/api/file/router.py:42-210`。
+`<src>/core/file/protocol.py:31-91`，路由见 `<src>/api/file/router.py:42-221`。
 
 ## 引擎范围
 
@@ -38,7 +38,7 @@ DeepSeek Harness SDK Minimal 四列。** 这些引擎只在 corp Profile 下从
 本次无法对它们做代码审计，因此不沿用上一版结果。如需更新这四列，需要在 OCB 内部仓库
 中按同一口径复核。
 
-共享 Capability 枚举位于 `<src>/core/engine/capability.py:16-161`。
+共享 Capability 枚举位于 `<src>/core/engine/capability.py:16-158`。
 
 ## 能力矩阵
 
@@ -241,11 +241,11 @@ Adapter 的 `GET /health`（`<src>/api/app.py:370`）是进程存活探针，不
 | Claude Code | session.create | Relay 没有显式 `sessions.create`；先通过 `sessions.patch` 预留 session key，首次 `chat.send` 时建立会话。声明见 `<src>/engines/claude_code/engine.py:118-121`，实现见 `<src>/core/adapters/claude_code/session.py:327-370`。 |
 | Claude Code | mcp.tools.call | 只有 SDK bridge 可直接调用；CLI bridge 需要通过对话让模型调用工具。声明见 `<src>/engines/claude_code/engine.py:122-124`。 |
 | Claude Code | mcp.tools.list | 必须指定 `server_code`；未指定时直接返回空列表。另外 Adapter 当前没有对外的 tools.list HTTP 路由，只能通过服务接口调用。见 `<src>/core/adapters/claude_code/mcp.py:249-260`。 |
-| Claude Code | skills.list / install / uninstall / update | `SkillsService` 方法有真实 relay 调用，但 Adapter 的 `/api/skills` 路由只暴露批量 symlink、center ensure、本地包应用和布局类接口，没有逐个技能管理的 HTTP 入口。实现见 `<src>/core/adapters/claude_code/skills.py:181-231`，路由见 `<src>/api/skills/router.py:156-600`。 |
+| Claude Code | skills.list / install / uninstall / update | `SkillsService` 方法有真实 relay 调用，但 Adapter 的 `/api/skills` 路由只暴露批量 symlink、center ensure、本地包应用和布局类接口，没有逐个技能管理的 HTTP 入口。实现见 `<src>/core/adapters/claude_code/skills.py:181-231`，路由见 `<src>/api/skills/router.py:156-616`。 |
 | OpenClaw、Claude Code | model.switch | 没有独立的切换 RPC；由 `chat.send` 的 `model` 参数或 `session.update` 的模型字段生效，本质是逐请求/逐会话设置。见 `<src>/core/models/protocol.py:15-18`。 |
 | OpenClaw | models.default.get | 只读取引擎 `config.get` 中配置的默认模型，不解析会话/请求级覆盖；未配置时返回 `None`。见 `<src>/core/adapters/openclaw/models.py:183-187`、`<src>/core/models/default_model.py:1-8`。 |
 | OpenClaw、Claude Code | skills.local_package.apply.v1 | 由引擎无关的 `LocalSkillPackageApplication` 在本地文件系统上完成，不经过引擎运行时。见 `<src>/core/adapters/openclaw/skills.py:112-117`、`<src>/core/adapters/claude_code/skills.py:172-177`。 |
-| OpenClaw、Claude Code | cli.acli.* | 由引擎无关的 `AcliRunner` / `AcliOperations` 执行，安装目录为全局常量 `ACLI_INSTALL_DIR=/home/admin/.agentclaw/bin`，不区分引擎；同一容器同时只允许一个操作（否则 409 `engine_busy`）。见 `<src>/api/cli/acli.py:1-175`、`<src>/config.py:47`。 |
+| OpenClaw、Claude Code | cli.acli.* | 由引擎无关的 `AcliRunner` / `AcliOperations` 执行，安装目录为全局常量 `ACLI_INSTALL_DIR=/home/admin/.agentclaw/bin`，不区分引擎；同一容器同时只允许一个操作（否则 409 `engine_busy`）。见 `<src>/api/cli/acli.py:1-178`、`<src>/config.py:47`。 |
 | OpenClaw、Claude Code | cli.* | `LocalCliToolsService` 只做本地文件放置，目录由镜像决定：OpenClaw 为 `/home/admin/.openclaw/cli`，Claude Code 为 `/home/admin/.aicoding/cli`。见 `<src>/engines/openclaw/engine.py:63`、`<src>/engines/claude_code/engine.py:135`。 |
 | OpenClaw、Claude Code | bash.exec | 两个引擎都复用核心默认的 `BaseBashService`，在 Adapter 进程所在环境执行，而不是引擎原生能力。 |
 
