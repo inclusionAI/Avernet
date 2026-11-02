@@ -152,9 +152,11 @@ runs.
 ## Decision 4 — retention is a policy knob, split by layer
 
 - **L2 (thread of record)** survives for the task's lifetime: what was asked,
-  what was delivered, what was approved. It guarantees *resumability*. It is
-  held by **BCN**, in the shared DB — the personal agent may keep its own
-  copy of the exchange, but resumability does not depend on it.
+  what was delivered, what was approved — the Decision-2 delegation thread,
+  **not** the experts' execution traces (those are L3). It guarantees
+  *resumability*. It is held by **BCN**, in the shared DB — the personal
+  agent may keep its own copy of the exchange, but resumability does not
+  depend on it.
 - **L3 (working state)** is compactable/expirable on its own clock, including
   signalling providers to drop session context. Retaining it buys *revision
   quality*: with L3 live, "change the hotel" resumes the expert's held state;
