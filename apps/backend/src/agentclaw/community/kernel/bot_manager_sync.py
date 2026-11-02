@@ -99,6 +99,13 @@ class ManagerSetChange:
     request_id: str
 
 
+class SyncWorkKind(StrEnum):
+    """Explicit work type, independent of the diagnostic submission reason."""
+
+    MANAGERS = "managers"
+    OWNERSHIP = "ownership"
+
+
 class SyncReason(StrEnum):
     """Why a sync is being requested — observability, not control flow."""
 
@@ -125,6 +132,7 @@ class SyncOutcome(StrEnum):
     ACKNOWLEDGED_EMPTY = "acknowledged_empty"
     DRIFT = "drift"
     FAILED = "failed"
+    BOT_MISSING_NOOP = "bot_missing_noop"
 
 
 class DeliveryFailure(StrEnum):

@@ -115,6 +115,8 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
         "access",
         "bot_chat",
         "bot_collaborator",
+        "manager_sync",
+        "ownership_sync",
         "cron",
         "expert_chat",
         "files",

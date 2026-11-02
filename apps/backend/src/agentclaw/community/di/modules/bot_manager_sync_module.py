@@ -22,8 +22,10 @@ from agentclaw.community.core.bot_collaborator.manager_sync.repair import (
     ManagerSyncRepairService, DisabledManagerSyncRepair,
 )
 from agentclaw.community.core.bot_collaborator.manager_sync.service import BotManagerSyncService
+from agentclaw.community.core.bot_management.ownership_sync.service import BotOwnershipSyncService
 from agentclaw.community.core.repository.implementations.bot.manager_sync import SqlManagerSyncReadRepository
 from agentclaw.community.core.repository.protocols.bot.manager_sync import ManagerSyncReadRepository
+from agentclaw.community.core.repository.protocols.bot.ownership_sync import OwnershipSyncReadRepository
 from agentclaw.community.di.bot_manager_sync_config import (
     CONFIG_BLOCK_NAME, ManagerSyncConfig, parse_manager_sync_config,
 )
@@ -31,6 +33,7 @@ from agentclaw.community.di.config import SecretNamesConfig
 from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bcs_managers import BcsManagersPlugin
+from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.gateway_principal_config import (
     bcs_service_principal_signer_config, resolve_signing_key,
@@ -45,14 +48,18 @@ class ManagerSyncStack:
 
     bcs: BcsManagersPlugin | None
     reason: str = ""
+    # None is the legitimate managers-only / unavailable capability posture.
+    ownership: BcsOwnershipPlugin | None = None
 
     @property
     def available(self) -> bool:
         return self.bcs is not None
 
     @classmethod
-    def available_with(cls, bcs: BcsManagersPlugin) -> ManagerSyncStack:
-        return cls(bcs=bcs)
+    def available_with(
+        cls, bcs: BcsManagersPlugin, *, ownership: BcsOwnershipPlugin | None = None,
+    ) -> ManagerSyncStack:
+        return cls(bcs=bcs, ownership=ownership)
 
     @classmethod
     def unavailable(cls, reason: str) -> ManagerSyncStack:
@@ -124,9 +131,19 @@ class BotManagerSyncModule(Module):
             return ManagerSyncStack.unavailable("principal-signing-key-required")
         from agentclaw.community.plugins.community.bcs_managers import HttpBcsManagersPlugin
 
-        return ManagerSyncStack.available_with(HttpBcsManagersPlugin(
-            base_url=config.bcs_base_url, mint_principal=mint_principal
-        ))
+        ownership = None
+        if config.ownership_enabled:
+            from agentclaw.community.plugins.community.bcs_ownership import HttpBcsOwnershipPlugin
+
+            ownership = HttpBcsOwnershipPlugin(
+                base_url=config.bcs_base_url, mint_principal=mint_principal
+            )
+        return ManagerSyncStack.available_with(
+            HttpBcsManagersPlugin(
+                base_url=config.bcs_base_url, mint_principal=mint_principal
+            ),
+            ownership=ownership,
+        )
 
     @singleton
     @provider
@@ -139,8 +156,15 @@ class BotManagerSyncModule(Module):
             logger.error("[MANAGER-SYNC] syncer unavailable: reason=%s", stack.reason)
             return DisabledBotManagerSync()
         reader = self.__injector__.get(ManagerSyncReadRepository)
+        ownership_service = (
+            BotOwnershipSyncService(
+                self.__injector__.get(OwnershipSyncReadRepository), stack.ownership
+            )
+            if stack.ownership is not None else None
+        )
         return BotManagerSyncDispatcher(
-            BotManagerSyncService(reader=reader, bcs=stack.bcs), reader, env=config.env
+            BotManagerSyncService(reader=reader, bcs=stack.bcs), reader,
+            env=config.env, ownership_service=ownership_service,
         )
 
     @singleton
@@ -151,7 +175,9 @@ class BotManagerSyncModule(Module):
             return DisabledBotManagerSyncLifecycle()
         stack = self.__injector__.get(ManagerSyncStack)
         assert stack.bcs is not None  # same singleton stack that built the dispatcher
-        return BotManagerSyncLifecycle(dispatcher=entry, bcs=stack.bcs)
+        return BotManagerSyncLifecycle(
+            dispatcher=entry, bcs=stack.bcs, ownership=stack.ownership,
+        )
 
     @singleton
     @provider

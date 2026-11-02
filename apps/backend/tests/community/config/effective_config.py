@@ -20,7 +20,9 @@ Two layers are captured per profile:
   ``tests/community/local/test_load_yaml_configs.py``.
 - ``typed`` — every neutral ``ConfigModule`` dataclass, resolved against the
   merged config. This additionally catches ``di/config.py`` **code-default**
-  changes (folded in by the providers), which the raw layer cannot see.
+  changes (folded in by the providers), which the raw layer cannot see. The shared
+  bot-manager/ownership sync block additionally uses its strict parser to pin
+  defaults, including ownership disabled when omitted.
 
 The merge uses ``_deep_merge`` (the ``YamlConfigProvider`` merge) consistently
 for every profile. For the corp/sofapy path this is an approximation of sofapy's
@@ -47,6 +49,7 @@ from agentclaw.community.core.config.provider import (
     set_config_provider,
 )
 from agentclaw.community.core.config.yaml_provider import _deep_merge
+from agentclaw.community.di.bot_manager_sync_config import parse_manager_sync_config
 from agentclaw.community.di.modules.config_module import ConfigModule
 
 _BACKEND = Path(__file__).resolve().parents[3]
@@ -195,6 +198,9 @@ def compute_effective_config(
         typed = {
             name: _normalize(getattr(module, name)()) for name in _PROVIDER_METHODS
         }
+        typed["bot_manager_sync"] = _normalize(
+            parse_manager_sync_config(user_config.get("bot_manager_sync"))
+        )
     finally:
         config_provider._provider = saved_provider
         config_provider._cached = saved_cached

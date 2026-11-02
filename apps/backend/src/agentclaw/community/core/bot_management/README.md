@@ -17,6 +17,9 @@ Bot lifecycle, creation policy, repository, engine resolution, render-screen mod
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
+  - BotOwnershipSyncService
+  - OwnershipSyncRepairService
+  - notify_bot_ownership_sync
   - bcn_bot_reference
   - provider_address_kwargs
   - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
@@ -39,6 +42,9 @@ provides:
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
 consumes:
+  - BotOwnershipSyncProtocol
+  - OwnershipSyncReadRepository
+  - BcsOwnershipPlugin
   - "DeviceAccessor"
   - "PassportPlugin"
   - "CallerIdentityRepositoryProtocol"
@@ -60,6 +66,9 @@ consumes:
   - "CapabilityDesiredStateRepositoryProtocol"
   - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.api.bot_ownership_sync
+  - agentclaw.community.kernel.bot_ownership_sync
+  - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.plugin_api.staff_dept
@@ -390,3 +399,13 @@ Bot deletion computes and validates Provider coordinates immediately after Bot
 validation, before withdrawing grants, releasing devices, destroying credentials
 or soft deletion. The post-delete notification consumes only that captured value;
 a corrupt stored reference cannot strand an already-deleted Bot behind an error.
+
+## BCS ownership delivery after handoff
+
+After the complete Owner-handoff business operation commits, independent
+best-effort helpers submit managers and explicit ownership work. Service API v1
+`BotOwnershipSyncProtocol` shares the bounded managers runtime, not the durable
+handoff task/journal. Only current committed facts are sent; delivery failure
+cannot change `SUCCEEDED`. This does not enable handoff initiation or establish
+real credential/device acceptance. See the
+[ownership boundary](ownership_sync/README.md) and its operations link.

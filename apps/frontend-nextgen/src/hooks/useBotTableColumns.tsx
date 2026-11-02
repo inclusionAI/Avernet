@@ -44,6 +44,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     getCollaborationMode,
     getGeneralConfigAvailability,
     onGeneralConfig,
+    getCopyAvailability,
+    onCopy,
     onOpenEngineInfo,
     onUpdateEngineVersion,
   } = options;
@@ -162,6 +164,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
           if (!onAction) return primaryCell;
           const menuKey = botTableEngineVersionKey(bot);
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
+          const copyAvailability = getCopyAvailability?.(bot);
           return (
             <div className="flex items-center justify-end gap-0.5" onClick={(event) => event.stopPropagation()}>
               {primaryCell}
@@ -183,6 +186,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                copyAvailability={copyAvailability}
+                onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
                 onOpenEngineInfo={onOpenEngineInfo}
                 onUpdateEngineVersion={onUpdateEngineVersion}
@@ -220,6 +225,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       toggleProgress,
       getGeneralConfigAvailability,
       onGeneralConfig,
+      getCopyAvailability,
+      onCopy,
       onOpenEngineInfo,
       onUpdateEngineVersion,
       engineVersionStates,
