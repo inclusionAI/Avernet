@@ -36,21 +36,22 @@ async def test_publish_eval_env_handler(resource_services):
     request = Request({"type": "http", "method": "POST", "path": "/"})
     request.state.trace_id = "trace-1"
     quality_tasks = FakeQualityTaskService()
-    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services, quality_tasks)
+    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", service, *resource_services, quality_tasks)
     assert result.code == 202000
     assert result.request_id == "trace-1"
     assert result.data.bot_uuid == "eval-bot"
     assert result.data.baas_bot_status is None
     assert result.data.quality_task_id == 1
-    assert result.data.quality_task_uuid
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1", device_count=1, resource_spec=None,
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
+        device_count=1, resource_spec=None,
     )
     task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
     assert task is not None
+    assert task.uuid == service.eval_publish.await_args.kwargs["biz_id"]
     assert task.ext == {
         "publish_id": 7, "bot_uuid": "eval-bot", "baas_publish_id": 42,
-        "operator": "actor", "biz_id": "task-1",
+        "operator": "actor",
     }
 
 
@@ -69,9 +70,7 @@ def test_openapi_contract():
     assert params["operator"]["in"] == "query"
     assert params["operator"]["required"] is True
     assert params["operator"]["schema"]["minLength"] == 1
-    assert params["biz_id"]["in"] == "query"
-    assert params["biz_id"]["required"] is False
-    assert params["biz_id"]["schema"]["default"] == ""
+    assert "biz_id" not in params
     assert params["device_count"]["in"] == "query"
     assert params["device_count"]["required"] is False
     assert params["device_count"]["schema"]["default"] == 1
@@ -90,13 +89,13 @@ async def test_publish_eval_env_device_count_forwarded(resource_services):
     request = Request({"type": "http", "method": "POST", "path": "/"})
     quality_tasks = FakeQualityTaskService()
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
         quality_tasks,
         device_count=3,
     )
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1",
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
         device_count=3, resource_spec=None,
     )
     assert result.data.quality_task_id == 1
@@ -107,7 +106,7 @@ async def test_not_found_is_enveloped(resource_services):
     service = Mock()
     service.eval_publish = AsyncMock(side_effect=ServicePublicationNotFoundError("hidden"))
     request = Request({"type": "http", "method": "POST", "path": "/"})
-    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "", service, *resource_services)
+    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", service, *resource_services)
     assert result.status_code == 404
 
 
@@ -130,7 +129,7 @@ async def test_foreign_publication_rejected(resource_services, field, value):
     service = Mock(eval_publish=AsyncMock())
     request = Request({"type": "http", "method": "POST", "path": "/"})
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "",
+        "bot-1", 7, request, "actor", "owner",
         service, *resource_services,
     )
     assert result.status_code == 404
@@ -274,7 +273,7 @@ async def test_non_service_bot_cannot_publish_eval_environment(resource_services
     service = Mock(eval_publish=AsyncMock())
     request = Request({"type": "http", "method": "POST", "path": "/"})
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "", service, *resource_services,
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
     )
     assert result.status_code == 409
     service.eval_publish.assert_not_awaited()
@@ -292,13 +291,13 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
     request = Request({"type": "http", "method": "POST", "path": "/"})
     quality_tasks = FakeQualityTaskService()
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
         quality_tasks,
         cpu=4, memory=8, disk=disk,
     )
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1",
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
         device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )
