@@ -360,6 +360,15 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-bot-store/src/memory_registration_create.rs
     bcs-bot-store/src/memory_registration_ownership.rs
     bcs-bot-store/src/memory_retirement.rs
+    # The collaboration-store split introduced memory_* module files; the four
+    # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11
+    # instrumentable lines). memory_events.rs is deliberately NOT listed: its
+    # shared state_machine_transition_events helper is executed via the SQL path
+    # (11 E2E hits), so the warn-and-re-include rule would fire on it.
+    bcs-collaboration-store/src/memory_binding.rs
+    bcs-collaboration-store/src/memory_definition.rs
+    bcs-collaboration-store/src/memory_runs.rs
+    bcs-collaboration-store/src/memory_transition.rs
     bcs-event-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs
