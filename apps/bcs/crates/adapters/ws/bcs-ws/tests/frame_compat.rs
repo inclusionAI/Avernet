@@ -60,6 +60,7 @@ struct RecordingBotRuntime {
 
 #[derive(Default)]
 struct RecordingCollaborationRuntime {
+    disconnects: Mutex<Vec<(String, u64)>>,
     correlation: Mutex<Option<StateMachineDeliveryCorrelation>>,
     aliases: Mutex<Vec<(String, String)>>,
 }
@@ -347,6 +348,11 @@ impl SystemMessageService for RecordingSystemMessageService {
 
 #[async_trait]
 impl CollaborationRuntimeService for RecordingCollaborationRuntime {
+    async fn bot_websocket_disconnected(&self, bot: &str, at: u64) -> Result<(), CollaborationRuntimeError> {
+        self.disconnects.lock().await.push((bot.into(), at));
+        Ok(())
+    }
+
     async fn start_state_machine_run(
         &self,
         _cmd: StartStateMachineRunCommand,
@@ -789,6 +795,7 @@ async fn bot_socket_errors_keep_request_identity_and_cleanup_after_disconnect_fa
     let state = new_state();
     state.bot_runtime.fail_disconnect.store(true, Ordering::Relaxed);
     let registry = state.dispatch_state.bot_connections.clone();
+    let collaboration = state.collaboration_runtime.clone();
     let (_, logs) = bcs_test_support::capture_request_logs("bot-socket-diagnostic", async {
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
         let request_id = bcs_observability::current_request_id();
@@ -825,6 +832,10 @@ async fn bot_socket_errors_keep_request_identity_and_cleanup_after_disconnect_fa
         socket.close(None).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), finished_rx).await.unwrap().unwrap();
         assert!(!registry.is_connected("bot-diagnostic").await, "adapter cleanup must still run when persistence fails");
+        let disconnects = collaboration.disconnects.lock().await;
+        assert_eq!(disconnects.len(), 1);
+        assert_eq!(disconnects[0].0, "bot-diagnostic");
+        assert!(disconnects[0].1 > 0);
         server.abort();
         let _ = server.await;
     }).await;

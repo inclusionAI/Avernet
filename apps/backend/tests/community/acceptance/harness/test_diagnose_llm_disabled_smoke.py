@@ -48,13 +48,13 @@ def _poll_until_terminal(client: httpx.Client, scan_id: int) -> dict:
 
 
 @pytest.mark.acceptance
-def test_diagnose_empty_bot_guarded_without_patches(live_backend, acceptance_fs_root):
+def test_diagnose_empty_bot_guarded_without_patches(live_backend, acceptance_fs_root, request):
     """POST /diagnose on a freshly created bot (no synced config files) is
     guarded: the scan fails fast with the empty-config reason and produces no
     patches — exercising the diagnose write-path orchestration end-to-end."""
     with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=30.0) as client:
         bot = create_live_personal_bot(
-            client, user_id=USER_ID, bot_name_prefix="diag",
+            client, request=request, user_id=USER_ID, bot_name_prefix="diag",
         )
         bot_id = bot["bot_id"]
 

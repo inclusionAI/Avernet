@@ -226,6 +226,7 @@ impl MemoryCollaborationStore {
         if command.action == StateMachineFailureAction::Retry && !retry_is_within_limit(node.attempt, node.max_attempts) { return Ok(false); }
         node.status = StateMachineNodeStatus::Failed; node.error = Some(command.error);
         node.completed_at = Some(command.completed_at_ms); node.timeout_deadline_ms = None;
+        inner.failure_reasons.insert((command.run_id.clone(), command.node_id.clone(), command.attempt), command.reason_category);
         inner.node_failure_actions.insert((command.run_id, command.node_id), command.action);
         let saved = inner.dispatches.get_mut(&operation).expect("checked dispatch");
         saved.status = Status::Superseded; saved.lease_owner = None; saved.lease_until_ms = None;
@@ -238,13 +239,13 @@ impl MySqlCollaborationStore {
         let action = failure_action_name(command.action);
         let operation = key(&command.run_id, &command.node_id, command.attempt);
         let lock = if self.flavor == DbSqlFlavor::Mysql { " FOR UPDATE" } else { "" };
-        let results = self.db.transaction(vec![
+        let result = self.db.transaction(vec![
             // Use the same checkpoint-before-Node lock order as dispatch ACKs.
             // A missing row is a normal lost race; the conditional writes do nothing.
             DbTransactionStep::Query(DbStatement::with_params(format!(
                 "SELECT operation_key FROM bcs_collaboration_delivery_checkpoints WHERE env = ? AND operation_key = ?{lock}"),
                 vec![DbValue::from(self.env.as_str()), DbValue::from(operation.as_str())])),
-            DbTransactionStep::Execute(DbStatement::with_params(format!(
+            DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(format!(
                 "UPDATE bcs_state_machine_node_runs SET status = 'failed', error_message = ?, completed_at_ms = ?, failure_action = ?, timeout_deadline_ms = NULL, runtime_phase = NULL, {} \
                  WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? AND status = 'running' AND artifact_text IS NULL AND record_status = 'active' \
                  AND (? = 'fail_run' OR (attempt >= 0 AND attempt < CASE WHEN max_attempts > 0 THEN max_attempts ELSE 1 END - 1)) \
@@ -252,14 +253,15 @@ impl MySqlCollaborationStore {
                  AND EXISTS (SELECT 1 FROM bcs_collaboration_delivery_checkpoints c WHERE c.env = bcs_state_machine_node_runs.env AND c.operation_key = ? AND c.operation_kind = 'bot_dispatch' AND c.status IN ('pending', 'delivering') AND c.deadline_ms <= ?)", self.flavor.set_modified_now()),
                 vec![DbValue::from(command.error.as_str()), DbValue::from(command.completed_at_ms), DbValue::from(action), DbValue::from(self.env.as_str()),
                     DbValue::from(command.run_id.as_str()), DbValue::from(command.node_id.as_str()), DbValue::from(command.attempt), DbValue::from(action),
-                    DbValue::from(operation.as_str()), DbValue::from(command.completed_at_ms)])),
+                    DbValue::from(operation.as_str()), DbValue::from(command.completed_at_ms)]), expected_affected_rows: 1 },
             DbTransactionStep::Execute(DbStatement::with_params(
                 "UPDATE bcs_collaboration_delivery_checkpoints SET status = 'superseded', lease_owner = NULL, lease_until_ms = NULL \
                  WHERE env = ? AND operation_key = ? AND operation_kind = 'bot_dispatch' AND status IN ('pending', 'delivering') \
                  AND EXISTS (SELECT 1 FROM bcs_state_machine_node_runs n WHERE n.env = bcs_collaboration_delivery_checkpoints.env AND n.run_id = bcs_collaboration_delivery_checkpoints.aggregate_id \
                  AND n.node_id = bcs_collaboration_delivery_checkpoints.node_id AND n.attempt = bcs_collaboration_delivery_checkpoints.aggregate_attempt AND n.status = 'failed' AND n.completed_at_ms = ? AND n.failure_action = ?)",
                 vec![DbValue::from(self.env.as_str()), DbValue::from(operation), DbValue::from(command.completed_at_ms), DbValue::from(action)])),
-        ]).await.map_err(db_error)?;
-        Ok(matches!(results.get(1), Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0))
+            failure_metadata::step(&self.env, &command.run_id, &command.node_id, command.attempt, command.reason_category, command.completed_at_ms)?,
+        ]).await;
+        match result { Ok(_) => Ok(true), Err(DbError::ConditionFailed { expected: 1, actual: 0 }) => Ok(false), Err(e) => Err(db_error(e)) }
     }
 }

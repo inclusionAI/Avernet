@@ -772,6 +772,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         self.start_commands.lock().await.push(cmd.clone());
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: "sm-http-test".to_string(),
                     root_run_id: Some("sm-http-test".to_string()),

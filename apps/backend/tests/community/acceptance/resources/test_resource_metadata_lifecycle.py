@@ -19,14 +19,14 @@ def _assert_success(response: httpx.Response) -> dict:
 
 
 @pytest.mark.acceptance
-def test_resource_metadata_roundtrip(live_backend):
+def test_resource_metadata_roundtrip(live_backend, request):
     """Manage local resource metadata without calling remote knowledge systems."""
     user_id = fresh_id("e2e_resources_user")
     headers = {"x-user-id": user_id}
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="Resources",
             bot_desc="resource metadata lifecycle bot",

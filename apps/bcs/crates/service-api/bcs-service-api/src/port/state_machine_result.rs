@@ -23,6 +23,10 @@ pub struct StateMachineResultPublishCommand {
 /// Bot routing: callers must not blindly replay an ambiguous invocation.
 #[async_trait]
 pub trait StateMachineResultPublisherPort: Send + Sync {
+    /// Prepare a private system Send for atomic repository composition. This
+    /// method performs authorization reads only; it must never enqueue or send.
+    async fn prepare_run_result(&self, _cmd: StateMachineResultPublishCommand)
+        -> ServiceResult<Option<crate::port::repo::message_delivery::AdmitMessageDeliveries>> { Ok(None) }
     async fn publish_state_machine_result(
         &self,
         cmd: StateMachineResultPublishCommand,

@@ -381,6 +381,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         self.start_commands.lock().await.push(cmd.clone());
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
+                terminal_result: None,
                 run: StateMachineRun {
                     run_id: "sm-http-test".to_string(),
                     root_run_id: Some("sm-http-test".to_string()),
@@ -413,6 +414,15 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         Ok(None)
+    }
+
+    async fn get_state_machine_run_result_for_bot(
+        &self, run_id: &str, bot: &str,
+    ) -> Result<Option<bcs_service_api::StateMachineBotRunResultView>, CollaborationRuntimeError> {
+        if bot != "bot-manager" { return Err(CollaborationRuntimeError::Forbidden("not the Run creator".into())); }
+        Ok(Some(bcs_service_api::StateMachineBotRunResultView { run_id: run_id.into(), group_id: "group-1".into(),
+            session_id: "group-1:abcdef12".into(), created_by: bot.into(), status: StateMachineRunStatus::Failed,
+            client_reference: None, terminal_result: None }))
     }
 
     async fn get_state_machine_session_history(
@@ -1035,4 +1045,31 @@ async fn post_invocation_honors_belongs_to_group_contract_over_field_match() {
         StatusCode::NOT_FOUND,
         "post_invocation must use belongs_to_group contract, not session.group_id field match"
     );
+}
+
+#[tokio::test]
+async fn bot_run_result_endpoint_requires_bot_auth_and_forwards_verified_identity() {
+    let tmp = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(tmp.path().to_path_buf()));
+    registry.store_token_mapping("manager-token".into(), "bot-manager".into()).await;
+    registry.store_token_mapping("worker-token".into(), "bot-worker".into()).await;
+    let mut services = Services::noop();
+    services.registry = registry;
+    services.collaboration_runtime = Arc::new(RecordingCollaborationRuntime::default());
+    let app = build_router(HttpAppState::new(services));
+    for (token, expected) in [(None, StatusCode::UNAUTHORIZED), (Some("worker-token"), StatusCode::FORBIDDEN),
+                              (Some("manager-token"), StatusCode::OK)] {
+        let mut req = Request::builder().uri("/state-machine-runs/run-1/result");
+        if let Some(token) = token { req = req.header("Authorization", format!("Bearer {token}")); }
+        let response = app.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), expected);
+        if expected == StatusCode::OK {
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["created_by"], "bot-manager");
+            assert_eq!(json["run_id"], "run-1");
+            assert!(json.get("input").is_none());
+            assert!(json.get("nodes").is_none());
+        }
+    }
 }

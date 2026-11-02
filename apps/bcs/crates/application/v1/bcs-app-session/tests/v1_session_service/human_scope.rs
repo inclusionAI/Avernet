@@ -296,6 +296,7 @@ async fn legacy_chat_session_with_state_machine_run_allows_participant_scope_and
         .session_run
         .lock()
         .expect("runtime session run lock") = Some(StateMachineRunView {
+                terminal_result: None,
         run: StateMachineRun {
             run_id: "legacy-run".to_string(),
             root_run_id: Some("legacy-run".to_string()),

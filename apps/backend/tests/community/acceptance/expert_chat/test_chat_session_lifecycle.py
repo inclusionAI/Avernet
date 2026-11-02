@@ -14,13 +14,13 @@ from tests.community.framework.flow_runner_live import run_flow_live
 
 
 @pytest.mark.acceptance
-def test_expert_chat_session_reaches_live_singlebox_engine(live_backend, acceptance_fs_root):
+def test_expert_chat_session_reaches_live_singlebox_engine(live_backend, acceptance_fs_root, request):
     user_id = fresh_id("e2e_expert_user")
     headers = {"x-user-id": user_id}
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="Expert Acceptance",
             bot_desc="expert_chat live session acceptance bot",

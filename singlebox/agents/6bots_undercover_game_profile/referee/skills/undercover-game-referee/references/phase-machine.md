@@ -2,18 +2,22 @@
 
 `uc status` 给出 `phase`，唤醒类型给出这一次是谁把我叫醒的。两者一查就知道该做什么。
 
+实际 RUN_RESULT 唤醒先走 [SX](#sx-自动恢复与最后兜底)。其他非节点唤醒先查 status；
+若返回可信恢复 command，先按 SX 执行。下表的等待和普通交接只适用于没有恢复动作时。
+
 | phase | 唤醒类型 | 执行 |
 | --- | --- | --- |
+| 当前局任意非终局阶段 | `RUN_RESULT` | [SX 自动恢复](#sx-自动恢复与最后兜底)，以服务端事实和恢复 command 为准 |
 | `NO_GAME`（还没开局） | `SESSION_START` | [S0 开局](#s0-开局) |
 | `FINISHED` **但这次是新会话把我叫醒的** | 任意 | 会话 ID 传错了。停下核对 `--session`，**不念稿、不 reveal、不结束会话** |
 | `NO_GAME`（还没开局） | `HUMAN_MSG` | 先做 S0；如果人类这句话就是要开始，紧接着做 S1 |
 | `AWAIT_START` | `HUMAN_MSG` | [S1 发牌并开第一轮](#s1-发牌并开第一轮) |
 | `SPEAK_RUNNING` | `NODE_TASK`（本轮发言汇总） | [S2 念发言](#s2-念发言) |
-| `SPEAK_RUNNING` | `HUMAN_MSG` | 人类在催或在闲聊：回一句现在等谁；说"卡住了"就走 [SX](#sx-卡住诊断) |
+| `SPEAK_RUNNING` | `HUMAN_MSG` | 人类在催或在闲聊：回一句现在等谁；说"卡住了"就走 [SX](#sx-自动恢复与最后兜底) |
 | `AWAIT_VOTE_START` | `NODE_TASK`（本轮发言汇总——`speeches-set` 把 phase 推过来了，但我还在同一次激活里） | 念完汇总稿**结束激活**，**绝不 `open-vote`**：我此刻占着协作槽位，在这里开投必然死锁。见 [S2](#s2-念发言) |
 | `AWAIT_VOTE_START` | 其余（`ECHO` / `HUMAN_MSG` / `WORKER_MSG`） | [S3 开投](#s3-开投)。转述稿的回灌就是开投的信号，不用等人类说话 |
 | `VOTE_RUNNING` | `NODE_TASK`（开票） | [S4 开票](#s4-开票) |
-| `VOTE_RUNNING` | `HUMAN_MSG` | 回一句还在等谁投；说"卡住了"就走 [SX](#sx-卡住诊断) |
+| `VOTE_RUNNING` | `HUMAN_MSG` | 回一句还在等谁投；说"卡住了"就走 [SX](#sx-自动恢复与最后兜底) |
 | `AWAIT_PK_SPEAK_START` | `NODE_TASK`（常规开票尚未结束） | 只报 PK 名单后结束；不启动运行 |
 | `AWAIT_PK_SPEAK_START` | `ECHO` / `HUMAN_MSG` | `uc open-round` 开同轮 PK 发言 |
 | `PK_SPEAK_RUNNING` | `NODE_TASK`（PK 汇总） | 按节点固定的 --round/--stage/--attempt 调 speeches-set，汇总后结束 |
@@ -24,17 +28,18 @@
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 非空**（有 Bot 出局，要念遗言） | 其余（`ECHO` / `HUMAN_MSG`） | [S4b 派遗言任务](#s4b-派遗言任务) |
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 为空**（PK 无人出局、常规零有效票或出局的是人类） | 其余（`ECHO` / `HUMAN_MSG`） | [S4c 直接开下一轮](#s4c-直接开下一轮) |
 | `AWAIT_NEXT_ROUND` | `HUMAN_MSG` 说"继续" | 跳过遗言，直接做 S5 的第 2 步 |
-| `FINISHED` | 任意 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
+| `FINISHED` | 维护者确认修复并明确要求重试关闭当前会话 | 仅按 SKILL.md 的关闭失败恢复调用 finish；不重复 reveal |
+| `FINISHED` | 其余 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
 
-任何格子里没写的组合：说清当前进行到哪、人类可以做什么，**不推进**。
+先处理经 status 核验的恢复动作；其余格子里没写的组合，说清当前进行到哪、人类可以做什么，**不推进**。
 
-`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。
+`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 按迟到回执处理，不根据其文本写入或重开。只允许先查 status；若服务端核验出当前 run 的恢复 command，则按 SX 执行，否则结束。
 
 **节点唤醒按节点正文执行，写入命令由脚本校验当前阶段。** 运行失败之后，失败前派出去的节点仍可能迟到几十秒才把产物送回来。命令报告阶段不符就只回一句"这条是迟到的回执，已忽略"，不继续写入、不念稿——照着它往下走会让人类以为一切正常。
 
 **`AWAIT_VOTE_START` 这两行的差别是本文件里最要紧的一条。** `speeches-set` 一跑完 phase 就是 `AWAIT_VOTE_START` 了，但那一刻我还在发言运行的末节点里、还占着协作槽位——那个运行要等我这次激活结束才算完成。在那里 `open-vote` 会 `RUN_SLOT_BUSY`，而重试、`sleep`、轮询只会让这次激活不结束，于是运行永远完不成、槽位永远不放，整局死在这一步（2026-08-30 第 2 轮实际发生过）。**判据是「这次激活是被什么叫醒的」，不是 phase。**
 
-**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START`、`AWAIT_PK_SPEAK_START`、`AWAIT_PK_VOTE_START` 和 `AWAIT_NEXT_ROUND` 要做事，其余一律直接结束激活，不输出、不调脚本：
+**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START`、`AWAIT_PK_SPEAK_START`、`AWAIT_PK_VOTE_START` 和 `AWAIT_NEXT_ROUND` 要做事，没有恢复动作时，其余直接结束激活，不输出、不追加脚本调用：
 
 - `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` → S3 开投。
 - `AWAIT_PK_SPEAK_START` → open-round 开同轮 PK 发言。
@@ -255,42 +260,27 @@ uc open-round --session "$session_id"
    **立刻结束激活，一次都不要重试。**
 3. 和 S1 一样：成功后播报 announcement 并结束。
 
-## SX 卡住诊断
+## SX 自动恢复与最后兜底
 
-人类说"卡住了"就走这一节。运行失败不会唤醒我，所以人类这句话是唯一的入口——开场白里
-必须把"超过 5 分钟没动静回我一句『卡住了』"说清楚，每一轮都算数。先看现在在哪：
+`[State Machine Run Result]` 是独立的 `RUN_RESULT` 唤醒，不是 ECHO 或 WORKER_MSG。
+先执行 `uc status --session "$session_id" --failed-run "<run_id>"`：脚本核对服务端
+run 的会话、创建者、异常终态与本局当前阶段。不要依赖消息文本自行决定重开。
+普通 status 也会核验已记录的当前 run；若返回恢复 command，优先执行，不能按本地
+RUNNING 提示继续等待。状态查询不写游戏状态；open-* 持锁重新核验后才提交及计数。
 
-```bash
-uc status --session "$session_id"
-```
+| `run_result_action.action` | 最后一个工具调用 |
+| --- | --- |
+| `retry-speak` | `uc open-round --session "$session_id" --retry --failed-run "<run_id>"` |
+| `retry-vote` | `uc open-vote --session "$session_id" --retry --failed-run "<run_id>"` |
+| `open-vote` | 汇总已落盘，`uc open-vote --session "$session_id" --failed-run "<run_id>"` |
+| `duplicate` / `stale` | 不重开 |
+| `follow-status` | 按 status 的事实状态交接，不重做已完成阶段 |
 
-（`status` 的会话 ID 不能省，见 [commands.md](commands.md#--session-什么时候必须给)。）
+同一会话、轮次、常规/PK、发言/投票阶段最多自动重开两次。重复结果不额外消耗次数；
+第三次失败、用户取消、范围失效或结果不可核验时停止并提示维护者。提交响应超时或丢失
+会保留不确定状态，只有服务端事实能唯一关联时才能确认，不能盲目再提交。
 
-然后按 `phase` 直接尝试重开当前这一轮——`open-*` 自己会先查协作槽位，所以这一条命令同时是诊断和恢复：
-
-```bash
-# phase = SPEAK_RUNNING 或 PK_SPEAK_RUNNING
-uc open-round --session "$session_id" --retry
-# phase = AWAIT_VOTE_START 或 AWAIT_PK_VOTE_START —— 注意这里**不带** --retry：这一轮的投票还没开过
-uc open-vote  --session "$session_id"
-# phase = VOTE_RUNNING 或 PK_VOTE_RUNNING
-uc open-vote  --session "$session_id" --retry
-```
-
-**`phase = AWAIT_VOTE_START` 时返回 `IN_COLLECT_NODE`** → 发言运行还挂在那儿没收尾。
-这一轮的汇总稿人类已经看到了，缺的只是开投。如实说：发言那一轮还没收尾，最多等到派单后
-10 分钟服务端判死，届时我再开投——然后结束激活，**不要重试、不要 `sleep` 着等**。
-判死之后人类再说一句"卡住了"，这条 `open-vote` 就能过。
-
-**`RUN_SLOT_BUSY` / `state_machine_run_active`** → 服务端仍认为运行活跃，不能据此排除队列卡住，而且这一条什么都没改。
-说一句还在等谁，结束激活。
-
-没有开场消息不能证明运行失败；以脚本的协作槽位检查为准，不猜测推进。
-返回 submitted=true 表示本次提交已接收。open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投及重开提示由副屏显示。
-重开时发言 announcement 或投票副屏会说明旧发言/旧票作废；status --full 的 renders 可查看本轮渲染次数。
-
-**`--retry` 不能省。** 不带它的话阶段卫兵会拒绝——`open-vote` 只在 `AWAIT_VOTE_START` 放行，而这时 phase 早就是 `VOTE_RUNNING` 了。带上 `--retry` 时轮次不推进、本轮记录不重建，只是把同一份 YAML 重新渲染并重新提交。
-
-同一轮重开**最多两次**。第三次还是起不来就停下，如实说本局只能作废。
-
-**重开也提交不上，或者状态长时间不变** → 目前没有取消运行的命令。如实说本局只能作废，请新建一个会话重开。**不要假装还能救。**
+“卡住了”用于通知未送达、自动重试耗尽或主持人激活失败的最后兜底：先查 status。
+运行中使用同一个 `open-round --retry` 或 `open-vote --retry` 校验当前失败 run 和次数；
+已落盘发言则按事实开投。运行仍活跃、槽位被占或结果不可核验时停止，不 sleep 轮询。
+重开后旧发言或旧票作废，按脚本的公告与副屏提示说明。

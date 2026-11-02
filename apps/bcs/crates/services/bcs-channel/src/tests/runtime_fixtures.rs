@@ -31,6 +31,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             return Err(CollaborationRuntimeError::InvalidRequest(error));
         }
         let view = StateMachineRunView {
+            terminal_result: None,
             run: StateMachineRun {
                 run_id: "state_run_1".to_string(),
                 root_run_id: Some("state_run_1".to_string()),

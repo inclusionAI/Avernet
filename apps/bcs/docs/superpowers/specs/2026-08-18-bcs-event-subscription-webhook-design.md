@@ -1001,6 +1001,8 @@ thinking 或原始工具参数。
 | `state_machine.run.created` | run 与定义快照持久化完成 | run | `definition_id`, `definition_version`, `run_mode`, `status=running` |
 | `state_machine.run.started` | run 开始调度首批节点 | run | `run_mode`, `started_at`, `input` |
 | `state_machine.run.completed` | run 首次进入 Completed | run | `completed_at`, `output`, `duration_ms` |
+| `state_machine.run.failed` | run 首次进入异常终态 | run | `result`, `completed_at`, `duration_ms`, `scope_invalid` |
+| `state_machine.run.aborted` | run 首次进入异常终态 | run | `result`, `completed_at`, `duration_ms`, `scope_invalid` |
 
 `run_mode`：
 

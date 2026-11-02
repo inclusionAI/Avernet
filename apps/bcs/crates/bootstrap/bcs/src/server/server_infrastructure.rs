@@ -414,7 +414,7 @@ impl BcsServer {
             Arc<dyn SessionRepoPort>,
             Arc<dyn SessionManagementService>,
             Arc<dyn GroupSessionMetricsSnapshotPort>,
-            Arc<dyn MessageRepoPort>,
+            Arc<MySqlMessageStore>,
         ) = {
             let env = crate::env::resolve_env();
             info!(env = %env, db_plugin = %db_kind, "DB-backed session and message storage initialized");
@@ -432,7 +432,7 @@ impl BcsServer {
                     )
                 }
             };
-            let message_repo: Arc<dyn MessageRepoPort> = match db_kind {
+            let message_repo = match db_kind {
                 DbPluginKind::LocalSqlite => {
                     Arc::new(MySqlMessageStore::sqlite(db_plugin.clone(), env))
                 }
@@ -656,10 +656,10 @@ impl BcsServer {
             info!(env = %env, db_plugin = %db_kind, "DB-backed collaboration storage initialized");
             let collaboration_store = match db_kind {
                 DbPluginKind::LocalSqlite => {
-                    Arc::new(MySqlCollaborationStore::sqlite(db_plugin.clone(), env))
+                    Arc::new(MySqlCollaborationStore::sqlite(db_plugin.clone(), env).with_message_store(message_repo.clone()))
                 }
                 DbPluginKind::Mysql => {
-                    Arc::new(MySqlCollaborationStore::new(db_plugin.clone(), env))
+                    Arc::new(MySqlCollaborationStore::new(db_plugin.clone(), env).with_message_store(message_repo.clone()))
                 }
                 DbPluginKind::External(provider) => {
                     panic!(

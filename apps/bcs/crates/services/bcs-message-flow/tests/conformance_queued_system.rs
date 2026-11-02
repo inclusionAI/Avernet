@@ -270,3 +270,49 @@ async fn driver_capacity_rejection_keeps_other_bots_initial_context() {
     assert_eq!(rows.iter().filter(|r| r.state.status == Status::PendingContext && r.target_bot_id == "bot-observer").count(), 1);
     assert!(support.bot_delivery.frames().await.is_empty());
 }
+
+#[tokio::test]
+async fn abnormal_run_result_is_private_and_rechecks_scope_before_send() {
+    use bcs_service_api::{SessionKind, SessionStatus, StateMachineResultPublishCommand};
+    use bcs_service_api::port::repo::message_delivery::{DeliveryLookup, MessageDeliveryRepoPort};
+    let (support, flow, service, repo, contexts) = fixture().await;
+    let cmd = StateMachineResultPublishCommand { run_id: "run-secret-test".into(), group_id: "group-1".into(),
+        session_id: "group-1:system".into(), sender_bot_id: "bot-driver".into(),
+        content: "[State Machine Run Result]\n{\"schema_version\":1}".into(), created_at_ms: 100 };
+    let admission = flow.prepare_state_machine_run_result(cmd.clone()).await.unwrap().unwrap();
+    assert_eq!(admission.message.sender_id, "system");
+    assert_eq!(admission.message.audience, Some(MessageAudience::directed(["bot-driver"]).unwrap()));
+    assert_eq!(admission.targets.len(), 1);
+    assert_eq!(admission.targets[0].target_bot_id, "bot-driver");
+    assert_eq!(admission.message.client_msg_id.as_deref(), Some("run-result:run-secret-test"));
+    repo.compose_delivery_transaction(vec![], vec![admission], vec![], false, || Ok(())).await.unwrap();
+    let rows = repo.lookup(DeliveryLookup::Message("run-result:run-secret-test".into())).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let preparer = QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: service.clone() };
+    assert!(preparer.prepare(&rows[0]).await.is_ok());
+    let group = support.group.get("group-1").await.unwrap();
+    for case in ["ended", "removed", "non_chat", "wrong_group"] {
+        let mut session = session_support::test_session("group-1:system", "group-1", group.participants.clone());
+        match case {
+            "ended" => session.status = SessionStatus::Completed,
+            "removed" => session.participants.retain(|p| p.bot_uuid != "bot-driver"),
+            "non_chat" => session.session_kind = SessionKind::ServiceInvocation,
+            _ => session.group_id = "another-group".into(),
+        }
+        let restricted = Arc::new(BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(),
+            support.bot_delivery.clone(), support.frontend_delivery.clone())
+            .with_message_repo(repo.clone()).with_managed_deliveries(service.clone()).with_bot_run_context(contexts.clone())
+            .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session))));
+        assert!(restricted.prepare_state_machine_run_result(cmd.clone()).await.unwrap().is_none(), "{case}");
+        let preparer = QueuedGroupPreparation { flow: Arc::downgrade(&restricted), deliveries: service.clone() };
+        assert!(preparer.prepare(&rows[0]).await.is_err(), "{case}");
+    }
+    let mut absent = cmd.clone(); absent.sender_bot_id = "unknown-worker".into();
+    assert!(flow.prepare_state_machine_run_result(absent).await.unwrap().is_none());
+    let mut closed = group;
+    closed.status = bcs_domain::GroupStatus::Closed;
+    support.group.upsert(closed).await.unwrap();
+    assert!(flow.prepare_state_machine_run_result(cmd.clone()).await.unwrap().is_none());
+    let preparer = QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: service.clone() };
+    assert!(preparer.prepare(&rows[0]).await.is_err());
+}

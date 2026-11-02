@@ -798,7 +798,8 @@ function selectionForSession(agent: Agent | undefined, fallback: ModelSelection)
 
 function resolveToolProfile(sessionContext: Record<string, unknown>): BcnToolProfile {
   const groupType = asNonEmptyString(sessionContext.group_type);
-  if (groupType === 'manager_worker') {
+  if (groupType === 'manager_worker' || (groupType === 'state_machine'
+      && ['manager', 'worker'].includes(asNonEmptyString(sessionContext.recipient_role) ?? ''))) {
     // COSEC: task-tool authority comes only from the authenticated BCN
     // downlink context. Missing or unknown roles fail closed.
     const recipientRole = asNonEmptyString(sessionContext.recipient_role);

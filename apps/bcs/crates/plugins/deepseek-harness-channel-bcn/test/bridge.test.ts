@@ -411,6 +411,24 @@ function taskGroupParams(
   return params;
 }
 
+test('state machine nodes retain the authenticated manager and worker profiles', async () => {
+  for (const role of ['manager', 'worker'] as const) {
+    const harness = new FakeHarness();
+    const client = new FakeClient();
+    const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+    bridge.start();
+    await client.deliverRequest('chat.send', 'ordinary', taskGroupParams('same-session', 'ordinary-run', role));
+    const node = taskGroupParams('same-session', 'node-run', role);
+    (node.session_context as Record<string, unknown>).group_type = 'state_machine';
+    await client.deliverRequest('chat.send', 'node', node);
+    const state = harness.state('bcs_grp_test:same-session');
+    assert.equal(state.followups.length, 2);
+    assert.deepEqual(state.tools.map(tool => tool.name), role === 'manager'
+      ? ['bcs_assign_task', 'bcs_task_complete'] : ['bcs_send_task_message']);
+    await bridge.dispose();
+  }
+});
+
 function toolRunContext(agent: Agent): ToolRunContext {
   return {
     agent,

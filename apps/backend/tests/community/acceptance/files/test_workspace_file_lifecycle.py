@@ -66,7 +66,7 @@ def _upload_when_baas_visible(
 
 
 @pytest.mark.acceptance
-def test_workspace_file_roundtrip(live_backend):
+def test_workspace_file_roundtrip(live_backend, request):
     """Create, upload, inspect, download, and delete a real workspace file."""
     user_id = fresh_id("e2e_files_user")
     headers = {"x-user-id": user_id}
@@ -76,7 +76,7 @@ def test_workspace_file_roundtrip(live_backend):
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="Files Acceptance",
             bot_desc="workspace files lifecycle bot",

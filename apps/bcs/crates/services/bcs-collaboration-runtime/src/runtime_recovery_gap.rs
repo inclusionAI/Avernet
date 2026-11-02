@@ -4,8 +4,8 @@ use bcs_service_api::{FailStateMachineStartup, StateMachineMissingStartupFact as
 impl CollaborationRuntime {
     pub(super) async fn converge_missing_startup(&self, run: &StateMachineRun, missing: Missing,
         preparation_error: Option<String>) -> Result<bool, CollaborationRuntimeError> {
-        if !self.runs.fail_missing_startup(FailStateMachineStartup { run_id: run.run_id.clone(), missing,
-            failed_at_ms: bcs_protocol::now_ms(), preparation_error }).await? { return Ok(false); }
+        if !self.commit_abnormal(run, StateMachineRunStatus::Failed, Some(Reason::StartupFailed), None, preparation_error.clone(),
+            Some(FailStateMachineStartup { run_id: run.run_id.clone(), missing, failed_at_ms: bcs_protocol::now_ms(), preparation_error }), false).await? { return Ok(false); }
         self.runs.supersede_inactive_node_dispatches(&run.run_id).await?;
         // Run and its typed failure fact are committed. Session completion is
         // independent, recoverable by the existing Running Session page.

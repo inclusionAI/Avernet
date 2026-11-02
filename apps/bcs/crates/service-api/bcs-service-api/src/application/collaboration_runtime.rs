@@ -293,6 +293,18 @@ pub struct StateMachineRunAccessCommand {
     pub authenticated_human: Option<AuthenticatedHumanCaller>,
 }
 
+/// Minimal server-owned facts available only to the Bot that created a Run.
+#[derive(Debug, Clone, Serialize)]
+pub struct StateMachineBotRunResultView {
+    pub run_id: String,
+    pub session_id: String,
+    pub group_id: String,
+    pub created_by: String,
+    pub status: crate::StateMachineRunStatus,
+    pub client_reference: Option<String>,
+    pub terminal_result: Option<crate::port::repo::StateMachineRunResultV1>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfigureGroupRuntimeCommand {
     pub group_id: String,
@@ -349,6 +361,8 @@ pub struct GroupCollaborationDefinitionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineRunView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_result: Option<crate::port::repo::StateMachineRunResultV1>,
     pub run: StateMachineRun,
     pub nodes: Vec<StateMachineNodeRun>,
     /// Complete Loop body mapping from the saved plan, keyed by execution node ID.
@@ -528,6 +542,10 @@ pub struct HandleBotTerminalEventOutcome {
 
 #[async_trait]
 pub trait CollaborationRuntimeService: Send + Sync {
+    /// Notify the runtime that a Bot WebSocket connection was lost.
+    async fn bot_websocket_disconnected(&self, _bot_id: &str, _disconnected_at_ms: u64) -> Result<(), CollaborationRuntimeError> {
+        Err(CollaborationRuntimeError::InvalidRequest("Bot disconnect handling is not implemented".into()))
+    }
     async fn validate_definition_yaml(
         &self,
         cmd: ValidateCollaborationDefinitionYamlCommand,
@@ -652,6 +670,13 @@ pub trait CollaborationRuntimeService: Send + Sync {
             }
             None => self.get_state_machine_run(&cmd.run_id).await,
         }
+    }
+
+    async fn get_state_machine_run_result_for_bot(
+        &self, run_id: &str, caller_bot_id: &str,
+    ) -> Result<Option<StateMachineBotRunResultView>, CollaborationRuntimeError> {
+        let _ = (run_id, caller_bot_id);
+        Err(CollaborationRuntimeError::InvalidRequest("Bot Run result lookup is not implemented".into()))
     }
 
     async fn get_state_machine_node_run_for_human(

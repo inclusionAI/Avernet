@@ -490,6 +490,10 @@ pub(crate) fn request_session_key(frame: &BcsFrame) -> Option<String> {
 
 #[async_trait]
 impl MessageFlowService for BcsMessageFlow {
+    async fn prepare_state_machine_run_result(&self, cmd: bcs_service_api::StateMachineResultPublishCommand)
+        -> ServiceResult<Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>> {
+        crate::queued_run_result::prepare(self, cmd).await
+    }
     async fn get_delivery_policy(&self, caller: CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
         self.delivery_policy.as_ref().ok_or_else(|| ServiceError::InternalError("delivery policy unavailable".into()))?.get(caller).await
     }
