@@ -23,6 +23,15 @@ def response(status, **values):
         version=1, operation_id=OPERATION, boot_id='instance-1', status=status) | values))
 
 
+def partial_response(*, operation_id=OPERATION, **backup_fields):
+    """Published source-omission receipt from the container helper's v1 contract."""
+    return response('partial_success', operation_id=operation_id, backup={
+        'status': 'partial_success', 'operation_id': operation_id, 'generation_id': 'g-partial',
+        'error_code': 'source_files_skipped', 'failed_phase': 'backup_partial',
+        **backup_fields,
+    })
+
+
 def prepare(execute):
     with patch.object(backup.time, 'sleep'):
         return backup.prepare_backup(execute=execute, operation_id=OPERATION,
@@ -605,9 +614,7 @@ async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
     prepared.assert_called_once()
     assert prepared.call_args.args == (ctx,)
     kwargs = prepared.call_args.kwargs
-    dependencies = kwargs.pop('restart_dependencies')
-    assert kwargs == dict(device_id='target', operation_id=None, restart_key=None)
-    assert dependencies.baas_runtime() is runtime
+    assert kwargs == dict(device_id='target', target_runtime=runtime, operation_id=None, restart_key=None)
     assert not runtime.mock_calls
 
 
@@ -760,3 +767,10 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
         verify()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()
+
+
+@pytest.fixture(autouse=True)
+def nonfastdisk_compatibility_scope(monkeypatch):
+    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
