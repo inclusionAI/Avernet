@@ -26,7 +26,7 @@ class TransferNotFoundError(FileTransferRepositoryError, ApiTransferNotFoundErro
     Inherits from both FileTransferRepositoryError (repo-layer base) and
     the API-layer TransferNotFoundError so that except clauses catching
     the API class also handle repo-originated instances (e.g., from
-    update_status in race conditions).
+    status updates in race conditions).
     """
 
     def __init__(self, transfer_id: str) -> None:
@@ -88,19 +88,19 @@ class TicketRepository(Protocol):
         """List tickets matching given statuses, ordered by gmt_create ASC, limited."""
         ...
 
-    def update_status(
+    def compare_and_set_status(
         self,
         transfer_id: str,
         new_status: str,
         error_message: str | None = None,
-    ) -> None:
-        """Update ticket status with CAS-style atomic transition validation.
+        *,
+        expected_statuses: frozenset[str],
+    ) -> int:
+        """Atomically update an env-scoped ticket in an expected state.
 
-        Uses a CAS (Compare-And-Swap) SQL UPDATE: only modifies the row if
-        its current status is one of the allowed source states for new_status.
-        Same-state transitions are idempotent.
-        Raises TransferStateConflictError on invalid state transition.
-        Raises TransferNotFoundError if no ticket with the given transfer_id exists.
+        Return driver affected rows (matched or changed, depending on backend).
+        Zero does not distinguish missing, conflicting or unchanged rows.
+        This method does not decide transitions or execute a diagnostic read.
         """
         ...
 

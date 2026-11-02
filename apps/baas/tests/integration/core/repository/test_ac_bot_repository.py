@@ -143,6 +143,7 @@ class TestAcBotPublishRepositoryProtocol:
         result = ac_bot_publish_repository.get_binding_id(
             source_bot_id="nonexistent_bot_" + _generate_uuid(),
             status="success",
+            binding_key="online",
         )
         assert result is None
 
@@ -155,6 +156,7 @@ class TestAcBotPublishRepositoryProtocol:
         result = ac_bot_publish_repository.get_binding_id(
             source_bot_id=_generate_uuid(),
             status="__test_nonexistent_status__",
+            binding_key="online",
         )
         assert result is None
 
@@ -168,6 +170,7 @@ class TestAcBotPublishRepositoryProtocol:
             source_bot_id=_generate_uuid(),
             status="success",
             owner_id="staff_12345",
+            binding_key="online",
         )
         if result is not None:
             assert isinstance(result, int)
@@ -180,8 +183,7 @@ class TestAcBotPublishRepositoryProtocol:
     ):
         """Uses status='validating' which selects ext.binding.verify instead of online."""
         result = ac_bot_publish_repository.get_binding_id(
-            source_bot_id=_generate_uuid(),
-            status="validating",
+            source_bot_id=_generate_uuid(), status="validating", binding_key="verify"
         )
         if result is not None:
             assert isinstance(result, int)

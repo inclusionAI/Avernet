@@ -212,120 +212,37 @@ class TestGetByTransferId:
 # ==================== TestUpdateStatus ====================
 
 
-class TestUpdateStatus:
-    def test_valid_transition(self, repo, mock_session):
-        """CAS update returns 1 — valid transition succeeds."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        # Should not raise
-        repo.update_status("tf-001", "UPLOADING")
-
-    def test_invalid_transition(self, repo, mock_session):
-        """CAS update returns 0, fallback query finds ticket with conflicting status."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        # Fallback first() returns a model with status=DONE (terminal)
-        fallback_row = MagicMock()
-        fallback_row.status = "DONE"
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            fallback_row
-        )
-
-        with pytest.raises(TransferStateConflictError):
-            repo.update_status("tf-001", "UPLOADING")
-
-    def test_not_found(self, repo, mock_session):
-        """CAS update returns 0, fallback query returns None → TransferNotFoundError."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        with pytest.raises(TransferNotFoundError, match="not found"):
-            repo.update_status("nonexistent", "DONE")
-
-    def test_same_state_idempotent(self, repo, mock_session):
-        """Same-state transition is idempotent (CREATED→CREATED allowed)."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        # Should not raise
-        repo.update_status("tf-001", "CREATED")
-
-    @pytest.mark.parametrize(
-        "status",
-        ["CREATED", "UPLOADING", "PUSHING", "FAILED", "DONE", "CANCELLED", "DELETED"],
-    )
-    @pytest.mark.parametrize("error_message", [None, "", "Download timed out"])
-    def test_zero_update_with_requested_result_is_idempotent(
-        self, repo, mock_session, status, error_message
+class TestCompareAndSetStatus:
+    @pytest.mark.parametrize("affected", [0, 1])
+    def test_returns_driver_count_without_diagnostic_read(
+        self, repo, mock_session, affected
     ):
-        """A zero changed-row count does not imply a state conflict."""
         query = mock_session.query.return_value.filter.return_value
-        query.update.return_value = 0
-        query.first.return_value = MagicMock(status=status, error_message=error_message)
+        query.update.return_value = affected
 
-        repo.update_status("tf-001", status, error_message)
+        assert (
+            repo.compare_and_set_status(
+                "tf-001",
+                "FAILED",
+                "timeout",
+                expected_statuses=frozenset({"UPLOADING"}),
+            )
+            == affected
+        )
 
         query.update.assert_called_once()
-        query.first.assert_called_once()
+        assert query.update.call_args.args[0]["error_message"] == "timeout"
+        query.first.assert_not_called()
+        assert mock_session.query.call_count == 1
 
-    def test_zero_update_without_message_preserves_existing_message(
-        self, repo, mock_session
-    ):
-        query = mock_session.query.return_value.filter.return_value
-        query.update.return_value = 0
-        query.first.return_value = MagicMock(
-            status="FAILED", error_message="original error"
-        )
-
-        repo.update_status("tf-001", "FAILED")
-
-        assert "error_message" not in query.update.call_args.args[0]
-
-    @pytest.mark.parametrize("stored_message", [None, "different error"])
-    def test_zero_update_with_unpersisted_message_still_fails(
-        self, repo, mock_session, stored_message
-    ):
-        query = mock_session.query.return_value.filter.return_value
-        query.update.return_value = 0
-        query.first.return_value = MagicMock(
-            status="FAILED", error_message=stored_message
-        )
-
-        with pytest.raises(TransferStateConflictError):
-            repo.update_status("tf-001", "FAILED", "Download timed out")
-
-    def test_database_update_error_propagates(self, repo, mock_session):
+    def test_write_failure_propagates(self, repo, mock_session):
         query = mock_session.query.return_value.filter.return_value
         query.update.side_effect = RuntimeError("database unavailable")
-
         with pytest.raises(RuntimeError, match="database unavailable"):
-            repo.update_status("tf-001", "FAILED")
-
+            repo.compare_and_set_status(
+                "tf-001", "FAILED", expected_statuses=frozenset({"UPLOADING"})
+            )
         query.first.assert_not_called()
-
-    def test_idempotent_readback_does_not_hide_commit_error(
-        self, repo, mock_session, mock_database
-    ):
-        query = mock_session.query.return_value.filter.return_value
-        query.update.return_value = 0
-        query.first.return_value = MagicMock(status="FAILED", error_message="timeout")
-        mock_database.orm_session.return_value.__exit__.side_effect = RuntimeError(
-            "commit failed"
-        )
-
-        with pytest.raises(RuntimeError, match="commit failed"):
-            repo.update_status("tf-001", "FAILED", "timeout")
-
-    def test_with_error_message(self, repo, mock_session):
-        """Verify error_message is passed through to update_kwargs."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        repo.update_status("tf-001", "FAILED", error_message="timeout")
-
-        call_kwargs = (
-            mock_session.query.return_value.filter.return_value.update.call_args
-        )
-        update_dict = call_kwargs[0][0]
-        assert update_dict["error_message"] == "timeout"
-        assert update_dict["status"] == "FAILED"
 
 
 # ==================== TestUpdateUrls ====================

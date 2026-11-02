@@ -19,7 +19,6 @@ def fresh_manager():
     """Return a clean singleton — reset class-level state."""
     DatabaseManager._instance = None
     DatabaseManager._plugin = None
-    DatabaseManager._scoped_sessions = []
     return DatabaseManager()
 
 

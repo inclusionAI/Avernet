@@ -43,7 +43,7 @@ class TestServiceDeviceProviderWithQueryService:
         mock_query_service: MagicMock,
     ) -> ServiceDeviceProvider:
         return ServiceDeviceProvider(
-            mock_binding_repo, mock_facade, config, mock_query_service
+            mock_binding_repo, mock_facade, config, query_service=mock_query_service
         )
 
     @pytest.mark.asyncio
@@ -138,7 +138,7 @@ class TestServiceDeviceProvider:
     """Tests for ServiceDeviceProvider."""
 
     @pytest.fixture
-    def mock_binding_repo(self) -> MagicMock:
+    def mock_query_service(self) -> MagicMock:
         return MagicMock()
 
     @pytest.fixture
@@ -152,20 +152,22 @@ class TestServiceDeviceProvider:
     @pytest.fixture
     def provider(
         self,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
         mock_facade: MagicMock,
         config: BotHealthCheckerConfig,
     ) -> ServiceDeviceProvider:
-        return ServiceDeviceProvider(mock_binding_repo, mock_facade, config)
+        return ServiceDeviceProvider(
+            mock_query_service, mock_facade, config, query_service=mock_query_service
+        )
 
     def test_provider_type(self, provider: ServiceDeviceProvider) -> None:
         assert provider.provider_type == DeviceProviderType.BAAS
 
     @pytest.mark.asyncio
     async def test_list_paas_device_by_bot(
-        self, provider: ServiceDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: ServiceDeviceProvider, mock_query_service: MagicMock
     ) -> None:
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "device_uuid": "uuid-123",
@@ -191,18 +193,19 @@ class TestServiceDeviceProvider:
 
     @pytest.mark.asyncio
     async def test_extend_ttl_all_statuses(
-        self, provider: ServiceDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: ServiceDeviceProvider, mock_query_service: MagicMock
     ) -> None:
         """extend_ttl_by_bot queries all statuses (draft/validating/online)."""
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = []
+        mock_query_service.list_paas_device_by_bot_service.return_value = []
 
         result = await provider.extend_ttl_by_bot(bot_id="bot1", entity_id="entity1")
 
         assert result.total_devices == 0
-        mock_binding_repo.list_paas_device_by_bot_service.assert_called_with(
+        mock_query_service.list_paas_device_by_bot_service.assert_called_with(
             bot_id="bot1",
             entity_id="entity1",
             statuses=["draft", "validating", "online"],
+            env="prod",
         )
 
     @pytest.mark.asyncio
@@ -210,13 +213,13 @@ class TestServiceDeviceProvider:
         self,
         provider: ServiceDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)
 
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -244,13 +247,13 @@ class TestServiceDeviceProvider:
         assert result.total_devices == 1
         assert result.extended_count == 1
         assert result.failed_count == 0
-        mock_binding_repo.update_baas_device_ttl_by_id.assert_called_once()
+        mock_query_service.update_baas_device_ttl_by_id.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extend_ttl_skip_empty_paas_device_id(
-        self, provider: ServiceDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: ServiceDeviceProvider, mock_query_service: MagicMock
     ) -> None:
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "",
                 "provider_type": "ARCA",
@@ -272,13 +275,13 @@ class TestServiceDeviceProvider:
         self,
         provider: ServiceDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)
 
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -306,21 +309,21 @@ class TestServiceDeviceProvider:
         assert result.total_devices == 1
         assert result.extended_count == 0
         assert result.failed_count == 1
-        mock_binding_repo.update_baas_device_refresh_fail_count_by_id.assert_called_once()
+        mock_query_service.update_baas_device_refresh_fail_count_by_id.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extend_ttl_sufficient_ttl_skips(
         self,
         provider: ServiceDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         """TTL with sufficient remaining time is skipped."""
         import time
 
         future_ts = int((time.time() + 86400 * 7) * 1000)  # 7 days in future
 
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -346,13 +349,13 @@ class TestServiceDeviceProvider:
         self,
         provider: ServiceDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         """When ttl_expiration_timestamp is None, refresh_device_ttl is called."""
         import time
         from unittest.mock import AsyncMock
 
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -380,14 +383,14 @@ class TestServiceDeviceProvider:
         self,
         provider: ServiceDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         """Exception during update_device_ttl is caught."""
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)
 
-        mock_binding_repo.list_paas_device_by_bot_service.return_value = [
+        mock_query_service.list_paas_device_by_bot_service.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -410,4 +413,4 @@ class TestServiceDeviceProvider:
         assert result.total_devices == 1
         assert result.extended_count == 0
         assert result.failed_count == 1
-        mock_binding_repo.update_baas_device_refresh_fail_count_by_id.assert_called_once()
+        mock_query_service.update_baas_device_refresh_fail_count_by_id.assert_called_once()

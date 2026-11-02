@@ -5,8 +5,11 @@ from ._protocols import (
     PaasService,
     PaasServiceFactory,
 )
+from ._relay_session import WsRelaySessionInfo, WsRelaySessionService
 
 __all__ = [
+    "WsRelaySessionInfo",
+    "WsRelaySessionService",
     "ConnectionManager",
     "PaasService",
     "PaasServiceFactory",

@@ -42,6 +42,8 @@ from secbaas.community.core.service.device_manage import device_record_to_respon
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
+from ._cloning import try_insert_pending_bot
+
 logger = get_logger("core-service")
 
 
@@ -154,7 +156,8 @@ class DefaultBotCrudService(BotCrudService):
             extra_config = new_config.model_dump(exclude_none=True)
 
         try:
-            new_bot_id = bot_repo.try_insert_pending_bot(
+            new_bot_id = try_insert_pending_bot(
+                bot_repo,
                 source_bot_id=source_bot_id,
                 tenant=tenant,
                 env=env,

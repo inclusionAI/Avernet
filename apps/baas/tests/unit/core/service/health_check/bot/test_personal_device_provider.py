@@ -43,7 +43,7 @@ class TestPersonalDeviceProviderWithQueryService:
         mock_query_service: MagicMock,
     ) -> PersonalDeviceProvider:
         return PersonalDeviceProvider(
-            mock_binding_repo, mock_facade, config, mock_query_service
+            mock_binding_repo, mock_facade, config, query_service=mock_query_service
         )
 
     @pytest.mark.asyncio
@@ -122,7 +122,7 @@ class TestPersonalDeviceProvider:
     """Tests for PersonalDeviceProvider."""
 
     @pytest.fixture
-    def mock_binding_repo(self) -> MagicMock:
+    def mock_query_service(self) -> MagicMock:
         return MagicMock()
 
     @pytest.fixture
@@ -136,20 +136,22 @@ class TestPersonalDeviceProvider:
     @pytest.fixture
     def provider(
         self,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
         mock_facade: MagicMock,
         config: BotHealthCheckerConfig,
     ) -> PersonalDeviceProvider:
-        return PersonalDeviceProvider(mock_binding_repo, mock_facade, config)
+        return PersonalDeviceProvider(
+            mock_query_service, mock_facade, config, query_service=mock_query_service
+        )
 
     def test_provider_type(self, provider: PersonalDeviceProvider) -> None:
         assert provider.provider_type == DeviceProviderType.ARCA
 
     @pytest.mark.asyncio
     async def test_list_paas_device_by_bot(
-        self, provider: PersonalDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: PersonalDeviceProvider, mock_query_service: MagicMock
     ) -> None:
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "device_uuid": None,
@@ -173,9 +175,9 @@ class TestPersonalDeviceProvider:
 
     @pytest.mark.asyncio
     async def test_extend_ttl_no_devices(
-        self, provider: PersonalDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: PersonalDeviceProvider, mock_query_service: MagicMock
     ) -> None:
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = []
+        mock_query_service.list_paas_device_by_bot_personal.return_value = []
 
         result = await provider.extend_ttl_by_bot(
             bot_id="bot1", entity_id="entity1", binding_id=10
@@ -189,13 +191,13 @@ class TestPersonalDeviceProvider:
         self,
         provider: PersonalDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         far_ts = int((time.time() + 20 * 3600) * 1000)  # 20 hours away
 
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -222,13 +224,13 @@ class TestPersonalDeviceProvider:
         self,
         provider: PersonalDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)  # expired 1 hour ago
 
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -256,20 +258,20 @@ class TestPersonalDeviceProvider:
         assert result.total_devices == 1
         assert result.extended_count == 1
         assert result.error is None
-        mock_binding_repo.update_device_props_ttl.assert_called_once()
+        mock_query_service.update_device_props_ttl.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extend_ttl_failure(
         self,
         provider: PersonalDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)
 
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -299,20 +301,20 @@ class TestPersonalDeviceProvider:
         assert result.extended_count == 0
         assert result.failed_count == 1
         assert result.error is not None
-        mock_binding_repo.update_device_props_refresh_fail_count.assert_called_once()
+        mock_query_service.update_device_props_refresh_fail_count.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extend_ttl_exception(
         self,
         provider: PersonalDeviceProvider,
         mock_facade: MagicMock,
-        mock_binding_repo: MagicMock,
+        mock_query_service: MagicMock,
     ) -> None:
         import time
 
         expired_ts = int((time.time() - 3600) * 1000)
 
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "ARCA-SANDBOX-001@0",
                 "provider_type": "ARCA",
@@ -337,13 +339,13 @@ class TestPersonalDeviceProvider:
         assert result.extended_count == 0
         assert result.failed_count == 1
         assert result.error is not None
-        mock_binding_repo.update_device_props_refresh_fail_count.assert_called_once()
+        mock_query_service.update_device_props_refresh_fail_count.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_extend_ttl_skip_empty_paas_device_id(
-        self, provider: PersonalDeviceProvider, mock_binding_repo: MagicMock
+        self, provider: PersonalDeviceProvider, mock_query_service: MagicMock
     ) -> None:
-        mock_binding_repo.list_paas_device_by_bot_personal.return_value = [
+        mock_query_service.list_paas_device_by_bot_personal.return_value = [
             {
                 "paas_device_id": "",
                 "provider_type": "ARCA",

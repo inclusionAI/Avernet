@@ -342,6 +342,7 @@ class TestQueryServiceDevicesValidating:
             status="validating",
             owner_id="entity-001",
             env="prod",
+            binding_key="verify",
         )
 
     def test_returns_devices_from_multiple_bindings(
@@ -482,6 +483,7 @@ class TestQueryServiceDevicesValidating:
             status="validating",
             owner_id="entity-001",
             env="pre",
+            binding_key="verify",
         )
 
     def test_returns_empty_when_binding_has_no_device_id(
@@ -557,7 +559,11 @@ class TestQueryServiceDevicesOnline:
         assert result[0]["query_status"] == "online"
         assert result[0]["paas_device_id"] == "ARCA-SANDBOX-ONLINE-001@0"
         mock_ac_bot_publish_repo.get_binding_ids.assert_called_once_with(
-            source_bot_id="bot-001", status="success", owner_id="entity-001", env="prod"
+            source_bot_id="bot-001",
+            status="success",
+            owner_id="entity-001",
+            env="prod",
+            binding_key="online",
         )
 
     def test_returns_devices_from_multiple_bindings(

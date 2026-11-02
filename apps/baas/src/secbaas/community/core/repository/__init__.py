@@ -64,13 +64,9 @@ def with_orm_session[
                     {**_active_sessions.get({}), id(self): session}
                 )
                 try:
-                    # conn_id 仅供 perf 日志：非 DEBUG 级别时跳过
-                    # session.connection()，避免为打点付出取连接开销。
-                    conn_id = (
-                        id(session.connection().connection)
-                        if perf_debug and session.is_active
-                        else "N/A"
-                    )
+                    # Session identity is observable without checking out a connection.
+                    # DEBUG must not turn an otherwise lazy/no-op call into a DB call.
+                    session_id = id(session)
                     session_start = time.monotonic()
                     result = func(self, *args, **kwargs)
                     query_end = time.monotonic()
@@ -82,10 +78,10 @@ def with_orm_session[
             # （字符串格式化 + handler + 落盘）在 CPU 火焰图上占 ~8%。
             if perf_debug:
                 _perf_logger.debug(
-                    "%s,%s,conn=%s,acquire=%.2fms,query=%.2fms,commit=%.2fms,total=%.2fms",
+                    "%s,%s,session=%s,scope=%.2fms,method=%.2fms,finalize=%.2fms,total=%.2fms",
                     type(self).__name__,
                     func.__name__,
-                    conn_id,
+                    session_id,
                     (session_start - t0) * 1000,
                     (query_end - session_start) * 1000,
                     (total_end - query_end) * 1000,

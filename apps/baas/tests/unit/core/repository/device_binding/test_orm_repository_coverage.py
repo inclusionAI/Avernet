@@ -17,8 +17,6 @@ from secbaas.community.core.repository.device_binding import (
     OrmDeviceBindingRepository,
 )
 
-# ==================== Fixtures ====================
-
 
 @pytest.fixture
 def mock_session():
@@ -46,9 +44,6 @@ def mock_database(mock_session):
 @pytest.fixture
 def repository(mock_database):
     return OrmDeviceBindingRepository(mock_database)
-
-
-# ==================== Helpers ====================
 
 
 def _make_binding_model(
@@ -145,9 +140,6 @@ def _make_execute_result(rows=None, scalar_val=None):
     return result
 
 
-# ==================== _model_to_record Tests ====================
-
-
 class TestModelToRecord:
     """Tests for OrmDeviceBindingRepository._model_to_record."""
 
@@ -218,9 +210,6 @@ class TestModelToRecord:
         assert result.gmt_modified == now
 
 
-# ==================== insert_binding Tests ====================
-
-
 class TestInsertBinding:
     def test_insert_binding_returns_id(self, repository, mock_session):
         # DeviceBindingModel is created inside the method, so we patch __init__ to
@@ -279,9 +268,6 @@ class TestInsertBinding:
             assert call_kwargs["apply_reason"] is None
 
 
-# ==================== get_by_id Tests ====================
-
-
 class TestGetById:
     def test_found(self, repository, mock_session):
         model = _make_binding_model(id_val=1)
@@ -299,9 +285,6 @@ class TestGetById:
         result = repository.get_by_id(999)
 
         assert result is None
-
-
-# ==================== get_by_device_id Tests ====================
 
 
 class TestGetByDeviceId:
@@ -323,9 +306,6 @@ class TestGetByDeviceId:
         assert result is None
 
 
-# ==================== release_binding Tests ====================
-
-
 class TestReleaseBinding:
     def test_release_binding(self, repository, mock_session):
         repository.release_binding(
@@ -340,9 +320,6 @@ class TestReleaseBinding:
         assert call_args[1]["synchronize_session"] is False
 
 
-# ==================== update_status Tests ====================
-
-
 class TestUpdateStatus:
     def test_update_status(self, repository, mock_session):
         repository.update_status(binding_id=1, status="ACTIVE")
@@ -350,9 +327,6 @@ class TestUpdateStatus:
         mock_session.query.return_value.filter.return_value.update.assert_called_once_with(
             {"status": "ACTIVE"}, synchronize_session=False
         )
-
-
-# ==================== update_status_and_alive_at Tests ====================
 
 
 class TestUpdateStatusAndAliveAt:
@@ -365,9 +339,6 @@ class TestUpdateStatusAndAliveAt:
         assert update_dict["status"] == "ACTIVE"
         assert "last_alive_at" in update_dict
         assert call_args[1]["synchronize_session"] is False
-
-
-# ==================== list_bindings Tests ====================
 
 
 class TestListBindings:
@@ -438,9 +409,6 @@ class TestListBindings:
         q.order_by.return_value.offset.return_value.limit.assert_called_with(20)
 
 
-# ==================== list_bindings_by_providers Tests ====================
-
-
 class TestListBindingsByProviders:
     def test_empty_providers(self, repository, mock_session):
         total, items = repository.list_bindings_by_providers(providers=[])
@@ -475,9 +443,6 @@ class TestListBindingsByProviders:
         assert items == []
 
 
-# ==================== count_non_released_bindings Tests ====================
-
-
 class TestCountNonReleasedBindings:
     def test_returns_count(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.scalar.return_value = 3
@@ -496,9 +461,6 @@ class TestCountNonReleasedBindings:
         )
 
         assert result == 0
-
-
-# ==================== exists_device_id Tests ====================
 
 
 class TestExistsDeviceId:
@@ -524,9 +486,6 @@ class TestExistsDeviceId:
         assert result is False
 
 
-# ==================== get_released_binding Tests ====================
-
-
 class TestGetReleasedBinding:
     def test_found(self, repository, mock_session):
         model = _make_binding_model(id_val=1, status="RELEASED")
@@ -543,9 +502,6 @@ class TestGetReleasedBinding:
         result = repository.get_released_binding(device_id="dev-1")
 
         assert result is None
-
-
-# ==================== reuse_binding Tests ====================
 
 
 class TestReuseBinding:
@@ -585,9 +541,6 @@ class TestReuseBinding:
         assert update_dict["status"] == "ACTIVE"
 
 
-# ==================== delete_binding Tests ====================
-
-
 class TestDeleteBinding:
     def test_deleted(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
@@ -602,9 +555,6 @@ class TestDeleteBinding:
         result = repository.delete_binding(999)
 
         assert result is False
-
-
-# ==================== exists Tests ====================
 
 
 class TestExists:
@@ -630,9 +580,6 @@ class TestExists:
         assert result is False
 
 
-# ==================== list_bindings_by_id_asc Tests ====================
-
-
 class TestListBindingsByIdAsc:
     def test_returns_records(self, repository, mock_session):
         model1 = _make_binding_model(id_val=1)
@@ -643,7 +590,9 @@ class TestListBindingsByIdAsc:
             model2,
         ]
 
-        result = repository.list_bindings_by_id_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         assert len(result) == 2
         assert result[0].id == 1
@@ -652,7 +601,9 @@ class TestListBindingsByIdAsc:
     def test_empty_list(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_bindings_by_id_asc(limit=50)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=50
+        )
 
         assert result == []
 
@@ -663,13 +614,12 @@ class TestListBindingsByIdAsc:
             None,
         ]
 
-        result = repository.list_bindings_by_id_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         assert len(result) == 1
         assert result[0].id == 1
-
-
-# ==================== update_device_props_ttl Tests ====================
 
 
 class TestUpdateDevicePropsTtl:
@@ -685,9 +635,6 @@ class TestUpdateDevicePropsTtl:
         call_args = mock_session.query.return_value.filter.return_value.update.call_args
         assert call_args[1]["synchronize_session"] is False
         assert "device_props" in call_args[0][0]
-
-
-# ==================== get_binding_by_sandbox_id Tests ====================
 
 
 class TestGetBindingBySandboxId:
@@ -706,9 +653,6 @@ class TestGetBindingBySandboxId:
         result = repository.get_binding_by_sandbox_id(sandbox_id="nonexistent")
 
         assert result is None
-
-
-# ==================== get_binding_by_sandbox_id_like Tests ====================
 
 
 class TestGetBindingBySandboxIdLike:
@@ -731,9 +675,6 @@ class TestGetBindingBySandboxIdLike:
         )
 
         assert result is None
-
-
-# ==================== list_by_device_id Tests ====================
 
 
 class TestListByDeviceId:
@@ -770,94 +711,6 @@ class TestListByDeviceId:
         assert result == []
 
 
-# ==================== export_device_all Tests ====================
-
-
-class TestExportDeviceAll:
-    def test_returns_tuples(self, repository, mock_session):
-        # query returns rows of (entity_id, device_props)
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", '{"bolt_id": "b1", "sandbox_id": "sbx1"}'),
-            ("ent-2", '{"bolt_id": "b2", "sandbox_id": "sbx2"}'),
-        ]
-
-        result = repository.export_device_all()
-
-        assert len(result) == 2
-        assert result[0] == ("ent-1", "b1", "sbx1")
-        assert result[1] == ("ent-2", "b2", "sbx2")
-
-    def test_empty(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.export_device_all()
-
-        assert result == []
-
-    def test_invalid_json(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", "invalid-json"),
-        ]
-
-        result = repository.export_device_all()
-
-        assert len(result) == 1
-        assert result[0] == ("ent-1", "", "")
-
-    def test_dict_props(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", {"bolt_id": "b1", "sandbox_id": "sbx1"}),
-        ]
-
-        result = repository.export_device_all()
-
-        assert len(result) == 1
-        assert result[0] == ("ent-1", "b1", "sbx1")
-
-
-# ==================== export_device_list Tests ====================
-
-
-class TestExportDeviceList:
-    def test_returns_tuples(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", '{"bolt_id": "b1", "sandbox_id": "sbx1"}'),
-        ]
-
-        result = repository.export_device_list(env="pre")
-
-        assert len(result) == 1
-        assert result[0] == ("ent-1", "b1", "sbx1")
-
-    def test_empty(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
-
-        result = repository.export_device_list(env="prod")
-
-        assert result == []
-
-    def test_invalid_json(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", "bad-json"),
-        ]
-
-        result = repository.export_device_list(env="pre")
-
-        assert result == [("ent-1", "", "")]
-
-    def test_none_props(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            ("ent-1", None),
-        ]
-
-        result = repository.export_device_list(env="pre")
-
-        assert result == [("ent-1", "", "")]
-
-
-# ==================== update_device_props_ttl_by_paas_device_id Tests ====================
-
-
 class TestUpdateDevicePropsTtlByPaasDeviceId:
     def test_update(self, repository, mock_session):
         repository.update_device_props_ttl_by_paas_device_id(
@@ -872,9 +725,6 @@ class TestUpdateDevicePropsTtlByPaasDeviceId:
         assert "device_props" in call_args[0][0]
 
 
-# ==================== update_device_props_refresh_fail_count Tests ====================
-
-
 class TestUpdateDevicePropsRefreshFailCount:
     def test_update(self, repository, mock_session):
         repository.update_device_props_refresh_fail_count(
@@ -885,9 +735,6 @@ class TestUpdateDevicePropsRefreshFailCount:
         call_args = mock_session.query.return_value.filter.return_value.update.call_args
         assert call_args[1]["synchronize_session"] is False
         assert "device_props" in call_args[0][0]
-
-
-# ==================== list_active_sandboxes_with_bot Tests ====================
 
 
 class TestListActiveSandboxesWithBot:
@@ -1015,172 +862,6 @@ class TestListActiveSandboxesWithBot:
         assert mock_session.execute.call_count == 2
 
 
-# ==================== list_sandboxes_by_bot Tests ====================
-
-
-class TestListSandboxesByBot:
-    def test_bot_not_found(self, repository, mock_session):
-        bot_result = _make_execute_result(rows=None)
-        mock_session.execute.return_value = bot_result
-
-        bot_info, sandboxes = repository.list_sandboxes_by_bot(
-            bot_id="bot-1", entity_id="ent-1"
-        )
-
-        assert bot_info is None
-        assert sandboxes == []
-
-    def test_bot_found_no_device_id(self, repository, mock_session):
-        bot_row = [
-            "bot-1",
-            "MyBot",
-            "ACTIVE",
-            "engine1",
-            "ent-1",
-            "bot",
-            None,  # device_id is None
-            datetime.now(),
-            datetime.now(),
-        ]
-        bot_result = MagicMock()
-        bot_result.fetchone.return_value = bot_row
-        bot_result.fetchall.return_value = []
-        bot_result.scalar.return_value = None
-
-        mock_session.execute.return_value = bot_result
-
-        bot_info, sandboxes = repository.list_sandboxes_by_bot(
-            bot_id="bot-1", entity_id="ent-1"
-        )
-
-        assert bot_info is not None
-        assert bot_info["bot_id"] == "bot-1"
-        assert sandboxes == []
-
-    def test_bot_found_with_bindings(self, repository, mock_session):
-        bot_row = [
-            "bot-1",
-            "MyBot",
-            "ACTIVE",
-            "engine1",
-            "ent-1",
-            "bot",
-            "dev-1",
-            datetime.now(),
-            datetime.now(),
-        ]
-        binding_row = [
-            1,
-            "ent-1",
-            "bot",
-            "dev-1",
-            "arca",
-            "prod",
-            '{"sandbox_id": "sbx1"}',
-            "ACTIVE",
-            "test",
-            "user1",
-            None,
-            None,
-            None,
-            None,
-            datetime.now(),
-            datetime.now(),
-        ]
-
-        bot_result = MagicMock()
-        bot_result.fetchone.return_value = bot_row
-        bot_result.fetchall.return_value = [binding_row]
-        bot_result.scalar.return_value = None
-
-        mock_session.execute.return_value = bot_result
-
-        bot_info, sandboxes = repository.list_sandboxes_by_bot(
-            bot_id="bot-1", entity_id="ent-1"
-        )
-
-        assert bot_info is not None
-        assert bot_info["bot_id"] == "bot-1"
-        assert len(sandboxes) == 1
-        assert sandboxes[0].id == 1
-        assert sandboxes[0].device_props == {"sandbox_id": "sbx1"}
-
-    def test_bot_found_with_env_filter(self, repository, mock_session):
-        bot_row = [
-            "bot-1",
-            "MyBot",
-            "ACTIVE",
-            "engine1",
-            "ent-1",
-            "bot",
-            "dev-1",
-            datetime.now(),
-            datetime.now(),
-        ]
-
-        bot_result = MagicMock()
-        bot_result.fetchone.return_value = bot_row
-        bot_result.fetchall.return_value = []
-        bot_result.scalar.return_value = None
-
-        mock_session.execute.return_value = bot_result
-
-        bot_info, sandboxes = repository.list_sandboxes_by_bot(
-            bot_id="bot-1", entity_id="ent-1", env="prod"
-        )
-
-        assert bot_info is not None
-        assert sandboxes == []
-
-    def test_invalid_json_device_props(self, repository, mock_session):
-        bot_row = [
-            "bot-1",
-            "MyBot",
-            "ACTIVE",
-            "engine1",
-            "ent-1",
-            "bot",
-            "dev-1",
-            datetime.now(),
-            datetime.now(),
-        ]
-        binding_row = [
-            1,
-            "ent-1",
-            "bot",
-            "dev-1",
-            "arca",
-            "prod",
-            "invalid-json",
-            "ACTIVE",
-            "test",
-            "user1",
-            None,
-            None,
-            None,
-            None,
-            datetime.now(),
-            datetime.now(),
-        ]
-
-        bot_result = MagicMock()
-        bot_result.fetchone.return_value = bot_row
-        bot_result.fetchall.return_value = [binding_row]
-        bot_result.scalar.return_value = None
-
-        mock_session.execute.return_value = bot_result
-
-        bot_info, sandboxes = repository.list_sandboxes_by_bot(
-            bot_id="bot-1", entity_id="ent-1"
-        )
-
-        assert len(sandboxes) == 1
-        assert sandboxes[0].device_props == {}
-
-
-# ==================== list_all_active_bot_device Tests ====================
-
-
 class TestListAllActiveBotDevice:
     def test_returns_items(self, repository, mock_session):
         count_result = _make_execute_result(scalar_val=1)
@@ -1222,9 +903,6 @@ class TestListAllActiveBotDevice:
         assert mock_session.execute.call_count == 2
 
 
-# ==================== get_bot_binding Tests ====================
-
-
 class TestGetBotBinding:
     def test_found(self, repository, mock_session):
         row = ["bot-1", "ent-1", 1, "personal", "engine1", "ACTIVE", "arca"]
@@ -1254,380 +932,6 @@ class TestGetBotBinding:
         assert result is None
 
 
-# ==================== get_publish_binding Tests ====================
-
-
-class TestGetPublishBinding:
-    def test_validating_status(self, repository, mock_session):
-        row = ["42"]
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = row
-        mock_session.execute.return_value = result_mock
-
-        result = repository.get_publish_binding(
-            source_bot_id="bot-1", status="validating"
-        )
-
-        assert result == 42
-
-    def test_online_status(self, repository, mock_session):
-        row = ["99"]
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = row
-        mock_session.execute.return_value = result_mock
-
-        result = repository.get_publish_binding(source_bot_id="bot-1", status="success")
-
-        assert result == 99
-
-    def test_not_found(self, repository, mock_session):
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
-        mock_session.execute.return_value = result_mock
-
-        result = repository.get_publish_binding(
-            source_bot_id="bot-1", status="validating"
-        )
-
-        assert result is None
-
-    def test_row_zero_value(self, repository, mock_session):
-        row = [None]
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = row
-        mock_session.execute.return_value = result_mock
-
-        result = repository.get_publish_binding(
-            source_bot_id="bot-1", status="validating"
-        )
-
-        assert result is None
-
-
-# ==================== list_paas_device_by_bot_personal Tests ====================
-
-
-class TestListPaasDeviceByBotPersonal:
-    def test_no_active_binding(self, repository, mock_session):
-        result_mock = MagicMock()
-        result_mock.fetchone.return_value = None
-        result_mock.fetchall.return_value = []
-        mock_session.execute.return_value = result_mock
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert result == []
-
-    def test_arca_provider(self, repository, mock_session):
-        binding_row = ["arca"]
-        device_row = [
-            "sbx-1",  # paas_device_id
-            "arca",  # provider_type
-            "ACTIVE",  # status
-            "2026-01-01 00:00:00",  # ttl_expiration_time
-            1234567890,  # ttl_expiration_timestamp
-            0,  # refresh_fail_count
-        ]
-
-        binding_result = MagicMock()
-        binding_result.fetchone.return_value = binding_row
-
-        device_result = MagicMock()
-        device_result.fetchall.return_value = [device_row]
-
-        mock_session.execute.side_effect = [binding_result, device_result]
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert len(result) == 1
-        assert result[0]["paas_device_id"] == "sbx-1"
-        assert result[0]["provider_type"] == "arca"
-        assert result[0]["status"] == "ACTIVE"
-        assert result[0]["ttl_expiration_timestamp"] == 1234567890
-        assert result[0]["refresh_fail_count"] == 0
-        assert result[0]["source_table"] == "ac_binding"
-        assert result[0]["source_table_id"] == 1
-
-    def test_baas_provider(self, repository, mock_session):
-        binding_row = ["baas"]
-        baas_device_row = [
-            "uuid-1",  # device_uuid
-            "sbx-1",  # paas_device_id
-            "baas",  # provider_type
-            "ACTIVE",  # status
-            "2026-01-01 00:00:00",  # ttl_expiration_time
-            1234567890,  # ttl_expiration_timestamp
-            0,  # refresh_fail_count
-            10,  # source_table_id
-        ]
-
-        binding_result = MagicMock()
-        binding_result.fetchone.return_value = binding_row
-
-        baas_result = MagicMock()
-        baas_result.fetchall.return_value = [baas_device_row]
-
-        mock_session.execute.side_effect = [binding_result, baas_result]
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert len(result) == 1
-        assert result[0]["device_uuid"] == "uuid-1"
-        assert result[0]["paas_device_id"] == "sbx-1"
-        assert result[0]["provider_type"] == "baas"
-        assert result[0]["query_status"] == "personal"
-        assert result[0]["source_table"] == "baas_device"
-        assert result[0]["source_table_id"] == "10"
-
-    def test_arca_provider_ttl_timestamp_none(self, repository, mock_session):
-        binding_row = ["ARCA"]
-        device_row = [
-            "sbx-1",
-            "arca",
-            "ACTIVE",
-            "2026-01-01 00:00:00",
-            None,  # ttl_expiration_timestamp
-            None,  # refresh_fail_count
-        ]
-
-        binding_result = MagicMock()
-        binding_result.fetchone.return_value = binding_row
-
-        device_result = MagicMock()
-        device_result.fetchall.return_value = [device_row]
-
-        mock_session.execute.side_effect = [binding_result, device_result]
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert len(result) == 1
-        assert result[0]["ttl_expiration_timestamp"] is None
-        assert result[0]["refresh_fail_count"] == 0
-
-    def test_arca_provider_ttl_timestamp_float_string(self, repository, mock_session):
-        binding_row = ["arca"]
-        device_row = [
-            "sbx-1",
-            "arca",
-            "ACTIVE",
-            "2026-01-01 00:00:00",
-            "1234567890.0",  # float string
-            2,
-        ]
-
-        binding_result = MagicMock()
-        binding_result.fetchone.return_value = binding_row
-
-        device_result = MagicMock()
-        device_result.fetchall.return_value = [device_row]
-
-        mock_session.execute.side_effect = [binding_result, device_result]
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert len(result) == 1
-        assert result[0]["ttl_expiration_timestamp"] == 1234567890
-
-    def test_baas_provider_ttl_timestamp_none(self, repository, mock_session):
-        binding_row = ["BAAS"]
-        baas_device_row = [
-            "uuid-1",
-            "sbx-1",
-            "baas",
-            "ACTIVE",
-            "2026-01-01 00:00:00",
-            None,  # ttl_expiration_timestamp
-            None,  # refresh_fail_count
-            10,
-        ]
-
-        binding_result = MagicMock()
-        binding_result.fetchone.return_value = binding_row
-
-        baas_result = MagicMock()
-        baas_result.fetchall.return_value = [baas_device_row]
-
-        mock_session.execute.side_effect = [binding_result, baas_result]
-
-        result = repository.list_paas_device_by_bot_personal(
-            bot_id="bot-1", binding_id=1
-        )
-
-        assert len(result) == 1
-        assert result[0]["ttl_expiration_timestamp"] is None
-        assert result[0]["refresh_fail_count"] == 0
-
-
-# ==================== list_paas_device_by_bot_service Tests ====================
-
-
-class TestListPaasDeviceByBotService:
-    def test_draft_status(self, repository, mock_session):
-        # draft query returns rows via fetchall
-        draft_row = [
-            None,  # device_uuid
-            "sbx-1",  # paas_device_id
-            "arca",  # provider_type
-            "ACTIVE",  # status
-            "2026-01-01",  # ttl_expiration_time
-            1234567890,  # ttl_expiration_timestamp
-            "ac_binding",  # source_table
-            1,  # source_table_id
-            0,  # refresh_fail_count
-        ]
-        result_mock = MagicMock()
-        result_mock.fetchall.return_value = [draft_row]
-        mock_session.execute.return_value = result_mock
-
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=["draft"]
-        )
-
-        assert len(result) == 1
-        assert result[0]["paas_device_id"] == "sbx-1"
-        assert result[0]["query_status"] == "draft"
-        assert result[0]["source_table"] == "ac_binding"
-
-    def test_validating_status(self, repository, mock_session):
-        validating_row = [
-            "uuid-1",
-            "sbx-1",
-            "baas",
-            "ACTIVE",
-            "2026-01-01",
-            1234567890,
-            "baas_device",
-            10,
-            0,
-        ]
-        result_mock = MagicMock()
-        result_mock.fetchall.return_value = [validating_row]
-        mock_session.execute.return_value = result_mock
-
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=["validating"]
-        )
-
-        assert len(result) == 1
-        assert result[0]["query_status"] == "validating"
-        assert result[0]["source_table"] == "baas_device"
-
-    def test_online_status(self, repository, mock_session):
-        online_row = [
-            "uuid-1",
-            "sbx-1",
-            "baas",
-            "ACTIVE",
-            "2026-01-01",
-            1234567890,
-            "baas_device",
-            10,
-            0,
-        ]
-        result_mock = MagicMock()
-        result_mock.fetchall.return_value = [online_row]
-        mock_session.execute.return_value = result_mock
-
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=["online"]
-        )
-
-        assert len(result) == 1
-        assert result[0]["query_status"] == "online"
-
-    def test_unknown_status_skipped(self, repository, mock_session):
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=["unknown_status"]
-        )
-
-        assert result == []
-
-    def test_multiple_statuses(self, repository, mock_session):
-        draft_row = [
-            None,
-            "sbx-1",
-            "arca",
-            "ACTIVE",
-            "2026-01-01",
-            1234567890,
-            "ac_binding",
-            1,
-            0,
-        ]
-        validating_row = [
-            "uuid-1",
-            "sbx-2",
-            "baas",
-            "ACTIVE",
-            "2026-01-01",
-            1234567890,
-            "baas_device",
-            10,
-            0,
-        ]
-
-        draft_result = MagicMock()
-        draft_result.fetchall.return_value = [draft_row]
-        validating_result = MagicMock()
-        validating_result.fetchall.return_value = [validating_row]
-
-        mock_session.execute.side_effect = [draft_result, validating_result]
-
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1",
-            entity_id="ent-1",
-            statuses=["draft", "validating"],
-        )
-
-        assert len(result) == 2
-        assert result[0]["query_status"] == "draft"
-        assert result[1]["query_status"] == "validating"
-
-    def test_empty_statuses(self, repository, mock_session):
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=[]
-        )
-
-        assert result == []
-
-    def test_ttl_timestamp_none(self, repository, mock_session):
-        draft_row = [
-            None,
-            "sbx-1",
-            "arca",
-            "ACTIVE",
-            "2026-01-01",
-            None,
-            "ac_binding",
-            1,
-            None,
-        ]
-        result_mock = MagicMock()
-        result_mock.fetchall.return_value = [draft_row]
-        mock_session.execute.return_value = result_mock
-
-        result = repository.list_paas_device_by_bot_service(
-            bot_id="bot-1", entity_id="ent-1", statuses=["draft"]
-        )
-
-        assert len(result) == 1
-        assert result[0]["ttl_expiration_timestamp"] is None
-        assert result[0]["refresh_fail_count"] == 0
-
-
-# ==================== update_baas_device_ttl Tests ====================
-
-
 class TestUpdateBaasDeviceTtl:
     def test_update(self, repository, mock_session):
         repository.update_baas_device_ttl(
@@ -1642,202 +946,3 @@ class TestUpdateBaasDeviceTtl:
         assert params["device_uuid"] == "uuid-1"
         assert params["ttl_expiration_time"] == "2026-01-01 00:00:00"
         assert params["ttl_expiration_timestamp"] == 1234567890
-
-
-# ==================== update_baas_device_ttl_by_id Tests ====================
-
-
-class TestUpdateBaasDeviceTtlById:
-    def test_update(self, repository, mock_session):
-        repository.update_baas_device_ttl_by_id(
-            baas_device_id=1,
-            ttl_expiration_time="2026-01-01 00:00:00",
-            ttl_expiration_timestamp=1234567890,
-            refresh_fail_count=2,
-        )
-
-        mock_session.execute.assert_called_once()
-        call_args = mock_session.execute.call_args
-        params = call_args[0][1]
-        assert params["baas_device_id"] == 1
-        assert params["ttl_expiration_time"] == "2026-01-01 00:00:00"
-        assert params["ttl_expiration_timestamp"] == 1234567890
-        assert params["refresh_fail_count"] == 2
-
-    def test_default_refresh_fail_count(self, repository, mock_session):
-        repository.update_baas_device_ttl_by_id(
-            baas_device_id=1,
-            ttl_expiration_time="2026-01-01 00:00:00",
-            ttl_expiration_timestamp=1234567890,
-        )
-
-        call_args = mock_session.execute.call_args
-        params = call_args[0][1]
-        assert params["refresh_fail_count"] == 0
-
-
-# ==================== update_baas_device_refresh_fail_count_by_id Tests ====================
-
-
-class TestUpdateBaasDeviceRefreshFailCountById:
-    def test_update(self, repository, mock_session):
-        repository.update_baas_device_refresh_fail_count_by_id(
-            baas_device_id=1, refresh_fail_count=5
-        )
-
-        mock_session.execute.assert_called_once()
-        call_args = mock_session.execute.call_args
-        params = call_args[0][1]
-        assert params["baas_device_id"] == 1
-        assert params["refresh_fail_count"] == 5
-
-
-# ==================== get_baas_device_by_id Tests ====================
-
-
-class TestGetBaasDeviceById:
-    def test_found(self, repository, mock_session):
-        device = _make_device_model(id_val=1)
-        mock_session.query.return_value.filter.return_value.first.return_value = device
-
-        result = repository.get_baas_device_by_id(baas_device_id=1)
-
-        assert result is not None
-        assert result["id"] == 1
-        assert result["tenant"] == "tenant-1"
-        assert result["env"] == "prod"
-        assert result["status"] == "ACTIVE"
-        assert result["provider_type"] == "ARCA"
-        assert result["provider_device_id"] == "sbx-001"
-        assert result["is_deleted"] == 0
-
-    def test_not_found(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        result = repository.get_baas_device_by_id(baas_device_id=999)
-
-        assert result is None
-
-
-# ==================== list_baas_devices_active_paginated Tests ====================
-
-
-class TestListBaasDevicesActivePaginated:
-    def test_returns_items(self, repository, mock_session):
-        device1 = _make_device_model(id_val=1)
-        device2 = _make_device_model(id_val=2)
-
-        # The query chain: query -> filter -> count() and query -> filter -> order_by -> offset -> limit -> all()
-        q = mock_session.query.return_value
-        q.filter.return_value.count.return_value = 2
-        q.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [
-            device1,
-            device2,
-        ]
-
-        total, items = repository.list_baas_devices_active_paginated(
-            env="prod", page=1, page_size=20
-        )
-
-        assert total == 2
-        assert len(items) == 2
-        assert items[0]["id"] == 1
-        assert items[1]["id"] == 2
-
-    def test_empty(self, repository, mock_session):
-        q = mock_session.query.return_value
-        q.filter.return_value.count.return_value = 0
-        q.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
-
-        total, items = repository.list_baas_devices_active_paginated(
-            env="prod", page=1, page_size=20
-        )
-
-        assert total == 0
-        assert items == []
-
-    def test_pagination(self, repository, mock_session):
-        q = mock_session.query.return_value
-        q.filter.return_value.count.return_value = 50
-        q.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
-
-        total, items = repository.list_baas_devices_active_paginated(
-            env="prod", page=3, page_size=10
-        )
-
-        assert total == 50
-        # offset should be (3-1)*10 = 20
-        q.filter.return_value.order_by.return_value.offset.assert_called_with(20)
-        q.filter.return_value.order_by.return_value.offset.return_value.limit.assert_called_with(
-            10
-        )
-
-
-# ==================== list_baas_devices_by_id_asc Tests ====================
-
-
-class TestListBaasDevicesByIdAsc:
-    def test_returns_dicts(self, repository, mock_session):
-        device1 = _make_device_model(id_val=1, provider_device_id="sbx-001")
-        device2 = _make_device_model(id_val=2, provider_device_id="sbx-002")
-
-        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            device1,
-            device2,
-        ]
-
-        result = repository.list_baas_devices_by_id_asc(limit=100)
-
-        assert len(result) == 2
-        assert result[0]["id"] == 1
-        assert result[0]["provider_device_id"] == "sbx-001"
-        assert result[1]["id"] == 2
-
-    def test_empty(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-
-        result = repository.list_baas_devices_by_id_asc(limit=50)
-
-        assert result == []
-
-    def test_result_has_expected_keys(self, repository, mock_session):
-        device = _make_device_model(id_val=10, tenant="test-tenant", env="pre")
-        mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            device
-        ]
-
-        result = repository.list_baas_devices_by_id_asc(limit=10)
-
-        assert len(result) == 1
-        expected_keys = {
-            "id",
-            "tenant",
-            "env",
-            "status",
-            "provider_type",
-            "provider_device_id",
-            "provider_device_props",
-            "is_deleted",
-        }
-        assert set(result[0].keys()) == expected_keys
-
-
-# ==================== update_baas_device_status_by_id Tests ====================
-
-
-class TestUpdateBaasDeviceStatusById:
-    def test_update(self, repository, mock_session):
-        repository.update_baas_device_status_by_id(baas_device_id=1, status="INACTIVE")
-
-        mock_session.query.return_value.filter.return_value.update.assert_called_once_with(
-            {"status": "INACTIVE", "modifier": "system"}, synchronize_session=False
-        )
-
-    def test_update_with_custom_modifier(self, repository, mock_session):
-        repository.update_baas_device_status_by_id(
-            baas_device_id=1, status="ACTIVE", modifier="admin"
-        )
-
-        mock_session.query.return_value.filter.return_value.update.assert_called_once_with(
-            {"status": "ACTIVE", "modifier": "admin"}, synchronize_session=False
-        )

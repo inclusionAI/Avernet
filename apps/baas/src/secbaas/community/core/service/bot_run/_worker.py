@@ -246,8 +246,12 @@ class BotRequestWorker:
         - RUNNING 且心跳过期（owner 已 down）：写结果终态 + force_done；
           RUNNING 但心跳正常（owner 还活着，含本机）→ 跳过。
         """
-        records = self._queue.scan_timeout()
+        records = self._queue.list_unfinished()
+        now = datetime.now()
         for record in records:
+            deadline = self._record_deadline(record)
+            if deadline is None or now <= deadline:
+                continue
             if record.status == "RUNNING":
                 if not self._is_heartbeat_stale(record):
                     # owner 还活着（含本机），由各自 guardian 处理超时
@@ -410,17 +414,18 @@ class BotRequestWorker:
                     bot_id,
                 )
                 continue
-            # 全局并发上限由队列层按 RUNNING 在途数强制（claim 时校验 max_running），
-            # 跨进程生效；这里只受本机 max_concurrent 与该 bot 全局在途数约束。
+            # RUNNING 计数是准入参考，不是严格跨进程原子配额。
+            # 计数调用已归还连接后再决定是否出队；原子认领仍由 Repo 保证。
             # 尽量多地从该 bot 排空 PENDING（不同请求可并行），避免高并发 bot
             # 被 poll 周期卡成瓶颈。
             claimed_here = 0
             while self._active < self._config.max_concurrent:
+                if self._queue.count_running_by_bot(bot_id) >= max_running:
+                    break
                 record = self._queue.claim_pending_by_bot(
                     bot_id,
                     self._worker_id,
                     candidates=self._config.candidates_per_bot,
-                    max_running=max_running,
                 )
                 if record is None:
                     break  # 已无可认领的 PENDING，或已达该 bot 全局并发上限
@@ -553,7 +558,7 @@ class BotRequestWorker:
 
     @staticmethod
     def _record_deadline(record: BotRunQueueRecord) -> datetime | None:
-        """按 ``gmt_create + meta.timeout`` 计算执行截止时间（与 scan_timeout 同源）。
+        """按 ``gmt_create + meta.timeout`` 计算执行截止时间（全局扫描与本机 guardian 共用）。
 
         无 meta.timeout 或 gmt_create 缺失时返回 None（不设 deadline，只做心跳）。
         """
@@ -573,6 +578,8 @@ class BotRequestWorker:
             release_result = self._queue.release_to_pending(
                 record.run_id, self._worker_id
             )
+            if release_result == 0:
+                self._log_queue_write_noop("release", record.run_id)
         except Exception as release_error:
             logger.warning(
                 "[BotRequestWorker] release_to_pending raised run_id=%s err=%s",
@@ -599,12 +606,28 @@ class BotRequestWorker:
             )
             return
         if result == 0:
-            logger.info(
-                "[BotRequestWorker] mark_done no-op (already PENDING/DONE) "
-                "run_id=%s result=%s",
-                record.run_id,
-                result,
+            self._log_queue_write_noop("mark_done", record.run_id)
+
+    def _log_queue_write_noop(self, action: str, run_id: str) -> None:
+        """写事务已结束；独立短读只用于诊断，不能影响写结果或触发重试。"""
+        try:
+            current = self._queue.get_by_run_id(run_id)
+        except Exception:
+            logger.warning(
+                "[BotRequestWorker] %s run_id=%s updated=0 diagnostic read failed",
+                action,
+                run_id,
+                exc_info=True,
             )
+            return
+        logger.warning(
+            "[bot-run-queue:%s] run_id=%s worker=%s updated=0 cur_status=%s "
+            "(expected RUNNING owned by worker; diagnostic observes later state)",
+            action,
+            run_id,
+            self._worker_id,
+            current.status if current else "NOT_FOUND",
+        )
 
     async def _post_run(
         self,

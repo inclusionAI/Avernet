@@ -24,6 +24,7 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
         self,
         *,
         source_bot_id: str,
+        binding_key: str,
         status: str = "success",
         owner_id: str | None = None,
         env: str | None = None,
@@ -37,7 +38,7 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
         """Query binding_id from ac_bot_publish ext JSON for service bots.
 
         Reads ext JSON column and extracts binding.{online, verify}.id
-        depending on the status value.
+        using the JSON projection key explicitly selected by the Service.
         """
         import json
 
@@ -66,7 +67,6 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
             ext = json.loads(ext_text) if isinstance(ext_text, str) else ext_text
             binding_info = ext.get("binding", {})
 
-            binding_key = "verify" if status == "validating" else "online"
             raw = binding_info.get(binding_key)
             result = int(raw) if raw is not None else None
             log.info("[ac-bot-publish:get_binding_id] result: %s", result)
@@ -80,6 +80,7 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
         self,
         *,
         source_bot_id: str,
+        binding_key: str,
         status: str = "success",
         owner_id: str | None = None,
         env: str | None = None,
@@ -92,6 +93,7 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
 
         Args:
             source_bot_id: 原始 bot_id
+            binding_key: binding JSON 子键，由调用方选择（如 verify/online）
             status: 发布状态（validating/success）
             owner_id: 所有者 ID
             env: 环境参数，可选
@@ -132,7 +134,6 @@ class OrmAcBotPublishRepository(OrmConnectionMixin, AcBotPublishRepository):
                 ext = json.loads(ext_text) if isinstance(ext_text, str) else ext_text
                 binding_info = ext.get("binding", {})
 
-                binding_key = "verify" if status == "validating" else "online"
                 raw = binding_info.get(binding_key)
                 if raw is not None:
                     bid = int(raw)

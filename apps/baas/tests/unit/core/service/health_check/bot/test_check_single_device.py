@@ -26,6 +26,7 @@ def _make_service(health_provider_factory=None):
         device_repo=MagicMock(),
         paas_facade=MagicMock(),
         config=BotHealthCheckerConfig(),
+        query_service=MagicMock(),
         health_provider_factory=health_provider_factory or MagicMock(),
     )
 

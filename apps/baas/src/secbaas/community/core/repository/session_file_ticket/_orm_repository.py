@@ -7,35 +7,10 @@ from secbaas.community.logger import get_logger
 from ._orm_model import SessionFileTicketModel
 from ._protocol import (
     SessionTicketRepository,
-    TransferNotFoundError,
-    TransferStateConflictError,
 )
 from ._record import SessionTicketRecord
 
 log = get_logger("orm")
-
-# Upload path:  CREATED -> UPLOADING -> DONE  (fast: CREATED -> DONE)
-# Cancel path:  CREATED/UPLOADING -> CANCELLED
-# Failure path: UPLOADING -> FAILED
-# Delete path:  DONE/FAILED/CANCELLED -> DELETED
-# Same-state:   idempotent no-op
-VALID_TRANSITIONS = frozenset(
-    {
-        # Upload path
-        ("CREATED", "UPLOADING"),
-        ("UPLOADING", "DONE"),
-        ("CREATED", "DONE"),  # Session complete_upload fast path (no device pull)
-        # Cancel path
-        ("CREATED", "CANCELLED"),
-        ("UPLOADING", "CANCELLED"),
-        # Failure path
-        ("UPLOADING", "FAILED"),
-        # Delete path (terminal states -> DELETED)
-        ("DONE", "DELETED"),
-        ("FAILED", "DELETED"),
-        ("CANCELLED", "DELETED"),
-    }
-)
 
 
 class OrmSessionTicketRepository(OrmConnectionMixin, SessionTicketRepository):
@@ -103,58 +78,33 @@ class OrmSessionTicketRepository(OrmConnectionMixin, SessionTicketRepository):
         return records
 
     @with_orm_session
-    def update_status(
+    def compare_and_set_status(
         self,
         transfer_id: str,
         new_status: str,
         error_message: str | None = None,
-    ) -> None:
-        log.info(
-            "update_status: transfer_id=%s, new_status=%s", transfer_id, new_status
-        )
+        *,
+        expected_statuses: frozenset[str],
+    ) -> int:
+        """One conditional write; transition policy belongs to the service.
+
+        Return the driver's affected-row count. No fallback SELECT is executed
+        while this UPDATE's connection/locks are held.
+        """
         from sqlalchemy import func
 
-        env = get_current_env()
-        # CAS-style atomic UPDATE: only modify the row if its current
-        # status is one of the allowed source states for new_status
-        # (plus new_status itself -- same-state is idempotent).
-        allowed_current = {new_status} | {
-            src for (src, dst) in VALID_TRANSITIONS if dst == new_status
-        }
-        update_kwargs = {
-            "status": new_status,
-            "gmt_modified": func.now(),
-        }
+        update_kwargs = {"status": new_status, "gmt_modified": func.now()}
         if error_message is not None:
             update_kwargs["error_message"] = error_message
-        result = (
+        return (
             self._session.query(SessionFileTicketModel)
             .filter(
                 SessionFileTicketModel.transfer_id == transfer_id,
-                SessionFileTicketModel.env == env,
-                SessionFileTicketModel.status.in_(allowed_current),
+                SessionFileTicketModel.env == get_current_env(),
+                SessionFileTicketModel.status.in_(expected_statuses),
             )
             .update(update_kwargs, synchronize_session=False)
         )
-        if result == 0:
-            # Either ticket not found or invalid transition -- distinguish
-            # via a fallback query for the error message.
-            row = (
-                self._session.query(SessionFileTicketModel)
-                .filter(
-                    SessionFileTicketModel.transfer_id == transfer_id,
-                    SessionFileTicketModel.env == env,
-                )
-                .first()
-            )
-            if row is None:
-                raise TransferNotFoundError(transfer_id)
-            else:
-                raise TransferStateConflictError(
-                    f"Cannot transition from {row.status} to {new_status}: "
-                    "ticket is in a conflicting or terminal state."
-                )
-        log.info("[session-file:update_status] result: done")
 
     @with_orm_session
     def get_by_transfer_id(

@@ -5,6 +5,7 @@ Implements ZDAS sync SQL pattern with soft-delete support per D-04.
 Includes list_by_bot_id with JOIN to baas_bot_device_rel table.
 """
 
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from ._record import DeviceRecord
@@ -208,8 +209,8 @@ class DeviceRepository(Protocol):
         *,
         last_id: int = 0,
         limit: int = 100,
-        grace_seconds: int = 0,
-        default_ttl_minutes: int = 10080,
+        due_before: datetime,
+        default_ttl_minutes: int,
     ) -> list[dict[str, Any]]:
         """查询 baas_device 中已到期的 ACK pod 设备，按 id ASC keyset 分页。
 

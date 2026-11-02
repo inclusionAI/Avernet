@@ -145,12 +145,14 @@ class OrmPublishBatchRepository(OrmConnectionMixin, PublishBatchRepository):
         log.info("[publish-batch:list_by_publish_id] result: %s rows", len(items))
         return items
 
-    @with_orm_session
     def list_by_publish_and_stage(
         self, publish_id: int, tenant: str, env: str, stage: str
     ) -> list[PublishBatchRecord]:
-        all_batches = self.list_by_publish_id(publish_id, tenant, env)
-        return [b for b in all_batches if b.stage == stage]
+        # stage is a record projection of extra_config, not a table column.
+        # This query facade must not open an outer Session: the single read
+        # finishes before projecting/filtering the detached records.
+        batches = self.list_by_publish_id(publish_id, tenant, env)
+        return [batch for batch in batches if batch.stage == stage]
 
     @with_orm_session
     def soft_delete(

@@ -59,7 +59,9 @@ class TestGetBindingIds:
             row
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [42]
 
@@ -72,7 +74,9 @@ class TestGetBindingIds:
             row_1,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200, 100]
 
@@ -87,14 +91,18 @@ class TestGetBindingIds:
             row_1,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200, 100]  # 100 appears once, deduped
 
     def test_returns_empty_list_when_no_rows(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == []
 
@@ -105,7 +113,10 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-001", status="success", owner_id="entity-001"
+            source_bot_id="bot-001",
+            status="success",
+            owner_id="entity-001",
+            binding_key="online",
         )
 
         assert result == [99]
@@ -122,7 +133,7 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-001", status="success", env="pre"
+            source_bot_id="bot-001", status="success", env="pre", binding_key="online"
         )
 
         assert result == [99]
@@ -134,7 +145,7 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-002", status="validating"
+            source_bot_id="bot-002", status="validating", binding_key="verify"
         )
 
         assert result == [77]
@@ -145,7 +156,9 @@ class TestGetBindingIds:
             row
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-003", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-003", status="success", binding_key="online"
+        )
 
         assert result == [88]
 
@@ -159,7 +172,9 @@ class TestGetBindingIds:
             invalid_row,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [100]
 
@@ -172,7 +187,9 @@ class TestGetBindingIds:
             row_no_key,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200]
 
@@ -187,7 +204,9 @@ class TestGetBindingIds:
         rows[1].ext = "bad-json"  # invalid JSON
         mock_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = rows
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [300, 400]
 
@@ -201,7 +220,9 @@ class TestGetBindingIds:
             row_str,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [500]
 
@@ -214,7 +235,9 @@ class TestGetBindingIds:
             row_null,
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [600]
 
@@ -226,14 +249,18 @@ class TestGetBindingIdStillWorks:
         row = _make_orm_row(ext={"binding": {"online": "42"}})
         mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = row
 
-        result = repository.get_binding_id(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_id(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == 42
 
     def test_returns_none_when_no_row(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
 
-        result = repository.get_binding_id(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_id(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result is None
 
@@ -242,7 +269,24 @@ class TestGetBindingIdStillWorks:
         mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = row
 
         result = repository.get_binding_id(
-            source_bot_id="bot-001", status="success", env="prod"
+            source_bot_id="bot-001", status="success", env="prod", binding_key="online"
         )
 
         assert result == 42
+
+
+@pytest.mark.parametrize(
+    "method,suffix", [("get_binding_id", "first"), ("get_binding_ids", "all")]
+)
+def test_projection_key_is_not_inferred_from_status(
+    repository, mock_session, method, suffix
+):
+    row = _make_orm_row(ext={"binding": {"verify": "10", "online": "20"}})
+    result_query = (
+        mock_session.query.return_value.filter.return_value.order_by.return_value
+    )
+    getattr(result_query, suffix).return_value = row if suffix == "first" else [row]
+    result = getattr(repository, method)(
+        source_bot_id="bot-1", status="validating", binding_key="online"
+    )
+    assert result == (20 if suffix == "first" else [20])

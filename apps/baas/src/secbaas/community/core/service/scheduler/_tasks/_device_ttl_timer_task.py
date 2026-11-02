@@ -18,7 +18,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from secbaas.community.core.repository.device_binding import DeviceBindingRepository
@@ -400,7 +400,11 @@ class DeviceTtlTimerTask:
             for attempt in range(1, self._config.query_retries + 1):
                 try:
                     rows = self._binding_repo.list_bindings_by_id_asc(
-                        last_id=last_id, limit=effective_batch
+                        due_before=(datetime.now() + timedelta(hours=24)).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        last_id=last_id,
+                        limit=effective_batch,
                     )
                     break
                 except Exception as e:
@@ -471,7 +475,11 @@ class DeviceTtlTimerTask:
             for attempt in range(1, self._config.query_retries + 1):
                 try:
                     rows = self._binding_repo.list_baas_devices_by_id_asc(
-                        last_id=last_id, limit=effective_batch
+                        due_before=(datetime.now() + timedelta(hours=24)).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        last_id=last_id,
+                        limit=effective_batch,
                     )
                     break
                 except Exception as e:

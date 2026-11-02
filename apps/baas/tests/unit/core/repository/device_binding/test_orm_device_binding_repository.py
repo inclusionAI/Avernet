@@ -145,7 +145,9 @@ class TestOrmListBindingsByIdAsc:
             model2,
         ]
 
-        result = repository.list_bindings_by_id_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         assert len(result) == 2
         assert isinstance(result[0], DeviceBindingRecord)
@@ -155,7 +157,9 @@ class TestOrmListBindingsByIdAsc:
     def test_returns_empty_list(self, repository, mock_database, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_bindings_by_id_asc(limit=50)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=50
+        )
 
         assert result == []
 
@@ -166,7 +170,9 @@ class TestOrmListBindingsByIdAsc:
             None,
         ]
 
-        result = repository.list_bindings_by_id_asc(limit=100)
+        result = repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         assert len(result) == 1
         assert result[0].id == 1
@@ -192,7 +198,9 @@ class TestOrmListBaasDevicesByIdAsc:
             device2,
         ]
 
-        result = repository.list_baas_devices_by_id_asc(limit=100)
+        result = repository.list_baas_devices_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=100
+        )
 
         assert len(result) == 2
         assert isinstance(result[0], dict)
@@ -203,7 +211,9 @@ class TestOrmListBaasDevicesByIdAsc:
     def test_returns_empty_list(self, repository, mock_database, mock_session):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
 
-        result = repository.list_baas_devices_by_id_asc(limit=50)
+        result = repository.list_baas_devices_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=50
+        )
 
         assert result == []
 
@@ -221,7 +231,9 @@ class TestOrmListBaasDevicesByIdAsc:
             device
         ]
 
-        result = repository.list_baas_devices_by_id_asc(limit=10)
+        result = repository.list_baas_devices_by_id_asc(
+            due_before="2099-01-01 00:00:00", limit=10
+        )
 
         assert len(result) == 1
         expected_keys = {
@@ -247,7 +259,9 @@ class TestOrmKeysetCursorPredicate:
         self, repository, mock_database, mock_session
     ):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        repository.list_bindings_by_id_asc(last_id=99, limit=100)
+        repository.list_bindings_by_id_asc(
+            due_before="2099-01-01 00:00:00", last_id=99, limit=100
+        )
         filter_args = self._captured_filter(mock_session).call_args.args
         sql = " ".join(str(a) for a in filter_args)
         assert ">" in sql  # id > last_id cursor
@@ -258,7 +272,9 @@ class TestOrmKeysetCursorPredicate:
         self, repository, mock_database, mock_session
     ):
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        repository.list_baas_devices_by_id_asc(last_id=7, limit=50)
+        repository.list_baas_devices_by_id_asc(
+            due_before="2099-01-01 00:00:00", last_id=7, limit=50
+        )
         sql = " ".join(
             str(a) for a in self._captured_filter(mock_session).call_args.args
         )

@@ -121,6 +121,12 @@ def _insert_publish_row(
         creator="test_user",
         modifier="test_user",
         extra_config=extra_config,
+        name="Publish-" + publish_type,
+        publisher="test_user",
+        replica_desired=1,
+        batch_capacity=5,
+        batch_number=1,
+        cooldown_seconds=0,
     )
     if with_batch:
         _batch_repo().insert_batch(

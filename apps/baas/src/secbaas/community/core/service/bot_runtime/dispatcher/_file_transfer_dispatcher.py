@@ -30,6 +30,9 @@ from secbaas.community.api.bot_runtime import (
 from secbaas.community.api.session_file_sharing import (
     SessionFileTransferProxyUnavailableError,
 )
+from secbaas.community.core.service.file_transfer import (
+    update_ticket_status,
+)
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
@@ -558,7 +561,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 )
 
         try:
-            self._ticket_repo.update_status(transfer_id, "UPLOAD_COMPLETED")
+            update_ticket_status(self._ticket_repo, transfer_id, "UPLOAD_COMPLETED")
         except TransferStateConflictError:
             # CAS failed — the poller may have already processed this ticket
             # between our read and the CAS.  Re-read and return success if the
@@ -654,7 +657,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         # WR-01: CAS-aware status update with TransferStateConflictError
         # recovery — same pattern as dispatch_complete_upload (CR-02).
         try:
-            self._ticket_repo.update_status(transfer_id, "CANCELLED")
+            update_ticket_status(self._ticket_repo, transfer_id, "CANCELLED")
         except TransferStateConflictError:
             ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
             if ticket is not None:
@@ -749,7 +752,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         # CAS-aware status update — a concurrent delete may have already
         # transitioned this ticket.
         try:
-            self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
+            update_ticket_status(self._ticket_repo, ticket.transfer_id, "DELETED")
         except TransferStateConflictError:
             ticket = self._ticket_repo.get_by_transfer_id(
                 ticket.transfer_id, tenant=tenant

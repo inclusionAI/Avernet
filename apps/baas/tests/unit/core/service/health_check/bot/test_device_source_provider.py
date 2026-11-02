@@ -67,7 +67,9 @@ class TestDeviceSourceProviderBase:
                     details=[],
                 )
 
-        return TestProvider(mock_binding_repo, mock_facade, config)
+        return TestProvider(
+            mock_binding_repo, mock_facade, config, query_service=mock_binding_repo
+        )
 
     # --- _should_extend_ttl tests ---
 

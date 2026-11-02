@@ -5,10 +5,10 @@ Uses fake stub-upload:// and stub-download:// URLs so tests can inject
 and extract file content without a real OSS instance.
 
 Protocol methods (matching secbaas.spi.file_transfer.FileTransferBackend):
-- generate_upload_url(staging_path, expire_seconds) -> str
+- generate_upload_url(staging_path, expire_seconds, content_type=None) -> str
 - check_object_exists(staging_path) -> bool
-- generate_download_url(staging_path, expire_seconds) -> str
-- initiate_multipart_upload(staging_path, expire_seconds, part_count=2) -> MultipartSession
+- generate_download_url(staging_path, expire_seconds, response_params=None) -> str
+- initiate_multipart_upload(staging_path, expire_seconds, part_count=2, content_type=None) -> MultipartSession
 - list_parts(staging_path, session_id) -> list[PartInfo]
 - complete_multipart_upload(staging_path, session_id, parts) -> None
 - abort_multipart_upload(staging_path, session_id) -> None
@@ -56,7 +56,12 @@ class StubFileTransferBackend(FileTransferBackend):
 
     # ── Protocol methods ────────────────────────────────────────────
 
-    def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_upload_url(
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        content_type: str | None = None,
+    ) -> str:
         """Generate a fake presigned PUT URL for the given staging path.
 
         Args:
@@ -81,7 +86,12 @@ class StubFileTransferBackend(FileTransferBackend):
         transfer_id = self._extract_transfer_id(staging_path)
         return transfer_id in self._storage
 
-    def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_download_url(
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        response_params: dict[str, str] | None = None,
+    ) -> str:
         """Generate a fake presigned GET URL for the given staging path.
 
         Args:
@@ -101,6 +111,7 @@ class StubFileTransferBackend(FileTransferBackend):
         staging_path: str,
         expire_seconds: int,
         part_count: int = 2,
+        content_type: str | None = None,
     ) -> MultipartSession:
         """Initiate a stub multipart upload session.
 
@@ -236,7 +247,7 @@ class StubFileTransferBackend(FileTransferBackend):
         Args:
             key: Full storage key to delete.
         """
-        self._storage.pop(key, None)
+        self._storage.pop(self._extract_transfer_id(key), None)
 
     # ── Test helper methods ─────────────────────────────────────────
 
@@ -336,6 +347,19 @@ class StubFileTransferBackend(FileTransferBackend):
         root = self._staging_root_path
         subdir_part = f"{subdir}/" if subdir else ""
         return f"{root}/{tenant}/{subdir_part}{transfer_id}/{filename}"
+
+    def build_session_staging_path(
+        self,
+        tenant: str,
+        session_id: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct a Session-scoped key using the backend protocol layout."""
+        root = self._staging_root_path
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{root}/{tenant}/{session_id}/{subdir_part}{transfer_id}/{filename}"
 
     def build_staging_prefix(
         self,

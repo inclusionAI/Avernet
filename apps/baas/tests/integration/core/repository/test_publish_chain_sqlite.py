@@ -52,6 +52,12 @@ def _create_publish(bot_id: int) -> int:
         status="PENDING",
         creator="test_user",
         modifier="test_user",
+        name="Publish-CREATE",
+        publisher="test_user",
+        replica_desired=1,
+        batch_capacity=5,
+        batch_number=1,
+        cooldown_seconds=0,
     )
 
 

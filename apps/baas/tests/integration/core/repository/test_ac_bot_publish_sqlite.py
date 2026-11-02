@@ -25,7 +25,7 @@ class TestAcBotPublishSqliteOrmEquivalence:
             get_container().repository.ac_bot_publish_repository()
         )
         result = repo.get_binding_id(
-            source_bot_id=f"nonexistent_bot_{_generate_uuid()}"
+            source_bot_id=f"nonexistent_bot_{_generate_uuid()}", binding_key="online"
         )
         assert result is None
 
@@ -34,6 +34,7 @@ class TestAcBotPublishSqliteOrmEquivalence:
         result = repo.get_binding_id(
             source_bot_id=f"nonexistent_bot_{_generate_uuid()}",
             status="nonexistent_status",
+            binding_key="online",
         )
         assert result is None
 
@@ -43,5 +44,6 @@ class TestAcBotPublishSqliteOrmEquivalence:
             source_bot_id=f"nonexistent_bot_{_generate_uuid()}",
             status="success",
             owner_id=_generate_uuid(),
+            binding_key="online",
         )
         assert result is None

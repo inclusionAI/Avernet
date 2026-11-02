@@ -64,7 +64,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "42"}}))
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [42]
 
@@ -77,7 +79,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "100"}})),
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200, 100]
 
@@ -91,7 +95,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "100"}})),
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200, 100]
 
@@ -100,7 +106,9 @@ class TestGetBindingIds:
     ):
         mock_orm_session._mock_order.all.return_value = []
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == []
 
@@ -111,7 +119,10 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-001", status="success", owner_id="entity-001"
+            source_bot_id="bot-001",
+            status="success",
+            owner_id="entity-001",
+            binding_key="online",
         )
 
         # Verify the query was built with owner_id filter
@@ -126,7 +137,7 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-001", status="success", env="pre"
+            source_bot_id="bot-001", status="success", env="pre", binding_key="online"
         )
 
         filter_call = mock_orm_session.query.return_value.filter.call_args[0]
@@ -139,7 +150,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "99"}}))
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         filter_call = mock_orm_session.query.return_value.filter.call_args[0]
         assert len(filter_call) == 2
@@ -153,7 +166,7 @@ class TestGetBindingIds:
         ]
 
         result = repository.get_binding_ids(
-            source_bot_id="bot-002", status="validating"
+            source_bot_id="bot-002", status="validating", binding_key="verify"
         )
 
         assert result == [77]
@@ -165,7 +178,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "88"}}))
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-003", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-003", status="success", binding_key="online"
+        )
 
         assert result == [88]
 
@@ -176,7 +191,9 @@ class TestGetBindingIds:
             _make_mock_row("not-json"),
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [100]
 
@@ -189,7 +206,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {}})),  # no "online" key
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [200]
 
@@ -204,7 +223,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "400"}})),
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [300, 400]
 
@@ -214,7 +235,9 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "1"}}))
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         mock_orm_session._mock_order.all.assert_called_once()
         assert result == [1]
@@ -228,6 +251,8 @@ class TestGetBindingIds:
             _make_mock_row(json.dumps({"binding": {"online": "not-a-number"}})),
         ]
 
-        result = repository.get_binding_ids(source_bot_id="bot-001", status="success")
+        result = repository.get_binding_ids(
+            source_bot_id="bot-001", status="success", binding_key="online"
+        )
 
         assert result == [500]
