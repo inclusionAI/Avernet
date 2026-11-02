@@ -14,9 +14,12 @@ export function ConversationComposerHost({ bot, session, children, ...value }: P
   // Never infer a target owner from the viewer, or decorate desktop/no-session input.
   const ownerId = bot?.ownerId;
   if (!Extension || !bot?.realBotId || !ownerId || !session || bot.botType === 'desktop') return children(value);
+  const knowledgeOwnerId = bot.isTeamBot ? bot.engineOwnerId : bot.engineOwnerId ?? ownerId;
+  if (!knowledgeOwnerId) return children(value);
   const context = {
     botId: bot.realBotId,
     ownerId,
+    knowledgeOwnerId,
     sessionId: session.sessionId,
     spaceId: bot.spaceId,
     botType: bot.botType,

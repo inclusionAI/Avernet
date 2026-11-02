@@ -75,6 +75,7 @@ from agentclaw.community.core.bot_management.services.template_service import Te
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
+from agentclaw.community.api.bot_knowledge_service import BotKnowledgePublicationSelectionProtocol
 from agentclaw.community.core.common_config import CommonConfigService, CommonWhiteListService
 from agentclaw.community.core.config_compose.protocols import (
     ComposeManagedFilesReader,
@@ -754,6 +755,7 @@ class ServiceBotModule(Module):
             flow=flow,
             task_queue_service=task_queue_service,
             approval_service_provider=lambda: injector.get(PublishApprovalService),
+            selection_provider=lambda: injector.get(BotKnowledgePublicationSelectionProtocol),
         )
 
     @singleton
