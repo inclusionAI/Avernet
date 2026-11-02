@@ -194,6 +194,22 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             response.raise_for_status()
             result = response.json()
             return result.get("data", {}).get("files", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # A 404 from the engine's file-list endpoint means the directory
+                # does not exist — an expected condition per the DeviceFileSystem
+                # contract (list_dir returns None for an absent directory), not an
+                # operational error. Logged at debug (mirrors read_file) to avoid
+                # false ERROR-level alert noise when a bot lists a missing path.
+                logger.debug(
+                    "[TeclawDeviceFileSystem.list_dir] not found: %s", engine_path
+                )
+            else:
+                logger.error(
+                    "[TeclawDeviceFileSystem.list_dir] HTTP %d: %s",
+                    e.response.status_code, engine_path,
+                )
+            return None
         except Exception as e:
             logger.error("[TeclawDeviceFileSystem.list_dir] error: %s", e)
             return None
