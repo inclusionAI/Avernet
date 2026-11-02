@@ -14,7 +14,7 @@ activation routes.
 
 from __future__ import annotations
 
-from agentclaw.community.core.ports.mcp_config import McpConfigDirective, McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigDirective, McpConfigWriteIntent
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import Skill
@@ -218,7 +218,7 @@ class ApplyClaimCommands:
         bot_id: str,
         owner_id: str,
         server_code: str,
-        config: McpConfigMutation,
+        config: McpConfigWriteIntent,
         platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
@@ -253,6 +253,7 @@ class ApplyClaimCommands:
                     env=get_current_env(),
                     server_code=server_code,
                     config=config,
+                    preserve_equivalent=True,
                 )
             )
             session.flush()

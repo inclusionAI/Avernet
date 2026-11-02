@@ -6,7 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.ports.mcp_config import McpConfigMutation
+    from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
     from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
         LegacySkillSetScope,
     )
@@ -295,7 +295,7 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     @abstractmethod
     def claim_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
-        config: McpConfigMutation, platform_default_codes: frozenset[str],
+        config: McpConfigWriteIntent, platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:

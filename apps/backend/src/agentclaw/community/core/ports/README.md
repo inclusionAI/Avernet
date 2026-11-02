@@ -50,7 +50,7 @@ Here, both sides can import it and neither owns it.
 
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
-- `mcp_config.py` — `McpConfigDirective` and `McpConfigMutation`: the shared
+- `mcp_config.py` — `McpConfigDirective` and `McpConfigWriteIntent`: the shared
   configuration actions a Direct MCP claim can preserve, clear or replace.
 - `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
   local skill package, without the directory-upload route's method.
@@ -102,6 +102,7 @@ rather than binding the service raw:
 
 ## Context Boundary
 
+`McpConfigWriteIntent` is an in-process write intent, not a persisted domain entity.
 An MCP configuration claim preserves the current Bot override with
 `McpConfigDirective.PRESERVE`, clears it with `None`, or replaces it with a
 mapping. Preserve performs no configuration write and never replays a value
@@ -114,7 +115,7 @@ purpose: Outbound ports — the narrow contracts core states for what it calls o
 provides:
   - ActivationPort
   - McpConfigDirective
-  - McpConfigMutation
+  - McpConfigWriteIntent
   - SkillPackageUploadPort
   - IdentityFilePort
   - ResourceFilePort

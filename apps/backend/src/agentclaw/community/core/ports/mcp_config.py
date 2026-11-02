@@ -8,11 +8,11 @@ the marker is never persisted or included in a Genome revision.
 from enum import Enum
 from typing import Any
 
-__all__ = ["McpConfigDirective", "McpConfigMutation"]
+__all__ = ["McpConfigDirective", "McpConfigWriteIntent"]
 
 
 class McpConfigDirective(Enum):
     PRESERVE = "preserve"
 
 
-McpConfigMutation = dict[str, Any] | None | McpConfigDirective
+McpConfigWriteIntent = dict[str, Any] | None | McpConfigDirective

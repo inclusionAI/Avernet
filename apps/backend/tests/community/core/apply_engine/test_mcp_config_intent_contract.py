@@ -121,7 +121,7 @@ async def test_preserve_does_not_restore_the_value_read_before_a_concurrent_scop
         # This external port callback runs after resolve read the old value;
         # configuration validation and persistence remain their real services.
         ScopedMCPConfigRepository(world.db).replace(
-            user_id="entity-1", server_code="mcp.explicit", headers={},
+            user_id="owner", server_code="mcp.explicit", headers={},
             bot_headers={"bot-1": {"X-Project": "new"}}, owned_bot_ids={"bot-1"},
             endpoint_env="PROD", transport_protocol=None,
         )

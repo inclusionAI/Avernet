@@ -86,11 +86,12 @@ def _seed_other_supplies(world):
 
 
 def _save_target(world, value):
+    current_user = world.config.get_user_unified_config("owner", "mcp.test") or {}
     ScopedMCPConfigRepository(world.db).replace(
-        user_id="entity-1", server_code="mcp.test", headers={},
+        user_id="owner", server_code="mcp.test", headers=current_user.get("headers") or {},
         bot_headers={"bot-1": {"X-Bot": value}}, owned_bot_ids={"bot-1"},
         endpoint_env="PROD", transport_protocol=None,
-        bot_urls={"bot-1": f"https://{value}.example/mcp"},
+        user_url=current_user.get("url"), bot_urls={"bot-1": f"https://{value}.example/mcp"},
     )
 
 

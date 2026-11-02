@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.ports.mcp_config import McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 from injector import inject
 
@@ -393,7 +393,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self,
         *,
         server_code: str,
-        config: McpConfigMutation,
+        config: McpConfigWriteIntent,
         bot_id: str,
         owner_id: str,
         actor_id: str,
@@ -428,6 +428,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=mutation,
                 scope_from_result=mcp_claim_scope,
+                skip_projection_when_unchanged=True,
             )
             self._log_manifest_source_transitions(
                 apply_id=apply_id, bot_id=bot_id, capability_type="mcp",

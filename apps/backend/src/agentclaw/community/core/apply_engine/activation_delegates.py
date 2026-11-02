@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.ports.mcp_config import McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
@@ -173,7 +173,7 @@ class _DelegatingActivation(ActivationPort):
         self,
         *,
         server_code: str,
-        config: McpConfigMutation,
+        config: McpConfigWriteIntent,
         bot_id: str,
         owner_id: str,
         actor_id: str,

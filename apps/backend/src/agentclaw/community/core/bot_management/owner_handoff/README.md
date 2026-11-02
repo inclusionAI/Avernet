@@ -121,3 +121,10 @@ locators are unchanged. This changes no schema or frontend protocol, and does
 not backfill already-SUCCEEDED handoffs; use the existing authorized Bot Space
 assignment API for those. No new quota rule is introduced by responsibility
 handoff; the ordinary explicit Space-move API retains its own quota checks.
+
+MCP legacy-key compatibility: before the final owner switch, the finish
+transaction moves uniquely attributable current-owner Bot MCP overrides to the
+existing immutable entity coordinate, consuming the old aliases. Existing
+canonical values win in full. This repairs legacy configuration keys without
+changing Bot identity, permissions, user defaults or the handoff feature flag.
+Normalization and owner/journal/freeze changes roll back together on failure.

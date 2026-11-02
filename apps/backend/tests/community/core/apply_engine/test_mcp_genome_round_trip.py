@@ -65,7 +65,7 @@ async def test_dormant_set_configuration_is_not_a_genome_entry_or_drift_but_full
         session.add(SkillSetMCPServer(skill_set_id=dormant.id, server_code="mcp.dormant", name="Dormant", env="dev"))
     for value in ("before", "after"):
         ScopedMCPConfigRepository(world.db).replace(
-            user_id="entity-1", server_code="mcp.dormant", headers={},
+            user_id="owner", server_code="mcp.dormant", headers={},
             bot_headers={"bot-1": {"X-Saved": value}}, owned_bot_ids={"bot-1"},
             endpoint_env="PROD", transport_protocol=None,
         )

@@ -26,7 +26,7 @@ def _set_with_mcp(world, code, *, active):
 
 def _save(world, code):
     ScopedMCPConfigRepository(world.db).replace(
-        user_id="entity-1", server_code=code, headers={}, bot_headers={"bot-1": {"X-Saved": "keep"}},
+        user_id="owner", server_code=code, headers={}, bot_headers={"bot-1": {"X-Saved": "keep"}},
         owned_bot_ids={"bot-1"}, endpoint_env="PROD", transport_protocol=None,
     )
 

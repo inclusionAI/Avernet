@@ -15,7 +15,7 @@ they are not inserted into the Installation table, do not appear in
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 from agentclaw.community.core.apply_engine.desired_state import DesiredMcpServer
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -40,6 +40,7 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
+from agentclaw.community.core.mcp.config_comparison import comparable_config
 from agentclaw.community.core.ports.mcp_config import McpConfigDirective
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
@@ -52,16 +53,6 @@ from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
 )
 
-
-def _comparison_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Normalize only semantics that HTTP defines as case-insensitive."""
-    if config is None:
-        return None
-    comparable = dict(config)
-    headers = comparable.get("headers")
-    if isinstance(headers, dict):
-        comparable["headers"] = {str(name).lower(): value for name, value in headers.items()}
-    return comparable
 
 
 class McpMaterialiser(Materialiser, ChecksSetSupply):
@@ -218,18 +209,16 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     else (
                         EntryOutcome.UNCHANGED.value
                         if intent.value is McpConfigDirective.PRESERVE
-                        or _comparison_config(overrides.get(intent.identity))
-                        == _comparison_config(intent.value)
+                        or comparable_config(overrides.get(intent.identity))
+                        == comparable_config(intent.value)
                         else EntryOutcome.UPDATED.value
                     )
                 ),
                 requires_write=(
                     intent.identity not in direct
-                    or (
-                        intent.value is not McpConfigDirective.PRESERVE
-                        and _comparison_config(overrides.get(intent.identity))
-                        != _comparison_config(intent.value)
-                    )
+                    # An explicit value must also consume legacy aliases even
+                    # when its public effective outcome is unchanged.
+                    or intent.value is not McpConfigDirective.PRESERVE
                 ),
             )
             for intent in intents

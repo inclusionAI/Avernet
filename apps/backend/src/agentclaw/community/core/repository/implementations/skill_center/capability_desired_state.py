@@ -89,6 +89,15 @@ class CapabilityDesiredStateRepository(
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
+    @staticmethod
+    def normalize_mcp_config_address(session, *, bot_id: str, owner_id: str, env: str) -> None:
+        """Participate in handoff's transaction without opening a second Session.
+
+        The capability UoW remains the owner of configuration table commands;
+        handoff coordinates this normalization before switching Bot ownership.
+        """
+        bot_mcp_configs.normalize(session, bot_id=bot_id, owner_id=owner_id, env=env)
+
     def purge_bot_installations(
         self, *, bot_id: str, owner_id: str, env: str
     ) -> dict[str, int]:

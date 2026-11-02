@@ -84,3 +84,39 @@ Enterprise validation uses matching OCB simulator sources and records the runnin
 | AC18 | Manifest → capture → Genome restore 的结果等价 | 初始有/无 override 均覆盖；bare Manifest 保留真实值，capture 记录 Direct 的实际值，扰动后恢复到捕获状态；不抹平 preserve/clear 意图。 |
 | AC19 | 停用集留下暂存配置 → capture → 修改该值 → drift → Apply | 暂存值不成为 Direct、不进入 capture、不单独触发 drift；完整 Apply 按非 Set 候选清理，且不恢复被明确重置的值。 |
 | AC20 | Teclaw 首次 artifact 与后续 redeliver | 验证实际 artifact：preserve 使用当前值、clear 使用继承值、replace 使用新值，未供应暂存配置不泄漏进 artifact；活动供应范围符合 Direct-only Replace 后的全量有效集合。 |
+
+## Stable configuration addressing and legacy compatibility
+
+Bot overrides use the Bot's immutable `entity_id` in the legacy `owner_id`
+storage column. Human user IDs continue to select permissions, ownership,
+audit identities and user-level defaults. Core override reads accept an explicit
+entity coordinate. Scoped commands resolve the authenticated human owner's live
+Bots and recheck their ownership under the write transaction; synchronization
+resolves legacy locators only at its public compatibility boundary, never in the
+core configuration read path.
+
+A canonical row wins as a complete value, including an empty object. Only when
+that row is absent may a read use the existing Bot's current-owner legacy row,
+and only when the tenant/env-qualified locator uniquely identifies that same
+Bot. Reads do not migrate data. A shared Bot ID, another Bot's owner/entity
+collision or unrelated tenant/env must never make an alias authoritative.
+A candidate key already assigned as another Bot's explicit entity is excluded
+from compatibility, including when that Bot is soft-deleted; its configuration
+is never read or removed for the current owner. Otherwise ambiguous legacy human
+ownership is rejected. Unknown orphan rows from past handoffs are not reconstructed by scanning Bot IDs.
+
+Explicit replacement, clear, Direct uninstall, Manifest parent removal and Bot
+deletion consume attributable aliases in the same transaction as the canonical
+write. An explicit Manifest configuration still reaches that transaction when
+the reported effective outcome is unchanged; omitted configuration performs no
+configuration write. Scoped Header/URL operations retain their existing snapshot
+and partial-field semantics, including preservation of undeclared URL fields.
+
+The existing owner-handoff finish transaction normalizes still-recognizable
+current-owner MCP rows before changing responsibility, preserving canonical
+values and rolling back normalization, owner and journal changes together on
+failure. Ordinary configuration reads do not query the optional handoff schema;
+this does not enable the handoff feature or add a product entrypoint.
+
+`McpConfigWriteIntent` names the existing internal preserve/clear/replace type
+alias. It is not a new entity, persisted action or YAML/Genome field.

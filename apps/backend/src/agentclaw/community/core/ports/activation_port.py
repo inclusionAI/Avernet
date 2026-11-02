@@ -31,7 +31,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
-from agentclaw.community.core.ports.mcp_config import McpConfigMutation
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 
 @runtime_checkable
@@ -98,7 +98,7 @@ class ActivationPort(Protocol):
 
     @abstractmethod
     async def claim_apply_mcp(
-        self, *, server_code: str, config: McpConfigMutation, bot_id: str,
+        self, *, server_code: str, config: McpConfigWriteIntent, bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
     ) -> Any: ...
 
