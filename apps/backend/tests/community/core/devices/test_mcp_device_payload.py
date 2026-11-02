@@ -125,3 +125,69 @@ def test_malformed_json_strings_fall_back_to_empty():
     })
     assert cfg.transport == "sse"
     assert cfg.url is None
+
+
+def _multi_transport_endpoints():
+    return [
+        {"url": "https://mcp/sse", "networkType": "INTERNET", "env": "PROD", "transportProtocol": "SSE"},
+        {"url": "https://mcp/http", "networkType": "INTERNET", "env": "PROD", "transportProtocol": "STREAMABLE_HTTP"},
+    ]
+
+
+def test_dsh_streamable_http_endpoint_success():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "mcp.ant.antcodemcp.code.mcpserver",
+            "run_mode": "REMOTE",
+            "endpoints": _multi_transport_endpoints(),
+        },
+        engine_type="deepseek_harness",
+    )
+    assert cfg.transport == "http"
+    assert cfg.url == "https://mcp/http"
+
+
+def test_dsh_ignores_explicit_sse_preference_when_http_exists():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "mcp.ant.antcodemcp.code.mcpserver",
+            "run_mode": "REMOTE",
+            "endpoints": _multi_transport_endpoints(),
+        },
+        transport_protocol="SSE",
+        engine_type="deepseek_harness",
+    )
+    assert cfg.transport == "http"
+    assert cfg.url == "https://mcp/http"
+
+
+def test_dsh_rejects_sse_only_config_before_delivery():
+    with pytest.raises(Exception, match="没有可用的 STREAMABLE_HTTP端点"):
+        convert_to_device_format(
+            {
+                "server_code": "mcp.ant.antcodemcp.code.mcpserver",
+                "run_mode": "REMOTE",
+                "endpoints": [
+                    {
+                        "url": "https://mcp/sse",
+                        "networkType": "INTERNET",
+                        "env": "PROD",
+                        "transportProtocol": "SSE",
+                    }
+                ],
+            },
+            engine_type="deepseek_harness",
+        )
+
+
+def test_non_dsh_embeds_explicit_sse_payload():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "mcp.ant.antcodemcp.code.mcpserver",
+            "run_mode": "REMOTE",
+            "endpoints": _multi_transport_endpoints(),
+        },
+        transport_protocol="SSE",
+    )
+    assert cfg.transport == "sse"
+    assert cfg.url == "https://mcp/sse"

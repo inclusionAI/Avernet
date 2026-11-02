@@ -315,6 +315,7 @@ def test_mcp_delegations_go_through_transport():
         transport_protocol=None,
         url_override=None,
         strict_transport_protocol=False,
+        engine_type=None,
     )
     mt.probe_mcp.assert_called_once_with(transport, "a")
     mt.remove_mcp.assert_called_once_with(transport, "a")
