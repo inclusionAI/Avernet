@@ -11,10 +11,19 @@ use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
-use super::{InviteCodeGateState, PrincipalVerifier};
+use super::{InviteCodeGateState, PrincipalVerifier, TrustedBrowserOrigins};
 
 pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
+
+    /// Trusted browser origins for the per-actual-source CSRF gate
+    /// (spec §7.4). Composed by bootstrap whenever any cookie-kind source
+    /// is registered; `None` fails closed for cookie-authenticated unsafe
+    /// writes. Defaulted for narrow test/local states that never register
+    /// a cookie source.
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -51,6 +60,11 @@ pub struct ApiState {
     pub manifest: ManifestConfig,
     pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
+    /// Trusted browser origins for the per-actual-source CSRF gate. Set by
+    /// the composition root (Task 12 assembles real cookie sources and
+    /// passes the `trusted_browser_origins` of `[api.auth]` through the
+    /// `TrustedBrowserOrigins` constructor).
+    pub trusted_browser_origins: Option<TrustedBrowserOrigins>,
 }
 
 impl ApiState {
@@ -91,7 +105,15 @@ impl ApiState {
             manifest: ManifestConfig::default(),
             manifest_env: "local".to_string(),
             principal_verifier,
+            trusted_browser_origins: None,
         }
+    }
+
+    /// Attach the trusted browser origins used by the per-actual-source
+    /// CSRF gate for cookie-authenticated unsafe writes.
+    pub fn with_trusted_browser_origins(mut self, origins: TrustedBrowserOrigins) -> Self {
+        self.trusted_browser_origins = Some(origins);
+        self
     }
 
     pub fn with_auth_service(
@@ -243,5 +265,9 @@ impl InviteCodeGateState for ApiState {
 impl PrincipalVerificationState for ApiState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }

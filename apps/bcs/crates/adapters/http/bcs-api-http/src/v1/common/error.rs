@@ -23,6 +23,20 @@ impl ErrorResponse {
             request_id: request_id.into(),
         }
     }
+
+    /// New strict-auth dependency fault (V1 API auth plan, spec §7.4): a
+    /// verifier's backing identity/session dependency is unreachable —
+    /// distinct from the existing Bot identity store 502
+    /// (`bot_identity_unavailable`), which keeps its mapping.
+    pub fn auth_dependency_unavailable(request_id: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: 50_300,
+            error_code: "auth_dependency_unavailable".to_string(),
+            message: "Authentication dependency is unavailable".to_string(),
+            request_id: request_id.into(),
+        }
+    }
 }
 
 impl IntoResponse for ErrorResponse {
@@ -50,6 +64,11 @@ pub fn invalid_request(request_id: &RequestId, message: impl Into<String>) -> Er
         message: message.into(),
         request_id: request_id.0.clone(),
     }
+}
+
+/// 503 / `auth_dependency_unavailable` for `PrincipalVerificationError::DependencyUnavailable`.
+pub fn auth_dependency_unavailable(request_id: &RequestId) -> ErrorResponse {
+    ErrorResponse::auth_dependency_unavailable(request_id.0.clone())
 }
 
 pub fn application_error_response(

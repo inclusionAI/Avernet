@@ -173,6 +173,10 @@ impl BcsServer {
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
                 self.state.gateway_principal_verifier.clone(),
+                // Task 12 composes the real cookie sources alongside the
+                // trusted browser origins; the Gateway-only chain carries
+                // no cookie provenance, so no origins are wired yet.
+                None,
             ))
             .merge(group_session_websocket_router);
 
