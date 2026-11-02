@@ -7,7 +7,9 @@ import pytest
 
 from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.core.cron.errors import CronRelayError
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
+
 from agentclaw.community.core.runtime_binding.models import (
     ResolvedRuntimeBinding,
     RuntimeBindingSource,
@@ -52,6 +54,20 @@ def service(*, caller=False, provider="baas", devices=("instance-a", "instance-b
         bindings,
         MagicMock(),
     )
+
+
+
+@pytest.mark.asyncio
+async def test_list_all_crons_missing_bot_returns_empty_list():
+    svc = service()
+    svc._bot_provider.get_bot.side_effect = BotNotFoundError("Bot not found: bot")
+    result = await svc.list_all_crons(
+        user_id="wrong-owner",
+        nick_name="Owner",
+        bot_id="bot",
+        runtime_stage=None,
+    )
+    assert result == {"success": True, "data": [], "total": 0, "failed_targets": []}
 
 
 @pytest.mark.asyncio

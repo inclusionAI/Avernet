@@ -982,13 +982,13 @@ def _seed_user_no_bot(world):
         query_params={"bot_id": "ghost_bot"},
     ),
     seed=_seed_user_no_bot,
-    expect=ExpectError(
+    expect=ExpectSuccess(
         status=200,
-        json_contains={"success": False, "error_code": 500},
+        json_contains={"success": True, "data": []},
     ),
 )
-def list_crons_error():
-    """list_crons surfaces a BotNotFoundError as an error envelope."""
+def list_crons_missing_bot_empty():
+    """list_crons for an unknown bot returns an empty success envelope."""
 
 
 @endpoint_test(
