@@ -4346,7 +4346,8 @@ class BotService(BotServiceProtocol):
             "resources_deleted": 0,
             "skill_installations_deleted": 0,
             "mcp_installations_deleted": 0,
-            "errors": []
+            "errors": [],
+            "skills_retained": False,
         }
 
         try:
@@ -4363,6 +4364,7 @@ class BotService(BotServiceProtocol):
                 "mcp_installations_deleted", 0
             )
             result["errors"].extend(cleanup_result.get("errors", []))
+            result["skills_retained"] = bool(cleanup_result.get("skills_retained"))
 
             if result["errors"]:
                 logger.warning(

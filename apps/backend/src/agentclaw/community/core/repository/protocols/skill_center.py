@@ -504,6 +504,10 @@ class SkillRepository(Protocol):
 
         Returns:
             Number of deleted records
+
+        Raises:
+            SkillAssetInUseError: when any skill still has durable reference
+                blockers; no deletion is performed in that case.
         """
         ...
 

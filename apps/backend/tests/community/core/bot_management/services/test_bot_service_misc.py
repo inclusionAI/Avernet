@@ -672,6 +672,23 @@ class TestDeleteBot:
             "mybot", "user001"
         )
 
+    def test_cleanup_wrapper_surfaces_retained_skills(self):
+        svc = _make_service()
+        svc._cleanup_service.cleanup_single_bot_data.return_value = {
+            "skills_deleted": 0,
+            "skill_sets_deleted": 0,
+            "resources_deleted": 0,
+            "skill_installations_deleted": 0,
+            "mcp_installations_deleted": 0,
+            "errors": [],
+            "skills_retained": True,
+        }
+
+        result = svc._cleanup_bot_associated_data("mybot", "user001")
+
+        assert result["skills_retained"] is True
+        assert result["errors"] == []
+
     def test_the_startup_script_is_purged_keyed_by_entity_not_owner(self):
         """The script is stored under ``entity_id``, which is only *usually* the
         owner id — under a team entity they differ. Passing ``user_id`` in its

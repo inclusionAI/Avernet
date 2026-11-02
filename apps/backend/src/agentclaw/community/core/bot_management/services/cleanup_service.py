@@ -4,6 +4,7 @@ Bot cleanup service — 清理已删除 Bot 的关联数据。
 迁移自 services/openclawserver/server/services/cleanup_service.py，
 遵循新架构规范，通过 repository 协议访问数据。
 """
+
 from agentclaw.community.log import get_logger
 from typing import Dict, Any
 
@@ -12,7 +13,10 @@ from injector import inject
 from agentclaw.community.core.bot_startup_script.protocols import (
     StartupScriptPurgeProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.skill_center.errors import SkillAssetInUseError
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -79,7 +83,9 @@ class BotCleanupService:
         Returns:
             清理结果统计
         """
-        logger.info(f"[BotCleanupService] Cleaning up data for bot {bot_id}, user {user_id}")
+        logger.info(
+            f"[BotCleanupService] Cleaning up data for bot {bot_id}, user {user_id}"
+        )
 
         result: Dict[str, Any] = {
             "skills_deleted": 0,
@@ -88,6 +94,7 @@ class BotCleanupService:
             "skill_installations_deleted": 0,
             "mcp_installations_deleted": 0,
             "errors": [],
+            "skills_retained": False,
         }
 
         # 1. Bot lifecycle explicitly removes effective capability facts.
@@ -117,6 +124,18 @@ class BotCleanupService:
         try:
             result["skills_deleted"] = self._skill_repo.delete_by_bot_id(
                 bot_id, user_id
+            )
+        except SkillAssetInUseError as e:
+            blocker_counts = dict(e.blocker_counts)
+            result["skills_retained"] = True
+            result["skills_retained_reason"] = "SKILL_ASSET_IN_USE"
+            result["skills_retained_blocker_counts"] = blocker_counts
+            result["skills_retained_bot_id"] = bot_id
+            logger.warning(
+                "[BotCleanupService] Retained skill assets for bot %s because "
+                "they are still referenced: %s",
+                bot_id,
+                blocker_counts,
             )
         except Exception as e:
             error_msg = f"Cleanup skills error for bot {bot_id}: {e}"
