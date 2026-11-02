@@ -407,7 +407,7 @@ class TestGetSymlinkMappings:
             )
 
     def test_active_mapping_without_direct_paths_collapses_exact_repeats(
-        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo, caplog
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Active", "is_default": False}
@@ -425,15 +425,51 @@ class TestGetSymlinkMappings:
             },
         ]
 
-        mappings = skill_set_service.get_symlink_mappings(
-            user_id="100015", bolt_id="default"
-        )
+        with caplog.at_level("WARNING"):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015", bolt_id="default"
+            )
 
         assert len(mappings) == 1
         assert mappings[0].target.endswith("/same")
         assert mappings[0].source.endswith("/skills-repo/business/same")
+        assert "runtime target conflicts without requested direct paths" not in caplog.text
 
     def test_active_mapping_without_direct_paths_preserves_first_source(
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo, caplog
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_repo.list_bot_installed_skills.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/direct/same",
+            },
+            {
+                "id": "2",
+                "name": "same",
+                "git_path": "git://business/repository/same",
+            },
+        ]
+
+        with caplog.at_level("WARNING"):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015", bolt_id="default"
+            )
+
+        assert mappings[0].source.endswith("/skills-repo/business/direct/same")
+        assert len(mappings) == 1
+        suppress_warnings = [
+            record for record in caplog.records
+            if "runtime target conflicts without requested direct paths" in record.message
+        ]
+        assert len(suppress_warnings) == 1
+        assert "kept=" in suppress_warnings[0].message
+        assert "dropped=" in suppress_warnings[0].message
+
+    def test_direct_path_collision_between_active_rows_still_raises(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
@@ -452,12 +488,12 @@ class TestGetSymlinkMappings:
             },
         ]
 
-        mappings = skill_set_service.get_symlink_mappings(
-            user_id="100015", bolt_id="default"
-        )
-
-        assert mappings[0].source.endswith("/skills-repo/business/direct/same")
-        assert len(mappings) == 1
+        with pytest.raises(ValueError, match="Conflicting Skill mappings"):
+            skill_set_service.get_symlink_mappings(
+                user_id="100015",
+                bolt_id="default",
+                additional_skill_paths=["git://business/other/same"],
+            )
 
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
