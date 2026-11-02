@@ -21,6 +21,9 @@ import json
 import ssl
 import threading
 import uuid
+from typing import Any
+
+from agentclaw.community.core.agentswarm.domain.models import BotId
 
 # Upper bound on one engine chat round trip. It follows the swarm's own
 # per-attempt task budget (``orchestration.per_attempt_timeout``, 1800s

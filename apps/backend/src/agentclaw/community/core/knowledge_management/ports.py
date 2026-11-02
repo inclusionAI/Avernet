@@ -81,6 +81,14 @@ class KnowledgeDisplaySource(Protocol):
         """
         ...
 
+    def stage_selection(self, *, bot, runtime_stage) -> dict | None:
+        """Stage-aware service selection after admission; None is personal/current.
+
+        Unknown stage state never falls back to the draft. kb_ids is bounded by
+        100; selection metadata is auxiliary, not provider authorization.
+        """
+        ...
+
     def has_enabled_selection(self, *, bot) -> bool:
         """Read whether this exact tenant/env/Bot/space has any enabled selection.
 

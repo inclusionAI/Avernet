@@ -58,6 +58,13 @@ class KnowledgeSourceRepository:
 
         return BotKnowledgeRepository(self.db).get_bot(scope)
 
+    def stage_selection(self, *, bot, runtime_stage):
+        from agentclaw.community.core.bot_knowledge.stage_selection import (
+            BotKnowledgeStageSelection,
+        )
+
+        return BotKnowledgeStageSelection(self.db).read(bot=bot, runtime_stage=runtime_stage)
+
     def has_enabled_selection(self, *, bot) -> bool:
         from agentclaw.community.core.bot_knowledge.repository.models import (
             BotKnowledgeBindingModel as Binding,

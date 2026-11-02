@@ -11,7 +11,7 @@ from agentclaw.community.core.agentswarm.config.settings import (
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentSpec, EpochMillis, FinishDecision,
     HandoffDecision, ProviderKind, RequestMetadata, Run, RunId, RunOptions,
-    RunStatus, SpawnDecision, TenantId, TerminationReason, WaitDecision,
+    RunStatus, SpawnDecision, TaskEnvelope, TenantId, TerminationReason, WaitDecision,
 )
 from agentclaw.community.core.agentswarm.orchestration.orchestrator import (
     Orchestrator,
@@ -50,7 +50,6 @@ def _mk_run() -> Run:
 
 
 def mk_envelope_named(name: str) -> "TaskEnvelope":
-    from agentclaw.community.core.agentswarm.domain.models import TaskEnvelope
     return TaskEnvelope(
         name=name, objective=f"objective for {name}",
         output_schema={}, boundaries="", parent_goal="")
