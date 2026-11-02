@@ -896,8 +896,10 @@ dependencies = [
  "axum",
  "bcs-auth-api",
  "bcs-jwt",
+ "bcs-test-support",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2407,6 +2409,7 @@ dependencies = [
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",
+ "bcs-auth-oauth",
  "bcs-bot",
  "bcs-bot-store",
  "bcs-cache-api",
@@ -2418,6 +2421,7 @@ dependencies = [
  "bcs-edge-permission",
  "bcs-edge-permission-store",
  "bcs-human-notify-api",
+ "bcs-jwt",
  "bcs-llm-api",
  "bcs-observability",
  "bcs-protocol",

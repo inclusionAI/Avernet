@@ -87,6 +87,7 @@ where
 
 pub mod caller_identity;
 pub mod auth_session_identity;
+pub mod oauth_session_engine;
 
 /// Contract tests every strict `AuthSessionIdentityPort` bridge must pass
 /// (V1 API auth plugin chain).
@@ -96,3 +97,12 @@ pub mod auth_session_identity;
 /// `RepoAuthSessionIdentityPort`); the harness owns the error-injection
 /// decorators and the classification asserts.
 pub use auth_session_identity::auth_session_identity_port_contract_tests;
+
+/// Contract tests the strict `OAuthSessionEngine` must pass over any
+/// `AuthSessionIdentityPort` (V1 API auth plugin chain, Task 8): the
+/// install → same-`now` refresh → by-sid revoke lifecycle from plan §8.5.
+///
+/// Drivers pass the HMAC secret, the port under test (in-crate test double
+/// now; Task 13's real repository bridge later), the injected environment,
+/// and the idle window; the harness owns the sequence and the asserts.
+pub use oauth_session_engine::oauth_session_engine_contract_tests;

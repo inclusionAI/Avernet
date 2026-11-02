@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use axum::http::HeaderMap;
 use bcs_auth_api::{AuthError, AuthPlugin, OAuthProvider, UserIdentityInfo, UserIdentityPort};
 use bcs_auth_google::{GoogleOAuthConfig, GoogleOAuthProvider};
-use bcs_auth_oauth::{verify_oauth_session, OAuthSessionPlugin};
+// Legacy seam coverage: these tests pin the pre-strict (Task 11 removal) path.
+use bcs_auth_oauth::{OAuthSessionPlugin, verify_oauth_session_unsafe_construction_transition};
 use bcs_jwt::JwtService;
 use bcs_service_api::UserIdentityRepoPort;
 use bcs_user_identity::MemoryUserIdentityRepo;
@@ -224,7 +225,9 @@ async fn verify_oauth_session_hot_path_does_not_refresh() {
     let mut headers = HeaderMap::new();
     headers.insert("cookie", format!("bcs_session={}", jwt).parse().unwrap());
 
-    let result = verify_oauth_session(&headers, jwt_secret, port.as_ref()).await.unwrap();
+    let result = verify_oauth_session_unsafe_construction_transition(&headers, jwt_secret, port.as_ref())
+        .await
+        .unwrap();
     let principal = result.expect("bound session should authenticate");
     assert_eq!(principal.user_id.as_deref(), Some(user_id.as_str()));
     assert!(
@@ -264,7 +267,9 @@ async fn verify_oauth_session_rejects_unbound_jwt() {
     let mut headers = HeaderMap::new();
     headers.insert("cookie", format!("bcs_session={}", jwt).parse().unwrap());
 
-    let result = verify_oauth_session(&headers, jwt_secret, port.as_ref()).await.unwrap();
+    let result = verify_oauth_session_unsafe_construction_transition(&headers, jwt_secret, port.as_ref())
+        .await
+        .unwrap();
     assert!(result.is_none(), "unbound JWT must not authenticate");
 }
 

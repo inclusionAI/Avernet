@@ -113,6 +113,49 @@ pub enum SessionStoreError {
     CorruptRecord,
 }
 
+/// Issued session artifact returned by the strict engine after a session
+/// install or refresh has been ATOMICALLY APPLIED. `token` is bearer
+/// credential material (plan §8.4 redaction): the hand-written `Debug`
+/// below prints only the expiry, never the token.
+#[derive(Clone)]
+pub struct IssuedSession {
+    /// The signed session JWT. Bearer material — never logged, never
+    /// persisted in clear; only its SHA-256 fingerprint (64 hex chars)
+    /// is stored.
+    pub token: String,
+    /// Trusted session-window expiry (unix seconds) of this exact version.
+    pub expires_at: u64,
+}
+
+impl std::fmt::Debug for IssuedSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IssuedSession")
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Closed failure categories for strict OAuth session-engine operations.
+/// Distinct variants keep the delivery error mapping honest: `Invalid` is
+/// the 401-side denial (re-authenticate), `Conflict` is the 409-side lost
+/// LOGIN race (restart the browser login batch), and `Unavailable` is the
+/// dependency failure that must surface as 503, never as a quiet denial.
+/// Display text is a fixed stable category — no SQL fragments, endpoints,
+/// claim values, or credential material.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionAuthError {
+    #[error("invalid session credential")]
+    Invalid,
+    #[error("session credential not accepted in this environment")]
+    Forbidden,
+    #[error("session identity store unavailable")]
+    Unavailable,
+    #[error("session engine internal failure")]
+    Internal,
+    #[error("session write conflict")]
+    Conflict,
+}
+
 /// Plugin-API port for strict, atomic, environment-scoped OAuth login
 /// sessions backing the V1 API auth plugin chain.
 ///

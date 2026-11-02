@@ -27,7 +27,7 @@ pub use oauth_provider::OAuthProvider;
 pub use oauth_types::{OAuthError, OAuthToken, ProviderUserInfo};
 pub use port::{BotInfo, UserIdentityInfo, BotLookupPort, UserIdentityPort};
 pub use session::{
-    AuthSessionIdentityPort, InstallSession, RotateSession, SessionRevoke, SessionScope,
-    SessionSnapshot, SessionStoreError, SessionVersion, SessionWrite,
+    AuthSessionIdentityPort, InstallSession, IssuedSession, RotateSession, SessionAuthError,
+    SessionRevoke, SessionScope, SessionSnapshot, SessionStoreError, SessionVersion, SessionWrite,
 };
 pub use types::{AuthError, AuthPrincipal, AuthResult, AuthSource};
