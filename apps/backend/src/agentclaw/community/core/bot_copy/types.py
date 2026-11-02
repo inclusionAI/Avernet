@@ -40,6 +40,20 @@ class CopyOperationNotFound(Exception):
     """Raised when a ``copy_state(operation_id)`` reference names no row."""
 
 
+class BotCopyStateSummary(BaseModel):
+    """The `copy_state` sub-field on a bot detail/list response.
+
+    Surfaces enough of the operation for FE to drive the retry endpoint and
+    show the right card affordance: `operation_id` is the retry path param,
+    `status` is the derive-on-read live progress, `source_bot_id` is the audit
+    link back to the source bot.
+    """
+
+    operation_id: str = Field(..., description="copy 操作幂等 id + retry path param")
+    status: BotCopyStatus = Field(..., description="derive-on-read live status")
+    source_bot_id: str = Field(..., description="源 ac_bots.bot_id (audit)")
+
+
 class BotCopyRow(BaseModel):
     """One `ac_bot_copy` row — the operation ledger record."""
 

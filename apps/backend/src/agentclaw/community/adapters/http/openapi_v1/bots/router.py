@@ -89,6 +89,14 @@ from agentclaw.community.core.bot_management.create_flow import (
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
+)
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
+from agentclaw.community.core.bot_copy.status_derive import build_copy_state_summary
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
@@ -870,14 +878,28 @@ async def get_bot(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
+    apply_repo: BotConfigManifestApplyRepositoryProtocol = Injected(
+        BotConfigManifestApplyRepositoryProtocol
+    ),
 ) -> Envelope[Bot]:
     """Get a bot's details."""
     bot = bot_service.get_bot(bot_id, owner_id)
     # A collaborator reading a shared bot gets the record without the owner's
     # template snapshot — see `_to_bot` for why the passthrough ends here.
-    return envelope(
-        _to_bot(bot, include_template=(user_id == owner_id)), request
+    bot_record = _to_bot(bot, include_template=(user_id == owner_id))
+    # Derive-on-read copy_state: legacy bots (no ac_bot_copy row) → null, so the
+    # additive field does not change their response. entity_id is the dst's apply
+    # key; fall back to owner_id for personal bots whose entity_id equals it.
+    bot_record.copy_state = build_copy_state_summary(
+        bot_copy_repo=bot_copy_repo,
+        apply_repo=apply_repo,
+        env=get_current_env(),
+        entity_id=bot.get("entity_id") or bot.get("owner_id") or owner_id,
+        bot_id=bot_id,
+        bot_status=bot.get("status"),
     )
+    return envelope(bot_record, request)
 
 
 @router.put(

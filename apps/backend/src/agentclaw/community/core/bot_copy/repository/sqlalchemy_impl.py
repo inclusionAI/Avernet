@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Mapping, Sequence
 
+from injector import inject
 from sqlalchemy import update
 
 from agentclaw.community.core.bot_copy.repository.models import AcBotCopyModel
@@ -21,12 +22,14 @@ from agentclaw.community.core.bot_copy.repository.protocol import (
     BotCopyRepositoryProtocol,
 )
 from agentclaw.community.core.bot_copy.types import BotCopyRow, BotCopyStatus
+from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 class BotCopyRepositoryImpl(BotCopyRepositoryProtocol):
     """The ledger operations against `ac_bot_copy`."""
 
-    def __init__(self, db) -> None:
+    @inject
+    def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
     def insert(self, row: BotCopyRow) -> None:

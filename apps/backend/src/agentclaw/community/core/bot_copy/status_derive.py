@@ -22,7 +22,11 @@ from agentclaw.community.core.apply_engine.triggers import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
 )
-from agentclaw.community.core.bot_copy.types import BotCopyRow, BotCopyStatus
+from agentclaw.community.core.bot_copy.types import (
+    BotCopyRow,
+    BotCopyStateSummary,
+    BotCopyStatus,
+)
 
 #: The bot row status meaning "device/container is up" — the on_container apply can
 #: only have run after this, so convergence requires it.
@@ -90,4 +94,44 @@ def _is_failed(record) -> bool:
     return record is not None and record.status == ApplyStatus.FAILED.value
 
 
-__all__ = ["compute_copy_status"]
+def build_copy_state_summary(
+    *,
+    bot_copy_repo,
+    apply_repo,
+    env: str,
+    entity_id: str,
+    bot_id: str,
+    bot_status: str | None,
+    recent_limit: int = 10,
+) -> BotCopyStateSummary | None:
+    """The `copy_state` for one bot, or ``None`` for a legacy (non-copy) bot.
+
+    Joins the `ac_bot_copy` ledger row (by dst_bot_id) with the dst's recent
+    `ac_bot_config_manifest_apply` records, then `compute_copy_status` derives
+    the live status. Returns ``None`` when there is no copy row — the caller
+    surfaces `copy_state: null` to FE.
+
+    `apply_repo.recent(env, entity_id, bot_id, limit)` is the existing read that
+    returns the dst's newest apply records newest-first; the two creation halves
+    (pre_container / on_container) are discriminated by `record.trigger` inside
+    `compute_copy_status`.
+    """
+    copy_row = bot_copy_repo.get_by_dst_bot_id(env=env, dst_bot_id=bot_id)
+    if copy_row is None:
+        return None
+    applies = apply_repo.recent(
+        env=env, entity_id=entity_id, bot_id=bot_id, limit=recent_limit
+    )
+    status = compute_copy_status(
+        copy_row=copy_row,
+        dst_apply_records=applies,
+        dst_bot_status=bot_status,
+    )
+    return BotCopyStateSummary(
+        operation_id=copy_row.operation_id,
+        status=status,
+        source_bot_id=copy_row.source_bot_id,
+    )
+
+
+__all__ = ["build_copy_state_summary", "compute_copy_status"]
