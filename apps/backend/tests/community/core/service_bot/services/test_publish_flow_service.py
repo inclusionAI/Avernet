@@ -3871,10 +3871,12 @@ async def test_process_draft_lost_race_describes_without_enqueue():
     record = _make_publish_record(status=PublishStatus.DRAFT.value)
     tq = Mock()
     svc, publish_service = _svc_with_record(record, task_queue_service=tq)
-    publish_service.update_publish_status.side_effect = PublishNotFoundError("lost")
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        status=PublishStatus.BUILDING.value
-    )
+    svc._ext_state.declare_build_attempt = Mock(side_effect=PublishNotFoundError("lost"))
+    publish_service.get_publish_by_id.side_effect = [
+        record,
+        _make_publish_record(status=PublishStatus.BUILDING.value),
+        _make_publish_record(status=PublishStatus.BUILDING.value),
+    ]
     result = await svc.process(publish_id=1, operator="op")
     tq.enqueue.assert_not_called()
     assert result.status == PublishStatus.BUILDING
@@ -4547,6 +4549,111 @@ async def test_retry_from_built_source_enqueues_verify_flow():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.action == "process"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_retry_from_building_failure_stamps_and_dispatches_new_attempt():
+    """A BUILDING retry must create the next attempt in the atomic rollback, then
+    pass that token to the durable build so a concurrent stale worker cannot win."""
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.BUILDING.value, "build_attempt": "old"},
+    )
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    svc._abandon_inflight_operations = Mock()
+
+    result = await svc.retry(publish_id=1, operator="op")
+
+    svc._abandon_inflight_operations.assert_called_once_with(
+        1, reason="retry rebuild — superseded"
+    )
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert rollback_ext["build_attempt"] not in ("old", "")
+    tq.enqueue.assert_called_once()
+    payload = tq.enqueue.call_args.args[1]
+    assert payload["build_attempt"] == rollback_ext["build_attempt"]
+    assert result.action == "process"
+
+
+@pytest.mark.unit
+def test_build_stage_attempts_are_fenced_by_live_token():
+    from agentclaw.community.core.service_bot.services.publish_flow.build_stage import (
+        BuildStageRunner,
+    )
+
+    runner = BuildStageRunner.__new__(BuildStageRunner)
+    ext_state = Mock()
+
+    ext_state.latest_status_and_build_attempt.return_value = (
+        PublishStatus.BUILDING.value,
+        "current",
+    )
+    runner._ext_state = ext_state
+    assert runner._build_guard(publish_id=1, build_attempt="current") is True
+    assert runner._build_guard(publish_id=1, build_attempt="stale") is False
+    assert runner._build_guard(publish_id=1, build_attempt=None) is True
+
+    ext_state.latest_status_and_build_attempt.return_value = (
+        PublishStatus.BUILDING.value,
+        "newer",
+    )
+    result = runner._build_attempt_superseded(1, "old")
+    assert result.status == PublishStatus.FAILED
+    assert result.message == "Build attempt superseded: old"
+
+
+@pytest.mark.unit
+def test_publish_ext_state_attempt_token_is_atomic():
+    from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
+        PublishExtState,
+    )
+
+    state = PublishExtState.__new__(PublishExtState)
+    publish_service = Mock()
+    state._publish_service = publish_service
+
+    publish_service.get_publish_by_id.return_value = None
+    with pytest.raises(PublishNotFoundError):
+        state.declare_build_attempt(
+            1, source_status=PublishStatus.DRAFT.value, target_status=PublishStatus.BUILDING.value
+        )
+    with pytest.raises(PublishNotFoundError):
+        state.latest_status_and_build_attempt(1)
+
+    latest = _make_publish_record(
+        status=PublishStatus.DRAFT.value,
+        ext={"build_attempt": "previous"},
+    )
+    publish_service.get_publish_by_id.return_value = latest
+    publish_service.update_publish_status_with_ext.return_value = None
+    with pytest.raises(PublishNotFoundError):
+        state.declare_build_attempt(
+            1, source_status=PublishStatus.DRAFT.value, target_status=PublishStatus.BUILDING.value
+        )
+
+    publish_service.update_publish_status_with_ext.return_value = latest
+    token = state.declare_build_attempt(
+        1, source_status=PublishStatus.DRAFT.value, target_status=PublishStatus.BUILDING.value
+    )
+    state.latest_status_and_build_attempt(1)
+    assert token
+    call_kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
+    assert call_kwargs["source_status"] == PublishStatus.DRAFT.value
+    assert call_kwargs["target_status"] == PublishStatus.BUILDING.value
+    assert call_kwargs["ext"]["build_attempt"] == token
+
+
+def test_verify_flow_payload_rejects_non_string_attempt():
+    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+        _require_optional_str,
+    )
+
+    assert _require_optional_str({"build_attempt": "token"}, "build_attempt") == "token"
+    assert _require_optional_str({}, "build_attempt") is None
+    with pytest.raises(ValueError, match="field build_attempt must be str"):
+        _require_optional_str({"build_attempt": 123}, "build_attempt")
 
 
 @pytest.mark.asyncio
