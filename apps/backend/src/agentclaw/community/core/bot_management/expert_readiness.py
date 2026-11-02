@@ -10,23 +10,30 @@ from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapte
 
 
 def creation_adapter_ready(*, spec: dict[str, Any], bot: dict[str, Any], bot_id: str,
-                           owner_id: str, resolver_provider: Any, transport_provider: Any) -> bool:
+                           owner_id: str, resolver_provider: Any, transport_provider: Any,
+                           concrete_connection_provider: Any) -> bool:
     if spec.get("expert_origin") is None:
         return True
     return expert_adapter_ready(
         bot=bot, bot_id=bot_id, owner_id=owner_id,
         resolver=resolver_provider(), transport=transport_provider(),
+        concrete_connection=concrete_connection_provider(),
     )
 
 
 def expert_adapter_ready(
     *, bot: dict[str, Any], bot_id: str, owner_id: str,
-    resolver: DeviceContextResolver, transport: Any,
+    resolver: DeviceContextResolver, transport: Any, concrete_connection: bool = False,
 ) -> bool:
     binding_id = bot.get("binding_id")
     if not binding_id:
         return False
-    context = resolver.resolve_for_binding_invoke(
+    resolve = (
+        resolver.resolve_for_binding
+        if concrete_connection
+        else resolver.resolve_for_binding_invoke
+    )
+    context = resolve(
         int(binding_id), owner_id, bot_id=bot_id,
     )
     conn_info = {**context.conn_info, "probe_runtime_readiness": True}

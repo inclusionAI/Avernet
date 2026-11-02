@@ -23,6 +23,7 @@ from agentclaw.community.core.common_config.bot_config_protocol import BotStorag
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.bot_management.expert_readiness import creation_adapter_ready
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugins.local.device_adapter_transport import InMemoryDeviceAdapterTransport
 from agentclaw.community.core.bot_management.creation_source import validate_creation_source
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
@@ -867,7 +868,8 @@ class BotManagementModule(Module):
             ).delivery_for_engine(engine).creation_sequence,
             creation_readiness_probe=lambda **kw: creation_adapter_ready(
                 **kw, resolver_provider=lambda: injector.get(DeviceContextResolver),
-                transport_provider=lambda: injector.get(DeviceAdapterTransport)),
+                transport_provider=lambda: injector.get(DeviceAdapterTransport),
+                concrete_connection_provider=lambda: isinstance(injector.get(DeviceAdapterTransport), InMemoryDeviceAdapterTransport)),
             # A creation that gives up before a bot exists withdraws the grant
             # the submitting application was given at submission.
             grant_sweep_provider=lambda: injector.get(BotAppGrantService),
