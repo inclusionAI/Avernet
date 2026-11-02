@@ -26,7 +26,7 @@ class BotKnowledgeStageSelection:
 # core/service_bot/services/publish_flow/tasks.py
 # existing progress poll: pre-sync identity, native terminal result, isolated projection
 ```
-历史记录格式复用 publication_selection.py，线上标记使用相同 tenant/env/source_pk 坐标、config_key=projection:online。前后最多200 ID，原有草稿CAS元数据保持不变。绑定不存在时一次有界 Core bulk insert 插入 disabled/revision0 的线上投影行，显式从受 tenant guard 的源 Bot 盖章租户，不伪造草稿编辑。online读取以完整唯一键 tenant/env/bot_pk/kb_id IN 定位，再按space/online_enabled过滤，避免扫描禁用历史；相同投影重放不写DML。
+历史记录格式复用 publication_selection.py，线上标记使用相同 tenant/env/source_pk 坐标、config_key=projection:online。前后最多200 ID，原有草稿CAS元数据保持不变。绑定不存在时一次有界 Core bulk insert 插入 disabled/revision0 的线上投影行，显式从受 tenant guard 的源 Bot 盖章租户，不伪造草稿编辑。online读取以完整唯一键 tenant/env/bot_pk/kb_id IN 定位，再按space/online_enabled过滤，避免扫描禁用历史；相同投影重放不写DML。辅助marker更新使用旧值CAS；若SQLite不支持FOR UPDATE而产生跨版本竞争，CAS失败回滚全部辅助写入，不锁原生表。
 
 ## Risks & Mitigations
 - 原生 SUCCESS 在回滚准入时可提前出现：投影触发必须来自实际 progress SUCCESS，而非状态扫描。来源标记还匹配原生 rollback_restored_from 与被降级版本已有 rollback.rolled_back_at/target_publish_id，避免旧标记在准入时提前复活；不增加原生ext字段。

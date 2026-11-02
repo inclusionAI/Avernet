@@ -2,6 +2,8 @@
 
 import json
 
+from sqlalchemy import update
+
 from agentclaw.community.core.bot_knowledge.publication_selection import (
     SelectionRecord,
     selection_coordinates,
@@ -363,7 +365,20 @@ class BotKnowledgeStageSelection:
                     }
                     session.add(BotCommonConfig(**coordinates, config_value=payload))
                 else:
-                    marker.config_value = payload
+                    # SQLite ignores FOR UPDATE. A late writer must not replace
+                    # newer provenance or commit its binding changes with it.
+                    changed = session.execute(
+                        update(BotCommonConfig)
+                        .where(
+                            BotCommonConfig.id == marker.id,
+                            BotCommonConfig.config_value == marker.config_value,
+                            BotCommonConfig.is_delete == 0,
+                        )
+                        .values(config_value=payload)
+                        .execution_options(synchronize_session=False)
+                    ).rowcount
+                    if changed != 1:
+                        raise ValueError("concurrent knowledge projection changed")
             return True
         except Exception:
             logger.exception(

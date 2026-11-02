@@ -513,3 +513,107 @@ def test_concurrent_auxiliary_writers_never_leave_partial_projection(observation
     assert BotKnowledgeStageSelection(db).read(bot=source(db), runtime_stage="online")[
         "kb_ids"
     ] == ["kb"]
+
+
+def test_older_cross_version_writer_cannot_replace_newer_community_projection(
+    observation,
+):
+    """SQLite ignores FOR UPDATE; auxiliary CAS must roll back the losing writer."""
+    from threading import Event, Thread, current_thread
+
+    from agentclaw.community.core.bot_knowledge.publication_selection import (
+        BotKnowledgePublicationSelection,
+    )
+    from agentclaw.community.core.repository.implementations.config.bot_common_config import (
+        BotCommonConfigRepository,
+    )
+    from agentclaw.community.plugins.community.database import CommunityDatabase
+
+    db, initial, _ = observation
+    assert initial.record_build_selection(publication_id=101)
+    terminal(db)
+    assert project(initial, publication_id=101)
+    for publication_id, version, kb_id in ((102, 2, "v2-only"), (103, 3, "v3-only")):
+        with db.orm_session() as session:
+            session.get(Publication, 101).status = "upgraded"
+            session.query(Binding).update({"enabled": False})
+            session.add(
+                Publication(
+                    id=publication_id,
+                    source_bot_pk=1,
+                    source_bot_id="bot",
+                    publish_bot_id=f"botpub{version}",
+                    name="Bot",
+                    owner_id="owner",
+                    status="building",
+                    version=version,
+                    env="dev",
+                    permission_owner="owner",
+                )
+            )
+            session.add(
+                Binding(
+                    bot_pk=1,
+                    space_id=1,
+                    env="dev",
+                    kb_id=kb_id,
+                    enabled=True,
+                    revision=1,
+                    updated_by="owner",
+                )
+            )
+        assert initial.record_build_selection(publication_id=publication_id)
+    terminal(db, 102, 302)
+    community = CommunityDatabase(str(db.factory.kw["bind"].url), create_schema=False)
+    observer = BotKnowledgePublicationSelection(
+        community, BotCommonConfigRepository(community)
+    )
+    paused, resume = Event(), Event()
+    outcomes = {}
+
+    def gate(conn, cursor, sql, *args):
+        if (
+            current_thread().name == "old-projection"
+            and not paused.is_set()
+            and sql.startswith(
+                ("UPDATE ac_bot_knowledge_binding", "UPDATE ac_bot_common_config")
+            )
+        ):
+            paused.set()
+            assert resume.wait(15), "new projection did not complete"
+
+    def old_writer():
+        outcomes["old"] = project(observer, publication_id=102)
+
+    event.listen(community._engine, "before_cursor_execute", gate)
+    thread = Thread(target=old_writer, name="old-projection")
+    thread.start()
+    try:
+        assert paused.wait(10), "old projection did not reach its write boundary"
+        with db.orm_session() as session:
+            session.get(Publication, 102).status = "upgraded"
+        terminal(db, 103, 303)
+        assert project(observer, publication_id=103)
+    finally:
+        resume.set()
+        thread.join(15)
+        event.remove(community._engine, "before_cursor_execute", gate)
+        community._engine.dispose()
+    assert not thread.is_alive()
+    assert outcomes["old"] is False
+    with db.orm_session() as session:
+        marker = json.loads(
+            session.query(BotCommonConfig)
+            .filter_by(config_key="projection:online")
+            .one()
+            .config_value
+        )
+        assert marker["workflow_id"] == 303
+        assert marker["selection"]["publication_id"] == 103
+        assert sorted(
+            row.kb_id for row in session.query(Binding).filter_by(online_enabled=True)
+        ) == ["v3-only"]
+        assert session.get(Publication, 103).status == "success"
+    assert BotKnowledgeStageSelection(db).read(bot=source(db), runtime_stage="online")[
+        "kb_ids"
+    ] == ["v3-only"]

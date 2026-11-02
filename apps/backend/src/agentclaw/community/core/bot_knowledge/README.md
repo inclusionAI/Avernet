@@ -118,7 +118,9 @@ the early SUCCESS admission flip. Its existing rollback timestamp/origin token
 invalidates prior provenance before redeploy. Late lower-workflow projections
 are rejected. Online reads probe the complete binding unique key before
 space/flag filtering. Missing rows use one tenant-stamped bounded bulk insert;
-identical projection replays do not write business rows. The poll captures a
+identical projection replays do not write business rows. Marker updates also
+compare-and-swap the previously read value; a lost race rolls back all auxiliary
+writes, including on SQLite where FOR UPDATE is not enforced. The poll captures a
 bounded native workflow/rollback identity before its existing native sync call;
 projection requires that same identity, so a delayed callback cannot sign a
 new rollback token even if no marker was previously saved. Plain in-place
