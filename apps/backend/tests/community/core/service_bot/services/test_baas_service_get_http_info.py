@@ -5,7 +5,7 @@ get_http_info was refactored to use self._http (the injected HttpClient port).
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -17,6 +17,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
     NoopStoragePolicy,
 )
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasNoActiveDevicesError,
     BaasService,
     BaasServiceError,
     HttpConnectionInfo,
@@ -144,11 +145,72 @@ def test_get_http_info_404_raises(baas_service, http):
 
 
 def test_get_http_info_503_raises(baas_service, http):
-    """No active devices -> raise BaasServiceError."""
+    """503 / no_active_devices response stays a normal BaasServiceError."""
     http.set_response("get", _err_resp(503, {"error": "no_active_devices", "message": "No active devices"}))
 
     with pytest.raises(BaasServiceError, match="503"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
+
+
+# ── BaaS structured NO_ACTIVE_DEVICES offline contract ───────────────
+
+
+def _offline_http_error_logs_call(spy: MagicMock, level: str) -> list:
+    """ Narrow result/type: only key logger calls on get_http_info. """
+    return [
+        c for c in getattr(spy, level).call_args_list
+        if c.args and "get_http_info" in str(c.args[0])
+    ]
+
+@pytest.mark.parametrize("status_code", [404, 503])
+def test_get_http_info_no_active_devices_is_offline_and_logs_info(
+    baas_service, http, status_code
+):
+    """404/503 + exact detail.error=NO_ACTIVE_DEVICES is trusted offline."""
+    http.set_response(
+        "get",
+        _err_resp(
+            status_code,
+            {"detail": {"error": "NO_ACTIVE_DEVICES", "message": "No active devices available"}},
+        ),
+    )
+    raw = "NO_ACTIVE_DEVICES-response"
+    with patch(
+        "agentclaw.community.core.service_bot.services.baas_service.logger"
+    ) as spy:
+        with pytest.raises(BaasNoActiveDevicesError) as raised:
+            baas_service.get_http_info(
+                bind_id=42, port=20010, path="/x"
+            )
+
+    assert raised.value.status_code == status_code
+    assert raised.value.error_code == "NO_ACTIVE_DEVICES"
+    assert _offline_http_error_logs_call(spy, "info")
+    assert not _offline_http_error_logs_call(spy, "warning")
+    assert not _offline_http_error_logs_call(spy, "error")
+    assert raw not in str(_offline_http_error_logs_call(spy, "info"))
+
+@pytest.mark.parametrize(
+    ("status_code", "body"),
+    [
+        (404, '{"detail":{"error":"BOT_NOT_FOUND"}}'),
+        (401, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
+        (403, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
+        (500, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
+        (503, '{"detail":{"error":"SOME_OTHER_ERROR"}}'),
+    ],
+)
+def test_other_http_errors_do_not_become_device_offline(
+    baas_service, http, status_code, body
+):
+    response = _err_resp(status_code, body)
+    http.set_response("get", response)
+
+    with pytest.raises(BaasServiceError) as raised:
+        baas_service.get_http_info(bind_id=42, port=20010, path="/x")
+
+    assert not isinstance(raised.value, BaasNoActiveDevicesError)
+    assert str(status_code) in str(raised.value)
 
 
 def test_get_http_info_business_code_nonzero_raises(baas_service, http):

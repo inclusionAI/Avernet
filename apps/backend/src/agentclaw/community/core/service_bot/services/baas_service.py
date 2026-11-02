@@ -3730,7 +3730,25 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
-            logger.error(
+            # 严格按既有 `_is_no_active_devices_response()` 契约（含 HTTP 404/503）识别；
+            # 非离线错误仍保留原 BaasServiceError，避免把其他故障降级。
+            if _is_no_active_devices_response(e.response):
+                device_id = binding.device_id
+                logger.info(
+                    "[BaasService.get_http_info] no active device: "
+                    "status=%s bind_id=%s device_id=%s tenant=%s "
+                    "device_affinity=%s device_uuid=%s",
+                    e.response.status_code,
+                    bind_id,
+                    device_id,
+                    effective_tenant,
+                    device_affinity,
+                    device_uuid,
+                )
+                raise BaasNoActiveDevicesError(
+                    status_code=e.response.status_code
+                ) from e
+            logger.warning(
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
