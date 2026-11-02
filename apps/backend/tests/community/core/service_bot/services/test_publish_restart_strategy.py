@@ -263,16 +263,31 @@ async def test_coding_scope_does_not_turn_cancellation_into_a_backup_veto(engine
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.parametrize('block_on_failure', [False, True])
 async def test_registered_strategy_reads_common_config_for_published_restart(engine, block_on_failure, monkeypatch, caplog):
-    from agentclaw.community.core.common_config.common_config_service_protocol import CommonConfigServiceProtocol
+    from types import SimpleNamespace
+    from injector import Injector
+    from agentclaw.community.core.bot_management.engines import registry
     from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import _operation_id
+    from agentclaw.community.core.common_config import CommonConfigRepositoryProtocol
     from agentclaw.community import di
+    from agentclaw.community.di.modules.aicoding_module import AICodingModule
+    from agentclaw.community.di.modules.common_config_module import CommonConfigModule
     from tests.community.core.bot_management.aicoding.test_restart_backup import response
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import executor
 
-    config, injector = Mock(), Mock()
-    config.get_value.return_value = block_on_failure
-    injector.get.return_value = config
-    monkeypatch.setattr(di, 'get_app_injector', lambda: injector)
+    # Exercise the real module -> service -> repository wiring, not a mocked
+    # global injector. Registering the lazy dependency must not read the DB.
+    repository = Mock()
+    repository.get_by_biz_param.return_value = SimpleNamespace(
+        enable='1', param_value='true' if block_on_failure else 'false',
+    )
+    monkeypatch.setattr(registry, '_restart_common_config_provider', None)
+    locator = Mock(side_effect=AssertionError('restart must not use a service locator'))
+    monkeypatch.setattr(di, 'get_app_injector', locator)
+    Injector([
+        AICodingModule(), CommonConfigModule(),
+        lambda binder: binder.bind(CommonConfigRepositoryProtocol, to=repository),
+    ])
+    repository.get_by_biz_param.assert_not_called()
     svc, _, baas, build, record = _setup(engine)
     baas.list_devices_by_bot_uuid.side_effect = None
     baas.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
@@ -282,5 +297,7 @@ async def test_registered_strategy_reads_common_config_for_published_restart(eng
     assert result['success'] is (not block_on_failure)
     assert build.upgrade_async.await_count == (0 if block_on_failure else 1)
     assert ('AICODING_RESTART_FAILED' in caplog.text) is block_on_failure
-    injector.get.assert_called_once_with(CommonConfigServiceProtocol)
-    config.get_value.assert_called_once()
+    locator.assert_not_called()
+    repository.get_by_biz_param.assert_called_once()
+    assert repository.get_by_biz_param.call_args.kwargs['business_code'] == 'aicoding'
+    assert repository.get_by_biz_param.call_args.kwargs['param_code'] == 'fastdisk_fail_block'

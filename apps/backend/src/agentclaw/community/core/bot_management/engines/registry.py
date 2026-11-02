@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol, TYPE_CHECKING
+from typing import Any, Callable, Mapping, Protocol, TYPE_CHECKING
 
 from .aicoding.strategy import (
     AICODING_ENGINE_TYPE,
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     # Neutral contract only — never import core/devices here (the engine
     # composition root must not reverse-couple into device internals).
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+    from agentclaw.community.core.common_config.common_config_service_protocol import (
+        CommonConfigServiceProtocol,
+    )
 
 logger = get_logger()
 
@@ -233,12 +236,25 @@ class EngineProvisioningRegistry:
         return self._default
 
 
-def _restart_common_config():
-    """Resolve lazily at the composition root, never during registry import."""
-    from agentclaw.community.core.common_config.common_config_service_protocol import CommonConfigServiceProtocol
-    from agentclaw.community.di import get_app_injector
+_restart_common_config_provider: Callable[[], CommonConfigServiceProtocol] | None = None
 
-    return get_app_injector().get(CommonConfigServiceProtocol)
+
+def configure_restart_common_config(
+    provider: Callable[[], CommonConfigServiceProtocol],
+) -> None:
+    """Supply the process-wide strategies' lazy dependency during DI bootstrap.
+
+    Registration does not query configuration or replace strategy instances.
+    The DI module captures its injector; core never locates a global container.
+    """
+    global _restart_common_config_provider
+    _restart_common_config_provider = provider
+
+
+def _restart_common_config() -> CommonConfigServiceProtocol:
+    if _restart_common_config_provider is None:
+        raise RuntimeError("Coding restart common configuration is not wired")
+    return _restart_common_config_provider()
 
 
 def _build_default_registry() -> EngineProvisioningRegistry:
@@ -610,6 +626,7 @@ __all__ = [
     "DefaultCapabilitiesEngineBucketResolverRegistry",
     "DefaultSkillSetSelectionResolverRegistry",
     "EngineProvisioningRegistry",
+    "configure_restart_common_config",
     "get_baas_engine_bucket_resolver_registry",
     "get_cli_defaults_resolver_registry",
     "get_default_capabilities_engine_bucket_resolver_registry",
