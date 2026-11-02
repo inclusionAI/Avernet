@@ -226,6 +226,41 @@ def _is_no_active_devices_response(response: httpx.Response) -> bool:
     return isinstance(detail, dict) and detail.get("error") == "NO_ACTIVE_DEVICES"
 
 
+# Single short backoff (seconds) for the upgrade-bot transient transport retry.
+# ``upgrade`` is wrapped by ``BotBuildService.upgrade_async`` via
+# ``asyncio.to_thread``, so a synchronous ``time.sleep`` here does not block the
+# event loop. Bounded to one re-attempt: BaaS's existing 409 in-flight contract
+# guards against any double-issue when the first request actually reached BaaS
+# (see ``upgrade_bot`` docstring + ``BotBuildService.upgrade``).
+_UPGRADE_TRANSIENT_RETRY_WAIT_SECONDS = 0.75
+
+
+def _request_error_from_tracing_wrapper(exc: BaseException) -> httpx.RequestError | None:
+    """Unwrap an ``httpx.RequestError`` hidden behind ant_baselib's send hook.
+
+    ``ant_baselib.tracer.patches.httpx_client`` re-raises every httpx transport
+    failure (``RemoteProtocolError`` / ``ConnectError`` / ...) as a plain
+    ``HttpxCallingException("Error in httpx send hook")``. The original
+    ``httpx.RequestError`` is preserved only on ``__cause__`` / ``__context__``,
+    so a naive ``except httpx.RequestError`` misses the wrapped case and a
+    transient outage (typical signature in prod logs:
+    ``Error in httpx send hook: Server disconnected``) leaks as a non-transient
+    error to callers such as the bot upgrade flow. Walk both cause chains to
+    surface the original transport error, mirroring the same pattern already in
+    ``agentclaw.corp.plugins.prod.device_adapter_transport``
+    (``_request_error_from_tracing_wrapper``); kept local so Avernet community
+    code does not depend on the corp layer.
+    """
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        if isinstance(current, httpx.RequestError):
+            return current
+        visited.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
 @dataclass
 class BotWsConnectionInfoResponse:
     """BAAS WebSocket connection info.
@@ -3063,24 +3098,100 @@ class BaasService:  # pragma: no cover
         )
 
         # 调用 BaaS 层 API
+        path = f"/api/v1/bots/{bot_uuid}/update"
         try:
             return self._post_bots_api(
-                path=f"/api/v1/bots/{bot_uuid}/update",
+                path=path,
                 payload=payload,
                 action="upgrade_bot",
             )
 
         except httpx.HTTPStatusError as e:
+            # 404/409/4xx/5xx: keep the existing contract — no transient retry,
+            # so the caller (concurrent upgrade flow) still sees the same 409
+            # in-flight signal instead of any added double-issue risk.
             logger.error(
                 f"[BaasService.upgrade_bot] HTTP error: {e.response.status_code} - {e.response.text}"
             )
             raise
+        except httpx.RequestError as e:
+            # Transport-layer failure (Server disconnected / ConnectError / ...).
+            # BaaS almost certainly didn't record a workflow yet — retry once.
+            logger.warning(
+                f"[BaasService.upgrade_bot] transient transport failure, "
+                f"retrying once after {_UPGRADE_TRANSIENT_RETRY_WAIT_SECONDS}s: "
+                f"bot_uuid={bot_uuid} error_type={type(e).__name__} error={e}"
+            )
+            return self._retry_upgrade_post_on_transport(
+                e, path=path, payload=payload, action="upgrade_bot",
+            )
         except Exception as e:
+            # ant_baselib's tracing patch re-raises httpx transport errors as a
+            # *plain* ``HttpxCallingException`` (not an httpx.RequestError) with
+            # the original on __cause__/__context__; unwrap it so we route the
+            # same transient-retry path as the direct httpx.RequestError branch.
+            underlying = _request_error_from_tracing_wrapper(e)
+            if underlying is None:
+                logger.error(
+                    f"[BaasService.upgrade_bot] "
+                    f"Failed to upgrade bot in BaaS: {e}"
+                )
+                raise
+            logger.warning(
+                f"[BaasService.upgrade_bot] transient transport failure "
+                f"(wrapped), retrying once after {_UPGRADE_TRANSIENT_RETRY_WAIT_SECONDS}s: "
+                f"bot_uuid={bot_uuid} underlying_type={type(underlying).__name__} error={e}"
+            )
+            return self._retry_upgrade_post_on_transport(
+                underlying, path=path, payload=payload, action="upgrade_bot",
+            )
+
+    def _retry_upgrade_post_on_transport(
+        self,
+        first_error: httpx.RequestError,
+        *,
+        path: str,
+        payload: Dict[str, Any],
+        action: str,
+    ) -> Dict[str, Any]:
+        """One bounded retry of the upgrade POST after a transient transport failure.
+
+        Sleeps once with ``_UPGRADE_TRANSIENT_RETRY_WAIT_SECONDS`` then re-issues
+        the *same* payload (carrying the caller's deterministic ``request_id``).
+        On a second transport failure surfaces ``BaasTransientServiceError`` so
+        callers route this through the existing transient contract rather than
+        treating it as a permanent failure. On a second ``httpx.HTTPStatusError``
+        (e.g. 409 when the first request did reach BaaS and an in-flight workflow
+        already exists) it re-raises unchanged, so existing 409 handling in
+        ``BotBuildService.upgrade`` survives the retry without new double-issue
+        risk.
+        """
+        time.sleep(_UPGRADE_TRANSIENT_RETRY_WAIT_SECONDS)
+        try:
+            return self._post_bots_api(path=path, payload=payload, action=action)
+        except httpx.HTTPStatusError as e:
+            # Keep the same HTTP-status contract as the first call (409 etc.).
             logger.error(
-                f"[BaasService.upgrade_bot] "
-                f"Failed to upgrade bot in BaaS: {e}"
+                f"[BaasService.upgrade_bot] HTTP error after retry: "
+                f"{e.response.status_code} - {e.response.text}"
             )
             raise
+        except httpx.RequestError as e:
+            # ``e`` is the second-attempt error; ``first_error`` is preserved as
+            # the immediate cause so callers/tests see the original failure too.
+            raise BaasTransientServiceError(
+                f"BaaS upgrade transport failure after retry: "
+                f"{type(e).__name__}: {e}"
+            ) from first_error
+        except Exception as e:
+            underlying = _request_error_from_tracing_wrapper(e)
+            if underlying is None:
+                # Original behavior: surface unchanged.
+                raise
+            raise BaasTransientServiceError(
+                f"BaaS upgrade transport failure after retry: "
+                f"{type(underlying).__name__}: {e}"
+            ) from first_error
 
     def update_device_outbound_rule(
         self, paas_device_id: str, outbound_rule: OutBoundOperationRule
