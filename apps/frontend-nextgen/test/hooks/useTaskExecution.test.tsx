@@ -15,14 +15,15 @@ jest.mock('@/services/tasks/taskService', () => ({
 jest.mock('@/services/workspace/botSkillService', () => ({
   botSkillService: {
     listSkillsForBotId: jest.fn(),
-    hasTaskIntentSkill: jest.fn((skills: Array<{ name: string; active: boolean }>) =>
-      skills.some((skill) => skill.active && skill.name === 'task-intent-recognition')),
+    hasTaskIntentSkill: jest.fn(),
+    // useTaskExecution 现走 hasTaskIntentSkillForBot:属主 bot → 列技能;非属主 → match 探针。
+    hasTaskIntentSkillForBot: jest.fn(),
   },
 }));
 
 const mockedExecute = executeTaskService as unknown as jest.Mock;
-const mockedListSkills = jest.requireMock('@/services/workspace/botSkillService').botSkillService
-  .listSkillsForBotId as jest.Mock;
+const mockedHasTaskIntent = jest.requireMock('@/services/workspace/botSkillService').botSkillService
+  .hasTaskIntentSkillForBot as jest.Mock;
 const context: TaskComposerContext = {
   sourceType: 'bot',
   ownerUserId: 'user-1',
@@ -64,15 +65,12 @@ describe('useTaskExecution relay bootstrap', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedExecute.mockResolvedValue(taskRecord('centralized'));
-    mockedListSkills.mockResolvedValue({ ok: true, data: [] });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: false });
     useTaskStore.getState().reset();
   });
 
   it('安装 task-intent-recognition 后动态任务可选', async () => {
-    mockedListSkills.mockResolvedValue({
-      ok: true,
-      data: [{ name: 'task-intent-recognition', active: true }],
-    });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
     const { result } = renderHook(() =>
       useTaskExecution({
         panelRef: { current: null } as never,
@@ -152,10 +150,7 @@ describe('useTaskExecution selections（多胶囊叠加态）', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resolveWorkflowCommand.mockResolvedValue({ command: 'cmd-x', title: '工作流X' });
-    mockedListSkills.mockResolvedValue({
-      ok: true,
-      data: [{ name: 'task-intent-recognition', active: true }],
-    });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
   });
 
   function renderExecution() {

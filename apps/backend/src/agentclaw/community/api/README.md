@@ -195,6 +195,7 @@ internal_dependencies:
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
+  - agentclaw.community.core.task.task_config.task_config_service_protocol  # TaskConfigServiceProtocol — re-exported by api/task/task_config_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
   - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
