@@ -257,6 +257,24 @@ class BotRepository(
             )
             return self._to_caller_identity_dict(bot) if bot else None
 
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """Keep explicit account lookups separate from legacy entity aliases."""
+        with self._db.orm_session() as db:
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .limit(2)
+                .all()
+            )
+            return [self._to_caller_identity_dict(bot) for bot in bots]
+
     def list_matches_by_legacy_locator(
         self, bot_id: str, locator: str
     ) -> List[Dict[str, Any]]:
