@@ -27,8 +27,9 @@ class CollaboratingBotSpace(BaseModel):
 
 
 class CollaboratingBot(BaseModel):
-    bcn_bot_id: str = Field(default="", description="Stable established BCN reference.")
     """Bot summary returned to one of its collaborators."""
+
+    bcn_bot_id: str = Field(default="", description="Stable established BCN reference.")
 
     bot_id: str = Field(description="Unique identifier of the Bot.")
     bot_name: str = Field(description="Display name of the Bot.")
