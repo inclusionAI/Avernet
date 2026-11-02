@@ -17,6 +17,7 @@ from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from starlette.requests import ClientDisconnect
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -1965,7 +1966,13 @@ async def search_bots(
         }
     """
     try:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except ClientDisconnect:
+            logger.info(
+                "[bot_router.search_bots] Client disconnected before body parse",
+            )
+            return Response(status_code=499)
 
         # 参数解析
         key = data.get("key")
