@@ -45,6 +45,34 @@ test('earlier failure survives later success; escaped XML remains readable', () 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('merges entity-heavy JUnit logs verbatim without exhausting the parser budget', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clawweb-report-logs-'));
+  try {
+    const reportDir = join(root, 'package'); mkdirSync(reportDir);
+    const log = '&quot;'.repeat(1_000_001);
+    writeFileSync(join(reportDir, 'junit.xml'), `<testsuites><testsuite name="logs"><testcase name="a &amp; b"/>
+      <system-out>${log}</system-out><system-err>&lt;error&gt;</system-err></testsuite></testsuites>`);
+    const row = { name: 'workflow', path: 'workflow', root, reportDir, status: 'PASS', total: 1, passed: 1, failed: 0 };
+    assert.equal(writeReports(root, root, [row], { node: process.version }), 0);
+    const merged = readFileSync(join(root, 'junit.xml'), 'utf8');
+    assert.ok(merged.includes(log));
+    assert.match(merged, /name="a &amp; b"/);
+    assert.match(merged, /<system-err>&lt;error&gt;<\/system-err>/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('still rejects JUnit entity declarations when console logs are opaque', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clawweb-report-dtd-'));
+  try {
+    const reportDir = join(root, 'package'); mkdirSync(reportDir);
+    writeFileSync(join(reportDir, 'junit.xml'), '<!DOCTYPE testsuites [<!ENTITY x "unsafe">]><testsuites/>');
+    const row = { name: 'workflow', path: 'workflow', root, reportDir, status: 'PASS', total: 1, passed: 1, failed: 0 };
+    assert.equal(writeReports(root, root, [row], { node: process.version }), 1);
+    assert.equal(row.status, 'ERROR');
+    assert.match(row.error, /DTD is not allowed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('collection errors are tracked separately from assertion failures', () => {
   const result = classifyResult({ ...json, testResults: [{ status: 'failed', assertionResults: [] }] }, { status: 1 });
   assert.equal(result.collectionErrors, 1);
