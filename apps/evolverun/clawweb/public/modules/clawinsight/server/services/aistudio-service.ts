@@ -1,3 +1,4 @@
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 export const SESSION_ANALYSIS_SNAPSHOT_ID = 62310015;
 export const DEFAULT_AISTUDIO_PROJECT_NAME = "alipay_ctuop_dev";
 // Credentials are deployment inputs. Public source must never provide a token fallback.
@@ -58,25 +59,36 @@ export class AistudioService {
     return (await this.getJobStatusDetail(jobId)).status;
   }
 
-  async stopExecution(jobId: string): Promise<void> {
+  async stopExecution(jobId: string, userId: string): Promise<void> {
     if (!this.config.token) throw new Error("AIS token 未配置");
-    const recordId = jobId.trim();
-    if (!recordId || recordId.length > 255 || /[\r\n\0]/u.test(recordId)) {
-      throw new Error("AIS recordId 格式不合法");
+    const normalizedJobId = jobId.trim();
+    if (!normalizedJobId || normalizedJobId.length > 255 || /[\r\n\0]/u.test(normalizedJobId)) {
+      throw new Error("AIS jobId 格式不合法");
+    }
+    const userNumber = typeof userId === "string" ? userId.trim() : "";
+    if (!userNumber || userNumber.length > 128 || /[\r\n\0]/u.test(userId)) {
+      throw new Error("AIS execution userId 格式不合法");
     }
     const url = new URL(`${API_BASE}/stopExecution`);
-    url.searchParams.set("recordId", recordId);
+    url.searchParams.set("jobId", normalizedJobId);
+    url.searchParams.set("userNumber", userNumber);
     url.searchParams.set("token", this.config.token);
     const response = await this.fetcher(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(20_000),
+      method: "GET", headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) throw new Error(`AIS stopExecution HTTP ${response.status}`);
-    let payload: { success?: boolean; message?: string };
+    let payload: { success?: boolean; errorCode?: unknown; errorMessage?: unknown; message?: unknown } | null;
     try { payload = await response.json() as typeof payload; }
-    catch { throw new Error("AIS stopExecution 返回非 JSON"); }
-    if (!payload.success) throw new Error("AIS stopExecution 返回失败");
+    catch {
+      throw new Error(response.ok ? "AIS stopExecution 返回非 JSON" : `AIS stopExecution HTTP ${response.status}`);
+    }
+    if (!response.ok || payload?.success !== true) {
+      const detail = [payload?.errorCode, payload?.errorMessage ?? payload?.message]
+        .filter((value): value is string => typeof value === "string" && !!value.trim()).join(": ");
+      const safeDetail = redactPersistableText(detail.replaceAll(this.config.token, "[REDACTED]")
+        .replaceAll(encodeURIComponent(this.config.token), "[REDACTED]"), 1500);
+      const failure = response.ok ? "返回失败" : `HTTP ${response.status}`;
+      throw new Error(`AIS stopExecution ${failure}${safeDetail ? `: ${safeDetail}` : ""}`);
+    }
   }
 
   async getJobStatusDetail(jobId: string): Promise<AistudioJobStatusDetail> {

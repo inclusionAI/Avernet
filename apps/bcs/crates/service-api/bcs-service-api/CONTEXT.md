@@ -1,5 +1,53 @@
 # bcs-service-api Context
 
+`A2aBotManagementService::register_provider_bot` orchestrates Provider-admin
+Card-aware creation using the existing Provider command/response. Its
+`A2aProviderRegistrationCoreService` dependency owns reauthorization and the
+atomic Bot/ownership/Card transaction through the existing repository port.
+SDK/HTTP types do not enter Core. The management credential authenticates the
+real Provider audit actor; owners are delegated Bot ownership, not a claimed
+Human caller. A2A duplicate creation conflicts and never returns old credentials.
+
+`RunBudgetService` is the application boundary for execution/wait budgets.
+Initialization delegates pure policy; update_deadline orchestrates policy,
+managed delivery and guarded Run-context deadline persistence. Its protocol-free
+RunBudgetTarget/RunBudgetUpdate carry canonical scope and expected deadline.
+The caller persists its protocol correlation before publishing a wait or sending
+a continuation. A failure is not a rollback or terminal; callers fail closed.
+The budget Core contract is consumed by application implementations and
+composition/tests, not outbound wire adapters through a facade re-export.
+
+`ManagedMessageDeliveryService::mark_run_transport_unknown` accepts only an
+already-issued canonical Send and its exact Bot/Group/Session scope. It retains
+the occupied slot and existing cancellation intent, is idempotent for uncertain
+or terminal work, rejects aliases/unsent work, and propagates persistence errors.
+Only a later trusted terminal or explicit operator resolution may release it.
+The shared managed-deadline harness covers Memory and SQLite implementations.
+
+`BotRegistryCoreService::resolve_abort_target` is cancellation-only. BotCore
+retains current Bot/Provider affiliation, enabled downlink/binding and credential
+checks. Failed refresh preserves the last successful snapshot for both new sends
+and cancellation, subject to current deployment policy. The adapter still proves exact frozen
+Task/context from the trusted Run; this method grants neither new send authority
+nor a wider cancel scope. Default implementations delegate ordinary resolution
+for backward compatibility. Queued and active-scope abort paths use the new
+method. No HTTP/WS or persistence-plugin API changes are introduced.
+
+Run budgeting adds the transport-independent `RunBudgetCoreService` policy and
+typed executing/waiting state. ManagedMessageDeliveryService's canonical
+`reschedule_run_deadline` and BotRunContextPort's expected-deadline
+`reschedule_deadline` are separate contracts: neither revives expired/terminal
+work, changes attempt/owner, or creates output producers. Unsupported defaults
+fail closed. The orchestrator must treat partial cross-store failure as failed
+budget publication and cancel before exposing input cards. Shared Core,
+application and port conformance harnesses cover Memory/SQLite/Redis-backed
+implementations. No HTTP/WS or storage-plugin contract/schema change is added.
+
+A2A delivery targets carry typed extension declarations including `required`
+and full `params`, rather than URI strings alone. Core projects declarations;
+the outbound adapter owns draft/profile negotiation. This source-level contract
+change requires rebuilding consumers; frozen Run records retain selected URIs.
+
 Operation-boundary delivery admission (bot-authority spec §8.2 — 已准入输出不追溯):
 `DeliveryAdmissionService::resolve_recipient_views` resolves each candidate
 connection's delivery view ONCE per accepted operation per scope (one shared
@@ -245,7 +293,7 @@ dispatcher-to-Send boundary without native inject.
   repository contracts provide an activation CAS; Memory/SQL implementations
   and the runtime-cleanup decorator must preserve it. Normal State Machine
   completion, failure, and cancellation use the same CAS, propagate write errors,
-  and dispatch callbacks only from the returned activation snapshot. Missing
+  and return the completed activation snapshot. Missing
   activation metadata is never inferred from the current Session. Completed/Failed
   Run recovery prepares the immutable terminal IM intent before completing the
   Session, then shares the foreground delivery path. Chat publication uses its
@@ -555,3 +603,80 @@ already validated accepted alias, not a new producer. Its default delegates the
 storage write for existing implementations; lifecycle decorators must not mint
 independent output lineage, including when a delayed ACK overlaps canonical
 terminal cleanup. WS uses this method for direct A2A alias scope projection.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+This retirement is a breaking Rust Service API change: bcs-service-api is version
+1.0.0. Group/Session consumers and implementations must rebuild together; Plugin
+API versions and State Machine contracts are unchanged.
+
+## Runtime-only caller identity envelopes
+
+`application::caller_identity` freezes the P0 caller identity envelopes:
+the strict `AuthenticatedHumanCallerIngress` (same-authentication Human caller
+material with a trusted, monotonically shrinkable validity window),
+`CallerSubjectRef` (opaque subject handle reachable only through explicit
+`expose_ref`) and the closed three-value `CallerExecutionPurpose`. These
+types never derive serde; Debug redacts the staff principal and the subject
+reference. Ingress supports Clone for trusted WS snapshots without renewing
+validity. WebSendCommand and GroupChatCommand clones remove caller_ingress;
+identity-preserving forwarding explicitly moves it. Handoff claim-once remains
+per scope, independent of Rust Clone. Persistable caller control-plane contracts live in
+`bcs_domain::caller_identity` instead. The access-level `application ::
+principal::CallerContext` is intentionally separate; it stays the request
+principal enum and never carries execution identity.
+
+
+Human acting for an owned Bot is authenticated as the Human but uses the Bot as the
+effective sender. It stays ordinary Bot speech for caller-disabled targets, never
+carries the Human ingress, and fails closed when a caller-enabled target is present.
+
+Caller observe commands carry a redacted destination subject and optional paired
+Gateway reference/epoch. Provider wire maps the subject to caller_context.subject
+for both send and ordinary observe-only inject; inject has no execution credential
+or identity-expiry claim. Provider container_routing defaults to ensure; explicit
+caller_subject opts into lazy Human×Bot routing and session isolation. Preparation
+reads the existing ProviderCore capability source once per target preparation,
+never per observer. Failed reads or ensure calls cannot enable a fallback. The
+subject/observe directory remains bounded, expiring and memory-only; no identity
+storage or new lifecycle is introduced.
+
+## Caller identity boundary
+
+Shared caller runtime envelopes are domain-owned and reexported here for compatibility. The issuance trait now lives exclusively in `bcs-caller-identity-api`; Service API does not depend on Plugin API.
+
+## A2A Bot configuration
+
+The frozen A2A context scope may carry a credential-free deployment route
+fingerprint. Changed remote routing identities partition contexts and must not
+retarget an existing Task. Absent fingerprints are omitted on HTTP scopes so
+existing serialized context keys remain compatible. This adds no SDK dependency
+or database migration; consumers persist the same correlation JSON atomically.
+
+`A2aBotManagementService` authorizes Provider-admin configuration and explicit
+refresh. `A2aCardPort` returns a validated, credential-free declaration; SDK and
+HTTP types do not enter this contract. `A2aBotCoreService` checks the active
+Gateway affiliation and delegates CAS to `A2aBotRepoPort`. Complete Card JSON,
+nullable source URL and revision are one atomic Bot-row write. Inline and URL
+sources share validation. Routes and fixed-kind Provider credentials derive from
+trusted current configuration; refresh failure does not overwrite the snapshot.
+No tool execution proves compatibility; in-flight tasks keep frozen interfaces.
+
+A2A association contract: explicit-column run bindings can share one remote Task
+within a trusted scope. Repository CAS returns the committed projection and
+fences both run and shared Task revisions. Pending input is Task-owned; budgets
+and local states remain run-owned. Run-scoped cancellation rejects a shared Task
+with another active binding. See docs/specs/a2a/task-bindings-v1.md.

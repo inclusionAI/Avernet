@@ -12,7 +12,6 @@ use bcs_protocol::{
     CreateGroupRequest, InlineEventPayloadMode, InlineEventSinkInfo,
     InlineGroupEventSubscriptionInfo,
 };
-use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::application::v1::{
     ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup as V1CreateGroup,
@@ -23,16 +22,16 @@ use bcs_service_api::application::v1::{
     StateMachineDefinitionContent, StateMachineParticipantBinding, UpdateGroup,
 };
 use bcs_service_api::{
-    BotDetailCommand, BotGroupListCommand, CallbackChannelConfig, CollaborationRuntimeError,
+    BotDetailCommand, BotGroupListCommand, CollaborationRuntimeError,
     ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, GroupAddMemberCommand,
     GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupDetailCommand,
     GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry, GroupParticipantModeCommand,
-    GroupPatchSettingsCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
+    GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
     GroupUpdateVisibilityCommand, GroupUseCaseError,
     MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
     PatchGroupCollaborationDefinitionCommand, RoutingMode, RoutingPolicy, ServiceError,
-    ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
+    SessionKind, SessionStatus, StartStateMachineRunCommand,
     UpgradeGroupCollaborationDefinitionCommand,
 };
 use bcs_service_api::types::MessageViewScope;

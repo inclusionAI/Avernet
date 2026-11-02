@@ -26,6 +26,7 @@ const runResult = { ok: true, workflowId: run.workflow_id, flowId: 'new-flow' }
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const fetchMock = vi.fn<typeof fetch>()
 let queryClient: QueryClient
+let saveResponse: () => Promise<Response>
 let deployResponse: () => Promise<Response>
 let runResponse: () => Promise<Response>
 
@@ -37,6 +38,15 @@ function deferredResponse() {
 
 function requests(path: string) {
   return fetchMock.mock.calls.filter(([url]) => url === `/api/auto-heal/${path}`)
+}
+
+async function deployBody() {
+  const init = requests('deploy')[0][1]!
+  expect(new Headers(init.headers).get('X-Pack-Version-CSRF')).toBe('1')
+  expect(new Headers(init.headers).has('Content-Encoding')).toBe(false)
+  expect(init.body).toBeInstanceOf(Blob)
+  const text = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(init.body as Blob) })
+  return JSON.parse(text)
 }
 
 function expectSourceRun(count = 1) {
@@ -69,13 +79,15 @@ async function saveFix(autoRun = true) {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  saveResponse = async () => response({ ok: true, saved: true, workflowId: run.workflow_id, packId: 'pack-1' })
   deployResponse = async () => response(deployed)
   runResponse = async () => response(runResult)
   fetchMock.mockReset().mockImplementation(async (input) => {
     switch (String(input)) {
       case '/api/auto-heal/diagnose': return response(diagnosis)
-      case '/api/auto-heal/save': return response({ ok: true, saved: true, packId: 'pack-1' })
+      case '/api/auto-heal/save': return saveResponse()
       case '/api/auto-heal/deploy': return deployResponse()
       case '/api/auto-heal/run': return runResponse()
       default: throw new Error(`Unexpected request: ${String(input)}`)
@@ -92,6 +104,82 @@ afterEach(() => {
 })
 
 describe('AutoHealPanel source-aware reruns', () => {
+
+  it('blocks a repeat after a lost deploy response, including after remount', async () => {
+    deployResponse = async () => response({ message: 'response lost' }, 503)
+    renderPanel()
+    await userEvent.click(await saveFix(false))
+    expect(await screen.findByText(/结果可能未知/)).toBeInTheDocument()
+    expect(localStorage.getItem(`clawweb.autoheal.review-blocked.v1.${encodeURIComponent(run.workflow_id)}`)).toBe('1')
+    expect(screen.getByRole('button', { name: '保存修复' })).toBeDisabled()
+    cleanup()
+    renderPanel()
+    await screen.findByText(/存在未确认的操作/)
+    await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
+    expect(await screen.findByRole('button', { name: '保存修复' })).toBeDisabled()
+    expect(requests('deploy')).toHaveLength(1)
+  })
+
+  it('removes legacy sensitive records without rendering them and blocks unsafe replacement', async () => {
+    const prefix = 'clawweb.autoheal.operation.v1.'
+    localStorage.setItem(prefix + run.workflow_id, JSON.stringify({ diagnosis: { rawResponse: 'SECRET-OTHER-USER', fixedSpec: { secret: 'placeholder' } } }))
+    localStorage.setItem(prefix + 'another-workflow', JSON.stringify({ diagnosis: { summary: 'OTHER-SECRET' } }))
+    renderPanel()
+    expect(await screen.findByRole('alert')).toHaveTextContent('存在未确认的操作')
+    expect(document.body.textContent).not.toContain('SECRET-OTHER-USER')
+    expect(document.body.textContent).not.toContain('placeholder')
+    expect(localStorage.getItem(prefix + run.workflow_id)).toBeNull()
+    expect(localStorage.getItem(prefix + 'another-workflow')).toBeNull()
+    expect(JSON.stringify(localStorage)).not.toContain('SECRET')
+    await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
+    expect(await screen.findByRole('button', { name: '保存修复' })).toBeDisabled()
+    expect(requests('save')).toHaveLength(0)
+    cleanup(); renderPanel()
+    expect(await screen.findByRole('alert')).toHaveTextContent('存在未确认的操作')
+  })
+  it('explains DB-only saving and deploys using the saved workflow and pack identifiers', async () => {
+    renderPanel()
+    const deployButton = await saveFix(false)
+    expect(screen.getByText(/已保存到数据库，尚未部署/)).toBeInTheDocument()
+    expect(requests('deploy')).toHaveLength(0)
+    await userEvent.click(deployButton)
+    await waitFor(() => expect(requests('deploy')).toHaveLength(1))
+    expect(await deployBody()).toEqual({
+      workflowId: run.workflow_id, packId: 'pack-1', diagnosisId: diagnosis.diagnosisId,
+      note: 'auto-heal deploy', autoRun: false,
+    })
+    await screen.findByText('修复已部署')
+    expect(localStorage.getItem(`clawweb.autoheal.review-blocked.v1.${encodeURIComponent(run.workflow_id)}`)).toBeNull()
+  })
+
+  it.each([
+    null,
+    { ok: false, saved: true, workflowId: run.workflow_id, packId: 'pack-1' },
+    { ok: true, saved: false, workflowId: run.workflow_id, packId: 'pack-1' },
+    { ok: true, saved: true, workflowId: 'another-workflow', packId: 'pack-1' },
+    { ok: true, saved: true, workflowId: run.workflow_id, packId: '' },
+    { ok: true, saved: true, workflowId: run.workflow_id },
+  ])('does not offer deployment for an unsuccessful or invalid save response: %o', async (result) => {
+    saveResponse = async () => response(result)
+    renderPanel()
+    await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
+    await userEvent.click(await screen.findByRole('button', { name: '保存修复' }))
+    expect(await screen.findByText(/保存结果无效或工作流不匹配/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '部署修复' })).not.toBeInTheDocument()
+    expect(requests('deploy')).toHaveLength(0)
+    expect(requests('run')).toHaveLength(0)
+  })
+
+  it('does not deploy when saving fails authorization', async () => {
+    saveResponse = async () => response({ message: '无权保存' }, 403)
+    renderPanel()
+    await userEvent.click(screen.getByRole('button', { name: '开始诊断' }))
+    await userEvent.click(await screen.findByRole('button', { name: '保存修复' }))
+    expect(await screen.findByText('无权保存')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '部署修复' })).not.toBeInTheDocument()
+    expect(requests('deploy')).toHaveLength(0)
+    expect(requests('run')).toHaveLength(0)
+  })
   it('sends run.flow_id, not client bot/stage metadata, for a single manual rerun', async () => {
     const { onRerunComplete, rerenderRun } = renderPanel()
     const clientRun = { ...run, botId: 'retired-diagnostic-bot', stage: 'untrusted-stage' }
@@ -106,7 +194,7 @@ describe('AutoHealPanel source-aware reruns', () => {
     const { onRerunComplete } = renderPanel()
     await userEvent.click(await saveFix())
     await waitFor(() => expect(requests('deploy')).toHaveLength(1))
-    expect(JSON.parse(String(requests('deploy')[0][1]?.body)).autoRun).toBe(false)
+    expect((await deployBody()).autoRun).toBe(false)
     await waitFor(() => expect(onRerunComplete).toHaveBeenCalledTimes(1))
     expectSourceRun()
   })
@@ -118,7 +206,7 @@ describe('AutoHealPanel source-aware reruns', () => {
     await userEvent.click(await saveFix(false))
 
     expect(await screen.findByText('修复已部署')).toBeInTheDocument()
-    expect(JSON.parse(String(requests('deploy')[0][1]?.body)).autoRun).toBe(false)
+    expect((await deployBody()).autoRun).toBe(false)
     expect(requests('run')).toHaveLength(0)
     const rerun = screen.getByRole('button', { name: '重新运行' })
     // Same-tick repeat events must not enqueue duplicate BaaS tasks.
@@ -140,7 +228,7 @@ describe('AutoHealPanel source-aware reruns', () => {
     const deployButton = await saveFix()
     act(() => { fireEvent.click(deployButton); fireEvent.click(deployButton) })
     await waitFor(() => expect(requests('deploy')).toHaveLength(1))
-    expect(JSON.parse(String(requests('deploy')[0][1]?.body))).toEqual({
+    expect((await deployBody())).toEqual({
       workflowId: run.workflow_id, packId: 'pack-1', diagnosisId: diagnosis.diagnosisId,
       note: 'auto-heal deploy', autoRun: false,
     })
@@ -154,11 +242,34 @@ describe('AutoHealPanel source-aware reruns', () => {
     expect(requests('deploy')).toHaveLength(1)
   })
 
+  it('shows a deployment compatibility error instead of reporting a deployment or rerunning', async () => {
+    const message = '候选部署暂不可用：跨入口并发保护、Git/数据库一致性及 YAML 候选同步尚未完成，未执行部署。'
+    deployResponse = async () => response({ error: 'Service Unavailable', code: 'CANDIDATE_DEPLOYMENT_UNAVAILABLE', message }, 503)
+    const { onRerunComplete } = renderPanel()
+    await userEvent.click(await saveFix())
+    expect(await screen.findByText((text) => text.includes(message))).toBeInTheDocument()
+    expect(await deployBody()).not.toHaveProperty('candidateCommit')
+    expect(requests('run')).toHaveLength(0)
+    expect(onRerunComplete).not.toHaveBeenCalled()
+    expect(screen.queryByText('修复已部署')).not.toBeInTheDocument()
+  })
+
+  it('does not rerun or report success when deploy returns an unsuccessful result', async () => {
+    deployResponse = async () => response({ ...deployed, deployed: false })
+    const { onRerunComplete } = renderPanel()
+    await userEvent.click(await saveFix())
+    expect(await screen.findByText(/部署结果无法确认/)).toBeInTheDocument()
+    expect(localStorage.getItem(`clawweb.autoheal.review-blocked.v1.${encodeURIComponent(run.workflow_id)}`)).toBe('1')
+    expect(requests('run')).toHaveLength(0)
+    expect(screen.queryByText('修复已部署')).not.toBeInTheDocument()
+    expect(onRerunComplete).not.toHaveBeenCalled()
+  })
+
   it('never runs when deployment fails', async () => {
     deployResponse = async () => response({ message: '部署失败，未发布' }, 500)
     const { onRerunComplete } = renderPanel()
     await userEvent.click(await saveFix())
-    expect(await screen.findByText('部署失败，未发布')).toBeInTheDocument()
+    expect(await screen.findByText(/部署失败，未发布/)).toBeInTheDocument()
     expect(requests('deploy')).toHaveLength(1)
     expect(requests('run')).toHaveLength(0)
     expect(screen.queryByText('修复已部署')).not.toBeInTheDocument()
@@ -197,17 +308,13 @@ describe('AutoHealPanel source-aware reruns', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it.each([true, false])('does not run without a source flow_id after deployment (autoRun=%s)', async (autoRun) => {
+  it.each([true, false])('does not carry diagnosis or a deploy candidate across source-run changes (autoRun=%s)', async autoRun => {
     const { rerenderRun, onRerunComplete } = renderPanel()
     await saveFix(autoRun)
-    rerenderRun({ ...run, flow_id: '' })
-    await userEvent.click(screen.getByRole('button', { name: '部署修复' }))
-    if (!autoRun) await userEvent.click(await screen.findByRole('button', { name: '重新运行' }))
-    expect(await screen.findByText(/缺少 flow_id.*无法重新运行/)).toBeInTheDocument()
-    expect(screen.getByText('修复已部署')).toBeInTheDocument()
-    expect(screen.getByText(diagnosis.summary)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重新运行' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '保存修复' })).not.toBeInTheDocument()
+    rerenderRun({ ...run, flow_id: 'different-run' })
+    expect(screen.queryByText(diagnosis.summary)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '部署修复' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重新运行' })).not.toBeInTheDocument()
     expect(requests('run')).toHaveLength(0)
     expect(onRerunComplete).not.toHaveBeenCalled()
   })

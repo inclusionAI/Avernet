@@ -270,19 +270,6 @@ impl GroupCoreService for FakeGroupCoreService {
         Ok(())
     }
 
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.service_spec = service_spec;
-        Ok(())
-    }
-
     async fn terminate(&self, id: &str, _caller_bot_id: &str) -> ServiceResult<Group> {
         let mut groups = self.groups.write().await;
         let group = groups

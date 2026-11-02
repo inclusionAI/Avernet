@@ -155,6 +155,7 @@ async fn register_provider(ctx: &TestContext) -> (String, String) {
     let registered = ctx
         .management
         .register_provider(RegisterProviderCommand {
+            caller_capabilities: None,
             collaboration_scope: None,
             slug: None,
             name: "Provider".to_string(),

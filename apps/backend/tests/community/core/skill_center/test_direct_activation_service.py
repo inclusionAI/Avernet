@@ -18,7 +18,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -81,7 +81,7 @@ class _Repository:
         self.uninstall_skill_calls.append(kwargs)
         return self._skill_mutation()
 
-    def claim_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+    def claim_apply_mcp(self, **kwargs) -> DesiredStateMutation:
         self.manifest_mcp_claim_calls.append(kwargs)
         return replace(
             self._mutation(),
@@ -89,7 +89,7 @@ class _Repository:
             source_transitions=self.manifest_transitions,
         )
 
-    def remove_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+    def remove_apply_mcp(self, **kwargs) -> DesiredStateMutation:
         self.manifest_mcp_remove_calls.append(kwargs)
         return replace(
             self._mutation(),
@@ -97,13 +97,13 @@ class _Repository:
             source_transitions=self.manifest_transitions,
         )
 
-    def claim_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+    def claim_apply_skill(self, **kwargs) -> DesiredStateMutation:
         self.manifest_skill_claim_calls.append(kwargs)
         return replace(
             self._skill_mutation(), source_transitions=self.manifest_transitions
         )
 
-    def remove_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+    def remove_apply_skill(self, **kwargs) -> DesiredStateMutation:
         self.manifest_skill_remove_calls.append(kwargs)
         return replace(
             self._skill_mutation(), source_transitions=self.manifest_transitions
@@ -791,7 +791,7 @@ async def test_manifest_claim_logs_safe_source_transition(monkeypatch):
         _PlatformDefaultMcpPolicy(), MagicMock(),
     )
 
-    result = await service.claim_manifest_mcp(
+    result = await service.claim_apply_mcp(
         server_code="github",
         config={"headers": {"Authorization": "must-not-be-logged"}},
         bot_id="bot-1",
@@ -823,8 +823,8 @@ async def test_manifest_command_marks_a_post_commit_audit_failure():
         _PlatformDefaultMcpPolicy(), MagicMock(),
     )
 
-    with pytest.raises(ManifestDesiredStateCommittedError):
-        await service.claim_manifest_mcp(
+    with pytest.raises(ApplyDesiredStateCommittedError):
+        await service.claim_apply_mcp(
             server_code="github",
             config=None,
             bot_id="bot-1",

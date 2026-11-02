@@ -176,6 +176,13 @@ class DeviceConnectionInfo:
     "该设备没有可交付的 A2A 地址"，caller 按原行为回落；网关 relay ws URL
     推不出等价的 A2A 面（route 404，正是本字段引入的原因），不得代填。
     """
+    a2a_withheld: bool = False
+    """服务端治理后明确拒绝为本连接签发 A2A 面（用户灰度未命中）。
+
+    与空串是两个语义：空串而非 withheld 是"旧服务端/该设备没有地址"
+    （客户端仍可走 ws url 直连推导兜底）；withheld=True 是"明确拒绝"——
+    客户端必须禁用推导与探测，稳定回落 v3，不得绕开用户灰度控制。
+    """
 
 
 @dataclass

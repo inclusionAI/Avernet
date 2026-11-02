@@ -368,6 +368,8 @@ fn manager_worker_coordination_instruction(
     surface: &CoordinationSurface,
     status_line: &str,
 ) -> String {
+    let status_line = format!("{status_line}\n使用 ref 关联任务。stored/received 只是请求回执，不代表已送达或完成；需要时按 ref 查询 bcs_task_status，不要轮询。unknown/not_found 不代表未执行或已停止，不要自动重派。取消不回滚副作用。同一 Worker 的追问用新的 bcs_assign_task，并在正文补充必要上下文；FIFO 不是业务去重保证。");
+    let status_line = status_line.as_str();
     match surface.mode {
         CoordinationMode::McporterMcp => mcporter_mcp_instruction(
             is_manager,
@@ -400,7 +402,7 @@ fn mcporter_mcp_instruction(
     is_manager: bool,
     surface: &CoordinationSurface,
     status_line: &str,
-    worker_send_task_message_enabled: bool,
+    _worker_send_task_message_enabled: bool,
 ) -> String {
     let command = surface
         .mcporter_command
@@ -413,13 +415,7 @@ fn mcporter_mcp_instruction(
             status_line
         );
     }
-    let worker_task_instruction = if worker_send_task_message_enabled {
-        format!(
-            "收到主 Bot 派发的任务后，使用 `{command} call {server}.bcs_send_task_message message=\"<结果、进展、问题或阻塞>\"`。"
-        )
-    } else {
-        "收到主 Bot 派发的任务后直接处理。".to_string()
-    };
+    let worker_task_instruction = "收到 manager 派发的任务后直接处理并正常回复，BCS 会自动把结果交给 Manager。信息不足、失败或有阻塞时，在本轮最终结果中说明已完成什么以及还需要什么，然后结束本轮，不要猜测继续。";
     format!(
         "本群为任务群，你是子 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。{worker_task_instruction}每个 `mcporter call` 必须单独使用一次 shell/exec 工具调用；需要同时调用多个时，分别发起多个独立工具调用，可以并行执行。禁止在同一命令、脚本或工具调用中使用 `;`、`&&` 等方式串联多个 `mcporter call`，否则 BCS 只能识别其中一个调用结果。执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。不要直接面向用户输出最终答案；最终汇总由 manager 完成，不要在普通回复中伪造工具结果。"
     )
@@ -429,7 +425,7 @@ fn native_mcp_instruction(
     is_manager: bool,
     surface: &CoordinationSurface,
     status_line: &str,
-    worker_send_task_message_enabled: bool,
+    _worker_send_task_message_enabled: bool,
 ) -> String {
     let server = surface.mcp_server.as_deref().unwrap_or("bcs");
     if is_manager {
@@ -438,13 +434,7 @@ fn native_mcp_instruction(
             status_line
         );
     }
-    let worker_task_instruction = if worker_send_task_message_enabled {
-        format!(
-            "收到 manager 派发的任务后，直接调用 MCP server `{server}` 上的 `bcs_send_task_message` 回传结果、进展、问题或阻塞。"
-        )
-    } else {
-        "收到 manager 派发的任务后直接处理。".to_string()
-    };
+    let worker_task_instruction = "收到 manager 派发的任务后直接处理并正常回复，BCS 会自动把结果交给 Manager。信息不足、失败或有阻塞时，在本轮最终结果中说明已完成什么以及还需要什么，然后结束本轮，不要猜测继续。";
     format!(
         "本群为任务群，你是子 Bot。你当前平台原生提供 BCS MCP 工具。{worker_task_instruction}不要使用 mcporter、exec、bash，不要直接面向用户输出最终答案。"
     )
@@ -453,7 +443,7 @@ fn native_mcp_instruction(
 fn native_tool_instruction(
     is_manager: bool,
     status_line: &str,
-    worker_send_task_message_enabled: bool,
+    _worker_send_task_message_enabled: bool,
 ) -> String {
     if is_manager {
         return format!(
@@ -461,11 +451,7 @@ fn native_tool_instruction(
             status_line
         );
     }
-    let worker_task_instruction = if worker_send_task_message_enabled {
-        "收到 manager 派发的任务后，直接调用原生工具 `bcs_send_task_message` 回传结果、进展、问题或阻塞。"
-    } else {
-        "收到 manager 派发的任务后直接处理。"
-    };
+    let worker_task_instruction = "收到 manager 派发的任务后直接处理并正常回复，BCS 会自动把结果交给 Manager。信息不足、失败或有阻塞时，在本轮最终结果中说明已完成什么以及还需要什么，然后结束本轮，不要猜测继续。";
     format!(
         "本群为任务群，你是子 Bot。你当前平台原生提供 BCS 协同工具，这些工具是当前运行环境中的原生 tools，不是 MCP server 工具。{worker_task_instruction}不要使用 mcporter、exec、bash，不要写 MCP server 名称，不要直接面向用户输出最终答案。"
     )
@@ -474,7 +460,7 @@ fn native_tool_instruction(
 fn legacy_manager_worker_instruction(
     delivery_type: DeliveryType,
     status_line: &str,
-    worker_send_task_message_enabled: bool,
+    _worker_send_task_message_enabled: bool,
 ) -> String {
     match delivery_type {
         DeliveryType::Send => format!(
@@ -482,11 +468,7 @@ fn legacy_manager_worker_instruction(
             status_line
         ),
         DeliveryType::Inject => {
-            if worker_send_task_message_enabled {
-                "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复；需要阶段性同步进展 / 说明阻塞时，用 bcs_send_task_message(message) 发给主 Bot。不要用引擎自带的发送工具向群里发消息。".to_string()
-            } else {
-                "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复。不要用引擎自带的发送工具向群里发消息。".to_string()
-            }
+            "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并正常回复，BCS 自动回传结果；信息不足时说明缺少什么并结束本轮。不要用引擎自带的发送工具向群里发消息。".to_string()
         }
     }
 }

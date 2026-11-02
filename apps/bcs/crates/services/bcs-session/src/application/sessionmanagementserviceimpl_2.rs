@@ -173,95 +173,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .await?)
     }
 
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(self.repo.count_running_service(group_id).await)
-    }
-
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self.repo.list_running_service(offset, limit).await)
-    }
-
     async fn list_running_service_after(
         &self, cursor: Option<&str>, limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         Ok(self.repo.list_running_service_after(cursor, limit).await?)
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self
-            .repo
-            .list_recoverable_callbacks(now_ms, after_session_id, limit)
-            .await?)
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(self.repo.update_callback_status(session_id, status).await?)
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        if command.expected_activation_count < 1
-            || command.lease_owner.is_empty()
-            || command.lease_until_ms <= command.now_ms
-        {
-            return Err(SessionUseCaseError::InvalidParams(
-                "callback claim requires a positive activation, non-empty owner, and future lease"
-                    .to_string(),
-            ));
-        }
-        Ok(self
-            .repo
-            .claim_callback(ClaimSessionCallback {
-                session_id: command.session_id,
-                expected_activation_count: command.expected_activation_count,
-                lease_owner: command.lease_owner,
-                now_ms: command.now_ms,
-                lease_until_ms: command.lease_until_ms,
-            })
-            .await?
-            .map(|claim| ClaimSessionCallbackOutcome {
-                lease_token: claim.lease_token,
-            }))
-    }
-
-    async fn complete_callback(
-        &self,
-        command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        if !matches!(
-            command.terminal_status.as_str(),
-            "succeeded" | "partial_failed" | "failed" | "not_applicable"
-        ) {
-            return Err(SessionUseCaseError::InvalidParams(format!(
-                "invalid terminal callback status: {}",
-                command.terminal_status
-            )));
-        }
-        Ok(self
-            .repo
-            .complete_callback(CompleteSessionCallback {
-                session_id: command.session_id,
-                expected_activation_count: command.expected_activation_count,
-                lease_owner: command.lease_owner,
-                lease_token: command.lease_token,
-                terminal_status: command.terminal_status,
-            })
-            .await?)
     }
 
     async fn complete_if_running(

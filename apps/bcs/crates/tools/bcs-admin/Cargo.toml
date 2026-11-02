@@ -28,6 +28,7 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-chat-run-store = { workspace = true }
 bcs-group-store = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-message-store = { workspace = true }

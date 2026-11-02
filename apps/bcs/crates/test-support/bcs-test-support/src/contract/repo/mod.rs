@@ -19,8 +19,7 @@ use bcs_domain::{
 };
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, ClaimEventDeliveries, ClaimFanoutTargets, ClaimSessionCallback,
-    CompleteEventDeliveryAttempt, CompleteSessionCallback, CreateEventReplayTarget,
+    AppendEventRecord, ClaimEventDeliveries, ClaimFanoutTargets, CompleteEventDeliveryAttempt, CreateEventReplayTarget,
     CreateEventSubscriptionRecord, CreateOrganizationRecord,
     EventDeliveryAttemptRecordResult, EventDeliveryRecord, EventRepoError, EventRepoPort,
     EventRetentionRequest, ListEventDeliveryRecords, ListOrganizationMembersPageQuery,
@@ -34,7 +33,7 @@ use bcs_service_api::{
     FriendRepoPort, FriendRequest, FriendRequestDirection, FriendRequestRepoPort,
     FriendRequestStatus, Group, GroupKind, GroupMutableFieldsPatch,
     GroupRepoPort, GroupStatus, NewSessionParams, Participant, ParticipantMode, ParticipantRole,
-    RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy, ServiceSpec,
+    RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy,
     Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
 };
 use sha2::{Digest, Sha256};
@@ -1722,27 +1721,16 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
     );
     assert!(repo.get(&group.id).await.is_none());
 
-    // service_spec / version / record_status roundtrip (Task 10)
-    // Re-upsert the group (was deleted above) with service_spec populated.
+    // Version / record_status roundtrip
+    // Re-upsert the group deleted above.
     let mut g = group.clone();
-    g.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
     g.version = 1;
     g.record_status = "active".to_string();
-    repo.upsert(g.clone()).await.expect("upsert service_spec");
+    repo.upsert(g.clone()).await.expect("upsert group");
     let fetched = repo
         .get(&g.id)
         .await
-        .expect("get after service_spec upsert");
-    let spec = fetched
-        .service_spec
-        .expect("service_spec should roundtrip");
-    assert_eq!(spec.timeout_seconds, Some(60));
-    assert_eq!(spec.max_concurrency, Some(8));
-    assert!(spec.callback_config.is_none());
+        .expect("get after group upsert");
     assert_eq!(fetched.version, 1);
     assert_eq!(fetched.record_status, "active");
 }
@@ -2001,7 +1989,7 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .expect("complete_if_running second");
     assert!(again.is_none(), "CAS short-circuits on already-completed");
 
-    // service_invocation session starts with callback_status="pending"
+    // Service invocation completes and reactivates without callback state.
     let svc: Session = repo
         .create(
             group_id,
@@ -2013,132 +2001,17 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         )
         .await
         .expect("create service_invocation session");
-    assert_eq!(svc.callback_status.as_deref(), Some("pending"));
     repo.complete_if_running(&svc.id, None, None)
         .await
         .expect("complete svc session");
 
-    // reactivate must fail while callback is still pending
-    let r = repo.reactivate(&svc.id, None).await;
-    assert!(r.is_err(), "reactivate must reject when callback pending");
-
-    let recoverable = repo
-        .list_recoverable_callbacks(100, None, 10)
-        .await
-        .expect("list idle callback recovery candidates");
-    assert_eq!(recoverable.len(), 1);
-    assert_eq!(recoverable[0].id, svc.id);
-    assert!(
-        repo.list_recoverable_callbacks(100, Some(&svc.id), 10)
-            .await
-            .expect("callback recovery keyset boundary")
-            .is_empty(),
-        "Session-id cursor must be exclusive"
-    );
-
-    // one activation can have only one live callback claim
-    let first_claim = repo
-        .claim_callback(ClaimSessionCallback {
-            session_id: svc.id.clone(),
-            expected_activation_count: 1,
-            lease_owner: "callback-owner-a".to_string(),
-            now_ms: 100,
-            lease_until_ms: 200,
-        })
-        .await
-        .expect("first callback claim")
-        .expect("first callback claim acquired");
-    assert_eq!(first_claim.lease_token, 1);
-    let concurrent_claim = repo
-        .claim_callback(ClaimSessionCallback {
-            session_id: svc.id.clone(),
-            expected_activation_count: 1,
-            lease_owner: "callback-owner-b".to_string(),
-            now_ms: 150,
-            lease_until_ms: 250,
-        })
-        .await
-        .expect("concurrent callback claim");
-    assert!(concurrent_claim.is_none(), "live lease must fence a second owner");
-    assert!(
-        repo.list_recoverable_callbacks(150, None, 10)
-            .await
-            .expect("list callbacks while lease is live")
-            .is_empty(),
-        "live callback lease must be excluded from recovery"
-    );
-
-    // expired takeover increments the fencing token
-    assert_eq!(
-        repo.list_recoverable_callbacks(200, None, 10)
-            .await
-            .expect("list expired callback lease")
-            .len(),
-        1,
-        "expired callback lease must become recoverable"
-    );
-    let takeover = repo
-        .claim_callback(ClaimSessionCallback {
-            session_id: svc.id.clone(),
-            expected_activation_count: 1,
-            lease_owner: "callback-owner-b".to_string(),
-            now_ms: 200,
-            lease_until_ms: 300,
-        })
-        .await
-        .expect("expired callback takeover")
-        .expect("expired callback lease is claimable");
-    assert_eq!(takeover.lease_token, 2);
-    let stale_completion = repo
-        .complete_callback(CompleteSessionCallback {
-            session_id: svc.id.clone(),
-            expected_activation_count: 1,
-            lease_owner: "callback-owner-a".to_string(),
-            lease_token: first_claim.lease_token,
-            terminal_status: "succeeded".to_string(),
-        })
-        .await
-        .expect("stale callback completion");
-    assert!(!stale_completion, "expired owner must not confirm callback");
-    let completed_callback = repo
-        .complete_callback(CompleteSessionCallback {
-            session_id: svc.id.clone(),
-            expected_activation_count: 1,
-            lease_owner: "callback-owner-b".to_string(),
-            lease_token: takeover.lease_token,
-            terminal_status: "not_applicable".to_string(),
-        })
-        .await
-        .expect("current callback completion");
-    assert!(completed_callback);
-    assert_eq!(
-        repo.get(&svc.id)
-            .await
-            .expect("service Session after callback")
-            .callback_status
-            .as_deref(),
-        Some("not_applicable")
-    );
-    assert!(
-        repo.list_recoverable_callbacks(300, None, 10)
-            .await
-            .expect("list terminal callbacks")
-            .is_empty(),
-        "terminal callback must leave the recovery set"
-    );
-
-    // terminal callback status allows reactivation
+    // Completed Service Sessions reactivate without callback state.
     let reacted = repo
         .reactivate(&svc.id, None)
         .await
-        .expect("reactivate after terminal callback");
+        .expect("reactivate completed service");
     assert_eq!(reacted.status, SessionStatus::Running);
     assert_eq!(reacted.activation_count, 2);
-
-    // count_running_service / list_running_service
-    assert_eq!(repo.count_running_service(group_id).await, 1);
-    let svc_running = repo.list_running_service(0, 10).await;
-    assert!(svc_running.iter().any(|s| s.id == svc.id));
 
     // add_participant / update_participant_mode / remove_participant
     let extra = Participant::bot("bot2", ParticipantRole::Consultant);

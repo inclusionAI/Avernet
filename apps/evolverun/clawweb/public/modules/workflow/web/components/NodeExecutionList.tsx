@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import type { NodeExecution, NodeStatus, WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import { formatTimeShort, formatDuration } from '@avernet/workflow/web/utils/time'
@@ -73,9 +74,11 @@ interface NodeExecutionListProps {
   onAnalyze: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
   approvalNodeIds?: Set<string>
+  renderSubworkflowLinks?: (node: NodeExecution) => ReactNode
+  readOnly?: boolean
 }
 
-export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds }: NodeExecutionListProps) {
+export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, renderSubworkflowLinks, readOnly = false }: NodeExecutionListProps) {
   if (nodes.length === 0) {
     return <p className="py-8 text-center text-gray-400 text-sm">暂无节点执行记录</p>
   }
@@ -127,6 +130,8 @@ export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId,
               hasApproval={approvalNodeIds?.has(node.node_id) ?? false}
               nodes={nodes}
               flowId={node.flow_id}
+              readOnly={readOnly}
+              subworkflowLinks={node.executor_type === 'subworkflow' ? renderSubworkflowLinks?.(node) : null}
             />
           ))}
         </tbody>
@@ -145,6 +150,8 @@ function NodeRow({
   hasApproval,
   nodes,
   flowId,
+  subworkflowLinks,
+  readOnly,
 }: {
   node: NodeExecution
   isSelected: boolean
@@ -155,6 +162,8 @@ function NodeRow({
   hasApproval: boolean
   nodes: NodeExecution[]
   flowId: string
+  subworkflowLinks?: ReactNode
+  readOnly: boolean
 }) {
   const tokenUsage = parseTokenUsage(node.token_usage_json)
   const hasError = node.status === 'failed' && node.error_text
@@ -198,6 +207,7 @@ function NodeRow({
         <td className="px-4 py-3">
           <div className="font-medium text-gray-900 text-sm">{node.node_title || node.node_id}</div>
           <div className="font-mono text-gray-400 text-xs">{node.node_id}</div>
+          {subworkflowLinks}
           {node.progress_message && (
             <div className="mt-0.5 text-gray-400 text-xs">{node.progress_message}</div>
           )}
@@ -216,7 +226,7 @@ function NodeRow({
                 {warnings.length}条警告
               </span>
             )}
-            {isBaasRunning && (
+            {!readOnly && isBaasRunning && (
               <button
                 onClick={handlePollBaas}
                 disabled={baasResult?.loading}
@@ -234,7 +244,7 @@ function NodeRow({
                 ) : '刷新状态'}
               </button>
             )}
-            {hasApproval && onApproval && (
+            {!readOnly && hasApproval && onApproval && (
               <button
                 onClick={(e) => { e.stopPropagation(); onApproval(node) }}
                 className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
@@ -287,6 +297,7 @@ function NodeRow({
               workflowSpec={workflowSpec}
               flowId={flowId}
               onAnalyze={onAnalyze}
+              readOnly={readOnly}
             />
           </td>
         </tr>
@@ -396,12 +407,14 @@ function NodeDetailPanel({
   workflowSpec,
   flowId,
   onAnalyze,
+  readOnly,
 }: {
   node: NodeExecution
   nodes: NodeExecution[]
   workflowSpec?: WorkflowSpec
   flowId: string
   onAnalyze: (node: NodeExecution) => void
+  readOnly: boolean
 }) {
   const [analyzing, setAnalyzing] = useState(false)
   const isWarning = node.error_text ? isWarningsErrorText(node.error_text) : false
@@ -421,7 +434,7 @@ function NodeDetailPanel({
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">节点详情</span>
         <div className="flex items-center gap-2">
-          {(node.embedded_session_key || node.session_id) && (
+          {!readOnly && (node.embedded_session_key || node.session_id) && (
             <button
               onClick={() => {
                 setAnalyzing(true)
@@ -432,7 +445,7 @@ function NodeDetailPanel({
               节点分析
             </button>
           )}
-          {analyzing && <AnalysisModal node={node} onClose={() => setAnalyzing(false)} />}
+          {!readOnly && analyzing && <AnalysisModal node={node} onClose={() => setAnalyzing(false)} />}
         </div>
       </div>
 

@@ -1,3 +1,4 @@
+import { submittedAisUser } from "@avernet/clawevolve/server/services/ais/ais-task-runner";
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
 import { logRepairEvent, repairLogError } from "./logging.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "./task-control-plane.js";
@@ -44,7 +45,8 @@ export async function reconcileAgentExecutions(deps: {
             retryable = remote.status !== "stopped" || expired;
           }
           if (remote.errorMessage) errorMessage = redactPersistableText(remote.errorMessage, 1500);
-          if (expired && remote.status === "running") await provider.stopExecution(step.bot_run_id);
+          if (expired && remote.status === "running") await provider.stopExecution(step.bot_run_id, submittedAisUser(step.bot_response_json)
+            ?? (name === "session_recovery" ? task.user_id : task.created_by));
         }
         if (!reason) continue;
         await deps.handlers[name]({ task, step, report: { status: "failed", summary: "本次 Agent 容器执行中断，未收到有效运行回报",

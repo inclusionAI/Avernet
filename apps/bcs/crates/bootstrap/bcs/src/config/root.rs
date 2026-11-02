@@ -35,6 +35,15 @@ pub struct BcsConfig {
     pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]
     pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
+    /// Optional caller identity service section (spec §10.13.7): absent =
+    /// no caller capability assembled and the anti-downgrade guard stays
+    /// closed; present = full validation at startup, fail closed.
+    #[serde(default)]
+    pub caller_identity: Option<bcs_config_api::CallerIdentityServiceConfig>,
+    /// Speaking-lease idle window (spec §10.13.9, §15.99): defaults to the
+    /// frozen 60s constant; absent section changes nothing.
+    #[serde(default)]
+    pub speaking_lease: bcs_config_api::SpeakingLeaseConfig,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -126,6 +135,14 @@ pub struct BcsConfig {
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
+
+    /// Human approval waits pause execution but remain bounded by these caps.
+    #[serde(default)]
+    pub a2a_input:super::a2a_input::A2aInputConfig,
+
+    /// Explicit deployment-owned routes through a local MOSN gRPC sidecar.
+    #[serde(default)]
+    pub a2a_grpc:Option<bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -431,6 +448,8 @@ impl Default for BcsConfig {
     fn default() -> Self {
         Self {
             collaboration_drafts: None,
+            caller_identity: None,
+            speaking_lease: Default::default(),
             state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),
@@ -452,6 +471,8 @@ impl Default for BcsConfig {
             human_notify: HumanNotifyConfig::default(),
             message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
+            a2a_input:super::a2a_input::A2aInputConfig::default(),
+            a2a_grpc:None,
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
             max_groups_as_driver: default_max_groups_as_driver(),

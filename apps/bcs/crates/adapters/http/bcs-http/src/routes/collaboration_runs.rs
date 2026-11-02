@@ -103,7 +103,7 @@ pub async fn start_state_machine_run(
             caller_id: authenticated_human
                 .as_ref()
                 .map(|human| human.actor_id.clone()),
-            authenticated_human,
+            authenticated_human, caller_association: None,
         })
         .await
     {
@@ -139,11 +139,34 @@ pub async fn start_session_state_machine_run(
     State(state): State<HttpAppState>,
     Path(session_id): Path<String>,
     headers: HeaderMap,
+    _uri: OriginalUri,
     Json(body): Json<StartSessionStateMachineRunRequest>,
 ) -> Response {
     let caller_bot_id = match authenticated_bot_from_headers(&state, &headers).await {
         Ok(bot_id) => bot_id,
         Err(error) => return error.into_response(),
+    };
+    // §15.83 S2 (spec §8.5, 拍板A): the run-submission route PARALLELY
+    // accepts the server-side Human identity chain — a Human-triggered
+    // caller-aware run carries its instance-association template. The
+    // trusted subject is exactly the identity extractor's derivation
+    // (never the body); Bot-only submissions keep None and the run
+    // executes caller-closed. The runtime stamps the created run id and
+    // the scope facts; the composition's registrar owns the only identity
+    // material.
+    let now_ms = bcs_protocol::now_ms() as i64;
+    let caller_association = match &state.caller_ingress_source {
+        Some(source) => source.extract_caller_request(&headers, now_ms).await.ok().map(|request| {
+            bcs_service_api::port::OrchestrationInstanceAssociation {
+                workflow_run_id: String::new(), environment: state.manifest_env.clone(),
+                group_id: String::new(), session_id: session_id.clone(),
+                message_turn_id: String::new(), history_cutoff_seq: 0,
+                // Run-budget fact, not an identity window: the association is
+                // bounded by the instance budget so the lineage ledger ages out.
+                expires_at_ms: now_ms + 86400000, ingress: request.ingress, now_ms,
+            }
+        }),
+        None => None,
     };
     if let Err(error) =
         reject_judge_yaml_when_unavailable(&state, &body.definition_yaml, "definition_yaml")
@@ -168,6 +191,7 @@ pub async fn start_session_state_machine_run(
             opening_message,
             input: body.input,
             judge_available: state.judge_enabled,
+            caller_association,
         })
         .await
     {

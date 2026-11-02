@@ -17,6 +17,9 @@ def connection_service():
     service._repo = MagicMock()
     service._baas_service = MagicMock()
     service._default_engine = "openclaw"
+    # 未接灰度门（ctor 绕过时属性也要在）——空 face 已不再短路判定，
+    # gate 属性总会被读。
+    service._a2a_issuance_gate = None
     service._resolve_bot_by_binding_id = MagicMock(return_value=None)
     service._baas_service.get_ws_info.return_value = SimpleNamespace(
         target="runtime:20003", token="test-token", ws_url="wss://example.invalid/ws",

@@ -23,6 +23,7 @@ prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = []
 
 [dependencies]
+bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
@@ -82,6 +83,7 @@ chrono = { workspace = true }
 # Crypto for Alibaba Cloud signing
 sha2 = { workspace = true }
 hex = { workspace = true }
+bcs-caller-identity-jwt = { workspace = true }
 
 # Directories (for config file discovery)
 dirs = { workspace = true }
@@ -155,6 +157,8 @@ bcs-app-collaboration-definition = { workspace = true }
 bcs-invite-code-store = { workspace = true }
 bcs-app-invite-code = { workspace = true }
 bcs-provider-http = { workspace = true }
+bcs-a2a-http = { workspace = true }
+bcs-app-a2a-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
 bcs-group-store = { workspace = true }
@@ -179,7 +183,6 @@ bcs-event-store = { workspace = true }
 bcs-eventing = { workspace = true }
 bcs-coordination-store = { workspace = true }
 bcs-webhook-client = { workspace = true }
-bcs-callback = { workspace = true }
 bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }

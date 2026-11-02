@@ -245,6 +245,20 @@ def test_the_tree_byte_cap_refuses_before_checkout_writes_the_tree():
     assert "checkout" not in steps, "the refusal must fire before the tree lands on disk"
 
 
+def test_unselected_gitlinks_count_towards_whole_tree_member_limit(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.fetch.git_source.GIT_CHECKOUT_MEMBER_LIMIT", 1
+    )
+    tree = (
+        "100644 blob " + "a" * 40 + " 1\tfile.txt\n"
+        + "160000 commit " + "b" * 40 + " -\tvendor/sub\n"
+    )
+    runner = _RecordingRunner(tree=tree)
+    with pytest.raises(FetchRefusedError, match="member cap"):
+        _argv_client(runner).fetch(GitSourceSpec(url="https://git.corp/repo.git", ref="main"))
+    assert "checkout" not in [a[1] for a in runner.argvs]
+
+
 def test_quoted_member_names_are_unquoted_by_the_enumeration():
     runner = _RecordingRunner(
         tree='100644 blob ' + "a" * 40 + ' 12\t"\\350\\257\\204\\344\\273\\267.md"\n'
@@ -324,6 +338,8 @@ def _serve_repo(
     _git(["git", "init", "--quiet", "-b", "main"], cwd=work)
     if symlink_member:
         (work / "pkg" / "escape").symlink_to("/etc")
+        (work / "pkg" / "relative").symlink_to("skill.md")
+        (work / "pkg" / "escape-other.txt").write_text("unrelated\n")
     _git(["git", "add", "."], cwd=work)
     if gitlink_member:
         # A gitlink row without its submodule contents: exactly the shape a
@@ -407,14 +423,37 @@ def test_subpath_escape_is_refused(serve):
 
 def test_a_symlink_member_is_refused(tmp_path):
     bare = _serve_repo(tmp_path, symlink_member=True)
+    checkout = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    assert checkout.read_file("root.txt") == b"root\n"
+    assert checkout.read_file("pkg/escape-other.txt") == b"unrelated\n"
     with pytest.raises(FetchRefusedError, match="forbidden member"):
-        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+        checkout.files("pkg")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files()
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("pkg/escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("pkg//escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("pkg/escape")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("pkg/relative")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("pkg/escape/passwd")
 
 
 def test_a_gitlink_member_is_refused(tmp_path):
     bare = _serve_repo(tmp_path, gitlink_member=True)
+    checkout = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    assert checkout.read_file("root.txt") == b"root\n"
     with pytest.raises(FetchRefusedError, match="forbidden member"):
-        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+        checkout.files("vendor")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files("vendor/sub")
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.files()
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        checkout.read_file("vendor/sub/file")
 
 
 def test_unknown_ref_is_a_fetch_failure(serve):

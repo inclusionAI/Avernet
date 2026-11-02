@@ -105,9 +105,6 @@ impl SessionManagementService for UnavailableHistorySession {
     async fn create_or_reactivate(&self, _: CreateOrReactivateCommand) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> { panic!("history mutated session") }
     async fn belongs_to_group(&self, _: &str, _: &str) -> Result<bool, SessionUseCaseError> { panic!("unexpected lookup") }
     async fn list_by_group(&self, _: &str, _: Option<SessionStatus>, _: u64, _: u64, _: Option<&str>, _: Option<&str>) -> Result<Vec<Session>, SessionUseCaseError> { panic!("history listed sessions") }
-    async fn count_running_service(&self, _: &str) -> Result<u64, SessionUseCaseError> { panic!("history counted sessions") }
-    async fn list_running_service(&self, _: u64, _: u64) -> Result<Vec<Session>, SessionUseCaseError> { panic!("history listed sessions") }
-    async fn update_callback_status(&self, _: &str, _: &str) -> Result<(), SessionUseCaseError> { panic!("history mutated session") }
     async fn complete_if_running(&self, _: &str, _: Option<Value>, _: Option<String>) -> Result<Option<Session>, SessionUseCaseError> { panic!("history mutated session") }
     async fn add_participant(&self, _: &str, _: Participant) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
     async fn remove_participant(&self, _: &str, _: &str) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }

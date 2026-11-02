@@ -218,7 +218,7 @@ it("stops a late AIS dispatch receipt instead of leaving a new Agent running", a
   await vi.waitFor(() => expect(submissions).toHaveLength(1));
   expect(await service.terminate(ack.task_id, actor)).toMatchObject({ status: "canceled", termination: { status: "stop_pending" } });
   finish("late-job");
-  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job"));
+  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job", "owner"));
   await vi.waitFor(async () => expect((await service.detail(ack.task_id, actor)).termination?.status).toBe("remote_stopped"));
   expect((await current(ack.task_id)).status).toBe("canceled");
   expect((await repo.findStep((await current(ack.task_id)).aisExecution!.stepId))!.status).toBe("canceled");
@@ -408,12 +408,40 @@ it("retries dispatch failures with revoked tickets instead of failing the accept
   now += 20000; await service.maintenance(); task = await current(ack.task_id);
   expect(task.execution!.jobId).toBeTruthy(); expect(ais.execute).toHaveBeenCalledTimes(2);
 });
+it("uses the original execution owner when an administrator stops recovery", async () => {
+  const task = await create();
+  await service.terminate(task.taskId, { userId: "admin", isAdmin: true });
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+it("keeps a rejected stop fenced and resumes the existing retry only after remote termination", async () => {
+  let task = await create();
+  const executionId = task.execution!.executionId;
+  now = task.execution!.leaseExpiresAt * 1000 + 1;
+  ais.stopExecution.mockRejectedValueOnce(new Error("temporary stop rejected"));
+  const reconcile = () => reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo,
+    handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais },
+    nowSeconds: () => Math.floor(now / 1000) });
+  await reconcile(); await service.maintenance(); task = await current(task.taskId);
+  expect(task.execution!.executionId).toBe(executionId);
+  expect(task.execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  await reconcile(); await service.maintenance();
+  expect((await current(task.taskId)).execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
+  await reconcile(); now += 20000; await service.maintenance();
+  expect(submissions).toHaveLength(2);
+  expect((await current(task.taskId)).execution!.executionId).not.toBe(executionId);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
 it("waits for the expired AIS job to stop before replacing its execution", async () => {
   let task = await create(); const executionId = task.execution!.executionId;
   now = task.execution!.leaseExpiresAt * 1000 + 1;
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   await service.maintenance(); task = await current(task.taskId);
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-1"); expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner"); expect(submissions).toHaveLength(1);
   expect(task.status).toBe("running"); expect(task.execution!.executionId).toBe(executionId);
   ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
@@ -708,7 +736,7 @@ it("old dispatch cannot attach its job to a replacement execution after a versio
   });
   await agent.start(task);
   expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", jobId: "replacement-job" });
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-2");
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-2", "owner");
 });
 
 it.each([false, true])("the same tool key cannot identify changed advice, including legacy envelope fields: %s", async legacyEnvelope => {

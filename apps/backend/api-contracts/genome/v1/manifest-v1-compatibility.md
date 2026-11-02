@@ -93,8 +93,8 @@ are typed sources in the state, not Manifest grammar, and never reach
 | a skill whose files are not a valid package | refused (*recording only*) | Missing or invalid `SKILL.md` front matter, a metadata name different from the entry name, or over the package limits (README §4.2); apply would refuse it too |
 | the skill's files (git directory or unpacked OSS zip) | resolved | `origin: local`, `digest` of the `acm-tree-v1` tree of the files `SkillPackageValidator` keeps (wrapper directory stripped, ignored paths dropped; README §4.2); M′: a `LocalSkillPackage` over that stored tree, from which apply builds the skill package zip |
 | `unpack` | resolved | |
-| a Skill Center skill | maps | `origin: center`, `center_version`. Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: a `CenterSkillVersion` source |
-| a shared-repository skill (`git://` row) | maps | `origin: repo`, `repo_path`. Manifest v1 cannot declare one either; captured from the bot. M′: a `RepoSkillPath` source. The repository commit is not pinned yet (RSI-04) |
+| a Skill Center skill | maps | `origin: center`, by name only (no version: the bot runs what the Center publishes). Manifest v1 cannot declare one; it comes from capturing a bot's current state. M′: a `CenterSkillByName` source |
+| a shared-repository skill (`git://` row) | maps | `origin: repo`, `repo_path`. Manifest v1 cannot declare one either; captured from the bot. M′: a `RepoSkillPath` source. No repository commit is recorded |
 
 ## `manifest.resources`
 

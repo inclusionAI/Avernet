@@ -36,6 +36,11 @@ async fn every_authority_route_requires_a_verified_signature() {
         ),
         (
             "PUT",
+            "/api/v1/collaboration/bots/bot_sync/ownership",
+            None,
+        ),
+        (
+            "PUT",
             &format!("/api/v1/collaboration/bots/bot_transfer/ownership-transfers/{TARGET_ACTOR}"),
             None,
         ),

@@ -50,10 +50,18 @@ from agentclaw.community.core.repository.protocols.devices import (
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
+from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
+from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.runtime_binding.service import (
     RuntimeBindingResolutionService,
 )
 from agentclaw.community.di.modules.config_module import read_user_config
+from agentclaw.community.di.config import GatewayEndpoint
 from injector import Binder, Module, inject, provider, singleton
 
 
@@ -62,8 +70,33 @@ class EngineRuntimeModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
-        binder.bind(
-            EngineConnectionService, to=EngineConnectionService, scope=singleton
+
+    @singleton
+    @provider
+    @inject
+    def engine_connection_service(
+        self,
+        bot_service: BotService,
+        binding_repository: DeviceBindingRepository,
+        device_service: DeviceService,
+        gateway: GatewayEndpoint,
+        collaborators: CollaboratorServiceProtocol,
+        publish_repo: BotPublishRepositoryProtocol,
+        desktop_connections: DesktopConnectionServiceProtocol,
+        config_repository: ConfigRepositoryProtocol,
+    ) -> EngineConnectionService:
+        """组合根显式构造：desktop 分支不过设备服务，A2A 灰度门必须
+        由本服务直接持有（连线=repo，判定单键见 a2a_issuance_gray），
+        否则 desktop 用户整体绕开用户级灰度。"""
+        return EngineConnectionService(
+            bot_service=bot_service,
+            binding_repository=binding_repository,
+            device_service=device_service,
+            gateway=gateway,
+            collaborators=collaborators,
+            publish_repo=publish_repo,
+            desktop_connections=desktop_connections,
+            a2a_issuance_gate=A2aIssuanceGate(config_repository),
         )
 
     @singleton

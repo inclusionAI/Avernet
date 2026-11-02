@@ -389,7 +389,6 @@ async fn test_chinese_name_mentions() {
         group_kind: bcs_service_api::GroupKind::default(),
         dm_pair_key: None,
         group_strategy: GroupStrategy::Chat,
-        service_spec: None,
         version: 1,
         record_status: "active".to_string(),
         visibility: "private".to_string(),

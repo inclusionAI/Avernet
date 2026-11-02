@@ -33,6 +33,13 @@ pub struct BcsServerState {
     pub delivery_admission:
         Arc<dyn bcs_service_api::application::v1::DeliveryAdmissionService>,
 
+    /// SQL speaking-lease store (spec §6.3, P3.3) shared by the flow's
+    /// admission fence and the WS lease command entrance — one store,
+    /// one epoch. `None` keeps lease commands answering an explicit
+    /// error instead of a fabricated lease.
+    pub speaking_leases:
+        Option<Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>>,
+
     /// Coordination echo deduplication store shared by bot WebSocket reconnects.
     pub coordination_processed: Arc<Mutex<std::collections::HashMap<String, u64>>>,
 
@@ -335,6 +342,11 @@ impl Default for BcsServerState {
             Some(bot_authority.hook.clone()),
         ));
         frontend_connections.set_delivery_admission(delivery_admission.clone());
+        // Default composition has no SQL lease store wired: lease commands
+        // answer an explicit error (never a fabricated lease).
+        let speaking_leases: Option<
+            Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+        > = None;
         let output_admission: Arc<dyn bcs_service_api::OutputAdmissionPort> =
             Arc::new(bcs_ws::web::WorkbenchOutputAdmission::new(
                 frontend_connections.clone(),
@@ -492,7 +504,6 @@ impl Default for BcsServerState {
             )
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
-            .with_outbound_url_guard(outbound_url_guard.clone())
             .with_bot_runtime(bot_use_cases.clone())
             .with_bot_authority(bot_authority.hook.clone())
             .with_session_authorization(session_authorization_core.clone()),
@@ -535,7 +546,6 @@ impl Default for BcsServerState {
             .with_history_persistence(config.state_machine_history.persistence_enabled)
             .with_history_cutoff_timestamp(config.message_history.state_machine_cutoff_timestamp)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
-            .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
                 message_flow.clone(),
@@ -725,13 +735,6 @@ impl Default for BcsServerState {
             .build()
             .expect("services must be fully wired");
 
-        // Start timeout scanner for service-invocation sessions
-        let _timeout_handle = crate::timeout_scanner::spawn_with_url_guard(
-            services.session_management.clone(),
-            services.group.clone(),
-            crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            outbound_url_guard.clone(),
-        );
         // Start JWT token expiry scanner
         let _token_expiry_handle = crate::token_expiry_scanner::spawn(
             bot_connections.clone(),
@@ -771,6 +774,7 @@ impl Default for BcsServerState {
             frontend_run_channels,
             session_authorization_core,
             delivery_admission,
+            speaking_leases,
             coordination_processed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             leader_election,
             lifecycle,

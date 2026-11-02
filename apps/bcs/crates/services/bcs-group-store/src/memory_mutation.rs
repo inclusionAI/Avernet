@@ -108,9 +108,6 @@ pub(super) fn apply_memory_group_mutation(
         GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
             group.routing_policy = Some(policy.clone());
         }
-        GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
-            group.service_spec = service_spec.clone();
-        }
         GroupEventfulMutation::Delete => {}
     }
     group.version = group

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -67,6 +68,11 @@ from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from injector import inject
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.services.a2a_issuance_gray import (
+        A2aIssuanceGate,
+    )
 
 logger = get_logger()
 
@@ -177,6 +183,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         collaborators: CollaboratorServiceProtocol,
         publish_repo: BotPublishRepositoryProtocol,
         desktop_connections: DesktopConnectionServiceProtocol,
+        a2a_issuance_gate: "A2aIssuanceGate | None" = None,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
@@ -185,6 +192,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         self._collaborators = collaborators
         self._publish_repo = publish_repo
         self._desktop_connections = desktop_connections
+        self._a2a_issuance_gate = a2a_issuance_gate
 
     def build(
         self, *, bot_id: str, owner_id: str, caller_id: str, stage: str,
@@ -257,6 +265,27 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         chat_path = self._chat_path(engine)
         try:
             if facts.bot_type == "desktop":
+                # Desktop branches never touch the device service, so the
+                # user-level gray gate that governs BaaS issuance cannot run
+                # there — enforce the same decision here, keyed on the
+                # authenticated caller, or desktop users bypass the release
+                # gate entirely (desktop ws is same-origin; clients could
+                # still derive and probe their way back onto A2A).
+                desktop_withheld = False
+                if self._a2a_issuance_gate is not None:
+                    try:
+                        desktop_withheld = not self._a2a_issuance_gate.allows_face(
+                            caller_id
+                        )
+                    except Exception:
+                        # 与 BaasDeviceService 同语义：门的意外失效只收敛
+                        # a2a 面（withheld），绝不拖垮 desktop 连接签发。
+                        logger.warning(
+                            "[a2a_gray] gate raised on desktop path, "
+                            "withholding face",
+                            exc_info=True,
+                        )
+                        desktop_withheld = True
                 ws = self._desktop_connections.resolve(
                     binding_id, resolved_owner, chat_path
                 )
@@ -267,6 +296,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                     token=ws.token,
                     url=ws.ws_url,
                     expires_at=ws.expires_at,
+                    a2a_withheld=desktop_withheld,
                 )
                 if mode == "direct":
                     return ConnectionResult(
@@ -274,9 +304,13 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                         expires_at=self._expires_at(info),
                         sockets=[SocketInfo(kind="chat", url=ws.ws_url)],
                         transport_mode="direct",
+                        a2a_withheld=desktop_withheld,
                     )
             else:
-                info = self._get_connection(binding_id, operator, chat_path, device_uuid)
+                info = self._get_connection(
+                    binding_id, operator, chat_path, device_uuid,
+                    caller_id=caller_id,
+                )
         except BaasNoActiveDevicesError as exc:
             raise EngineDeviceNotReadyError(
                 f"device unavailable for bot={bot_id}"
@@ -331,6 +365,9 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             transport_mode=self._desktop_connections.config.mode
             if facts.bot_type == "desktop"
             else "",
+            # 用户灰度负结果的显式信号:withheld 时客户端禁用 ws 推导兜底,
+            # 否则直连拓扑下名单外用户仍能探测到同源 A2A 绕开灰度。
+            a2a_withheld=bool(getattr(info, "a2a_withheld", False)),
         )
 
     def _stage_binding_id(
@@ -395,10 +432,16 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
 
     def _get_connection(
         self, binding_id: int, operator: OperatorContext, chat_path: str,
-        device_uuid: str | None = None,
+        device_uuid: str | None = None, caller_id: str | None = None,
     ) -> object:
-        """Ask the provider for this device's connection."""
-        selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
+        """Ask the provider for this device's connection.
+
+        ``caller_id`` is the authenticated user — gray-gate identity. The
+        ``operator`` argument is deliberately the resolved owner.
+        """
+        selection = (
+            {"device_uuid": device_uuid} if device_uuid is not None else {}
+        )
         return self._device_service.get_device_connection(
             **selection,
             binding_id=binding_id,
@@ -427,6 +470,11 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             # appends the engine path itself rather than trusting the provider to
             # have applied it.
             path=chat_path,
+            # ``operator`` above is deliberately the resolved owner (routing and
+            # permission-compat); user-level gray decisions must key on the
+            # authenticated caller instead, or collaborators would inherit the
+            # owner's gray bucket.
+            caller_id=caller_id,
         )
 
     # ── composition ───────────────────────────────────────────────────────

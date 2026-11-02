@@ -133,6 +133,7 @@ impl BcsServer {
             group_session_connections.clone(),
             web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
             ws_lifecycle_hook(&self.state),
+            Arc::clone(&self.state.auth_chain),
         );
         let oauth_state = self.build_full_oauth_route_state();
         let mut openapi_v1 = self.state.openapi_v1.clone()
@@ -141,6 +142,9 @@ impl BcsServer {
                 self.state.services.registry.clone(),
             )));
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
+        openapi_v1.worker_task_service = Some(Arc::new(
+            bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),
+        ));
         let mut browser_v1 = openapi_v1.clone();
         browser_v1.principal_verifier = Arc::new(crate::browser_principal::BrowserPrincipalVerifier(
             self.state.auth_chain.clone(),
@@ -259,17 +263,6 @@ impl BcsServer {
         )
     }
 
-    fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {
-        crate::callback_recovery_scanner::spawn(
-            self.state.leader_election.clone(),
-            self.state.services.session_management.clone(),
-            self.state.services.group.clone(),
-            crate::callback_recovery_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::callback_recovery_scanner::DEFAULT_BATCH_SIZE,
-            self.state.outbound_url_guard.clone(),
-        )
-    }
-
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         self.run_with_listener(None).await
@@ -286,10 +279,11 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _a2a_card_refresh = self.state.services.a2a_bot_management.clone()
+            .map(super::a2a_wiring::start_card_refresh);
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));
-        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -438,7 +432,6 @@ impl BcsServer {
         let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
-        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         let app = self.build_router().await?;
 

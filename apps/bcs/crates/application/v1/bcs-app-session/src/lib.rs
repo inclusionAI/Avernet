@@ -810,9 +810,6 @@ fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
-        SessionUseCaseError::CallbackPending(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
         SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(service_error) => map_service_error(service_error),
     }
@@ -836,9 +833,6 @@ fn map_launch_error(error: SessionLaunchError) -> ApplicationError {
             ApplicationError::invalid("invalid_request", message)
         }
         SessionLaunchError::Conflict(message) => ApplicationError::conflict("conflict", message),
-        SessionLaunchError::CallbackPending(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
         SessionLaunchError::Runtime(error) => map_runtime_error(error),
         SessionLaunchError::Internal(error) => map_service_error(error),
     }
@@ -928,10 +922,6 @@ mod tests {
         assert_eq!(
             map_session_error(SessionUseCaseError::InvalidParams("bad".into())).code(),
             "invalid_request"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::CallbackPending("pending".into())).code(),
-            "conflict"
         );
         assert_eq!(
             map_session_error(SessionUseCaseError::Conflict("running".into())).code(),

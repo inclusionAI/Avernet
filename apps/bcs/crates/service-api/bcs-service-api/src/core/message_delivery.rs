@@ -9,7 +9,16 @@ pub enum DeliveryLifecycleEvent {
     StartSend,
     /// Transport submission is not proof of Bot receipt.
     Submitted,
+    /// Trusted execution/wait budgeting updates the deadline while retaining
+    /// the same live attempt and execution slot. Never revives uncertain work.
+    RunDeadlineAdjusted,
     Accepted,
+    /// Typed caller dispatch commit (spec §7.5.1/wire contract): persists the
+    /// canonical request digest / effective deadline / control revision into the
+    /// caller row's semantic projection via CAS. Only valid by the typed
+    /// `commit_caller_dispatch` service method — a bare transition with this
+    /// event and no commit payload is rejected.
+    CommitCallerDispatch,
     /// Caller has matched the current request and proved no I/O or residual
     /// sender task exists. `retry` includes the application's retry-budget check.
     DefinitelyNotSent {
@@ -23,6 +32,13 @@ pub enum DeliveryLifecycleEvent {
     /// Authorized human certifies that the downstream run has stopped.
     ResolveStopped,
     CancelRequested,
+    /// Typed caller cancel intent (spec §"取消意图与回执"): persists the
+    /// stable cancel_request_id / frozen control revision / reason / original
+    /// not_after into the caller row's semantic projection in the SAME CAS
+    /// that moves the row to Cancelling. Only valid by the typed
+    /// `cancel_caller_dispatch` service method — a bare transition with this
+    /// event and no cancel payload is rejected.
+    CancelCallerDispatch,
     /// Explicit operator/user scope abort, never a scheduler retry.
     ScopeAbortRequested,
     /// Authorize the first abort attempt after cancellation intent is durable.

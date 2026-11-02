@@ -1,55 +1,52 @@
-import { EXECUTOR_TYPES, type ExecutorType } from '../editor/store'
+import { useState } from 'react'
+import { useEditorStore } from '../editor/store'
+import { NODE_CATALOG, createEditorNode } from '../editor/nodeCatalog'
+import { NODE_DRAG_TYPE } from './editor/CanvasPresentation'
+import FlowNodeIcon from './editor/FlowNodeIcon'
 
-const EXECUTOR_DESCRIPTIONS: Record<ExecutorType, string> = {
-  'embedded-agent': '带提示词的AI代理',
-  action: '外部动作执行',
-  human: '人工审批/输入节点',
-  'loop-group': '循环节点组',
-  collaboration: '多代理协作',
-  done: '终止/完成节点',
-  subagent: '委托给子代理技能',
-  'bcs-route': 'BCS服务路由',
-  'baas-call': 'BaaS Bot API调用',
-  'mcp-call': 'MCP工具调用',
-  'cli-script': '运行CLI脚本/命令',
-  subworkflow: '调用其他工作流',
-  approval: '审批门控节点',
+export interface NodePaletteProps {
+  onAdd?: (type: string) => void
 }
 
-const EXECUTOR_ACCENTS: Record<ExecutorType, string> = {
-  'embedded-agent': 'bg-blue-500', action: 'bg-blue-500', human: 'bg-amber-500',
-  'loop-group': 'bg-slate-500', collaboration: 'bg-blue-500', done: 'bg-slate-400',
-  subagent: 'bg-blue-500', 'bcs-route': 'bg-slate-500', 'baas-call': 'bg-blue-500',
-  'mcp-call': 'bg-blue-500', 'cli-script': 'bg-slate-500', subworkflow: 'bg-slate-500', approval: 'bg-amber-500',
-}
+export default function NodePalette({ onAdd }: NodePaletteProps) {
+  const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState(false)
+  const { spec, addNode, selectNode } = useEditorStore()
+  const search = query.trim().toLocaleLowerCase()
+  const matches = NODE_CATALOG.filter((item) => `${item.label} ${item.type} ${item.description}`.toLocaleLowerCase().includes(search))
+  const common = matches.filter((item) => item.group === 'common')
+  const advanced = matches.filter((item) => item.group === 'advanced')
+  const disabled = !onAdd && !spec
 
-export default function NodePalette() {
-  const handleDragStart = (e: React.DragEvent, executorType: ExecutorType) => {
-    e.dataTransfer.setData('application/clawflow-node-type', executorType)
-    e.dataTransfer.effectAllowed = 'copy'
+  const add = (type: string) => {
+    if (onAdd) { onAdd(type); return }
+    const node = createEditorNode(type)
+    addNode(node)
+    // The store may reject additions while an unapplied draft is active.
+    if (useEditorStore.getState().spec?.nodes.some((item) => item.id === node.id)) selectNode(node.id)
   }
+  const renderCards = (items: typeof matches) => items.map((item) => (
+    <button key={item.type} type="button" draggable={!disabled} disabled={disabled} onClick={() => add(item.type)}
+      onDragStart={(event) => { event.dataTransfer.setData(NODE_DRAG_TYPE, item.type); event.dataTransfer.effectAllowed = 'copy' }}
+      aria-label={`添加${item.label}`} title={`${item.label} · ${item.type}`}
+      className="group flex w-full cursor-grab items-center gap-2.5 rounded-lg border border-input bg-card p-2.5 text-left transition hover:border-primary/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><FlowNodeIcon type={item.type} /></span>
+      <span className="min-w-0 flex-1"><span className="block text-xs font-medium text-foreground">{item.label}</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{item.description}</span></span>
+      <span aria-hidden="true" className="text-muted-foreground/60 group-hover:text-primary">⠿</span>
+    </button>
+  ))
 
   return (
-    <div className="w-48 shrink-0 overflow-y-auto border-l border-slate-200 bg-slate-50/70 p-3">
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">
-        节点类型
-      </h3>
-      <div className="space-y-1.5">
-        {EXECUTOR_TYPES.map((type) => (
-          <div
-            key={type}
-            draggable
-            onDragStart={(e) => handleDragStart(e, type)}
-            className="cursor-grab rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-700 transition hover:border-blue-300 hover:shadow-sm active:cursor-grabbing"
-          >
-            <div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${EXECUTOR_ACCENTS[type]}`} /><span className="text-xs font-medium">{type}</span></div>
-            <div className="mt-0.5 pl-3.5 text-[10px] text-slate-400">{EXECUTOR_DESCRIPTIONS[type]}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 border-t border-gray-100 pt-3">
-        <p className="text-[10px] leading-4 text-slate-400">拖拽节点类型到画布上添加节点</p>
-      </div>
-    </div>
+    <aside aria-label="节点库" className="flex h-full w-52 shrink-0 flex-col overflow-y-auto border-r border-input bg-card p-3 text-foreground">
+      <div className="mb-4 flex items-center justify-between"><h2 className="text-sm font-semibold">添加节点</h2><span className="text-[10px] text-muted-foreground">点击或拖入</span></div>
+      <input aria-label="搜索节点类型" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或类型…"
+        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" />
+      {common.length > 0 && <section aria-label="常用节点" className="mt-5"><h3 className="mb-2 text-[10px] font-medium text-muted-foreground">常用节点</h3><div className="space-y-2">{renderCards(common)}</div></section>}
+      {!search && <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)} className="my-3 flex w-full items-center justify-between rounded px-1 py-2 text-xs text-muted-foreground hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">更多节点 <span aria-hidden="true">{expanded ? '−' : '+'}</span></button>}
+      {(expanded || search) && advanced.length > 0 && <section aria-label="更多节点" className={search ? 'mt-4' : ''}><h3 className="mb-2 text-[10px] font-medium text-muted-foreground">更多节点</h3><div className="space-y-2">{renderCards(advanced)}</div></section>}
+      {matches.length === 0 && <p role="status" className="py-6 text-center text-xs text-muted-foreground">没有匹配的节点类型</p>}
+      <div className="mt-5 border-t border-input py-4 text-[11px] leading-5 text-muted-foreground"><p className="font-medium text-foreground">连起来，就是工作流</p><p className="mt-1">从输出端口连到输入端口。<br />结果分支在节点属性中配置。</p></div>
+      <p className="mt-auto rounded-lg bg-muted/60 p-3 text-[10px] leading-5 text-muted-foreground">节点按钮支持键盘添加。<br />复杂类型保留完整原始配置。</p>
+    </aside>
   )
 }

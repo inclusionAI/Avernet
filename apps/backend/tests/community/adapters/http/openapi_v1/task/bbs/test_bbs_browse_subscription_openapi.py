@@ -13,6 +13,7 @@ delete) rather than the injector.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Request, Response
@@ -38,8 +39,16 @@ from agentclaw.community.core.task.forum.models import (
 )
 
 
-def _request(method: str, path: str) -> Request:
-    request = Request(scope={"type": "http", "method": method, "path": path})
+def _request(
+    method: str, path: str, *, headers: dict[str, str] | None = None
+) -> Request:
+    raw_headers = [
+        (name.lower().encode(), value.encode())
+        for name, value in (headers or {}).items()
+    ]
+    request = Request(
+        scope={"type": "http", "method": method, "path": path, "headers": raw_headers}
+    )
     request.state.trace_id = "trace-browse-openapi"
     return request
 
@@ -59,12 +68,20 @@ def _record(*, bot_id: str = "bot-a", mode: str = "openclaw", note=None):
 class _FakeProvisioner:
     """Records delegation to the asynchronous provisioning service."""
 
-    def __init__(self, result: BrowseSubscriptionProvisionResult) -> None:
+    def __init__(
+        self,
+        result: BrowseSubscriptionProvisionResult,
+        *,
+        events: list[str] | None = None,
+    ) -> None:
         self._result = result
+        self._events = events
         self.joins: list[dict[str, str | None]] = []
         self.cancels: list[str] = []
 
     def join_or_refresh(self, *, bot_id: str, owner_user_id: str, note: str | None):
+        if self._events is not None:
+            self._events.append("provision")
         self.joins.append(
             {"bot_id": bot_id, "owner_user_id": owner_user_id, "note": note}
         )
@@ -72,6 +89,24 @@ class _FakeProvisioner:
 
     async def cancel_pending(self, *, bot_id: str) -> None:
         self.cancels.append(bot_id)
+
+
+class _FakeGrantService:
+    """Records the synchronous authorization that must precede provisioning."""
+
+    def __init__(
+        self, *, events: list[str] | None = None, error: Exception | None = None
+    ) -> None:
+        self._events = events
+        self._error = error
+        self.grants: list[dict[str, str]] = []
+
+    async def grant(self, **kwargs):
+        if self._events is not None:
+            self._events.append("grant")
+        self.grants.append(kwargs)
+        if self._error is not None:
+            raise self._error
 
 
 class _FakeCronManager:
@@ -110,30 +145,76 @@ class _FakeScheduler:
 
 
 @pytest.mark.asyncio
-async def test_upsert_new_subscription_is_accepted_async():
+async def test_upsert_new_subscription_grants_before_async_provisioning():
+    events: list[str] = []
+    grant_service = _FakeGrantService(events=events)
     provisioner = _FakeProvisioner(
         BrowseSubscriptionProvisionResult(
             subscription=_record(mode="openclaw", note="self cron"),
             created=True,
             persisted=False,
-        )
+        ),
+        events=events,
     )
     response = Response()
     payload = await upsert_bbs_browse_subscription(
         body=BrowsSubscriptionJoinRequest(note="self cron"),
         bot_id="bot-a",
-        request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
+        request=_request(
+            "POST",
+            "/openapi/v1/bots/bot-a/bbs/browse-subscription",
+            headers={"cookie": "sid=browser", "referer": "https://client.example/bbs"},
+        ),
         response=response,
         owner_user_id="111111",
+        principal=SimpleNamespace(user_id="caller-1"),
+        grant_service=grant_service,
         provisioner=provisioner,
     )
     assert response.status_code == 202
     assert payload.code == 202000
     assert isinstance(payload.data, SubscriptionItem)
     assert payload.data.mode == "openclaw" and payload.data.note == "self cron"
+    assert events == ["grant", "provision"]
+    assert grant_service.grants == [
+        {
+            "bcs_bot_id": "bot-a:111111",
+            "cookie": "sid=browser",
+            "referer": "https://client.example/bbs",
+            "operator": "caller-1",
+        }
+    ]
     assert provisioner.joins == [
         {"bot_id": "bot-a", "owner_user_id": "111111", "note": "self cron"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_upsert_grant_failure_does_not_start_provisioning():
+    grant_service = _FakeGrantService(error=RuntimeError("grant failed"))
+    provisioner = _FakeProvisioner(
+        BrowseSubscriptionProvisionResult(
+            subscription=_record(mode="openclaw"),
+            created=True,
+            persisted=False,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="grant failed"):
+        await upsert_bbs_browse_subscription(
+            body=None,
+            bot_id="bot-a",
+            request=_request(
+                "POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"
+            ),
+            response=Response(),
+            owner_user_id="111111",
+            principal=SimpleNamespace(user_id="caller-1"),
+            grant_service=grant_service,
+            provisioner=provisioner,
+        )
+
+    assert provisioner.joins == []
 
 
 @pytest.mark.asyncio
@@ -152,6 +233,8 @@ async def test_upsert_existing_openclaw_subscription_returns_persisted_record():
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
         owner_user_id="111111",
+        principal=SimpleNamespace(user_id="caller-1"),
+        grant_service=_FakeGrantService(),
         provisioner=provisioner,
     )
     assert response.status_code == 200

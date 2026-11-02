@@ -129,7 +129,8 @@ impl Fixture {
     async fn dispatch(&self) -> ServiceResult<TaskDispatchOutcome> {
         self.flow.handle_task_dispatch(TaskDispatchCommand {
             driver_bot_id: "bot-driver".into(), group_id: "group-1".into(), target_bot_id: "bot-observer".into(),
-            target_bot_name: None, payload: json!({"message":"analyse", "bcs_session_id":SESSION, "response_mode":"full"}),
+            target_bot_name: None, caller_delegation: None,
+            payload: json!({"message":"analyse", "bcs_session_id":SESSION, "response_mode":"full"}),
         }).await
     }
     async fn row(&self) -> PersistedMessageDelivery {
@@ -142,7 +143,7 @@ impl Fixture {
         let prep = QueuedGroupPreparation { flow: Arc::downgrade(&self.flow), deliveries: self.fault.clone() };
         let mut prepared = prep.prepare(&row).await.unwrap();
         prepared.transport_context_json["policy_version"] = json!(self.live.snapshot.read().await.version);
-        let row = self.managed.transition(DeliveryTransitionCommand {
+        let row = self.managed.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
             now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
@@ -314,7 +315,7 @@ async fn queued_cancellation_releases_output_permit() {
     f.dispatch().await.unwrap();
     let (op, run) = f.latest();
     let row = f.row().await;
-    let cancelled = f.managed.transition(DeliveryTransitionCommand {
+    let cancelled = f.managed.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: Some("human_user".into()),
@@ -393,7 +394,7 @@ async fn unsent_terminal_cleanup_does_not_depend_on_status_notification_delivery
         let (op, run) = f.latest();
         let row = f.row().await;
         // Deliberately no notification subscriber: this is post-commit cleanup.
-        let terminal = f.managed.transition(DeliveryTransitionCommand {
+        let terminal = f.managed.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id: row.delivery_id, expected_state_version: row.state.state_version, event,
             now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
             transport_context_json: None, deadline_at_ms: None,
@@ -413,7 +414,7 @@ async fn cancelling_a_started_run_keeps_output_until_its_callback_terminal() {
     let (op, run) = f.latest();
     f.start().await;
     let row = f.row().await;
-    let pending = f.managed.transition(DeliveryTransitionCommand {
+    let pending = f.managed.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
         delivery_id: row.delivery_id, expected_state_version: row.state.state_version, event: Event::CancelRequested,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: None, deadline_at_ms: None,
@@ -433,7 +434,7 @@ async fn cancellation_of_the_transition_caller_does_not_cancel_committed_cleanup
     *f.output.release_gate.lock().unwrap() = Some(gate.clone());
     let service = f.managed.clone();
     let caller = tokio::spawn(async move {
-        service.transition(DeliveryTransitionCommand {
+        service.transition(DeliveryTransitionCommand { caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
             delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
             now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,

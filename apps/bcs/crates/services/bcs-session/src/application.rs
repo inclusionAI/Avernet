@@ -17,7 +17,6 @@ use bcs_domain::{
 
 
 use bcs_service_api::application::session::{
-    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome, CompleteSessionCallbackCommand,
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
 };
@@ -25,8 +24,7 @@ use bcs_service_api::application::session::{
 use bcs_service_api::core::session::new_session_id;
 
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
-    CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort, MessageRepoPort,
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort, MessageRepoPort,
     RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };

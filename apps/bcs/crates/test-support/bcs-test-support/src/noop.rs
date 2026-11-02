@@ -981,14 +981,6 @@ impl GroupCoreService for NoopGroupCoreService {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        _service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
-        Err(ServiceError::GroupNotFound(id.to_string()))
-    }
-
     async fn terminate(&self, id: &str, _caller_bot_id: &str) -> ServiceResult<Group> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
@@ -1059,19 +1051,6 @@ pub struct NoopGroupDispatchContextPort;
 impl GroupDispatchContextPort for NoopGroupDispatchContextPort {
     async fn participants(&self, _group_id: &str) -> Option<Vec<Participant>> {
         None
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct NoopSessionCallbackDispatchPort;
-
-#[async_trait]
-impl SessionCallbackDispatchPort for NoopSessionCallbackDispatchPort {
-    async fn maybe_dispatch(
-        &self,
-        _session: Session,
-        _session_management: std::sync::Arc<dyn SessionManagementService>,
-    ) {
     }
 }
 
@@ -1815,12 +1794,6 @@ impl GroupManagementService for NoopGroupManagementService {
         Err(service_not_configured("group management service").into())
     }
 
-    async fn patch_group_settings(
-        &self,
-        _cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        Err(service_not_configured("group management service").into())
-    }
 }
 
 #[derive(Debug, Default)]

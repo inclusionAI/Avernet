@@ -64,6 +64,14 @@ pub enum ServiceError {
         existing_provider_bot_ref: String,
     },
 
+    /// Registration committed but a post-commit initialization failed
+    /// (P1.3): the Bot/binding stay durable, nothing is auto-retried,
+    /// deleted or credential-replayed by BCS; the caller reconciles via
+    /// the authenticated management queries and may resubmit the same
+    /// command. Disabling the caller configuration can never unblock an
+    /// incomplete registration.
+    #[error("registration committed; caller reconciliation required")]
+    RegistrationReconciliationRequired,
     /// Request conflicts with an existing immutable or concurrently updated resource.
     #[error("Conflict: {0}")]
     Conflict(String),
@@ -131,10 +139,6 @@ pub enum ServiceError {
     #[error("Invalid session params: {0}")]
     SessionInvalidParams(String),
 
-    /// Session reactivation blocked because callback is still pending.
-    #[error("Session '{0}' callback still pending")]
-    SessionCallbackPending(String),
-
     /// Group contains non-public bots, preventing visibility change to public.
     /// Each tuple is (bot_uuid, bot_name).
     #[error("Group contains non-public bots preventing visibility change")]
@@ -196,7 +200,6 @@ impl ServiceError {
             Self::ParticipantNotFound(id) => serde_json::json!({ "participant_id": id }),
             Self::SessionNotFound(id) => serde_json::json!({ "session_id": id }),
             Self::SessionInvalidParams(reason) => serde_json::json!({ "reason": reason }),
-            Self::SessionCallbackPending(id) => serde_json::json!({ "session_id": id }),
             Self::Conflict(reason)
             | Self::Unauthorized(reason)
             | Self::Forbidden(reason)
@@ -226,7 +229,8 @@ impl ServiceError {
             Self::CannotAddSelf
             | Self::CannotAcceptRejected
             | Self::CannotRejectAccepted
-            | Self::PrivateBotCannotCollaborate => serde_json::Value::Null,
+            | Self::PrivateBotCannotCollaborate
+            | Self::RegistrationReconciliationRequired => serde_json::Value::Null,
         }
     }
 }

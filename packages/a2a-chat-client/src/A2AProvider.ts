@@ -64,6 +64,7 @@ import {
 } from './recovery';
 import { classifyCancel, type CancelOutcome } from './cancelOutcomes';
 import { createSendBanRegistry, type SendBanRegistry } from './sendBan';
+import { scopedSendBanContext } from './policy';
 import type { A2aUrls } from './urls';
 import {
   A2aParserFactoryMissingError,
@@ -171,6 +172,11 @@ export interface A2AProviderConfig extends A2aOpenClawProviderConfig {
   /** B12：context 级 send-ban 注册表（§3.1）。缺省模块级共享实例——禁令
    * 生存期独立于 provider 实例；B13 注入自持实例以复用同一 registry。 */
   sendBan?: SendBanRegistry;
+  /** R6：禁令的 bot/runtime 作用域（宿主由 bot+owner+stage 构造，无空格
+   * 成分）。挂禁/查询/核销的 context 键统一经它拼域——防止 registry 单例
+   * 下不同 bot 的同名 sessionKey 互相串联/误封；缺省（未升级宿主）保持
+   * 裸 context 的 legacy 键口径。 */
+  sendBanScopeId?: string;
 }
 
 export class A2AProvider {
@@ -189,6 +195,8 @@ export class A2AProvider {
   private readonly config: A2AProviderConfig;
   /** B12 context 级 send-ban（config 注入或模块级缺省——§3.1 生命周期独立） */
   private readonly sendBan: SendBanRegistry;
+  /** R6 挂禁作用域（bot/runtime 键前缀；undefined=legacy 裸 context 键） */
+  private readonly sendBanScopeId: string | undefined;
   private parser: SdkParser | null = null;
   private readonly parserReady: Promise<void>;
   private connected = false;
@@ -215,6 +223,7 @@ export class A2AProvider {
   constructor(config: A2AProviderConfig) {
     this.config = config;
     this.sendBan = config.sendBan ?? DEFAULT_SEND_BAN_REGISTRY;
+    this.sendBanScopeId = config.sendBanScopeId;
     // parserFactory 注入缝（B10 公共/宿主解耦）：宿主给"构造好的实例工厂"——
     // Promise.resolve().then(...) 推迟调用，兼容同步/异步两种宿主并保住
     // "构造期零同步抛"（对位原 loadOpenClawParser 的 async 恒拒绝语义）：
@@ -513,7 +522,7 @@ export class A2AProvider {
    * 本层只此一处发 CancelTask，无重试。
    */
   private fireWireCancel(taskId: string, contextId: string): void {
-    this.sendBan.begin(this.config.a2aUrls.rpcUrl, contextId);
+    this.sendBan.begin(this.config.a2aUrls.rpcUrl, this.banContext(contextId));
     void this.runCancelControl(taskId, contextId);
   }
 
@@ -569,19 +578,25 @@ export class A2AProvider {
    *                             禁发——与 cancel-rejected 同文案，但禁令核销行
    *                             不同，typed 分行防误放行）
    */
+  /** R6：禁令的 context 键（挂禁/核销/宿主查询三口径同键）——scope 前缀
+   * 隔离不同 bot 的同名 sessionKey；scope 缺省时保持 legacy 裸键。 */
+  private banContext(contextId: string): string {
+    return scopedSendBanContext(this.sendBanScopeId, contextId);
+  }
+
   private applyCancelBanDisposition(outcome: CancelOutcome, contextId: string): void {
     const rpcUrl = this.config.a2aUrls.rpcUrl;
     switch (outcome.kind) {
       case 'cancelled-clean':
-        this.sendBan.releaseOnConfirmedAbort(rpcUrl, contextId);
+        this.sendBan.releaseOnConfirmedAbort(rpcUrl, this.banContext(contextId));
         break;
       case 'cancelled-unconfirmed':
       case 'cancel-unknown':
       case 'cancel-rejected-unknown':
-        this.sendBan.begin(rpcUrl, contextId);
+        this.sendBan.begin(rpcUrl, this.banContext(contextId));
         break;
       case 'cancel-rejected':
-        this.sendBan.releaseOnTerminal(rpcUrl, contextId);
+        this.sendBan.releaseOnTerminal(rpcUrl, this.banContext(contextId));
         break;
     }
   }
@@ -607,7 +622,7 @@ export class A2AProvider {
       if (typeof task !== 'object' || task === null) return;
       const state = terminalStateOf(task as Record<string, unknown>);
       if (state === STATE_COMPLETED || state === STATE_FAILED) {
-        this.sendBan.releaseOnTerminal(this.config.a2aUrls.rpcUrl, contextId);
+        this.sendBan.releaseOnTerminal(this.config.a2aUrls.rpcUrl, this.banContext(contextId));
       }
     } catch {
       /* best-effort：无新证据即不解禁（§3.1 无停止证明不释放） */
@@ -617,7 +632,7 @@ export class A2AProvider {
   /** §3.1 非 cancel 终态解禁（COMPLETED/FAILED；GetTask 确认同路）——
    *  CANCELED 终态不走此路（解禁只认 engineAbort=confirmed）。 */
   private releaseBanOnNonCancelTerminal(contextId: string): void {
-    this.sendBan.releaseOnTerminal(this.config.a2aUrls.rpcUrl, contextId);
+    this.sendBan.releaseOnTerminal(this.config.a2aUrls.rpcUrl, this.banContext(contextId));
   }
 
   // ─── B11 恢复面（自动恢复在 request() catch 内联；本节为公共锚点） ────

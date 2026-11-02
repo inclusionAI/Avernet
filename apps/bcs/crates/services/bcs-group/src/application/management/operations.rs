@@ -150,6 +150,16 @@ impl GroupManagementService for GroupManagement {
                 .await;
         }
 
+        // P3 prewarm intent (spec §7 member-entry): no trusted subject for
+        // the added member here — record the non-sensitive intent only
+        // (group, member kind). Identity and containers are established
+        // per message by the admission seam, never on membership change.
+        tracing::info!(
+            group_id = %cmd.group_id,
+            member_kind = ?bot.actor_kind,
+            "caller prewarm intent recorded for member entry (no identity, no ensure)"
+        );
+
         Ok(GroupAddMemberResult {
             group_id: cmd.group_id,
             member: GroupParticipantView {
@@ -608,66 +618,4 @@ impl GroupManagementService for GroupManagement {
         })
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-
-        let running_service_count = self
-            .session_management
-            .count_running_service(&cmd.group_id)
-            .await
-            .unwrap_or(0);
-
-        if let Some(spec_patch) = cmd.service_spec.clone() {
-            if let Err(error) = validate_service_spec_patch(
-                group.service_spec.as_ref(),
-                spec_patch.as_ref(),
-                running_service_count,
-            ) {
-                let conflict = match error {
-                    crate::core::ServiceSpecPatchError::CallbackConfigImmutable => {
-                        GroupPatchSettingsConflict {
-                            field: ServiceSpecPatchConflictField::CallbackConfig,
-                            running_service_count,
-                        }
-                    }
-                    crate::core::ServiceSpecPatchError::RouteFieldsLocked(count) => {
-                        GroupPatchSettingsConflict {
-                            field: ServiceSpecPatchConflictField::RouteFields,
-                            running_service_count: count,
-                        }
-                    }
-                };
-                return Err(GroupUseCaseError::Conflict(
-                    serde_json::to_string(&conflict)
-                        .unwrap_or_else(|_| "service_spec patch rejected".to_string()),
-                ));
-            }
-
-            self.group
-                .mutate(group_mutation_command(
-                    &cmd.group_id,
-                    "system",
-                    GroupMutationKind::UpdateServiceSpec(spec_patch),
-                ))
-                .await?;
-        }
-
-        let updated = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-
-        Ok(GroupPatchSettingsResult {
-            group_id: cmd.group_id,
-            service_spec: updated.service_spec,
-        })
-    }
 }

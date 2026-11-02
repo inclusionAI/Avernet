@@ -60,3 +60,10 @@ for normalized card presentation. Keep using `actions` for available operations.
 The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged.
 Existing publication identifiers, diagnostic state, edit locks, and action policy
 remain intact. Projection reuses the existing batched publication read.
+
+For personal cloud Bots, stored `RECYCLED` maps to `display_state: dormant`
+even when `ext.dormant` is absent. The Owner receives `activate` in `actions`;
+collaborators do not. `RECYCLING` and `REACTIVATING` without a legacy dormant
+flag remain `pending`, with no activation action while the transition runs.
+The raw `status`, local/service card mappings, and activation endpoint are
+unchanged. Clients still need to render and invoke the advertised action.

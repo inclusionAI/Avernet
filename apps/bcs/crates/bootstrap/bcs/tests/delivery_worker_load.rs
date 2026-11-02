@@ -106,6 +106,9 @@ impl BotDeliveryPort for MockIo {
             for _ in 0..16 {
                 let row = service.lookup(DeliveryLookup::Request(request.clone())).await.unwrap().remove(0);
                 let result = service.transition(DeliveryTransitionCommand {
+                    caller_dispatch_commit: None,
+                    caller_cancel: None,
+                    caller_terminal: None,
                     delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
                     event: DeliveryLifecycleEvent::Completed, now_ms: chrono::Utc::now().timestamp_millis(),
                     request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -167,7 +170,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
         max_safe_retries: 0, pause_dispatch: false,
         bots: (0..bots).map(|b| (format!("bot{b:03}"), DeliveryRuntimePolicy { max_running: cap, min_send_interval_ms: 0 })).collect(),
         tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), startup_recovery_grace: Duration::ZERO, max_tasks: 32, max_abort_tasks: 2,
-    }};
+    }, caller_dispatch: None };
     let expected = (bots - usize::from(offline)) * sessions * 10;
     let start = Instant::now();
     let (stop, shutdown) = tokio::sync::watch::channel(false);

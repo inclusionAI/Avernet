@@ -158,9 +158,13 @@ impl WorkbenchSessionService for GroupManagement {
             // Compatibility path for Workbench clients that predate explicit
             // participant views. Its authorization and participant list are
             // the values produced by the original full-view connection.
+            let speaking_mode = self
+                .resolve_connect_speaking_mode(&legacy_participants)
+                .await;
             return Ok(WorkbenchConnectOutcome {
                 group_id: command.group_id,
                 participants: legacy_participants,
+                speaking_mode,
             });
         };
 
@@ -187,9 +191,39 @@ impl WorkbenchSessionService for GroupManagement {
         };
 
         Ok(WorkbenchConnectOutcome {
+            speaking_mode: self
+                .resolve_connect_speaking_mode(&participants)
+                .await,
             group_id: command.group_id,
             participants,
         })
+    }
+
+    async fn resolve_speaking_mode_projection(
+        &self,
+        command: WorkbenchSpeakingModeCommand,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        use bcs_domain::speaking_lease::SessionSpeakingMode;
+
+        // Same reduction `connect` performs, mirrored for transport-scoped
+        // (V1 session-bound) connects: the CURRENT membership and the CURRENT
+        // per-bot caller configuration. Lookup failures degrade to `Plain`
+        // (advisory projection) — message admission re-resolves authoritatively.
+        let Some(group) = self.group.get(&command.group_id).await else {
+            return SessionSpeakingMode::Plain;
+        };
+        let participants = if let Some(session_id) = command.session_id.as_deref() {
+            match self.session_management.get(session_id).await {
+                Ok(Some(session)) if session.group_id == command.group_id => {
+                    workbench_participants_from_slice(&session.participants)
+                }
+                _ => return SessionSpeakingMode::Plain,
+            }
+        } else {
+            workbench_participants(&group)
+        };
+        self.resolve_connect_speaking_mode(&participants)
+            .await
     }
 
     async fn authorize_chat_send(

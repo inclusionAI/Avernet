@@ -82,6 +82,17 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function latestFailedDelivery(task: SessionRecoveryTask | null) {
+  if (!task || task.status !== 'failed') return null;
+  const calls = new Set(task.evidence.filter(item => item.source === 'retry_message').map(item => item.tool_call_id));
+  const event = task.timeline.filter(item => item.kind === 'operation' && calls.has(String(item.payload.raw_tool_call_id ?? item.payload.tool_call_id)))
+    .sort((a, b) => a.at_ms - b.at_ms).at(-1);
+  if (!event || event.payload.status !== 'failed') return null;
+  const result = record(event.payload.result);
+  const error = typeof result.error === 'string' ? result.error : record(result.error).message;
+  return typeof error === 'string' && error.trim() ? { event, error, unsent: result.dispatched === false } : null;
+}
+
 function groupPhaseEvents(task: SessionRecoveryTask | null): Record<RecoveryPhase, RecoveryEvent[]> {
   const grouped: Record<RecoveryPhase, RecoveryEvent[]> = { assess: [], observe: [], plan: [], apply: [], verify: [] };
   if (!task) return grouped;
@@ -386,7 +397,7 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
   const effect = typeof judgment.effect === 'string' && judgment.effect in effectLabels ? judgment.effect as keyof typeof effectLabels : undefined;
   const decision = event.kind === 'assessment' && typeof event.payload.decision === 'string' ? (task.simulation ? simulationDecisionLabels : decisionLabels)[event.payload.decision] : undefined;
   const conclusionSummary = event.kind !== 'assessment' && typeof detailText === 'string' && detailText !== resultSummary ? detailText : undefined;
-  return <li className={`sr-process-action ${status}`}>
+  return <li id={`recovery-operation-${event.event_id}`} className={`sr-process-action ${status}`}>
     <div className="sr-process-index">{index + 1}</div>
     <article>
       <div className="sr-process-header"><h3>{title}</h3><div className="sr-process-status">{status && <StatusPill status={status}>{actionStatusLabels[status] || status}</StatusPill>}{effect && <StatusPill status={effect}>{effectLabels[effect]}</StatusPill>}</div></div>
@@ -405,7 +416,7 @@ function ProcessAction({ task, event, index, rawEvidence, loadEvidence, onViewAc
           </dl>}
           {typeof detailText === 'string' && <div className="sr-operation-field"><h4>{event.kind === 'assessment' || event.kind === 'observation' && !event.payload.sourceToolCallId ? '判断说明' : conclusion.conclusionZh ? '结论' : '记录说明'}</h4><div className="sr-long-text"><PlanMarkdown text={detailText} /></div></div>}
           {typeof event.payload.feedback === 'string' && event.payload.feedback.trim() && <div className="sr-operation-field"><h4>Owner 补充说明</h4><PlanMarkdown text={event.payload.feedback} /></div>}
-          {typeof (result.message ?? request.message) === 'string' && <div className="sr-operation-field"><h4>发送的恢复消息</h4><PlanMarkdown text={String(result.message ?? request.message)} /></div>}
+          {typeof (result.message ?? request.message) === 'string' && <div className="sr-operation-field"><h4>{result.dispatched === false ? '拟发送的恢复消息（未发送）' : '发送的恢复消息'}</h4><PlanMarkdown text={String(result.message ?? request.message)} /></div>}
           {actualCommand && <details className="sr-disclosure"><summary>查看本次调用的 Shell 命令</summary><RawDetails value={actualCommand} /></details>}
           {actualRequest != null && <details className="sr-disclosure"><summary>查看本次调用的接口请求</summary><RawDetails value={actualRequest} /></details>}
           {(typeof result.stdout === 'string' || typeof result.stderr === 'string') && <details className="sr-disclosure"><summary>查看命令输出</summary>{typeof result.stdout === 'string' && <><p className="sr-note">标准输出</p><RawDetails value={result.stdout} /></>}{typeof result.stderr === 'string' && <><p className="sr-note">错误输出</p><RawDetails value={result.stderr} /></>}</details>}
@@ -628,6 +639,7 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
   const currentPhase = phases.find((item) => item.key === currentPhaseKey);
   const lastEvent = task?.timeline.at(-1);
   const failureSummary = task?.judgment?.summary || lastEvent?.summary || '本次自愈执行未完成，详见阶段操作与证据。';
+  const failedDelivery = latestFailedDelivery(task);
   const effect = task?.judgment?.effect ?? 'unknown';
   const delivery = task?.judgment?.delivery;
   const response = task?.judgment?.response;
@@ -700,10 +712,14 @@ export default function SessionRecoveryDetail({ taskId, onBack }: { taskId: stri
           : task.termination?.status === 'remote_stop_failed' ? '后续干预已禁止，但 AIS 停止请求未成功，可重试停止 AIS。'
           : '后续干预已禁止；AIS 尚未返回作业编号，派发回执返回后会补停。'}已完成的操作和调查记录保留。</p></div>
       </section>}
-      {task.status === 'failed' && !unrecoveredOutcome(task) && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong><div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
-        setPhaseSelection({ taskId, phase: currentPhaseKey });
-        window.requestAnimationFrame(() => document.getElementById('recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-      }}>查看执行记录</button></section>}
+      {task.status === 'failed' && !unrecoveredOutcome(task) && <section role="alert" className="sr-alert danger"><MonitoringIcon name="alert" /><div><strong>自愈执行失败</strong>
+        {failedDelivery && <div className="sr-process-error"><strong>{failedDelivery.unsent ? '恢复消息未发送' : '恢复消息投递失败'}</strong><p>{failedDelivery.error}</p></div>}
+        <div className="sr-failure-preview"><PlanMarkdown text={failureSummary} /></div><details className="sr-disclosure"><summary>查看完整失败说明</summary><PlanMarkdown text={failureSummary} /></details></div><button type="button" className="sr-button" onClick={() => {
+          const event = failedDelivery?.event;
+          const phase = event ? phases.find(item => grouped[item.key].some(entry => entry.event_id === event.event_id))?.key ?? currentPhaseKey : currentPhaseKey;
+          setPhaseSelection({ taskId, phase });
+          window.requestAnimationFrame(() => document.getElementById(event ? `recovery-operation-${event.event_id}` : 'recovery-stage-process')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        }}>{failedDelivery ? '查看投递记录' : '查看执行记录'}</button></section>}
       {task.status === 'waiting_owner' && <section role="status" className="sr-alert warning"><MonitoringIcon name="user" /><div><strong>{task.canOperate ? '需要确认修复方案' : '等待 Owner 确认修复方案'}</strong><p>{stageSummary}</p></div><button type="button" className="sr-button primary" onClick={viewPlan}>查看方案</button></section>}
       <section className="sr-summary-grid" aria-label="任务概览">
         <article className="sr-summary-card sr-stage-summary">

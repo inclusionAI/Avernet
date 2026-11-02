@@ -216,6 +216,15 @@ class DeviceConnectionResponse(BaseModel):
             "derive or compose one (a relay ws URL implies no equivalent A2A face)."
         ),
     )
+    a2a_withheld: bool = Field(
+        False,
+        description=(
+            "The server governs this user's A2A access (user-level gray release) "
+            "and withheld the A2A address on purpose. Unlike an address that is "
+            "simply absent, this is an explicit refusal: a client must not derive, "
+            "probe, or reuse an A2A choice for this connection."
+        ),
+    )
 
 
 class DeviceProps(BaseModel):

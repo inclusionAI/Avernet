@@ -1322,6 +1322,10 @@ class BotRunner:
             (actual_session_id, session_pending)
             session_pending=True 表示 session_id 为计划值，尚未在 adapter 侧物化。
         """
+        # An empty identifier cannot refer to an existing engine session.
+        # Treat it like an omitted identifier and use the normal planning path.
+        if session_id == "":
+            session_id = None
         if session_id is not None and route.binding_info.engine_type != "teclaw":
             self._run_repository.update_session_id(run_id, session_id)
             logger.info(

@@ -68,6 +68,7 @@ def world(monkeypatch):
             passport_plugin=passport, identity_repository=repository,
         ),
         session_validator=MagicMock(),
+        bcs_caller_sync=MagicMock(),
     )
     return SimpleNamespace(
         database=database, repository=repository, service=service, bot=bot,

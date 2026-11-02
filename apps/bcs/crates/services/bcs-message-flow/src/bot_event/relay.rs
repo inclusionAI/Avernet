@@ -275,6 +275,18 @@ pub(super) async fn relay_final_chat_event(
     for target in &decision.targets {
         if raw_text.is_empty() { continue; }
         if queued_reply_targets.as_ref().is_some_and(|reply| reply.target_ids.contains(&target.bot_uuid)) { continue; }
+        if target.delivery_type == DeliveryType::Send {
+            if let Err(error) = crate::caller_delegation::guard_legacy_relay_send(flow, &target.bot_uuid).await {
+                delivery_results.push(MessageDeliveryResult {
+                    bot_uuid: target.bot_uuid.clone(), delivery_type: target.delivery_type,
+                    success: false, error: Some(error.to_string()),
+                });
+                bot_deliveries.push(BotDeliveryResult {
+                    target_bot_id: target.bot_uuid.clone(), delivered: false, error: Some(error),
+                });
+                continue;
+            }
+        }
         let directive = build_response_directive(
             target,
             &routing_source,

@@ -19,7 +19,7 @@ use bcs_service_api::types::bot_authority::{
 };
 use crate::contract::bot_transfer_contract::{BotTransferContractFixture, HarnessTransferSeed};
 use crate::contract::bot_authority_contract::{
-    BotAuthorityContractFixture, HarnessAuditRow,
+    BotAuthorityContractFixture, HarnessAuditRow, HarnessTransferDecision,
 };
 
 /// One scenario DB + store + fixture. Fresh instance per
@@ -252,6 +252,83 @@ impl BotAuthorityContractFixture for SqlAuthorityFixture {
             ],
         )
         .await;
+    }
+
+    async fn ownership_version(&self, env: &str, bot_id: &str) -> u64 {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT ownership_version FROM bcs_bots WHERE bot_uuid = ? AND env = ?",
+                vec![DbValue::from(bot_id), DbValue::from(env)],
+            ))
+            .await
+            .expect("read ownership version");
+        rows.first()
+            .map(|row| {
+                row.get_i64("ownership_version")
+                    .expect("ownership_version")
+                    .unwrap_or(0) as u64
+            })
+            .unwrap_or(0)
+    }
+
+    async fn seed_pending_transfer(
+        &self,
+        env: &str,
+        bot_id: &str,
+        from_owner_actor: &str,
+        target_actor: &str,
+        expected_version: u64,
+    ) {
+        let requested = sqlite_offset_expr(0);
+        let expires = sqlite_offset_expr(7 * 24 * 3600);
+        execute(
+            self.db.as_ref(),
+            &format!(
+                "INSERT INTO bot_ownership_transfers \
+                 (env, bot_id, target_owner_actor_id, from_owner_actor_id, \
+                  expected_ownership_version, status, requested_at, expires_at, \
+                  updated_at) \
+                 VALUES (?, ?, ?, ?, ?, 'pending', {requested}, {expires}, {requested})"
+            ),
+            vec![
+                DbValue::from(env),
+                DbValue::from(bot_id),
+                DbValue::from(target_actor),
+                DbValue::from(from_owner_actor),
+                DbValue::from(expected_version),
+            ],
+        )
+        .await;
+    }
+
+    async fn transfer_decision_state(
+        &self,
+        env: &str,
+        bot_id: &str,
+        target_actor: &str,
+    ) -> Option<HarnessTransferDecision> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT status, decided_by_kind, decided_by_id, reason \
+                 FROM bot_ownership_transfers \
+                 WHERE env = ? AND bot_id = ? AND target_owner_actor_id = ? LIMIT 1",
+                vec![
+                    DbValue::from(env),
+                    DbValue::from(bot_id),
+                    DbValue::from(target_actor),
+                ],
+            ))
+            .await
+            .expect("read transfer decision");
+        rows.first()
+            .map(|row| HarnessTransferDecision {
+                status: row.get_string("status").expect("status").unwrap(),
+                decided_by_kind: row.get_string("decided_by_kind").expect("decided_by_kind"),
+                decided_by_id: row.get_string("decided_by_id").expect("decided_by_id"),
+                reason: row.get_string("reason").expect("reason"),
+            })
     }
 }
 

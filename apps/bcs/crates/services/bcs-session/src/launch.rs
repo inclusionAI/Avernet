@@ -484,7 +484,7 @@ impl SessionLaunchApplication {
                     opening_message_override: None,
                     input: session.input.clone().unwrap_or(serde_json::Value::Null),
                     caller_id: Some(prepared.caller.actor_id().to_string()),
-                    authenticated_human,
+                    authenticated_human, caller_association: None,
                 })
                 .await?;
             return Ok(SessionLaunchOutcome {
@@ -567,9 +567,6 @@ fn map_session_error(error: SessionUseCaseError) -> SessionLaunchError {
     match error {
         SessionUseCaseError::NotFound(message) => SessionLaunchError::SessionNotFound(message),
         SessionUseCaseError::InvalidParams(message) => SessionLaunchError::InvalidRequest(message),
-        SessionUseCaseError::CallbackPending(message) => {
-            SessionLaunchError::CallbackPending(message)
-        }
         SessionUseCaseError::Conflict(message) => SessionLaunchError::Conflict(message),
         SessionUseCaseError::Internal(error) => SessionLaunchError::Internal(error),
     }

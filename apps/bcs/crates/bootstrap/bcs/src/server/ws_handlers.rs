@@ -20,13 +20,52 @@ pub(super) async fn ws_upgrade_handler(
     // Resolve identity BEFORE on_upgrade: once the connection switches to
     // WebSocket frames the original HTTP headers are gone, so cookie
     // extraction must happen here in the request scope.
-    let bound_actor_id = match state.auth_chain.authenticate(&headers).await {
-        Ok(result) => result
-            .principal
-            .and_then(|p| p.user_id)
-            .filter(|s| !s.is_empty())
-            .map(|staff_no| format!("human_{}", staff_no)),
-        Err(_) => None,
+    let (bound_actor_id, caller_ingress) = match state.auth_chain.authenticate(&headers).await {
+        Ok(result) => {
+            let principal = result.principal;
+            // Caller ingress (spec §10.13/§10.1.1): the SAME authenticated
+            // principal that names the bound actor is the only material the
+            // strict human caller snapshot may be built from — machine
+            // credentials (bot/owner) and identity-less principals are
+            // skipped, never synthesized. Skipping only affects caller-
+            // enabled targets (their sends fail closed); ordinary
+            // subscriptions keep working for every principal.
+            let caller_ingress = principal
+                .as_ref()
+                .and_then(|principal| {
+                    match bcs_ws::web::ws_upgrade_caller_ingress(
+                        principal,
+                        bcs_protocol::now_ms() as i64,
+                    ) {
+                        Ok(ingress) => Some(ingress),
+                        Err(reason) => {
+                            debug!(
+                                reason = ?reason,
+                                "WS upgrade: no caller ingress for this principal"
+                            );
+                            None
+                        }
+                    }
+                });
+            let bound_actor_id = principal
+                .and_then(|p| p.user_id)
+                .filter(|s| !s.is_empty())
+                .map(|staff_no| format!("human_{}", staff_no));
+            // Diagnostics for the caller seam: INFO on both outcomes so the
+            // E2E stack (INFO-level logs) can prove whether the ingress was
+            // built or skipped, and why.
+            match (&bound_actor_id, &caller_ingress) {
+                (Some(actor), Some(_)) => {
+                    info!(actor_id = %actor, "WS upgrade: caller ingress ready")
+                }
+                (Some(actor), None) => {
+                    info!(actor_id = %actor, "WS upgrade: caller ingress skipped")
+                }
+                _ => {}
+            }
+            (bound_actor_id, caller_ingress)
+        }
+        Err(_) => (None, None),
     };
 
     if let Some(ref actor_id) = bound_actor_id {
@@ -44,6 +83,7 @@ pub(super) async fn ws_upgrade_handler(
             ws_state,
             bcs_ws::web::WorkbenchConnectionAuth::UserBound {
                 actor_id: bound_actor_id,
+                caller_ingress,
             },
             metrics_hook,
         ))

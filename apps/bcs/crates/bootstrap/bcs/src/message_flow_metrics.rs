@@ -26,6 +26,12 @@ impl InstrumentedMessageFlowService {
 #[cfg(feature = "prometheus-metrics")]
 #[async_trait::async_trait]
 impl MessageFlowService for InstrumentedMessageFlowService {
+    async fn task_status(&self, refs: Vec<String>) -> ServiceResult<Vec<bcs_service_api::TaskHandleView>> {
+        self.inner.task_status(refs).await
+    }
+    async fn cancel_task(&self, task_ref: String, reason: String) -> ServiceResult<bcs_service_api::TaskHandleView> {
+        self.inner.cancel_task(task_ref, reason).await
+    }
     async fn resolve_managed_provider_run(&self, run_id: &str, provider_id: &str, bot_id: &str) -> ServiceResult<Option<bcs_service_api::BotRunContext>> {
         self.inner.resolve_managed_provider_run(run_id, provider_id, bot_id).await
     }

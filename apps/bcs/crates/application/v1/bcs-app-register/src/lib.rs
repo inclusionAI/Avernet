@@ -44,6 +44,7 @@ pub struct RegisterServiceImpl {
     /// a repo.
     registry: Option<Arc<dyn BotRegistryCoreService>>,
     token_secret: Vec<u8>,
+    a2a_cards: Option<Arc<dyn bcs_service_api::port::a2a_card::A2aCardPort>>,
     provider_registration: Option<Arc<dyn ProviderRegistrationCoreService>>,
 }
 
@@ -52,8 +53,13 @@ impl RegisterServiceImpl {
         Self {
             registry: None,
             token_secret,
+            a2a_cards: None,
             provider_registration: None,
         }
+    }
+
+    pub fn with_a2a_cards(mut self, cards: Arc<dyn bcs_service_api::port::a2a_card::A2aCardPort>) -> Self {
+        self.a2a_cards = Some(cards); self
     }
 
     /// Wire the trusted registration chain (required for
@@ -104,6 +110,7 @@ impl RegisterServiceImpl {
         command: &RegisterBot,
         bot_name: &str,
         payload: ProviderRegisterTokenPayload,
+        source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>,
     ) -> Result<BotRegistration, ApplicationError> {
         let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
         if !payload.allowed_modes.contains(&mode) {
@@ -117,18 +124,39 @@ impl RegisterServiceImpl {
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
         let initialization = Self::ownership_initialization(owner);
-        let result = self.provider_registration()?.register_with_ownership(
-            RegisterProviderBot {
-                token_auth_mode: payload.auth_mode,
-                provider_id: payload.provider_id,
-                provider_bot_ref: provider_bot_ref.to_string(),
-                owner: owner.to_string(),
-                mode,
-                bot_name: bot_name.to_string(),
-                webhook_url: command.webhook_url.clone(),
-            },
-            initialization,
-        ).await.map_err(provider_registration_error)?;
+        let core = self.provider_registration()?;
+        let mut registration = RegisterProviderBot {
+            token_auth_mode:payload.auth_mode,provider_id:payload.provider_id,
+            provider_bot_ref:provider_bot_ref.to_string(),owner:owner.to_string(),
+            mode,bot_name:bot_name.to_string(),webhook_url:command.webhook_url.clone(),
+        };
+        let result = if let Some(source) = source {
+            if mode != ProviderRegistrationMode::Gateway || command.webhook_url.is_some() {
+                return Err(ApplicationError::invalid("invalid_request", "A2A requires gateway mode without webhook_url"));
+            }
+            // Reauthorize before any outbound access. Core repeats admission
+            // before the transaction; no database lock covers this fetch.
+            core.authorize_a2a_registration(&registration.provider_id, owner).await.map_err(provider_registration_error)?;
+            let cards = self.a2a_cards.as_ref().ok_or_else(||ApplicationError::internal("A2A registration is not configured"))?;
+            use bcs_service_api::types::a2a_bot::A2aCardSource;
+            let (url,fetched)=match source {
+                A2aCardSource::Url(url)=>{let fetched=cards.fetch(&url,true).await.map_err(provider_registration_error)?;(Some(url),fetched)},
+                A2aCardSource::Inline(raw)=>(None,cards.validate(raw,true).await.map_err(provider_registration_error)?),
+            };
+            if registration.bot_name.is_empty() {registration.bot_name=fetched.raw.get("name").and_then(|value|value.as_str()).unwrap_or("").into();}
+            if !(2..=64).contains(&registration.bot_name.chars().count()) || registration.bot_name!=registration.bot_name.trim() {
+                return Err(ApplicationError::invalid("invalid_request","Card name requires a 2..64 character BCS display alias"));
+            }
+            let now_ms = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)
+                .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
+                .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
+            let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                agent_card_url:url,
+                agent_card:fetched.raw,interface:fetched.interface,
+                registered_at_ms:now_ms,};
+            core.register_a2a_with_ownership(registration,initialization,card).await
+        } else { core.register_with_ownership(registration,initialization).await }
+            .map_err(provider_registration_error)?;
         let record = result.record;
         Ok(BotRegistration {
             bot_name: record.bot_name,
@@ -247,9 +275,23 @@ impl RegisterService for RegisterServiceImpl {
         &self,
         command: RegisterBot,
     ) -> Result<BotRegistration, ApplicationError> {
+        self.register_impl(command, None).await
+    }
+
+    async fn register_a2a_card(&self, command:RegisterBot, source:bcs_service_api::types::a2a_bot::A2aCardSource)->Result<BotRegistration,ApplicationError> {
+        self.register_impl(command,Some(source)).await
+    }
+
+    async fn register_a2a_bot(&self, command: RegisterBot, card_url: String) -> Result<BotRegistration, ApplicationError> {
+        self.register_impl(command, Some(bcs_service_api::types::a2a_bot::A2aCardSource::Url(card_url))).await
+    }
+}
+
+impl RegisterServiceImpl {
+    async fn register_impl(&self, command: RegisterBot, source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>) -> Result<BotRegistration, ApplicationError> {
         let bot_name = command.bot_name.trim();
         let name_len = bot_name.chars().count();
-        if name_len < 2 || name_len > 64 {
+        if (source.is_none() || !command.bot_name.is_empty()) && (name_len < 2 || name_len > 64) {
             return Err(ApplicationError::invalid(
                 "invalid_request",
                 format!("bot-name must be 2-64 characters, got {name_len}"),
@@ -260,7 +302,7 @@ impl RegisterService for RegisterServiceImpl {
             Err(RegisterTokenError::UnsupportedVersion) => {
                 let payload = provider_registration_token::decode_and_verify(&command.token, &self.token_secret)
                     .map_err(|_| ApplicationError::Unauthenticated)?;
-                return self.register_provider_bot(&command, bot_name, payload).await;
+                return self.register_provider_bot(&command, bot_name, payload, source).await;
             }
             Err(_) => return Err(ApplicationError::Unauthenticated),
         };
@@ -269,6 +311,7 @@ impl RegisterService for RegisterServiceImpl {
         if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
             || command.provider_bot_ref.is_some()
             || command.webhook_url.is_some()
+            || source.is_some()
         {
             return Err(ApplicationError::invalid(
                 "invalid_request", "legacy register tokens only support ordinary upstream registration",

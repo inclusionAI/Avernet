@@ -160,6 +160,7 @@ async fn added_message_flow_methods_fail_closed_for_noop_and_legacy_implementati
 
 fn group_chat_command() -> GroupChatCommand {
     GroupChatCommand {
+        caller_ingress: None,
         caller: CallerContext::Public,
         group_id: "group-1".to_string(),
         requested_sender_id: None,

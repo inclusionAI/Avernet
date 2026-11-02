@@ -51,7 +51,11 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
 
     def test_pr_module_diffs_use_the_checked_out_merge_parent(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-        for env_name, module_path in MODULE_JOBS.values():
+        for job_name, (env_name, module_path) in MODULE_JOBS.items():
+            if job_name == "bcs":
+                self.assertIn("run: python3 apps/bcs/scripts/ci/detect_changes.py", workflow)
+                self.assertIn("BCS_BASE_REF: ${{ steps.changes.outputs.base-ref }}", workflow)
+                continue
             assignment = f"{env_name}: {PR_MERGE_PARENT_EXPRESSION}"
             self.assertEqual(workflow.count(assignment), 1)
             self.assertIn(
@@ -72,7 +76,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             "        run: python3 singlebox/ci/tests/test_unit_test_workflow_diff.py\n",
             workflow,
         )
-        self.assertIn("dsh-bcn-changed=true", workflow)
+        self.assertIn("steps.changes.outputs.dsh-bcn-changed == 'true'", workflow)
         self.assertIn("npm run ci", workflow)
 
         with tempfile.TemporaryDirectory() as temporary_directory:

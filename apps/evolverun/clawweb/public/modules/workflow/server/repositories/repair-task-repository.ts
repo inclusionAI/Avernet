@@ -3,6 +3,14 @@ import { RepairBatchError, canonicalRepairJson, digestRepairJson, type RepairRev
 import type { RepairExecutionIdentity } from '../contracts/repair-workbench.js';
 import type { RepairTaskDetail } from '../contracts/repair-workbench.js';
 
+function submissionUser(responseJson: string | null, legacyUserId: string): string {
+  try {
+    const submittedBy: unknown = JSON.parse(responseJson ?? '{}')?.submittedBy;
+    if (typeof submittedBy === 'string' && submittedBy.trim()) return submittedBy;
+  } catch { /* Historical dispatches retain their task-level identity. */ }
+  return legacyUserId;
+}
+
 type ExecutionRow = { status: string; error_code: string | null; bot_run_id: string | null; output_json: string | null };
 function executionFromRow(row: ExecutionRow): NonNullable<RepairTaskDetail['execution']> {
   let output: { attempt?: unknown; executionId?: unknown; rawStatus?: unknown } = {};
@@ -24,6 +32,14 @@ export class RepairTaskRepository {
     const row = (await this.db.query<ExecutionRow>(
       "SELECT status, error_code, bot_run_id, output_json FROM ce_steps WHERE task_id = ? AND step_id = ? AND step_type = 'workflow_repair_draft'", [taskId, this.stepId(taskId, revision)]))[0];
     return row ? executionFromRow(row) : undefined;
+  }
+  async submissionUser(taskId: string, revision: number): Promise<string> {
+    const row = (await this.db.query<{ user_id: string; bot_response_json: string | null }>(
+      `SELECT t.user_id, s.bot_response_json FROM ce_steps s JOIN ce_tasks t ON t.task_id = s.task_id
+       WHERE s.task_id = ? AND s.step_id = ? AND s.step_type = 'workflow_repair_draft'`,
+      [taskId, this.stepId(taskId, revision)]))[0];
+    if (!row) throw new RepairBatchError('TASK_NOT_FOUND', 'AIS submission identity is missing');
+    return submissionUser(row.bot_response_json, row.user_id);
   }
   async executions(taskId: string, revisions: number[]): Promise<Map<number, NonNullable<RepairTaskDetail['execution']>>> {
     const byStep = new Map(revisions.map(revision => [this.stepId(taskId, revision), revision]));
@@ -82,9 +98,9 @@ export class RepairTaskRepository {
     await this.db.exec("UPDATE ce_steps SET output_json = ? WHERE task_id = ? AND step_id = ? AND status = 'dispatching'", [output, taskId, stepId]);
     return { stepId, attempt, executionId, actorId: row.user_id };
   }
-  async finishDispatch(taskId: string, revision: number, jobId: string | null, failure: 'rejected' | 'uncertain' | null): Promise<void> {
-    await this.db.exec(`UPDATE ce_steps SET status = ?, bot_run_id = ?, error_code = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status = 'dispatching'`,
-      [failure === 'uncertain' ? 'dispatch_uncertain' : failure === 'rejected' ? 'dispatch_failed' : 'dispatched', jobId,
+  async finishDispatch(taskId: string, revision: number, jobId: string | null, failure: 'rejected' | 'uncertain' | null, submittedBy: string): Promise<void> {
+    await this.db.exec(`UPDATE ce_steps SET status = ?, bot_run_id = ?, bot_response_json = ?, error_code = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status = 'dispatching'`,
+      [failure === 'uncertain' ? 'dispatch_uncertain' : failure === 'rejected' ? 'dispatch_failed' : 'dispatched', jobId, canonicalRepairJson({ jobId, submittedBy }),
         failure === 'uncertain' ? 'DISPATCH_UNCERTAIN' : failure === 'rejected' ? 'DISPATCH_REJECTED' : null,
         this.db.dialect.now(), taskId, this.stepId(taskId, revision)]);
   }
@@ -96,7 +112,7 @@ export class RepairTaskRepository {
     return result.affectedRows;
   }
   async active(limit: number): Promise<Array<{ taskId: string; revision: number; jobId: string; identity: RepairExecutionIdentity; actorId: string; requestedAtMs: number; successObservedAtMs: number | null }>> {
-    const rows = await this.db.query<{ task_id: string; round_no: number; bot_run_id: string; output_json: string; user_id: string }>(`SELECT s.task_id, s.round_no, s.bot_run_id, s.output_json, t.user_id
+    const rows = await this.db.query<{ task_id: string; round_no: number; bot_run_id: string; output_json: string; bot_response_json: string | null; user_id: string }>(`SELECT s.task_id, s.round_no, s.bot_run_id, s.output_json, s.bot_response_json, t.user_id
       FROM ce_steps s JOIN ce_tasks t ON t.task_id = s.task_id
       WHERE s.step_type = 'workflow_repair_draft' AND s.status IN ('dispatched', 'running') AND s.bot_run_id IS NOT NULL
       ORDER BY s.gmt_modified ASC LIMIT ?`, [limit]);
@@ -105,7 +121,7 @@ export class RepairTaskRepository {
         const value = JSON.parse(row.output_json) as { attempt?: unknown; executionId?: unknown; requestedAtMs?: unknown; successObservedAtMs?: unknown };
         if (!Number.isSafeInteger(value.attempt) || typeof value.executionId !== 'string') return [];
         return [{ taskId: row.task_id, revision: Number(row.round_no), jobId: row.bot_run_id,
-          identity: { stepId: this.stepId(row.task_id, Number(row.round_no)), attempt: Number(value.attempt), executionId: value.executionId }, actorId: row.user_id,
+          identity: { stepId: this.stepId(row.task_id, Number(row.round_no)), attempt: Number(value.attempt), executionId: value.executionId }, actorId: submissionUser(row.bot_response_json, row.user_id),
           requestedAtMs: Number.isSafeInteger(value.requestedAtMs) ? Number(value.requestedAtMs) : Date.now(),
           successObservedAtMs: Number.isSafeInteger(value.successObservedAtMs) ? Number(value.successObservedAtMs) : null }];
       } catch { return []; }

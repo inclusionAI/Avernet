@@ -8,7 +8,7 @@ use crate::{app::BridgeApp, registration};
 #[derive(Parser)]
 #[command(name = "bcs-bridge", version)]
 pub struct Cli {
-    /// Configuration file (default: ~/.bcn-bridge/bridge.toml)
+    /// Configuration file (default: ~/.bcn-bridge/bridge.toml; start also discovers a unique profile)
     #[arg(long, global = true, env = "BRIDGE_CONFIG")]
     config: Option<PathBuf>,
     /// Named configuration for register/init/start; status/stop refer to the active instance
@@ -122,6 +122,8 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
         (Some(name), None) => crate::profiles::configuration(
             &dirs::home_dir().context("Cannot locate home directory")?, &name)?,
         (None, Some(path)) => path,
+        (None, None) if matches!(&cli.command, Commands::Start(_)) => crate::profiles::start_configuration(
+            &dirs::home_dir().context("Cannot locate home directory; pass --config")?)?,
         (None, None) => dirs::home_dir().context("Cannot locate home directory; pass --config")?
             .join(".bcn-bridge/bridge.toml"),
         _ => bail!("Use either --profile or --config"),

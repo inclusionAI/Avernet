@@ -1023,11 +1023,19 @@ class DeviceService:
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
         Validates the binding exists and is not FAILED, checks permission,
         then delegates to _compose_device_conn_info for provider-specific logic.
+
+        ``caller_id`` is the authenticated user to use for user-level gray
+        decisions when the entry surface deliberately re-labels ``operator``
+        as the resolved owner (engine_runtime connections). Surfaces whose
+        ``operator`` already *is* the caller (the devices HTTP face) leave it
+        None and the gray gate falls back to ``operator.staff_id``. Local
+        providers ignore it — they issue no a2a face.
 
         ``device_uuid`` (optional) targets a specific instance in the multi-instance
         BaaS provider (see ``BaasDeviceService.get_device_connection``); local /

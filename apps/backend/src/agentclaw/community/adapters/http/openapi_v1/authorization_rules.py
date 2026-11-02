@@ -25,6 +25,9 @@ from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PAT
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): NoCheck(
+        "service environment teardown intentionally has no Bot collaborator-level requirement"
+    ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
@@ -275,6 +278,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
+    ),
+    ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): NoCheck(
+        "workflow-id-only progress query intentionally has no Bot authorization requirement"
+    ),
+    # Eval reuses a built artifact without editing the draft or its bindings.
+    ("POST", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"): NoCheck(
+        "service environment API intentionally has no Bot collaborator-level requirement; "
+        "resource address validation is not actor authorization"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(

@@ -39,7 +39,6 @@ pub(crate) fn group_to_detail_with_context(group: DomainGroup, context_injected:
         updated_at: group.updated_at,
         chat_url: None,
         context_injected,
-        service_spec: group.service_spec.clone(),
         latest_running_session_id: None,
         initial_run: None,
         originator: group.originator,

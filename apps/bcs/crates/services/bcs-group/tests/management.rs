@@ -27,6 +27,12 @@ use bcs_service_api::{
 };
 use bcs_service_api::types::{MessageViewScope, OpeningMessage};
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
+use bcs_service_api::{
+    BotCallerConfiguration, BotCandidateReadQuery, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneView, CallerIdentityConfig, CallerIdentitySnapshot,
+    CallerMinimumIsolation,
+};
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -2321,6 +2327,154 @@ async fn workbench_session_service_connects_for_owner_and_authorizes_owned_sende
         .expect("human owner can send as owned bot");
 }
 
+/// Minimal caller-config plane fake: every single caller-configuration
+/// read answers with an ENABLED caller-identity snapshot, regardless of
+/// which bot or environment is asked.
+struct CallerEnabledControlPlane;
+
+#[async_trait]
+impl BotControlPlaneCoreService for CallerEnabledControlPlane {
+    async fn get_caller_configuration(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotCallerConfiguration>> {
+        Ok(Some(BotCallerConfiguration {
+            snapshot: Some(CallerIdentitySnapshot {
+                source_revision: 1,
+                caller_identity: CallerIdentityConfig {
+                    enabled: true,
+                    minimum_isolation: CallerMinimumIsolation::CallerContainer,
+                },
+            }),
+        }))
+    }
+
+    async fn get_record(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get_by_ids(
+        &self,
+        _bot_ids: &[String],
+        _env: &str,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_candidates(
+        &self,
+        _query: BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_by_creator(
+        &self,
+        _query: BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn patch(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+        _patch: BotControlPlanePatch,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+}
+
+#[tokio::test]
+async fn state_machine_group_connect_requires_lease_with_caller_enabled_members() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Driver", "public", None)
+        .with_bot("helper", "Helper", "public", None)
+        .with_human("human_alice", "Alice");
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_caller_config_plane(Arc::new(CallerEnabledControlPlane));
+
+    let mut cmd = create_cmd(
+        Some("human_alice"),
+        "driver",
+        vec![
+            participant("driver", Some("driver")),
+            participant("helper", Some("consultant")),
+            participant("human_alice", Some("consultant")),
+        ],
+    );
+    cmd.group_strategy = Some(GroupStrategy::StateMachine);
+    service.create_group(cmd).await.unwrap();
+
+    let connected = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: Some("human_alice".to_string()),
+        })
+        .await
+        .expect("state_machine group with human + caller bot must connect");
+
+    assert_eq!(
+        connected.speaking_mode,
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+        "state_machine groups expose lease_required when a caller bot is enabled"
+    );
+}
+
+#[tokio::test]
+async fn chat_group_connect_aggregates_a_caller_enabled_member_to_lease_required() {
+    let fixture = Fixture::new()
+        .with_bot("driver", "Driver", "public", None)
+        .with_human("human_alice", "Alice");
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_caller_config_plane(Arc::new(CallerEnabledControlPlane));
+
+    service
+        .create_group(create_cmd(
+            Some("human_alice"),
+            "driver",
+            vec![
+                participant("driver", Some("driver")),
+                participant("human_alice", Some("consultant")),
+            ],
+        ))
+        .await
+        .unwrap();
+
+    let connected = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: Some("human_alice".to_string()),
+        })
+        .await
+        .expect("chat group with human + caller bot must connect");
+
+    assert_eq!(
+        connected.speaking_mode,
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+        "chat groups aggregate a caller-enabled member into LeaseRequired"
+    );
+}
+
 #[tokio::test]
 async fn workbench_normal_group_allows_bound_human_sender_when_participant() {
     let fixture = Fixture::new()
@@ -2672,26 +2826,6 @@ impl SessionManagementService for StaticSessionManagement {
         unimplemented!("not needed by this test")
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -2760,7 +2894,6 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -2985,7 +3118,6 @@ fn create_cmd(
         member_bot_ids: Vec::new(),
         participants,
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,
@@ -3370,73 +3502,6 @@ impl FriendCoreService for FakeFriendCoreService {
     }
 }
 
-#[tokio::test]
-async fn create_group_persists_service_spec() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: None,
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    service.create_group(cmd).await.unwrap();
-    let stored = fixture.group.get("group-under-test").await
-        .expect("group should be persisted");
-    let spec = stored.service_spec
-        .expect("service_spec should round-trip through create_group");
-    assert_eq!(spec.timeout_seconds, Some(60));
-    assert_eq!(spec.max_concurrency, Some(8));
-    assert!(spec.callback_config.is_none());
-}
-
-#[tokio::test]
-async fn create_group_rejects_private_baas_callback_base_url() {
-    let fixture = Fixture::new()
-        .with_bot("driver", "Driver", "public", None)
-        .with_bot("helper", "Helper", "public", None);
-    let service = fixture.service_with_limits(5, 10, 10);
-
-    let mut cmd = create_cmd(
-        Some("driver"),
-        "driver",
-        vec![
-            participant("driver", Some("driver")),
-            participant("helper", Some("consultant")),
-        ],
-    );
-    cmd.service_spec = Some(bcs_service_api::ServiceSpec {
-        callback_config: Some(bcs_service_api::CallbackConfig {
-            channels: vec![bcs_service_api::CallbackChannelConfig::Baas {
-                base_url: "http://169.254.169.254/latest/meta-data".to_string(),
-                api_key: "sk-test".to_string(),
-                bot_id: "default:callback-test".to_string(),
-                metadata: None,
-            }],
-        }),
-        timeout_seconds: Some(60),
-        max_concurrency: Some(8),
-    });
-
-    let err = service
-        .create_group(cmd)
-        .await
-        .expect_err("private BaaS callback base_url should be rejected");
-
-    assert!(matches!(err, GroupUseCaseError::InvalidProposal(message) if message.contains("base_url is not allowed")));
-    assert!(fixture.group.get("group-under-test").await.is_none());
-}
 
 #[tokio::test]
 async fn create_group_with_human_consultant_chat() {
@@ -4114,7 +4179,6 @@ async fn list_groups_filters_by_visibility() {
         member_bot_ids: Vec::new(),
         participants: vec![participant("bot_b", Some("driver"))],
         group_kind: None,
-        service_spec: None,
         group_strategy: None,
         visibility: Some("public".to_string()),
         provisioning: false,

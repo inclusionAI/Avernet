@@ -412,7 +412,8 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
     };
     assert!(message_for(manager_id).contains("mcporter call bcs.bcs_assign_task"));
     assert!(!message_for(manager_id).contains("bcs_task_complete"));
-    assert!(message_for(mcporter_worker_id).contains("mcporter call bcs.bcs_send_task_message"));
+    assert!(!message_for(mcporter_worker_id).contains("bcs_send_task_message"));
+    assert!(message_for(mcporter_worker_id).contains("然后结束本轮"));
     for bot_id in [manager_id, mcporter_worker_id] {
         assert!(message_for(bot_id).contains(
             "每个 `mcporter call` 必须单独使用一次 shell/exec 工具调用"
@@ -428,9 +429,9 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             "禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理"
         ));
     }
-    assert!(message_for(native_mcp_worker_id).contains("MCP server `bcs`"));
-    assert!(message_for(native_mcp_worker_id).contains("`bcs_send_task_message`"));
-    assert!(message_for(native_tool_worker_id).contains("原生工具 `bcs_send_task_message`"));
+    assert!(message_for(native_mcp_worker_id).contains("原生提供 BCS MCP 工具"));
+    assert!(!message_for(native_mcp_worker_id).contains("bcs_send_task_message"));
+    assert!(!message_for(native_tool_worker_id).contains("bcs_send_task_message"));
     assert!(!message_for(native_tool_worker_id).contains("MCP server `bcs`"));
     assert!(!message_for(legacy_worker_id).contains("mcporter call"));
     assert!(!message_for(legacy_worker_id).contains("MCP server `bcs`"));
@@ -508,7 +509,7 @@ async fn manager_worker_worker_context_omits_optional_send_message_tool_when_dis
 
     let worker_message = message_for(worker_id);
     assert!(worker_message.contains("本群为任务群，你是子 Bot。"));
-    assert!(worker_message.contains("收到 manager 派发的任务后直接处理。"));
+    assert!(worker_message.contains("收到 manager 派发的任务后直接处理并正常回复"));
     assert!(!worker_message.contains("bcs_send_task_message"));
 }
 
@@ -522,9 +523,9 @@ async fn manager_worker_worker_reminder_lists_only_worker_tool() {
         .expect("worker receives context");
 
     assert_eq!(worker_message.persist, bcs_domain::PersistMode::PerRecipient);
-    assert!(worker_message.message.contains("bcs_send_task_message"));
+    assert!(!worker_message.message.contains("bcs_send_task_message"));
     assert!(worker_message.message.contains(
-        "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并回复"
+        "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并正常回复"
     ));
     assert!(worker_message.message.contains("不要用引擎自带的发送工具向群里发消息。"));
     assert!(!worker_message.message.contains("bcs_assign_task"));

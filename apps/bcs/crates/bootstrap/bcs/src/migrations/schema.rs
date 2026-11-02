@@ -835,3 +835,13 @@ pub(super) async fn add_sqlite_bot_authority_schema(db: &dyn DbPlugin) -> DbResu
     }
     Ok(())
 }
+
+
+pub(super) async fn add_sqlite_task_handle_lookup(db: &dyn DbPlugin) -> DbResult<()> {
+    // One migration transaction owns both generated columns and indexes.
+    let steps = include_str!("../../../../../migrations/sqlite/038_task_handle_lookup.sql")
+        .split(';').map(str::trim).filter(|sql| !sql.is_empty())
+        .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+    db.transaction(steps).await?;
+    Ok(())
+}

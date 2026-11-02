@@ -60,7 +60,7 @@ class FakeReader:
             elif isinstance(e, RepoSkill):
                 skills.append(CapturedSkill(e.name, SkillOrigin.REPO, repo_path=e.repo_path))
             else:
-                skills.append(CapturedSkill(e.name, SkillOrigin.CENTER, center_version=e.center_version))
+                skills.append(CapturedSkill(e.name, SkillOrigin.CENTER))
         resources = []
         for e in spec.resources:
             data = blobs.read(e.digest)
@@ -179,7 +179,7 @@ async def test_local_skills_are_what_the_validator_keeps_and_repo_skills_keep_th
                 ),
             ),
             CapturedSkill("weather", SkillOrigin.REPO, repo_path="team/weather"),
-            CapturedSkill("refund", SkillOrigin.CENTER, center_version="v7"),
+            CapturedSkill("refund", SkillOrigin.CENTER),
         ]
     )
     captured = await _capture(reader)
@@ -188,7 +188,7 @@ async def test_local_skills_are_what_the_validator_keeps_and_repo_skills_keep_th
         "SKILL.md",
         "a.py",
     ]
-    assert captured.spec.skills[0].to_json() == {"name": "refund", "origin": "center", "center_version": "v7"}
+    assert captured.spec.skills[0].to_json() == {"name": "refund", "origin": "center"}
     assert captured.spec.skills[2].to_json() == {"name": "weather", "origin": "repo", "repo_path": "team/weather"}
 
 
@@ -271,19 +271,16 @@ async def test_a_persona_type_outside_the_contract_is_refused_as_schema() -> Non
 
 
 @pytest.mark.asyncio
-async def test_an_invalid_local_skill_and_an_unpinned_center_skill_are_refused() -> None:
+async def test_an_invalid_local_skill_is_refused_and_a_center_skill_needs_only_its_name() -> None:
     reader = FakeReader(
         skills=[
             CapturedSkill("bad", SkillOrigin.LOCAL, files=(CapturedFile("README.md", b"no skill"),)),
-            CapturedSkill("refund", SkillOrigin.CENTER, center_version=None),
+            CapturedSkill("refund", SkillOrigin.CENTER),
         ]
     )
     with pytest.raises(CaptureRefused) as caught:
         await _capture(reader)
-    assert [(r.code, r.location) for r in caught.value.reasons] == [
-        ("skill_package", "skills/bad"),
-        ("skill_package", "skills/refund"),
-    ]
+    assert [(r.code, r.location) for r in caught.value.reasons] == [("skill_package", "skills/bad")]
 
 
 def test_example_blob_directory_is_the_fixture_root() -> None:

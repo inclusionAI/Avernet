@@ -68,7 +68,6 @@ impl HttpAdapterError {
             Self::Service(ServiceError::BotNotRegistered(_)) => StatusCode::NOT_FOUND,
             Self::Service(ServiceError::BotNotConnected(_)) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Service(ServiceError::SessionNotFound(_)) => StatusCode::NOT_FOUND,
-            Self::Service(ServiceError::SessionCallbackPending(_)) => StatusCode::CONFLICT,
             Self::Service(ServiceError::PendingRequestExists { .. }) => StatusCode::CONFLICT,
             Self::BadRequestStructured { .. } => StatusCode::BAD_REQUEST,
             Self::Service(_) => StatusCode::INTERNAL_SERVER_ERROR,

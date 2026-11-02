@@ -45,6 +45,9 @@ fn transition(
     event: Event,
 ) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event,
@@ -575,4 +578,131 @@ async fn pending_and_bound_context_cancellation_do_not_start_a_run()
         2
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn the_startup_recovery_sweep_spares_barrier_parked_dispatching_rows() {
+    // Spec §6.8 (review-V P1-3): a HistoryBarrier-parked Dispatching row is
+    // NOT restart uncertainty — its protected send was refused BEFORE
+    // acceptance, so Recover must leave it parked with the committed
+    // attempt/digest. A plain Dispatching row still conservatively becomes
+    // Unknown (the startup sweep's original semantics).
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    let admitted = service.admit(admit("barrier", DeliveryType::Send)).await.unwrap();
+    let mut row = admitted.deliveries[0].clone();
+    // Drive to Dispatching with a committed attempt.
+    let mut command = transition(&row, Event::StartSend);
+    command.transport_context_json =
+        Some(serde_json::json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":null,"downstream_session_key":"session"}));
+    command.deadline_at_ms = Some(200 + 600_000);
+    row = service.transition(command).await.unwrap();
+
+    // The barrier marker now rides a Dispatching row (the one wait reason
+    // allowed to do so).
+    service
+        .update_wait_reasons(
+            vec![(
+                row.delivery_id.clone(),
+                bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier,
+            )],
+            300,
+        )
+        .await
+        .unwrap();
+    let expected_id = row.delivery_id.clone();
+    let parked = service
+        .snapshot(Some("session".into()))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.delivery_id == expected_id)
+        .expect("row readback");
+    assert_eq!(parked.state.status, Status::Dispatching);
+    assert_eq!(
+        parked.wait_reason,
+        Some(bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier)
+    );
+
+    // Recover leaves the barrier row untouched.
+    let recovered = service
+        .transition(transition(&parked, Event::Recover))
+        .await
+        .unwrap();
+    assert_eq!(recovered.state.status, Status::Dispatching, "the barrier row stays parked");
+    assert_eq!(
+        recovered.wait_reason,
+        Some(bcs_domain::message_delivery::DeliveryWaitReason::HistoryBarrier)
+    );
+    assert_eq!(recovered.attempt_no, parked.attempt_no, "no new attempt");
+
+    // Control shape: WITHOUT the marker the same sweep converts to Unknown.
+    // The control row lives in its OWN session lane — the parked barrier row
+    // above is still Dispatching in "session" and would lane-block it.
+    let mut plain_admission = admit("plain", DeliveryType::Send);
+    plain_admission.message.session_id = "session-plain".into();
+    let admitted = service.admit(plain_admission).await.unwrap();
+    let mut plain = admitted.deliveries[0].clone();
+    let mut command = transition(&plain, Event::StartSend);
+    command.transport_context_json =
+        Some(serde_json::json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":null,"downstream_session_key":"session"}));
+    command.deadline_at_ms = Some(200 + 600_000);
+    plain = service.transition(command).await.unwrap();
+    let recovered = service
+        .transition(transition(&plain, Event::Recover))
+        .await
+        .unwrap();
+    assert_eq!(recovered.state.status, Status::Unknown, "plain uncertainty still converges");
+}
+
+#[tokio::test]
+async fn queue_ttl_policy_caps_but_never_deletes_the_admission_expiry() {
+    // §15.98: the live policy expiry must CAP the admission's own TTL, not
+    // replace it. The old overwrite silently produced NULL expire whenever
+    // queue_ttl_ms was unset — immortal silent rows for BOTH owner and
+    // caller flows; the fail-safe floor now bounds zero-config deployments
+    // on the SERVER clock (command.now_ms must not decide the window).
+    use bcs_config_api::message_delivery::{DeliveryPolicyRecord, BotDeliveryMode};
+
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let mut initial = DeliveryPolicyRecord::default();
+    initial.policy.flow_enabled.group = true;
+    initial.policy.defaults.mode = BotDeliveryMode::Enforce;
+    let live = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial));
+    let service = Arc::new(ManagedMessageDelivery::new(repo).with_policy(live.clone()));
+    service.set_admission_available(true);
+
+    let server_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+
+    // Policy without queue_ttl_ms + admission without an expiry: the
+    // fail-safe floor lands the row on a ~24h server-clock deadline.
+    let fallback = service
+        .admit(AdmitMessageDeliveries { expire_at_ms: None, ..admit("ttl-none", DeliveryType::Send) })
+        .await.unwrap();
+    let row = &fallback.deliveries[0];
+    assert!(row.expire_at_ms.is_some(), "zero-config admissions must stay mortal");
+    let expire = row.expire_at_ms.unwrap();
+    assert!(expire > server_now, "the floor must anchor to the server clock, not command.now_ms");
+    assert!(expire <= server_now.saturating_add(25 * 60 * 60 * 1000), "the floor is ~24h");
+
+    // The admission's own expiry survives a policy without queue_ttl_ms.
+    let carried = service
+        .admit(AdmitMessageDeliveries { expire_at_ms: Some(2000), ..admit("ttl-kept", DeliveryType::Send) })
+        .await.unwrap();
+    assert_eq!(carried.deliveries[0].expire_at_ms, Some(2000));
+
+    // Both present: the configured policy TTL CAPS the admission window to
+    // the stricter of the two.
+    {
+        let mut snapshot = live.snapshot.write().await;
+        snapshot.policy.queue_ttl_ms = Some(50_000);
+        snapshot.version += 1;
+    }
+    let governed = service
+        .admit(AdmitMessageDeliveries { expire_at_ms: None, ..admit("ttl-policy", DeliveryType::Send) })
+        .await.unwrap();
+    assert_eq!(governed.deliveries[0].expire_at_ms, Some(100 + 50_000));
+    let capped = service
+        .admit(AdmitMessageDeliveries { expire_at_ms: Some(2000), ..admit("ttl-min", DeliveryType::Send) })
+        .await.unwrap();
+    assert_eq!(capped.deliveries[0].expire_at_ms, Some(2000));
 }

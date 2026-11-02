@@ -127,7 +127,7 @@ fn command(yaml: String, human: bool) -> StartStateMachineRunCommand {
         group_id: "group-1".into(), session_id: None, definition_yaml: Some(yaml), definition: None,
         definition_ref: None, participant_bindings: None, opening_message_override: None,
         input: json!({"question": "iterate"}), caller_id: None,
-        authenticated_human: human.then(|| AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: None }),
+        authenticated_human: human.then(|| AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: None }), caller_association: None,
     }
 }
 
@@ -373,7 +373,7 @@ async fn nested_admission_blocks_group_configuration_and_one_shot_before_side_ef
     }).await.unwrap().session;
     let runtime = h.runtime.with_nested_loop_execution_enabled(false);
     let error = runtime.start_session_state_machine_run(StartSessionStateMachineRunCommand {
-        session_id: session.id.clone(), caller_bot_id: "driver-bot".into(),
+        session_id: session.id.clone(), caller_bot_id: "driver-bot".into(), caller_association: None,
         definition_yaml: nested_authoring_yaml(),
         participant_bindings: BTreeMap::from([("worker".into(), RuntimeParticipantBinding {
             source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
@@ -449,7 +449,6 @@ async fn nested_rerun_reuses_compiler_v2_snapshot_despite_tighter_current_limits
     let source_run = &started.view.run;
     let source_snapshot = h.store.get_run_snapshot(&source_run.run_id).await.unwrap().unwrap();
     assert_eq!(h.fail(0, source_run).await.view.unwrap().run.status, StateMachineRunStatus::Failed);
-    wait_for_callback_status(&h.sessions, &source_run.session_id, "not_applicable").await;
     h.definitions.hide_definitions.store(true, Ordering::SeqCst);
     let runtime = h.runtime.with_fixed_loop_limits(bcs_config_api::FixedLoopLimits {
         max_fixed_loop_depth: 1,
@@ -699,7 +698,6 @@ async fn rerun_inherits_historical_plan_bindings_and_ids_with_new_attempt_zero_n
     let source = h.store.get_run_snapshot(&run.run_id).await.unwrap().unwrap();
     h.finish(0, run, "old-first").await;
     assert_eq!(h.fail(1, run).await.view.unwrap().run.status, StateMachineRunStatus::Failed);
-    wait_for_callback_status(&h.sessions, &run.session_id, "not_applicable").await;
     h.definitions.hide_definitions.store(true, Ordering::SeqCst);
     // Current compile limits cannot affect an existing plan, including rerun.
     let runtime = h.runtime.with_fixed_loop_limits(bcs_config_api::FixedLoopLimits { max_fixed_loop_iterations: 1, ..Default::default() });
@@ -822,7 +820,7 @@ async fn one_shot_loop_uses_session_bindings_and_does_not_persist_a_group_defini
         participant_bindings: BTreeMap::from([("driver".into(), RuntimeParticipantBinding {
             source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
         })]),
-        opening_message: None, input: Value::Null, judge_available: false,
+        opening_message: None, input: Value::Null, judge_available: false, caller_association: None,
     }).await.unwrap();
     let run = &started.view.run;
     assert_eq!(run.session_id, session.id);
@@ -982,7 +980,6 @@ async fn concurrent_loop_rerun_creates_one_child_and_dispatches_its_first_node_o
     let started = h.start(loop_yaml(2, false, false, 1), false).await;
     let run = &started.view.run;
     h.fail(0, run).await;
-    wait_for_callback_status(&h.sessions, &run.session_id, "not_applicable").await;
     let command = RerunStateMachineCommand { source_run_id: run.run_id.clone(), authenticated_human: None };
     let (first, second) = tokio::join!(
         h.runtime.rerun_state_machine_run(command.clone()),

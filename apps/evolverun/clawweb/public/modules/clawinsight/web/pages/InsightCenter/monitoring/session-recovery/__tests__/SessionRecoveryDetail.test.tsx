@@ -22,6 +22,67 @@ beforeEach(() => {
   vi.mocked(sessionRecoveryApi.setTaskShared).mockResolvedValue(task as never);
   vi.mocked(sessionRecoveryApi.terminate).mockResolvedValue({ ...task, status: 'canceled', termination: { status: 'remote_stopped', aisJobId: 'job' } } as never);
 });
+
+const deliveryFailureTask = (receipt: { dispatched?: boolean } = { dispatched: false }) => ({
+  ...task, status: 'failed', phase: 'plan', plan: null,
+  judgment: { effect: 'unknown', summary: '原任务审批结论已上报。'.repeat(80) + '恢复指引未能送达。' },
+  timeline: [
+    { event_id: 'read-error', at_ms: 1, kind: 'operation', actor: 'agent', summary: '读取配置', payload: { phase: 'assess', raw_tool_call_id: 'read-error', status: 'failed', result: { error: { message: '辅助读取失败' } } } },
+    { event_id: 'retry-call', at_ms: 2, kind: 'operation', actor: 'agent', summary: '发送恢复指引', payload: { phase: 'assess', raw_tool_call_id: 'retry-call', status: 'failed', request: { message: '请核实通知结果后处理' }, result: { ...receipt, error: { code: 'recovery_execution_conflict', message: 'Bot 运行目标已变化（发布版本：V7 → V8），本次恢复消息未发送。' } } } },
+  ],
+  evidence: [{ evidence_id: 'retry-evidence', tool_call_id: 'retry-call', source: 'retry_message', location: 'tool:retry-call', excerpt: '{}' }],
+});
+
+it('shows the unsent message receipt above long reasoning and links to its actual stage', async () => {
+  const value = deliveryFailureTask();
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(value as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const alert = within(await screen.findByRole('alert'));
+  expect(alert.getByText('恢复消息未发送')).toBeVisible();
+  expect(alert.getByText(/发布版本：V7 → V8/)).toBeVisible();
+  expect(alert.queryByText('辅助读取失败')).toBeNull();
+  expect(sessionRecoveryApi.toolCall).not.toHaveBeenCalled();
+  await userEvent.click(alert.getByRole('button', { name: '查看投递记录' }));
+  expect(screen.getByRole('tab', { name: /判断干预方式/ })).toHaveAttribute('aria-selected', 'true');
+  expect(document.getElementById('recovery-operation-retry-call')).toBeInTheDocument();
+  await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
+  const operation = within(document.getElementById('recovery-operation-retry-call')!);
+  await userEvent.click(operation.getByText('展开详情'));
+  expect(operation.getByRole('heading', { name: '拟发送的恢复消息（未发送）' })).toBeVisible();
+});
+
+it('shows historical rejection text without inventing missing version or dispatch facts', async () => {
+  const value = deliveryFailureTask({});
+  value.timeline[1].payload.result!.error.message = '目标运行位置已变化，不能投递旧方案的重试消息';
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(value as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const alert = within(await screen.findByRole('alert'));
+  expect(alert.getByText('恢复消息投递失败')).toBeVisible();
+  expect(alert.getByText('目标运行位置已变化，不能投递旧方案的重试消息')).toBeVisible();
+  expect(alert.queryByText('恢复消息未发送')).toBeNull();
+  expect(alert.queryByText(/V7|V8/)).toBeNull();
+});
+
+it.each(['succeeded', 'unknown'])('does not surface an old rejection as the latest message outcome after %s', async status => {
+  const value = deliveryFailureTask();
+  value.timeline.push({ event_id: 'retry-later', at_ms: 3, kind: 'operation', actor: 'agent', summary: '再次投递', payload: { phase: 'assess', raw_tool_call_id: 'retry-later', status } } as never);
+  value.evidence.push({ evidence_id: 'later-evidence', tool_call_id: 'retry-later', source: 'retry_message', location: 'tool:retry-later', excerpt: '{}' });
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(value as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const alert = within(await screen.findByRole('alert'));
+  expect(alert.queryByText(/恢复消息未发送|恢复消息投递失败|发布版本：V7/)).toBeNull();
+  expect(alert.getByRole('button', { name: '查看执行记录' })).toBeVisible();
+});
+
+it('does not promote an auxiliary read error to a message delivery failure', async () => {
+  const value = deliveryFailureTask(); value.timeline = value.timeline.slice(0, 1); value.evidence = [];
+  vi.mocked(sessionRecoveryApi.detail).mockResolvedValue(value as never);
+  render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
+  const alert = within(await screen.findByRole('alert'));
+  expect(alert.queryByText(/恢复消息未发送|恢复消息投递失败|辅助读取失败/)).toBeNull();
+  expect(alert.getByRole('button', { name: '查看执行记录' })).toBeVisible();
+});
+
 it('confirms stopping the task and then removes all continuation controls', async () => {
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
   try {

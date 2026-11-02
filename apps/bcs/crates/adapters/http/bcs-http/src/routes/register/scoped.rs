@@ -61,6 +61,7 @@ pub(super) async fn register_bot(
     uri: &Uri,
     token: String,
     bot_name: String,
+    source:Option<bcs_service_api::types::a2a_bot::A2aCardSource>,
 ) -> Response {
     // V1 keeps ignoring these historically unknown fields; only scoped calls parse them.
     let Query(query) = match Query::<ScopedRegisterQuery>::try_from_uri(uri) {
@@ -73,10 +74,12 @@ pub(super) async fn register_bot(
         Ok(service) => service,
         Err(error) => return error_response(error),
     };
-    match service.register_bot(RegisterBot {
-        token, bot_name, mode: query.mode,
-        provider_bot_ref: query.provider_bot_ref, webhook_url: query.webhook_url,
-    }).await {
+    let command = RegisterBot {token,bot_name,mode:query.mode,
+        provider_bot_ref:query.provider_bot_ref,webhook_url:query.webhook_url};
+    let result = if let Some(source) = source {
+        service.register_a2a_card(command,source).await
+    } else { service.register_bot(command).await };
+    match result {
         Ok(bot) => success_response(bot),
         Err(error) => error_response(error),
     }

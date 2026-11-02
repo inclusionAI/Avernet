@@ -507,6 +507,265 @@ async fn e2e_bot_authority_trusted_apps_default_deny() {
         status, 403,
         "no trusted_apps config → even reads are denied"
     );
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &format!("/api/v1/collaboration/bots/{bot_id}/ownership"),
+        &app_token(APP_ID, Some(TENANT)),
+        Some(json!({ "owner_user_id": WALT })),
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        403,
+        "no trusted_apps config → ownership sync denied too"
+    );
 
     println!("\n========== E2E Trusted-App Default Deny PASSED ==========");
+}
+
+/// Ownership sync story (设计 §9.1 E2E story): scoped
+/// trusted App swaps the owner atomically; old owner is
+/// FULLY removed; pending transfer closes as invalidated;
+/// idempotent replay is a zero-diff; unknown target and
+/// Human-only credentials are rejected with the pinned
+/// codes. (The version-0 Bot 409 leg stays in the shared
+/// conformance harnesses — trusted registration always
+/// lands a bot at ownership_version 1, so a public-HTTP
+/// e2e cannot produce one.)
+#[tokio::test]
+async fn e2e_bot_authority_ownership_sync_story() {
+    let (_temp_dir, data_dir) = create_temp_dir();
+    let mut pm = ProcessManager::new();
+    let port = {
+        let extra = json!({
+            "bot_authority": { "trusted_apps": [trusted_apps_rule()] }
+        });
+        start_with_extra(&mut pm, &data_dir, Some(extra)).await
+    };
+    let bcs_url = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    // ── 1. The stage: owner WALT's bot; CAROL + DAVE become ──
+    //    KNOWN Humans through their own trusted registrations
+    //    (the same pre-seed convention as the full-chain story).
+    let (bot_id, _) =
+        register_trusted_bot(&client, &bcs_url, WALT, "Sync Origin Bot").await;
+    let (_carol_bot, _) =
+        register_trusted_bot(&client, &bcs_url, CAROL, "Carol Bot").await;
+    let (_dave_bot, _) =
+        register_trusted_bot(&client, &bcs_url, DAVE, "Dave Bot").await;
+
+    let ownership_path =
+        format!("/api/v1/collaboration/bots/{bot_id}/ownership");
+
+    // ── 2. Human-only credential: denied with the pinned code ──
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &ownership_path,
+        &human_token(WALT),
+        Some(json!({ "owner_user_id": CAROL })),
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 403, "Human-only ownership sync denied: {body}");
+    assert_eq!(
+        body["data"]["error_code"],
+        "bot_authority_operator_forbidden",
+        "the pinned Human-only denial code: {body}"
+    );
+
+    // ── 3. Trusted swap WALT → CAROL (设计 §2: atomic; the ──
+    //    previous owner is reported back).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &ownership_path,
+        &app_token(APP_ID, Some(TENANT)),
+        Some(json!({ "owner_user_id": CAROL })),
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "ownership swap: {status} {body}");
+    assert_eq!(
+        body["data"]["changed"], true,
+        "the swap is a real change: {body}"
+    );
+    assert_eq!(body["data"]["owner_user_id"], CAROL, "the new owner: {body}");
+    assert_eq!(
+        body["data"]["previous_owner_user_id"], WALT,
+        "the displaced owner is reported: {body}"
+    );
+
+    // ── 4. CAROL reads the ownership view; WALT is fully out ──
+    //    (no manage — the same Human-rule read the full-chain
+    //    story proves for revoked ex-managers).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "GET",
+        &ownership_path,
+        &human_token(CAROL),
+        None,
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "new owner reads ownership: {body}");
+    assert_eq!(body["data"]["owner_user_id"], CAROL, "view owner: {body}");
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "GET",
+        &ownership_path,
+        &human_token(WALT),
+        None,
+    )
+    .await;
+    assert_eq!(
+        resp.status(),
+        403,
+        "the old owner lost every Human rule (fully removed)"
+    );
+
+    // ── 5. Idempotent replay: zero diff (设计 §2 idempotent ──
+    //    same-owner replay never writes state).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &ownership_path,
+        &app_token(APP_ID, Some(TENANT)),
+        Some(json!({ "owner_user_id": CAROL })),
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "the replay stays a success: {body}");
+    assert_eq!(
+        body["data"]["changed"], false,
+        "the replay is a zero diff: {body}"
+    );
+
+    // ── 6. Unknown target Human: the pinned 400 ─────────────
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &ownership_path,
+        &app_token(APP_ID, Some(TENANT)),
+        Some(json!({ "owner_user_id": "nobody-at-all" })),
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 400, "unknown target rejected: {body}");
+    assert_eq!(
+        body["data"]["error_code"],
+        "bot_authority_human_unknown",
+        "the pinned human-unknown code: {body}"
+    );
+
+    // ── 7. Pending closure: CAROL initiates CAROL → DAVE, ────
+    //    then the App syncs CAROL → DAVE directly; the transfer
+    //    row closes invalidated with the frozen system
+    //    marker/reason (设计 §5.1 step 6).
+    let transfer_path = format!(
+        "/api/v1/collaboration/bots/{bot_id}/ownership-transfers/human_{DAVE}"
+    );
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &transfer_path,
+        &human_token(CAROL),
+        None,
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 201, "transfer initiated: {status} {body}");
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "PUT",
+        &ownership_path,
+        &app_token(APP_ID, Some(TENANT)),
+        Some(json!({ "owner_user_id": DAVE })),
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "swap under pending: {status} {body}");
+
+    // The closure is visible to the row's target Human (the
+    // dual-admission read).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "GET",
+        &transfer_path,
+        &human_token(DAVE),
+        None,
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "target reads the closed row: {body}");
+    assert_eq!(body["data"]["status"], "invalidated", "closure state: {body}");
+    assert_eq!(
+        body["data"]["decided_by_kind"], "system",
+        "the frozen system marker: {body}"
+    );
+    assert_eq!(
+        body["data"]["reason"], "ownership_sync",
+        "the frozen closure reason: {body}"
+    );
+
+    // ── 8. A stale late accept on the closed round can no ────
+    //    longer move the owner (owner_changed; the swap result
+    //    is final).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "POST",
+        &format!("{transfer_path}/accept"),
+        &human_token(DAVE),
+        None,
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 409, "stale accept conflicts: {status} {body}");
+    assert_eq!(
+        body["data"]["error_code"], "owner_changed",
+        "the pinned owner-changed conflict code: {body}"
+    );
+
+    // Post-accept the owner stays DAVE (S05: the committed
+    // swap is the durable fact).
+    let resp = collaboration(
+        &client,
+        &bcs_url,
+        "GET",
+        &ownership_path,
+        &human_token(DAVE),
+        None,
+    )
+    .await;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or_default();
+    assert_eq!(status, 200, "the final owner keeps the read: {body}");
+    assert_eq!(
+        body["data"]["owner_user_id"], DAVE,
+        "the owner stays DAVE after the stale accept: {body}"
+    );
+
+    println!("\n========== E2E Ownership Sync PASSED ==========");
 }

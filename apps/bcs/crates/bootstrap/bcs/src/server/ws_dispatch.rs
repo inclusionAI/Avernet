@@ -97,10 +97,6 @@ pub(super) fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::
         group_dispatch: Arc::new(CoreGroupDispatchContext {
             group: state.services.group.clone(),
         }),
-        callback_dispatch: Arc::new(bcs_callback::SessionCallbackDispatcher::new(
-            state.services.group.clone(),
-            state.outbound_url_guard.clone(),
-        )),
         system_message: Some(state.services.system_message.clone()),
         coordination_processed: state.coordination_processed.clone(),
         agent_credential_backfill: Some(Arc::new(AgentCredentialBackfill {
@@ -123,6 +119,18 @@ pub(super) fn web_ws_dispatch_state(
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
         delivery_admission: state.delivery_admission.clone(),
+        // Speaking-lease store (spec §6.3, P3.3): the SAME store instance
+        // server_infrastructure mounts feeds the flow's admission fence AND
+        // this WS lease command entrance — one store, one epoch. A None here
+        // (store-less compositions) keeps lease commands answering an
+        // explicit error, never a fake lease.
+        speaking_leases: state.speaking_leases.clone(),
+        // §15.99 server-wide idle window ([speaking_lease]
+        // idle_timeout_ms): granted at every acquire/preempt and required
+        // again at message submission (the message-flow fence reads the
+        // same config value). A store-less composition keeps the value
+        // inert — lease commands answer an explicit error anyway.
+        lease_idle_timeout_ms: state.config.speaking_lease.idle_timeout_ms,
     })
 }
 

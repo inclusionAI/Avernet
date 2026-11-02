@@ -249,16 +249,6 @@ fn test_session_invalid_params_code() {
 }
 
 #[test]
-fn test_session_callback_pending_code() {
-    let err = ServiceError::SessionCallbackPending("sess-1".into());
-    assert_eq!(err.as_ref(), "session_callback_pending");
-    assert_eq!(
-        err.error_params(),
-        serde_json::json!({ "session_id": "sess-1" })
-    );
-}
-
-#[test]
 fn test_message_limit_reached_code() {
     let err = ServiceError::MessageLimitReached("group msg limit exceeded".into());
     assert_eq!(err.as_ref(), "message_limit_reached");

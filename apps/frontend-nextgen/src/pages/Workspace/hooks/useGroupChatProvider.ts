@@ -25,8 +25,15 @@ export function useGroupChatProvider(
   const groupId = session?.groupId;
   const provider = useMemo(() => {
     if (!sessionId || !groupId || !identityId) return null;
-    return createGroupChatProvider({ sessionId, groupId, identityId, liveEnabled, wsOrigin: resolveGroupWsOrigin() });
-  }, [sessionId, groupId, identityId, liveEnabled]);
+    return createGroupChatProvider({
+      sessionId,
+      groupId,
+      identityId,
+      authenticatedUserId,
+      liveEnabled,
+      wsOrigin: resolveGroupWsOrigin(),
+    });
+  }, [sessionId, groupId, identityId, authenticatedUserId, liveEnabled]);
 
   // 在 passive effects/异步续体之前关闭旧实例；旧引用（包括桥和重连计时器）不能恢复连接。
   useLayoutEffect(() => {

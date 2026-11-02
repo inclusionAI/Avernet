@@ -72,6 +72,7 @@ def _make_service(
     vault=None,
     task_queue_service=None,
     template_service=None,
+    a2a_issuance_gate=None,
 ) -> BaasDeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -95,6 +96,7 @@ def _make_service(
         template_resolver=template_resolver,
         vault=vault,
         layout_confirmation=MagicMock(),
+        a2a_issuance_gate=a2a_issuance_gate,
         task_queue_service=task_queue_service,
         template_service=template_service,
     )
@@ -447,6 +449,106 @@ class TestGetDeviceConnection:
         result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
 
         assert result.a2a_base_url == ""
+
+    # ------------------------------------------------------------------
+    # A2A issuance gray gate (design: docs/superpowers/specs/
+    # 2026-10-27-a2a-user-issuance-gray-release-design.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _gate(staff_decision: dict[str, bool]) -> MagicMock:
+        gate = MagicMock()
+        gate.allows_face.side_effect = lambda staff_id: staff_decision[staff_id]
+        return gate
+
+    def _ws_info_with_a2a_face(self):
+        info = self._ws_info()
+        info.a2a_base_url = "http://bot-a1b2-vc.stable.alipay.net:32196"
+        return info
+
+    def test_gate_allows_operator_keeps_the_issued_face(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas, a2a_issuance_gate=self._gate({"u001": True})
+        )
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+        assert result.a2a_withheld is False
+
+    def test_gate_denies_operator_signs_an_empty_face(self):
+        """名单外用户拿到空 a2a face：下游不装 a2a socket，前端探针落 v3。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas, a2a_issuance_gate=self._gate({"u001": False})
+        )
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
+        assert result.a2a_withheld is True
+
+    def test_gate_is_judged_on_the_caller_not_the_owner_operator(self):
+        """engine_runtime 面传下来的 operator 是 resolved owner（权限兼容
+        +实例亲和），灰度身份必须取 caller_id——协作者不继承 owner 的桶。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        svc = _make_service(
+            baas_service=baas,
+            a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
+        )
+
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id="u002"
+        )
+        allowed = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), caller_id=None,
+        )
+
+        judged = [c.args[0] for c in svc._a2a_issuance_gate.allows_face.call_args_list]
+        # caller_id 在场即覆盖 operator.staff_id；缺席则回退 operator（operator
+        # 本身就是 caller 的面，如 devices HTTP 面）。
+        assert judged == ["u002", "u001"]
+        assert denied.a2a_base_url != ""
+        assert allowed.a2a_base_url == ""
+
+    def test_gate_still_judges_when_no_face_is_issued(self):
+        """review R3-F1：上游没签发地址也要过门——local/单机 provider 不填
+        a2a_base_url，但直连拓扑可从 WS 推导出 A2A 地址。名单外用户必须
+        拿到 withheld=True 才禁得住推导兜底；名单成员则保留空地址推导。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()  # 无 a2a face
+        svc = _make_service(
+            baas_service=baas,
+            a2a_issuance_gate=self._gate({"u001": False, "u002": True}),
+        )
+
+        denied = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001")
+        )
+        allowed = svc.get_device_connection(binding_id=7, operator=_operator("u002"))
+
+        assert denied.a2a_base_url == ""
+        assert denied.a2a_withheld is True
+        assert allowed.a2a_base_url == ""
+        assert allowed.a2a_withheld is False
+        assert allowed.a2a_base_url == ""
+
+    def test_gate_failure_withholds_rather_than_breaks_the_connection(self):
+        """门读配置抛异常也只收敛 a2a face：v3 面照常签发。"""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info_with_a2a_face()
+        gate = MagicMock()
+        gate.allows_face.side_effect = RuntimeError("config store down")
+        svc = _make_service(baas_service=baas, a2a_issuance_gate=gate)
+
+        result = svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert result.a2a_base_url == ""
+        assert result.target == "BAAS_DEVICE@template:20003"
 
     def test_server_issued_expiry_is_passed_through(self):
         """The ``ttl`` argument is ignored here — the server decides — so the

@@ -23,6 +23,9 @@ mod controllable;
 // the SQL Store's suite.
 #[path = "memory_authority.rs"]
 pub mod authority;
+/// Memory ownership sync command (2026-10-29 design §5.1).
+#[path = "memory_ownership_sync.rs"]
+pub mod ownership_sync;
 /// Shared runtime permission-profile state + the
 /// `PermissionProfileRepoPort` (same Arc, Task 4.3a).
 #[path = "memory_permission_profile.rs"]
@@ -146,6 +149,10 @@ pub struct MemoryBotRepo {
     /// `bot_authority.legacy_created_by_fallback`); only the
     /// authority role/roles_for facade consults it.
     legacy_created_by_fallback: AtomicBool,
+    /// Per-Bot caller-identity configuration snapshots keyed by
+    /// (bot_id, env) (spec §10.7.2). Mirrors the `$.caller` sub-object
+    /// the SQL repository keeps inside `bcs_bots.bot_info`.
+    caller_configurations: RwLock<HashMap<(String, String), bcs_service_api::port::repo::CallerIdentitySnapshot>>,
 }
 
 /// Persisted capabilities format.
@@ -318,6 +325,7 @@ impl MemoryBotRepo {
             authority: RwLock::new(authority::MemoryAuthorityState::default()),
             profiles: RwLock::new(permission_profile::MemoryProfileState::default()),
             legacy_created_by_fallback: AtomicBool::new(false),
+            caller_configurations: RwLock::new(HashMap::new()),
         }
     }
 
@@ -471,6 +479,7 @@ impl Default for MemoryBotRepo {
             authority: RwLock::new(authority::MemoryAuthorityState::default()),
             profiles: RwLock::new(permission_profile::MemoryProfileState::default()),
             legacy_created_by_fallback: AtomicBool::new(false),
+            caller_configurations: RwLock::new(HashMap::new()),
         }
     }
 }

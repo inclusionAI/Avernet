@@ -441,7 +441,7 @@ BCS_CLI_TOKEN=""
 
 # Resolve the bcs-cli binary. Priority:
 #   1. $BCS_CLI_BIN (coverage script injects the instrumented build)
-#   2. src/bcs/target/debug/bcs-cli
+#   2. apps/bcs/target/debug/bcs-cli
 #   3. fallback: cargo run -p bcs-cli --quiet -- (with warn)
 # Echoes the invocation prefix; returns 0 if a real binary is in hand, 1 on fallback-only.
 get_bcs_cli_bin() {
@@ -451,7 +451,7 @@ get_bcs_cli_bin() {
     fi
     local repo_root
     repo_root="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-    local debug_bin="$repo_root/src/bcs/target/debug/bcs-cli"
+    local debug_bin="$repo_root/apps/bcs/target/debug/bcs-cli"
     if [[ -x "$debug_bin" ]]; then
         BCS_CLI_BIN_PATH="$debug_bin"
         return 0

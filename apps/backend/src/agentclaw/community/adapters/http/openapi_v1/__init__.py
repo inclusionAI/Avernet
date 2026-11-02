@@ -247,6 +247,7 @@ from .skills import (
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_envs import router as service_envs_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -514,6 +515,8 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter(route_class=PublicAPIRoute)
+    # Explicit business locators, no acting-user query dimension.
+    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public

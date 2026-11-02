@@ -14,6 +14,8 @@ import { ConnectionBanner } from '@aix-chat/ui';
 import { Loader2, Network } from 'lucide-react';
 import React, { useCallback, useState } from 'react';
 import type { GroupInfo, MessageViewScope, ParticipantMode } from '../../types';
+import type { SpeakingLease } from '../../utils/speakingLease';
+import type { SpeakingLeaseStatus } from '../SpeakingLeaseControl';
 import BotControlTab from './BotControlTab';
 import CollabAlertDialogs from './CollabAlertDialogs';
 import UserCollabTab from './UserCollabTab';
@@ -45,6 +47,15 @@ interface BottomPanelProps {
   isRequesting: boolean;
   mentionCategories: MentionCategory[];
   userId: string | undefined;
+  speakingLease?: SpeakingLease;
+  speakingLeaseStatus: SpeakingLeaseStatus;
+  /** 服务端 connect 快照下的会话发言权语义；plain 会话不渲染发言权面板 */
+  speakingMode?: 'plain' | 'lease_required';
+  isUpdatingSpeakingLease?: boolean;
+  leaseNowMs?: number;
+  onAcquireSpeakingLease: () => void;
+  onPreemptSpeakingLease: () => void;
+  onReleaseSpeakingLease: (lease: SpeakingLease) => void;
   wsStatus?: string;
   retryCount?: number;
   onReconnect?: () => void;
@@ -82,6 +93,14 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
   isRequesting,
   mentionCategories,
   userId,
+  speakingLease,
+  speakingLeaseStatus,
+  speakingMode,
+  isUpdatingSpeakingLease,
+  leaseNowMs,
+  onAcquireSpeakingLease,
+  onPreemptSpeakingLease,
+  onReleaseSpeakingLease,
   wsStatus,
   retryCount,
   onReconnect,
@@ -187,6 +206,14 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
           onLeaveCollaboration={() => setShowLeaveDialog(true)}
           onSendMessage={onSendMessage}
           onAbort={onAbort}
+          speakingLease={speakingLease}
+          speakingMode={speakingMode}
+          speakingLeaseStatus={speakingLeaseStatus}
+          isUpdatingSpeakingLease={isUpdatingSpeakingLease}
+          leaseNowMs={leaseNowMs}
+          onAcquireSpeakingLease={onAcquireSpeakingLease}
+          onPreemptSpeakingLease={onPreemptSpeakingLease}
+          onReleaseSpeakingLease={onReleaseSpeakingLease}
         />
       ) : (
         /* 自由聊天群：双 Tab 布局 */
@@ -232,6 +259,14 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
               onLeaveCollaboration={() => setShowLeaveDialog(true)}
               onSendMessage={onSendMessage}
               onAbort={onAbort}
+              speakingLease={speakingLease}
+              speakingMode={speakingMode}
+              speakingLeaseStatus={speakingLeaseStatus}
+              isUpdatingSpeakingLease={isUpdatingSpeakingLease}
+              leaseNowMs={leaseNowMs}
+              onAcquireSpeakingLease={onAcquireSpeakingLease}
+              onPreemptSpeakingLease={onPreemptSpeakingLease}
+              onReleaseSpeakingLease={onReleaseSpeakingLease}
             />
           </TabsContent>
         </Tabs>

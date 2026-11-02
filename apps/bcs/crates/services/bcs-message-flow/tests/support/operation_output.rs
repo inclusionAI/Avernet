@@ -25,6 +25,8 @@ pub fn web_send(group_id: &str, from: &str, session: Option<&str>, mentions: &[&
         channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: vec![],
+        caller_ingress: None,
+        speaking_lease: None,
     }
 }
 

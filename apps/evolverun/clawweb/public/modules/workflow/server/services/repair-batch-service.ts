@@ -622,10 +622,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       return {...claim,materialAccess};
     });
     if (!claimed) return;
+    const submittedBy = actorId ?? claimed.actorId;
     let failure: 'rejected' | 'uncertain' | null = null; let jobId: string | null = null;
     try {
       const identity = { stepId: claimed.stepId, attempt: claimed.attempt, executionId: claimed.executionId };
-      const receipt = await repairStage('ais_submit', () => this.execution!.dispatch({ input: executionInput, ...(claimed.materialAccess?{materialAccess:claimed.materialAccess}:{}), actorId: actorId ?? claimed.actorId, identity }));
+      const receipt = await repairStage('ais_submit', () => this.execution!.dispatch({ input: executionInput, ...(claimed.materialAccess?{materialAccess:claimed.materialAccess}:{}), actorId: submittedBy, identity }));
       if (!receipt?.jobId?.trim() || receipt.jobId.length > 255) throw new Error('Invalid AIS job id');
       jobId = receipt.jobId;
     } catch (error) {
@@ -633,7 +634,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       failure = error instanceof RepairAutomationDeniedError || /^AIS executeSnapshot HTTP (?:400|401|403|404|422):/u.test(message) || message.startsWith('AIS executeSnapshot 失败:')
         || message.includes('token/projectName 未配置') ? 'rejected' : 'uncertain';
     }
-    await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failure));
+    await this.tx(tx => new RepairTaskRepository(tx).finishDispatch(revision.taskId, revision.revision, jobId, failure, submittedBy));
   }
   async retryResult(actorId: string, taskId: string, expectedRevision: number): Promise<void> {
     this.actor(actorId);
@@ -863,7 +864,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const request = { input: before.latestAttempt.input, actorId,
         identity: { stepId: new RepairTaskRepository(this.db).stepId(taskId, expectedRevision), attempt: execution.attempt, executionId: execution.executionId },
         jobId: execution.jobId };
-      try { await this.execution.stop(request); } catch { /* Local cancellation is authoritative; remote stop is best effort. */ }
+      try {
+        const submittedBy = await new RepairTaskRepository(this.db).submissionUser(taskId, expectedRevision);
+        await this.execution.stop({ ...request, actorId: submittedBy });
+      } catch { /* Local cancellation is authoritative; remote stop is best effort. */ }
     }
   }
   async diff(taskId: string, revision: number, base: 'baseline' | 'parent') {

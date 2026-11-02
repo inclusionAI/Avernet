@@ -155,6 +155,8 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
         frontend_connections: connections.clone(),
         run_channels,
         delivery_admission: Arc::new(support::AllowAllAdmission),
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -176,6 +178,7 @@ async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
 
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human-e2e-ws".to_string()),
+        caller_ingress: None,
     };
     let mut connection_state = WebClientConnectionState::default();
     let _protected_rx = connection_state.open_protected_queue();
@@ -254,6 +257,8 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
         frontend_connections: connections.clone(),
         run_channels,
         delivery_admission: Arc::new(support::AllowAllAdmission),
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     let (tx, mut rx) = mpsc::channel(16);
     connections
@@ -281,6 +286,7 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
 
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human-e2e".to_string()),
+        caller_ingress: None,
     };
     let mut connection_state = WebClientConnectionState::default();
     let _protected_rx = connection_state.open_protected_queue();

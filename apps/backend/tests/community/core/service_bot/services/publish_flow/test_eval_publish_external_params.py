@@ -148,3 +148,71 @@ async def test_eval_publish_with_external_docker_image() -> None:
         )
 
     assert result["success"] is True
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_template", [False, True])
+@pytest.mark.parametrize("spec_values", [None, {"cpu": 4, "memory": 8}, {"cpu": 4, "memory": 8, "disk": 200}])
+async def test_eval_publish_resource_override_is_deployment_local(with_template, spec_values):
+    from copy import deepcopy
+    from agentclaw.community.kernel.device_dto import ResourceSpecification
+
+    svc = _FakeEvalPublishService()
+    bot = svc._bot_service.get_bot_by_address.return_value
+    if with_template:
+        bot["template_config"] = {
+            "resource_spec": {"cpu": 1, "memory": 2, "disk": 10},
+            "envs": {"KEEP": "value"}, "docker_image": "original/image:tag",
+        }
+    original = deepcopy(bot)
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+    spec = ResourceSpecification(**spec_values) if spec_values else None
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(42, "tester", resource_spec=spec)
+
+    assert result["success"] is True
+    assert result["stage"] == PublishStage.EVAL.value
+    kwargs = svc._build_service.release_async.await_args.kwargs
+    expected = deepcopy(original.get("template_config"))
+    if spec_values:
+        expected = {**(expected or {}), "resource_spec": spec_values}
+    assert kwargs["template_config"] == expected
+    assert kwargs["docker_image"] == "registry/image:tag"
+    assert bot == original
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_device_count_forwarded() -> None:
+    """外部传入 device_count 时应原样转发给 release_async。"""
+    record = _record(ext={"migration_path": "/arca/snapshot"})
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(42, "tester", device_count=3)
+
+    assert result["success"] is True
+    assert svc._build_service.release_async.await_args.kwargs["device_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_rejects_non_positive_device_count() -> None:
+    """device_count 是部署意向输入，0 或负数没有可执行语义。"""
+    svc = _FakeEvalPublishService()
+
+    with pytest.raises(
+        PublishFlowServiceError,
+        match="device_count must be at least 1",
+    ):
+        await svc.eval_publish(42, "tester", device_count=0)

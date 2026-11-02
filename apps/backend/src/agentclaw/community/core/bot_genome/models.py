@@ -279,6 +279,26 @@ class GenomeRef:
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None
+    #: What the last move says about the ref; today only ``RefLabel.PARTIAL``, on ``active`` or carried to ``previous``
+    #: with the revision. Rewritten on every move.
+    labels: tuple[str, ...] = ()
+
+
+class RefLabel(StrEnum):
+    """The labels a ref can carry."""
+
+    #: ``active`` was moved by a promotion whose apply ended ``PARTIAL``: the bot holds most of the revision, not all.
+    PARTIAL = "partial"
+
+
+class PromotionStatus(StrEnum):
+    """A promotion's lifecycle: filed, delivering, then settled once its apply ends."""
+
+    PENDING = "pending"  #: filed; its apply is being started
+    APPLYING = "applying"  #: its apply is running; the refs have not moved
+    APPLIED = "applied"  #: the apply succeeded and the refs moved
+    APPLIED_PARTIAL = "applied_partial"  #: the apply was partial; the refs moved and ``active`` is labelled partial
+    APPLY_FAILED = "apply_failed"  #: the apply failed or never started, or ``active`` moved meanwhile; no ref moved
 
 
 @dataclass(frozen=True)
@@ -356,21 +376,14 @@ class Drift:
 
 
 @dataclass(frozen=True)
-class ApplyResult:
-    """What the delivery seam answered when it took a revision's desired state."""
-
-    kind: str  # the applier: pending | direct | …
-    detail: str = ""
-
-
-@dataclass(frozen=True)
 class Promotion:
-    """One promotion as recorded: the move of ``ref`` from ``from_revision`` to ``revision`` and its delivery.
+    """One promotion as recorded: the delivery of ``revision`` and the move of ``ref`` it makes once that ends.
 
-    Promoting moves ``active`` to the target (and ``previous`` to the old
-    ``active``), records this row, then hands the revision's desired state to
-    the delivery seam. The revision is the record of what was delivered; the
-    row carries no copy of it.
+    Promoting files this row ``pending``, starts the apply that delivers the
+    revision (``applying``, with ``apply_id``), and settles when that apply
+    ends: on success or partial success ``active`` moves to the target (and
+    ``previous`` to the old ``active``); otherwise nothing moves. The revision
+    is the record of what was delivered; the row carries no copy of it.
     """
 
     id: str  #: the promotion's id
@@ -380,10 +393,11 @@ class Promotion:
     going_back: bool  #: True when the target had been promoted before and was not the current ``active``
     actor: Provenance  #: who promoted
     reason: str  #: why, as the actor said
-    status: str  #: ``applying`` until the seam answers, then ``applied`` or ``apply_failed``
-    apply_kind: str  #: which delivery seam took it: ``pending`` (none yet, RSI-03) or ``direct`` (RSI-04)
-    apply_detail: str  #: the seam's one-line answer, e.g. ``started``; a failure names the error type only
-    created_at: datetime  #: when the refs moved
+    status: PromotionStatus
+    apply_id: str | None  #: the apply run delivering it; ``None`` until it started, or when it never did
+    apply_detail: str  #: one line on how the delivery went; a failure never quotes an exception's text
+    created_at: datetime  #: when the promotion was asked for
+    settled_at: datetime | None  #: when its apply ended and it took its final status; ``None`` while in flight
 
 
 @dataclass(frozen=True)

@@ -155,3 +155,30 @@ export function parseDeliveryStatusView(
     content_preview: typeof payload.content_preview === 'string' ? payload.content_preview : null,
   };
 }
+
+/**
+ * chat.send 提交侧已知拒绝话术 → 用户可见文案(单一来源)。
+ * BCS 只有消息提交 seam 会产出这些 message;Provider 的兜底广播判定与
+ * useChatSendErrorToasts 的 toast 话术映射共用此表。
+ */
+export const CHAT_SEND_REJECTION_REASONS: Array<[RegExp, string]> = [
+  [/speaking lease required/, '需先获取发言权才能在 Caller 群发言'],
+  [/speaking lease rejected/, '发言权已失效或被抢占，请重新获取后发送'],
+  [/caller identity missing/, '登录身份缺失，请刷新页面重新连接后再发送'],
+  [/caller target requires human speech/, '该会话仅支持真人 Caller 发言'],
+  [/participant absent/i, '当前身份未加入会话，请先加入后再发言'],
+];
+
+/**
+ * 失败应答是否携带已知 chat.send 提交侧拒绝话术。
+ * 在途请求 id 精确匹配的兜底：这些特征只可能来自消息提交流(补丁时序或
+ * 帧路径丢掉 id 追踪时仍可见)，未知失败话术不在此列、不得误报。
+ */
+export function isChatSendRejectionFrame(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const frame = message as Record<string, unknown>;
+  if (frame.type !== 'res' || frame.ok !== false) return false;
+  const text = (frame.error as { message?: unknown } | undefined)?.message;
+  if (typeof text !== 'string') return false;
+  return CHAT_SEND_REJECTION_REASONS.some(([pattern]) => pattern.test(text));
+}

@@ -5,6 +5,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import type { RecoveryActionNotifier } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "./task-contracts.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
 
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
@@ -152,7 +153,7 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
-  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}`;
+  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}\n\n**Entity ID**：${clip(task.request.target.entity_id, 150)}`;
   return { title: `会话自愈｜${title}`, text: `## 会话自愈｜${title}\n\n${[context, ...sections].join("\n\n")}\n\n[查看完整任务与处理记录](${url.href})` };
 }
 
@@ -168,7 +169,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
 
   after(input: GroupNotification): void {
     setImmediate(() => {
-      void this.notify(input).catch(() => console.error("[session-recovery] group notification unavailable", input.taskId, input.kind));
+      void this.notify(input).catch(error => logRepairEvent("session-recovery", "session_recovery_notification", "group_unavailable", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) }));
     });
   }
   private async notify(input: GroupNotification): Promise<void> {
@@ -197,8 +199,9 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
       await this.deps.sender.send({ webhook, timeoutSeconds: config.timeout_seconds,
         ...notificationContent(task, source, input.kind, this.deps.publicBaseUrl) });
       sent = true;
-    } catch {
-      console.error("[session-recovery] group notification not confirmed", input.taskId, input.kind);
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "group_unconfirmed", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) });
     }
     await this.deps.tasks.appendNotification(input.taskId, {
       event_id: `${id}-result`, at_ms: Date.now(), kind: "notification", actor: "service",

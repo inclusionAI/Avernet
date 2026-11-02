@@ -297,15 +297,6 @@ impl GroupManagementService for GroupServiceFake {
         })
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        Ok(GroupPatchSettingsResult {
-            group_id: cmd.group_id,
-            service_spec: cmd.service_spec.unwrap_or(None),
-        })
-    }
 }
 
 struct MessageFlowFake;
@@ -421,7 +412,8 @@ impl MessageFlowService for MessageFlowFake {
             status: "ok".to_string(),
             bot_deliveries: vec![],
             frontend_deliveries: vec![],
-        })
+            real_run_id: None,
+})
     }
 
     async fn handle_task_complete(
@@ -561,7 +553,6 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         updated_at: 1,
         chat_url: None,
         context_injected: 0,
-        service_spec: None,
         latest_running_session_id: None,
         initial_run: None,
         originator: None,
@@ -599,7 +590,6 @@ fn group_create_cmd() -> GroupCreateCommand {
         participants: vec![],
         member_bot_ids: vec![],
         group_kind: Some(GroupKind::Normal),
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,
@@ -634,6 +624,8 @@ fn group_delete_cmd() -> GroupDeleteCommand {
 fn web_send_cmd() -> WebSendCommand {
     WebSendCommand {
         caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         session_id: None,
@@ -653,6 +645,7 @@ fn web_send_cmd() -> WebSendCommand {
 
 fn group_chat_cmd() -> GroupChatCommand {
     GroupChatCommand {
+        caller_ingress: None,
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         requested_sender_id: None,
@@ -722,6 +715,7 @@ fn task_dispatch_cmd() -> TaskDispatchCommand {
         target_bot_id: "bot-target".to_string(),
         target_bot_name: None,
         payload: serde_json::json!({}),
+        caller_delegation: None,
     }
 }
 

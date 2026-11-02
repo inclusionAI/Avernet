@@ -12,7 +12,7 @@ from agentclaw.community.core.bot_genome.compile import genome_state
 from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused
 from agentclaw.community.core.apply_engine.constructs import Category, Section
 from agentclaw.community.core.apply_engine.desired_state import (
-    CenterSkillVersion,
+    CenterSkillByName,
     Declaration,
     DesiredIdentityFile,
     DesiredMcpServer,
@@ -26,7 +26,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     ContentRef,
 )
 from agentclaw.community.core.bot_genome.compile import GenomeCompiler, compile_spec
-from agentclaw.community.core.bot_genome.errors import NotAppliable, RevisionNotFound
+from agentclaw.community.core.bot_genome.errors import NotAppliable, RefConflict, RevisionNotFound
 from agentclaw.community.core.bot_genome.spec_models import GenomeSpec, RepoSkill
 from tests.community.core.apply_engine._fakes import make_context
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir, load_revisions
@@ -81,7 +81,7 @@ def test_skill_origins_and_mcp_overrides_take_their_typed_source() -> None:
     state = compile_spec(spec, BlobDir())
     sources = {s.name: s.source for s in state.skills.entries}
     assert sources["weather"] == RepoSkillPath("team/weather")
-    assert all(isinstance(s, (LocalSkillPackage, CenterSkillVersion, RepoSkillPath)) for s in sources.values())
+    assert all(isinstance(s, (LocalSkillPackage, CenterSkillByName, RepoSkillPath)) for s in sources.values())
     for entry in spec.tools.mcp:
         desired = next(m for m in state.mcp.entries if m.server_code == entry.server_code)
         expected = McpOverride.from_config(entry.config.to_json()) if entry.config is not None else None
@@ -104,6 +104,10 @@ def test_script_null_declares_no_script_rather_than_leaving_it_alone() -> None:
 # -- the compiler the run service holds ----------------------------------------------------------
 
 
+REVISION = "sha256:" + "ab" * 32
+FROM = "sha256:" + "cd" * 32
+
+
 class _Promotions:
     def __init__(self, row) -> None:
         self.row = row
@@ -115,38 +119,27 @@ class _Promotions:
 
 
 class _Registry:
-    def __init__(self, state: DesiredState) -> None:
+    def __init__(self, state: DesiredState, active: str | None = FROM) -> None:
         self.state = state
+        self.active = active
         self.compiled: list[tuple] = []
+
+    def list_refs(self, bot):
+        return [] if self.active is None else [SimpleNamespace(name="active", revision=self.active)]
 
     def compile(self, bot, rev):
         self.compiled.append((bot, rev))
         return self.state
 
 
-REVISION = "sha256:" + "ab" * 32
+def _row(status: str = "applying", ref: str = "active", from_revision: str | None = FROM):
+    return SimpleNamespace(revision_id=REVISION, status=status, ref=ref, from_revision_id=from_revision)
 
 
-def _row(status: str = "applying", ref: str = "active"):
-    return SimpleNamespace(revision_id=REVISION, status=status, ref=ref)
-
-
-class _Refs:
-    def __init__(self, active: str | None = REVISION) -> None:
-        self.active = active
-        self.asked: list[str] = []
-
-    def get(self, *, name, **axes):
-        self.asked.append(name)
-        return None if self.active is None else SimpleNamespace(revision_id=self.active)
-
-
-def _compiler(
-    row, state: DesiredState | None = None, *, active: str | None = REVISION
-) -> tuple[GenomeCompiler, _Registry, _Promotions]:
+def _compiler(row, state: DesiredState | None = None) -> tuple[GenomeCompiler, _Registry, _Promotions]:
     registry = _Registry(state or compile_spec(_spec(CASES[0]), BlobDir()))
     promotions = _Promotions(row)
-    compiler = GenomeCompiler(registry=registry, promotions=promotions, refs=_Refs(active), env=lambda: "dev")
+    compiler = GenomeCompiler(registry=registry, promotions=promotions, env=lambda: "dev")
     return compiler, registry, promotions
 
 
@@ -176,12 +169,10 @@ def test_only_narrows_the_genome_state_to_a_phases_constructs() -> None:
     assert half.identity is None and half.resources is None and half.skills is None and half.mcp is None
 
 
-def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() -> None:
-    """The row is ``applied`` by the time the apply run compiles in its
-    worker (the seam answered "started" before that), so ``applied`` resolves
-    like ``applying``; ``apply_failed`` has nothing to deliver, a status this
-    module does not know is refused rather than trusted, and a promotion
-    ``active`` has moved on from must not be redelivered over the newer one."""
+def test_only_a_missing_promotion_is_refused_and_no_status_is_checked() -> None:
+    """Compile is revision → desired state and nothing else: whatever the promotion's status, its revision
+    compiles (a re-run after a crash compiles the same state again). Only a promotion that does not exist
+    is refused — as the genome's own error by ``check``, as ``CompileRefused`` in the worker."""
     ctx = make_context(engine_type="openclaw", bot_type="arca")
     compiler, _, _ = _compiler(None)
     with pytest.raises(RevisionNotFound):
@@ -189,26 +180,30 @@ def test_a_missing_never_started_unknown_or_superseded_promotion_is_refused() ->
     with pytest.raises(CompileRefused, match="is not there to deliver") as refused:
         asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
     assert isinstance(refused.value.domain_error, RevisionNotFound)
-    compiler, registry, _ = _compiler(_row("applied"))
+    assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
+    for status in ("pending", "applying", "applied", "applied_partial", "apply_failed"):
+        compiler, registry, _ = _compiler(_row(status))
+        compiler.check(ctx, genome_state("p" * 32))
+        assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
+
+
+def test_check_refuses_a_promotion_whose_from_revision_is_no_longer_active() -> None:
+    """``check`` runs under the bot's apply lock before the apply is enqueued: a promotion that another
+    promotion's settle overtook is refused there, before its revision reaches the bot. ``compile`` maps
+    the revision whatever ``active`` says."""
+    ctx = make_context(engine_type="openclaw", bot_type="arca")
+    compiler, registry, _ = _compiler(_row())
+    registry.active = "sha256:" + "ef" * 32
+    with pytest.raises(RefConflict) as moved:
+        compiler.check(ctx, genome_state("p" * 32))
+    assert (moved.value.expected, moved.value.current) == (FROM, registry.active)
     assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
-    for status in ("apply_failed", "superseded", ""):
-        compiler, _, _ = _compiler(_row(status))
-        with pytest.raises(NotAppliable) as caught:
-            compiler.check(ctx, genome_state("p" * 32))
-        assert "only an applied or applying promotion is delivered" in caught.value.reasons[0].message
-        with pytest.raises(CompileRefused, match="only an applied or applying promotion"):
-            asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
-    for active in ("sha256:" + "cd" * 32, None):
-        compiler, _, _ = _compiler(_row("applied"), active=active)
-        with pytest.raises(NotAppliable) as caught:
-            compiler.check(ctx, genome_state("p" * 32))
-        assert "superseded" in caught.value.reasons[0].message
-        # In the worker the same refusal is the engine's CompileRefused, with the genome error as its cause.
-        with pytest.raises(CompileRefused) as refused:
-            asyncio.run(compiler.compile(ctx, genome_state("p" * 32)))
-        assert isinstance(refused.value.domain_error, NotAppliable) and "superseded" in str(refused.value)
-        assert refused.value.domain_error.reasons == caught.value.reasons, "the same refusal check raised"
-        assert refused.value.__cause__ is refused.value.domain_error, "chained for the worker's log too"
+    first, registry, _ = _compiler(_row(from_revision=None))
+    registry.active = None
+    first.check(ctx, genome_state("p" * 32))  # a bot's first promotion: no active either side
+    registry.active = FROM
+    with pytest.raises(RefConflict):
+        first.check(ctx, genome_state("p" * 32))
 
 
 def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_repository_is_asked() -> None:
@@ -224,14 +219,6 @@ def test_a_genome_reference_without_a_promotion_id_is_refused_before_the_reposit
         asyncio.run(compiler.compile(ctx, StateRef("genome", "")))
     assert isinstance(refused.value.domain_error, RevisionNotFound)
     assert promotions.calls == []
-
-
-def test_currency_is_judged_against_the_ref_the_promotion_moved() -> None:
-    """A canary promotion (RSI-16) moves ``canary``, not ``active``; it is current while ``canary`` points at it."""
-    compiler, registry, _ = _compiler(_row("applied", ref="canary"))
-    ctx = make_context(engine_type="openclaw", bot_type="arca")
-    assert asyncio.run(compiler.compile(ctx, genome_state("p" * 32))).state is registry.state
-    assert compiler._refs.asked == ["canary"]
 
 
 def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash() -> None:
@@ -258,7 +245,7 @@ def test_a_revision_the_state_model_refuses_is_not_appliable_rather_than_a_crash
         def compile(self, bot, rev):
             return compile_spec(spec, BlobDir())
 
-    compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), refs=_Refs(), env=lambda: "dev")
+    compiler = GenomeCompiler(registry=_StaleRegistry(), promotions=_Promotions(_row()), env=lambda: "dev")
     with pytest.raises(CompileRefused, match="is an identity file") as refused:
         asyncio.run(compiler.compile(make_context(engine_type="openclaw", bot_type="arca"), genome_state("p" * 32)))
     assert isinstance(refused.value.domain_error, NotAppliable)

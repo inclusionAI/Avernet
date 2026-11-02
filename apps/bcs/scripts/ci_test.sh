@@ -22,6 +22,8 @@ set -euo pipefail
 #   bash apps/bcs/scripts/ci_test.sh --fast-fail          # gate at 100%, fail fast
 #   bash apps/bcs/scripts/ci_test.sh --coverage            # run all + coverage, no gating
 #
+# --coverage --reuse-build additionally exports nextest metadata for CI MySQL
+# contracts, with the same unit-only JUnit/Cobertura reports as --coverage.
 # Enabled by default; set OCB_PRE_PUSH_ENABLE_BCS=0 to skip temporarily.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +32,7 @@ bcs_dir="$(cd "$script_dir/.." && pwd)"
 base=""
 head="HEAD"
 coverage=0
+reuse_build=0
 fast_fail=0
 
 while [[ "$#" -gt 0 ]]; do
@@ -44,6 +47,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --coverage)
       coverage=1
+      shift
+      ;;
+    --reuse-build)
+      reuse_build=1
       shift
       ;;
     --report-only)
@@ -67,6 +74,10 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 cd "$bcs_dir"
+if [[ "$reuse_build" -eq 1 && "$coverage" -ne 1 ]]; then
+  echo "--reuse-build requires --coverage" >&2
+  exit 2
+fi
 
 echo "========== BCS pre-push gate =========="
 echo "bcs_dir: $bcs_dir"
@@ -153,9 +164,14 @@ if [[ "$coverage" -eq 1 ]]; then
   export CARGO_INCREMENTAL=0
   echo "--- running cargo llvm-cov nextest (single-pass + coverage) ---"
   set +e
-  cargo llvm-cov nextest --config-file "$tmp_nextest" --profile ci --retries 0 ${nextest_fail_args[@]+"${nextest_fail_args[@]}"} \
-    --cobertura --output-path ./testresult/cobertura.xml
-  status=$?
+  if [[ "$reuse_build" -eq 1 ]]; then
+    bash "$script_dir/ci/reusable_coverage.sh" "$tmp_nextest" ${nextest_fail_args[@]+"${nextest_fail_args[@]}"}
+    status=$?
+  else
+    cargo llvm-cov nextest --config-file "$tmp_nextest" --profile ci --retries 0 ${nextest_fail_args[@]+"${nextest_fail_args[@]}"} \
+      --cobertura --output-path ./testresult/cobertura.xml
+    status=$?
+  fi
   set -e
 else
   echo "--- running cargo nextest (single-pass, 100% required) ---"

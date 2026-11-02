@@ -1,0 +1,151 @@
+import {
+  classifySaveFailure, diff, dirty, oid, publish, putPackVersion, updateVersion,
+  type SaveAttempt, type SaveResult, type Session, type Snapshot, type Version,
+} from './packVersionSession'
+import { packVersionWritesEnabled } from './packVersionWritePolicy'
+import { readPackOperation } from './packOperation'
+import { packWorkflow } from './packCanvas'
+
+export const PACK_SAVE_TIMEOUT_MS = 30_000
+
+function verifiedResult(value: Partial<SaveResult>, id: string, attempt: SaveAttempt): SaveResult {
+  if (!value || value.branch !== `saved/${id}` || typeof value.commit !== 'string' || !oid.test(value.commit)
+    || value.requestId !== attempt.requestId || value.packId !== attempt.expectedPackId
+    || !Number.isSafeInteger(value.version) || value.version! < 1) throw { status: 200 }
+  return value as SaveResult
+}
+
+/** Commit the submitted bytes, not a potentially newer/stale follow-up GET. */
+function complete(session: Session, id: string, attempt: SaveAttempt, result: SaveResult) {
+  const snapshot = attempt.snapshot
+  const candidate = attempt.files.map(file => ({ ...file }))
+  const saved: Snapshot = { ...snapshot, packId: result.packId, baseRef: `origin/saved/${id}`, baseCommit: result.commit, draftHead: result.commit, versionFiles: candidate }
+  const versions = { ...session.state.versions, draft: { snapshot: saved, files: candidate, loading: false, error: null, blocked: false,
+    notice: `已保存到草稿 commit ${result.commit}，尚未部署。` } }
+  if (versions.current.snapshot) versions.current = { ...versions.current, snapshot: { ...versions.current.snapshot, draftHead: result.commit } }
+  if (attempt.input.sourceVersion === 'current') versions.current = { ...versions.current, files: snapshot.versionFiles.map(file => ({ ...file })), notice: null }
+  // The callback checks the captured editor lifetime before touching canvas state.
+  attempt.onSaved?.(result)
+  publish(session, { ...session.state, version: 'draft', versions, saving: false, reconciliation: null })
+}
+
+async function submit(session: Session, id: string, attempt: SaveAttempt): Promise<SaveResult | null> {
+  const token = {}
+  session.saveRequest = token
+  publish(session, { ...session.state, saving: true })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = verifiedResult(await Promise.race([
+      putPackVersion(id, attempt.input),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Save response timeout')), PACK_SAVE_TIMEOUT_MS) }),
+    ]), id, attempt)
+    if (session.saveRequest !== token) return null
+    complete(session, id, attempt, result)
+    return result
+  } catch (error) {
+    if (session.saveRequest !== token) return null
+    const failure = classifySaveFailure(error, id, attempt.requestId)
+    const version = attempt.input.sourceVersion
+    const errorMessage = failure.preOperationConflict ? '保存未开始：服务端检测到并发请求。当前候选仍保留，请修改后使用新的 requestId 重试。'
+      : failure.conflict ? '保存冲突：远端版本已变化。更改仍在本地，请重新读取后处理。'
+      : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请先人工核对 Git 的 saved 分支，不要盲目重试。'
+      : '保存结果无法确认，可能已部分完成；更改仍在本地，请先人工核对 Git 分支。'
+    if (failure.preOperationConflict) {
+      // The server did not create this operation, so there is nothing safe to
+      // GET/reconcile. Keep the candidate editable; the next save allocates a
+      // fresh requestId while retaining this attempt's source/CAS baseline.
+      publish(session, { ...session.state, saving: false,
+        versions: { ...session.state.versions, [version]: { ...session.state.versions[version], blocked: false, error: errorMessage } },
+        reconciliation: null,
+      })
+      return null
+    }
+    publish(session, { ...session.state, saving: false,
+      versions: { ...session.state.versions, [version]: { ...session.state.versions[version], blocked: true, error: errorMessage } },
+      reconciliation: failure.conflict ? null : { token: {}, attempt, version, reason: failure.reason, identity: failure.identity,
+        attemptedFiles: attempt.files, sourceCommit: attempt.snapshot.baseCommit, expectedSavedHead: attempt.snapshot.draftHead,
+        checking: false, observation: null, checkError: false },
+    })
+    return null
+  } finally {
+    clearTimeout(timeout)
+    if (session.saveRequest === token) session.saveRequest = undefined
+  }
+}
+
+/** Both canvas and file save buttons enter here with one immutable snapshot and candidate. */
+export async function savePackVersion(session: Session, id: string, version: Version,
+  files = session.state.versions[version].files, onSaved?: (result: SaveResult) => void): Promise<SaveResult | null> {
+  const current = session.state.versions[version], snapshot = current.snapshot
+  if (!snapshot || !packVersionWritesEnabled(snapshot) || current.loading || current.blocked
+    || session.state.saving || session.state.uploading || session.state.reconciliation || session.state.deployment) return null
+  const changes = diff(snapshot.versionFiles, files)
+  const stateAtConfirmation = session.state
+  if (version === 'current' && dirty(session.state.versions.draft)) {
+    updateVersion(session, version, { error: '保存冲突：已有本地草稿更改，不会静默覆盖。请切换到草稿处理。' })
+    return null
+  }
+  if (version === 'current' && snapshot.draftHead !== null && snapshot.draftHead !== snapshot.baseCommit
+    && !window.confirm(`保存将替换已存在的草稿（预期 head：${snapshot.draftHead}）。当前修改会保留为新的 saved；远端并发变化会返回冲突。确定继续？`)) {
+    updateVersion(session, version, { error: '保存已取消：已有不同的草稿，当前修改仍保留。' })
+    return null
+  }
+  if (session.state !== stateAtConfirmation) return null
+  if (!changes.length && version === 'draft') return null
+  let expectedPackId: string
+  try { expectedPackId = packWorkflow(files, id).packId }
+  catch {
+    updateVersion(session, version, { error: '完整候选的 Pack manifest 或工作流身份无效；请检查合法 Pack ID，并保留当前 workflowId。更改仍在本地。' })
+    return null
+  }
+  for (const key of ['current', 'draft'] as const) {
+    session.requests[key]?.abort()
+    if (session.state.versions[key].loading) updateVersion(session, key, { loading: false })
+  }
+  // Preserve the merged canvas YAML locally even if the request conflicts or is unknown.
+  const candidate = files.map(file => ({ ...file }))
+  const requestId = crypto.randomUUID()
+  updateVersion(session, version, { files: candidate })
+  return submit(session, id, { requestId, expectedPackId, snapshot, files: candidate, onSaved,
+    input: { sourceVersion: version, sourceCommit: snapshot.baseCommit, expectedSavedHead: snapshot.draftHead, changes, requestId } })
+}
+
+/** Without a durable journal a retry may perform a second write. */
+export async function retryPackVersionSave(_session: Session, _id: string): Promise<SaveResult | null> {
+  throw new Error('未配置持久操作日志，无法安全自动重试；请先人工核对 saved 分支。')
+}
+
+/** GET is observation-only; recovery is always an explicit CSRF-guarded POST. */
+export async function reconcilePackVersionSave(session: Session, id: string, recover = false) {
+  const pending = session.state.reconciliation
+  if (!pending || pending.checking || session.state.saving || session.state.uploading) return
+  const token = {}
+  const controller = new AbortController()
+  session.saveRequest = token
+  publish(session, { ...session.state, reconciliation: { ...pending, checking: true, checkError: false } })
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const operation = await Promise.race([
+      readPackOperation(id, pending.attempt.requestId, 'save', recover, controller.signal),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => { controller.abort(); reject(new Error('Operation timeout')) }, PACK_SAVE_TIMEOUT_MS) }),
+    ])
+    if (session.saveRequest !== token || session.state.reconciliation?.token !== pending.token) return
+    if (operation.state === 'completed') complete(session, id, pending.attempt, verifiedResult(operation.result as SaveResult, id, pending.attempt))
+    else if (operation.state === 'failed') {
+      // Only the authenticated receipt of this exact request proves no push took
+      // place. Preserve its candidate/baseline, but allow correction as a NEW operation.
+      const version = pending.version
+      publish(session, { ...session.state, reconciliation: null,
+        versions: { ...session.state.versions, [version]: { ...session.state.versions[version], blocked: false, error: null,
+          notice: '服务端已确认保存于推送前失败，未写入 Git。候选仍保留，可就地修改后重新保存（新 requestId）。' } } })
+    }
+    else publish(session, { ...session.state, reconciliation: { ...pending, checking: false, checkError: false, operationState: operation.state } })
+  } catch {
+    if (session.saveRequest === token && session.state.reconciliation?.token === pending.token) {
+      publish(session, { ...session.state, reconciliation: { ...pending, checking: false, checkError: true } })
+    }
+  } finally {
+    clearTimeout(timeout)
+    if (session.saveRequest === token) session.saveRequest = undefined
+  }
+}

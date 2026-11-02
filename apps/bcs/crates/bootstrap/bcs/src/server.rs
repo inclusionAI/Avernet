@@ -176,6 +176,8 @@ use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery};
 use secrecy::{ExposeSecret, Secret};
 
 mod channel_wiring;
+mod a2a_wiring;
+mod infrastructure_helpers;
 mod http_middleware;
 mod lifecycle_wiring;
 mod output_admission_wiring;
@@ -314,7 +316,7 @@ mod tests {
             );
 
         let registered = provider_management
-            .register_provider(RegisterProviderCommand {
+            .register_provider(RegisterProviderCommand { caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
@@ -819,7 +821,7 @@ mod tests {
             .state
             .services
             .provider_management
-            .register_provider(RegisterProviderCommand {
+            .register_provider(RegisterProviderCommand { caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),

@@ -678,6 +678,7 @@ runtime:
         caller_id: Some("human_alice".into()), authenticated_human: Some(AuthenticatedHumanCaller {
             actor_id: "human_alice".into(), display_name: None,
         }),
+        caller_association: None,
     }).await.unwrap();
     let sid = started.view.run.session_id;
     fixture.sessions.add_participant(&sid, Participant::human("human_bob", bcs_service_api::ParticipantRole::Observer)).await.unwrap();
@@ -689,7 +690,7 @@ runtime:
     let before = StateMachineRunRepoPort::get_run(&*fixture.collaboration, &started.view.run.run_id).await.unwrap().unwrap();
     assert!(matches!(fixture.runtime.handle_session_human_input(HandleSessionHumanInputCommand {
         group_id: "new-group".into(), session_id: Some(sid.clone()), caller_actor_id: "human_bob".into(),
-        content: "approve".into(), source: HumanResponseSource::Http,
+        content: "approve".into(), source: HumanResponseSource::Http, caller_ingress: None,
     }).await, Err(CollaborationRuntimeError::Forbidden(_))));
     let response = fixture.app.clone().oneshot(Request::builder().method("POST").uri(format!("/sessions/{sid}/chat"))
         .header("content-type", "application/json").body(Body::from(json!({"message":"approve"}).to_string())).unwrap()).await.unwrap();

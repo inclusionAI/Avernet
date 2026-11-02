@@ -649,7 +649,10 @@ def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     total = len(entries) + silent_failures
     if ok == total:
         return ApplyStatus.SUCCEEDED
-    if ok:
+    # A category that converged by removing what it no longer declares (``script: null`` deleting the script)
+    # changed the bot without a declared entry to show for it: with that landed, the apply is PARTIAL, not FAILED.
+    removed = any(category.removals and not category.aborted for category in categories)
+    if ok or removed:
         return ApplyStatus.PARTIAL
     failed_outright = silent_failures or any(
         entry.outcome is EntryOutcome.FAILED or category.aborted

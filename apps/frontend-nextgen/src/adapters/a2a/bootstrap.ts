@@ -138,6 +138,10 @@ export async function maybeBuildA2AProvider(
   const sessionKey = deps.sessionKey ?? A2A_CHOICE_SESSION_KEY;
 
   if (!switchOn()) return null;                 // 缓存不动 + 零 fetch
+  // 服务端明确拒绝（用户灰度未命中）：不推导、不探测、不决策——缓存也不
+  // 动（refused 不是 v3 的探测结论；配置翻绿后缓存无病可用）。send-ban
+  // 遗留键查询不走此门（isSendBannedForSession 另读注册表）。
+  if (providerConfig.a2aWithheld) return null;
   let urls: A2aUrls;
   try {
     urls = resolveA2aUrls(providerConfig);
@@ -227,6 +231,9 @@ export function takeCachedA2AProvider(
   const sessionKey = deps.sessionKey ?? A2A_CHOICE_SESSION_KEY;
 
   if (!switchOn()) return null;
+  // 明确拒绝覆盖一切：缓存命中的 'a2a' 也不构造成 provider——灰度回滚后
+  // 在途页面曾有的 A2A choice 不得让名单外用户继续用 A2A。
+  if (providerConfig.a2aWithheld) return null;
   let urls: A2aUrls;
   try {
     urls = resolveA2aUrls(providerConfig);
@@ -248,16 +255,16 @@ export function takeCachedA2AProvider(
 
 /**
  * 发送门（hook 侧入口）：isSessionBanned 的 nextgen 便利封装——registry 缺省
- * app 单例（判据/键位口径与文档见 policy.isSessionBanned；语义注释随真身迁去，
- * 此处不在公共面——公共入口导出显式收 registry 的纯判据版）。
+ * app 单例（判据/口径与文档见 policy.isSessionBanned）。
+ * scopeId（R6）限定查询在 bot/runtime 域内——同名 sessionKey 的其他 bot
+ * 的禁令不会串联误封；由 provider 以 `bot:owner:stage` 提供。
  */
 export function isSendBannedForSession(
   sessionKey: string,
-  wsUrl: string,
-  a2aBaseUrl?: string,
+  opts: { scopeId?: string; wsUrl: string; a2aBaseUrl?: string },
   registry: SendBanRegistry = appSendBan,
 ): boolean {
-  return isSessionBanned(registry, sessionKey, wsUrl, a2aBaseUrl);
+  return isSessionBanned(registry, sessionKey, opts);
 }
 
 // A2A M2 bootstrap seam: 取消结果 UI 文案单源转出（spec §4.3 表）——

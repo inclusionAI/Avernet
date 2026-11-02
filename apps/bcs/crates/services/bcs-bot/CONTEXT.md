@@ -113,3 +113,45 @@ identity before mutation. See `docs/agentpass-subbots.md` for the full contract.
 Provider collaboration scope is resolved from live Provider metadata by BotRegistryCoreService.collaboration_owner. Same-owner authorization uses persisted created_by; missing affiliated Providers and malformed policies fail closed. Provider admin commands expose optional scope, and cannot relax same_owner. See specs/2026-10-13-provider-collaboration-scope/spec.md.
 
 Legacy Provider registration preflights affiliation before merging Bot capabilities or credentials, for both plugin and gateway modes. This catches existing public memberships without modifying the Bot; storage independently revalidates under its policy/row locks.
+
+## A2A Card core
+
+`A2aBotCore` implements `A2aBotCoreService` using active Gateway affiliation and
+the `A2aBotRepoPort` CAS boundary. It does not perform HTTP access, parse SDK
+types or authenticate Provider management requests. Those use cases live in
+`crates/application/bcs-app-a2a-bot`. Bootstrap injects the collaborators.
+
+The Bot query facade receives the same Core as a read collaborator. Detail,
+discovery and search responses expose an optional full `agent_card`, preserving
+skills/descriptions and unknown fields without rewriting legacy capabilities.
+Existing BCS visibility, ownership, organization and friendship gates run first.
+Core batches Card reads; discovery predicates identify nonmatching A2A Bots
+without loading their full payload or falling back to legacy capabilities.
+Cards are read from persistence, so refresh needs no duplicated query cache.
+Query/discovery orchestration is in application/bot_query.rs and bot_cards.rs.
+Refresh failure preserves the last validated Card for new sends and cancellation.
+New delivery interfaces derive from current egress/gRPC policy, without a saved
+route projection; availability uses the same pure selector.
+Affiliation, disabled binding/Provider/downlink and credential checks remain
+unchanged. Cancellation skips new extension negotiation and the outbound adapter
+uses the already-frozen Run endpoint/Task. No new database read or cache is added.
+Delivery targets project typed extension declarations with their required flag
+and full params. Core does not select an experimental draft/business profile;
+that interpretation belongs to the outbound protocol adapter. Invalid stored
+declarations fail rather than silently dropping negotiation data.
+
+
+ProviderRegistrationCore supports explicit validated A2A registration. It requires
+current Provider management authority (not self-service alone), Gateway mode,
+enabled downlink/credential and matching Card identities. No webhook default is
+required; the repository commits Card and existing ownership lifecycle together.
+
+
+`A2aProviderRegistrationCore` implements the Provider-admin A2A admission Core.
+It consumes ProviderCoreService and the existing BotProviderRepoPort atomic
+ownership/Card create; no network or SDK code is added to Core. It repeats
+management/downlink authorization after application Card fetch, normalizes the
+Provider identity, preserves a delegated owner and audits the actual Provider.
+Duplicates, tombstones and concurrent collisions fail without credential replay.
+The transaction is the existing composite; no migration or second partial Bot
+write is introduced. Admission adds bounded per-request reads, no registry scan.

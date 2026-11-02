@@ -69,6 +69,15 @@ class Connection(BaseModel):
         description="Exactly the sockets this bot offers. A kind absent from "
         "the list is not available for this bot."
     )
+    a2a_withheld: bool = Field(
+        False,
+        description="The server governs this user's A2A access (user-level "
+        "gray release) and withheld the a2a socket on purpose. Absent a2a "
+        "socket with this flag false is *no address available* (fallback "
+        "derivation stays allowed); with this flag true it is an explicit "
+        "refusal — a client must not derive, probe, or reuse an A2A choice "
+        "for this connection.",
+    )
 
 
 class DesktopConnection(Connection):

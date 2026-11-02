@@ -187,7 +187,7 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("denied") || msg.includes("CREATE") || msg.includes("DDL")) {
-      console.warn(`[clawweb] DDL denied (assumes schema exists in managed DB): ${msg}`);
+      console.warn(`[clawweb] DDL capability unavailable for managed DB: ${msg}`);
       return false;
     }
     throw err;
@@ -201,12 +201,12 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     // migration ledger exists or contains rows. Do not read or write the
     // ledger or replay ordinary migrations here; only explicitly marked,
     // idempotent self-healing repairs are attempted.
-    console.warn("[clawweb] DDL denied — assuming schema exists in managed DB");
+    console.warn("[clawweb] DDL denied — ordinary migrations skipped");
   }
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
 
-  // v146 automation-history DDL is retired; reserve that version and keep existing schemas untouched.
+  // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
   for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.

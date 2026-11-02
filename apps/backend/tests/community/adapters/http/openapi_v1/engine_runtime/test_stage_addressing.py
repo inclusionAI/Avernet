@@ -107,6 +107,10 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: caller's own bot — because ``bot_id`` alone does not identify one. They do
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
+_REQUIRED_OWNER_OPERATIONS = {
+    ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
+}
+
 _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
@@ -482,10 +486,11 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             assert not params["stage"].get("required", False), path
         if "owner_id" in params:
             carrying_owner.append((method, path))
-            # Never required anywhere: omitting it means the caller's own bot,
-            # which is what every one of these operations meant before the
-            # parameter existed.
-            assert not params["owner_id"].get("required", False), path
+            # Eval publication explicitly names a resource owner; it does not
+            # derive one from the caller as runtime operations do.
+            assert params["owner_id"].get("required", False) is (
+                (method, path) in _REQUIRED_OWNER_OPERATIONS
+            ), path
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
@@ -502,7 +507,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
         "no retiring address of those five, whose contract is frozen"
     )
     assert sorted(carrying_owner) == sorted(
-        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
+        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE | _REQUIRED_OWNER_OPERATIONS
     ), (
         "owner_id belongs to engine-runtime and the explicitly listed "
         "owner-addressed operations, and to nothing else by accident"

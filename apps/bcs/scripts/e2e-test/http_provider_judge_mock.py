@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -130,6 +131,23 @@ class Handler(BaseHTTPRequestHandler):
                         "body": body,
                     }
                 )
+            if isinstance(body, dict) and body.get("method") == "caller.container.ensure":
+                # Frozen wire subset (apps/bcs/docs caller-container-gateway.md):
+                # ok + isolation.level=container_bound + a nonempty binding_ref +
+                # a future container lifetime; BCS caps it against the trusted
+                # deadline with min(), so any far-future value simply lets the
+                # real deadline govern. No target/subject echo exists to
+                # validate in this subset.
+                far_future_ms = int(time.time() * 1000) + 7 * 24 * 60 * 60 * 1000
+                self.send_json(200, {
+                    "ok": True,
+                    "isolation": {
+                        "level": "container_bound",
+                        "binding_ref": "e2e-" + str(body.get("id", "")),
+                        "expires_at_ms": far_future_ms,
+                    },
+                })
+                return
             self.send_json(200, {"ok": True})
             return
         if self.path == "/event-webhook":

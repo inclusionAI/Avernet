@@ -298,6 +298,8 @@ impl ChannelService for BcsChannelService {
                 .message_flow
                 .handle_web_send(WebSendCommand {
                     caller_execution,
+                    caller_ingress: None,
+                    speaking_lease: None,
                     caller,
                     group_id: dispatch_group_id.clone(),
                     session_id: Some(dispatch_session_id.clone()),

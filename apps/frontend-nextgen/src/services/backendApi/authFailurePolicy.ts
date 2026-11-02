@@ -23,10 +23,15 @@ export type AuthFailureDisposition = 'login-prompt-silent' | 'silent' | 'default
  * 命中未登录时本函数先经 `loginRedirectStore.requestPrompt()` 单飞登记弹窗信号(幂等,重复调用 no-op),
  * 调用方只需按返回值决定「静默上抛还是默认提示」。
  */
-export function resolveAuthFailureDisposition(input: { status?: number; data?: unknown }): AuthFailureDisposition {
+export function resolveAuthFailureDisposition(input: {
+  status?: number;
+  data?: unknown;
+  /** 请求发出时捕获的认证代次；与当前代次不一致的晚到 401 属于旧请求，忽略其信号登记。 */
+  fromEpoch?: number;
+}): AuthFailureDisposition {
   if (useLoginStrategyStore.getState().loginStrategy !== 'oauth-provider') return 'default';
   if (input.status === 401 || isEnvelopeUnauthenticated(input.data)) {
-    useLoginRedirectStore.getState().requestPrompt();
+    useLoginRedirectStore.getState().requestPrompt(input.fromEpoch);
     return 'login-prompt-silent';
   }
   if (useExternalAuthStore.getState().status === 'unauthenticated') return 'silent';

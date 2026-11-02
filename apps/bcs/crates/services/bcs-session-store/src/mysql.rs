@@ -1,10 +1,6 @@
 //! MySQL-backed `SessionRepoPort` implementation via `bcs-db-api`.
 //!
-//! Task 8a: helpers + `create` + `get` + `belongs_to_group`.
-//! Task 8b: `complete_if_running`, `reactivate`, `update_callback_status`, `update_title`.
-//! Task 8c: `list_by_group`, `latest_running`, `count_running_service`,
-//!           `list_running_service`, `add_participant`, `remove_participant`,
-//!           `update_participant_mode`, `list_group_ids_by_session_participant`.
+//! Session persistence, activation fencing, membership and recovery queries.
 
 #[path = "mysql_registry.rs"]
 mod registry;
@@ -23,9 +19,8 @@ use bcs_service_api::core::session::{
     can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
 };
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, AppendEventRecord, ClaimSessionCallback,
-    CompleteSessionCallback, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    AddSessionParticipantWithEvent, AppendEventRecord, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::MessageViewScope;
@@ -41,10 +36,9 @@ use bcs_service_api::{
 const INSERT_SQL: &str = "INSERT INTO bcs_group_sessions \
     (session_id, group_id, session_title, env, status, session_kind, message_visibility_version, group_version, \
      caller_id, input, caller_principal, activation_count, \
-     callback_status, callback_lease_token, callback_lease_owner, callback_lease_until_ms, \
      created_by, participants, completed_at, meta,
      current_msg_seq, participant_join_seq) \
-    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL \
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, 0, NULL \
     WHERE EXISTS (SELECT 1 FROM bcs_session_registry WHERE env = ? AND session_id = ? AND session_type = 'group' AND current_msg_seq IS NULL)";
 
 // ---------------------------------------------------------------------------
@@ -80,7 +74,7 @@ impl MySqlSessionStore {
     fn select_cols(&self) -> String {
         format!(
             "session_id, group_id, session_title, group_version, env, status, \
-             session_kind, message_visibility_version, caller_id, input, output, error_message, callback_status, \
+             session_kind, message_visibility_version, caller_id, input, output, error_message, \
              caller_principal, activation_count, created_by, participants, completed_at, meta, \
              current_msg_seq, participant_join_seq, \
              ({})*1000 AS gmt_create_ms, ({})*1000 AS gmt_modified_ms",
@@ -94,7 +88,7 @@ impl MySqlSessionStore {
         format!(
             "s.session_id, s.group_id, s.session_title, s.group_version, s.env, \
              s.status, s.session_kind, s.message_visibility_version, s.caller_id, s.input, s.output, s.error_message, \
-             s.callback_status, s.caller_principal, s.activation_count, s.created_by, \
+             s.caller_principal, s.activation_count, s.created_by, \
              s.participants, s.completed_at, s.meta, \
              s.current_msg_seq, s.participant_join_seq, \
              ({})*1000 AS gmt_create_ms, ({})*1000 AS gmt_modified_ms",
@@ -150,13 +144,6 @@ impl MySqlSessionStore {
         event: Option<&AppendEventRecord>,
     ) -> ServiceResult<Session> {
         let session_kind = params.session_kind;
-        let initial_cb = initial_callback_status(session_kind);
-        let initial_callback_lease_token = if matches!(session_kind, SessionKind::ServiceInvocation)
-        {
-            DbValue::I64(0)
-        } else {
-            DbValue::Null
-        };
         let participants_json = serde_json::to_string(&params.participants).map_err(|e| {
             ServiceError::SessionInvalidParams(format!("participants serialize: {e}"))
         })?;
@@ -176,7 +163,6 @@ impl MySqlSessionStore {
             input: params.input.clone(),
             output: None,
             error_message: None,
-            callback_status: initial_cb.clone(),
             activation_count: 1,
             caller_principal: params.caller_principal.clone(),
             created_by: params.created_by.clone(),
@@ -219,8 +205,7 @@ impl MySqlSessionStore {
                     DbValue::from(params.caller_id.as_deref()),
                     input_value,
                     DbValue::from(params.caller_principal.as_deref()),
-                    DbValue::from(initial_cb.as_deref()),
-                    initial_callback_lease_token,
+
                     DbValue::from(params.created_by.as_deref()),
                     DbValue::from(participants_json.as_str()),
                     meta_value,
@@ -390,15 +375,6 @@ pub(crate) fn participants_from_json(s: &str) -> ServiceResult<Vec<Participant>>
         .map_err(|e| ServiceError::InternalError(format!("participants deserialize: {e}")))
 }
 
-/// Initial `callback_status` value for a new session.
-fn initial_callback_status(kind: SessionKind) -> Option<String> {
-    if matches!(kind, SessionKind::ServiceInvocation) {
-        Some("pending".to_string())
-    } else {
-        None
-    }
-}
-
 /// Canonical DB string for a `SessionKind`.
 fn kind_to_string(kind: SessionKind) -> &'static str {
     match kind {
@@ -487,8 +463,6 @@ fn row_to_session(row: &DbRow) -> ServiceResult<Session> {
         output: parse_json("output", row)?,
         error_message: db_get_column_opt(row, "error_message")
             .map_err(|e| ServiceError::InternalError(format!("error_message: {e}")))?,
-        callback_status: db_get_column_opt(row, "callback_status")
-            .map_err(|e| ServiceError::InternalError(format!("callback_status: {e}")))?,
         activation_count,
         caller_principal: db_get_column_opt(row, "caller_principal")
             .map_err(|e| ServiceError::InternalError(format!("caller_principal: {e}")))?,
@@ -631,15 +605,6 @@ impl SessionRepoPort for MySqlSessionStore {
         new_input: Option<serde_json::Value>,
     ) -> ServiceResult<Session> { self.repo_reactivate(session_id, new_input).await }
 
-    async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> { self.repo_update_callback_status(session_id, status).await }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> { self.repo_claim_callback(command).await }
-
-    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> { self.repo_complete_callback(command).await }
-
     async fn update_title(
         &self,
         session_id: &str,
@@ -668,8 +633,6 @@ impl SessionRepoPort for MySqlSessionStore {
 
     async fn latest_running(&self, group_id: &str) -> Option<Session> { self.repo_latest_running(group_id).await }
 
-    async fn count_running_service(&self, group_id: &str) -> u64 { self.repo_count_running_service(group_id).await }
-
     /// Mirrors [`SessionRepoPort::try_list_by_group`] filter conditions exactly
     /// (env + group_id + optional status / title_contains / participant_id
     /// JOIN) but runs `SELECT COUNT(*)` without LIMIT/OFFSET. Used by the V1
@@ -685,20 +648,11 @@ impl SessionRepoPort for MySqlSessionStore {
         participant_id: Option<&str>,
     ) -> ServiceResult<u64> { self.repo_count_by_group(group_id, status, title_contains, participant_id).await }
 
-    async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> { self.repo_list_running_service(offset, limit).await }
-
     async fn list_running_service_after(
         &self,
         after_session_id: Option<&str>,
         limit: u64,
     ) -> ServiceResult<Vec<Session>> { self.repo_list_running_service_after(after_session_id, limit).await }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> ServiceResult<Vec<Session>> { self.repo_list_recoverable_callbacks(now_ms, after_session_id, limit).await }
 
     async fn add_participant(
         &self,

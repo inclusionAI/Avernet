@@ -702,7 +702,7 @@ describe('openclaw-channel-bcn', () => {
 
     assert.deepEqual(
       [ ...new Set(registeredToolNames) ].sort(),
-      [ 'bcs_assign_task', 'bcs_route', 'bcs_send_task_message', 'bcs_task_complete' ].sort(),
+      [ 'bcs_assign_task', 'bcs_route', 'bcs_task_status', 'bcs_cancel_task', 'bcs_task_complete' ].sort(),
     );
     assert.equal(registeredEvents.includes('before_tool_call'), false);
   });

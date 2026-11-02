@@ -459,9 +459,8 @@ _story_group_metadata_without_workspace() {
     assert_json_eq "default delivery is persisted" "$RESPONSE" "routing_policy.default_bot_final_delivery" "inject_observers"
 
     api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "group is exposed as a bounded service" "200" || return
-    assert_json_eq "service group max concurrency is persisted" "$RESPONSE" "service_spec.max_concurrency" "2"
-    assert_json_eq "group settings update returns stable status" "$RESPONSE" "status" "ok"
+    require_status "retired group policy settings return Gone" "410" || return
+    assert_json_eq "retired policy is identified" "$RESPONSE" "error" "service_policy_retired"
 
     api_post "/groups/${group_id}/messages" \
         "{\"sender\":\"${BOT_CEO_UUID}\",\"content\":\"Please validate the hotfix\",\"message_type\":\"bot\",\"role\":\"user\"}"
@@ -731,10 +730,6 @@ _story_complete_and_invoke_sessions() {
     require_status "completed session can be read back" "200" || return
     assert_json_eq "read-back keeps completed status" "$RESPONSE" "status" "completed"
     assert_json_eq "read-back keeps completion output" "$RESPONSE" "output.summary" "release approved"
-
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "release group is configured for service invocations" "200" || return
-    assert_json_eq "service invocation concurrency is two" "$RESPONSE" "service_spec.max_concurrency" "2"
 
     bot_post "/services/${group_id}/sessions" PM \
         '{"caller_id":"release-pipeline-1","session_title":"Automated release audit","input":{"commit":"abc123"},"meta":{"source":"e2e"}}'

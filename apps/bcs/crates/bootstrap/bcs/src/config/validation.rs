@@ -49,6 +49,9 @@ pub(super) fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn s
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    // Owner→caller relay is default-on with a single boolean opt-out, whose
+    // strict table (`deny_unknown_fields`) is validated at parse time; the
+    // shape has no cross-field policy left to check here.
     config.bot_ws_admission.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -69,6 +72,8 @@ pub(super) fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn s
             "collaboration.nested_loop_execution_enabled requires collaboration.loop_execution_enabled=true",
         )));
     }
+    config.a2a_input.validate().map_err(crate::BcsError::InvalidConfig)?;
+    if let Some(grpc)=&config.a2a_grpc { grpc.validate().map_err(crate::BcsError::InvalidConfig)?; }
     config.provider_http.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         LayoutInitializationConfirmationProtocol,
         McpSyncProtocol,
     )
+    from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -115,6 +116,7 @@ class BaasDeviceService(DeviceService):
         secret_resolver: SecretResolver | None = None,
         theta_master_key_secret: str = "",
         layout_confirmation: "LayoutInitializationConfirmationProtocol",
+        a2a_issuance_gate: "A2aIssuanceGate | None" = None,
     ):
         super().__init__(
             repository=repository,
@@ -143,6 +145,7 @@ class BaasDeviceService(DeviceService):
         self._template_service = template_service
         self._secret_resolver = secret_resolver
         self._theta_master_key_secret = theta_master_key_secret
+        self._a2a_issuance_gate = a2a_issuance_gate
         logger.info("[BaasDeviceService] Initialized")
 
     # ------------------------------------------------------------------
@@ -817,6 +820,7 @@ class BaasDeviceService(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         """获取设备连接信息。
 
@@ -876,6 +880,10 @@ class BaasDeviceService(DeviceService):
 
         engine_type = (bot.get("active_engine") if bot else None) or self._default_engine
 
+        gated_face, a2a_withheld = self._gated_a2a_base_url(
+            ws_info.a2a_base_url, operator, caller_id
+        )
+
         result = DeviceConnectionInfo(
             type=conn_type,
             target=ws_info.target,
@@ -887,8 +895,13 @@ class BaasDeviceService(DeviceService):
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
             # A2A 面 base 与 ws_conn_mode 无关：它描述的是设备自己的 http 面，
-            # 不是某条 ws 链路的形状。BaaS 未签发即空串，透传空串。
-            a2a_base_url=ws_info.a2a_base_url,
+            # 不是某条 ws 链路的形状。BaaS 未签发即空串，透传空串；
+            # 接线了用户灰度门则先过门（设计：docs/superpowers/specs/
+            # 2026-10-27-a2a-user-issuance-gray-release-design.md §4）。
+            # withheld 标记"有面但拒绝给你"——客户端据此禁用 ws 推导兜底，
+            # 空串与 withheld 是两个语义：前者是旧服务端，后者是明确拒绝。
+            a2a_base_url=gated_face,
+            a2a_withheld=a2a_withheld,
             # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
             # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
             expires_at=ws_info.expires_at,
@@ -900,6 +913,46 @@ class BaasDeviceService(DeviceService):
         )
 
         return result
+
+    def _gated_a2a_base_url(
+        self,
+        issued: str,
+        operator: OperatorContext,
+        caller_id: str | None = None,
+    ) -> tuple[str, bool]:
+        """A2A face 出口门控，返回 (face, withheld)。
+
+        灰度身份取经认证的实际访问用户：engine_runtime 连接面把 operator
+        有意重标为 resolved owner（权限兼容 + 实例亲和），owner 在名单里
+        不等于访问者在名单里，所以该面必须传 caller_id；operator 本身就是
+        caller 的面（devices HTTP 面）可不传，回退 operator.staff_id。
+
+        ``(issued, False)`` 原状透传（BaaS 未签发、或未接门——维持阶段二
+        的加性语义）；门拒发时 `("", True)`——空串与 withheld 是两个语义：
+        前者是"旧服务端没有地址"（客户端仍可 ws 推导兜底），后者是
+        "明确拒绝"（客户端必须禁用推导与探测，稳定落 v3）。
+        """
+        if self._a2a_issuance_gate is None:
+            return issued, False
+        # 门接线即判定，与上游是否签发地址无关：单机/直连 provider 不填
+        # a2a_base_url，但客户端仍可从直连 WS 推导 A2A 地址——名单外用户
+        # 在这些拓扑下必须拿到 withheld=True 才禁得住推导兜底。
+        identity = caller_id or operator.staff_id
+        try:
+            allowed = self._a2a_issuance_gate.allows_face(identity)
+        except Exception:
+            # 门是注入协作件；它的任何意外失效只允许收敛 a2a face，
+            # 绝不能拖垮 v3 连接本身的签发。fail-closed + 记录，不静默。
+            logger.warning(
+                "[a2a_gray] gate raised, withholding face",
+                exc_info=True,
+            )
+            return "", True
+        # 允许时空地址原样返还并 withheld=False——灰名单成员在直连拓扑
+        # 本就靠推导兜底使用 A2A，不能因门接线而丢失。
+        if allowed:
+            return issued, False
+        return "", True
 
     def _resolve_bot_by_binding_id(self, binding_id: int) -> dict[str, Any] | None:
         """根据 binding_id 获取 Bot 信息，兼容桌面 BOT 和服务 BOT。

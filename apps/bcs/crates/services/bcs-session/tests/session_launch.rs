@@ -871,11 +871,6 @@ async fn reactivate_replaces_input_and_preserves_other_session_fields() {
         .complete_if_running(&created.session.id, None, None)
         .await
         .expect("complete");
-    fixture
-        .session_repo
-        .update_callback_status(&created.session.id, "success")
-        .await
-        .expect("complete callback");
 
     let new_input = serde_json::json!({"new": true});
     let outcome = fixture
@@ -937,11 +932,6 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
         .complete_if_running(&created.session.id, None, None)
         .await
         .expect("complete");
-    fixture
-        .session_repo
-        .update_callback_status(&created.session.id, "success")
-        .await
-        .expect("complete callback");
 
     let outcome = fixture
         .service

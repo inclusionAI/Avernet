@@ -41,6 +41,10 @@ def view() -> BotLifecycleView:
         ({"status": "ERROR"}, DisplayState.FAILED),
         ({"status": "DORMANT"}, DisplayState.DORMANT),
         ({"status": "SLEEPING"}, DisplayState.DORMANT),
+        ({"status": "RECYCLED"}, DisplayState.DORMANT),
+        ({"status": "recycled", "ext": {}}, DisplayState.DORMANT),
+        ({"status": "RECYCLING"}, DisplayState.PENDING),
+        ({"status": "REACTIVATING"}, DisplayState.PENDING),
         ({"status": "PENDING"}, DisplayState.PENDING),
         ({"status": "ACTIVE", "ext": {"dormant": True}}, DisplayState.DORMANT),
     ],
@@ -62,6 +66,7 @@ def test_personal_display_state_matrix(view, bot, expected) -> None:
         ("FAILED", DisplayState.LOCAL_FAILED),
         ("ERROR", DisplayState.LOCAL_FAILED),
         ("PENDING", DisplayState.LOCAL_PENDING),
+        ("RECYCLED", DisplayState.LOCAL_PENDING),
     ],
 )
 def test_local_display_state_matrix(view, status, expected) -> None:
@@ -72,12 +77,13 @@ def test_local_display_state_matrix(view, status, expected) -> None:
 
 
 @pytest.mark.unit
-def test_service_lifecycle_delegates_to_port(view) -> None:
+@pytest.mark.parametrize("bot", [{}, {"status": "RECYCLED"}])
+def test_service_lifecycle_delegates_to_port(view, bot) -> None:
     assert (
-        view.display_state(bot={}, kind=BotInventoryKind.SERVICE)
+        view.display_state(bot=bot, kind=BotInventoryKind.SERVICE)
         is DisplayState.SERVICE_ONLINE
     )
-    actions, disabled = view.allowed_actions(bot={}, kind=BotInventoryKind.SERVICE)
+    actions, disabled = view.allowed_actions(bot=bot, kind=BotInventoryKind.SERVICE)
     assert actions == (BotAction.VIEW, BotAction.CHAT)
     assert disabled == {}
     assert view.service_cards(bots=[{"bot_id": "service"}]) == {"service": ()}

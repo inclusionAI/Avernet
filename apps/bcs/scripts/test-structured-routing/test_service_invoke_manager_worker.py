@@ -1,37 +1,10 @@
 #!/usr/bin/env python3
-"""
-End-to-end test for the Part B service-invocation flow with a
-manager-worker group + AntDing callback (Part B Task 5/Task 7).
+"""Manager-worker Service Session E2E.
 
-Walks the full chain:
-
-  1. POST /groups            → create a manager_worker group with
-                              service_spec.callback_config (AntDing)
-  2. POST /services/{group_id}/sessions
-                            → external service-invocation entry,
-                              authenticated by the api_key seeded at
-                              setup time (X-BCS-Service-Key header).
-  3. WS /ws (workbench)     → subscribe and observe events.
-  4. Manager bot dispatches via bcs_assign_task; Worker executes.
-  5. Manager bot calls bcs_task_complete → BCS completes the
-     service-invocation Session and dispatches the post-completion
-     callback against service_spec.callback_config.channels.
-  6. The test polls Session.callback_status until it reaches a
-     terminal state (succeeded / partial_failed / failed) and asserts
-     the dispatcher actually fired.
-
-Important:
-- This test uses the public AntDing prod endpoint with bogus
-  credentials, so the channel always fails (returns business
-  success=false). What matters is that BCS records a terminal
-  callback_status — proving the end-to-end pipeline ran.
-- The api_key + bound_groups must be configured **before** BCS
-  starts (Part B Task 3 validates them at startup).
-
-Setup.sh must have been run first.
-
-Usage:
-    bash scripts/test-structured-routing/run.sh service-invoke-manager-worker
+Create an ordinary Group, invoke it with the configured service API key,
+observe the manager-worker task round trip, then assert Session completion.
+No external completion callback is configured or sent.
+Run setup.sh first, then run.sh service-invoke-manager-worker.
 """
 
 import asyncio
@@ -77,14 +50,9 @@ GRAY = "\033[0;90m"
 NC = "\033[0m"
 
 BOT_RESPONSE_TIMEOUT = 180  # LLM inference + manager_worker round-trip
-CALLBACK_POLL_TIMEOUT = 30
-CALLBACK_POLL_INTERVAL = 1.0
+SESSION_POLL_TIMEOUT = 30
+SESSION_POLL_INTERVAL = 1.0
 
-DEFAULT_ANTDING = {
-    "access_key_id": os.environ.get("BCS_TEST_ANTDING_AK", "replace-with-antding-ak"),
-    "access_key_secret": os.environ.get("BCS_TEST_ANTDING_SK", "replace-with-antding-sk"),
-    "robot_code": os.environ.get("BCS_TEST_ANTDING_ROBOT", "replace-with-antding-robot"),
-}
 
 
 def ok(msg):
@@ -202,7 +170,7 @@ class WorkbenchObserver:
 
 
 async def phase_create_service_group(client):
-    info("Phase 1: create manager_worker group with service_spec + AntDing callback")
+    info("Phase 1: create manager_worker group")
     # The api_key seeded in setup.sh is bound to SERVICE_GROUP_ID; we
     # must create the group with that exact id so the auth middleware
     # accepts the X-BCS-Service-Key header.
@@ -217,18 +185,6 @@ async def phase_create_service_group(client):
             {"bot_uuid": DEVOPS_UUID, "role": "worker"},
         ],
         "group_strategy": "manager_worker",
-        "service_spec": {
-            "max_concurrency": 2,
-            "timeout_seconds": 300,
-            "callback_config": {
-                "channels": [
-                    {
-                        "type": "antding",
-                        **DEFAULT_ANTDING,
-                    }
-                ]
-            },
-        },
     }
     resp = await http_post(client, "/groups", token=COORD_TOKEN, json_body=body)
     assert resp.status_code == 200, f"create group failed: {resp.status_code} {resp.text}"
@@ -239,11 +195,8 @@ async def phase_create_service_group(client):
     )
     ok(f"Service group created: {group_id}")
 
-    # Verify service_spec persisted via GET
     g = (await http_get(client, f"/groups/{group_id}")).json()
-    spec = g.get("service_spec") or {}
-    assert spec.get("max_concurrency") == 2, f"max_concurrency not persisted: {spec}"
-    ok(f"service_spec persisted (max_concurrency={spec.get('max_concurrency')})")
+    assert "service_spec" not in g
     return group_id
 
 
@@ -262,11 +215,6 @@ async def phase_invoke_via_service_api(client, group_id):
             "expected_workers": ["DBA"],
         },
         "session_title": "DB perf audit",
-        "meta": {
-            "callback_target": {
-                "user_id": os.environ.get("BCS_TEST_ANTDING_USER_ID", "11111111"),
-            }
-        },
     }
     resp = await http_post(client, f"/services/{group_id}/sessions",
                            headers=headers, json_body=body)
@@ -275,7 +223,7 @@ async def phase_invoke_via_service_api(client, group_id):
     session_id = data["session_id"]
     assert data.get("activation_count") == 1
     assert data.get("reused") is False
-    assert data.get("callback_status") == "pending"
+    assert "callback_status" not in data
     ok(f"Invocation accepted: {session_id} (activation_count=1, reused=false)")
     return session_id
 
@@ -336,39 +284,24 @@ async def phase_send_user_kickoff(group_id, session_id):
         await obs.close()
 
 
-async def phase_assert_callback_terminal(client, group_id, session_id):
-    """Polls the service-invocation read endpoint until callback_status
-    reaches a terminal state. The AntDing prod endpoint returns
-    success=false for our bogus credentials, so we expect 'failed' or
-    'partial_failed' (but assert only on 'in {terminal}', not on a
-    specific value, so the test stays robust if real creds are
-    plugged in later)."""
-    info("Phase 4: poll callback_status for terminal state")
-    headers = {"X-BCS-Service-Key": SERVICE_API_KEY}
-    deadline = time.time() + CALLBACK_POLL_TIMEOUT
-    last_status = None
+async def phase_assert_session_completed(client, group_id, session_id):
+    """Wait for completion facts without a post-completion callback dependency."""
+    info("Phase 4: poll Session completion")
+    deadline = time.time() + SESSION_POLL_TIMEOUT
     while time.time() < deadline:
-        resp = await http_get(
-            client,
-            f"/services/{group_id}/sessions/{session_id}",
-            headers=headers,
-        )
+        resp = await http_get(client, f"/services/{group_id}/sessions/{session_id}",
+                              headers={"X-BCS-Service-Key": SERVICE_API_KEY})
         if resp.status_code != 200:
             fail_msg(f"GET invocation failed: {resp.status_code} {resp.text}")
             return False
         body = resp.json()
-        last_status = body.get("callback_status")
-        if last_status in ("succeeded", "partial_failed", "failed"):
-            ok(f"Session.callback_status reached terminal: {last_status}")
-            ok(f"  status={body.get('status')} "
-               f"latest_activation_seq={body.get('latest_activation_seq')}")
+        assert "callback_status" not in body
+        if body.get("status") == "completed":
+            assert body.get("completed_at") is not None
+            ok("Service Session completed")
             return True
-        await asyncio.sleep(CALLBACK_POLL_INTERVAL)
-
-    fail_msg(
-        f"callback_status never reached terminal in {CALLBACK_POLL_TIMEOUT}s; "
-        f"last={last_status}"
-    )
+        await asyncio.sleep(SESSION_POLL_INTERVAL)
+    fail_msg(f"Session did not complete in {SESSION_POLL_TIMEOUT}s")
     return False
 
 
@@ -395,10 +328,10 @@ async def main():
         if not await phase_send_user_kickoff(group_id, session_id):
             failures.append("Phase 3 (manager-worker round trip)")
 
-        if not failures and not await phase_assert_callback_terminal(
+        if not failures and not await phase_assert_session_completed(
             client, group_id, session_id
         ):
-            failures.append("Phase 4 (callback dispatcher)")
+            failures.append("Phase 4 (Session completion)")
 
     print()
     if failures:

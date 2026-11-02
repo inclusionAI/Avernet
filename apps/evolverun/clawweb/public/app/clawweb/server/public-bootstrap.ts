@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type RequestHandler } from "express";
 import { withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import compression from "compression";
 import cookieParser from "cookie-parser";
@@ -14,6 +14,12 @@ import {
   createRunsRouter,
   createWorkflowsRouter,
 } from "@avernet/workflow/server";
+import { createSubworkflowObservabilityRouter } from "@avernet/workflow/server/routes/subworkflow-observability";
+import { createSubworkflowAuthorizer } from "@avernet/workflow/server/routes/subworkflow-authorization";
+import { createPackVersionRouter } from "@avernet/workflow/server/routes/pack-version";
+import { readPackOperationFromRemote, reconcilePackOperationFromRemote } from "@avernet/workflow/server/services/pack-version-remote";
+import { createPackScriptsRouter } from "@avernet/workflow/server/routes/pack-scripts";
+import { readPackScriptsFromRemote } from "@avernet/workflow/server/services/pack-script-read-service";
 import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
 import { createWorkflowVersionComparisonService } from "@avernet/workflow/server/services/workflow-version-comparison-service";
 import { createWorkflowVersionSourceService } from "@avernet/workflow/server/services/workflow-version-source-service";
@@ -48,6 +54,22 @@ import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
+
+/** Non-browser clients may omit Origin, but must still send the CSRF header. */
+const packWriteGuard: RequestHandler = (req, res, next) => {
+  const origin = req.get("origin");
+  if (req.method === "GET" || req.method === "HEAD") {
+    if ((origin && origin !== `${req.protocol}://${req.get("host")}`) || req.get("sec-fetch-site") === "cross-site") {
+      res.status(403).json({ error: "Forbidden", code: "CSRF_REJECTED" }); return;
+    }
+    next(); return;
+  }
+  if (req.get("x-pack-version-csrf") !== "1" || (origin && origin !== `${req.protocol}://${req.get("host")}`)
+    || req.get("sec-fetch-site") === "cross-site") {
+    res.status(403).json({ error: "Forbidden", code: "CSRF_REJECTED" }); return;
+  }
+  next();
+};
 
 export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
   return {
@@ -186,6 +208,38 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
       const facadeRepo = new FacadeBindingRepository(db);
+      // The public development identity can come from an unverified cookie.
+      // Do not expose scripts until a verified principal and Pack ACL exist.
+      app.use("/api/workflows", createPackScriptsRouter({
+        enabled: false,
+        resolvePrincipal: async () => null,
+        botPermRepo,
+        workflowSpecRepo,
+        supportsVersionedSnapshots: true,
+        supportsVersionedPackResolution: true,
+        readSnapshot: (workflowId, packId, version) => readPackScriptsFromRemote({
+          db, gitConfig: autoHealGitConfig, gitAuthor: autoHealAuthor, workflowId, packId, version,
+        }),
+      }));
+      const resolvePackPrincipal = async (request: express.Request) => {
+        const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+        // Local cookies may select arbitrary names, so only the fixed local developer
+        // identity is eligible for these sensitive public-host operations.
+        return identity?.userId === "dev_local" ? { actorId: "dev_local" } : null;
+      };
+      const packContext = { db, gitConfig: autoHealGitConfig, gitAuthor: autoHealAuthor };
+      // Snapshot reads require the same verified local principal and edit ACL as
+      // journal recovery. File writes remain unavailable on the public host.
+      app.use(/^\/api\/workflows\/[^/]+\/(?:pack-version|pack-operations\/[^/]+(?:\/reconcile)?)\/?$/i, packWriteGuard);
+      app.use("/api/workflows", createPackVersionRouter({
+        resolvePrincipal: resolvePackPrincipal,
+        botPermRepo, workflowSpecRepo,
+        readSnapshot: (workflowId, packId, version) => readPackScriptsFromRemote({
+          ...packContext, workflowId, packId, version, includeVersionFiles: true,
+        }),
+        readOperation: (requestId, workflowId, actorId) => readPackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
+        reconcileOperation: (requestId, workflowId, actorId) => reconcilePackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
+      }));
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
@@ -198,6 +252,15 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       app.use("/api/workflows", createWorkflowNodeStatsRouter(
         null, null, createWorkflowVersionComparisonService(db), botPermRepo,
       ));
+      // The public host only has a verified local-development identity. Production
+      // hosts must inject their own verified principal instead of trusting headers.
+      const authorizeSubworkflows = createSubworkflowAuthorizer(async request => {
+        const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+        if (!identity) return null;
+        return { actorId: identity.userId, isAdmin: identity.userId === "dev_local"
+          || await adminUserRepo.hasRole([identity.userId, identity.userName], "admin") };
+      }, botPermRepo);
+      app.use("/api/runs", createSubworkflowObservabilityRouter(db, authorizeSubworkflows));
       app.use("/api/runs", createRunsRouter(
         flowRunRepo,
         nodeExecRepo,
@@ -210,7 +273,9 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         execStepLogRepo,
         facadeRepo,
       ));
+      app.use(["/api/auto-heal/save", "/api/auto-heal/deploy"], packWriteGuard);
       app.use("/api/auto-heal", createAutoHealRouter({
+        resolvePrincipal: resolvePackPrincipal,
         db,
         flowRunRepo,
         workflowSpecRepo,

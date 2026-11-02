@@ -245,6 +245,20 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 标注请求：`{ "layer": "effect", "correct": true, "reason": "原操作前后已核验", "evidence_ids": ["…"] }`。`layer` 为 `delivery / response / effect`；`correct` 为 `true / false / null`。标注追加保留，不覆盖 Agent 的判断。
 
 
+### Cron 发送前观察
+
+真实非 Debug 的 OpenClaw Cron 尚在运行、且本次未发送恢复指引时，Agent 在现有阶段回报接口提交：
+
+```json
+{"kind":"assessment","phase":"assess","decision":"wait_cron","summary":"本轮 Cron 的实际进展、运行状态及等待依据","evidence_ids":["受控现场读取的证据 ID"]}
+```
+
+任务仍为 `running / assess`，后端在既有 Task JSON 保存 `cronWait: { startedAt, deadlineAt }`，首次设置固定 5 分钟期限。重复评估、新日志和执行恢复均不延长期限，runner 复用约 60 秒的轮询续跑 Agent。到期再次提交 `wait_cron` 返回 HTTP 422，要求按最新证据收口。窗口内本轮已结束时，仍可使用原评估分支，离开评估后清除 `cronWait`；发送成功后的效果观察沿用原期限。
+
+Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/running`，结合执行历史与原会话核对本轮；空列表、索引缺失或当前文件末尾不证明本轮已完成。消息工具对正在运行的对应 Cron 返回 `cron_run_running`、`dispatched=false`；状态不可核实则返回 `cron_state_unavailable`，均不实际发送。
+
+到期刷新后仍在运行或本轮结果未确认，按 `owner_handoff` 协议转交并结束，说明具体 Cron、已观察时长、实际进展、待核查事项和未发送消息的事实；未知结果使用 `effect=unknown`，不宣称 Cron 已超时失败。用户续聊和其他独立、已核实的转交条件继续适用。Debug／仿真及已 accepted／unknown 投递后的效果回收不进入此等待；没有新增数据库表、业务状态或 AIS Base 配置。
+
 ### 用户续聊后正常结束
 
 任何活动阶段核实原始故障后已有真实用户新消息时，Agent 回报
@@ -283,9 +297,13 @@ Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化�
 
 ## 失败监控与排障日志
 
-自愈沿用 `[session-recovery]` 前缀，通过现有 console 输出单行 JSON；Repair 共用执行监测使用 `[agent-execution-monitor]`。日志字段白名单与错误脱敏位于 Repair 的 `common/logging.ts`，不依赖工作流日志或继承工作流上下文。内部 Host 仍写入既有 `/home/admin/logs/clawweb/start.log`，不新增 logger、日志文件、轮转或部署配置。监控继续按 `job`、`event` 筛选，失败事件和计数口径不变。
+自愈日志由 Repair 的 `common/logging.ts` 写入 `~/logs/clawweb/clawweb-session-recovery.log`，不重复输出到 console。每行以容器本地时间 `yyyy-MM-dd HH:mm:ss.SSS` 开头，随后是 `[session-recovery]` 和单行 JSON；JSON 内的 `ts` 仍为 UTC ISO 时间。日志字段白名单和错误脱敏保持不变，不依赖工作流日志或继承工作流上下文。Repair 共用执行监测仍通过原 console 入口输出 `[agent-execution-monitor]`。
 
-分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。不要按 console 级别筛选：既有后台日志入口统一使用 `console.info`，失败语义在 `event` / `outcome` 中。
+沿用现有文件日志的写入方式：日志入口确保目录存在，首次追加写入时创建文件，不在启动脚本中单独预建文件。轮转与保留由部署配置管理，应用只追加固定文件，不自行改名或滚动；每次写入重新打开路径，支持 `copytruncate` 及文件替换。写入失败仅报告一次目的文件错误，恢复后可重新报告，不影响任务执行。
+
+内部 Host 的采集路径为 `/home/admin/logs/clawweb/clawweb-session-recovery.log`，已有 `clawweb/*.log` 的 logrotate 规则覆盖此文件。AntMonitor 和日志查询平台需采集这个文件，并确认预发与生产机器覆盖范围。时间戳解析从第 0 位开始，格式为 `yyyy-MM-dd HH:mm:ss.SSS`，与容器本地时区一致；不要使用 JSON 内位置不固定的 UTC `ts` 作为采集时间。
+
+分钟统计仅筛选 `job=session_recovery_task` 且 `event` 为下表两个值，对 `count` 求和；按事件类型和控制面环境分组。失败语义在 `event` / `outcome` 中，不按日志级别筛选。
 
 | event | count | 计数边界 |
 | --- | --- | --- |

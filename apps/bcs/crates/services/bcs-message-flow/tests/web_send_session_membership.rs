@@ -26,6 +26,8 @@ use session_support::{StaticSessionManagement, test_session};
 fn web_send(group_id: &str, from: &str, session: Option<&str>, mention: &str) -> WebSendCommand {
     WebSendCommand {
         caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".into(),
             staff_no: "1".into(),

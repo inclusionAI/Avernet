@@ -241,6 +241,9 @@ async def get_connection(
         (DesktopConnection if result.transport_mode else Connection)(
             engine=result.engine,
             expires_at=result.expires_at,
+            # 用户灰度负结果必须透传到 wire——schema default False 会在缺席时
+            # 把核心层的"明确拒绝"冲掉，名单外用户在可推导直连拓扑下绕回 A2A。
+            a2a_withheld=result.a2a_withheld,
             **(
                 {"transport_mode": result.transport_mode}
                 if result.transport_mode

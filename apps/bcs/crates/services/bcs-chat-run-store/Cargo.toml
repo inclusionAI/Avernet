@@ -14,10 +14,14 @@ bcs-db-api = { workspace = true }
 bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-test-support = { workspace = true }
+tempfile = { workspace = true }
 async-trait = { workspace = true }
 bcs-cache-api = { workspace = true }
 bcs-cache-local = { workspace = true }

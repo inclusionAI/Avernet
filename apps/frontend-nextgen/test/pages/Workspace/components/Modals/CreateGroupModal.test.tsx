@@ -7,6 +7,8 @@ import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 // 建群表单重度使用 Radix Select/Popover 等组件，jsdom 下异步渲染开销大：
 // 并行全量（--maxWorkers=50%）下个别用例在默认 30s 随机临界超时。
@@ -101,6 +103,7 @@ beforeEach(() => {
       summary: { participants: 1, nodes: 1, initial_nodes: [] },
       participants: [{ binding: 'role-1', display_name: '助手', required: true, assigned: false }],
       errors: [],
+      warnings: [],
     },
   });
 });
@@ -357,6 +360,7 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
       summary: { initial_nodes: ['node-1'] },
       participants: [{ binding: 'role-1', display_name: 'Alpha', required: true }],
       errors: [],
+      warnings: [],
       graph: {
         graph_mode: 'acyclic',
         nodes: [
@@ -407,6 +411,37 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
   expect(screen.getByRole('button', { name: '重新编辑' })).toHaveClass('text-xs');
 });
 
+it('previews a validation-only Loop but blocks creation until the server permits execution', async () => {
+  const response = JSON.parse(readFileSync(resolve(__dirname, '../../../../../../bcs/tests/fixtures/fixed_loop_preview.json'), 'utf8'));
+  const validate = jest.mocked(collaborationDefinitionService.validate);
+  validate.mockResolvedValueOnce({ ok: true, data: response });
+  renderModal({ activeIdentity: botIdentity });
+  fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  const yaml = readFileSync(resolve(__dirname, '../../../../../../bcs/tests/fixtures/fixed_loop_authoring.yaml'), 'utf8');
+  fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: yaml } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  expect(await screen.findByText(/暂不能创建协作群/)).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('VALIDATION_ONLY_FEATURE');
+  expect(screen.getByRole('status')).toHaveTextContent('$.runtime.state_machine.version');
+  expect(screen.getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  expect(gs.createGroup).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '重新编辑' }));
+  validate.mockResolvedValueOnce({ ok: true, data: { ...response, warnings: [] } });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+  await waitFor(() => expect(screen.queryByText(/暂不能创建协作群/)).not.toBeInTheDocument());
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'loop-group' } });
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+  await waitFor(() => expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({
+    definitionYaml: yaml, strategy: 'state_machine', participantBindings: [{ binding: 'writer', actor_ids: ['b1'] }],
+  })));
+});
+
 it('shows YAML validation errors on the left side of the footer action row', async () => {
   const validate = collaborationDefinitionService.validate as jest.Mock;
   validate.mockResolvedValueOnce({
@@ -416,6 +451,7 @@ it('shows YAML validation errors on the left side of the footer action row', asy
       summary: { participants: 0, nodes: 0, initial_nodes: [] },
       participants: [],
       errors: [{ code: 'INVALID_YAML', path: '$', message: '角色定义无效' }],
+      warnings: [],
     },
   });
   renderModal({ activeIdentity: botIdentity });
@@ -424,7 +460,7 @@ it('shows YAML validation errors on the left side of the footer action row', asy
   fireEvent.change(screen.getByLabelText('协作定义 YAML'), { target: { value: 'participants: invalid' } });
   fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
 
-  const error = await screen.findByText('角色定义无效');
+  const error = await screen.findByText(/角色定义无效/);
   const footer = screen.getByTestId('create-group-modal-footer');
   expect(footer).toContainElement(error);
   expect(screen.getByTestId('create-group-modal-body')).not.toContainElement(error);

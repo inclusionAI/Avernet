@@ -54,6 +54,8 @@ export interface BotConnectionDto {
   transport_mode?: 'direct' | 'relay';
   engine: string;
   expires_at: string;
+  /** 用户灰度负结果（服务端治理后明确拒绝 A2A）——与 sockets 缺 a2a 是两个语义 */
+  a2a_withheld?: boolean;
   sockets: BotSocketDto[];
 }
 

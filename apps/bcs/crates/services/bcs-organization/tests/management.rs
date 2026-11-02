@@ -233,6 +233,7 @@ async fn register_bot(ctx: &TestContext, provider: &ProviderFixture, bot_uuid: &
                 scopes: vec!["campaign".to_string()],
                 bot_uuid: Some(bot_uuid.to_string()),
                 connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
+                initial_caller: None,
             },
         )
         .await

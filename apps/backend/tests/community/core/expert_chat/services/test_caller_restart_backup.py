@@ -68,5 +68,58 @@ async def test_real_coding_backup_transport_failure_still_upgrades_caller():
     result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
                                          owner_id=OWNER_ID, migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
-    svc._baas.post_bots_api.assert_called_once()
+    assert svc._baas.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
     build.upgrade_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['failed', 'partial_success', 'legacy'])
+@pytest.mark.parametrize('block_on_failure', [False, True])
+async def test_confirmed_fastdisk_caller_result_follows_guard(outcome, block_on_failure, monkeypatch, caplog):
+    from unittest.mock import Mock
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import command
+    from agentclaw.community.core.bot_management.engines.registry import get_engine_provisioning_registry
+    from tests.community.core.bot_management.aicoding.test_restart_backup import partial_response, response
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, detection_command
+    import re
+
+    config = Mock()
+    config.get_value.return_value = block_on_failure
+    strategy = get_engine_provisioning_registry().resolve('claude_code')
+    monkeypatch.setattr(strategy, '_common_config_provider', lambda: config)
+    svc, instances, _, _, bots, bindings, build, *_ = _make_service()
+    bots.get_by_id_and_owner.return_value = {
+        'bot_id': BOT_ID, 'owner_id': OWNER_ID, 'active_engine': 'claude_code'}
+    svc._baas.list_devices_by_bot_uuid = Mock(return_value=[{'provider_device_id': 'physical', 'status': 'ACTIVE'}])
+
+    def execute(**kw):
+        cmd = kw['payload']['cmd']
+        if cmd == detection_command():
+            return detection()
+        operation = re.search(r'[a-f0-9]{32}', cmd).group()
+        if outcome == 'partial_success':
+            assert cmd in {command('start', operation), command('status', operation)}
+            return partial_response(operation_id=operation)
+        assert cmd == command('start', operation)
+        return response(outcome, operation_id=operation)
+
+    svc._baas.post_bots_api = Mock(side_effect=execute)
+    build.upgrade_async = AsyncMock(return_value={'publish_id': 77})
+    if block_on_failure and outcome != 'partial_success':
+        with pytest.raises(ConnectionError, match='快盘'):
+            await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
+                                         owner_id=OWNER_ID, migration_path='/artifact')
+        build.upgrade_async.assert_not_called()
+    else:
+        result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
+                                              owner_id=OWNER_ID, migration_path='/artifact')
+        assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
+        build.upgrade_async.assert_awaited_once()
+    assert svc._baas.post_bots_api.call_count == (3 if outcome == 'partial_success' else 2)
+    if outcome == 'partial_success':
+        assert 'phase=verify status=partial_success' in caplog.text
+        assert 'AICODING_RESTART_FAILED' not in caplog.text
+    config.get_value.assert_called_once()
+    build.release_async.assert_not_called()
+    instances.update_instance.assert_not_called()
+    bindings.update_status.assert_not_called()

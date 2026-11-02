@@ -1,411 +1,240 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  type Node,
-  type Edge,
-  type NodeProps,
-  type OnConnect,
-  Handle,
-  Position,
-  useReactFlow,
-  ReactFlowProvider,
+  ReactFlow, Background, Controls, MiniMap, ReactFlowProvider, useReactFlow,
+  type Edge, type Connection, type OnNodesChange, type OnEdgesChange, type OnBeforeDelete,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useEditorStore, type EditorNode as StoreEditorNode, type ExecutorType, EXECUTOR_TYPES } from '../editor/store'
+import { useEditorStore } from '../editor/store'
+import { canConnect, computeDagLayout, dependencies } from '../editor/graph'
+import { getResultBranches } from '../editor/contracts'
+import { NODE_CATALOG, createEditorNode } from '../editor/nodeCatalog'
+import EditorFlowNode, { type EditorCanvasNode } from './editor/EditorFlowNode'
+import EditorCanvasToolbar from './editor/EditorCanvasToolbar'
+import { branchHandleId, branchIdFromHandle, canvasTheme, canvasThemeClasses, GENERAL_SOURCE_HANDLE, NODE_DRAG_TYPE } from './editor/CanvasPresentation'
 
-/** Layout constants for auto-arranging DAG nodes */
-const LAYOUT_LAYER_GAP_Y = 160   // vertical gap between layers
-const LAYOUT_NODE_GAP_X = 260    // horizontal gap between nodes in same layer
-const LAYOUT_BRANCH_OFFSET_X = 60 // extra horizontal offset for branch nodes
-const LAYOUT_ORIGIN_X = 80        // left margin
-const LAYOUT_ORIGIN_Y = 60        // top margin
+const nodeTypes = { editorNode: EditorFlowNode }
 
-/**
- * Compute DAG layout positions using topological layering.
- *
- * Algorithm:
- * 1. Build adjacency from `dependsOn` → assign each node to the layer after its deepest dependency
- * 2. Group nodes by layer, then spread horizontally within each layer
- * 3. Branch nodes (same branchId) are grouped together and offset slightly
- *
- * Returns a map of nodeId → { x, y }.
- */
-function computeDagLayout(nodes: Array<{ id: string; dependsOn?: string[]; branchId?: string }>): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>()
-  if (nodes.length === 0) return positions
-
-  const nodeMap = new Map(nodes.map(n => [n.id, n]))
-  const layerOf = new Map<string, number>()
-
-  // Compute layer for each node (longest path from root)
-  function getLayer(nodeId: string): number {
-    if (layerOf.has(nodeId)) return layerOf.get(nodeId)!
-    const node = nodeMap.get(nodeId)
-    if (!node || !node.dependsOn || node.dependsOn.length === 0) {
-      layerOf.set(nodeId, 0)
-      return 0
-    }
-    let maxDepLayer = 0
-    for (const dep of node.dependsOn) {
-      const depLayer = getLayer(dep)
-      if (depLayer >= maxDepLayer) maxDepLayer = depLayer + 1
-      else if (depLayer + 1 > maxDepLayer) maxDepLayer = depLayer + 1
-    }
-    // Ensure node is at least one layer after all its dependencies
-    let layer = 0
-    for (const dep of node.dependsOn) {
-      layer = Math.max(layer, getLayer(dep) + 1)
-    }
-    layerOf.set(nodeId, layer)
-    return layer
-  }
-
-  // Compute layers for all nodes
-  for (const node of nodes) {
-    getLayer(node.id)
-  }
-
-  // Group nodes by layer
-  const maxLayer = Math.max(...layerOf.values(), 0)
-  const layers: Array<string[]> = Array.from({ length: maxLayer + 1 }, () => [])
-  for (const node of nodes) {
-    const layer = layerOf.get(node.id) ?? 0
-    layers[layer].push(node.id)
-  }
-
-  // Sort within each layer: group by branchId, then by original order
-  for (const layer of layers) {
-    layer.sort((a, b) => {
-      const nodeA = nodeMap.get(a)!
-      const nodeB = nodeMap.get(b)!
-      const branchA = nodeA.branchId ?? ''
-      const branchB = nodeB.branchId ?? ''
-      if (branchA !== branchB) {
-        // Non-branch nodes first, then branch groups together
-        if (!branchA) return -1
-        if (!branchB) return 1
-        return branchA.localeCompare(branchB)
-      }
-      return 0
-    })
-  }
-
-  // Assign positions
-  for (let layerIdx = 0; layerIdx < layers.length; layerIdx++) {
-    const layerNodes = layers[layerIdx]
-    // Center the layer horizontally
-    const totalWidth = (layerNodes.length - 1) * LAYOUT_NODE_GAP_X
-    const startX = LAYOUT_ORIGIN_X + Math.max(0, (800 - totalWidth) / 2 - LAYOUT_ORIGIN_X)
-
-    // Track branch group offsets
-    let currentBranchOffset = 0
-
-    for (let nodeIdx = 0; nodeIdx < layerNodes.length; nodeIdx++) {
-      const id = layerNodes[nodeIdx]
-      const node = nodeMap.get(id)!
-      const branchId = node.branchId
-
-      // Check if previous node in same branch group
-      const prevId = nodeIdx > 0 ? layerNodes[nodeIdx - 1] : null
-      const prevBranch = prevId ? nodeMap.get(prevId)?.branchId : null
-      if (branchId && branchId === prevBranch) {
-        // Same branch group — tighter spacing
-        currentBranchOffset += LAYOUT_BRANCH_OFFSET_X
-      } else {
-        currentBranchOffset = 0
-      }
-
-      const x = startX + nodeIdx * LAYOUT_NODE_GAP_X + currentBranchOffset
-      const y = LAYOUT_ORIGIN_Y + layerIdx * LAYOUT_LAYER_GAP_Y
-      positions.set(id, { x, y })
-    }
-  }
-
-  return positions
-}
-
-const EXECUTOR_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  'embedded-agent': { bg: '#eff6ff', border: '#3b82f6', text: '#1d4ed8' },
-  action: { bg: '#faf5ff', border: '#a855f7', text: '#7e22ce' },
-  human: { bg: '#fffbeb', border: '#f59e0b', text: '#b45309' },
-  'loop-group': { bg: '#f0fdfa', border: '#14b8a6', text: '#0f766e' },
-  collaboration: { bg: '#fff1f2', border: '#f43f5e', text: '#be123c' },
-  done: { bg: '#f9fafb', border: '#9ca3af', text: '#4b5563' },
-  subagent: { bg: '#eef2ff', border: '#6366f1', text: '#4338ca' },
-  'bcs-route': { bg: '#ecfeff', border: '#06b6d4', text: '#0e7490' },
-  'mcp-call': { bg: '#f5f3ff', border: '#8b5cf6', text: '#6d28d9' },
-  'cli-script': { bg: '#f7fee7', border: '#84cc16', text: '#4d7c0f' },
-  subworkflow: { bg: '#fff7ed', border: '#f97316', text: '#c2410c' },
-  approval: { bg: '#fdf2f8', border: '#ec4899', text: '#be185d' },
-}
-
-interface EditorNodeData {
-  label: string
-  nodeId: string
-  executorType: string
-  executorDetail: string
-  branchId: string | null
-  hasError: boolean
-  [key: string]: unknown
-}
-
-type EditorNode = Node<EditorNodeData>
-
-function EditorNodeComponent({ data }: NodeProps<EditorNode>) {
-  const colors = EXECUTOR_COLORS[data.executorType] ?? EXECUTOR_COLORS.done
-  return (
-    <div
-      className="min-w-[140px] rounded-lg border-2 bg-white px-3 py-2 shadow-sm"
-      style={{ borderColor: colors.border, backgroundColor: colors.bg }}
-    >
-      <Handle type="target" position={Position.Top} className="!bg-gray-400" />
-      <div className="text-center">
-        <div className="font-medium text-xs" style={{ color: colors.text }}>
-          {data.label}
-        </div>
-        <div className="mt-0.5 text-[10px]" style={{ color: colors.text, opacity: 0.7 }}>
-          {data.executorType}
-        </div>
-        {data.executorDetail && (
-          <div className="mt-0.5 truncate text-[9px] font-mono" style={{ color: colors.text, opacity: 0.6 }}>
-            {data.executorDetail}
-          </div>
-        )}
-        {data.branchId && (
-          <div className="mt-0.5 inline-block rounded-full bg-white/60 px-1.5 py-0.5 text-[9px] font-medium" style={{ color: colors.text }}>
-            {data.branchId}
-          </div>
-        )}
-        {data.hasError && (
-          <div className="mt-0.5 text-[10px] font-bold text-red-500">!</div>
-        )}
-      </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-gray-400" />
-    </div>
-  )
-}
-
-const nodeTypes = { editorNode: EditorNodeComponent }
-
-interface EditorCanvasProps {
+export interface EditorCanvasProps {
   onNodeClick: (nodeId: string) => void
 }
 
 function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
-  const { spec, addNode, addEdge, removeNode, removeEdge, moveNode, selectedNodeId, selectNode, validationErrors } = useEditorStore()
-  const wrapperRef = useRef<HTMLDivElement>(null)
-  const { screenToFlowPosition } = useReactFlow()
+  const {
+    spec, positions, selectedNodeId, validationErrors, actionError, pendingEdits,
+    canUndo, canRedo, undo, redo, beginTransaction, endTransaction, setActionError,
+    addNode, addEdge, removeNode, removeEdge, moveNode, selectNode,
+  } = useEditorStore()
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  // MiniMap reads dimensions from the controlled user node, not only Flow's
+  // internal node. Keep measurements UI-only and stable when spec data changes.
+  const [measurements, setMeasurements] = useState<Record<string, { width: number; height: number }>>({})
+  const dragActive = useRef(false)
+  const droppedNodeId = useRef<string | null>(null)
+  const { screenToFlowPosition, setCenter, fitView, getNode } = useReactFlow<EditorCanvasNode>()
+  const hasPendingEdits = Object.keys(pendingEdits).length > 0
+  const layout = useMemo(() => computeDagLayout(spec?.nodes ?? []), [spec?.nodes])
 
-  const flowNodes: EditorNode[] = useMemo(() => {
-    if (!spec) return []
-    const errorNodeIds = new Set(
-      validationErrors.filter((e) => e.nodeId).map((e) => e.nodeId!),
-    )
-
-    // Compute DAG layout for nodes that lack saved positions
-    const nodesWithPositions = new Set<string>()
-    for (const node of spec.nodes) {
-      const editorNode = node as StoreEditorNode
-      if (editorNode._x != null && editorNode._y != null) {
-        nodesWithPositions.add(node.id)
-      }
+  const flowNodes: EditorCanvasNode[] = useMemo(() => (spec?.nodes ?? []).map((node) => {
+    const legacy = typeof node._x === 'number' && typeof node._y === 'number' && Number.isFinite(node._x) && Number.isFinite(node._y)
+      ? { x: node._x, y: node._y } : undefined
+    return {
+      id: node.id, type: 'editorNode',
+      position: positions[node.id] ?? legacy ?? layout.get(node.id) ?? { x: 0, y: 0 },
+      selected: selectedNodeId === node.id,
+      measured: measurements[node.id],
+      ariaLabel: `${node.title || node.id} · ${node.executor?.type ?? '未指定类型'}`,
+      data: { node, errors: validationErrors.filter((error) => error.nodeId === node.id).map((error) => error.message) },
     }
-
-    // Compute auto-layout for all nodes — will be used as fallback
-    const layoutPositions = computeDagLayout(
-      spec.nodes.map(n => ({
-        id: n.id,
-        dependsOn: n.dependsOn,
-        branchId: (n as StoreEditorNode).branchId,
-      }))
-    )
-
-    return spec.nodes.map((node) => {
-      const exec = node.executor as Record<string, unknown> | undefined
-      let executorDetail = ''
-      const execType = node.executor?.type ?? 'done'
-      if (execType === 'mcp-call' && exec) {
-        executorDetail = `${exec.server ?? ''}/${exec.tool ?? ''}`
-      } else if (execType === 'bcs-route' && exec?.target) {
-        executorDetail = String(exec.target)
-      } else if (execType === 'cli-script' && exec?.command) {
-        executorDetail = String(exec.command)
-      }
-      const editorNode = node as StoreEditorNode
-      // Prefer saved position, fall back to DAG auto-layout
-      const savedPos = (editorNode._x != null && editorNode._y != null)
-        ? { x: editorNode._x, y: editorNode._y }
-        : null
-      const autoPos = layoutPositions.get(node.id) ?? { x: 0, y: 0 }
-
-      return {
-        id: node.id,
-        type: 'editorNode' as const,
-        position: savedPos ?? autoPos,
-        data: {
-          label: node.title || node.id,
-          nodeId: node.id,
-          executorType: execType,
-          executorDetail,
-          branchId: editorNode.branchId ?? null,
-          hasError: errorNodeIds.has(node.id),
-        },
-      }
-    })
-  }, [spec, validationErrors])
+  }), [spec?.nodes, positions, selectedNodeId, validationErrors, layout, measurements])
 
   const flowEdges: Edge[] = useMemo(() => {
-    if (!spec) return []
-    const edges: Edge[] = []
-    for (const node of spec.nodes) {
-      const branchId = (node as any).branchId as string | undefined
-      for (const dep of node.dependsOn ?? []) {
-        const hasCycle = validationErrors.some((e) => e.type === 'cycle')
-        const isBranchEdge = !!branchId
-        edges.push({
-          id: `${dep}-${node.id}`,
-          source: dep,
-          target: node.id,
-          animated: isBranchEdge,
-          label: isBranchEdge ? branchId : undefined,
-          labelStyle: { fontSize: 9, fontWeight: 600, fill: '#6d28d9' },
-          labelBgStyle: { fill: '#f5f3ff', fillOpacity: 0.9 },
-          labelBgPadding: [4, 2] as [number, number],
-          labelBgBorderRadius: 4,
-          style: hasCycle
-            ? { stroke: '#ef4444', strokeWidth: 2 }
-            : isBranchEdge
-              ? { stroke: '#8b5cf6', strokeWidth: 1.5, strokeDasharray: '4 2' }
-              : { stroke: '#94a3b8' },
-          interactionWidth: 20,
-        })
+    const nodesById = new Map((spec?.nodes ?? []).map((node) => [node.id, node]))
+    return (spec?.nodes ?? []).flatMap((node) => [...new Set(dependencies(node))].flatMap((source) => {
+      const upstream = nodesById.get(source)
+      // Malformed imports retain their data, but dangling edges cannot be drawn.
+      if (!upstream) return []
+      const branch = node.branchId && getResultBranches(upstream)?.find((candidate) => candidate.branchId === node.branchId)
+      const id = JSON.stringify([source, node.id])
+      return [{
+        id, source, target: node.id, sourceHandle: branch ? branchHandleId(branch.branchId) : GENERAL_SOURCE_HANDLE,
+        selected: selectedEdgeId === id, label: branch ? branch.branchId : undefined,
+        ariaLabel: `${upstream.title || source} → ${node.title || node.id}${branch ? ` · ${branch.branchId}` : ''}`,
+        labelStyle: { fontSize: 11, fill: 'var(--canvas-foreground)' },
+        labelBgStyle: { fill: 'var(--canvas-card)' }, labelBgPadding: [6, 3] as [number, number], labelBgBorderRadius: 4,
+        style: { strokeWidth: selectedEdgeId === id ? 2.5 : 1.5 }, interactionWidth: 24,
+      }]
+    }))
+  }, [spec?.nodes, selectedEdgeId])
+  const selectedEdge = flowEdges.find((edge) => edge.id === selectedEdgeId)
+  const selection = selectedEdge ? 'edge' : selectedNodeId ? 'node' : null
+
+  const chooseNode = useCallback((nodeId: string) => {
+    selectNode(nodeId)
+    if (useEditorStore.getState().selectedNodeId !== nodeId) return
+    setSelectedEdgeId(null)
+    onNodeClick(nodeId)
+  }, [selectNode, onNodeClick])
+
+  const focusNode = useCallback((nodeId: string) => {
+    const node = flowNodes.find((item) => item.id === nodeId)
+    if (!node) return
+    const measured = getNode(nodeId)?.measured
+    void setCenter(node.position.x + (measured?.width ?? 240) / 2, node.position.y + (measured?.height ?? 140) / 2, { zoom: 1, duration: 240 })
+  }, [flowNodes, getNode, setCenter])
+
+  // Adding via the palette should not leave the selected node off-screen.
+  const previousIds = useRef(new Set(spec?.nodes.map((node) => node.id)))
+  useEffect(() => {
+    if (selectedNodeId && !previousIds.current.has(selectedNodeId) && droppedNodeId.current !== selectedNodeId) focusNode(selectedNodeId)
+    droppedNodeId.current = null
+    previousIds.current = new Set(spec?.nodes.map((node) => node.id))
+  }, [spec?.nodes, selectedNodeId, focusNode])
+  useEffect(() => { if (selectedNodeId) setSelectedEdgeId(null) }, [selectedNodeId])
+  useEffect(() => () => { if (dragActive.current) endTransaction() }, [endTransaction])
+
+  const connectionError = useCallback((connection: Connection | Edge) => {
+    const current = useEditorStore.getState().spec
+    if (!current) return '请先选择工作流'
+    const branchId = branchIdFromHandle(connection.sourceHandle)
+    if (connection.sourceHandle && connection.sourceHandle !== GENERAL_SOURCE_HANDLE && branchId === undefined) return '无法识别的分支端口'
+    return canConnect(current, connection.source, connection.target, branchId)
+  }, [])
+  const onConnect = useCallback((connection: Connection) => {
+    const error = connectionError(connection)
+    if (error) { setActionError(error); return }
+    addEdge(connection.source, connection.target, branchIdFromHandle(connection.sourceHandle))
+  }, [connectionError, setActionError, addEdge])
+
+  const startDrag = useCallback(() => {
+    if (dragActive.current) return
+    beginTransaction()
+    dragActive.current = true
+  }, [beginTransaction])
+  const onNodesChange: OnNodesChange<EditorCanvasNode> = useCallback((changes) => {
+    setMeasurements((previous) => {
+      let next = previous
+      for (const change of changes) {
+        if (change.type !== 'dimensions' || !change.dimensions) continue
+        const { width, height } = change.dimensions
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) continue
+        if (previous[change.id]?.width === width && previous[change.id]?.height === height) continue
+        if (next === previous) next = { ...previous }
+        next[change.id] = { width, height }
+      }
+      return next
+    })
+    // Handle deselections before selections: a batch may contain both.
+    const chosen = changes.find((change) => change.type === 'select' && change.selected)
+    if (chosen && chosen.type === 'select') chooseNode(chosen.id)
+    else if (changes.some((change) => change.type === 'select' && !change.selected && change.id === useEditorStore.getState().selectedNodeId)) selectNode(null)
+    for (const change of changes) {
+      if (change.type === 'position' && change.position) {
+        if (change.dragging) startDrag()
+        moveNode(change.id, change.position.x, change.position.y)
       }
     }
-    return edges
-  }, [spec, validationErrors])
+  }, [chooseNode, selectNode, moveNode, startDrag])
+  const onEdgesChange: OnEdgesChange = useCallback((changes) => {
+    const chosen = changes.find((change) => change.type === 'select' && change.selected)
+    if (chosen && chosen.type === 'select') {
+      selectNode(null)
+      if (useEditorStore.getState().selectedNodeId === null) setSelectedEdgeId(chosen.id)
+    } else if (changes.some((change) => change.type === 'select' && !change.selected && change.id === selectedEdgeId)) setSelectedEdgeId(null)
+  }, [selectNode, selectedEdgeId])
 
-  const onConnect: OnConnect = useCallback(
-    (params) => {
-      if (params.source && params.target) {
-        addEdge(params.source, params.target)
-      }
-    },
-    [addEdge],
-  )
+  const deleteSelection = useCallback((nodeIds: string[], edges: Edge[]) => {
+    if (Object.keys(useEditorStore.getState().pendingEdits).length) {
+      setActionError('请先应用或放弃未应用的编辑，再删除节点或连线。')
+      return
+    }
+    if (nodeIds.length) {
+      const titles = nodeIds.map((id) => useEditorStore.getState().spec?.nodes.find((node) => node.id === id)?.title || id)
+      if (!window.confirm(`删除节点“${titles.join('、')}”？已知依赖会被清理；存在其他引用时将阻止删除。`)) return
+      beginTransaction()
+      try { for (const id of nodeIds) removeNode(id) } finally { endTransaction() }
+      // Never separately remove React Flow's incident edges: a guarded node may remain.
+    } else {
+      beginTransaction()
+      try { for (const edge of edges) removeEdge(edge.source, edge.target) } finally { endTransaction() }
+      setSelectedEdgeId(null)
+    }
+  }, [beginTransaction, endTransaction, removeNode, removeEdge, setActionError])
+  const onBeforeDelete: OnBeforeDelete<EditorCanvasNode, Edge> = useCallback(async ({ nodes, edges }) => {
+    deleteSelection(nodes.map((node) => node.id), edges)
+    // The store is authoritative, including reference checks and draft protection.
+    return false
+  }, [deleteSelection])
 
-  const onNodeClickHandler = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      selectNode(node.id)
-      onNodeClick(node.id)
-    },
-    [selectNode, onNodeClick],
-  )
-
-  const onNodesChange: import('@xyflow/react').OnNodesChange = useCallback(
-    (changes) => {
-      for (const change of changes) {
-        if (change.type === 'position' && change.position && change.id) {
-          moveNode(change.id, change.position.x, change.position.y)
-        }
-      }
-    },
-    [moveNode],
-  )
-
-  const onNodesDelete = useCallback(
-    (nodes: Node[]) => {
-      for (const node of nodes) {
-        removeNode(node.id)
-      }
-    },
-    [removeNode],
-  )
-
-  const onEdgesDelete = useCallback(
-    (edges: Edge[]) => {
-      for (const edge of edges) {
-        removeEdge(edge.source, edge.target)
-      }
-    },
-    [removeEdge],
-  )
-
-  const onEdgeClick = useCallback(
-    (_event: React.MouseEvent, edge: Edge) => {
-      removeEdge(edge.source, edge.target)
-    },
-    [removeEdge],
-  )
-
-  const onDragOver = useCallback((event: React.DragEvent) => {
+  const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
-    event.dataTransfer.dropEffect = 'copy'
-  }, [])
+    const type = event.dataTransfer.getData(NODE_DRAG_TYPE)
+    if (!NODE_CATALOG.some((entry) => entry.type === type)) return
+    const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+    const node = createEditorNode(type, position)
+    droppedNodeId.current = node.id
+    beginTransaction()
+    try {
+      addNode(node)
+      if (useEditorStore.getState().spec?.nodes.some((item) => item.id === node.id)) {
+        moveNode(node.id, position.x, position.y)
+        chooseNode(node.id)
+      }
+    } finally { endTransaction() }
+  }, [screenToFlowPosition, beginTransaction, endTransaction, addNode, moveNode, chooseNode])
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault()
-      const executorType = event.dataTransfer.getData('application/clawflow-node-type') as ExecutorType
-      if (!executorType || !EXECUTOR_TYPES.includes(executorType)) return
-
-      const position = screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      })
-
-      const id = `node-${Date.now()}`
-      addNode({
-        id,
-        _x: position.x,
-        _y: position.y,
-        title: executorType,
-        executor: { type: executorType },
-        dependsOn: [],
-      })
-      selectNode(id)
-    },
-    [addNode, selectNode, screenToFlowPosition],
-  )
-
-  if (!spec) {
-    return (
-      <div className="flex h-full items-center justify-center text-gray-400 text-sm">
-        从侧边栏选择工作流或创建新工作流
-      </div>
-    )
-  }
+  if (!spec) return <div className="flex h-full items-center justify-center bg-muted/30 text-sm text-muted-foreground">从侧边栏选择工作流或创建新工作流</div>
+  const first = flowNodes[0]?.position ?? { x: 0, y: 0 }
 
   return (
-    <div className="h-full w-full" ref={wrapperRef} onDragOver={onDragOver} onDrop={onDrop}>
-      <ReactFlow
-        nodes={flowNodes}
-        edges={flowEdges}
-        nodeTypes={nodeTypes}
-        onConnect={onConnect}
-        onNodeClick={onNodeClickHandler}
-        onNodesChange={onNodesChange}
-        onNodesDelete={onNodesDelete}
-        onEdgesDelete={onEdgesDelete}
-        onEdgeClick={onEdgeClick}
-        deleteKeyCode="Delete"
-        fitView
-        minZoom={0.3}
-        maxZoom={1.5}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background />
-        <Controls />
-      </ReactFlow>
-    </div>
+    <section aria-label="工作流画布" className="flex h-full min-h-0 w-full min-w-0 flex-col bg-background text-foreground"
+      onKeyDown={(event) => {
+        const target = event.target as HTMLElement
+        if (target.closest('input, textarea, select, [contenteditable="true"]')) return
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+          event.preventDefault()
+          event.stopPropagation() // Do not also trigger the host Editor's history shortcut.
+          if (hasPendingEdits) { setActionError('请先应用或放弃未应用的编辑，再撤销或重做。'); return }
+          if (event.shiftKey) redo(); else undo()
+        }
+      }}>
+      <EditorCanvasToolbar nodes={spec.nodes} canUndo={canUndo} canRedo={canRedo} hasPendingEdits={hasPendingEdits} selection={selection}
+        onUndo={undo} onRedo={redo} onFocus={(id) => { chooseNode(id); focusNode(id) }}
+        onFit={() => { void fitView({ padding: 0.2, minZoom: 0.08, maxZoom: 1, duration: 240 }) }}
+        onReadableZoom={() => { const id = selectedNodeId ?? spec.nodes[0]?.id; if (id) focusNode(id) }}
+        onDelete={() => deleteSelection(selectedEdge ? [] : selectedNodeId ? [selectedNodeId] : [], selectedEdge ? [selectedEdge] : [])} />
+      {actionError && <div role="alert" className="flex items-start justify-between gap-3 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError(null)} aria-label="关闭操作提示" className="shrink-0 rounded px-1 focus-visible:ring-2 focus-visible:ring-ring">×</button></div>}
+      {validationErrors.length > 0 && <details className="border-b border-input bg-card px-3 py-2 text-xs text-destructive"><summary className="cursor-pointer">{validationErrors.length} 项配置问题（原始定义已保留）</summary><ul className="mt-2 max-h-28 list-inside list-disc overflow-auto">{validationErrors.map((error, index) => <li key={index}>{error.nodeId ? `${error.nodeId}: ` : ''}{error.message}</li>)}</ul></details>}
+      <div className="relative min-h-48 flex-1" data-testid="editor-canvas-dropzone" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={onDrop}>
+        <ReactFlow<EditorCanvasNode, Edge> nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} style={canvasTheme} className={canvasThemeClasses}
+          onConnect={onConnect} isValidConnection={(connection) => connectionError(connection) === null}
+          onConnectEnd={(_event, state) => {
+            if (state.isValid || !state.fromNode || !state.toNode) return
+            const fromSource = state.fromHandle?.type === 'source'
+            const error = connectionError({ source: (fromSource ? state.fromNode : state.toNode).id, target: (fromSource ? state.toNode : state.fromNode).id, sourceHandle: (fromSource ? state.fromHandle : state.toHandle)?.id ?? null, targetHandle: null })
+            if (error) setActionError(error)
+          }}
+          onNodeClick={(_event, node) => chooseNode(node.id)} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+          onNodeDragStart={startDrag} onNodeDragStop={(_event, node) => {
+            moveNode(node.id, node.position.x, node.position.y)
+            if (dragActive.current) { dragActive.current = false; endTransaction() }
+          }}
+          onEdgeClick={(_event, edge) => { selectNode(null); if (useEditorStore.getState().selectedNodeId === null) setSelectedEdgeId(edge.id) }}
+          onPaneClick={() => { selectNode(null); setSelectedEdgeId(null) }} onBeforeDelete={onBeforeDelete}
+          deleteKeyCode={['Delete', 'Backspace']} multiSelectionKeyCode={null} selectionKeyCode={null}
+          defaultViewport={{ x: typeof spec.nodes[0]?._x === 'number' ? 48 - first.x : 24, y: 64 - first.y, zoom: 1 }} minZoom={0.08} maxZoom={2} proOptions={{ hideAttribution: true }}
+          ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应全部节点', 'minimap.ariaLabel': '流程小地图' }}>
+          <Background gap={20} size={1} />
+          <Controls showInteractive={false} orientation="horizontal" fitViewOptions={{ padding: 0.2, minZoom: 0.08, maxZoom: 1 }} aria-label="画布缩放控制" className="overflow-hidden rounded-lg border border-input shadow-sm" />
+          <MiniMap pannable zoomable aria-label="流程小地图" nodeColor={(node) => node.selected ? 'var(--canvas-primary)' : 'var(--canvas-muted-foreground)'} className="overflow-hidden rounded-lg border border-input" style={{ width: 140, height: 96 }} />
+        </ReactFlow>
+        {!spec.nodes.length && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="rounded-xl border border-dashed border-input bg-card/90 px-8 py-6 text-center"><p className="text-sm font-medium">从一个节点开始</p><p className="mt-2 text-xs text-muted-foreground">点击左侧节点，或将它拖到这里</p></div></div>}
+      </div>
+      <footer className="flex flex-wrap items-center gap-3 border-t border-input bg-card px-3 py-2 text-[10px] text-muted-foreground"><span>{spec.nodes.length} 个节点 · {flowEdges.length} 条连线</span>{selectedEdge && <span className="text-primary">已选择连线 · Delete 删除</span>}<span className="ml-auto">拖动空白处平移 · Delete 删除 · Ctrl/⌘ Z 撤销</span></footer>
+    </section>
   )
 }
 
 export default function EditorCanvas(props: EditorCanvasProps) {
-  return (
-    <ReactFlowProvider>
-      <EditorCanvasInner {...props} />
-    </ReactFlowProvider>
-  )
+  const workflowId = useEditorStore((state) => state.spec?.id)
+  return <ReactFlowProvider key={workflowId ?? 'empty'}><EditorCanvasInner {...props} /></ReactFlowProvider>
 }

@@ -79,20 +79,16 @@ fn valid_random_suffix(value: &str) -> bool {
     value.len() == 8 && value.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// 唤醒前置：服务化 session 必须 Completed 且 callback_status 已是终态。
+/// 唤醒前置：服务化 session 必须 Completed。
 pub fn can_reactivate(
     status: SessionStatus,
     session_kind: SessionKind,
-    callback_status: Option<&str>,
 ) -> Result<(), &'static str> {
     if !matches!(status, SessionStatus::Completed) {
         return Err("session is not completed");
     }
     if !matches!(session_kind, SessionKind::ServiceInvocation) {
         return Err("session is not service_invocation");
-    }
-    if callback_status == Some("pending") {
-        return Err("callback is still pending");
     }
     Ok(())
 }
@@ -172,33 +168,29 @@ mod tests {
 
     #[test]
     fn reactivate_blocked_when_not_completed() {
-        let r = can_reactivate(SessionStatus::Running, SessionKind::ServiceInvocation, None);
+        let r = can_reactivate(SessionStatus::Running, SessionKind::ServiceInvocation);
         assert!(r.is_err());
     }
 
     #[test]
     fn reactivate_blocked_for_chat_kind() {
-        let r = can_reactivate(SessionStatus::Completed, SessionKind::Chat, None);
+        let r = can_reactivate(SessionStatus::Completed, SessionKind::Chat);
         assert!(r.is_err());
     }
 
     #[test]
-    fn reactivate_blocked_when_callback_pending() {
+    fn reactivate_completed_service_without_callback_state() {
         let r = can_reactivate(
             SessionStatus::Completed,
-            SessionKind::ServiceInvocation,
-            Some("pending"),
-        );
-        assert!(r.is_err());
+            SessionKind::ServiceInvocation);
+        assert!(r.is_ok());
     }
 
     #[test]
     fn reactivate_ok_when_terminal() {
         let r = can_reactivate(
             SessionStatus::Completed,
-            SessionKind::ServiceInvocation,
-            Some("succeeded"),
-        );
+            SessionKind::ServiceInvocation);
         assert!(r.is_ok());
     }
 }

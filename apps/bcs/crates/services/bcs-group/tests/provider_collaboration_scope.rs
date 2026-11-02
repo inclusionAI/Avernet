@@ -41,7 +41,7 @@ async fn human_invitation_is_restricted_only_while_the_local_bot_participates() 
         .with_bot_provider_repo(metadata);
     let provider = admin.register_provider_with_policy(
         "Local".into(), None, ProviderAuthMode::StaticBearer, "alice".into(),
-        None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+        None, None, None, None, Some(ProviderCollaborationScope::SameOwner), None,
     ).await.unwrap();
     let (local, _) = admin.register_provider_bot_with_bot_uuid(
         &provider.provider.provider_id, &provider.provider_admin_token,

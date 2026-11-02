@@ -62,6 +62,14 @@ pub struct RegisterProviderBotParams {
     pub scopes: Vec<String>,
     pub bot_uuid: Option<String>,
     pub connection_mode: ProviderBotConnectionMode,
+    /// Initial caller configuration snapshot (P1.3): committed in the same
+    /// registration flow as the Bot/binding via the P1.1 caller-config
+    /// CAS. `None` registers without caller capability (the anti-downgrade
+    /// guard stays closed until a later authenticated update). When the
+    /// post-commit snapshot sync fails, the registration is REPORTED as
+    /// reconciliation-required: it stays committed, is never deleted or
+    /// retried by BCS, and no credential is replayed.
+    pub initial_caller: Option<bcs_domain::caller_identity::CallerIdentitySnapshot>,
 }
 
 #[async_trait]
@@ -79,9 +87,10 @@ pub trait ProviderCoreService: Send + Sync {
         &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
         created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
         slug: Option<String>, admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
     ) -> ServiceResult<RegisteredProvider> {
         if scope.is_some() { return Err(ServiceError::InternalError("Provider policy registration is not configured".into())); }
-        self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url).await
+        self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, caller_capabilities).await
     }
 
     async fn update_provider_with_policy(
@@ -89,9 +98,10 @@ pub trait ProviderCoreService: Send + Sync {
         name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>, admin_callback_url: Option<String>,
         scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
     ) -> ServiceResult<ProviderRecord> {
         if scope.is_some() { return Err(ServiceError::InternalError("Provider policy update is not configured".into())); }
-        self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url).await
+        self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, caller_capabilities).await
     }
 
     /// Additive registration entry point preserving callers of register_provider.
@@ -100,8 +110,9 @@ pub trait ProviderCoreService: Send + Sync {
         created_by: String, protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
     ) -> ServiceResult<RegisteredProvider> {
-        if slug.is_some() || admin_callback_url.is_some() {
+        if slug.is_some() || admin_callback_url.is_some() || caller_capabilities.is_some() {
             return Err(ServiceError::InvalidOperation {
                 message: "provider slug registration is not configured".to_string(),
                 request_id: None,
@@ -117,8 +128,9 @@ pub trait ProviderCoreService: Send + Sync {
         coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
         admin_callback_url: Option<String>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
     ) -> ServiceResult<ProviderRecord> {
-        if slug.is_some() || admin_callback_url.is_some() {
+        if slug.is_some() || admin_callback_url.is_some() || caller_capabilities.is_some() {
             return Err(ServiceError::InvalidOperation {
                 message: "provider slug updates are not configured".to_string(),
                 request_id: None,
@@ -183,6 +195,22 @@ pub trait ProviderCoreService: Send + Sync {
         authenticated_staff_id: &str,
         disabled: bool,
     ) -> ServiceResult<ProviderRecord>;
+
+    /// Authoritative read of the Provider's declared caller technical
+    /// capabilities (spec §10.7.3). This is the technical capability source
+    /// only — it never overrides Bot caller switches and never implies
+    /// execution readiness. The default refuses so an unconfigured core
+    /// cannot answer caller readiness questions.
+    async fn get_caller_capabilities(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<Option<bcs_domain::caller_identity::ProviderCallerCapabilities>> {
+        let _ = provider_id;
+        Err(ServiceError::InvalidOperation {
+            message: "ProviderCoreService::get_caller_capabilities is not configured".to_string(),
+            request_id: None,
+        })
+    }
 }
 
 /// Bot-authority retirement branch (spec §7.1): the durable

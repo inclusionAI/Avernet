@@ -449,9 +449,6 @@ story_cli_operator_runs_sessions_and_services() {
     assert_json_eq "CLI session completion returns completed" "$BCS_CLI_STDOUT" "status" "completed"
     assert_json_eq "CLI session completion keeps its output" "$BCS_CLI_STDOUT" "output.summary" "approved by CLI"
 
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "CLI service fixture enables group invocation" "200" || return
-
     _cli_story_run "release pipeline invokes the group service" PM service invoke \
         --group "$group_id" --input '{"commit":"cli123"}' \
         --meta '{"source":"cli-story"}' --caller-id "cli-release-pipeline" \

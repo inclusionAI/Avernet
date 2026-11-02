@@ -9,8 +9,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.content_store.service import ContentStoreService
-from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind
-from agentclaw.community.core.bot_genome.promotion.service import GenomePromotionService
+from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind
+from agentclaw.community.core.apply_engine.completion import ApplyOutcome
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
+from agentclaw.community.core.bot_genome.promotion.service import PROMOTABLE, GenomePromotionService
+from agentclaw.community.core.bot_genome.promotion.settle import PromotionSettler
 from agentclaw.community.core.bot_genome.registry import GenomeRegistryService
 from agentclaw.community.core.bot_genome.spec_checks import SpecChecks
 from agentclaw.community.core.repository.implementations.bot.genome import (
@@ -63,9 +66,11 @@ class InMemorySqliteDB:
 
 
 class FakeApplier:
-    """Accepts by default; ``refuse`` makes preflight raise it, ``fail`` makes start raise it."""
+    """Accepts by default; ``refuse`` makes preflight raise it, ``fail`` makes start raise it.
 
-    kind = "fake"
+    ``start`` answers an apply id and records the call; nothing is applied. The world's ``deliver`` plays
+    the apply's end: it publishes an outcome to the real settler, as the apply engine would.
+    """
 
     def __init__(self) -> None:
         self.refuse: Exception | None = None
@@ -81,11 +86,11 @@ class FakeApplier:
         if self.refuse is not None:
             raise self.refuse
 
-    async def start(self, bot, state, *, actor, reason) -> ApplyResult:
-        self.starts.append((bot, state, actor, reason))
+    def start(self, bot, *, promotion_id, principal_id, audit_actor) -> str:
+        self.starts.append((bot, promotion_id, principal_id, audit_actor))
         if self.fail is not None:
             raise self.fail
-        return ApplyResult(kind=self.kind, detail="started")
+        return f"ap_{len(self.starts)}"
 
 
 class World:
@@ -115,9 +120,27 @@ class World:
         self.applier = FakeApplier()
         self.promotion = GenomePromotionService(
             registry=self.registry,
-            revisions=self.revisions,
             refs=self.refs,
             promotions=self.promotions,
             applier=self.applier,
             env=lambda: "dev",
         )
+        self.settler = PromotionSettler(promotions=self.promotions, promotable=tuple(s.value for s in PROMOTABLE))
+
+    def deliver(self, promotion, status: ApplyStatus = ApplyStatus.SUCCEEDED, summary: str = "applied"):
+        """The promotion's apply ends with ``status``: publish it to the settler, answer the promotion as settled."""
+        self.settler.settle(
+            env="dev",
+            entity_id=BOT.entity_id,
+            bot_id=BOT.bot_id,
+            promotion_id=promotion.id,
+            outcome=ApplyOutcome(promotion.apply_id or "ap_0", status, summary),
+        )
+        return self.promotion.get_promotion(BOT, promotion.id)
+
+    async def promote(self, revision, *, expected, actor, reason="r", status: ApplyStatus = ApplyStatus.SUCCEEDED):
+        """Promote and let the delivery end with ``status``; answers the settled promotion."""
+        promoted = await self.promotion.promote(
+            BOT, revision=revision, ref="active", expected_revision=expected, actor=actor, reason=reason
+        )
+        return self.deliver(promoted, status)

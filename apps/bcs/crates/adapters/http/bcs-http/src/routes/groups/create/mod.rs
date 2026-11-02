@@ -182,10 +182,6 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         participants,
         member_bot_ids,
         group_kind,
-        service_spec: req
-            .service_spec
-            .clone()
-            .and_then(|v| serde_json::from_value(v).ok()),
         group_strategy,
         visibility: req.visibility,
         provisioning: false,
@@ -220,6 +216,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
                 &result,
                 caller_actor_id.clone(),
                 authenticated_human,
+                &headers,
             )
             .await?
             {

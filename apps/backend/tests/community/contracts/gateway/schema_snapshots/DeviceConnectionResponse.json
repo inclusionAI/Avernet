@@ -44,6 +44,12 @@
       "description": "Authoritative HTTP base of the device's A2A face (agent-card / /rpc), issued by BaaS in ws-info. Empty string means the provider delivered no A2A address: callers fall back to existing behavior and must NOT derive or compose one (a relay ws URL implies no equivalent A2A face).",
       "title": "A2A Base Url",
       "type": "string"
+    },
+    "a2a_withheld": {
+      "default": false,
+      "description": "The server governs this user's A2A access (user-level gray release) and withheld the A2A address on purpose. Unlike an address that is simply absent, this is an explicit refusal: a client must not derive, probe, or reuse an A2A choice for this connection.",
+      "title": "A2A Withheld",
+      "type": "boolean"
     }
   },
   "required": [

@@ -141,11 +141,14 @@ mode choices are not overwritten. Codex and QwenWork defaults are unchanged.
   Successful completion requires, in order, an empty `background_tasks` Stop
   snapshot, a successful result and a fresh idle event for the same main epoch.
   Background work and intervening activity invalidate stale evidence.
-- The supported native profile is **Claude Code 2.1.199** (validated with cfuse
-  2.6.44). Other versions, unsupported task kinds or missing/conflicting evidence
-  fail explicitly; `hook_idle` never silently falls back to legacy completion.
-  This default change does not certify managed policies, cron/monitor tasks or
-  every nested/resumed-background combination.
+- Native versions **>= Claude Code 2.1.199** are admitted using semantic-version
+  ordering, including later patch, minor and major versions. Older, missing or
+  malformed versions fail explicitly. Native lifecycle checks have been exercised
+  with 2.1.199 / cfuse 2.6.44 and 2.1.258 / cfuse 2.6.46; admitting a newer version
+  does not bypass protocol validation or certify every future runtime combination.
+  Unsupported task kinds or missing/conflicting completion evidence still fail;
+  `hook_idle` never silently falls back to legacy completion. Managed policies,
+  cron/monitor tasks and every nested/resumed-background combination are not certified.
 - Initialization is bounded by 30 seconds, result-to-idle waiting by 5 seconds,
   and ordinary stream inactivity by the 600-second default idle window. A shorter
   per-turn idle timeout still applies. Failed result frames return an error
@@ -420,6 +423,16 @@ configuration, not an implicit service URL; supply the intended registration
 API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
 digits, hyphens or underscores. `--config` remains supported but cannot be
 combined with `--profile`.
+
+For `start` (including `start --daemon`), explicit `--profile`, `--config` or
+`BRIDGE_CONFIG` takes precedence. Without a selector, the bridge uses
+`~/.bcn-bridge/bridge.toml` when it exists. Otherwise it discovers named profiles
+with a `bridge.toml` file: a unique profile is selected and its name is printed;
+multiple profiles produce a sorted list of startup commands and require an
+explicit choice. Configuration contents are validated after selection; an
+invalid selected configuration fails rather than falling back to another one.
+When no configuration exists, the error suggests completing Bot onboarding.
+Registration, initialization and deinitialization retain their existing defaults.
 
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.

@@ -35,6 +35,7 @@ use super::{BotInfo, RegisteredBotInner, bot_info_json_set};
 
 mod agent_registration;
 mod bot_repo_port;
+mod caller_config;
 mod control_plane;
 mod registration_create;
 mod agent_bots;
@@ -81,6 +82,12 @@ pub struct PersistentBotRepo {
     /// flavor reads are pure dialect chooses, never writes.
     pub(crate) flavor: DbSqlFlavor,
 
+    /// Read-through cache for per-Bot caller configuration snapshots
+    /// (§15.96): the sync write path invalidates the key on success, so
+    /// same-process PATCH→read stays immediate; cross-process staleness is
+    /// bounded by the per-class TTLs.
+    pub(crate) caller_config_cache: crate::caller_config_cache::CallerConfigCache,
+
     /// Pending request-response channels for send_request.
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
 }
@@ -103,6 +110,10 @@ impl PersistentBotRepo {
             bot_info_overrides: RwLock::new(HashMap::new()),
             db,
             flavor,
+            caller_config_cache: crate::caller_config_cache::CallerConfigCache::new(
+                crate::caller_config_cache::POSITIVE_TTL,
+                crate::caller_config_cache::NEGATIVE_TTL,
+            ),
             pending_requests: RwLock::new(HashMap::new()),
         }
     }

@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod a2a_bot;
 pub mod collaboration_draft;
 pub mod bot_authority;
 pub mod bot_control_plane;
@@ -35,4 +36,6 @@ pub use registry::*;
 pub use routing::*;
 pub use session_authorization::*;
 pub use system_message::*;
-pub use crate::types::{Session, SessionKind, SessionStatus, ServiceSpec};
+pub use crate::types::{Session, SessionKind, SessionStatus};
+
+pub mod run_budget;

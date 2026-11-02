@@ -44,6 +44,8 @@ fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpApp
 fn build_api_routes() -> Router<HttpAppState> {
     Router::new()
         .merge(routes::collaboration_drafts::router())
+        .route("/tasks/status", post(routes::task_handle::status))
+        .route("/tasks/cancel", post(routes::task_handle::cancel))
         .route("/manifest", get(routes::manifest::get_manifest))
         .route(
             "/assets/{bundle_name}/{file_name}",
@@ -65,6 +67,9 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::bots::get_bot).delete(routes::bots::leave_bot),
         )
         .route("/providers", post(routes::providers::register_provider))
+        .route("/bots/{id}/agent-card", get(routes::bot_agent_card::get))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a", get(routes::a2a_bots::get).put(routes::a2a_bots::configure))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a/card:refresh", post(routes::a2a_bots::refresh))
         .route("/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route("/api/v1/collaboration/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route(
@@ -145,6 +150,11 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/providers/{provider_id}/bots/{bot_uuid}",
             delete(routes::providers::delete_provider_bot)
                 .patch(routes::providers::patch_provider_bot),
+        )
+        .route(
+            "/providers/{provider_id}/bots/{provider_bot_ref}/caller",
+            get(routes::providers::get_provider_bot_caller_config)
+                .patch(routes::providers::patch_provider_bot_caller_config),
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}/attributes",

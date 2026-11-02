@@ -8,6 +8,8 @@ pub use collaboration_terminal_im::{StateMachineTerminalImPayload, StateMachineT
 pub mod collaboration_publication;
 pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 pub mod bot;
+pub mod a2a_bot;
+pub mod a2a_run;
 pub mod bot_authority;
 pub mod bot_provider;
 pub mod bot_actor_config;
@@ -34,6 +36,7 @@ pub mod permission_request;
 pub mod provider;
 pub mod relation;
 pub mod session;
+pub mod session_speaking_lease;
 pub mod session_registry;
 pub mod session_file;
 pub mod user_identity;
@@ -79,16 +82,17 @@ pub use organization::{
     UpsertOrganizationMemberRecord,
 };
 pub use provider::{
-    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
-    ProviderCredentialRepoPort, ProviderRepoPort,
+    CallerTokenVisibility, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    ProviderBotDiscoverySelector, ProviderCallerCapabilities, ProviderCredentialRepoPort,
+    ProviderRepoPort,
 };
 pub use relation::RelationRepoPort;
 pub use permission_profile::PermissionProfileRepoPort;
 pub use permission_request::PermissionRequestRepoPort;
+pub use session_speaking_lease::*;
 pub use session::{
-    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
-    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 pub use session_file::{

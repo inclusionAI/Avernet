@@ -12,6 +12,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 import { GroupChatProvider } from '@aix-chat/adapters';
+import {
+  GroupChatLeaseClient,
+  getChatSendLeaseParams,
+  type SpeakingLease,
+} from '../utils/speakingLease';
 
 export interface ProviderInfo {
   provider: GroupChatProvider;
@@ -21,6 +26,16 @@ export interface ProviderInfo {
   isConnected: boolean;
   /** 标记为已销毁，防止断开后重连 */
   isDestroyed: boolean;
+  /** Authenticated-connection lease command client. */
+  leaseClient: GroupChatLeaseClient;
+  /** Mutable lease coordinates used by the chat.send transport patch. */
+  leaseRef: { current: SpeakingLease | undefined };
+  /**
+   * 服务端 Workbench connect 应答中携带的会话发言权语义
+   * （"plain" | "lease_required"，快照）。仅用于会话 UI 条件渲染；
+   * 消息提交始终以服务端的逐条判定为准。
+   */
+  speakingMode: 'plain' | 'lease_required' | undefined;
 }
 
 // 全局 provider 缓存 (key: groupId:sessionId:viewActorId)
@@ -158,6 +173,8 @@ export function useGroupChatProviders(): UseGroupChatProvidersResult {
 
         try {
           const provider = new GroupChatProvider(config);
+          const transport = (provider as any).transport;
+          const leaseClient = new GroupChatLeaseClient(transport);
           const providerInfo: ProviderInfo = {
             provider,
             groupId,
@@ -165,13 +182,17 @@ export function useGroupChatProviders(): UseGroupChatProvidersResult {
             viewActorId,
             isConnected: false,
             isDestroyed: false,
+            leaseClient,
+            leaseRef: { current: undefined },
+            speakingMode: undefined,
           };
 
           // Patch: SDK 的 GroupChatProvider 在 BCS 帧中未传递 session_id，
           // 导致以 session 为维度建立 WS 连接后，发送消息仍走 'main' session。
-          // 此处拦截 transport.send，在 BCS 帧中注入 session_id。
-          const transport = (provider as any).transport;
+          // 此处拦截 transport.send，在 BCS 帧中注入 session_id，
+          // 并记录 connect 帧 id 以便在应答中同步 server speaking_mode。
           if (transport) {
+            let pendingConnectFrameId: string | undefined;
             const originalSend = transport.send.bind(transport);
             transport.send = (frame: any) => {
               if (frame?.params) {
@@ -179,11 +200,20 @@ export function useGroupChatProviders(): UseGroupChatProvidersResult {
                 if (frame.method === 'connect') {
                   frame.params.session_id = sessionId;
                   frame.params.view_actor_id = viewActorId;
+                  pendingConnectFrameId = frame.id;
                 }
                 // 在 chat.send 帧中注入 session_id，并将 sessionKey 从硬编码 'main' 替换为 sessionId
                 if (frame.method === 'chat.send') {
                   frame.params.session_id = sessionId;
                   frame.params.sessionKey = sessionId;
+                  const leaseParams = getChatSendLeaseParams(
+                    providerInfo.leaseRef.current,
+                    Date.now(),
+                  );
+                  if (leaseParams) {
+                    frame.params.leaseId = leaseParams.leaseId;
+                    frame.params.leaseEpoch = leaseParams.leaseEpoch;
+                  }
                 }
               }
               return originalSend(frame);
@@ -194,6 +224,22 @@ export function useGroupChatProviders(): UseGroupChatProvidersResult {
             // 新 scope 仍只由服务端从 Session Participant 解析。
             const originalOnTransportMessage = transport.onMessage;
             transport.onMessage = (frame: any) => {
+              if (leaseClient.handleFrame(frame)) return;
+              // 截获 Workbench connect 应答，同步服务端 speaking_mode 快照。
+              if (
+                pendingConnectFrameId &&
+                frame?.type === 'res' &&
+                frame?.id === pendingConnectFrameId
+              ) {
+                pendingConnectFrameId = undefined;
+                const mode = frame?.payload?.speaking_mode;
+                const next: 'plain' | 'lease_required' | undefined =
+                  mode === 'lease_required' ? 'lease_required' : 'plain';
+                if (providerInfo.speakingMode !== next) {
+                  providerInfo.speakingMode = next;
+                  notifyListeners();
+                }
+              }
               const isScopeChange =
                 frame?.type === 'event' &&
                 frame?.event === 'close' &&
