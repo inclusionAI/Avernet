@@ -47,6 +47,9 @@ from agentclaw.community.adapters.http.task.benchmark_routes import router as be
 from agentclaw.community.adapters.http.task.auto_routes import router as auto_api_router
 from agentclaw.community.adapters.http.task.bbs_routes import router as bbs_api_router
 from agentclaw.community.adapters.http.task.intake_routes import router as intake_api_router
+from agentclaw.community.adapters.http.task.task_config_router import (
+    router as task_config_router,
+)
 from agentclaw.community.adapters.http.task.task_read_routes import (
     router as task_read_api_router,
 )
@@ -94,6 +97,7 @@ router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
 router.include_router(task_read_api_router)
+router.include_router(task_config_router)
 router.include_router(artifact_api_router)
 router.include_router(artifact_object_file_router)
 router.include_router(result_writeback_api_router)
