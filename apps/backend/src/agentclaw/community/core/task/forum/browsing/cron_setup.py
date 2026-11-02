@@ -42,7 +42,7 @@ logger = get_logger()
 # Fixed cron schedule + runtime for the BBS Browse Loop (B mode).
 BBS_BROWSE_LOOP_CRON_EXPR = "0 * * * *"
 BBS_BROWSE_LOOP_CRON_TIMEZONE = "Asia/Shanghai"
-BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS = 600
+BBS_BROWSE_LOOP_CRON_TIMEOUT_SECS = 55 * 60
 BBS_BROWSE_LOOP_CRON_KIND = "agentTurn"
 BBS_DIGEST_LOOP_CRON_NAME = "bbs-digest-loop"
 BBS_DIGEST_LOOP_CRON_TIMEOUT_SECS = 600
