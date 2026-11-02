@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { EngineVersionUpdateAvailability } from '@/domain/botEngineVersion';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import { ClipboardList, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
+import { ClipboardList, Copy, HeartPulse, MapPin, MoreVertical, ShieldCheck, Users } from 'lucide-react';
 import { useState } from 'react';
 import { BotEngineVersionMenuItems } from './BotEngineVersionMenuItems';
 import { BotManagementConfirmDialog } from './BotManagementConfirmDialog';
@@ -29,6 +29,9 @@ interface BotManagementMenuProps {
   canGeneralConfig?: boolean;
   generalConfigDisabledReason?: string;
   onGeneralConfig?: (bot: BotDomain) => void;
+  /** 复制 Bot 入口可用性;visible=false 时不渲染该项。 */
+  copyAvailability?: { visible: boolean; enabled: boolean; disabledReason?: string };
+  onCopy?: (bot: BotDomain) => void;
   engineVersionUpdateAvailability?: EngineVersionUpdateAvailability;
   onOpenEngineInfo?: (bot: BotDomain) => void;
   onUpdateEngineVersion?: (bot: BotDomain) => void;
@@ -49,6 +52,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     canGeneralConfig,
     generalConfigDisabledReason,
     onGeneralConfig,
+    copyAvailability,
+    onCopy,
     engineVersionUpdateAvailability,
     onOpenEngineInfo,
     onUpdateEngineVersion,
@@ -74,6 +79,26 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
         <PopoverContent align="end" className="w-52 space-y-1 p-2">
           {/* 配置类：Bot 的配置与形态变更操作（验收修正：配置类同组置顶） */}
           <MenuSection>
+            {copyAvailability?.visible && onCopy ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                leftIcon={<Copy className="size-4" />}
+                disabled={!copyAvailability.enabled}
+                onClick={() => {
+                  if (!copyAvailability.enabled) return;
+                  setOpen(false);
+                  onCopy(bot);
+                }}
+              >
+                {copyAvailability.enabled ? (
+                  '复制 Bot'
+                ) : (
+                  <ActionHelp description={copyAvailability.disabledReason ?? '当前不可复制'}>复制 Bot</ActionHelp>
+                )}
+              </Button>
+            ) : null}
             {onGeneralConfig ? (
               <Button
                 variant="ghost"
