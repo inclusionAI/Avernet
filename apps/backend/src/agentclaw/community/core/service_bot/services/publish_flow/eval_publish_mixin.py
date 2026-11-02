@@ -45,6 +45,7 @@ class EvalPublishMixin:
         config_artifact: str | None = None,
         docker_image: str | None = None,
         resource_spec: ResourceSpecification | None = None,
+        device_count: int = 1,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -69,6 +70,7 @@ class EvalPublishMixin:
             config_artifact: 外部传入的 config_artifact（可选）。优先级高于
                 publish_record.ext 中的值。
             resource_spec: 本次发布的资源覆盖；None 保持原配置，不修改源 Bot。
+            device_count: 本次发布的 BaaS 设备/实例数量。小于 1 视为调用方错误发失败。
             docker_image: 外部传入的镜像 pin（可选）。非空时跳过
                 resolve_publish_image_pin，用于 Eval DRAFT 构建路径。
         """
@@ -96,6 +98,9 @@ class EvalPublishMixin:
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
+
+        if device_count < 1:
+            raise PublishFlowServiceError("device_count must be at least 1")
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # config_artifact read above is only the build-artifact presence guard. Eval
@@ -146,7 +151,7 @@ class EvalPublishMixin:
                 bot=bot,
                 user_id=owner_id,
                 migration_path=mp,
-                device_count=1,
+                device_count=device_count,
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
