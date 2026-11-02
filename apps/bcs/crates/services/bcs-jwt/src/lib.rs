@@ -5,10 +5,33 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod group_session;
+mod oauth_session;
 
 pub use group_session::{GroupSessionJwtBuildError, GroupSessionJwtService};
+pub use oauth_session::{OAuthSessionClaims, OAuthSessionJwt};
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// HS256 sign over `data` with `secret`. Shared by every JWT service in this
+/// crate so no module hand-rolls its own HMAC path.
+pub(crate) fn hs256_sign(secret: &[u8], data: &[u8]) -> Result<Vec<u8>, JwtError> {
+    let mut mac = HmacSha256::new_from_slice(secret)
+        .map_err(|e| JwtError::SignFailed(e.to_string()))?;
+    mac.update(data);
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+/// Constant-time verification of an HS256 signature over `signing_input`.
+pub(crate) fn hs256_verify(
+    secret: &[u8],
+    signing_input: &[u8],
+    provided_sig: &[u8],
+) -> Result<(), JwtError> {
+    let mut mac = HmacSha256::new_from_slice(secret)
+        .map_err(|e| JwtError::SignFailed(e.to_string()))?;
+    mac.update(signing_input);
+    mac.verify_slice(provided_sig).map_err(|_| JwtError::InvalidSignature)
+}
 
 /// JWT claims payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,12 +147,8 @@ impl JwtService {
             .decode(sig_b64)
             .map_err(|e| JwtError::InvalidToken(format!("signature decode: {e}")))?;
 
-        // Constant-time comparison via hmac.
-        let mut mac = HmacSha256::new_from_slice(&self.secret)
-            .map_err(|e| JwtError::SignFailed(e.to_string()))?;
-        mac.update(signing_input.as_bytes());
-        mac.verify_slice(&provided_sig)
-            .map_err(|_| JwtError::InvalidSignature)?;
+        // Constant-time comparison via the shared crate HMAC path.
+        hs256_verify(&self.secret, signing_input.as_bytes(), &provided_sig)?;
 
         // Decode claims.
         let payload_bytes = URL_SAFE_NO_PAD
@@ -144,10 +163,7 @@ impl JwtService {
     /// Compute HMAC-SHA256. Returns `Result` so callers never need to
     /// `unwrap` (workspace denies `unwrap_used`).
     fn hmac_sign(&self, data: &[u8]) -> Result<Vec<u8>, JwtError> {
-        let mut mac = HmacSha256::new_from_slice(&self.secret)
-            .map_err(|e| JwtError::SignFailed(e.to_string()))?;
-        mac.update(data);
-        Ok(mac.finalize().into_bytes().to_vec())
+        hs256_sign(&self.secret, data)
     }
 }
 

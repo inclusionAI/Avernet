@@ -16,6 +16,7 @@ pub mod config;
 pub mod cookie;
 pub mod oauth_types;
 pub mod oauth_provider;
+pub mod session;
 
 pub use chain::{AuthPlugin, AuthPluginChain};
 pub use actor::{BCN_ACTOR_BOT_ID_HEADER, expected_actor_id, validate_actor};
@@ -25,4 +26,8 @@ pub use jwt::is_jwt_format;
 pub use oauth_provider::OAuthProvider;
 pub use oauth_types::{OAuthError, OAuthToken, ProviderUserInfo};
 pub use port::{BotInfo, UserIdentityInfo, BotLookupPort, UserIdentityPort};
+pub use session::{
+    AuthSessionIdentityPort, InstallSession, RotateSession, SessionRevoke, SessionScope,
+    SessionSnapshot, SessionStoreError, SessionVersion, SessionWrite,
+};
 pub use types::{AuthError, AuthPrincipal, AuthResult, AuthSource};

@@ -7,11 +7,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_auth_api::session::AuthSessionIdentityPort;
 use bcs_auth_api::{AuthError, UserIdentityInfo, UserIdentityPort};
 use bcs_db_api::DbPlugin;
+use bcs_service_api::port::repo::auth_session::AuthSessionRepoPort;
 use bcs_service_api::UserIdentityRepoPort;
 use bcs_user_identity::{DbUserIdentityStore, MemoryUserIdentityRepo};
 
+use crate::identity_session_wiring::RepoAuthSessionIdentityPort;
 use crate::plugins::DbPluginKind;
 
 /// Convert a persistence-layer `UserIdentity` into an auth-layer display struct.
@@ -111,23 +114,68 @@ pub fn db_user_identity_port(
     db_kind: DbPluginKind,
     db: Arc<dyn DbPlugin>,
 ) -> Arc<dyn UserIdentityPort> {
-    let repo: Arc<dyn UserIdentityRepoPort> = match db_kind {
-        DbPluginKind::LocalSqlite => Arc::new(DbUserIdentityStore::sqlite(db)),
-        DbPluginKind::Mysql => Arc::new(DbUserIdentityStore::mysql(db)),
-        DbPluginKind::External(provider) => {
-            panic!(
-                "external database plugin '{}' has no user identity store wiring",
-                provider
-            )
-        }
-    };
-    Arc::new(RepoUserIdentityPort::new(repo))
+    db_identity_ports(db_kind, db).user_identity
 }
 
 /// Build an in-memory identity port for standalone / test paths that have no
 /// DB plugin. Identities do not survive a restart.
 pub fn memory_user_identity_port() -> Arc<dyn UserIdentityPort> {
-    Arc::new(RepoUserIdentityPort::new(Arc::new(
-        MemoryUserIdentityRepo::new(),
-    )))
+    memory_identity_ports().user_identity
+}
+
+/// The two identity bridges over one store: the display-oriented legacy
+/// `UserIdentityPort` and the strict V1 API `AuthSessionIdentityPort`.
+///
+/// Both bridges are built over the SAME store instance: for the in-memory
+/// store that single instance is what keeps display-path identity writes
+/// (legacy `/auth/*`) and V1 strict session operations in one state; the
+/// DB bridges share the database naturally.
+pub struct IdentityPorts {
+    #[allow(dead_code, reason = "Task 5 ships the wiring; Task 8/12 wires call sites")]
+    pub auth_session_identity: Arc<dyn AuthSessionIdentityPort>,
+    pub user_identity: Arc<dyn UserIdentityPort>,
+}
+
+/// Build both identity bridges from the selected DB plugin's store. The
+/// strict session bridge is constructed alongside the legacy display
+/// bridge; the display bridge's construction and behavior are unchanged.
+pub fn db_identity_ports(db_kind: DbPluginKind, db: Arc<dyn DbPlugin>) -> IdentityPorts {
+    let (identity_repo, session_repo): (Arc<dyn UserIdentityRepoPort>, Arc<dyn AuthSessionRepoPort>) =
+        match db_kind {
+            DbPluginKind::LocalSqlite => {
+                let store: Arc<DbUserIdentityStore> = Arc::new(DbUserIdentityStore::sqlite(db));
+                (store.clone(), store)
+            }
+            DbPluginKind::Mysql => {
+                let store: Arc<DbUserIdentityStore> = Arc::new(DbUserIdentityStore::mysql(db));
+                (store.clone(), store)
+            }
+            DbPluginKind::External(provider) => {
+                panic!(
+                    "external database plugin '{}' has no user identity store wiring",
+                    provider
+                )
+            }
+        };
+    IdentityPorts {
+        user_identity: Arc::new(RepoUserIdentityPort::new(identity_repo.clone())),
+        auth_session_identity: Arc::new(RepoAuthSessionIdentityPort::new(
+            session_repo,
+            identity_repo,
+        )),
+    }
+}
+
+/// Build both identity bridges over one fresh in-memory store, for
+/// standalone / test paths that have no DB plugin. Identities do not
+/// survive a restart.
+pub fn memory_identity_ports() -> IdentityPorts {
+    let store: Arc<MemoryUserIdentityRepo> = Arc::new(MemoryUserIdentityRepo::new());
+    IdentityPorts {
+        user_identity: Arc::new(RepoUserIdentityPort::new(store.clone())),
+        auth_session_identity: Arc::new(RepoAuthSessionIdentityPort::new(
+            store.clone(),
+            store,
+        )),
+    }
 }

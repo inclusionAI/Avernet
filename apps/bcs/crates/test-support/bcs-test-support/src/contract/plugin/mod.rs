@@ -86,3 +86,13 @@ where
 }
 
 pub mod caller_identity;
+pub mod auth_session_identity;
+
+/// Contract tests every strict `AuthSessionIdentityPort` bridge must pass
+/// (V1 API auth plugin chain).
+///
+/// Drivers pass a fresh persistence repo, the matching identity repo, and
+/// the factory wiring them into the port under test (e.g. bootstrap's
+/// `RepoAuthSessionIdentityPort`); the harness owns the error-injection
+/// decorators and the classification asserts.
+pub use auth_session_identity::auth_session_identity_port_contract_tests;
