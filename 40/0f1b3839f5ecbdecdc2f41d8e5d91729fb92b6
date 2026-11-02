@@ -1,0 +1,23 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixed_loop_density/catalog.py
+  s_cecdc98e721f4b::t_3fa458b0c8696b 1-514
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixed_loop_density/contract.py
+  s_cecdc98e721f4b::t_615eedda3cffd2 1-717
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixed_loop_density/registrations.py
+  s_cecdc98e721f4b::t_a5c62252f72ebc 1-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "400f1b3839f5ecbdecdc2f41d8e5d91729fb92b6",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

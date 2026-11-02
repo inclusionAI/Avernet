@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/resources/yuque_resolve.py
+  s_f680af005a7087::t_5fcdf96d8e3b56 75-87,135-137,139-158,161-189,196-212
+apps/backend/tests/community/core/resources/test_yuque_resolve_transient.py
+  s_f680af005a7087::t_d3effecec391ca 1-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8371fc909a78f1d6da61ed22636a4333eb10a8eb",
+  "prompts": {},
+  "sessions": {
+    "s_f680af005a7087": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-e5db-77e1-8fc6-9865269b8503",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

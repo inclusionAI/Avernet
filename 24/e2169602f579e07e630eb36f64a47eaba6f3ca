@@ -1,0 +1,61 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_d053df196b4bc9 14,45,302-313
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_da23c79f312bea 45,721-732
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_904c78a8fb9d8d 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_242cc1db4adb24 223,595-603
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/README.md
+  s_cecdc98e721f4b::t_4d2ffc084fb15e 1-129
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/__init__.py
+  s_cecdc98e721f4b::t_a5022dd0f279b4 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/checks.py
+  s_cecdc98e721f4b::t_4972e7de61a543 1-412
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/contract.py
+  s_cecdc98e721f4b::t_7dfd7e45ed48e5 1-320
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/provider-subbots-required.json
+  s_cecdc98e721f4b::t_c76d086f9d1616 1-4
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/reporting.py
+  s_cecdc98e721f4b::t_c2e5d9963b25f6 1-176
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/run.py
+  s_cecdc98e721f4b::t_a63da04bc89c53 1-343
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/runtime.py
+  s_cecdc98e721f4b::t_d6f18bceb5cbb9 1-66
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots/story.py
+  s_cecdc98e721f4b::t_1fd60c44842d13 1-525
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_subbots_case_run/__init__.py
+  s_cecdc98e721f4b::t_df9d89386b6191 1-749
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_42592dc9545c9f 348
+apps/bcs/scripts/e2e-runner/provider-subbots-migration-contract.json
+  s_cecdc98e721f4b::t_0c2bcb2ae60535 1-506
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_checks.py
+  s_cecdc98e721f4b::t_aa99e235a2bbb7 1-251
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_contract.py
+  s_cecdc98e721f4b::t_ee5e708ad9bb64 1-178
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_run.py
+  s_cecdc98e721f4b::t_3cc7e0937cd569 1-197
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_runtime.py
+  s_cecdc98e721f4b::t_a36658273758c4 1-84
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_2e3a49e158169e 617-618,644-649
+apps/bcs/scripts/e2e-runner/tests/test_provider_subbots_dual_case_run.py
+  s_cecdc98e721f4b::t_49d8ef82160f54 1-376
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24e2169602f579e07e630eb36f64a47eaba6f3ca",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

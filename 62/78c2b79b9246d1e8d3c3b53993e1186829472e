@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_e77a55edd4e0bd::t_71809c9493c6ec 2607-2616
+apps/backend/tests/community/api/bot_management/test_router.py
+  s_e77a55edd4e0bd::t_1aa5b781e55f02 478-488
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6278c2b79b9246d1e8d3c3b53993e1186829472e",
+  "prompts": {},
+  "sessions": {
+    "s_e77a55edd4e0bd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac2-0bf9-7f13-8ec8-77ae441a2c9b",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
