@@ -94,7 +94,7 @@ def _seed(world):
     _bind_fake_quality_tasks(world)
 
 
-def _assert_publish_linked_quality_task(_world, response):
+def _assert_publish_linked_quality_task(response, _world):
     assert _quality_tasks is not None
     task = _quality_tasks.get_task_by_uuid(response.json()["data"]["quality_task_uuid"])
     assert task is not None
