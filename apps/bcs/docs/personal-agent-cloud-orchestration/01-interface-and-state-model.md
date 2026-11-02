@@ -101,6 +101,14 @@ rules, A2A lives in delivery adapters; the service-api contracts stay
 protocol-neutral, so upgrading or replacing A2A is an adapter change, not
 a design change.
 
+Coupling to agent *frameworks* (ADK, LangGraph, CrewAI, …) is **zero**:
+the design binds wire-observable behavior only, never a participant's
+internals. Today's fleet is the proof — OpenClaw, Claude Code/Codex via
+the bridge, DeepSeek Harness, external platforms; none shares a
+framework. Each participant, the personal agent included, picks and can
+later swap its framework without anyone else noticing: the only shared
+commitment is the wire contract.
+
 ## Decision 2 — three conversation layers, with projection boundaries
 
 ![The three conversation layers: L1 (user and personal agent, never enters BCN raw), L2 (the delegation thread between personal agent and BCN, retained for the task lifetime), L3 (the collaboration workspace between BCN and supply agents, compactable, with expert working context held provider-side). Projections cross the boundaries in both directions.](assets/conversation-layers.svg)

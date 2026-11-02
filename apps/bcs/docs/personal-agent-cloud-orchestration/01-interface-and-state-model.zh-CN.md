@@ -76,6 +76,11 @@
 规则,A2A 落在投递适配器里;service-api 契约保持协议中立,因此升级乃至替换 A2A 是一次
 适配器变更,不是一次设计变更。
 
+与 Agent *框架*(ADK、LangGraph、CrewAI 等)的耦合为**零**:本设计只约束线上可观测的
+行为,从不触及参与者的内部实现。今天的机群就是证明 —— OpenClaw、经 bridge 的
+Claude Code/Codex、DeepSeek Harness、外部平台;没有谁与谁共用框架。每个参与者
+(包括 PA)都可以自选框架、日后更换而无人察觉:唯一的共同承诺是线上契约。
+
 ## 决策 2 —— 三层对话,边界即投影
 
 ![三层对话:L1(用户与 PA,原文永不进入 BCN)、L2(PA 与 BCN 之间的委托线程,保留整个任务生命周期)、L3(BCN 与供给侧 Agent 之间的协作工作区,可压缩,专家工作上下文由 Provider 侧持有)。投影双向穿越边界。](assets/conversation-layers.svg)
