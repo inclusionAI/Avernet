@@ -2,6 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { cn } from '@/utils/cn';
 import React, { useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
@@ -141,7 +142,12 @@ export function GroupWorkspaceArea({
       {!sessionOnly && (
         <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
       )}
-      <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+      {/* 本地管理/历史/资源面板必须连同隔离上下文高于 AppShell 的持久副屏（z-10）。
+          只提升子面板的 z-index 无法越过 isolate；关闭后恢复，不卸载正在运行的副屏。 */}
+      <div
+        className={cn('relative isolate flex min-h-0 min-w-0 flex-1', activePanel !== 'none' && 'z-20')}
+        data-workspace-conversation="true"
+      >
         <GroupChatPane
           identityLocked={Boolean(scope)}
           group={selectedGroup}
