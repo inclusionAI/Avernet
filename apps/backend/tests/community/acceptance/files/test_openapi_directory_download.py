@@ -88,7 +88,7 @@ def _mkdir_when_baas_visible(client: httpx.Client, bot_id: str, path: str) -> No
 
 
 @pytest.mark.acceptance
-def test_workspace_directory_download(live_backend):
+def test_workspace_directory_download(live_backend, request):
     """Zip a workspace directory through the public API, get what the browser shows.
 
     One story over one live bot: build a tree, download the directory as one
@@ -105,7 +105,7 @@ def test_workspace_directory_download(live_backend):
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             # Prefix short on purpose: fresh_id appends "_<12 hex>", and the
             # bot name cap is 32 — "Files DL" lands at 21, the long spelling

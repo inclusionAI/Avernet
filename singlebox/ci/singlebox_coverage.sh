@@ -208,6 +208,13 @@ run_real_singlebox() {
   }
   trap cleanup_real_singlebox EXIT
   bcs_e2e_mock_start "$coverage_root/mock-services"
+  # Coverage runs own this isolated database. Retained deliveries from an
+  # earlier run can keep Bot lanes draining after the policy is restored,
+  # contaminating otherwise queue-disabled stories in the next run.
+  env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+    STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
+    STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    bash "$repo_root/singlebox/singlebox.sh" --standalone clean bcs
   # BCS_SKIP_DEBUG_BUILD=1: `setup all` would otherwise compile the
   # non-instrumented bcs/bcs-cli/bcs-admin into src/bcs/target/debug, a full
   # cargo build (~2 minutes in CI) that nothing in this run uses. The

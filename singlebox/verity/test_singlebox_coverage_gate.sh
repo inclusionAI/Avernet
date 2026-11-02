@@ -244,6 +244,13 @@ test_default_mode_runs_real_singlebox() {
 
   grep -Fx -- "--standalone --with-bcs-coverage start all" "$log" >/dev/null || \
     fail "default coverage mode should start instrumented BCS in the full standalone stack"
+  "${ROOT}/apps/backend/.venv/bin/python" - "$log" <<'PY'
+import sys
+from pathlib import Path
+commands = Path(sys.argv[1]).read_text().splitlines()
+assert commands.index("--standalone clean bcs") < commands.index("--standalone --with-bcs-coverage start all"), \
+    "coverage must clear its retained BCS deliveries before starting the shared stack"
+PY
   grep -Fx -- "--standalone stop all" "$log" >/dev/null || \
     fail "default coverage mode should stop the full standalone singlebox stack"
   grep -F "run pytest tests/community/acceptance/devices tests/community/acceptance/cron" "$uv_log" >/dev/null || \

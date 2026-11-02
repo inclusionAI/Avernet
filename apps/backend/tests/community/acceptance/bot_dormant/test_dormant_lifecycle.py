@@ -48,13 +48,13 @@ def _wait_reactivated_bot_ready(
 
 
 @pytest.mark.acceptance
-def test_dormant_recycle_notification_and_reactivate_live(live_backend):
+def test_dormant_recycle_notification_and_reactivate_live(live_backend, request):
     owner_id = fresh_id("dormant_owner")
     headers = {"x-user-id": owner_id}
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=180.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=owner_id,
             bot_name_prefix="Dormant Acceptance",
             bot_desc="dormant recycle and reactivate acceptance bot",
