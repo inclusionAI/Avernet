@@ -508,6 +508,35 @@ def test_is_readonly_rules():
     assert is_readonly("data/report.csv") is False
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-repo",
+        "skills-pool/skills-repo/business/content",
+    ],
+)
+def test_is_readonly_rules_protect_the_shared_repo_subtree(path):
+    # The shared repo is a read-only engine mount; the resource API must reject
+    # its exact subtree rather than forwarding the delete and exposing the
+    # engine's underlying read-only error.
+    assert is_readonly(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-local",
+        "skills-pool/skills-local/notes.md",
+        "skills-pool/skills-repository",
+        "skills-pool/skills-repo-example",
+    ],
+)
+def test_is_readonly_rules_keeps_sibling_paths_writable(path):
+    # Safeguards against a too-broad string match: user-owned and distinct
+    # directories near the shared repo remain governed by their own policy.
+    assert is_readonly(path) is False
+
+
 def test_resolves_from_di(test_injector):
     """The service is wired as a singleton and resolves from the real injector."""
     svc = test_injector.get(ResourceFileService)

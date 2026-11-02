@@ -87,9 +87,31 @@ _HIDDEN_BASENAMES = PROTECTED_ROOT_FILES
 _HIDDEN_DIRNAMES = PROTECTED_ROOT_DIRS
 
 
+# Shared repos are mounted (or otherwise filled) by the skills center and are
+# not per-bot writable content. These are *workspace-relative* path prefixes,
+# not basename rules: only the exact subtree mounted at this address is
+# protected, while sibling writable directories keep their existing behavior.
+_READONLY_PATH_PREFIXES = ("skills-pool/skills-repo",)
+
+
+def _is_readonly_prefix(path: str) -> bool:
+    """Whether ``path`` names, or descends from, a protected shared repo."""
+    return any(
+        path == prefix or path.startswith(prefix + "/")
+        for prefix in _READONLY_PATH_PREFIXES
+    )
+
+
 def is_readonly(path: str) -> bool:
-    """Whether a file/dir is read-only (cannot delete): dotfiles, or an OpenClaw
-    identity ``.md`` file in the workspace root."""
+    """Whether a file/dir is read-only (cannot delete).
+
+    Dotfiles and OpenClaw identity ``.md`` files in the workspace root stay
+    protected. Shared repo subtrees are additionally protected by their exact
+    workspace-relative path, so callers refuse before trying to delete a read-only
+    mount through the engine.
+    """
+    if _is_readonly_prefix(path):
+        return True
     basename = path.rsplit("/", 1)[-1] if "/" in path else path
     if basename.startswith("."):
         return True

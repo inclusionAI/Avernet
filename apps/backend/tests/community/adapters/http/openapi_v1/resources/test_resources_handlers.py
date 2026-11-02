@@ -1479,7 +1479,10 @@ async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", [".env", "AGENTS.md", "docs/.hidden"])
+@pytest.mark.parametrize(
+    "path",
+    [".env", "AGENTS.md", "docs/.hidden", "skills-pool/skills-repo/business/content"],
+)
 async def test_delete_file_403s_a_read_only_path(path):
     """Same policy the console's delete enforces. Addressing by path is what
     makes these reachable at all — they never had a resource record, so the old
