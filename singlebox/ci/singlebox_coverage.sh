@@ -228,6 +228,7 @@ run_real_singlebox() {
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF="${SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF:-1}" \
     SINGLEBOX_ACCEPTANCE_KNOWLEDGE_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/bot_knowledge/fixture_catalog.json" \
     SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
     bash "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start all
@@ -332,6 +333,8 @@ run_bcs_e2e() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     BCS_BOTS_DATA_DIR="$coverage_standalone_root/profiles" \
+    BCS_E2E_CHANGED_LINE_MIN="${BCS_E2E_CHANGED_LINE_MIN:-60}" \
+    BCS_E2E_CHANGED_BASE_REF="${BCS_E2E_CHANGED_BASE_REF:-${SINGLEBOX_BASE_REF:-origin/dev}}" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     bash "$repo_root/apps/bcs/scripts/e2e_coverage.sh" \
       --skip-start \

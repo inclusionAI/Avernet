@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), refetch: vi.fn(), history: vi.fn(), snapshot: vi.fn(), rows: [] as Array<Record<string, unknown>> }))
 vi.mock('../../api/hooks', () => ({
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
@@ -12,7 +12,7 @@ vi.mock('../../api/hooks', () => ({
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'user', isAdmin: false }) }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
 vi.mock('../../components/NodePalette', () => ({ default: () => null }))
@@ -81,7 +81,7 @@ describe('real workspace and embedded editor transitions', () => {
     unchanged(session)
     await act(async () => { target.resolve(B); await target.promise })
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=b'))
-    expect(state().spec).toEqual(B); expect(readDraft(session, 'yaml')).toBeUndefined()
+    expect(state().spec).toEqual(B); expect(state()._databaseSpec).toEqual(B); expect(readDraft(session, 'yaml')).toBeUndefined()
     expect(screen.getByRole('button', { name: /切换工作流，当前：Target/ })).toBeInTheDocument()
     expect(window.confirm).toHaveBeenCalledTimes(1)
   })
@@ -157,6 +157,16 @@ describe('real workspace and embedded editor transitions', () => {
     expect(state().spec).toEqual(target); expect(readDraft(session, 'yaml')).toBeUndefined()
     expect(screen.getByRole('button', { name: /切换工作流，当前：New/ })).toBeInTheDocument()
     expect(window.confirm).toHaveBeenCalledTimes(1); expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('commits an active-only target with a null DB baseline rather than inventing a draft', async () => {
+    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
+    mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
+    mount(); chooseB()
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('workflowId=b'))
+    expect(state().spec).toEqual(B); expect(state()._databaseSpec).toBeNull()
+    expect(mocks.snapshot).toHaveBeenCalledWith('b', 2)
   })
 
 })

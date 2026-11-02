@@ -30,6 +30,7 @@ pub(super) fn build_use_case_bundle(
     system_queue: Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     bot_core: Arc<BotCore>,
+    a2a_queries: Option<Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>>,
     organization_core: Arc<dyn OrganizationCoreService>,
     bot_connection_control: Arc<dyn bcs_service_api::BotConnectionControlPort>,
     group: Arc<dyn GroupCoreService>,
@@ -84,6 +85,9 @@ pub(super) fn build_use_case_bundle(
         .with_connection_control(bot_connection_control.clone());
     if let Some(edge_grants) = edge_grants {
         bot_use_cases = bot_use_cases.with_edge_grants(edge_grants);
+    }
+    if let Some(queries) = a2a_queries {
+        bot_use_cases = bot_use_cases.with_a2a_queries(queries);
     }
     if let Some(user_directory) = user_directory {
         bot_use_cases = bot_use_cases.with_user_directory(user_directory);
@@ -177,12 +181,22 @@ pub(super) fn build_use_case_bundle(
     }
 }
 
+#[cfg(any(test,feature="test-utils"))]
 pub(super) fn create_interaction_service(
     provider_transport: Arc<bcs_provider_http::HttpProviderTransport>,
     bot_connections: Arc<bcs_ws::bot::BotConnectionRegistry>,
     authorization: Arc<dyn CanResolveInteraction>,
     frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     terminal_retention_ms: u64,
+) -> Arc<dyn InteractionService> {
+    create_interaction_service_with_a2a(provider_transport,bot_connections,authorization,frontend_delivery,terminal_retention_ms,None)
+}
+
+pub(super) fn create_interaction_service_with_a2a(
+    provider_transport:Arc<bcs_provider_http::HttpProviderTransport>,
+    bot_connections:Arc<bcs_ws::bot::BotConnectionRegistry>,
+    authorization:Arc<dyn CanResolveInteraction>,frontend_delivery:Arc<dyn FrontendDeliveryPort>,terminal_retention_ms:u64,
+    a2a:Option<Arc<dyn bcs_service_api::InteractionProviderPort>>,
 ) -> Arc<dyn InteractionService> {
     let store = Arc::new(MemoryInteractionStore::new());
     let interaction_frontend = Arc::new(bcs_ws::web::WorkbenchInteractionDelivery::new(
@@ -193,11 +207,12 @@ pub(super) fn create_interaction_service(
     // 参数——函数参数位置是 Rust unsize coercion 的标准触发点，不需要显式
     // `as Arc<dyn ...>` 或额外包装（BotConnectionRegistry 已直接 impl
     // InteractionProviderPort）。
-    let interaction_provider: Arc<dyn bcs_service_api::InteractionProviderPort> =
-        Arc::new(bcs_provider_http::InteractionProviderMux::new(
+    let mut mux=bcs_provider_http::InteractionProviderMux::new(
             bot_connections,
             provider_transport.clone(),
-        ));
+        );
+    if let Some(a2a)=a2a {mux=mux.with_a2a(a2a);}
+    let interaction_provider: Arc<dyn bcs_service_api::InteractionProviderPort> =Arc::new(mux);
     let interactions: Arc<dyn InteractionService> = Arc::new(InteractionManagement::new(
         store,
         authorization,

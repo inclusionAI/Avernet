@@ -263,6 +263,7 @@ _CORE_SERVICE_MODULE_EXEMPT_SUFFIX: tuple[str, ...] = (
 #   * Helpers — pure functions used to resolve / probe / generate.
 _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Errors raised by services that the router translates to HTTP:
+    "UpgradeDraftRestartError",
     "FileTooLargeError",
     "InvalidIdentityEntityTypeError", "InvalidIdentityFileTypeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",

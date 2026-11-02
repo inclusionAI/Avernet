@@ -130,7 +130,7 @@ impl ActorDirectory {
         let status = if is_active { "active" } else { "offline" };
         let is_downlink = matches!(
             self.registry.resolve_delivery_target(&bot.bot_uuid).await,
-            Ok(BotDeliveryTarget::HttpProvider { .. })
+            Ok(BotDeliveryTarget::HttpProvider { .. } | BotDeliveryTarget::A2a { .. })
         );
         let capabilities = actor_capabilities_view(&bot);
 

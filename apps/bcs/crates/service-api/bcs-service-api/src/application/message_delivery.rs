@@ -186,6 +186,10 @@ pub trait CallerExecutionControlService: Send + Sync {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CancelMessageDeliveryResult {
     pub delivery: DeliveryStatusView,
+    /// Stable client-side correlation key for removing an optimistic user
+    /// message after cancellation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
     pub error: Option<String>,
 }
 
@@ -407,6 +411,20 @@ pub enum ManagedDeliveryError {
 pub trait ManagedMessageDeliveryService: Send + Sync {
     /// Best-effort post-commit observations; status callers must re-read on lag.
     fn subscribe_changes(&self) -> Option<tokio::sync::broadcast::Receiver<Vec<PersistedMessageDelivery>>> { None }
+
+    /// Trusted transport lost observation of an already-issued canonical Send.
+    /// Retain its occupied slot and cancellation intent. Never terminalizes,
+    /// retries submission, revives terminal work or accepts a request alias.
+    async fn mark_run_transport_unknown(
+        &self,_scope:&crate::BotRunScope,_run_id:&str,_now_ms:u64,
+    )->Result<(),ManagedDeliveryError> {Err(ManagedDeliveryError::Conflict)}
+
+    /// Internal budgeting only. Requires the exact canonical Run and scope,
+    /// an unexpired Dispatching/Running Send and a future deadline. This does
+    /// not release the Session slot, alter ownership or authorize new I/O.
+    async fn reschedule_run_deadline(
+        &self, _scope: &crate::BotRunScope, _run_id: &str, _deadline_ms: u64, _now_ms: u64,
+    ) -> Result<(), ManagedDeliveryError> { Err(ManagedDeliveryError::Conflict) }
 
     async fn admit_batch(&self, _commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
         Err(ManagedDeliveryError::Conflict)
@@ -687,4 +705,18 @@ mod tests {
         let view = view.with_content_preview(None);
         assert!(view.content_preview.is_none());
     }
+    #[test]
+    fn cancellation_client_id_is_additive_and_absent_without_removal_proof() {
+        let delivery = DeliveryStatusView {
+            admission_error: None, delivery_id: "delivery".into(), message_id: "canonical".into(),
+            target_bot_id: "bot".into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+            kind: bcs_domain::DeliveryType::Send, status: bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled,
+            state_version: 2, run_id: None, wait_reason: None, content_preview: None, task: None,
+        };
+        let mut result = CancelMessageDeliveryResult { delivery, error: None, client_message_id: None };
+        assert!(serde_json::to_value(&result).unwrap().get("client_message_id").is_none());
+        result.client_message_id = Some("client-1".into());
+        assert_eq!(serde_json::to_value(result).unwrap()["client_message_id"], "client-1");
+    }
+
 }

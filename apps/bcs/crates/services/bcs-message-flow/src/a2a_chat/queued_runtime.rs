@@ -2,7 +2,7 @@
 use super::*;
 use super::queued::{DirectProjection, invalid, transition, transition_conflict};
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
-use bcs_service_api::{BotDeliveryTarget, BotRunTransportOwner, PreparedManagedDelivery, BotEventCommand, BotEventOutcome, ChatEventState};
+use bcs_service_api::{BotRunTransportOwner, PreparedManagedDelivery, BotEventCommand, BotEventOutcome, ChatEventState};
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 
 impl A2aChat {
@@ -31,13 +31,10 @@ impl A2aChat {
         self.authorize_queued_text(run, &p.from_bot_id, &row.target_bot_id, text).await?;
         let target = self.registry.resolve_delivery_target(&row.target_bot_id).await?;
         let headers = bcs_config_api::queued_provider_headers::snapshot(&p.provider_route_headers, &flow.queue_persistable_headers).map_err(invalid)?;
-        let connection_id = if target.is_http_provider() { None } else {
+        let connection_id = if target.is_gateway() { None } else {
             Some(self.bot_delivery.connection_identity(&target).await.ok_or_else(|| invalid("direct connection unavailable"))?)
         };
-        let owner = match &target {
-            BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
-            BotDeliveryTarget::HttpProvider { provider_id, provider_bot_ref, .. } => BotRunTransportOwner::HttpProvider { provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone() },
-        };
+        let owner = BotRunTransportOwner::from_target(&target);
         let headers = if target.is_http_provider() { headers } else { Vec::new() };
         let mut frame = build_chat_send_frame(run, &row.session_id, &row.target_bot_id, &p.from_bot_id, &p.sender_name, &p.from_actor_id, text, &p.target_tags, p.caller_wait_mode.as_deref())?;
         if let BcsFrame::Request(request) = &mut frame {

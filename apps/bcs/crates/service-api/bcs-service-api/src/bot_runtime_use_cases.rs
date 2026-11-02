@@ -77,7 +77,7 @@ pub trait BotRuntimeConnectionService: Send + Sync {
     /// Return true when the bot is configured for provider downlink
     /// delivery and should no longer accept a WebSocket uplink.
     async fn is_provider_downlink_bot(&self, bot_id: &str) -> ServiceResult<bool> {
-        Ok(self.resolve_delivery_target(bot_id).await?.is_http_provider())
+        Ok(self.resolve_delivery_target(bot_id).await?.is_gateway())
     }
 
     /// Resolve the current delivery target for a bot (WebSocket or HttpProvider).

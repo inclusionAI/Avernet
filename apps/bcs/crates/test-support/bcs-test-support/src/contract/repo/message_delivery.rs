@@ -105,6 +105,12 @@ pub async fn message_delivery_repo_port_contract_tests<
     assert!(repo.lookup(DeliveryLookup::BotPendingContexts("A".into())).await?.is_empty(),
         "bound contexts stay with their existing carrier while Sends drain");
     assert_eq!(repo.lookup(DeliveryLookup::Message(first.message.message_id.clone())).await?.len(), 2);
+    let exact=&first.deliveries[0];
+    let run=exact.run_id.clone().expect("Send has canonical Run");
+    let canonical=repo.lookup(DeliveryLookup::CanonicalRun {bot:exact.target_bot_id.clone(),session:exact.session_id.clone(),run:run.clone()}).await?;
+    assert_eq!(canonical.len(),1);assert_eq!(canonical[0].delivery_id,exact.delivery_id);assert_eq!(canonical[0].run_id,exact.run_id);
+    assert!(repo.lookup(DeliveryLookup::CanonicalRun {bot:exact.target_bot_id.clone(),session:"other".into(),run:run.clone()}).await?.is_empty());
+    assert!(repo.lookup(DeliveryLookup::CanonicalRun {bot:"other".into(),session:exact.session_id.clone(),run}).await?.is_empty());
     let stats = repo.queue_statistics().await?;
     assert_eq!(stats.iter().filter(|s| s.status == "queued").map(|s| s.count).sum::<u64>(), 2);
     assert_eq!(stats.iter().filter(|s| s.status == "bound").map(|s| s.count).sum::<u64>(), 1);

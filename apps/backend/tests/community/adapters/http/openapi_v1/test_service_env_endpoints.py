@@ -9,6 +9,7 @@ from starlette.requests import Request
 from agentclaw.community.adapters.http.openapi_v1.service_envs import router as service_envs_router
 from agentclaw.community.adapters.http.openapi_v1.service_envs.router import publish_eval_env
 from agentclaw.community.core.service_bot.errors import ServicePublicationNotFoundError
+from tests.community.adapters.http.quality.test_quality_router import FakeQualityTaskService
 
 
 @pytest.fixture
@@ -34,14 +35,24 @@ async def test_publish_eval_env_handler(resource_services):
     })
     request = Request({"type": "http", "method": "POST", "path": "/"})
     request.state.trace_id = "trace-1"
-    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services)
+    quality_tasks = FakeQualityTaskService()
+    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", service, *resource_services, quality_tasks)
     assert result.code == 202000
     assert result.request_id == "trace-1"
     assert result.data.bot_uuid == "eval-bot"
     assert result.data.baas_bot_status is None
+    assert result.data.quality_task_id == 1
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1", resource_spec=None,
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
+        device_count=1, resource_spec=None,
     )
+    task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
+    assert task is not None
+    assert task.uuid == service.eval_publish.await_args.kwargs["biz_id"]
+    assert task.ext == {
+        "publish_id": 7, "bot_uuid": "eval-bot", "baas_publish_id": 42,
+        "operator": "actor",
+    }
 
 
 def test_openapi_contract():
@@ -59,11 +70,35 @@ def test_openapi_contract():
     assert params["operator"]["in"] == "query"
     assert params["operator"]["required"] is True
     assert params["operator"]["schema"]["minLength"] == 1
-    assert params["biz_id"]["in"] == "query"
-    assert params["biz_id"]["required"] is False
-    assert params["biz_id"]["schema"]["default"] == ""
+    assert "biz_id" not in params
+    assert params["device_count"]["in"] == "query"
+    assert params["device_count"]["required"] is False
+    assert params["device_count"]["schema"]["default"] == 1
+    assert params["device_count"]["schema"]["minimum"] == 1
     publication = next(p for p in operation["parameters"] if p["name"] == "publication_id")
     assert publication["schema"]["minimum"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_eval_env_device_count_forwarded(resource_services):
+    service = Mock()
+    service.eval_publish = AsyncMock(return_value={
+        "success": True, "publish_id": 7, "stage": "eval", "bot_uuid": "eval-bot",
+        "baas_publish_id": 42,
+    })
+    request = Request({"type": "http", "method": "POST", "path": "/"})
+    quality_tasks = FakeQualityTaskService()
+    result = await publish_eval_env(
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
+        quality_tasks,
+        device_count=3,
+    )
+    assert result.code == 202000
+    service.eval_publish.assert_awaited_once_with(
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
+        device_count=3, resource_spec=None,
+    )
+    assert result.data.quality_task_id == 1
 
 
 @pytest.mark.asyncio
@@ -71,7 +106,7 @@ async def test_not_found_is_enveloped(resource_services):
     service = Mock()
     service.eval_publish = AsyncMock(side_effect=ServicePublicationNotFoundError("hidden"))
     request = Request({"type": "http", "method": "POST", "path": "/"})
-    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "", service, *resource_services)
+    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", service, *resource_services)
     assert result.status_code == 404
 
 
@@ -94,7 +129,7 @@ async def test_foreign_publication_rejected(resource_services, field, value):
     service = Mock(eval_publish=AsyncMock())
     request = Request({"type": "http", "method": "POST", "path": "/"})
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "",
+        "bot-1", 7, request, "actor", "owner",
         service, *resource_services,
     )
     assert result.status_code == 404
@@ -102,7 +137,7 @@ async def test_foreign_publication_rejected(resource_services, field, value):
 
 
 _PROGRESS_PATH = (
-    "/openapi/v1/service-envs"
+    "/openapi/v1/bots/service-envs"
     "/env-publish/{baas_publish_id}/progress"
 )
 
@@ -123,7 +158,7 @@ async def test_env_progress(status):
     assert result.data == progress
     assert result.request_id == "progress-trace"
     service.get_baas_publish_progress.assert_called_once_with(
-        baas_publish_id=42, include_devices=False,
+        baas_publish_id=42, include_devices=True,
     )
     service.eval_publish.assert_not_called()
 
@@ -157,7 +192,7 @@ async def test_progress_provider_error_propagates():
         )
 
 
-_TEARDOWN_PATH = "/openapi/v1/service-envs/{bot_uuid}/env-teardown"
+_TEARDOWN_PATH = "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"
 
 
 @pytest.mark.asyncio
@@ -238,7 +273,7 @@ async def test_non_service_bot_cannot_publish_eval_environment(resource_services
     service = Mock(eval_publish=AsyncMock())
     request = Request({"type": "http", "method": "POST", "path": "/"})
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "", service, *resource_services,
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
     )
     assert result.status_code == 409
     service.eval_publish.assert_not_awaited()
@@ -254,12 +289,18 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
         "baas_publish_id": 42,
     }))
     request = Request({"type": "http", "method": "POST", "path": "/"})
+    quality_tasks = FakeQualityTaskService()
     result = await publish_eval_env(
-        "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
+        quality_tasks,
         cpu=4, memory=8, disk=disk,
     )
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
-        publish_id=7, operator="actor", biz_id="task-1",
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
+        device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )
+    task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
+    assert task is not None
+    assert task.id == result.data.quality_task_id

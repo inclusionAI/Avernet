@@ -113,11 +113,15 @@ def _operator(staff_id: str = "u001") -> OperatorContext:
 
 
 class TestUpdateDeviceHeaders:
-    def test_teclaw_uses_teclaw_authorization_rule_builder(self):
+    @pytest.mark.parametrize("single_device", [True, False])
+    def test_teclaw_uses_teclaw_authorization_rule_builder(self, single_device):
         baas = MagicMock()
         rule = MagicMock()
         baas._build_teclaw_outbound_operation_rule.return_value = rule
         baas.get_device_by_uuid.return_value = {"provider_device_id": "PAAS-1"}
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "DEVICE-1", "provider_device_id": "PAAS-1"}
+        ]
         svc = _make_service(baas_service=baas)
         device = AllocatedDevice(
             device_id="BOT-teclaw",
@@ -125,7 +129,7 @@ class TestUpdateDeviceHeaders:
             device_props={
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
-                "device_uuid": "DEVICE-1",
+                **({"device_uuid": "DEVICE-1"} if single_device else {}),
             },
         )
 
@@ -139,8 +143,9 @@ class TestUpdateDeviceHeaders:
             agent_pass_token="passport-token"
         )
         baas._build_outbound_operation_rule.assert_not_called()
-        baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule)
-        assert result == [{"baas_device_uuid": "DEVICE-1", "paas_device_id": "PAAS-1"}]
+        baas.update_device_outbound_rule.assert_called_once_with("PAAS-1", rule, mode="replace")
+        device_key = "baas_device_uuid" if single_device else "device_uuid"
+        assert result == [{device_key: "DEVICE-1", "paas_device_id": "PAAS-1"}]
 
     def test_teclaw_skips_update_when_rule_builder_returns_none(self):
         baas = MagicMock()

@@ -103,6 +103,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - BotOwnershipSyncProtocol
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
@@ -344,3 +345,21 @@ missing data or directory failure grants nothing. Path segments are case-sensiti
 subject to explicit legacy unique-collation write conflicts (409). No public rule
 listing is exposed. The real DI provider supplies repository plus staff directory.
 The signature gate and real SQLite/HTTP behavior tests cover this contract.
+
+## Ownership sync Service API v1
+
+`api.bot_ownership_sync.BotOwnershipSyncProtocol` is an additive, transport-free
+notification contract, separate from the unchanged managers-only v1 API:
+
+```python
+request_ownership_sync(*, bot_pk: int, env: str, avernet_tenant: str,
+                       reason: SyncReason) -> SubmissionResult
+```
+
+It performs only memory admission (`QUEUED`, `COALESCED`, `DISABLED`, `REJECTED`),
+not database reads, HTTP delivery, or confirmation. Owner handoff and the
+ownership notification/repair helpers consume it. The composition root binds
+both sync APIs to the same `BotManagerSyncDispatcher` when enabled. The current
+contract is defined here rather than re-exported from Core; its specific Core
+consumer edges must be declared, not generalized into permission to import
+HTTP adapters. `reason` is diagnostic only, never a work-kind selector.

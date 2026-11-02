@@ -12,14 +12,17 @@ cycle), so everything both sides need lives here.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterator, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+from .restart_contract import PublishedRestartServices
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -261,6 +264,24 @@ class EngineProvisioningStrategy(ABC):
         through to the original synchronous lifecycle callback.
         """
         return restart(**kwargs)
+
+    @contextmanager
+    def published_restart_scope(
+        self, ctx: BotProvisioningContext, *, services: PublishedRestartServices,
+        publish_id: int, stage: str, binding_id: int, source_status: str,
+    ) -> Iterator[dict]:
+        """Keep shared orchestration in place; engines own entry/exit policy.
+
+        Yield an empty result to proceed, or a populated result to return before
+        executing the workflow. If a policy consumes a workflow exception, it
+        must populate that same result after any required persistence succeeds.
+        The default performs no I/O and never suppresses exceptions.
+        """
+        yield {}
+
+    async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
+        """Keep the runner's exact operation identity and crash/adoption contract."""
+        return await runner.acquire_workflow(op, issue)
 
     @abstractmethod
     def apply_restart_extra_configs(

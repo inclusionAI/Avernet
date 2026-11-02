@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 CONFIG_BLOCK_NAME = "bot_manager_sync"
-_ALLOWED_KEYS = frozenset({"enabled", "env", "bcs_base_url"})
+_ALLOWED_KEYS = frozenset({"enabled", "ownership_enabled", "env", "bcs_base_url"})
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class ManagerSyncConfig:
     enabled: bool = False
     env: str = ""
     bcs_base_url: str = ""
+    ownership_enabled: bool = False
 
 
 def parse_manager_sync_config(block: Mapping[str, object] | None) -> ManagerSyncConfig:
@@ -32,6 +33,11 @@ def parse_manager_sync_config(block: Mapping[str, object] | None) -> ManagerSync
     enabled = block.get("enabled", False)
     if type(enabled) is not bool:
         raise ValueError(f"{CONFIG_BLOCK_NAME}.enabled must be a boolean")
+    ownership_enabled = block.get("ownership_enabled", False)
+    if type(ownership_enabled) is not bool:
+        raise ValueError(f"{CONFIG_BLOCK_NAME}.ownership_enabled must be a boolean")
+    if ownership_enabled and not enabled:
+        raise ValueError(f"ownership sync requires {CONFIG_BLOCK_NAME}.enabled")
     values: dict[str, str] = {}
     for field in ("env", "bcs_base_url"):
         value = block.get(field, "")
@@ -43,7 +49,7 @@ def parse_manager_sync_config(block: Mapping[str, object] | None) -> ManagerSync
     if values["bcs_base_url"]:
         if not _is_origin(values["bcs_base_url"]):
             raise ValueError(f"{CONFIG_BLOCK_NAME}.bcs_base_url must be an http(s) origin")
-    return ManagerSyncConfig(enabled=enabled, **values)
+    return ManagerSyncConfig(enabled=enabled, ownership_enabled=ownership_enabled, **values)
 
 
 def _is_origin(value: str) -> bool:

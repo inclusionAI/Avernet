@@ -5,10 +5,11 @@
 - The SQL authority implementation (`DbBotAuthorityStore`) for the bot
   authority management edges (bot-authority spec §5/§6/§7): owner/manager
   edge reads and the registration/lifecycle composition steps, manager
-  single-item edits and trusted full-set sync, ownership transfer
+  single-item edits and trusted full-set sync, trusted ownership sync
+  (owner replace, previous owner fully removed), ownership transfer
   lifecycle (request/refresh/accept/reject/cancel with one pending row
   per `(env, bot_id, target_owner_actor_id)`), the paged reads behind
-  the eleven `/api/v1/collaboration/` authority routes, and the
+  the twelve `/api/v1/collaboration/` authority routes, and the
   `bot_authority_changes` permission-scope audit ledger.
 - One transaction per authority change, serialized on the Bot row:
   bot lock → owner guard → count guards → Human-existence guards →
@@ -58,6 +59,15 @@ or transaction is added. MySQL uses the existing binary identity predicates;
 SQLite query/row counts do not establish MySQL EXPLAIN or lock/contention results.
 
 ## Runtime ownership
+
+Ownership sync guards both the target's and previous owner's approved manager
+counts, including zero, under the Bot row lock. This adds at most two bounded
+count queries per transaction; owner and Bot liveness pre-read query counts
+stay unchanged. The command still uses at most four transaction attempts and
+the existing ten-second transaction deadline. A manager grant racing pre-read
+forces a fresh attempt; retirement is classified before owner-integrity errors.
+Owner identity validation finishes before any write, and ownership audit states
+use JSON serialization while preserving the existing field order.
 
 Authority writes are the only permission-scope writers here; audit rows
 append with a monotonic per-mutation sequence. Reads never audit.

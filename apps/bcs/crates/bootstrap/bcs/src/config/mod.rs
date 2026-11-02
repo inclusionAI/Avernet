@@ -17,6 +17,7 @@
 //! - `tests` — configuration tests (colocated at module scope).
 
 mod bot_authority;
+mod a2a_input;
 mod collaboration;
 mod http;
 mod invite;

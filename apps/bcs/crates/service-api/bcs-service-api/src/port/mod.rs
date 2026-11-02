@@ -1,4 +1,5 @@
 pub mod coordination_intent;
+pub mod a2a_card;
 pub use coordination_intent::*;
 pub mod bot_authority;
 pub mod bot_catalog_cleanup;

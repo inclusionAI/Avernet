@@ -11,7 +11,7 @@ import json
 from copy import deepcopy
 import threading
 import uuid
-from typing import Any, Dict, Mapping, TYPE_CHECKING
+from typing import Any, Callable, Dict, Mapping, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
     can_create_service_with_template,
@@ -44,7 +44,6 @@ from .restart_backup import AicodingRestartBackupMixin
 from .restart_task import AicodingDurableRestartMixin
 from .restart_baas import AicodingSubmissionMixin
 from .hosted_workspace_mixin import AicodingHostedWorkspaceMixin
-
 
 # Legacy coding template types.  This is only used for old call sites that
 # identify coding bots by template_type (applicationCoding/personalCoding).
@@ -166,8 +165,9 @@ class AicodingBaasEngineBucketResolver:
 
 class AicodingProvisioningStrategy(AicodingSubmissionMixin, AicodingDurableRestartMixin, AicodingRestartBackupMixin, AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
-    def __init__(self, engine_type: str) -> None:
+    def __init__(self, engine_type: str, *, common_config_provider: Callable[[], Any] | None = None) -> None:
         self._engine_type = engine_type
+        self._common_config_provider = common_config_provider
 
     @property
     def engine_type(self) -> str:

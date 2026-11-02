@@ -1,6 +1,122 @@
 # Coding-only restart backup
 
-## Best-effort policy (2026-10-12)
+## Confirmed-fastdisk policy (2026-10-30)
+
+Backend sends the embedded publication detector. Unknown/failed initial detection
+uses the best-effort policy below; with blocking explicitly enabled, a positively
+confirmed fastdisk target requires
+a valid complete or partial backup receipt within 300 seconds. Failure,
+missing capability or unconfirmed result blocks replacement; a validated
+`partial_success` permits restart with a distinct warning, even when blocking is enabled. Ordinary durable
+restarts persist positive confirmations across redelivery.
+
+Published restart policy and correlated failure logs live in the existing
+`restart_backup.py`, contributed by
+`AicodingProvisioningStrategy`. It owns the guard, terminal failure/replay handling,
+exact-operation failure and status/ext CAS for the existing frontend fields.
+Shared publish orchestration stays in its original `execute_restart` method and
+only calls the declared `published_restart_scope` and `acquire_restart_workflow`
+strategy hooks. No second common execution function or workflow callback is
+introduced. The scope owns entry checks and failure handling: an empty result
+permits execution; a populated result returns an existing/handled failure. Coding
+fills the result only after required failure persistence succeeds. Default scopes
+perform no I/O, add no engine metadata and never suppress exceptions. The generic
+operation runner retains its adopt-before-issue logic and has no backup exception or coding-state knowledge.
+Only the coding strategy catches `RestartBackupBlocked`; transient/post-submit
+failures retain the existing crash-resume behavior. No shared service is patched
+or reconfigured per request.
+
+## Partial backup is restart success (2026-11-02)
+
+A durably published `partial_success` is a terminal successful backup for restart
+policy, not a complete copy of all source data. It permits restart with either
+value of `fastdisk_fail_block`. The strategy validates the nested partial receipt:
+matching operation ID, nonempty string generation ID, `status=partial_success`,
+`error_code=source_files_skipped` and `failed_phase=backup_partial`. Optional
+`completeness` must be `degraded` when present. A committed success receipt with
+`completeness=degraded` is also classified as partial rather than full success.
+
+Both preparation and the final pre-mutation verification log at WARN with
+`event=aicoding_restart_backup status=partial_success reason=partial_receipt_valid
+ action=continue_restart data_loss_risk=true`, plus bot ID, full ARCA ID (including
+`@` suffix), owner, environment, operation, generation and elapsed time. Raw helper
+diagnostics and file paths are not logged. A valid partial result neither emits
+`[AICODING_RESTART_FAILED]` nor writes failure fields for the frontend. Full success
+keeps its INFO `committed`/`allowed` logs; actual failures keep the existing policy.
+
+The same status, boot identity, generation and completeness classification are
+rechecked before mutation. Malformed or changed receipts are still unconfirmed
+failures governed by the existing switch, not partial successes. Binding changes
+and ownership fences remain mandatory. This behavior is confined to the aicoding
+strategy; no shared flow, frontend or container-script changes are needed.
+
+## Runtime switch (2026-11-01)
+
+Use the existing `ac_common_config` record (no schema or frontend change):
+
+| Field | Value |
+| --- | --- |
+| `business_code` | `aicoding` |
+| `param_code` | `fastdisk_fail_block` |
+| `enable` | `"1"` (configuration record is active) |
+| `param_value` | JSON boolean `false` (default) to warn and continue, `true` to block |
+| `env` | Chosen by the backend environment, not by the request body |
+
+Missing or disabled records, invalid values and configuration read errors retain
+blocking `false` (warn and continue). `enable="0"` disables the configuration
+record and also restores this non-blocking default. To enable blocking, use both
+`enable="1"` and `param_value=true`. Read errors log only the error type, never raw
+exception text. Only a confirmed fastdisk attempt reads the setting. Each backup
+precondition snapshots it once across all replicas and final receipt checks;
+changes affect later attempts, not a backup already using its snapshot.
+Already-terminal failed tasks remain failed; the switch does not revive them.
+
+The old `fastdisk_fail_open` key is no longer read. Do not invert an existing row's
+value under the old name. Insert the new `fastdisk_fail_block` key in the target
+environment; existing old-key rows alone leave blocking disabled. No database
+configuration is automatically written or migrated by this code change.
+
+Both values still attempt the same helper and retain the fastdisk 300-second
+wait budget. With `false`, backup-only failures use the existing sanitized
+`action=continue_restart data_loss_risk=true` warning with bot/ARCA/owner/env
+correlation fields; they do not produce the restart-failed marker. A failed
+backup is not reported as successful. Binding changes, ownership/CAS failures
+and mutation fences still block. Non-coding engines and non-fastdisk/unknown
+initial detection keep their existing behavior. Ordinary BaaS, direct ARCA and
+published/Caller restarts all use the same coding strategy. Ordinary publication
+and restore policy are unchanged.
+
+**Disabling blocking accepts data loss:** replacement can interrupt an unfinished
+backup or destroy unpersisted data. Backend does not remove a maintenance barrier,
+repair a failed helper or guarantee the replacement will become ready.
+
+Operator example (not automatically executed): set `OCB_BASE_URL` to the target
+backend origin and `OCB_COOKIE` to your authorized operator login cookie. The
+existing `upsert` route inserts a missing record or updates that same key in the
+backend's current environment. Use `create` instead to reject an existing key.
+
+```bash
+curl --fail-with-body --request POST \
+  "${OCB_BASE_URL%/}/api/v1/common-config/upsert" \
+  --header 'Content-Type: application/json' \
+  --cookie "$OCB_COOKIE" \
+  --data-raw '{
+    "business_code": "aicoding",
+    "business_name": "AICoding",
+    "param_code": "fastdisk_fail_block",
+    "param_name": "快盘备份失败阻断重启",
+    "param_value": false,
+    "enable": "1"
+  }'
+```
+
+Keep `enable="1"` and set `param_value` to `true` to block after backup failure.
+The example uses the default `false`, which allows continuation after backup failure.
+Confirm the response body's `success` is `true` (HTTP 200 alone is insufficient).
+The existing `POST /api/v1/common-config/get` accepts the same `business_code` and
+`param_code` for readback; its returned `env` identifies the effective environment.
+
+## Non-fastdisk / unconfirmed best-effort policy (2026-10-12)
 
 Backup is attempted, but backup-only failures log sanitized warnings and do not
 block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
@@ -118,15 +234,60 @@ An absent `/opt/agentclaw/bin/restart_backup` is a legacy skip only when both th
 new `/opt/agentclaw/restart-backup-v1` installation and the restart barrier are
 absent. The older `.fastdisk.ready` marker is not a backup capability marker.
 A permission error is not absence. Once installed, the runtime helper checks
-actual mounts; `not_mounted` skips backup. Mounted runtimes must stop writers and
-return a committed generation/operation receipt for backup to count as successful.
-Unconfirmed backup still allows restart, with a data-loss warning.
+actual mounts; `not_mounted` skips backup only under the non-blocking policy.
+Current helpers perform a live backup without stopping business processes and
+return a durable complete or partial generation/operation receipt. Unconfirmed
+backup follows the switch above, rather than counting as success.
 
 Inventory logs include `source=baas_devices`, query start/failure, device count,
 status distribution, resolved target count, operation ID and elapsed time.
 Logs carry `event=aicoding_restart_backup`, phase, status/reason, Bot/target,
 operation, elapsed time and generation. The policy does not log raw output or
 exception messages. Poll logs occur on transitions or at most once per minute.
+
+## Restart failure alerts (2026-10-30)
+
+The coding strategy emits ERROR logs with `[AICODING_RESTART_FAILED]` and
+`event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, receipt
+verification failures, and blocking preparation errors. Ordinary task and
+published-restart exception handlers retain the underlying backup diagnostics
+and log before persisting failure, so a failed status write cannot hide the
+original backup error. This is diagnostic-only: no queue, retry, publication,
+status or replacement decisions are changed.
+
+Each record includes `bot_id`, `owner_id`, `env`, `arca_id`, raw `target_id`, `operation_id`, `phase`,
+`reason`, `error_type`, chained `cause_types`, `elapsed_ms`, `helper_status`,
+`binding_id`, `publish_id`, and a safe `stack`. Stages distinguish `prepare`,
+`verify`, `verify_target`, `precondition`, `task_failed`, and `published_restart`.
+Stack entries contain only filename, line number and function; raw exception
+messages, source lines, locals, commands and helper stdout/stderr are excluded.
+Unknown/unavailable fields use `-` rather than an invented value.
+
+`arca_id` comes from the captured direct-ARCA `sandbox_id` or a BaaS physical
+`provider_device_id` beginning with `ARCA-SANDBOX-`. Both `arca_id` and
+`target_id` preserve the complete routing identity, including any `@tenant`
+suffix (for example `@8`). Log formatting never changes provider execution
+parameters or tenant translation. Exception wrappers
+preserve the resolved physical target. Inventory verification errors retain the
+previously captured physical targets; when several containers are involved, emit
+one record per captured container rather than arbitrarily selecting a replica.
+`owner_id` comes from the Bot provisioning context or durable restart state, not
+the user triggering restart. `env` uses the existing `get_current_env()` data
+environment (`dev`/`pre`/`prod`; gray maps to prod), not the deployment profile or
+publish stage. These values do not require extra database/container lookups.
+A logical Bot/device ID is never labeled
+as an ARCA ID. Failures without a resolved physical target have `arca_id=-` and
+must be correlated by Bot/operation; logging performs no extra inventory or
+database I/O.
+
+Alert on ERROR plus `event=aicoding_restart_failed` (or the bracketed marker).
+Multiple phases can log the same failure: group/deduplicate by `bot_id` and
+`operation_id`, and use `arca_id`/`phase` for diagnosis. These logs cover this
+strategy's backup/precondition and exception failure boundaries, not a new
+universal event contract for all deployment/queue failures. Non-fastdisk or
+failed initial detection retains WARNING with `action=continue_restart`, without
+this failure marker. Lost-ownership `RestartSuperseded` also emits no new failure
+alarm. Other engines and shared lifecycle orchestration do not use this logger.
 
 ## Validation boundary
 
@@ -148,17 +309,18 @@ Additional JSON fields are ignored to allow additive v1 changes.
 | --- | --- |
 | `version` | Integer `1`; incompatible versions must not be silently accepted |
 | `operation_id` | The requested operation ID, identical throughout one operation |
-| `status` | `legacy`, `not_mounted`, `running`, `committed`, or `failed` |
+| `status` | `legacy`, `not_mounted`, `running`, `committed`, `partial_success`, or `failed` |
 | `boot_id` | Nonempty container-boot identity, required except for `legacy` |
-| `backup` | Required for `committed`: object with `status: success`, matching `operation_id`, and nonempty `generation_id` |
+| `backup` | Required for `committed` or `partial_success`: matching `operation_id` and nonempty `generation_id`; committed uses nested `status: success`, partial uses the partial receipt contract above |
 
 `legacy` is emitted only by the backend's missing-helper probe when both new
 capability markers are absent; it is not a fallback for transport errors.
 `not_mounted` means the installed helper found no canonical data mounts.
 `running` requires polling; it must not transition to a skip state. `committed`
-means writers have been stopped and the backup generation is durable. `failed`
-degrades backup but allows replacement. Before replacement, the status, boot
-identity and committed generation are checked again; changes warn and continue.
+means a durable successful generation; `partial_success` means a durable generation
+with omitted source files. Both allow restart after receipt validation, with
+distinct logs. `failed` and unconfirmed results follow the blocking switch. Before
+replacement, status, boot identity, generation and completeness are checked again.
 Changed physical inventories stop receipt probing against those targets.
 
 The paired script repository must implement this same v1 contract. Rollout must
@@ -229,9 +391,10 @@ transport still blocks replacement. Binding/database checks stay outside that
 boundary. This is dependency consolidation, not a new common provider API: BaaS
 continues to use inventory and Arca continues to pin the old binding's sandbox.
 
-The `prepare_instance_restart` published/Caller dispatcher preserves its existing
-`target_runtime` argument and wraps it with `RestartBackupDependencies.for_instance`
-before invoking the engine hook. No provider-specific backup factory is passed
+The `prepare_instance_restart` published/Caller dispatcher passes its existing
+`target_runtime` argument unchanged to the engine hook. Only the coding strategy
+wraps it with `RestartBackupDependencies.for_instance`; default/other engines do
+not construct coding backup dependencies. No provider-specific backup factory is passed
 through BotService or the engine hook anymore. BotService's existing BaaS service
 dependency remains for non-backup lifecycle operations; this change does not
 remove that shared functionality.

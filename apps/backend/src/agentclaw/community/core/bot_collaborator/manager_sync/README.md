@@ -38,7 +38,8 @@ becomes an empty BCS replacement.
 
 - Notification is post-commit, nonblocking, and memory-only.
 - The existing dedicated loop runs 4 workers.
-- Capacity is 1,024 Bot entries plus pending Space hints, with running entries counted.
+- Capacity is 1,024 total slots shared by Bot entries and pending/expanding Space
+  hints (including running work).
 - Space expansion and repair page at 100 keys.
 - One process coalesces duplicate keys and marks a running key dirty so it is read
   again after the current round.
@@ -55,8 +56,13 @@ late writes are accepted. No eventual convergence is promised. Stale managers,
 including revoked permissions, can remain until another successful notification or a
 manual repair request.
 
-Owner handoff is an ordinary refresh: this package does not transfer BCS ownership,
-prove owners match, or retain an owner hold.
+The managers-only API never transfers ownership. Owner handoff now also submits
+explicit ownership work through the [ownership extension](../../bot_management/ownership_sync/README.md).
+The shared dispatcher tracks pending `MANAGERS` and `OWNERSHIP` per key, runs
+Owner first when both are claimed, and schedules a fresh managers read after
+confirmed Owner delivery. Owner failure still allows already-claimed managers
+work. Each kind has its own 3-send/15-second budget; there is no owner hold.
+The existing lifecycle closes both plugins on the same worker loop.
 
 ## Repair
 
@@ -82,10 +88,15 @@ provides:
   - notify_bot_manager_sync
   - notify_space_manager_sync
 consumes:
+  - BotOwnershipSyncProtocol (structurally implemented by the shared dispatcher)
+  - BotOwnershipSyncService
+  - BcsOwnershipPlugin (closed by the shared lifecycle)
   - BotManagerSyncProtocol
   - ManagerSyncReadRepository
   - BcsManagersPlugin
 internal_dependencies:
+  - agentclaw.community.core.bot_management.ownership_sync.service
+  - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.kernel.bot_manager_sync
   - agentclaw.community.kernel.lifecycle

@@ -6,6 +6,7 @@ import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton'
 import { BotManagementTabs, type BotManagementTab } from '@/components/BotWorkshop/BotManagementTabs';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import { ContainerInstancesModal } from '@/components/BotWorkshop/ContainerInstancesModal';
+import CopyBotModal from '@/components/BotWorkshop/CopyBotModal';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
@@ -29,6 +30,17 @@ const BotWorkshopPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<BotManagementTab>('tc');
   const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   const effectiveTab = workshop.currentSpaceKind === 'personal' ? activeTab : 'tc';
+  // 复制 Modal 第 2 步只读展示源 Bot 归属空间名;不复制时不渲染。
+  const copySourceSpaces = workshop.copyBot
+    ? [
+        {
+          id: workshop.copyBot.spaceId ?? '',
+          name: workshop.copyBot.spaceName ?? workshop.copyBot.spaceId ?? '当前空间',
+          ownership: workshop.copyBot.ownership,
+          canCreate: false,
+        },
+      ]
+    : [];
   const handleView = (bot: BotDomain) => {
     Tracert.click(Points.botWorkshop.openDetail, { bot_id: bot.id });
     if (workshop.canEnterDetail(bot)) workshop.openDetail(bot);
@@ -135,6 +147,8 @@ const BotWorkshopPage: React.FC = () => {
                       onGeneralConfig={setGeneralConfigBot}
                       onManagePublication={setPublicationBot}
                       onAction={workshop.runAction}
+                      onCopy={workshop.openCopy}
+                      getCopyAvailability={workshop.getCopyAvailability}
                       onClaimLock={workshop.claimLock}
                       onReleaseLock={workshop.releaseLock}
                       getInventoryActions={(bot) => ({
@@ -168,6 +182,14 @@ const BotWorkshopPage: React.FC = () => {
           onClose={workshop.closeCreate}
           onSubmit={workshop.submitCreate}
           onExpertCreated={() => void workshop.retry()}
+        />
+        <CopyBotModal
+          sourceBot={workshop.copyBot}
+          spaces={copySourceSpaces}
+          copying={workshop.copying}
+          authorization={workshop.copyAuthorization}
+          onClose={workshop.closeCopy}
+          onSubmit={workshop.submitCopy}
         />
         <BotAccessModal
           mode={workshop.access.mode}

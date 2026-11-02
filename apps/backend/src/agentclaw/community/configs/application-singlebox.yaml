@@ -85,6 +85,7 @@ user_config:
   # Local BCS trusts the backend service principal using the existing dev key.
   bot_manager_sync:
     enabled: true
+    ownership_enabled: true
     env: dev
     bcs_base_url: "http://127.0.0.1:21000"
 

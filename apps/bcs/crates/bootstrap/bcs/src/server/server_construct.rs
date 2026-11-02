@@ -365,6 +365,7 @@ impl BcsServer {
             message_flow_builder.system_queue_port(),
             bot_registry.clone(),
             bot_core_arc.clone(),
+            None,
             organization_core.clone(),
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),

@@ -22,9 +22,10 @@ use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActorKind, BotAccessRelation, BotOwnershipView, BotRoleQuery,
     ManagerEdit, ManagerListQuery, ManagerPage, ManagerSetChange,
-    ManagerSync, TransferCommand, TransferDirection, TransferKey,
-    TransferListQuery, TransferOutcome, TransferPage, TransferStatus,
-    TransferView, check_page_bounds, human_user_id_of_actor,
+    ManagerSync, OwnershipChange, OwnershipSync, TransferCommand,
+    TransferDirection, TransferKey, TransferListQuery, TransferOutcome,
+    TransferPage, TransferStatus, TransferView, check_page_bounds,
+    human_user_id_of_actor,
 };
 
 use super::{CHUNK, DbBotAuthorityStore, not_initialized_error, owner_integrity_error};
@@ -407,6 +408,10 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
 
     async fn sync_managers(&self, command: ManagerSync) -> ServiceResult<ManagerSetChange> {
         self.sync_managers_impl(command).await
+    }
+
+    async fn sync_ownership(&self, command: OwnershipSync) -> ServiceResult<OwnershipChange> {
+        self.sync_ownership_impl(command).await
     }
 
     async fn change_transfer(&self, command: TransferCommand) -> ServiceResult<TransferOutcome> {

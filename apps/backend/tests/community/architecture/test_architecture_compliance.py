@@ -144,6 +144,21 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/bot_management/owner_handoff/service.py",
         "agentclaw.community.api.bot_manager_sync",
     ),
+    # Owner post-commit consumers use only the transport-free ownership Service API.
+    (
+        "core/bot_management/owner_handoff/service.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
+    (
+        "core/bot_management/ownership_sync/notifications.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
+    # Repair consumes the transport-free notification Service API just like
+    # handoff/helper (Rule 3); this permits no arbitrary core-to-API imports.
+    (
+        "core/bot_management/ownership_sync/repair.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
     # BotSpaceService consumes the manager-sync Service API Protocol via DI
     # (same pattern as publish_approval).
     (

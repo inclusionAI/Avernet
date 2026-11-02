@@ -129,3 +129,4 @@ pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verif
 pub mod state_machine_history;
 
 pub mod caller_identity_material;
+pub mod a2a;

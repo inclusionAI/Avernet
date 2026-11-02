@@ -39,7 +39,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 async function mount() { render(<Editor embedded initialWorkflowId={mocks.db!.id} />); await waitFor(() => expect(sessionFor(mocks.db!.id).state.versions.current.loading).toBe(false)) }
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name, exact: true }))
 async function editFile(path: string, text: string) {
-  fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click(path)
+  fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); fireEvent.click(await screen.findByRole('button', { name: path, exact: true }))
   fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: text } })
 }
 function putCalls() { return mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'PUT') }
@@ -100,6 +100,8 @@ describe('Editor DB workflow and saved Pack files', () => {
     const path = change === 'path' ? 'flows/other.yaml' : 'flows/custom.yaml'
     const originalFile = current.versionFiles.find(item => item.path === 'flows/custom.yaml')!
     if (change === 'path') {
+      fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
+      await screen.findByRole('button', { name: 'scripts/run' })
       const session = sessionFor(mocks.db!.id)
       act(() => updateVersion(session, 'current', { files: session.state.versions.current.files.map(item =>
         item.path === 'flows/custom.yaml' ? { ...item, path } : item) }))
@@ -247,6 +249,16 @@ describe('Editor DB workflow and saved Pack files', () => {
     expect(session.state.versions.current.blocked).toBe(true)
     expect(screen.queryByRole('button', { name: /重试原始/ })).not.toBeInTheDocument()
     click('部署工作流'); expect(mocks.deploy).not.toHaveBeenCalled(); expect(putCalls()).toHaveLength(1)
+    const reconciliation = session.state.reconciliation, files = session.state.versions.current.files
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
+    expect(screen.queryByRole('region', { name: '保存结果对账' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/响应无法验证|文件仍保留；请勿盲目重试/)).not.toBeInTheDocument()
+    act(() => state().updateSpecField('title', 'Independent DB edit')); click('保存')
+    await screen.findByText(/工作流已保存到数据库/)
+    expect(mocks.db!.title).toBe('Independent DB edit'); expect(putCalls()).toHaveLength(1)
+    expect(session.state.reconciliation).toBe(reconciliation)
+    expect(session.state.versions.current.files).toEqual(files)
+    expect(session.state.versions.current.blocked).toBe(true)
   })
   it('blocks confirmation if the database changes after the dialog opens', async () => {
     await mount(); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('草稿版（saved）')
@@ -258,6 +270,7 @@ describe('Editor DB workflow and saved Pack files', () => {
 
   it('confirms and uses the captured saved head when editing current files', async () => {
     current = { ...current, draftHead: B }; await mount()
+    fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
     await waitFor(() => expect(sessionFor(mocks.db!.id).state.version).toBe('draft'))
     fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('当前版（wf）'); click('scripts/run')
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'current edit' } }); click('保存到草稿')

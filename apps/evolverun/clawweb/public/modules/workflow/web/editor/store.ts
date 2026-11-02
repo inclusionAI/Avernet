@@ -26,8 +26,8 @@ export interface EditorState extends Snapshot {
   actionError: string | null
   canUndo: boolean
   canRedo: boolean
-  loadSpec: (spec: WorkflowSpec) => void
-  replaceSession: (spec: WorkflowSpec, expected: EditorState, isNew: boolean) => boolean
+  loadSpec: (spec: WorkflowSpec, databaseSpec?: WorkflowSpec | null, activeDeployNumber?: number | null) => void
+  replaceSession: (spec: WorkflowSpec, expected: EditorState, isNew: boolean, databaseSpec?: WorkflowSpec | null, activeDeployNumber?: number | null) => boolean
   createNew: (id: string, title: string) => void
   updateSpecField: (field: string, value: unknown) => void
   addNode: (node: EditorNode) => void
@@ -54,6 +54,10 @@ interface HistoryState {
   _past: Snapshot[]
   _future: Snapshot[]
   _savedSpec: WorkflowSpec | null
+  /** Confirmed DB draft; null means absent, separate from the canvas dirty baseline. */
+  _databaseSpec: WorkflowSpec | null
+  /** Active publication seen when no draft exists; null once a draft exists. */
+  _activeDeployNumber: number | null
   _baselinePositions: Positions
   _transaction: Snapshot | null
   _transactionDepth: number
@@ -89,8 +93,11 @@ function identityChangedDuringSave(current: WorkflowSpec, source: WorkflowSpec, 
   return !equal(current[field], source[field])
 }
 function historyInitial(): HistoryState {
-  return { _past: [], _future: [], _savedSpec: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
+  return { _past: [], _future: [], _savedSpec: null, _databaseSpec: null, _activeDeployNumber: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
 }
+
+const positiveDeployNumber = (value: number | null | undefined): value is number =>
+  value !== null && Number.isSafeInteger(value) && value > 0
 function initial(sessionId = 0) {
   return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, isLayoutDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
 }
@@ -154,25 +161,36 @@ export const useEditorStore = create<StoreState>((set, get) => {
 
   return {
     ...initial(),
-    loadSpec: (incoming) => {
+    loadSpec: (incoming, databaseSpec = incoming, activeDeployNumber) => {
       if (!ready()) return
       const state = get()
+      // Loading historical documents is a structural boundary, not the stricter
+      // session-replacement/version policy. Preserve their source values as-is.
+      if (validateSpec(incoming).some(error => error.type === 'invalid-structure')
+        || typeof incoming.id !== 'string' || !incoming.id.trim()
+        || databaseSpec !== null && (validateSpec(databaseSpec).some(error => error.type === 'invalid-structure') || databaseSpec.id !== incoming.id || activeDeployNumber !== undefined && activeDeployNumber !== null)
+        || databaseSpec === null && !positiveDeployNumber(activeDeployNumber)) {
+        fail('工作流或数据库基线身份/结构无效，未替换当前文档'); return
+      }
       // A same-ID refetch can still be a different source/version. Never overwrite
       // edits just because workflow identity is unchanged.
       if (state.isDirty || (state.isLayoutDirty && state.spec?.id !== incoming.id)) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
-      if (validateSpec(incoming).some((error) => error.type === 'invalid-structure')) { fail('工作流结构无效，未替换当前文档'); return }
       const spec = clone(incoming)
       const positions = positionsFor(spec, state)
       const baseline = state.spec?.id === spec.id && state.isLayoutDirty ? state._baselinePositions : positions
-      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), validationErrors: validateSpec(spec) })
+      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
     },
-    replaceSession: (incoming, expected, isNew) => {
+    replaceSession: (incoming, expected, isNew, databaseSpec = incoming, activeDeployNumber) => {
       if (get() !== expected) return false
       const prepared = prepareWorkflowSession(incoming)
-      if (!prepared || get() !== expected) return false
+      const database = isNew || databaseSpec === null ? null : prepareWorkflowSession(databaseSpec)
+      if (!prepared
+        || !isNew && databaseSpec !== null && (!database || database.spec.id !== prepared.spec.id || activeDeployNumber !== undefined && activeDeployNumber !== null)
+        || !isNew && databaseSpec === null && !positiveDeployNumber(activeDeployNumber)
+        || get() !== expected) return false
       const { spec, positions, errors } = prepared
       set({ ...initial(expected.sessionId + 1), spec, positions, _baselinePositions: clone(positions),
-        _savedSpec: isNew ? null : clone(spec), isDirty: isNew, validationErrors: errors })
+        _savedSpec: isNew ? null : clone(spec), _databaseSpec: database ? clone(database.spec) : null, _activeDeployNumber: !isNew && databaseSpec === null ? activeDeployNumber : null, isDirty: isNew, validationErrors: errors })
       return true
     },
     createNew: (id, title) => {
@@ -319,7 +337,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       } else if (Object.hasOwn(saved, 'facade')) spec.facade = clone(saved.facade)
       else delete spec.facade
 
-      set({ spec: clone(spec), _savedSpec: saved, isDirty: !equal(spec, saved),
+      set({ spec: clone(spec), _savedSpec: saved, _databaseSpec: clone(saved), _activeDeployNumber: null, isDirty: !equal(spec, saved),
         validationErrors: validateSpec(spec), actionError: null })
       return true
     },
@@ -328,7 +346,9 @@ export const useEditorStore = create<StoreState>((set, get) => {
       if (!state.spec) { fail('尚未加载工作流，不能标记已保存'); return }
       if (savedSpec && savedSpec.id !== state.spec.id) { fail('保存结果属于其他工作流，未修改当前保存基线'); return }
       const baseline = clone(savedSpec ?? state.spec)
-      set({ _savedSpec: baseline, isDirty: !equal(state.spec, baseline), actionError: null })
+      const databaseSpec = state._databaseSpec === null ? null : baseline
+      set({ _savedSpec: baseline, _databaseSpec: databaseSpec, _activeDeployNumber: databaseSpec === null ? state._activeDeployNumber : null,
+        isDirty: !equal(state.spec, baseline), actionError: null })
     },
     importYaml: (incoming) => {
       if (!ready()) return

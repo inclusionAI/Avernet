@@ -2,8 +2,11 @@ import type { BotManagementVerb } from '@/domain/botWorkshop';
 import { botWorkshopService } from './botWorkshopService';
 import { localBotService } from './localBotService';
 import type { BotDomain } from './types';
+import { botDormantService } from './botDormantService';
+import type { BotActivationResult } from '@/services/backendApi/bots/botDormantController';
 
-const runners: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
+const runners: Record<BotManagementVerb, (bot: BotDomain, userId?: string) => Promise<void | BotActivationResult>> = {
+  activate: (bot, userId) => botDormantService.activate(bot, userId ?? ''),
   open_folder: async (bot) => {
     await localBotService.openFolder(bot.id);
   },
@@ -21,6 +24,7 @@ const runners: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
 };
 
 const successMessages: Record<BotManagementVerb, string> = {
+  activate: '激活请求已提交，请等待 Bot 恢复运行',
   open_folder: '打开目录请求已提交',
   delete: 'Bot 已删除',
   restart: '重启请求已提交',
@@ -30,6 +34,6 @@ const successMessages: Record<BotManagementVerb, string> = {
 };
 
 export const botManagementActionService = {
-  run: (action: BotManagementVerb, bot: BotDomain) => runners[action](bot),
+  run: (action: BotManagementVerb, bot: BotDomain, userId?: string) => runners[action](bot, userId),
   successMessage: (action: BotManagementVerb) => successMessages[action],
 };

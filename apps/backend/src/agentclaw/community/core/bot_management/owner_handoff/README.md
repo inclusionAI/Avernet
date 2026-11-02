@@ -11,6 +11,7 @@ provides:
   - OwnerHandoffTask
   - assert_bot_mutable
 consumes:
+  - BotOwnershipSyncProtocol
   - OwnerHandoffRepositoryProtocol
   - PassportPlugin
   - StaffDeptPlugin
@@ -21,6 +22,9 @@ consumes:
   - SpaceServiceProtocol
   - SpaceAccessServiceProtocol
 internal_dependencies:
+  - agentclaw.community.api.bot_ownership_sync
+  - agentclaw.community.core.bot_management.ownership_sync.notifications
+  - agentclaw.community.core.bot_collaborator.manager_sync.notifications
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_management.owner_handoff
@@ -121,3 +125,19 @@ locators are unchanged. This changes no schema or frontend protocol, and does
 not backfill already-SUCCEEDED handoffs; use the existing authorized Bot Space
 assignment API for those. No new quota rule is introduced by responsibility
 handoff; the ordinary explicit Space-move API retains its own quota checks.
+
+## Post-commit BCS ownership notification
+
+`OwnerHandoffService.step()` submits independent managers and Owner hints only
+after `finish()` successfully commits `SUCCEEDED`. The two helpers isolate only
+notification exceptions: persistence failures still propagate. Initiation,
+authorization waiting, cancellation, failed commit, and reads/retries of an
+already-completed operation do not create another completion notification.
+
+The additive v1 `BotOwnershipSyncProtocol` is a memory-only Service API consumed
+by this coordinator, not a BCS transaction participant. Its helper is owned by
+[ownership_sync](../ownership_sync/README.md). The existing managers-only API
+retains its semantics. `bot_manager_sync.ownership_enabled` controls delivery;
+`owner_handoff.enabled` controls initiation and remains unchanged. Delivery can
+be lost after commit, leaving old BCS Owner permissions active until corrected.
+The handoff's durable journal is not an ownership-delivery outbox.

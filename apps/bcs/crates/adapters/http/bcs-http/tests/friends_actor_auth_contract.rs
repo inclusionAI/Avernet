@@ -127,6 +127,7 @@ fn fixture(
 ) -> Fixture {
     let query = RecordingBotQueryService {
         detail_result: Ok(BotDetailResult {
+            agent_card: None,
             bot_uuid: actor_id.to_string(),
             capabilities: BotCapabilities::default(),
             status: ActorStatus::Online,

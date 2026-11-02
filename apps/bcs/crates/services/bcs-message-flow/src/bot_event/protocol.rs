@@ -373,7 +373,7 @@ pub(super) fn request_id(frame: &BcsFrame) -> Option<String> {
 }
 
 pub(super) fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
-    if target.is_http_provider() {
+    if target.is_gateway() {
         protocol_version.max(3)
     } else {
         protocol_version

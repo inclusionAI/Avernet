@@ -56,6 +56,21 @@ pub trait ProviderRegistrationCoreService: Send + Sync {
         command: RegisterProviderBot,
     ) -> ServiceResult<ProviderRegistrationResult>;
 
+    /// Explicit management authority is required to bind a remote Agent;
+    /// self-service ordinary Bot registration alone does not grant it.
+    async fn authorize_a2a_registration(&self, _provider_id: &str, _owner: &str) -> ServiceResult<()> {
+        Err(crate::ServiceError::Forbidden("A2A registration is not configured".into()))
+    }
+
+    /// Scoped A2A registration uses a validated declaration and commits
+    /// its Card with the existing ownership composite. No HTTP inside Core.
+    async fn register_a2a_with_ownership(
+        &self, _command: RegisterProviderBot, _initialization: OwnershipInitialization,
+        _card: crate::types::a2a_bot::A2aRegistrationCard,
+    ) -> ServiceResult<ProviderRegistrationResult> {
+        Err(crate::ServiceError::InternalError("atomic A2A registration is not configured".into()))
+    }
+
     /// Trusted scoped registration: the existing Provider admission,
     /// mode/ref/webhook validation and result types are reused, and
     /// the repo's composite create commits Bot, Human, owner,

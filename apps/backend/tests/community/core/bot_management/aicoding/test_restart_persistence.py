@@ -235,3 +235,21 @@ def test_status_only_write_does_not_overwrite_concurrent_ext(persisted):
     assert bot["status"] == "PENDING"
     assert bot["ext"]["callback"] == "keep"
     assert bot["ext"][KEY]["phase"] == "QUEUED"
+
+
+def test_positive_fastdisk_targets_merge_across_concurrent_cas(persisted):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartState, journal
+
+    p = persisted
+    p.strategy._submit_restart(p.ctx, p.services, {'bot_id': 'bot', 'user_id': 'owner'})
+    task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key('bot', 'owner'))
+    state = RestartState(p.repo, 'bot', 'owner', task.payload['operation_id'])
+    state.update({'QUEUED'}, phase='BACKING_UP')
+
+    def confirm(target):
+        state.update({'BACKING_UP'}, fastdisk_targets=[target])
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(confirm, ['p1', 'p2', 'p1', 'p3']))
+    assert journal(state.read())['fastdisk_targets'] == ['p1', 'p2', 'p3']
+    assert state.read()['ext']['unrelated'] == 1

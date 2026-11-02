@@ -25,7 +25,7 @@ export function prepareWorkflowTransition(approval: WorkflowTransition, target: 
 }
 
 /** Reject stale approvals, malformed or mismatched targets before changing the session. */
-export function commitWorkflowTransition(approval: WorkflowTransition, target: WorkflowSpec, expectedId: string, isNew = false): boolean {
+export function commitWorkflowTransition(approval: WorkflowTransition, target: WorkflowSpec, expectedId: string, isNew = false, databaseSpec: WorkflowSpec | null = target, activeDeployNumber?: number | null): boolean {
   if (!target || target.id !== expectedId || !workflowTransitionIsCurrent(approval)) return false
-  return useEditorStore.getState().replaceSession(target, approval.state, isNew)
+  return useEditorStore.getState().replaceSession(target, approval.state, isNew, isNew ? null : databaseSpec, activeDeployNumber)
 }

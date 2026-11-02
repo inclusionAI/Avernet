@@ -59,7 +59,7 @@ describe('Editor and Pack candidate isolation', () => {
   it('blocks deploy with a dirty file candidate even after switching tabs', async () => {
     mount(); await openFile(); fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'dirty' } })
     fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
-    expect(screen.getByText(/切换标签后仍保留/)).toBeInTheDocument()
+    expect(screen.queryByText(/切换标签后仍保留/)).not.toBeInTheDocument()
     expect(screen.getByText(/导出仅包含已应用的画布工作流 spec/)).toHaveTextContent('不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置')
     fireEvent.click(screen.getByRole('button', { name: '部署' }))
     expect(screen.getByText(/版本文件存在未保存更改/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
@@ -75,6 +75,7 @@ describe('Editor and Pack candidate isolation', () => {
     fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); fireEvent.click(screen.getByRole('button', { name: 'scripts/test' }))
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'late change' } })
     await act(async () => { pending.resolve(snapshot('draft')); await pending.promise })
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
     expect(screen.getByText(/读取期间编辑内容或数据库草稿已变化/)).toBeInTheDocument(); expect(mocks.deploy).not.toHaveBeenCalled()
   })
   it('does not deploy after an unsuccessful Pack save and retains the file', async () => {
@@ -122,8 +123,8 @@ describe('Editor and Pack candidate isolation', () => {
   })
 
   it('rejects a remotely advanced candidate until its baseline has been read', async () => {
-    mount()
-    await waitFor(() => expect(screen.queryByText('正在读取完整 Git 基线…')).not.toBeInTheDocument())
+    mount(); await openFile()
+    fireEvent.click(screen.getByRole('tab', { name: '工作流编排' }))
     mocks.fetchJson.mockResolvedValueOnce({ ...snapshot('draft'), baseCommit: B, draftHead: B })
     fireEvent.click(screen.getByRole('button', { name: '部署' }))
     expect(await screen.findByText(/saved\s*文件快照与已读取基线不一致/)).toBeInTheDocument()

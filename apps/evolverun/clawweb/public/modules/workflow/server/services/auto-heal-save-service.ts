@@ -13,20 +13,23 @@ import { assertNoUnresolvedLegacyPackOperation } from './legacy-pack-operation-g
 import { withPreparedWorkflowSpec } from './pack-spec-save.js';
 import { PackCandidateConflictError, PackCandidateOutcomeUnknownError } from './pack-candidate-save.js';
 
-export type AutoHealSaveInput = { workflowId: string; spec: WorkflowSpec; actorId: string; requestId?: string; createOnly?: boolean;
+export type AutoHealSaveInput = { workflowId: string; spec: WorkflowSpec; actorId: string; requestId?: string; createOnly?: boolean; expectedDraftAbsent?: true; expectedActiveDeployNumber?: number;
   sourceCommit?: string; expectedSavedHead?: string | null; packId?: string | null; diagnosisId?: string | null; note?: string | null };
-/** DB-only edits have no Git identity; creation also initializes the saved ref. */
+/** DB-only drafts have no Git identity; createOnly also initializes the saved ref. */
 export type AutoHealSaveResult = { ok: true; saved: true; workflowId: string; packId: string; branch?: string; commit?: string };
 
 export class AutoHealSaveService {
   constructor(private db: IDatabase, private specRepo: WorkflowSpecRepository,
-    _deployHistoryRepo: WorkflowDeployHistoryRepository | null,
+    private deployHistoryRepo: WorkflowDeployHistoryRepository | null,
     private botPermRepo: BotWorkflowPermissionRepository | null,
     private gitConfig?: ClawFlowsGitConfig, private author?: GitAuthor) {}
 
   async save(input: AutoHealSaveInput): Promise<AutoHealSaveResult> {
     if (!validPackGitId(input.workflowId) || /^__.+__$/.test(input.workflowId) || !input.spec
       || (input.createOnly !== undefined && typeof input.createOnly !== 'boolean')
+      || (input.expectedDraftAbsent !== undefined && (input.expectedDraftAbsent !== true || input.createOnly !== undefined))
+      || (input.expectedActiveDeployNumber !== undefined && (input.expectedDraftAbsent !== true || !Number.isSafeInteger(input.expectedActiveDeployNumber) || input.expectedActiveDeployNumber <= 0))
+      || (input.expectedDraftAbsent === true && input.expectedActiveDeployNumber === undefined)
       || (input.requestId !== undefined && (typeof input.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(input.requestId)))
       || (input.sourceCommit !== undefined && !gitOidPattern.test(input.sourceCommit))
       || (input.expectedSavedHead !== undefined && input.expectedSavedHead !== null && !gitOidPattern.test(input.expectedSavedHead))) {
@@ -50,8 +53,9 @@ export class AutoHealSaveService {
     }
 
     const row = await this.specRepo.findByWorkflowId(input.workflowId);
-    if (!row) throw new PackOperationError(404, 'WORKFLOW_NOT_FOUND');
+    if (!row) return this.saveFirstDraft(input, submitted, spec.title || input.workflowId);
     if (row && !await this.botPermRepo.hasEditPermission(input.workflowId, input.actorId)) throw new PackOperationError(403, 'FORBIDDEN');
+    if (input.expectedDraftAbsent) throw new PackOperationError(409, 'DRAFT_ALREADY_EXISTS');
     await assertNoUnresolvedLegacyPackOperation(this.db, input.workflowId);
     const packId = input.packId ?? row?.pack_id ?? input.workflowId;
     if (!validPackGitId(packId)) throw new PackOperationError(400, 'INVALID_REQUEST');
@@ -63,6 +67,55 @@ export class AutoHealSaveService {
       const updated = await tx.exec('UPDATE workflow_specs SET spec_json = ?, pack_id = ?, title = ?, owner_id = ?, gmt_modified = ? WHERE workflow_id = ? AND id = ?',
         [specJson, packId, spec.title || input.workflowId, input.actorId, tx.dialect.now(), input.workflowId, row.id]);
       if (updated.affectedRows !== 1) throw new Error('Workflow update failed');
+    });
+    return { ok: true, saved: true, workflowId: input.workflowId, packId };
+  }
+
+  /** Restore only an already-published workflow, never create a new Pack identity. */
+  private async saveFirstDraft(input: AutoHealSaveInput, submitted: WorkflowSpec, title: string): Promise<AutoHealSaveResult> {
+    const active = await this.deployHistoryRepo?.findActiveByWorkflowId(input.workflowId);
+    if (!active) throw new PackOperationError(404, 'WORKFLOW_NOT_FOUND');
+    if (!await this.botPermRepo!.hasEditPermission(input.workflowId, input.actorId)) throw new PackOperationError(403, 'FORBIDDEN');
+    await assertNoUnresolvedLegacyPackOperation(this.db, input.workflowId);
+    const packId = active.pack_id;
+    if (!validPackGitId(packId)) throw new PackOperationError(400, 'INVALID_REQUEST');
+    if (input.packId != null && input.packId !== packId) throw new PackOperationError(409, 'PACK_ID_MISMATCH');
+    const conflict = () => new PackOperationError(409, input.expectedDraftAbsent ? 'DRAFT_ALREADY_EXISTS' : 'WORKFLOW_ALREADY_EXISTS');
+
+    await this.db.transaction(async tx => {
+      const lock = tx.dbType === 'mysql' || tx.dbType === 'zdas' ? ' FOR UPDATE' : '';
+      // Lock the existing active publication first to serialize first-draft saves,
+      // rather than sharing a missing-draft gap lock before competing for active.
+      // Re-read the same publication projection as the repository.
+      // SQLite's BEGIN IMMEDIATE already serializes writers; managed DBs need locks.
+      const current = (await tx.query<NonNullable<typeof active>>(`SELECT pack_id, deploy_number, version, tag_name, action,
+        spec_json, bot_id, owner_id, gmt_create, gmt_modified FROM workflow_deploy_history
+        WHERE workflow_id = ? AND is_active = 1 ORDER BY deploy_number DESC LIMIT 1${lock}`, [input.workflowId]))[0];
+      if (!current) throw new PackOperationError(404, 'WORKFLOW_NOT_FOUND');
+      if (input.expectedDraftAbsent && current.deploy_number !== input.expectedActiveDeployNumber) throw new PackOperationError(409, 'BASELINE_STALE');
+      if (JSON.stringify(current) !== JSON.stringify(active)) throw new PackOperationError(409, 'BASELINE_STALE');
+      // Run the permission policy on the transaction connection so grants and
+      // BotDirectory membership are checked as late as possible before insertion,
+      // not from an earlier pool read. External directory state is not lockable by
+      // this database transaction; the active row lock only serializes saves that
+      // already reached this same check.
+      await tx.query(`SELECT id FROM bot_workflow_permissions WHERE workflow_id = ?${lock}`, [input.workflowId]);
+      // The first snapshot read follows both locks, so RR sees earlier save
+      // winners and current grants. Do not lock draft here: publication locks
+      // draft before active, and an inverse row-lock order could deadlock.
+      if ((await tx.query('SELECT id FROM workflow_specs WHERE workflow_id = ?', [input.workflowId])).length) throw conflict();
+      if (!await this.botPermRepo!.withDatabase(tx).hasEditPermission(input.workflowId, input.actorId)) throw new PackOperationError(403, 'FORBIDDEN');
+      await assertNoUnresolvedLegacyPackOperation(tx, input.workflowId);
+      try {
+        const now = tx.dialect.now();
+        const inserted = await tx.exec('INSERT INTO workflow_specs (workflow_id,pack_id,spec_json,title,owner_id,gmt_create,gmt_modified) VALUES (?,?,?,?,?,?,?)',
+          [input.workflowId, packId, JSON.stringify(submitted), title, input.actorId, now, now]);
+        if (inserted.affectedRows !== 1) throw new Error('Workflow creation failed');
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code === 'ER_DUP_ENTRY' || code?.startsWith('SQLITE_CONSTRAINT_UNIQUE')) throw conflict();
+        throw error;
+      }
     });
     return { ok: true, saved: true, workflowId: input.workflowId, packId };
   }
