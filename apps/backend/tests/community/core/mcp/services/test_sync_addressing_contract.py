@@ -158,14 +158,14 @@ async def test_ambiguous_account_target_is_a_failed_fanout_without_delivery():
     world = McpWorld()
     await world.apply_manifest([{"server_code": "mcp.test", "config": {"headers": {"X-Bot": "private"}}}])
     world.bots.insert({
-        "bot_id": "bot-1", "owner_id": "entity-1", "entity_id": "another-entity", "entity_type": "staff",
+        "bot_id": "bot-1", "owner_id": "owner", "entity_id": "another-entity", "entity_type": "staff",
         "creator_id": "entity-1", "status": "ACTIVE", "active_engine": "moltis", "bot_type": "personal",
     })
     device = RecordingDevice()
     result = await connected_sync_service(world, device).sync_mcp_detail_to_all_bots(
-        user_id="entity-1", entity_id="entity-1", entity_type="staff", server_code="mcp.test",
+        user_id="owner", entity_id="owner", entity_type="staff", server_code="mcp.test",
         mcp_data=world.center.get_mcp_detail("mcp.test"), target_bot_ids=["bot-1"],
-        target_bot_owners={"bot-1": "entity-1"},
+        target_bot_owners={"bot-1": "owner"},
     )
     assert result["sync_summary"]["failed_count"] == 1
     assert result["sync_results"][0]["synced"] is False
@@ -260,3 +260,42 @@ async def test_invalid_single_payload_fails_before_resolving_a_missing_bot():
     world = McpWorld()
     result = await sync_service(world).sync_mcp_detail(user_id="missing", bot_id="missing", mcp_data={})
     assert result == {"success": False, "error": "向 bot=missing 推送 MCP 配置失败"}
+
+
+@pytest.mark.asyncio
+async def test_account_fanout_treats_owner_as_a_human_even_when_another_bot_uses_it_as_entity():
+    world = McpWorld()
+    await world.apply_manifest([{"server_code": "mcp.test", "config": {"headers": {"X-Bot": "saved"}}}])
+    world.config.user_mcp_config_repo.create({
+        "user_id": "owner", "server_code": "mcp.test", "env": get_current_env(),
+        "extra_config": {"headers": {"X-User": "inherited"}},
+    })
+    world.bots.insert({
+        "bot_id": "bot-1", "owner_id": "someone-else", "entity_id": "owner", "entity_type": "staff",
+        "creator_id": "someone-else", "status": "ACTIVE", "active_engine": "moltis", "bot_type": "service",
+    })
+    device = RecordingDevice()
+    result = await connected_sync_service(world, device).sync_mcp_detail_to_all_bots(
+        user_id="owner", entity_id="owner", entity_type="staff", server_code="mcp.test",
+        mcp_data=world.center.get_mcp_detail("mcp.test"), target_bot_ids=["bot-1"],
+        target_bot_owners={"bot-1": "owner"},
+    )
+    assert result["sync_results"][0]["synced"] is True
+    assert device.deliveries[0]["custom_headers"]["X-Bot"] == "saved"
+    assert device.deliveries[0]["custom_headers"]["X-User"] == "inherited"
+
+
+@pytest.mark.asyncio
+async def test_explicit_entity_uses_resolved_binding_when_another_bot_has_that_owner():
+    world = McpWorld()
+    await world.apply_manifest([{"server_code": "mcp.test", "config": {"headers": {"X-Bot": "saved"}}}])
+    world.bots.insert({
+        "bot_id": "bot-1", "owner_id": "entity-1", "entity_id": "other-resource", "entity_type": "staff",
+        "creator_id": "entity-1", "status": "ACTIVE", "active_engine": "moltis", "bot_type": "service",
+    })
+    device = RecordingDevice()
+    result = await connected_sync_service(world, device).sync_mcp_detail(
+        user_id="owner", entity_id="entity-1", bot_id="bot-1", mcp_data=world.center.get_mcp_detail("mcp.test"),
+    )
+    assert result["success"] is True
+    assert device.deliveries[0]["custom_headers"]["X-Bot"] == "saved"

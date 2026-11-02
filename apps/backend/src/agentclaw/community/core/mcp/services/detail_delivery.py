@@ -8,6 +8,8 @@ from typing import Any, Optional
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
+from agentclaw.community.core.devices.services.device_context import DeviceContext, DeviceNotBoundError
+from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.log import get_logger
@@ -23,6 +25,14 @@ def resolve_detail_bot(
     if entity_id is not None:
         return resolver.resolve(bot_id=bot_id, entity_id=entity_id)
     return resolver.resolve(bot_id=bot_id, legacy_owner_id=legacy_owner_id)
+
+
+def resolve_detail_device(resolver: DeviceContextResolver, resource: ResolvedBotContext, operator_id: str) -> DeviceContext:
+    """Use the already resolved Bot binding while retaining the delivery actor."""
+    binding_id = resource.bot.get("binding_id")
+    if binding_id is None:
+        raise DeviceNotBoundError(f"DeviceContextResolver: no active binding for bot={resource.bot_id}")
+    return resolver.resolve_for_binding(int(binding_id), operator_id, bot_id=resource.bot_id)
 
 
 async def deliver_mcp_detail(

@@ -94,6 +94,7 @@ def _make_service(
         actual_resolver.resolve_for_bot.return_value = _make_ctx()
     if dispatcher is None:
         actual_dispatcher.dispatch.return_value = (plugin or _make_plugin())
+    actual_resolver.resolve_for_binding.side_effect = lambda _binding_id, operator_id, *, bot_id: actual_resolver.resolve_for_bot(bot_id, operator_id)
     service._resolver_provider = lambda: actual_resolver
     service._device_sync_dispatcher_provider = lambda: actual_dispatcher
     return service

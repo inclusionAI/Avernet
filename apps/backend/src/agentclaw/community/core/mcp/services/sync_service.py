@@ -21,8 +21,9 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.mcp.services.detail_delivery import deliver_mcp_detail, resolve_detail_bot
+from agentclaw.community.core.mcp.services.detail_delivery import deliver_mcp_detail, resolve_detail_bot, resolve_detail_device
 from agentclaw.community.core.mcp.services.detail_fanout import (
     fan_out_mcp_details,
     server_code_of,
@@ -238,9 +239,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             # 查询。直接在协程里调用会占住 event loop,把 caller 的并发投递重新
             # 串行化(caller 的 gather 只有等这里让出才能轮到下一个 MCP)。
             ctx = await asyncio.to_thread(
-                self._resolver_provider().resolve_for_bot,
-                bot_id,
-                resource_owner_id,
+                resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
             )
         except (DeviceNotBoundError, UnknownProviderError):
             error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
@@ -313,9 +312,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         if device_sync is None:
             try:
                 ctx = await asyncio.to_thread(
-                    self._resolver_provider().resolve_for_bot,
-                    bot_id,
-                    resource_owner_id,
+                    resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
                 )
             except (DeviceNotBoundError, UnknownProviderError):
                 error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
@@ -598,13 +595,19 @@ class MCPSyncService(MCPSyncServiceProtocol):
             bot_owner_id = (target_bot_owners or {}).get(bot_id, user_id)
             async with semaphore:
                 try:
-                    resource_bot = await asyncio.to_thread(
-                        resolve_detail_bot, self.bot_repository, bot_id=bot_id,
-                        entity_id=None if control_plane_selected else entity_id, legacy_owner_id=bot_owner_id,
-                    )
+                    if control_plane_selected:
+                        resource_bot = await asyncio.to_thread(
+                            BotAddressResolver(self.bot_repository).resolve_current_owner,
+                            bot_id=bot_id, owner_id=bot_owner_id,
+                        )
+                    else:
+                        resource_bot = await asyncio.to_thread(
+                            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+                            entity_id=entity_id, legacy_owner_id=bot_owner_id,
+                        )
                     resource_owner_id = resource_bot.entity_id
                     ctx = await asyncio.to_thread(
-                        self._resolver_provider().resolve_for_bot, bot_id, resource_owner_id
+                        resolve_detail_device, self._resolver_provider(), resource_bot, entity_id
                     )
                 except (DeviceNotBoundError, UnknownProviderError) as exc:
                     logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)

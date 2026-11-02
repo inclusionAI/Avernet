@@ -47,6 +47,8 @@ class BotAddressResolverProtocol(Protocol):
         allow_unique_bot_id: bool = False,
     ) -> ResolvedBotContext: ...
 
+    def resolve_current_owner(self, *, bot_id: str, owner_id: str) -> ResolvedBotContext: ...
+
     def resolve_pk(self, bot_pk: int) -> ResolvedBotContext: ...
 
     def resolve_publish_source(
@@ -108,6 +110,15 @@ class BotAddressResolver(BotAddressResolverProtocol):
         raise BotAddressNotFoundError(
             f"Bot locator is required: bot_id={bot_id}"
         )
+
+    def resolve_current_owner(self, *, bot_id: str, owner_id: str) -> ResolvedBotContext:
+        """Resolve a known human owner without mixing entity and owner roles."""
+        matches = self._repository.list_matches_by_current_owner(bot_id, owner_id)
+        if not matches:
+            raise BotAddressNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
+        if len(matches) != 1:
+            raise BotLookupAmbiguousError(f"Bot current owner is ambiguous: bot_id={bot_id}, owner_id={owner_id}")
+        return self._context(matches[0])
 
     def resolve_pk(self, bot_pk: int) -> ResolvedBotContext:
         bot = self._repository.get_by_pk(bot_pk)
