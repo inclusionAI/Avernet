@@ -4634,11 +4634,11 @@ def test_publish_ext_state_attempt_token_is_atomic():
         )
 
     publish_service.update_publish_status_with_ext.return_value = latest
-    token = state.declare_build_attempt(
+    new_attempt = state.declare_build_attempt(
         1, source_status=PublishStatus.DRAFT.value, target_status=PublishStatus.BUILDING.value
     )
     state.latest_status_and_build_attempt(1)
-    assert token
+    assert new_attempt
     call_kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
     assert call_kwargs["source_status"] == PublishStatus.DRAFT.value
     assert call_kwargs["target_status"] == PublishStatus.BUILDING.value
