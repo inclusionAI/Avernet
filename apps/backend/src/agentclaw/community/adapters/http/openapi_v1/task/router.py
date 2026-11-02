@@ -35,6 +35,9 @@ from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
 from agentclaw.community.adapters.http.task.schemas_execute_diagnostics import task_info_request_params_to_dict
+from agentclaw.community.adapters.http.task.task_config_router import (
+    TaskConfigMatchRequest,
+)
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -66,9 +69,13 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.api.task.task_context_service import (
     TaskContextServiceProtocol,
 )
+from agentclaw.community.api.task.task_config_service import (
+    TaskConfigServiceProtocol,
+)
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils import env_utils
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 
@@ -364,3 +371,28 @@ async def revoke_task_claim(
         ),
         request,
     )
+
+
+@router.post("/config/match", response_model=Envelope[dict])
+@envelope_errors
+async def match_task_config_public(
+    body: TaskConfigMatchRequest,
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskConfigServiceProtocol = Injected(TaskConfigServiceProtocol),  # noqa: B008
+) -> Envelope[dict]:
+    """Public typed-config match probe (spec 2026-11-02). Returns whether
+    value matches the stored row for config_name under that row's config_type,
+    replying matched only and never the stored config value itself. env is
+    resolved server-side from the deployment context and is never a request
+    parameter, so pre and prod stay isolated. admission is OPEN and
+    authorization is NoCheck: match does not address a bot resource, so any
+    authenticated principal may read."""
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
+    env = env_utils.get_current_env()
+    matched = service.match(
+        config_name=body.config_name,
+        value=body.value,
+        env=env,
+    )
+    return envelope({"matched": matched}, request)

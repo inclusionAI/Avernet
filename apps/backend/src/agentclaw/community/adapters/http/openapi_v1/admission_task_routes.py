@@ -142,4 +142,8 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # authorizes. Same shape as the other task public operations.
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
+    # task_config match: a typed config probe (spec 2026-11-02). No addressed
+    # bot — any authenticated principal may read. The authorization row beside
+    # it is NoCheck for the same reason.
+    ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
 }
