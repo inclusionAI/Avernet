@@ -23,7 +23,7 @@ _EXPLICIT_LOOKUP = re.compile(
     r"^(?:find|get|lookup|retrieve)\s+(?:agent|worker|bot)\s+(?P<target>.+)$"
 )
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9_@:.-]{0,127}$")
-_IDENTIFIER_TOKEN = re.compile(r"^[a-z0-9@:][a-z0-9_.:@-]{4,127}$")
+_BOUND_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9@:][a-z0-9_.:@-]{4,127}$")
 
 
 _EMBEDDED_SEPARATORS = ("_", ":", "@")
@@ -40,7 +40,7 @@ def _embedded_identifier_tokens(normalized_query: str) -> list[str]:
 
     tokens: list[str] = []
     for token in normalized_query.split():
-        if _IDENTIFIER_TOKEN.fullmatch(token) is None:
+        if _BOUND_IDENTIFIER_PATTERN.fullmatch(token) is None:
             continue
         if len(token) < 5:
             continue
