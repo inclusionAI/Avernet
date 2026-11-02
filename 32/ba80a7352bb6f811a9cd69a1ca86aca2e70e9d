@@ -1,0 +1,30 @@
+apps/backend/specs/2026-10-28-service-env-eval-api/spec.md
+  h_b419236b0792fa 1-120
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  h_b419236b0792fa 249,333
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  h_b419236b0792fa 29-34
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  h_b419236b0792fa 28-30,282-289
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_envs/__init__.py
+  h_b419236b0792fa 1-5
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_envs/router.py
+  h_b419236b0792fa 1-154
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_envs/schemas.py
+  h_b419236b0792fa 1-25
+apps/backend/src/agentclaw/community/api/publish_flow_service.py
+  h_b419236b0792fa 28-63
+apps/backend/tests/community/adapters/http/openapi_v1/test_service_env_endpoints.py
+  h_b419236b0792fa 1-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32ba80a7352bb6f811a9cd69a1ca86aca2e70e9d",
+  "prompts": {},
+  "humans": {
+    "h_b419236b0792fa": {
+      "author": "hongwei.quhw <hongwei.quhw@antfin.com>"
+    }
+  }
+}

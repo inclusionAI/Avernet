@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_f38069ebdc505f 22-23,56-61,116-132
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_ac7ce00c614ddf 331-336,420,456-473,628,635
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_3bc97115e78b47 165-228
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_owner_run.py
+  s_cecdc98e721f4b::t_7cdd8f61ebea4b 3-4,38,467,469-470,473,477-483
+apps/bcs/scripts/e2e-runner/tests/test_local_story_commands.py
+  s_cecdc98e721f4b::t_f4e1b31648c620 80-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d8f938734df26b6e0f9ddd83a5676bf6284e013f",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

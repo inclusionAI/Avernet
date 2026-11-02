@@ -1,0 +1,16 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/custom_collaboration_cli_case_run.py
+  h_12dd6d063428b2 27-33,234-240,260,358-361,364,382-386,391,398,423,425-427,429,448-451,599-605
+apps/bcs/scripts/e2e-runner/tests/test_custom_collaboration_cli_case_run.py
+  h_12dd6d063428b2 54-57,126,174,231,237,417-424,461-479
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d6cbd69d39616ddc6d5472260321ce20b90d3517",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
