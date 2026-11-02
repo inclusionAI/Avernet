@@ -84,6 +84,9 @@ _CAPABILITY_UNSUPPORTED_STATUS = 501
 _SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
 
 
+def _stale_agentclaw_sandbox(exc: Any) -> bool:
+    """Whether this transport failure specifically denotes a stale sandbox."""
+    return exc.status_code == 500 and "sandbox info not exist" in (getattr(exc, "response_text", None) or "").lower()
 class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     """Forward one call to a bot's engine adapter and normalise the answer."""
 
@@ -403,6 +406,10 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             if exc.status_code == _CAPABILITY_UNSUPPORTED_STATUS:
                 raise EngineCapabilityUnsupportedError(
                     f"engine does not support {path}"
+                ) from exc
+            if _stale_agentclaw_sandbox(exc):
+                raise EngineDeviceNotReadyError(
+                    f"engine device is not ready for {path}"
                 ) from exc
             raise EngineUpstreamError(
                 f"engine returned HTTP {exc.status_code} for {path}"
