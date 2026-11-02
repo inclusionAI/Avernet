@@ -14,6 +14,14 @@ class EvalEnvPublishResult(BaseModel):
     bot_uuid: str = Field(description="BaaS Bot UUID for the isolated evaluation environment.")
     baas_publish_id: int = Field(description="BaaS workflow identifier used to query deployment progress.")
     baas_bot_status: str | None = Field(default=None, description="BaaS Bot status when submission completed, if available.")
+    quality_task_id: int | None = Field(
+        default=None,
+        description="Backend Quality task ID created to expose this deployed eval environment to later Quality flows.",
+    )
+    quality_task_uuid: str | None = Field(
+        default=None,
+        description="Backend Quality task UUID created to link this deployed eval environment to later Quality flows.",
+    )
 
 
 class EvalEnvTeardownResult(BaseModel):
