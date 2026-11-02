@@ -37,7 +37,14 @@ Returns HTTP 202 with the existing Envelope and data fields `success`,
 `baas_bot_status`. This acknowledges submission, NOT environment readiness.
 The existing service auto-approves the workflow and schedules default TTL teardown
 (currently 24 hours). It does not advance the main publication lifecycle or write
-its binding. This endpoint does not create or advance a Quality task.
+its binding. The public input contract does not expose `biz_id`. After the publish call
+succeeds, the endpoint creates one linked Quality task
+(`task_type="eval"`, `biz_type="service_bot_single"`) through the existing
+QualityTaskService service API. The task UUID uses an internally generated
+`biz_id`, so the same value can later drive publication-stage binding lookup. Its
+`ext` records the Backend `publish_id`, the returned BaaS `bot_uuid`,
+`baas_publish_id`, and the caller `operator`. The response adds
+`quality_task_id` and `quality_task_uuid`.
 
 Missing/hidden Bot or publication, including cross-Bot/environment references,
 returns the existing sanitized 404 envelope. Invalid parameters return 422.
