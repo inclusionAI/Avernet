@@ -49,7 +49,8 @@ export function deliveryTaskStatus(delivery: DeliveryStatusView): GroupTaskStatu
     case 'cancelled':
       return delivery.status;
     case 'expired':
-      return 'timed_out';
+      // Queue expiry does not confirm that an uncertain send or cancellation stopped the Worker.
+      return 'unknown';
     case 'rejected_capacity':
       return 'failed';
     default:
@@ -74,6 +75,7 @@ export function projectGroupTasks(
         (current.lastActivityAt === task.last_activity_at && current.version >= delivery.state_version))
     )
       continue;
+    const status = deliveryTaskStatus(delivery);
     byRef.set(task.task_ref, {
       taskRef: task.task_ref,
       intentId: current?.intentId,
@@ -81,11 +83,11 @@ export function projectGroupTasks(
       summary: task.summary || delivery.content_preview || '未记录任务摘要',
       workerId: task.worker_id,
       workerName: participants.find((p) => p.actorId === task.worker_id)?.name || task.worker_name || 'Worker',
-      status: deliveryTaskStatus(delivery),
+      status,
       queuedAt: task.queued_at,
       startedAt: task.started_at ?? undefined,
       lastActivityAt: task.last_activity_at,
-      finishedAt: task.finished_at ?? undefined,
+      finishedAt: isTerminalTask(status) ? task.finished_at ?? undefined : undefined,
       sourceMessageId: delivery.message_id,
       deliveryId: delivery.delivery_id,
       runId: delivery.run_id ?? undefined,

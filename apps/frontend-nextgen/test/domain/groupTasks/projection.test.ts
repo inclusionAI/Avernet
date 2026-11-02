@@ -58,7 +58,7 @@ describe('manager-worker task projection', () => {
     ['completed', 'completed'],
     ['failed', 'failed'],
     ['cancelled', 'cancelled'],
-    ['expired', 'timed_out'],
+    ['expired', 'unknown'],
     ['unknown', 'unknown'],
     ['cancel_unknown', 'unknown'],
     ['cancelling', 'unknown'],
@@ -147,4 +147,23 @@ it.each(['completed', 'failed', 'cancelled'] as const)('preserves persisted %s a
     } });
     expect(result).toEqual(task);
   }
+});
+
+it('keeps expired delivery execution uncertain until task status confirms termination', () => {
+  const expired = delivery('T-12345678', 'expired');
+  expired.task!.finished_at = 4000;
+  expired.task!.timed_out = true;
+  const [task] = projectGroupTasks([expired], [], []);
+  task.intentId = `bcs_intent_${'a'.repeat(32)}`;
+  expect(task.status).toBe('unknown');
+  expect(task.finishedAt).toBeUndefined();
+  const [uncertain] = applyTaskStatuses([task], { [task.intentId]: {
+    row: { ref: task.intentId, status: 'unknown' }, observedAt: 5000,
+  } });
+  expect(uncertain.status).toBe('unknown');
+  expect(uncertain.finishedAt).toBeUndefined();
+  const [confirmed] = applyTaskStatuses([uncertain], { [task.intentId]: {
+    row: { ref: task.intentId, status: 'timed_out' }, observedAt: 6000,
+  } });
+  expect(confirmed.status).toBe('timed_out');
 });
