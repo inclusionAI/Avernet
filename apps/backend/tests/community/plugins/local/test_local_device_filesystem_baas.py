@@ -583,6 +583,23 @@ async def test_read_file_baas_503_retries_then_200(fs_baas):
 
 
 @pytest.mark.asyncio
+async def test_read_file_baas_504_retries_then_200(fs_baas):
+    """504 → retry → 200 covers the gateway-timeout member of the retry set."""
+    responses = [
+        _mock_httpx_response(status_code=504, json_body={"error": "gateway_timeout"}),
+        _mock_httpx_response(status_code=200, content=b"recovered"),
+    ]
+    client = _patch_async_client_seq(responses)
+
+    with patch("httpx.AsyncClient", return_value=client), \
+         patch("asyncio.sleep", _noop_sleep):
+        result = await fs_baas.read_file("/tmp/x")
+
+    assert result == b"recovered"
+    assert client.post.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_read_file_baas_all_retries_exhausted_raises(fs_baas):
     """Persistent 502 across all attempts (1 initial + 3 retries = 4 calls)
     → the last response is returned so raise_for_status() raises fail-closed."""
