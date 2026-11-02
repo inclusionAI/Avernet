@@ -72,6 +72,19 @@ def _get_engine_url(
     return ctx.conn_info
 
 
+def _is_transient_streamable_http(body: dict) -> bool:
+    """Detect the transient streamable HTTP failure reported by ``mcporter``."""
+    if not isinstance(body, dict) or body.get("success") is not False:
+        return False
+    data = body.get("data")
+    if not isinstance(data, dict) or not data.get("is_error"):
+        return False
+    content = data.get("content")
+    return (
+        isinstance(content, str)
+        and "Streamable HTTP error: Error POSTing to endpoint" in content
+    )
+
 def resolve_yuque_url(
     url: str,
     bot_id: str = "",
@@ -119,68 +132,81 @@ def resolve_yuque_url(
         call_tool_url, _MCP_TOOL, url,
     )
 
-    try:
-        resp = sync_requests.post(
-            call_tool_url,
-            json=payload,
-            headers=engine_headers,
-            timeout=30,
-        )
-    except sync_requests.exceptions.RequestException as exc:
-        logger.error(
-            "[yuque_resolve] Engine request failed: url=%s error=%s",
-            call_tool_url, exc,
-        )
-        raise YuqueResolveError(
-            message="引擎服务连接失败，请稍后重试",
-            error_code=YUQUE_RESOLVE_ENGINE_UNAVAILABLE,
-            url=url,
-        ) from exc
-
-    logger.info(
-        "[yuque_resolve] Response status=%s body_preview=%s",
-        resp.status_code, resp.text[:500],
-    )
-
-    if resp.status_code != 200:
-        detail = ""
+    max_attempts = 2
+    body: dict | None = None
+    for attempt in range(max_attempts):
         try:
-            detail = resp.json().get("detail", resp.text)
-        except Exception:
-            detail = resp.text
-        logger.error(
-            "[yuque_resolve] Engine returned %s: %s", resp.status_code, detail,
-        )
-        raise YuqueResolveError(
-            message="引擎服务返回错误，请检查 Bot 是否正常运行",
-            error_code=YUQUE_RESOLVE_ENGINE_UNAVAILABLE,
-            url=url,
+            resp = sync_requests.post(
+                call_tool_url,
+                json=payload,
+                headers=engine_headers,
+                timeout=30,
+            )
+        except sync_requests.exceptions.RequestException as exc:
+            logger.error(
+                "[yuque_resolve] Engine request failed: url=%s error=%s",
+                call_tool_url, exc,
+            )
+            raise YuqueResolveError(
+                message="引擎服务连接失败，请稍后重试",
+                error_code=YUQUE_RESOLVE_ENGINE_UNAVAILABLE,
+                url=url,
+            ) from exc
+
+        logger.info(
+            "[yuque_resolve] Response status=%s body_preview=%s",
+            resp.status_code, resp.text[:500],
         )
 
-    try:
-        body = resp.json()
-    except json.JSONDecodeError as exc:
-        logger.error(
-            "[yuque_resolve] Failed to parse engine response: %s, raw=%s",
-            exc, resp.text[:500],
-        )
-        raise YuqueResolveError(
-            message="引擎返回了无法解析的数据，请联系管理员",
-            error_code=YUQUE_RESOLVE_PARSE_ERROR,
-            url=url,
-        ) from exc
+        if resp.status_code != 200:
+            detail = ""
+            try:
+                detail = resp.json().get("detail", resp.text)
+            except Exception:
+                detail = resp.text
+            logger.error(
+                "[yuque_resolve] Engine returned %s: %s", resp.status_code, detail,
+            )
+            raise YuqueResolveError(
+                message="引擎服务返回错误，请检查 Bot 是否正常运行",
+                error_code=YUQUE_RESOLVE_ENGINE_UNAVAILABLE,
+                url=url,
+            )
+        try:
+            body = resp.json()
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "[yuque_resolve] Failed to parse engine response: %s, raw=%s",
+                exc, resp.text[:500],
+            )
+            raise YuqueResolveError(
+                message="引擎返回了无法解析的数据，请联系管理员",
+                error_code=YUQUE_RESOLVE_PARSE_ERROR,
+                url=url,
+            ) from exc
 
-    if not body.get("success"):
+        if body.get("success"):
+            break
+
         error_msg = body.get("message") or "未知错误"
         logger.error(
             "[yuque_resolve] MCP tool call not successful: %s body=%s",
             error_msg, str(body)[:500],
         )
-        raise YuqueResolveError(
-            message=f"语雀链接解析失败: {error_msg}",
-            error_code=YUQUE_RESOLVE_FAILED,
-            url=url,
-        )
+        if attempt < max_attempts - 1 and _is_transient_streamable_http(body):
+            logger.warning(
+                "[yuque_resolve] Transient streamable HTTP failure; retrying url=%s",
+                url,
+            )
+            continue
+
+        if _is_transient_streamable_http(body):
+            error_code = YUQUE_RESOLVE_ENGINE_UNAVAILABLE
+            message = "语雀链接解析失败：引擎服务暂时不可用，请稍后重试"
+        else:
+            error_code = YUQUE_RESOLVE_FAILED
+            message = f"语雀链接解析失败: {error_msg}"
+        raise YuqueResolveError(message, error_code=error_code, url=url)
 
     content_str = (body.get("data") or {}).get("content", "")
     try:
