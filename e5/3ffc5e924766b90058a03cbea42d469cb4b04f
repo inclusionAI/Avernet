@@ -1,0 +1,19 @@
+apps/backend/tests/community/services/test_skill_set_service.py
+  s_094e36eb13ebbf::t_16d323f0aa5659 410,428-431,436,439,457-460,464-496
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e53ffc5e924766b90058a03cbea42d469cb4b04f",
+  "prompts": {},
+  "sessions": {
+    "s_094e36eb13ebbf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19bff-8f05-75c1-b5ce-8ef08f29ffac",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
