@@ -444,6 +444,14 @@ class SkillsPoolRuntime:
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:
                 return self._unsupported_mapping_publish_result()
+            if error.status_code >= 500:
+                logger.warning(
+                    "[skills_pool.runtime] mapping publish HTTP failure bot_id=%s "
+                    "status=%s",
+                    bot_id,
+                    error.status_code,
+                )
+                return self._unavailable_mapping_publish_result()
             logger.exception(
                 "[skills_pool.runtime] mapping publish HTTP failure bot_id=%s "
                 "status=%s",
@@ -648,6 +656,14 @@ class SkillsPoolRuntime:
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:
                 return self._unsupported_mapping_verification_result()
+            if error.status_code >= 500:
+                logger.warning(
+                    "[skills_pool.runtime] mapping verify HTTP failure bot_id=%s "
+                    "status=%s",
+                    bot_id,
+                    error.status_code,
+                )
+                return self._unavailable_mapping_verification_result()
             logger.exception(
                 "[skills_pool.runtime] mapping verify HTTP failure bot_id=%s "
                 "status=%s",
