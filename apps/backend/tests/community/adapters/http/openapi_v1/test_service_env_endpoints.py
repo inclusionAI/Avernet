@@ -9,6 +9,7 @@ from starlette.requests import Request
 from agentclaw.community.adapters.http.openapi_v1.service_envs import router as service_envs_router
 from agentclaw.community.adapters.http.openapi_v1.service_envs.router import publish_eval_env
 from agentclaw.community.core.service_bot.errors import ServicePublicationNotFoundError
+from tests.community.adapters.http.quality.test_quality_router import FakeQualityTaskService
 
 
 @pytest.fixture
@@ -34,14 +35,23 @@ async def test_publish_eval_env_handler(resource_services):
     })
     request = Request({"type": "http", "method": "POST", "path": "/"})
     request.state.trace_id = "trace-1"
-    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services)
+    quality_tasks = FakeQualityTaskService()
+    result = await publish_eval_env("bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services, quality_tasks)
     assert result.code == 202000
     assert result.request_id == "trace-1"
     assert result.data.bot_uuid == "eval-bot"
     assert result.data.baas_bot_status is None
+    assert result.data.quality_task_id == 1
+    assert result.data.quality_task_uuid
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id="task-1", device_count=1, resource_spec=None,
     )
+    task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
+    assert task is not None
+    assert task.ext == {
+        "publish_id": 7, "bot_uuid": "eval-bot", "baas_publish_id": 42,
+        "operator": "actor", "biz_id": "task-1",
+    }
 
 
 def test_openapi_contract():
@@ -78,8 +88,10 @@ async def test_publish_eval_env_device_count_forwarded(resource_services):
         "baas_publish_id": 42,
     })
     request = Request({"type": "http", "method": "POST", "path": "/"})
+    quality_tasks = FakeQualityTaskService()
     result = await publish_eval_env(
         "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        quality_tasks,
         device_count=3,
     )
     assert result.code == 202000
@@ -87,6 +99,7 @@ async def test_publish_eval_env_device_count_forwarded(resource_services):
         publish_id=7, operator="actor", biz_id="task-1",
         device_count=3, resource_spec=None,
     )
+    assert result.data.quality_task_id == 1
 
 
 @pytest.mark.asyncio
@@ -277,8 +290,10 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
         "baas_publish_id": 42,
     }))
     request = Request({"type": "http", "method": "POST", "path": "/"})
+    quality_tasks = FakeQualityTaskService()
     result = await publish_eval_env(
         "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        quality_tasks,
         cpu=4, memory=8, disk=disk,
     )
     assert result.code == 202000
@@ -287,3 +302,6 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
         device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )
+    task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
+    assert task is not None
+    assert task.id == result.data.quality_task_id
