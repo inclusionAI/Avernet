@@ -214,6 +214,7 @@ pub struct BotEventCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderEventSource {
+    A2a { binding: bcs_domain::a2a::A2aBinding, update_mode: bcs_domain::a2a::A2aUpdateMode },
     Sse,
     Callback,
 }

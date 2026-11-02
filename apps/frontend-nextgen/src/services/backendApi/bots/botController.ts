@@ -107,6 +107,7 @@ export const BOT_ENDPOINTS = {
   restartLocal: (bot_id: string) => `/openapi/v1/bots/${bot_id}/local/restart`,
   space: (bot_id: string) => `/openapi/v1/bots/${bot_id}/space`,
   authStatus: (bot_id: string) => `/openapi/v1/bots/${bot_id}/auth-status`,
+  copy: '/openapi/v1/bots/copy',
 };
 
 export function changeBotSpace(bot_id: string, space_id: number, user_id?: string) {
@@ -147,6 +148,15 @@ export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQ
 // 创建 Bot。
 export function createBot(body: MutateBotRequest) {
   return backendRequest<BackendApiEnvelope<BotDto | BotAuthPendingDto>>(BOT_ENDPOINTS.list, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: body,
+  });
+}
+
+// 复制 Bot();响应同构:成功返回 BotDto,需 AgentPass 授权时返回 BotAuthPendingDto。
+export function copyBot(body: MutateBotRequest) {
+  return backendRequest<BackendApiEnvelope<BotDto | BotAuthPendingDto>>(BOT_ENDPOINTS.copy, {
     method: 'POST',
     params: userScopedParams(),
     data: body,

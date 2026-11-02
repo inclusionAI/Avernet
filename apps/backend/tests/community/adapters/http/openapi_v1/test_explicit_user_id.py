@@ -282,8 +282,8 @@ def _without_request_id(response) -> dict:
 _NO_USER_DIMENSION = {
     # Environment operations declare business operator/owner, not an acting user.
     ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
-    ("get", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"),
-    ("post", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"),
+    ("get", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"),
+    ("post", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"),
     # Expert discovery is tenant-wide, selected by the verified principal.
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),

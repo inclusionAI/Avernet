@@ -22,6 +22,7 @@ import { useGroupChatHistorySync } from './useGroupChatHistorySync';
 import { useGroupChatInteractions } from './useGroupChatInteractions';
 import { useGroupChatProvider } from './useGroupChatProvider';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
+import { useCancelledGroupChatMessages } from './useCancelledGroupChatMessages';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
 import { useWsReconnectNonce } from './useWsReconnectNonce';
@@ -60,8 +61,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
 
   const provider = useGroupChatProvider(session, identityId, authenticatedUserId);
-  // 终止（abort）+ 投递队列（deliveries）组合为运行控制，控制本文件体积（门禁 250 行）。
-  const runControl = useGroupChatRunControl(provider, sessionId);
 
   const chat = useChat({
     // provider 为 null 时 Hook 仍需调用 useChat 以保持 Hook 数量稳定；这里以 never 兜底，
@@ -73,6 +72,8 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     placeholderMessage: '',
     panelRef,
   });
+  const removeCancelledMessages = useCancelledGroupChatMessages(chat.setMessages);
+  const runControl = useGroupChatRunControl(provider, sessionId, removeCancelledMessages);
   // 显示状态合成（Spec AC-1/AC-2，就绪绑定消息可见性；进入信号/自动重连由合成 hook 自治管理）。
   const displayStatus = useGroupChatDisplayStatus({
     sessionId,
@@ -192,7 +193,7 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     setIsLoadingMoreHistory(true);
     try {
       const older: ChatMessage[] = await provider.loadMoreHistory();
-      if (older.length > 0) chat.setMessages((prev) => prependUniqueMessages(prev, older));
+      if (older.length > 0) chat.setMessages((prev: ChatMessage[]) => prependUniqueMessages(prev, older));
       setHasMoreHistory(provider.hasMoreHistory);
     } catch (error: unknown) {
       setHasMoreHistory(provider.hasMoreHistory);

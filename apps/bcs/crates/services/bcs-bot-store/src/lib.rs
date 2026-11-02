@@ -42,6 +42,8 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod persistent_repo;
 pub mod provider;
+pub mod a2a;
+mod a2a_search;
 pub mod provider_cache;
 mod caller_config_cache;
 

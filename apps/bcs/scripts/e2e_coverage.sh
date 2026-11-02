@@ -27,7 +27,7 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
 #                                                    # gate line >=41%, method >=36%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
-#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 50]
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 60]
 #                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -352,6 +352,7 @@ if [[ "$no_stop" -eq 0 ]]; then
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
     bcs-bot-store/src/memory_authority.rs
+    bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
     bcs-bot-store/src/memory_control_plane.rs

@@ -25,12 +25,32 @@ switch; see `pack-operation-migration.md` for the exact conditions and limits.
 snapshot from `wf/<id>` for `current` or `saved/<id>` for `draft`. A missing
 ref is not replaced with the other ref. `canWrite` indicates that the host has
 installed a Pack-file save handler, not that a journal or recovery exists.
+The explicit version reader fetches only this workflow's two branch tips, without
+checking out the default branch or fetching all repository history. It verifies
+that the advertised refs still match during the read and fails closed if they
+change. It does not affect the separate Git paths used for save or deployment.
+A duplicate matching manifest or overlapping Pack layout is rejected as 409
+`SNAPSHOT_CONFLICT` instead of selecting a file tree implicitly. The service logs
+only a fixed failure phase and error category, never Git credentials, raw errors,
+or file contents. Other errors may still return 503 `SERVICE_UNAVAILABLE`.
 
 `POST /api/auto-heal/save` validates an existing workflow's spec and stores the
 submitted document in `workflow_specs` in a database transaction. The database
 draft is the source of the workflow YAML used at deployment; an existing-workflow
 save does not write Git, allocate a release version, or return a Git commit. It
-requires edit permission and an existing workflow. `sourceCommit` and
+requires edit permission and an existing workflow. If that workflow has an active
+database deployment but no draft row, saving creates its first database draft
+without Git or release-history writes; it does not provision a new Pack identity.
+The editor supplies `expectedDraftAbsent: true` and the exact
+`expectedActiveDeployNumber` it read from the active database release for this
+first save. If a draft already exists or another insert wins, the service
+returns 409 `DRAFT_ALREADY_EXISTS` without overwriting it; if the re-locked
+active release has a different deploy number, it returns 409 `BASELINE_STALE`
+without inserting. The first-draft preconditions accept only `true` and a
+positive integer, cannot be combined with `createOnly`, and are omitted by
+ordinary existing-draft saves.
+See [the editor draft boundary](workflow-editor-draft-boundary.md) for draft-first
+reading and the separate Apply/save actions. `sourceCommit` and
 `expectedSavedHead` are unsupported for an existing-workflow save. A request ID
 does not make this save idempotent.
 

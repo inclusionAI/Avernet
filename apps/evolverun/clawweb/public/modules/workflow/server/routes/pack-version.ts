@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { logWorkflowBackground } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import { PackCandidateConflictError, PackCandidateOutcomeUnknownError } from '../services/pack-candidate-save.js';
 import type { PackScriptSnapshot, PackScriptVersion } from '../services/pack-script-snapshot.js';
 
@@ -45,13 +46,16 @@ export function createPackVersionRouter(deps: Dependencies): Router {
   router.all('/:workflowId/pack-version', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (req.method !== 'GET' && req.method !== 'PUT') { res.status(405).json({ error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' }); return; }
+    let phase = 'identity';
     try {
       const principal = await deps.resolvePrincipal(req);
       if (!principal || typeof principal.actorId !== 'string' || !principal.actorId.trim()) { res.status(401).json({ error: 'Authentication required', code: 'AUTHENTICATION_REQUIRED' }); return; }
       const workflowId = req.params.workflowId;
       if (!validId(workflowId)) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
+      phase = 'permission';
       if (!deps.botPermRepo || await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) !== true) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
       if (!deps.workflowSpecRepo) { res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
+      phase = 'workflow';
       const row = await deps.workflowSpecRepo.findByWorkflowId(workflowId);
       if (!row) { res.status(404).json({ error: 'Workflow not found', code: 'WORKFLOW_NOT_FOUND' }); return; }
       const packId = row.pack_id ?? row.workflow_id;
@@ -59,6 +63,7 @@ export function createPackVersionRouter(deps: Dependencies): Router {
       if (req.method === 'GET') {
         const version = req.query.version;
         if ((version !== 'current' && version !== 'draft') || Object.keys(req.query).some(k => k !== 'version')) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
+        phase = 'snapshot';
         const snapshot = await deps.readSnapshot(workflowId, packId, version);
         if (!snapshot || snapshot.workflowId !== workflowId || !validId(snapshot.packId) || snapshot.baseRef !== `origin/${version === 'current' ? 'wf' : 'saved'}/${workflowId}`
           || !oid(snapshot.baseCommit) || !(snapshot.draftHead === null || oid(snapshot.draftHead)) || !Array.isArray(snapshot.versionFiles)) throw new Error('Invalid snapshot');
@@ -80,7 +85,20 @@ export function createPackVersionRouter(deps: Dependencies): Router {
       if (error instanceof PackCandidateConflictError) { res.status(409).json({ error: 'Version conflict', code: 'VERSION_CONFLICT' }); return; }
       if (operationError(res, error)) return;
       const message = error instanceof Error ? error.message : '';
-      if (message === 'Workflow snapshot not found' || message === 'Pack manifest not found') { res.status(404).json({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }); return; }
+      if (message === 'Workflow snapshot not found' || message === 'Pack manifest not found') {
+        res.status(404).json({ error: 'Snapshot not found', code: 'SNAPSHOT_NOT_FOUND' }); return;
+      }
+      if (req.method === 'GET') {
+        // Log only fixed categories. Never serialize provider errors, paths, tokens or request data.
+        const conflict = phase === 'snapshot' && (message === 'Pack manifest conflict' || message === 'Mixed Pack layout');
+        const inputCode = (error as { code?: unknown } | null)?.code;
+        const errorCode = conflict ? 'PACK_MANIFEST_CONFLICT' :
+          inputCode === 'GIT_QUEUE_FULL' || inputCode === 'GIT_OPERATION_TIMEOUT' || inputCode === 'GIT_TIMEOUT' || inputCode === 'GIT_OUTPUT_LIMIT' || inputCode === 'PACK_REFS_CHANGED'
+            ? inputCode : 'PACK_READ_FAILED';
+        logWorkflowBackground('pack_version_read', 'failed', { phase, errorCode,
+          ...(validId(req.params.workflowId) ? { workflowId: req.params.workflowId } : {}) });
+        if (conflict) { res.status(409).json({ error: 'Version snapshot conflict', code: 'SNAPSHOT_CONFLICT' }); return; }
+      }
       res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' });
     }
   });

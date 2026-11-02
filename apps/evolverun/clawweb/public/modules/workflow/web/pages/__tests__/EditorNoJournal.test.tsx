@@ -264,10 +264,15 @@ it('does not send AutoHeal deployment if persisting the shared marker fails', as
 })
 it('rejects the fresh saved-only baseline if layout edits appear before confirmation', async () => {
   const { session } = setup('draft', true)
+  act(() => {
+    mocks.spec = { ...mocks.spec, nodes: [{ id: 'done', title: 'Done', phase: 'execute', executor: { type: 'done' } }] }
+    mocks.get.mockResolvedValue(mocks.spec)
+    useEditorStore.getState().loadSpec(mocks.spec)
+  })
   await waitFor(() => expect(session.state.versions.current.loading).toBe(false))
   fireEvent.click(screen.getByRole('button', { name: '部署' }))
   const confirm = await screen.findByRole('button', { name: '确认部署' })
-  act(() => useEditorStore.setState({ isLayoutDirty: true }))
+  act(() => useEditorStore.getState().moveNode('done', 600, 300))
   fireEvent.click(confirm)
   expect(await screen.findByText(/确认期间编辑内容已变化/)).toBeInTheDocument()
   expect(mocks.deploy).not.toHaveBeenCalled()

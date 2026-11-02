@@ -23,6 +23,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-chat-run-store = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
 bcs-group-store = { workspace = true }

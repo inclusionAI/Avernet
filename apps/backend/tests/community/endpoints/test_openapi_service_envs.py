@@ -20,8 +20,8 @@ _KEY = "service-env-test-signing-key-at-least-32-bytes"
 _OWNER = "env-owner"
 _BOT = "env-source"
 _PUBLISH = "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"
-_PROGRESS = "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"
-_TEARDOWN = "/openapi/v1/service-envs/{bot_uuid}/env-teardown"
+_PROGRESS = "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"
+_TEARDOWN = "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"
 
 
 class _Secret:
@@ -46,14 +46,14 @@ def _auth(world):
     init_principal_verifier_config(_Resolver(), "gateway_principal_signing_key", strict=False)
 
 
-async def _publish(self, *, publish_id, operator, biz_id, resource_spec=None):
+async def _publish(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
     assert resource_spec is None
-    assert (publish_id, operator, biz_id) == (1, "operator-1", "task-1")
+    assert (publish_id, operator, biz_id, device_count) == (1, "operator-1", "task-1", 1)
     return {"success": True, "publish_id": 1, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
 
 
 def _progress(self, *, baas_publish_id, include_devices):
-    assert baas_publish_id == 42 and include_devices is False
+    assert baas_publish_id == 42 and include_devices is True
     return {"publish_id": 42, "status": "SUCCESS"}
 
 
@@ -131,8 +131,9 @@ for _method, _path, _params in (
         expect=ExpectError(status=401))(lambda: None)
 
 
-async def _publish_resources(self, *, publish_id, operator, biz_id, resource_spec):
+async def _publish_resources(self, *, publish_id, operator, biz_id, device_count, resource_spec):
     assert resource_spec.to_dict() == {"cpu": 4, "memory": 8, "disk": 200}
+    assert device_count == 1
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
 
 
@@ -146,6 +147,26 @@ def _seed_resources(world):
         query_params={"owner_id": _OWNER, "operator": "operator-1", "cpu": 4, "memory": 8, "disk": 200}, headers=_headers()),
     expect=ExpectSuccess(status=202, json_contains={"data": {"success": True}}))
 def publish_resources():
+    pass
+
+
+async def _publish_device_count(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
+    assert resource_spec is None
+    assert (publish_id, operator, biz_id, device_count) == (1, "operator-1", "task-1", 3)
+    return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
+
+
+def _seed_device_count(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {"eval_publish": _publish_device_count})
+
+
+@endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_device_count", seed=_seed_device_count,
+    input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
+        query_params={"owner_id": _OWNER, "operator": "operator-1", "biz_id": "task-1", "device_count": 3},
+        headers=_headers()),
+    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True}}))
+def publish_device_count():
     pass
 
 

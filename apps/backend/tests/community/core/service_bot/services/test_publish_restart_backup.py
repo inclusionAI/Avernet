@@ -72,5 +72,5 @@ async def test_real_coding_backup_transport_failure_still_issues_published_resta
 
     build.upgrade_async = AsyncMock(side_effect=upgrade)
     await svc.execute_restart(1, 'online', 'operator')
-    baas.post_bots_api.assert_called_once()
+    assert baas.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
     build.upgrade_async.assert_awaited_once()

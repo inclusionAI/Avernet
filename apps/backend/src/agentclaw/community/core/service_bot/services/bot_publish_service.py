@@ -1,6 +1,7 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
 import copy
 import threading
+import time
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
@@ -27,6 +28,7 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishAlreadyExistsError,
     PublishNotFoundError,
     PublishStatusInvalidError,
+    UpgradeDraftRestartError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
@@ -910,7 +912,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
 
         Args:
             publish_id: 原发布单 ID
-            owner_id: 操作者 ID（用于权限校验）
+            owner_id: 已由 adapter/facade 完成权限及编辑锁校验的操作者 ID
 
         Returns:
             新创建的 BotPublishRecord（状态为 draft）
@@ -939,7 +941,13 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             # 查询已创建的新发布单并返回
             existing_new = self._repo.get_by_last_pub_id(publish_id)
             if existing_new:
-                logger.info(f"[upgrade_publish] idempotent return: original_id={publish_id} already upgraded to new_id={existing_new.id}")
+                logger.info(
+                    "service_bot.upgrade.draft_restart.skipped reason=existing_successor "
+                    "original_publish_id=%s draft_publish_id=%s source_bot_pk=%s "
+                    "source_bot_id=%s operator_id=%s",
+                    publish_id, existing_new.id, existing_new.source_bot_pk,
+                    existing_new.source_bot_id, owner_id,
+                )
                 return existing_new
             # 异常情况：状态是 upgraded 但找不到新发布单
             raise BotPublishServiceError(
@@ -958,7 +966,13 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             # 步骤 5 已完成，步骤 6 未完成
             # 补偿更新原发布单状态
             # self._repo.update_status(publish_id, PublishStatus.UPGRADED)
-            logger.info(f"[upgrade_publish] idempotent return + status fix: original_id={publish_id} -> new_id={existing_new.id}")
+            logger.info(
+                "service_bot.upgrade.draft_restart.skipped reason=existing_successor "
+                "original_publish_id=%s draft_publish_id=%s source_bot_pk=%s "
+                "source_bot_id=%s operator_id=%s",
+                publish_id, existing_new.id, existing_new.source_bot_pk,
+                existing_new.source_bot_id, owner_id,
+            )
             return existing_new
 
         # 5. 正常流程：创建新发布单
@@ -985,7 +999,59 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
         logger.info(f"[upgrade_publish] original_id={publish_id} -> new_id={new_record.id}, version={new_version}")
+        self._restart_upgraded_draft(new_record, operator_id=owner_id)
         return new_record
+
+    def _restart_upgraded_draft(
+        self, draft: BotPublishRecord, *, operator_id: str,
+    ) -> None:
+        """Submit a normal draft restart after a successor has been persisted.
+
+        Existing successors never reach this method. A submission failure keeps
+        the draft; callers recover through the existing manual restart endpoint.
+        """
+        started = time.monotonic()
+        context = {
+            "system": "backend", "direction": "internal",
+            "operation": "upgrade_draft_restart", "method": "restart_bot",
+            "original_publish_id": draft.last_pub_id, "draft_publish_id": draft.id,
+            "source_bot_pk": draft.source_bot_pk, "source_bot_id": draft.source_bot_id,
+            "operator_id": operator_id, "stage": "draft",
+        }
+        logger.info("service_bot.upgrade.draft_restart.request %s", context)
+        try:
+            bot = self._bot_repo.get_by_pk(draft.source_bot_pk)
+            # COSEC: never replace an immutable source identity with a caller's
+            # owner-shaped locator, especially for historical default Bots.
+            if bot is None or str(bot["bot_id"]) != draft.source_bot_id:
+                raise BotNotFoundError("Source Bot no longer matches the draft")
+            context.update(current_owner_id=bot["owner_id"], engine=bot.get("active_engine"))
+            if self._bot_service.is_teclaw_bot(bot.get("active_engine")):
+                logger.info(
+                    "service_bot.upgrade.draft_restart.skipped %s reason=teclaw_unsupported",
+                    context,
+                )
+                return
+            result = self._bot_service.restart_bot(
+                bot_id=draft.source_bot_id, user_id=bot["owner_id"],
+            )
+            if result.get("success") is False or str(result.get("status", "")).upper() == "FAILED":
+                raise BotPublishServiceError("Draft restart submission was rejected")
+        except Exception as exc:
+            # COSEC: provider exceptions may contain reusable credentials. Keep
+            # the stable failure and exception type, never their raw payload.
+            logger.error(
+                "service_bot.upgrade.draft_restart.failure %s exception_type=%s "
+                "reason=restart_submission_failed draft_retained=true duration_ms=%.1f",
+                context, type(exc).__name__, (time.monotonic() - started) * 1000,
+            )
+            raise UpgradeDraftRestartError(draft) from None
+        logger.info(
+            "service_bot.upgrade.draft_restart.response %s status=%s binding_id=%s "
+            "duration_ms=%.1f",
+            context, result.get("status"), result.get("binding_id"),
+            (time.monotonic() - started) * 1000,
+        )
 
     def can_upgrade_publish(self, publish_id: int) -> bool:
         """检查发布单是否可以升级。

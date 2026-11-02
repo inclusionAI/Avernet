@@ -5,10 +5,9 @@ use super::*;
 async fn retired_service_policy_preserves_schema_and_history_across_restarts() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     run_sqlite_bootstrap_tables(&db).await?;
-    for migration in SQLITE_VERSIONED_MIGRATIONS
-        .iter()
-        .filter(|m| m.version <= 38)
-    {
+    // Establish the current schema before probing restart stability. New additive
+    // migrations are verified by upgrade tests, not treated as retirement writes.
+    for migration in SQLITE_VERSIONED_MIGRATIONS {
         apply_sqlite_migration(&db, migration).await?;
     }
     run_sqlite_bootstrap_indexes(&db).await?;

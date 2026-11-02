@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.bot_management.ownership_sync.notifications import (
+    DisabledBotOwnershipSync,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
@@ -163,6 +166,7 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         DisabledBotManagerSync(),
         Mock(),
         Mock(),
+        ownership_sync=DisabledBotOwnershipSync(),
     )
     with pytest.raises(HandoffError, match="UNSUPPORTED"):
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")

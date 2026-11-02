@@ -346,6 +346,12 @@ pub use bcs_domain::{
 
 // Note: bcs-bot-connectors has been removed. Bot communication uses the streaming adapter.
 
+// Delivery adapters consume these declared Service API contracts through the
+// public facade; concrete policy implementations stay in services/*.
+pub use application::run_budget::RunBudgetService;
+pub use types::run_budget::{RunBudgetChange,RunBudgetLimits,RunBudgetPhase,RunBudgetState};
+pub use core::message_delivery::DeliveryLifecycleEvent;
+
 pub use port::repo::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 
 pub use port::repo::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};

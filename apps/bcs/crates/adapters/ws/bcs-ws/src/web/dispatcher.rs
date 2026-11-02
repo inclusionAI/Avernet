@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bcs_domain::{HumanMessageView, MessageVisibilityDomain};
-use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
+use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame};
 use bcs_service_api::application::v1::{
     AuthorizeGroupSessionConnection, ConnectionView, DeliveryAdmissionService,
     DeliveryScope, DeliveryVisibility, GroupSessionConnectionBinding,
@@ -261,38 +261,11 @@ fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ChatSendParams {
-    #[serde(alias = "sessionKey")]
-    session_key: Option<String>,
-    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
-    session_id: Option<String>,
-    message: String,
-    group_id: String,
-    bot_uuid: Option<String>,
-    bot_id: Option<String>,
-    bot_name: Option<String>,
-    #[serde(default)]
-    mentions: Vec<String>,
-    thinking: Option<String>,
-    #[serde(alias = "idempotencyKey")]
-    idempotency_key: Option<String>,
-    /// Speaking-lease coordinates for caller groups (spec §6.3): the id
-    /// and epoch an acquire/preempt returned. Optional — plain groups
-    /// never carry it and DM traffic never fences on it.
-    #[serde(default, alias = "leaseId")]
-    lease_id: Option<String>,
-    #[serde(default, alias = "leaseEpoch")]
-    lease_epoch: Option<u64>,
-    attachments: Option<Vec<bcs_protocol::Attachment>>,
-}
+mod responses;
+use responses::{send_error, send_error_shape, send_ok};
 
-#[derive(Debug, Serialize)]
-struct ChatSendResponse {
-    #[serde(rename = "runId")]
-    run_id: String,
-    status: String,
-}
+mod chat_send_params;
+use chat_send_params::{ChatSendParams, ChatSendResponse};
 
 async fn handle_chat_send(
     state: &Arc<WebDispatchState>,
@@ -528,7 +501,10 @@ async fn handle_chat_send(
                     .collect()
             }),
             thinking: params.thinking,
-            idempotency_key: params.idempotency_key,
+            // Preserve the explicit client correlation key for the
+            // canonical message/delivery cancellation path; fall back to the
+            // legacy request id for older callers.
+            idempotency_key: params.client_message_id.or(params.idempotency_key),
             source_im_message_id: None,
             channel_sender_identity: None,
             sender_conn_id,
@@ -939,16 +915,6 @@ fn build_protected_delivery_binding(
     })
 }
 
-async fn send_ok(tx: &mpsc::Sender<String>, req_id: &str, payload: Value) -> Result<()> {
-    let response = ResponseFrame::ok(req_id, payload);
-    let frame = BcsFrame::Response(response);
-    let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to send response: {}", e))
-    })?;
-    Ok(())
-}
-
 async fn send_empty_human_input_final(
     tx: &mpsc::Sender<String>,
     group_id: &str,
@@ -1020,40 +986,6 @@ async fn send_human_input_error_event(
             "Failed to send HumanInput error event: {}",
             error
         ))
-    })?;
-    Ok(())
-}
-
-async fn send_error(
-    tx: &mpsc::Sender<String>,
-    req_id: &str,
-    code: &str,
-    message: &str,
-) -> Result<()> {
-    send_error_shape(
-        tx,
-        req_id,
-        ErrorShape {
-            code: code.to_string(),
-            message: message.to_string(),
-            details: None,
-            retryable: false,
-            retry_after_ms: None,
-        },
-    )
-    .await
-}
-
-async fn send_error_shape(
-    tx: &mpsc::Sender<String>,
-    req_id: &str,
-    error: ErrorShape,
-) -> Result<()> {
-    let response = ResponseFrame::err(req_id, error);
-    let frame = BcsFrame::Response(response);
-    let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to send error response: {}", e))
     })?;
     Ok(())
 }

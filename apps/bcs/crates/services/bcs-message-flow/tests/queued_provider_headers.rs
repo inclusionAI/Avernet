@@ -35,6 +35,36 @@ async fn fixture() -> (support::FlowTestSupport, Arc<BcsMessageFlow>, Arc<Manage
 }
 
 #[tokio::test]
+async fn a2a_abort_preparation_preserves_canonical_run_and_rejects_changed_owner() {
+    use bcs_service_api::{BotDeliveryTarget, DeliveryTransitionCommand, RedactedToken};
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+    use bcs_service_api::types::a2a_bot::{A2aBinding,A2aInterface,A2aUpdateMode};
+    let (support,flow,service)=fixture().await;
+    let mut target=BotDeliveryTarget::A2a { bot_id:"bot-driver".into(),provider_id:"provider".into(),provider_bot_ref:"remote-bot".into(),
+        interface:A2aInterface {url:"https://example.org/a2a/bots/remote-bot".into(),tenant:None,protocol_version:"1.0".into(),
+            binding:A2aBinding::HttpJson,update_mode:A2aUpdateMode::Stream},credential_kind:"downlink_bcs_to_provider".into(),
+        bearer:RedactedToken::new("test-a2a"),card_revision:1,extensions:vec![] };
+    support.registry.set_delivery_target("bot-driver",target.clone()).await;
+    let view=flow.handle_web_send(command("a2a-cancel","x-routing-zone","do-not-relay")).await.unwrap().queue_admission.unwrap();
+    let row=service.snapshot(None).await.unwrap().into_iter().find(|row|row.source_message_id==view.message_id
+        && row.state.kind==DeliveryType::Send).unwrap();
+    let preparer=QueuedGroupPreparation {flow:Arc::downgrade(&flow),deliveries:service.clone()};
+    let prepared=preparer.prepare(&row).await.unwrap();
+    assert!(prepared.command.provider_bypass_headers.is_empty());
+    assert!(prepared.transport_context_json["connection_id"].is_null());
+    let started=service.transition(DeliveryTransitionCommand {delivery_id:row.delivery_id.clone(),expected_state_version:row.state.state_version,
+        event:Event::StartSend,now_ms:chrono::Utc::now().timestamp_millis(),request_id:None,actor_id:None,reply:None,
+        transport_context_json:Some(prepared.transport_context_json),deadline_at_ms:Some(i64::MAX), caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None}).await.unwrap();
+    let abort=preparer.prepare_abort(&started).await.unwrap();
+    assert_eq!(abort.run_id,started.run_id);
+    assert_eq!(abort.session_id,"group-1:headers");
+    assert!(abort.provider_bypass_headers.is_empty());
+    if let BotDeliveryTarget::A2a {provider_bot_ref,..}=&mut target {*provider_bot_ref="another-bot".into();}
+    support.registry.set_delivery_target("bot-driver",target).await;
+    assert!(preparer.prepare_abort(&started).await.is_err());
+}
+
+#[tokio::test]
 async fn rejects_only_provider_target_without_persisting_unsupported_values() {
     let (support, flow, service) = fixture().await;
     let result = flow.handle_web_send(command("reject", "cookie", "do-not-persist")).await.unwrap();

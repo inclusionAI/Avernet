@@ -40,6 +40,7 @@ class PublishFlowServiceProtocol(Protocol):
         config_artifact: str | None = None,
         docker_image: str | None = None,
         resource_spec: ResourceSpecification | None = None,
+        device_count: int = 1,
     ) -> dict[str, Any]:
         """Submit an eval deployment without advancing the main publication.
 
@@ -47,6 +48,9 @@ class PublishFlowServiceProtocol(Protocol):
         Submission success is not readiness.
         resource_spec replaces template resource settings for this deployment only;
         None preserves existing defaults. Disk units/support are provider-defined.
+        device_count is the number of BaaS deployment instances in this eval
+        environment; 1 preserves prior behavior and provider-defined upper limits
+        still apply.
         """
         ...
 

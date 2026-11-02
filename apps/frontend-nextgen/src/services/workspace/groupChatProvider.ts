@@ -583,7 +583,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     );
   }
 
-  async request(params: GroupChatRequest, messageId?: string): Promise<void> {
+  async request(params: GroupChatRequest, messageId?: string, clientMessageId?: string): Promise<void> {
     const generation = this.transportGeneration;
     const lifecycleSeq = ++this.lifecycleSeq;
     const inner = await this.ensureInitialized();
@@ -595,9 +595,21 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       this.assertLiveGeneration(generation);
       this.assertConnected(inner);
     }
-    // payload 字段保真装配抽至 buildGroupChatPayload（groupChatProviderHelpers,根因 C);messageId 缺省时不透传第二参。
+    // payload 字段保真装配抽至 buildGroupChatPayload（groupChatProviderHelpers,根因 C）；
+    // assistant/client message IDs are forwarded separately for response matching and cancellation correlation。
     const payload = buildGroupChatPayload(params, this.options.groupId, this.options.identityId);
-    if (messageId !== undefined) {
+    // The published SDK type may still expose the pre-correlation two-argument
+    // request signature while the SDK branch is being released; keep the
+    // runtime-compatible third argument here without weakening the public
+    // provider type elsewhere.
+    const requestWithClientMessageId = inner.request as (
+      requestPayload: typeof payload,
+      assistantMessageId?: string,
+      clientMessageId?: string,
+    ) => Promise<void>;
+    if (clientMessageId !== undefined) {
+      await requestWithClientMessageId.call(inner, payload, messageId, clientMessageId);
+    } else if (messageId !== undefined) {
       await inner.request(payload, messageId);
     } else {
       await inner.request(payload);

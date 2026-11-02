@@ -20,6 +20,7 @@ setup_env() {
   unset SINGLEBOX_DEMO_BOT_NAME
   unset SINGLEBOX_DEMO_BOT_DESC
   unset SINGLEBOX_DEMO_ENTITY_ID
+  unset SINGLEBOX_BBS_DEMO_ENTITY_ID
   unset SINGLEBOX_DEMO_ENTITY_TYPE
   unset SINGLEBOX_DEMO_ENGINE_TYPE
   unset SINGLEBOX_DEMO_BOT_TYPE
@@ -84,6 +85,7 @@ test_defaults_are_community_safe() {
   assert_eq "developer" "$DEMO_BOT_NAME" "bot name"
   assert_eq "Local demo bot for OpenOCB Singlebox" "$DEMO_BOT_DESC" "bot desc"
   assert_eq "mock-user" "$DEMO_ENTITY_ID" "entity id"
+  assert_eq "000001" "$DEMO_BBS_ENTITY_ID" "BBS bot owner id"
   assert_eq "staff" "$DEMO_ENTITY_TYPE" "entity type"
   assert_eq "openclaw" "$DEMO_ENGINE_TYPE" "engine type"
   assert_eq "personal" "$DEMO_BOT_TYPE" "bot type"
@@ -94,12 +96,14 @@ test_env_overrides_are_used() {
   setup_env
   export SINGLEBOX_DEMO_BOT_NAME="product-manager"
   export SINGLEBOX_DEMO_ENTITY_ID="mock-pm"
+  export SINGLEBOX_BBS_DEMO_ENTITY_ID="bbs-owner"
   # shellcheck source=/dev/null
   source "$MODULE"
   demo_bot_defaults
 
   assert_eq "product-manager" "$DEMO_BOT_NAME" "override bot name"
   assert_eq "mock-pm" "$DEMO_ENTITY_ID" "override entity id"
+  assert_eq "bbs-owner" "$DEMO_BBS_ENTITY_ID" "override BBS bot owner id"
 }
 
 test_bcs_bot_id_uses_backend_bot_and_entity_id() {
@@ -575,7 +579,7 @@ test_bbs_start_seeds_topics_bots_skills_and_subscriptions_in_order() (
   }
   demo_bbs_create() { fail "existing BBS demo bots must be reused"; }
   demo_bot_wait_ready() {
-    printf '%s\n' "ready:$1" >> "$sequence_file"
+    printf '%s\n' "ready:$1:$2" >> "$sequence_file"
     return 0
   }
   demo_bbs_skills_install() {
@@ -587,7 +591,7 @@ test_bbs_start_seeds_topics_bots_skills_and_subscriptions_in_order() (
   }
 
   demo_bot_start
-  assert_eq $'topics\nfind:社区产品官\nready:bot-product\nfind:社区工程官\nready:bot-engineering\nskills:bot-product\nsubscription:bot-product\nskills:bot-engineering\nsubscription:bot-engineering'     "$(cat "$sequence_file")" "BBS demo start order"
+  assert_eq $'topics\nfind:社区产品官\nready:bot-product:000001\nfind:社区工程官\nready:bot-engineering:000001\nskills:bot-product\nsubscription:bot-product\nskills:bot-engineering\nsubscription:bot-engineering'     "$(cat "$sequence_file")" "BBS demo start order"
 )
 
 test_bbs_start_fails_fast_when_topic_seed_fails() (
@@ -628,8 +632,8 @@ SH
   skill_id="$(demo_bbs_skill_upload "bot-product" "bbs-browse")"
   assert_eq "9" "$skill_id" "uploaded skill id"
   args="$(cat "$CURL_ARGS_FILE")"
-  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills?user_id=mock-user&owner_id=mock-user' <<< "$args" >/dev/null || fail "BBS skill upload URL missing"
-  grep -F 'x-dev-user: mock-user' <<< "$args" >/dev/null || fail "BBS skill upload caller header missing"
+  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills?user_id=000001&owner_id=000001' <<< "$args" >/dev/null || fail "BBS skill upload URL missing"
+  grep -F 'x-dev-user: 000001' <<< "$args" >/dev/null || fail "BBS skill upload caller header missing"
   grep -F -- '--data-binary @' <<< "$args" >/dev/null || fail "BBS skill upload must send a zip body"
 )
 
@@ -650,7 +654,7 @@ SH
   source "$MODULE"
   demo_bot_defaults
   demo_bbs_skill_activate "bot-product" "9" "bbs-browse"
-  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills/9/activate?user_id=mock-user&owner_id=mock-user'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS skill activation URL missing"
+  grep -F 'POST http://127.0.0.1:8889/openapi/v1/bots/bot-product/skills/9/activate?user_id=000001&owner_id=000001'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS skill activation URL missing"
 )
 
 test_bbs_subscription_enable_uses_internal_unified_contract() (
@@ -667,7 +671,7 @@ while [ "$#" -gt 0 ]; do
   fi
   shift
 done
-printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"000001","mode":"openclaw","note":"product note"}}'
 SH
   chmod +x "${tmpbin}/curl"
   PATH="${tmpbin}:$PATH"
@@ -678,8 +682,11 @@ SH
   source "$MODULE"
   demo_bot_defaults
   demo_bbs_subscription_enable "bot-product" "product note"
-  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=mock-user'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription URL missing"
-  grep -F 'x-user-id: mock-user' "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription caller header missing"
+  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=000001'     "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription URL missing"
+  grep -F 'x-user-id: 000001' "$CURL_ARGS_FILE" >/dev/null || fail "BBS subscription caller header missing"
+  if grep -F 'Cookie:' "$CURL_ARGS_FILE" >/dev/null; then
+    fail "BBS subscription must not depend on a BaaS-specific local auth cookie"
+  fi
   jq -e '.note == "product note"' "$CURL_BODY_FILE" >/dev/null || fail "BBS subscription body mismatch"
 )
 
@@ -689,10 +696,10 @@ test_bbs_subscription_enable_waits_after_202_acceptance() (
   cat > "${tmpbin}/curl" <<'SH'
 #!/usr/bin/env bash
   printf '%s\n' "$*" >> "${CURL_CALLS_FILE}"
-  if [[ "$*" == *"browse-subscription?owner_user_id=mock-user"* ]]; then
-    printf '%s\n' '{"code":202000,"message":"Accepted","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+  if [[ "$*" == *"browse-subscription?owner_user_id=000001"* ]]; then
+    printf '%s\n' '{"code":202000,"message":"Accepted","data":{"bot_id":"bot-product","owner_user_id":"000001","mode":"openclaw","note":"product note"}}'
   else
-    printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"mock-user","mode":"openclaw","note":"product note"}}'
+    printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"000001","mode":"openclaw","note":"product note"}}'
   fi
 SH
   chmod +x "${tmpbin}/curl"
@@ -706,7 +713,7 @@ SH
   demo_bbs_subscription_enable "bot-product" "product note"
 
   calls="$(cat "$CURL_CALLS_FILE")"
-  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=mock-user' <<< "$calls" >/dev/null || fail "BBS subscription POST URL missing"
+  grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=000001' <<< "$calls" >/dev/null || fail "BBS subscription POST URL missing"
   grep -F -- '-X GET' <<< "$calls" >/dev/null || fail "BBS subscription poll must be an HTTP GET"
   grep -F 'http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription' <<< "$calls" >/dev/null || fail "BBS subscription must poll the persisted row after 202"
 )

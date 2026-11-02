@@ -388,3 +388,68 @@ separately. Cancellation terminates BCS execution, not an upstream identity JWT.
 The material ledger still fences parent run/attempt; plugins never select INITIAL
 as recovery from a failed parent relay. Unsupported purpose-specific issuance
 fails closed. This distinction adds no database access or credential cache.
+
+## Run execution and input-wait budgets
+
+`RunBudgetManagement` implements application `RunBudgetService`, calling the
+pure budget Core then ManagedMessageDeliveryService and BotRunContextPort. The
+outbound A2A adapter no longer calls Core policy or orchestrates managed/cache
+deadlines; it receives the accepted change and persists A2A correlation before
+publishing cards/continuations. The initial unchanged deadline adds no writes.
+Pause/resume/initial cap retain the prior bounded managed CAS + guarded context
+operation cost, with no additional DB reads or token-path writes. Cross-store
+failure is returned explicitly, including partial managed-success/cache-failure;
+no rollback or slot release is fabricated. Shared application conformance runs
+with Memory/SQLite managed stores and live context guards; failure tests prove
+managed failure prevents cache writes and cache errors cannot return success.
+
+`RunBudgetCore` implements the transport-independent `RunBudgetCoreService`.
+It charges execution time before a pause, retains the remaining execution
+budget during input wait, and caps every phase by a fixed total deadline.
+Repeated observations cannot renew an existing wait. Expired, exhausted or
+backwards-clock transitions fail. Bootstrap supplies limits; Core reads no
+environment and performs no I/O.
+
+Managed delivery exposes `reschedule_run_deadline` for an exact canonical
+Bot/Group/Session/Run. Only live Dispatching/Running Send deliveries can change;
+the normal CAS transaction increments their version without changing attempt,
+request, transport, status or occupied slot. Identical updates are idempotent.
+Canonical lookup is bounded to two rows and uses the existing env/run index.
+The normal path adds one lookup and existing delivery reads/CAS; stale-version
+conflicts have at most three attempts, and storage errors propagate immediately.
+
+Memory/Redis Run-context stores expose the separately guarded
+`reschedule_deadline` port operation. It requires an unexpired canonical A2A
+Run, matching expected deadline, active scope and transport ownership, and no
+terminal/terminal-processing claim. A per-Run local gate serializes against
+terminal and owner removal; this is not a distributed lease. Updates retain
+existing aliases/output lineage and cannot create producers after retirement.
+
+Redis performs bounded reads (five lifecycle keys, one scope field, at most two
+aliases), UpdateOnly writes for transport/active/context, and expiry updates.
+With two aliases and scope expiry extension the test asserts eleven cache
+operations, no full hash scan. Canonical context is written last. Redis updates
+are not a cross-store transaction: earlier TTL/index writes can remain after a
+failure. The caller must cancel/fail closed rather than publish an interaction
+until BOTH managed delivery and Run-context updates and correlation persistence
+have succeeded. No per-token budget writes or restart recovery guarantee exists.
+
+The A2A waiting driver now integrates the injected budget policy and persistence
+ports. The last decision resumes charging before transmitting a continuation
+that can execute tools, not after its ACK. Waiting itself holds the Session slot
+but no SSE subscription; partial decisions cannot renew a wait. No A2A SDK or
+wire schema enters this Core/store boundary.
+
+Lost observation uses `mark_run_transport_unknown`, an exact canonical scoped
+lookup followed by the existing CAS transition, bounded to three conflicts.
+Dispatching/Running becomes Unknown; Cancelling becomes CancelUnknown. The
+attempt and occupied execution slot are retained. No token-path writes, scans,
+implicit retries or new task submissions are introduced. A later confirmed
+terminal still settles through normal event ingestion. Memory/SQLite shared
+conformance covers scope/alias rejection, idempotence and terminal non-revival.
+
+Queued and active-scope aborts use the registry's cancellation-only target
+resolver. A failed Card refresh therefore cannot block cancellation of an
+already-submitted A2A Run. Immutable owner checks and canonical scope remain;
+the adapter loads the original endpoint/Task from durable correlation. New send
+preparation still uses normal target resolution and rejects an unavailable Card.

@@ -1223,7 +1223,7 @@ literals the routes actually publish:
 <!-- reserved-component-names -->
 ```text
 all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  connection  engine  identity
-loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 

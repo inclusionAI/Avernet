@@ -136,6 +136,14 @@ pub struct BcsConfig {
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
 
+    /// Human approval waits pause execution but remain bounded by these caps.
+    #[serde(default)]
+    pub a2a_input:super::a2a_input::A2aInputConfig,
+
+    /// Explicit deployment-owned routes through a local MOSN gRPC sidecar.
+    #[serde(default)]
+    pub a2a_grpc:Option<bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
     pub collaboration: CollaborationConfig,
@@ -463,6 +471,8 @@ impl Default for BcsConfig {
             human_notify: HumanNotifyConfig::default(),
             message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
+            a2a_input:super::a2a_input::A2aInputConfig::default(),
+            a2a_grpc:None,
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
             max_groups_as_driver: default_max_groups_as_driver(),

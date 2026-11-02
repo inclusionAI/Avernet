@@ -63,6 +63,7 @@ check_r25_2_conformance_uses_harness() {
 has_conformance_entry_for_impl() {
   local trait="$1"
   local type_name="$2"
+  local file
   local harness
   harness="$(to_snake "$trait")_contract_tests"
 

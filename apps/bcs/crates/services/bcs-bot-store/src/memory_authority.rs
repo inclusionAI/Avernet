@@ -32,14 +32,14 @@ use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::types::bot_authority::{
     AuthorityActor, AuthorityActorKind, AuthorityConflictCode, BotAccessRelation,
     BotOwnershipView, BotRoleQuery, ManagerEdit, ManagerEditAction, ManagerListQuery,
-    ManagerPage, ManagerSetChange, ManagerSync, TransferAction, TransferChange,
-    TransferCommand, TransferDirection, TransferKey, TransferListQuery,
-    TransferOutcome, TransferPage, TransferStatus, TransferView,
+    ManagerPage, ManagerSetChange, ManagerSync, OwnershipChange, OwnershipSync,
+    TransferAction, TransferChange, TransferCommand, TransferDirection, TransferKey,
+    TransferListQuery, TransferOutcome, TransferPage, TransferStatus, TransferView,
     check_page_bounds, human_actor_id, human_user_id_of_actor,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 
-use bcs_config::resolve_env_str as resolve_env;
+pub(super) use bcs_config::resolve_env_str as resolve_env;
 use tokio::sync::RwLock;
 use tracing::warn;
 
@@ -490,6 +490,10 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         manager_sync_impl(self, command).await
     }
 
+    async fn sync_ownership(&self, command: OwnershipSync) -> ServiceResult<OwnershipChange> {
+        super::ownership_sync::ownership_sync_impl(self, command).await
+    }
+
     async fn change_transfer(&self, command: TransferCommand) -> ServiceResult<TransferOutcome> {
         transfer_change_impl(self, command).await
     }
@@ -510,7 +514,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
 const MANAGER_INPUT_CAP: usize = 1_000;
 const MANAGER_STOCK_BOUND: u64 = 10_000;
 
-fn memory_human_unknown(detail: String) -> ServiceError {
+pub(super) fn memory_human_unknown(detail: String) -> ServiceError {
     ServiceError::InvalidOperation {
         message: format!(
             "{}: {detail}",
@@ -520,7 +524,7 @@ fn memory_human_unknown(detail: String) -> ServiceError {
     }
 }
 
-fn memory_operator_forbidden(detail: &str) -> ServiceError {
+pub(super) fn memory_operator_forbidden(detail: &str) -> ServiceError {
     ServiceError::Forbidden(format!(
         "{}: {detail}",
         bcs_service_api::application::v1::bot_authority::ERROR_BOT_AUTHORITY_OPERATOR_FORBIDDEN
@@ -728,7 +732,7 @@ async fn memory_human_alive(repo: &MemoryBotRepo, actor_id: &str) -> bool {
 /// Version + owner-completeness validation, run against
 /// the staged clone INSIDE the command's single
 /// write-guard span.
-fn memory_require_initialized(
+pub(super) fn memory_require_initialized(
     staged: &MemoryAuthorityState,
     ctx: &MemoryWriteContext,
 ) -> ServiceResult<u64> {
@@ -749,7 +753,7 @@ fn memory_require_initialized(
 
 /// Owner actor id of the bot; integrity errors preserve
 /// the strict-read semantics.
-fn memory_state_owner(state: &MemoryAuthorityState, ctx: &MemoryWriteContext) -> String {
+pub(super) fn memory_state_owner(state: &MemoryAuthorityState, ctx: &MemoryWriteContext) -> String {
     state
         .edges
         .iter()
@@ -1040,7 +1044,7 @@ fn memory_state_total(state: &MemoryAuthorityState, ctx: &MemoryWriteContext) ->
 /// `(env, mutation_id, sequence)` row fails (the
 /// memory counterpart of the UNIQUE constraint).
 #[allow(clippy::too_many_arguments)]
-fn memory_append_audit(
+pub(super) fn memory_append_audit(
     state: &mut MemoryAuthorityState,
     ctx: &MemoryWriteContext,
     action: &str,
@@ -1291,7 +1295,7 @@ async fn manager_sync_impl(
 
 /// The audit state string shares its exact spelling
 /// with the SQL store (harness-pinned).
-fn transfer_audit_state(
+pub(super) fn transfer_audit_state(
     status: &str,
     from_owner_actor_id: &str,
     version: u64,
@@ -1313,7 +1317,7 @@ fn transfer_state_denial(detail: String) -> ServiceError {
 
 /// Fixed system identity for in-command lazy
 /// closures (spec §4.4; mirrors the SQL store).
-const CLOSING_SYSTEM_ACTOR: &str = "system_transfer_close";
+pub(super) const CLOSING_SYSTEM_ACTOR: &str = "system_transfer_close";
 
 /// Refresh window (spec §4.3: expires_at = 本轮
 /// requested_at + 七天).
@@ -1441,7 +1445,7 @@ fn other_valid_pending(
 /// row to the wanted status (insert when it does not
 /// exist yet — the memory projection has no separate
 /// revoked-row reuse requirement beyond status).
-fn memory_set_edge(
+pub(super) fn memory_set_edge(
     staged: &mut MemoryAuthorityState,
     ctx: &MemoryWriteContext,
     actor: &str,
@@ -2334,7 +2338,7 @@ fn transfer_view(
         .map(|row| view_from_row(row, now_ms())))
 }
 
-fn owner_integrity_error(bot_id: &str, owner_count: usize) -> ServiceError {
+pub(super) fn owner_integrity_error(bot_id: &str, owner_count: usize) -> ServiceError {
     owner_integrity_error_message(if owner_count == 0 {
         format!("bot {bot_id} has no approved owner edge")
     } else {
@@ -2342,7 +2346,7 @@ fn owner_integrity_error(bot_id: &str, owner_count: usize) -> ServiceError {
     })
 }
 
-fn owner_integrity_error_message(detail: String) -> ServiceError {
+pub(super) fn owner_integrity_error_message(detail: String) -> ServiceError {
     ServiceError::InternalError(format!(
         "{}: {}",
         bcs_service_api::application::v1::bot_authority::ERROR_BOT_OWNER_INTEGRITY,
@@ -2350,7 +2354,7 @@ fn owner_integrity_error_message(detail: String) -> ServiceError {
     ))
 }
 
-fn not_initialized_error(bot_id: &str) -> ServiceError {
+pub(super) fn not_initialized_error(bot_id: &str) -> ServiceError {
     ServiceError::Conflict(format!(
         "{}: bot {} not initialized in this environment",
         bcs_service_api::application::v1::bot_authority::ERROR_BOT_AUTHORITY_NOT_INITIALIZED,

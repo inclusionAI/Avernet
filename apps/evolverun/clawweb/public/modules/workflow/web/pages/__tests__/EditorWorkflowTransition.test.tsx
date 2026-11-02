@@ -4,12 +4,12 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), history: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), history: vi.fn(), snapshot: vi.fn() }))
 vi.mock('../../api/hooks', () => ({
   useEditorWorkflowDocument: (id: string) => ({ data: id ? { id, title: id === 'a' ? 'Original' : 'Target', version: '1', nodes: [] } : undefined, isLoading: false }),
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history } }, fetchJson: () => new Promise(() => {}) }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: mocks.get, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: () => new Promise(() => {}) }))
 vi.mock('@xyflow/react', () => ({ ReactFlowProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('../../components/WorkflowPackSidebar', () => ({ default: ({ selectedWorkflowId, onSelectWorkflow }: { selectedWorkflowId: string; onSelectWorkflow: (id: string) => void }) => <><span data-testid="selection">{selectedWorkflowId}</span><button onClick={() => onSelectWorkflow('b')}>选择 B</button><button onClick={() => onSelectWorkflow('c')}>选择 C</button></> }))
 vi.mock('../../components/EditorCanvas', () => ({ default: () => null }))
@@ -67,7 +67,7 @@ describe('standalone editor workflow transition', () => {
     fireEvent.click(screen.getByText('选择 B'))
     expect(state().sessionId).toBe(session)
     await act(async () => { target.resolve(B); await target.promise })
-    expect(state().spec).toEqual(B); expect(state().pendingEdits).toEqual({})
+    expect(state().spec).toEqual(B); expect(state()._databaseSpec).toEqual(B); expect(state().pendingEdits).toEqual({})
     expect(screen.getByTestId('selection')).toHaveTextContent('b')
     expect(readDraft(session, 'yaml')).toBeUndefined(); expect(window.confirm).toHaveBeenCalledTimes(1)
   })
@@ -86,7 +86,7 @@ describe('standalone editor workflow transition', () => {
   it('refuses a structurally malformed target without clearing the existing session', async () => {
     const session = makeDraft(); mocks.get.mockResolvedValueOnce({ ...B, title: undefined }); mount()
     fireEvent.click(screen.getByText('选择 B'))
-    expect(await screen.findByText(/工作流切换未完成/)).toBeInTheDocument()
+    expect(await screen.findByText(/工作流读取失败.*必须包含非空 id、title，以及 nodes 数组/)).toBeInTheDocument()
     expect(state().sessionId).toBe(session); expect(state().spec?.title).toBe('Unsaved')
     expect(readDraft(session, 'yaml')?.text).toBe('unapplied'); expect(screen.getByTestId('selection')).toHaveTextContent('a')
   })
@@ -185,7 +185,18 @@ describe('embedded editor controlled target', () => {
     view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
     expect(state().sessionId).toBe(session)
     await act(async () => { target.resolve(B); await target.promise })
-    expect(state().spec).toEqual(B); expect(readDraft(session, 'yaml')).toBeUndefined()
+    expect(state().spec).toEqual(B); expect(state()._databaseSpec).toEqual(B); expect(readDraft(session, 'yaml')).toBeUndefined()
     expect(window.confirm).toHaveBeenCalledTimes(1)
   })
+  it('passes the active fallback and its absent DB draft through a controlled switch', async () => {
+    mocks.get.mockRejectedValueOnce({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
+    mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
+    mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
+    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    await waitFor(() => expect(state().spec).toEqual(B))
+    expect(state()._databaseSpec).toBeNull()
+    expect(mocks.snapshot).toHaveBeenCalledWith('b', 2)
+  })
+
 })

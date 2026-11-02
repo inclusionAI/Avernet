@@ -87,17 +87,20 @@ def test_http_failure_never_means_released(status):
 def test_real_client_reaches_container_skip_and_rechecks_inventory(status):
     service, http = setup_service(GROUPS, GROUPS)
     operation = 'a' * 32
-    http.post.return_value.json.return_value = {'code': 0, 'data': {
-        'exit_code': 0,
-        'stdout': json.dumps({'version': 1, 'operation_id': operation,
-                              'boot_id': 'boot-1', 'status': status}),
-    }}
+    def post(path, **kw):
+        data = ({'status': 'skip_no_fastdisk', 'storage': '/opt/.aicoding', 'home': '/home/admin/.aicoding'}
+                if kw['json']['cmd'] == backup.detection_command()
+                else {'version': 1, 'operation_id': operation, 'boot_id': 'boot-1', 'status': status})
+        result = Mock()
+        result.json.return_value = {'code': 0, 'data': {'exit_code': 0, 'stdout': json.dumps(data)}}
+        return result
+    http.post.side_effect = post
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
         ctx, device_id=BOT, restart_dependencies=RestartBackupDependencies.for_instance(service), operation_id=operation)
     verify()
     assert http.get.call_args_list == 2 * [
         call(f'/api/v1/bots/{BOT}/devices', params={'tenant': service._tenant}, timeout=30.0)]
-    assert http.post.call_count == 2
+    assert http.post.call_count == 3  # Backend detector plus helper start/status.
     assert all(c.args[0] == '/api/v1/paas/devices/physical/commands'
                for c in http.post.call_args_list)

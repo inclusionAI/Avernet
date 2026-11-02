@@ -31,6 +31,12 @@ function publishStatusOf(dto: BackendUnknownRecord) {
 }
 
 function legacyLifecycle(dto: BackendUnknownRecord, warnings: string[]): BotLifecycle {
+  const rawStatus = asString(dto.status)?.toUpperCase();
+  const personalCloud = asString(dto.bot_type)?.toLowerCase() !== 'desktop' &&
+    asString(dto.kind)?.toLowerCase() !== 'local' && asString(dto.deploy_mode)?.toLowerCase() !== 'local';
+  // 回收/激活是实体状态；旧 display_state 可能尚未更新，不能覆盖过渡态。
+  if (personalCloud && (rawStatus === 'REACTIVATING' || rawStatus === 'RECYCLING')) return 'deploying';
+  if (personalCloud && rawStatus === 'RECYCLED') return 'offline';
   const displayState = asString(dto.display_state)?.toLowerCase();
   if (displayState && DISPLAY_STATE_LIFECYCLE[displayState]) return DISPLAY_STATE_LIFECYCLE[displayState];
   const status = asString(dto.status)?.toUpperCase();

@@ -371,7 +371,7 @@ pub async fn handle_chat_abort(
             .iter()
             .map(|context| context.transport_owner.clone())
             .collect();
-        let current_target = flow.registry.resolve_delivery_target(&cmd.bot_id).await;
+        let current_target = flow.registry.resolve_abort_target(&cmd.bot_id).await;
         let delivery = match (provider_headers_match, owners.len(), current_target) {
             (false, _, _) => Err(ServiceError::InvalidOperation {
                 message: "active Provider runs have conflicting routing headers".to_string(),
@@ -383,13 +383,20 @@ pub async fn handle_chat_abort(
                     &target,
                 ) =>
             {
+                let a2a_run = if matches!(&target, BotDeliveryTarget::A2a { .. }) {
+                    if provider_runs.len() != 1 {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "A2A cancellation requires one unambiguous active Run".into(), request_id: cmd.run_id.clone() });
+                    }
+                    Some(provider_runs[0].canonical_run_id.clone())
+                } else { None };
                 flow.bot_delivery
                     .abort(BotAbortDeliveryCommand {
                         target,
                         command_id: uuid::Uuid::new_v4().to_string(),
                         group_id: cmd.group_id.clone(),
                         session_id: cmd.session_id.clone(),
-                        run_id: None,
+                        run_id: a2a_run,
                         provider_bypass_headers,
                         timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
                     })
@@ -499,20 +506,8 @@ fn chat_abort_failure_code(error: &ServiceError) -> &'static str {
 }
 
 pub(super) fn provider_owner_matches_target(owner: &BotRunTransportOwner, target: &BotDeliveryTarget) -> bool {
-    matches!(
-        (owner, target),
-        (
-            BotRunTransportOwner::HttpProvider {
-                provider_id: owner_provider_id,
-                provider_bot_ref: owner_bot_ref,
-            },
-            BotDeliveryTarget::HttpProvider {
-                provider_id,
-                provider_bot_ref,
-                ..
-            }
-        ) if owner_provider_id == provider_id && owner_bot_ref == provider_bot_ref
-    )
+    !matches!(owner, BotRunTransportOwner::WebSocket)
+        && owner == &BotRunTransportOwner::from_target(target)
 }
 
 async fn commit_aborted_run(

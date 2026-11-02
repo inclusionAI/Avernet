@@ -26,3 +26,4 @@ fn history_projection(mut message: bcs_domain::PersistedMessage) -> bcs_domain::
 }
 
 mod task_lookup;
+mod cancelled_history;

@@ -62,6 +62,7 @@ impl BotDiscoveryService for RecordingBotDiscoveryService {
         self.commands.lock().await.push(command);
         Ok(BotDiscoveryResult {
             bots: vec![BotDiscoveryEntry {
+                agent_card: None,
                 bot_uuid: "planner-friend".to_string(),
                 capabilities: bcs_service_api::BotCapabilities {
                     name: Some("Planner Friend".to_string()),
@@ -305,6 +306,7 @@ async fn recording_bot_query_service_supports_discover_list_expectations() {
 async fn recording_bot_query_service_supports_discover_detail_expectations() {
     let service = RecordingBotQueryService {
         detail_result: Ok(BotDetailResult {
+            agent_card: None,
             bot_uuid: "bot-public".to_string(),
             capabilities: Default::default(),
             status: ActorStatus::Hidden,
