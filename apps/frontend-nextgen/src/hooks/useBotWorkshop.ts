@@ -23,7 +23,9 @@ import { toast } from 'sonner';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { Points } from '@/tracking/points';
 import { Tracert } from '@/utils/tracert';
+import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
+import { useBotWorkshopHealthCheck } from './useBotWorkshopHealthCheck';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
@@ -101,6 +103,7 @@ export function useBotWorkshop() {
     void load();
   }, [load]);
   const createFlow = useBotWorkshopCreateFlow({ load, setCreateScenario: state.setCreateScenario });
+  const copyHost = useBotWorkshopCopyHost({ load, currentOpenApiUserId });
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
   useVisibleInterval(
     refreshVisibleList,
@@ -108,18 +111,7 @@ export function useBotWorkshop() {
     requestIdentity.ready && spaceInitialized && Boolean(spaceId) && !createFlow.creating && !createFlow.authorization,
   );
   const accessControl = useBotWorkshopAccess(currentOpenApiUserId, load);
-  const openHealthCheck = useCallback(
-    (bot: BotDomain) => {
-      const target = botHealthCheckService.toTarget(bot, currentOpenApiUserId);
-      if (!target) {
-        const availability = botHealthCheckService.resolveAvailability(bot, currentOpenApiUserId);
-        toast.error(availability.disabledReason ?? '缺少当前用户身份，无法发起健康检查');
-        return;
-      }
-      history.push(`/bot-workshop/health-check?id=${encodeURIComponent(target.botId)}`);
-    },
-    [currentOpenApiUserId],
-  );
+  const openHealthCheck = useBotWorkshopHealthCheck(currentOpenApiUserId);
   const runAction = useCallback(
     async (action: BotManagementVerb, bot: BotDomain) => {
       try {
@@ -235,6 +227,7 @@ export function useBotWorkshop() {
       }
       await createFlow.submitCreate(input);
     },
+    ...copyHost,
     runAction,
     ...locks,
     ...accessControl,

@@ -37,6 +37,8 @@ const BotTable: React.FC<BotTableProps> = ({
   getCollaborationMode,
   getGeneralConfigAvailability,
   onGeneralConfig,
+  getCopyAvailability,
+  onCopy,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
   const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
@@ -87,6 +89,8 @@ const BotTable: React.FC<BotTableProps> = ({
     getCollaborationMode,
     getGeneralConfigAvailability,
     onGeneralConfig,
+    getCopyAvailability,
+    onCopy,
     onOpenEngineInfo: engineVersions.openInfo,
     onUpdateEngineVersion: engineVersions.openUpdate,
   });
