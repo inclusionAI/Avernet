@@ -1,0 +1,38 @@
+apps/bcsfuse/src/app/bootstrap/opensource.py
+  s_b3a070472fe41d::t_e6d85a59bba954 285-308,473-474,478
+apps/bcsfuse/tests/contract/test_search_ha_ten_upgrades_tdd.py
+  s_b3a070472fe41d::t_e6d85a59bba954 1-303,306-314,316,319-321,325-374
+  s_b3a070472fe41d::t_530170e45df9ec 304-305
+  s_b3a070472fe41d::t_c6867d47ad47db 315
+  s_b3a070472fe41d::t_1654ca6283dafe 317-318
+  s_b3a070472fe41d::t_b426b1c0092ec2 322-324
+apps/bcsfuse/src/app/adapters/http/shared_response_cache_writer.py
+  s_b3a070472fe41d::t_e6d85a59bba954 16-17,49,56-63,67-69,84-87,89,136-137
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependencies.py
+  s_b3a070472fe41d::t_e6d85a59bba954 723,725-728,743-746,748-751,753-759,812
+  s_b3a070472fe41d::t_bca81b89e7c7c4 809-811
+  s_b3a070472fe41d::t_db35bf106c2a9b 813
+apps/bcsfuse/src/app/adapters/http/recommend_response_cache.py
+  s_b3a070472fe41d::t_e6d85a59bba954 169,190-192
+apps/bcsfuse/src/app/adapters/http/search_response_cache.py
+  s_b3a070472fe41d::t_e6d85a59bba954 128,148-150
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  s_b3a070472fe41d::t_e6d85a59bba954 5,446-450,520-523,525-530,534-544
+  s_b3a070472fe41d::t_b661a049cf343b 545-546
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "300e7c277065852b34e145401fe2719eca678797",
+  "prompts": {},
+  "sessions": {
+    "s_b3a070472fe41d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a19-11bc-7bb0-9c15-892b1367e5a8",
+        "model": "Ling-3.0-Flash-VL"
+      },
+      "human_author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}
