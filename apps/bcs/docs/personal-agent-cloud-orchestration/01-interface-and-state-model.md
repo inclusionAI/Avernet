@@ -82,6 +82,25 @@ Consequences:
   still works but a durable-timer store must be added. Out of scope until the
   personal-agent team confirms.
 
+### How coupled is this design to A2A?
+
+Deliberately thinly. A2A is an open protocol (originated at Google, since
+donated to the Linux Foundation and governed vendor-neutrally) — a wire
+protocol and object model, **not a framework**: we take no runtime
+dependency, only the verb surface and objects, and the org has already
+adopted it via the engine protocol migration. What actually touches A2A:
+the verbs (`SendMessage`/`GetTask`/`SubscribeToTask`), the Task/`contextId`
+mapping, and the profile's declaration slot (the AgentCard extension URI).
+Everything load-bearing is protocol-neutral: the state model and lifetimes,
+placement/leases/fencing, write-ahead keys, the profile's semantic clauses,
+and tiering. Pull reconciliation needs only three things from a carrier —
+a durable task id, a read-task-state verb, and a metadata slot — which is
+why the same design already runs over today's non-A2A frame channels
+(registration flag instead of AgentCard, Doc 04). Per the architecture
+rules, A2A lives in delivery adapters; the service-api contracts stay
+protocol-neutral, so upgrading or replacing A2A is an adapter change, not
+a design change.
+
 ## Decision 2 — three conversation layers, with projection boundaries
 
 ![The three conversation layers: L1 (user and personal agent, never enters BCN raw), L2 (the delegation thread between personal agent and BCN, retained for the task lifetime), L3 (the collaboration workspace between BCN and supply agents, compactable, with expert working context held provider-side). Projections cross the boundaries in both directions.](assets/conversation-layers.svg)
