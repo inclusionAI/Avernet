@@ -466,8 +466,8 @@ class TestGetSymlinkMappings:
             if "runtime target conflicts without requested direct paths" in record.message
         ]
         assert len(suppress_warnings) == 1
-        assert "kept=" in suppress_warnings[0].message
-        assert "dropped=" in suppress_warnings[0].message
+        assert "/skills-repo/business/direct/same" in suppress_warnings[0].message
+        assert "/skills-repo/business/repository/same" in suppress_warnings[0].message
 
     def test_direct_path_collision_between_active_rows_still_raises(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
@@ -492,7 +492,7 @@ class TestGetSymlinkMappings:
             skill_set_service.get_symlink_mappings(
                 user_id="100015",
                 bolt_id="default",
-                additional_skill_paths=["git://business/other/same"],
+                additional_skill_paths=["git://business/other/distinct"],
             )
 
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
