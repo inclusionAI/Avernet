@@ -42,4 +42,4 @@ class BotKnowledgeStageSelection:
 真实SQLite记录和服务入口覆盖空选择、缺失、损坏、跨tenant/space、草稿/预发/线上隔离、回滚、晚到回调、投影失败、CAS不变、当前授权撤销。保留个人Bot响应兼容；运行HTTP/DI/architecture与相关完整模块。前端额外验证stage参数、未知空列表无提示与lazy conversation，以及team entity与真实Owner分离。
 
 ## Rollout
-用户更正目标为 dev，授权从最新 dev 迁移本功能净变更并新建公共 PR；原 #3293 已由其他操作合入 Release，本轮不撤销、不导入整个 Release。只创建 dev 目标 PR，不合并、部署、DDL或回填，不创建配套私有前端 PR。旧验证记录不代表 dev 基线验证通过。
+用户最新指定目标 REL20261103，授权新建该目标公共 PR。其当前基线与已验证 dev 基线完全一致，仅更新交付文档，不改变功能代码；保留 dev PR #3439，不擅自关闭或合并。原 #3293 已由其他操作合入旧 Release，本轮不撤销、不导入整个旧 Release。不合并、部署、DDL或回填，不创建配套私有前端 PR。

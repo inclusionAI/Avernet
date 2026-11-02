@@ -1,5 +1,11 @@
 # Verification: 服务 Bot 分状态知识库选择
 
+## REL20261103 target correction (2026-11-02; current delivery)
+- User requested a separate PR targeting `REL20261103`; #3439 remains open against dev and is not retargeted/closed by this delivery.
+- Freshly fetched `github/REL20261103` is exactly `7cfeb03d36857cbc149033f4c6ebd85220a382c5`, equal to the validated dev contribution base. Dedicated branch: `codex/bot-knowledge-stages-rel20261103`. No Release history is imported and no production/test logic is changed.
+- Source/tests stay byte-identical to delivered `28a9b521db18f3bd868e8df7f4831955906b8ea0`; this target correction changes only delivery documentation. Previous complete dev Backend CI (**28953 passed / 40 skipped / 6 subtests**, line **90.83%**, changed **93.33%**) and independent **327 passed** delta review remain applicable source evidence, not a newly rerun full CI.
+- Fresh targeted HTTP/storage/task/DI regressions and the normal `github/dev` pre-push gate are run again for this release-target delivery. New PR remote CI is checked separately; no merge, deployment, DDL, backfill, private frontend PR or gitlink update.
+
 ## Dev-targeted port (2026-11-02; current delivery)
 - User corrected the target to `dev` and requested a new PR. Original #3293 is already merged into `REL20261029` as `5572adf8aec428b3073500bc235189edb1bcbe0e` at 2026-11-02 15:19:01 Asia/Shanghai; no revert or deployment is performed.
 - Initial contribution baseline: `github/dev@6d67835cf1c858773a0580b72eef048fa96f451b`; rebased without conflicts onto `github/dev@7cfeb03d36857cbc149033f4c6ebd85220a382c5` before delivery. Branch `codex/bot-knowledge-stages-dev`; only the net feature patch from #3293 is applied, not Release history.
