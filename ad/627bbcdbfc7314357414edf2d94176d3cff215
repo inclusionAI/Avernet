@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/fresh_fixture_pair.py
+  s_cecdc98e721f4b::t_e98e26ebb84ecd 29-30,32,39-46,54,71-82,96-106,117-124,133-134,146-160,166-167,172,205-366,455,468,489-490,535-571
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_1ce2e52140d48f 13,16,19,159-160,163,168-169,175,178,212-225,227-231,236-238,278-286
+apps/bcs/scripts/e2e-runner/tests/test_fresh_fixture_pair.py
+  s_cecdc98e721f4b::t_8c62e5f65ddb7e 8,20,25,105-167,259-262,286-382
+apps/bcs/scripts/e2e-runner/tests/test_friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_a9788ef6622912 21,143-144,153-170,173-189,196-199,213,216,230-238,251-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad627bbcdbfc7314357414edf2d94176d3cff215",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
