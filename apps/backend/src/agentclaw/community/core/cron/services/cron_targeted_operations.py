@@ -145,6 +145,12 @@ class CronTargetedOperationsMixin:
             target=target,
         )
         provider = str(self._read_field(device, "device_provider") or "").lower()
+        # Teclaw production is addressed by the runtime binding, not a container.
+        engine = str(bot.get("active_engine") or bot.get("engine") or "").lower()
+        if engine == "teclaw" and runtime_stage == "online":
+            if device_uuid is not None:
+                raise CronRelayError("Teclaw online does not accept device_uuid", 400)
+            return bot, target
         if provider in MULTI_INSTANCE_DEVICE_PROVIDERS:
             try:
                 devices = await self._get_runtime_devices(target)
