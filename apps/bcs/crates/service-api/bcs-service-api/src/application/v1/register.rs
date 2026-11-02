@@ -69,6 +69,18 @@ pub trait RegisterService: Send + Sync {
         command: IssueRegisterToken,
     ) -> Result<RegisterTokenView, ApplicationError>;
 
+    /// Same verified scoped token and ownership boundary, with a public Card.
+    /// Direct Card submission and URL sources share the scoped admission path.
+    async fn register_a2a_card(&self, command:RegisterBot, source:crate::types::a2a_bot::A2aCardSource)->Result<BotRegistration,ApplicationError> {
+        match source {
+            crate::types::a2a_bot::A2aCardSource::Url(url)=>self.register_a2a_bot(command,url).await,
+            _=>Err(ApplicationError::invalid("invalid_request","inline Card registration is not configured")),
+        }
+    }
+    async fn register_a2a_bot(&self, _command: RegisterBot, _card_url: String) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("A2A registration is not configured"))
+    }
+
     async fn register_bot(
         &self,
         command: RegisterBot,

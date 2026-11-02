@@ -175,6 +175,15 @@ impl MessageTracker {
             .or_insert(RunOutputBinding::Independent { deadline_ms });
     }
 
+    /// Update existing output lifetime only. Never recreates retired producer facts.
+    pub(crate) async fn reschedule_output_deadline(&self, run: &str, expected: u64, deadline: u64) -> bool {
+        match self.run_operations.lock().await.get_mut(run) {
+            Some(RunOutputBinding::Independent {deadline_ms}) if *deadline_ms == expected => { *deadline_ms = deadline; true }
+            Some(RunOutputBinding::Admitted(_)) => true,
+            _ => false,
+        }
+    }
+
     /// Missing means unknown/retired, Some(None) is a live independent Run,
     /// and Some(Some(id)) belongs to an admitted operation.
     pub async fn output_binding(&self, run_id: &str) -> Option<Option<String>> {

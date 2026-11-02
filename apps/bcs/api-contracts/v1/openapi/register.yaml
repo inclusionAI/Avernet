@@ -79,7 +79,7 @@ BotRegistrationResult:
           description: Stored Bot override. Null means inherit Provider default for gateway; always null for plugin.
         effective_webhook_url:
           type: [string, "null"]
-          description: Current resolved gateway endpoint; null for plugin.
+          description: Current resolved webhook endpoint; null for plugin and A2A gateway registration.
 
 RegisterTokenPath:
   get:
@@ -189,8 +189,15 @@ RegisterPath:
       Checks run inside registration; no separate availability-check API is provided.
       Any duplicate scoped ref returns 409, including an identical retry.
       A valid token can register multiple distinct refs. SQL Bot creation and
-      gateway binding creation are atomic; owner-edge failures are returned but
-      may leave an existing Bot requiring operator reconciliation. Registration is not an
+      gateway binding, Human identity, ownership, profile and audit creation are
+      atomic. Optional agent_card_url or inline agent_card JSON selects A2A registration with a scoped v2
+      token in gateway mode, without webhook_url. The signed Human must currently
+      manage the Provider; self-service access alone cannot bind a remote Agent.
+      BCS fetches and validates the public Card before opening the transaction,
+      then atomically saves the complete Card, nullable source URL and revision
+      with the Bot lifecycle records. Interfaces derive from current deployment
+      policy and credentials from the trusted Provider binding. No webhook default is
+      required or used for A2A. Card failure creates no Bot. Registration is not an
       endpoint-update or mode-migration API. Responses containing tokens must not
       be cached. No bridge process is started by this API.
     x-avernet-security: {}
@@ -204,8 +211,8 @@ RegisterPath:
           minLength: 1
       - name: bot-name
         in: query
-        required: true
-        description: Display name of the new Bot; the wire name keeps the legacy
+        required: false
+        description: Required for legacy registration; optional A2A alias defaults to Card.name. The wire name keeps the legacy
           dashed form. Servers also accept `bot_name`.
         schema:
           type: string
@@ -235,6 +242,34 @@ RegisterPath:
           type: string
           format: uri
           minLength: 1
+      - name: agent_card_url
+        in: query
+        required: false
+        description: Public A2A Card source. Requires a scoped v2 gateway registration token belonging to a current Provider manager; mutually exclusive with webhook_url. Subject to outbound URL and Card declaration validation. Not accepted with legacy v1 tokens.
+        schema:
+          type: string
+          format: uri
+          minLength: 1
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              agent_card:
+                type: object
+                description: Complete inline AgentCard, mutually exclusive with agent_card_url. Uses the same declaration and egress validation without a Card GET. Scoped v2 gateway only.
+                additionalProperties: true
+              agent_card_url:
+                type: string
+                format: uri
+              bot_name:
+                type: string
+                minLength: 2
+                maxLength: 64
+            description: Query/body duplicates are rejected. Omitted A2A name defaults from Card.name. URL-backed Cards can refresh; inline Cards require explicit updates.
     responses:
       "201":
         description: Bot registered with its credentials.

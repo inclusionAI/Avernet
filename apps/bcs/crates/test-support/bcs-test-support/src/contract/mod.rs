@@ -26,3 +26,4 @@ pub mod provider_slug;
 pub mod bot_self;
 pub mod agent_bots;
 pub mod group_human_notify;
+pub mod a2a_bot;

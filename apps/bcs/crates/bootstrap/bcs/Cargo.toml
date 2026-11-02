@@ -157,6 +157,8 @@ bcs-app-collaboration-definition = { workspace = true }
 bcs-invite-code-store = { workspace = true }
 bcs-app-invite-code = { workspace = true }
 bcs-provider-http = { workspace = true }
+bcs-a2a-http = { workspace = true }
+bcs-app-a2a-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
 bcs-group-store = { workspace = true }

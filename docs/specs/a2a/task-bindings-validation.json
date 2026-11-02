@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-31",
+  "status": "passed_with_documented_scope_limits",
+  "scope": "Normalized A2A Task / Run / Context bindings, many-to-one association",
+  "source_sha256": {
+    "apps/bcs/crates/service-api/bcs-service-api/src/port/repo/a2a_run.rs": "55dcb4b0fba9678604178dc12691934ca8b464d927c429e2d6c00219d059c363",
+    "apps/bcs/crates/services/bcs-chat-run-store/src/a2a.rs": "8a62812eb2fc4e7282fd4335dcc7bcc1eab35f7bc7f9affdfeb5cf91119582b1",
+    "apps/bcs/crates/services/bcs-chat-run-store/src/a2a_codec.rs": "23c9042ff8d82ec52830ba9266b7b01f5992156caf7df9a6df07baea2eb54c06",
+    "apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs": "f17d72aad98a8b379b4f62bef6a7bc0835bc5a8c86975969b1c669f18a9b1fc1",
+    "apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_driver.rs": "51a9328c5fd3089c64efe388ff5d780831c9e1fb11063744d132b007300fdf02",
+    "apps/bcs/migrations/mysql/038_a2a_task_bindings.sql": "8d0de69238f477f4d0731871922a3a808db27a1deccc14bd3c3e2bce0bd0e09b",
+    "apps/bcs/migrations/sqlite/039_a2a_task_bindings.sql": "9541179a13451c12acc49fb4de9deda1d23da766ce478faa914c6dd27d2ea7a4"
+  },
+  "passed": [
+    {
+      "command": "cargo test -p bcs-chat-run-store -p bcs-a2a-http -p bcs-bot-store -p bcs-test-support --tests",
+      "log": "/tmp/avernet-a2a-bindings-regression-current.log",
+      "tests": 433,
+      "suites": 47,
+      "ignored": 6,
+      "result": "passed",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p bcs --lib migrations::",
+      "tests": 43,
+      "log": "/tmp/avernet-a2a-bindings-migrations-current.log"
+    },
+    {
+      "command": "current a2a_mysql test executable --ignored --nocapture, with isolated BCS_TEST_MYSQL_URL",
+      "tests": 1,
+      "log": "/tmp/avernet-a2a-bindings-mysql-current.log",
+      "coverage": "real MySQL 8.4 complete 001–038 chain; shared Card/Run/many-to-one contracts; Task revision and unversioned-writer fencing; failure rollback"
+    },
+    {
+      "check": "final MySQL schema metadata and direct opaque-ID case-sensitivity assertions",
+      "result": "9 required audit columns; no record_json/scope_json in new tables; opaque identifiers case-sensitive"
+    },
+    {
+      "command": "bash apps/bcs/scripts/ci/check-store-boundaries.sh",
+      "result": "PASS R10"
+    }
+  ],
+  "scope_limits": [
+    "No full workspace, live Harness or load benchmark rerun in this storage refactor.",
+    "Text clarification product entry and parallel/multi-instance Task ownership are deferred. Existing serial admission remains.",
+    "No business runtime deployment or retained business-database upgrade. Development migrations intentionally reset disposable A2A associations."
+  ],
+  "historical_attempts": [
+    "Earlier regression attempts found a Card-test return-type adaptation error and an outdated migration-version assertion. Both were corrected; interrupted/failed attempts are not counted as passes."
+  ],
+  "default_ignored_tests": [
+    "test tests::integration_test_reconnect_streaming_recover_from_storage ... ignored, Requires external database connections",
+    "test tests::integration_test_register_and_retrieve ... ignored, Requires external database connections",
+    "test tests::integration_test_sql_injection_protection ... ignored, Requires external database connections",
+    "test tests::integration_test_token_persistence ... ignored, Requires external database connections",
+    "test full_mysql_chain_and_a2a_card_context_conformance ... ignored, requires an isolated empty BCS_TEST_MYSQL_URL schema",
+    "test provider_lifecycle_mysql_conformance ... ignored, requires BCS_TEST_MYSQL_URL; CI runs the plan §6 MySQL gate"
+  ],
+  "ignored_note": "The A2A MySQL contract listed as ignored in the default regression was executed separately and passed. The remaining five external-database tests were not run.",
+  "hygiene": {
+    "git_diff_check": "passed",
+    "modified_and_added_task_sources_max_1000_lines": "passed",
+    "temporary_review_outside_repository": "verified",
+    "frozen_mysql_037_and_sqlite_038": "unchanged from index"
+  },
+  "historical_record_note": "This records the completed Task-binding phase. Later minimal-card-registration work changes the draft 038/039 DDL and Card contracts; these hashes and 477 passes do not verify that later phase. See minimal-card-validation.json for current evidence.",
+  "publication_note": "Historical pre-rebase evidence only. Current PR consolidates uncommitted A2A migrations into MySQL/SQLite 039 after upstream 038; see ../2026-10-28-bcs-a2a-grpc/pr-validation.json for merged-head evidence."
+}
