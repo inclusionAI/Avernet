@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from agentclaw.community.core.service_bot.baas_service_errors import BaasTransientServiceError
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -35,6 +36,13 @@ class BaasPublishOpsMixin:
                 publish_id=int(baas_publish_id),
                 include_devices=include_devices,
             )
+        except BaasTransientServiceError as e:
+            logger.warning(
+                f"[PublishFlowService.get_baas_publish_progress] "
+                f"Transient BaaS publish progress failure: baas_publish_id={baas_publish_id}, "
+                f"error={e}"
+            )
+            raise
         except Exception as e:
             logger.error(
                 f"[PublishFlowService.get_baas_publish_progress] "

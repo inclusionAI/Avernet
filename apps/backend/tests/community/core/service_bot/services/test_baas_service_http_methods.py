@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
@@ -19,6 +20,7 @@ from agentclaw.community.core.service_bot.services.deploy.managed_composer impor
 from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
     NoopStoragePolicy,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError, BaasTransientServiceError
 from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
@@ -119,6 +121,43 @@ class TestBaasServiceHttpMethods:
         assert call.args[0] == "/api/v1/publishes/42/progress"
         assert call.kwargs["params"]["tenant"] == "tnt"
         assert call.kwargs["params"]["include_devices"] == "true"
+
+    def _publish_progress_http_error(self, status_code: int, body: str):
+        request = httpx.Request("GET", "http://baas.test/api/v1/publishes/42/progress")
+        response = httpx.Response(status_code, request=request, text=body)
+        err = httpx.HTTPStatusError(
+            f"{status_code}", request=request, response=response
+        )
+        http_response = MagicMock()
+        http_response.raise_for_status.side_effect = err
+        return http_response
+
+    @pytest.mark.parametrize(
+        ("status_code", "body", "expected_error"),
+        [
+            (400, "<!DOCTYPE HTML>", BaasTransientServiceError),
+            (429, "slow down", BaasTransientServiceError),
+            (502, "gateway", BaasTransientServiceError),
+            (404, "missing", BaasServiceError),
+        ],
+    )
+    def test_get_publish_progress_classifies_retryable_fronting_http_error(
+        self, status_code, body, expected_error
+    ):
+        service, http = _make_service()
+        http.set_response(
+            "get", self._publish_progress_http_error(status_code, body)
+        )
+
+        with pytest.raises(expected_error) as exc_info:
+            service.get_publish_progress(42)
+
+        prefix = (
+            "BaaS API transient error"
+            if expected_error is BaasTransientServiceError
+            else "BaaS API error"
+        )
+        assert str(exc_info.value) == f"{prefix}: {status_code} - {body}"
 
     def test_get_bot(self):
         service, http = _make_service()
