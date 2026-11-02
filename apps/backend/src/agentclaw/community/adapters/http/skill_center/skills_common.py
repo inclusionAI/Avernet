@@ -211,6 +211,32 @@ def _upload_error_chain(error: BaseException) -> tuple[BaseException, ...]:
     return tuple(chain)
 
 
+def _resolve_underlying_manifest_error(
+    error: BaseException,
+) -> "SkillManifestError | None":
+    """Return the first ``SkillManifestError`` in the error cause chain.
+
+    The legacy upload path wraps a validator-level ``SkillManifestError`` twice
+    before it reaches the HTTP adapter:
+
+    ``SkillManifestError`` (precise code/message)
+        -> ``SkillPackageInvalidError("invalid_metadata") from exc``
+        -> ``LocalSkillInvalidPackageError("invalid_metadata") from exc``
+
+    The most informative value lives on the original ``SkillManifestError``.
+    Walk ``_upload_error_chain`` so the public classifier and response builder
+    can reuse the precise ``SkillManifestErrorCode`` and validator message
+    instead of collapsing every wrapped manifest failure to the generic
+    ``invalid_metadata`` reason string.
+    """
+    if not isinstance(error, BaseException):
+        return None
+    for candidate in _upload_error_chain(error):
+        if isinstance(candidate, SkillManifestError):
+            return candidate
+    return None
+
+
 def _contains_zip_upload_error(error: BaseException | str) -> bool:
     candidates: tuple[BaseException | str, ...] = (
         _upload_error_chain(error) if isinstance(error, BaseException) else (error,)
@@ -240,6 +266,22 @@ def _classify_upload_validation_error(
     if isinstance(error, LocalSkillTooLargeError):
         return SkillUploadErrorCode.PACKAGE_TOO_LARGE
     if isinstance(error, LocalSkillInvalidPackageError):
+        # ``LocalSkillInvalidPackageError`` wraps the validator-level cause
+        # chain; a nested ``SkillManifestError`` carries the precise
+        # ``SkillManifestErrorCode`` that already maps to a dedicated public
+        # code. Look it up first so callers keep the actionable code (e.g.
+        # ``NAME_MISSING`` instead of generic ``MANIFEST_INVALID``); fall back
+        # to the reason-string table for cases without a manifest cause
+        # (``unsafe_file_path``, ``invalid_zip``, the markdown-only fallback
+        # producing ``metadata={}`` with no ``SkillManifestError``, ...).
+        manifest_error = _resolve_underlying_manifest_error(error)
+        if manifest_error is not None:
+            try:
+                manifest_code = SkillManifestErrorCode(manifest_error.code)
+            except (TypeError, ValueError):
+                manifest_code = None
+            if manifest_code is not None:
+                return _MANIFEST_UPLOAD_ERROR_CODES.get(manifest_code)
         return _PACKAGE_UPLOAD_ERROR_CODES.get(
             str(error), SkillUploadErrorCode.MANIFEST_INVALID
         )
@@ -335,7 +377,19 @@ def _build_upload_error_response(
     """Build the backward-compatible failed-upload envelope once."""
 
     if isinstance(error, LocalSkillInvalidPackageError):
-        raw_message = _PACKAGE_UPLOAD_MESSAGES.get(str(error), error.public_message)
+        # Surface the underlying ``SkillManifestError`` message when the
+        # validator-level cause chain survives wrapping (frontmatter present
+        # but missing/invalid fields). For cases without a manifest cause
+        # (e.g. markdown-only SKILL.md producing ``metadata={}``), keep the
+        # existing ``public_message`` fallback so callers still get the
+        # documented "must define a valid name and description" hint.
+        manifest_error = _resolve_underlying_manifest_error(error)
+        if manifest_error is not None and str(manifest_error):
+            raw_message = str(manifest_error)
+        else:
+            raw_message = _PACKAGE_UPLOAD_MESSAGES.get(
+                str(error), error.public_message
+            )
     elif isinstance(error, LocalSkillTooLargeError):
         raw_message = "Skill package is too large."
     else:
