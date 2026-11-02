@@ -87,6 +87,8 @@ def _resolve_user_identity(
             )
             resolved_owner_id = bot.get("owner_id") if bot else None
             if resolved_owner_id:
+                if resolved_owner_id == user.staffId:
+                    return user.staffId, user.nickName or user.staffId
                 return resolved_owner_id, bot.get("owner_name") or resolved_owner_id
         except Exception as e:
             logger.warning(

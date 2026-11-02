@@ -253,6 +253,42 @@ class TestResolveUserIdentity:
         ]
         assert bot_service.get_bot_calls == []
 
+    def test_no_owner_id_resolves_current_user_bot(self):
+        """A real owner omits owner_id and stays on the authenticated identity.
+
+        Exact reachability keeps the helper aligned with the owner branch while
+        also preserving the live auth nickname rather than a stale bot row.
+        """
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_owner",
+            staffId="u_owner",
+            nickName="Auth Owner",
+            operatorName="Auth Owner",
+        )
+        bot_service = _RecordingBotService(
+            collaborator_bot={
+                "bot_id": "bot1",
+                "owner_id": "u_owner",
+                "owner_name": "Bot Row Owner",
+            },
+        )
+        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+
+        assert user_id == "u_owner"
+        assert nick_name == "Auth Owner"
+        assert bot_service.search_bots_calls == [
+            {
+                "owner_id": "u_owner",
+                "collaborator_user_id": "u_owner",
+                "bot_id": "bot1",
+                "page": 1,
+                "page_size": 1,
+            }
+        ]
+        assert bot_service.get_bot_calls == []
+
     def test_no_owner_id_falls_back_when_bot_is_not_reachable(self):
         """Without reachability, identity stays with the current caller."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
