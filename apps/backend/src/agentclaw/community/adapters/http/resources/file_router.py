@@ -287,23 +287,28 @@ async def upload_files(
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
 
     # any path separator in a filename means a directory upload (preserve structure)
-    preserve = any('/' in (f.filename or '') for f in files)
-    uploaded: list[FileItem] = []
-    errors: list[dict] = []
+    preserve = any('/' in (file.filename or '') for file in files)
+    payload = []
+    errors = []
     for file in files:
         try:
-            result = await file_svc.upload_file(
-                entity_id=eid, bot_id=ebid, engine_type=eeng,
-                target_dir=path, filename=file.filename or "unnamed",
-                data=await file.read(), preserve_structure=preserve,
+            payload.append(
+                {
+                    "filename": file.filename or "unnamed",
+                    "data": await file.read(),
+                }
             )
-            uploaded.append(FileItem(**result))
-        except ValueError as e:
-            errors.append({"filename": file.filename, "error": str(e)})
         except Exception as e:
-            logger.error(f"[upload_files] Failed: {file.filename}, {e}")
+            logger.error("[upload_files] Failed reading: %s, %s", file.filename, e)
             errors.append({"filename": file.filename, "error": str(e)})
-
+    result = await file_svc.upload_files(
+        entity_id=eid, bot_id=ebid, engine_type=eeng,
+        target_dir=path, files=payload, preserve_structure=preserve,
+    )
+    uploaded = [FileItem(**item) for item in result.get("uploaded", [])]
+    errors = result.get("errors", [])
+    for failure in errors:
+        logger.error("[upload_files] Failed: %s, %s", failure.get("filename"), failure.get("error"))
     return FileUploadResponse(success=len(errors) == 0, uploaded=uploaded,
                               errors=errors if errors else None)
 
