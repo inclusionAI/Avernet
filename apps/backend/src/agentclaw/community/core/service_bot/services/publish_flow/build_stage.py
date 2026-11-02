@@ -113,8 +113,14 @@ class BuildStageRunner:
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
 
-    def _current_status_and_attempt(self, publish_id: int) -> tuple[str, str]:
-        return self._ext_state.latest_status_and_build_attempt(publish_id)
+    def _current_status_and_attempt(self, publish_id: int) -> tuple[str | None, str | None]:
+        try:
+            value = self._ext_state.latest_status_and_build_attempt(publish_id)
+            if isinstance(value, tuple):
+                return value
+        except Exception:
+            pass
+        return None, None
 
     def _is_status_ok(self, status: str) -> bool:
         return status == PublishStatus.BUILDING.value
