@@ -382,6 +382,59 @@ async fn corrupt_revision_rows_classify_as_corrupt_record() {
     }
 }
 
+/// The Task-4 reviewer's hand-corruption corner, pinned on real SQLite:
+/// a row corrupted to the DOUBLE-checkable BIGINT maximum revision lets
+/// the revoke predicate still match (scope + sid + non-empty hash), and
+/// SQLite promotes the `session_revision + 1` bump to a REAL — so the
+/// revoke itself reports `Revoked` while the NEXT classified read of the
+/// row is persisted corruption (`CorruptRecord`), never a plausible
+/// revision. (MySQL's equivalent raises BIGINT out-of-range at the
+/// revoke, classifying `Unavailable`; that dialect difference is
+/// arbitrated by the ignored live-MySQL gate, never by this file.)
+#[tokio::test]
+async fn revoke_on_hand_corrupted_max_revision_pins_the_sqlite_overflow() {
+    let harness = Harness::migrated().await;
+    let scope = session_scope(&harness, "revoke-overflow").await;
+
+    // Hand-corrupt the stored revision to the BIGINT maximum (only
+    // reachable by direct row manipulation, never by the engine's
+    // checked bumps).
+    harness
+        .real
+        .execute(DbStatement::with_params(
+            "UPDATE bcs_user_identities SET session_revision = ? WHERE user_id = ?",
+            vec![
+                DbValue::from(i64::MAX),
+                DbValue::from(scope.user_id.as_str()),
+            ],
+        ))
+        .await
+        .expect("plant the corrupted max revision");
+
+    // The revoke predicate matches the corrupted row and commits.
+    assert_eq!(
+        harness
+            .store(None)
+            .revoke_session(&scope, "revoke-overflow-sid")
+            .await
+            .expect("the revoke itself commits on real SQLite"),
+        AuthSessionRevoke::Revoked
+    );
+
+    // Every subsequent classified read of that row is persisted
+    // corruption: the bump promoted the column to a non-integer REAL.
+    assert!(
+        matches!(
+            harness
+                .store(None)
+                .read_session_revision(&scope)
+                .await,
+            Err(AuthSessionStoreError::CorruptRecord)
+        ),
+        "the SQLite promotion must be detected as corruption on the next read"
+    );
+}
+
 /// Access-cost evidence, measured through the counting decorator over the real
 /// plugin: one strict verify SELECT (≤ 1 row), login = 1 revision SELECT + 1
 /// install UPDATE, refresh = 1 UPDATE, logout = 1 UPDATE, and zero

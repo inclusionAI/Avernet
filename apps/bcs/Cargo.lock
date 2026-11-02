@@ -482,6 +482,7 @@ dependencies = [
  "rand 0.8.7",
  "regex",
  "reqwest 0.12.28",
+ "rsa",
  "secrecy",
  "serde",
  "serde_json",
@@ -2467,11 +2468,16 @@ name = "bcs-user-identity"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-service-api",
  "bcs-test-support",
+ "mysql_async",
+ "sha2",
  "tokio",
+ "tokio-test",
  "tracing",
  "uuid",
 ]

@@ -566,5 +566,29 @@ pub async fn select_v1_authentication(
     Ok(ApiAuthSelection::Explicit(Box::new(built)))
 }
 
+/// Wrap a final composite in the SAME production Stateful outer gate the
+/// server composition mounts (principal revalidation against the Bot
+/// registry, `LegacyBrowserBoundary` refusal) so integration fixtures
+/// exercise the real delivery chain without re-implementing the wrapper
+/// (V1 API auth plan, Task 13 acceptance fixtures).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn stateful_verifier_for_tests(
+    inner: Arc<dyn PrincipalVerifier>,
+    registry: Arc<dyn bcs_service_api::core::BotRegistryCoreService>,
+) -> Arc<dyn PrincipalVerifier> {
+    Arc::new(crate::principal_state::StatefulPrincipalVerifier { inner, registry })
+}
+
+/// The production native-browser principal adapter (`/collaboration/user`),
+/// exposed for integration fixtures so they mount the REAL legacy Human
+/// chain wrapper instead of approximating it (V1 API auth plan, Task 13
+/// N2 compatibility fixtures).
+#[cfg(any(test, feature = "test-utils"))]
+pub fn browser_verifier_for_tests(
+    chain: Arc<bcs_auth_api::AuthPluginChain>,
+) -> Arc<dyn PrincipalVerifier> {
+    Arc::new(crate::browser_principal::BrowserPrincipalVerifier(chain))
+}
+
 #[cfg(test)]
 mod tests;

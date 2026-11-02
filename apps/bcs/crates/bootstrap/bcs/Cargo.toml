@@ -219,6 +219,7 @@ chrono = { workspace = true }
 [dev-dependencies]
 dirs = "5.0"
 futures-util = "0.3"
+rsa = { workspace = true }
 bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
