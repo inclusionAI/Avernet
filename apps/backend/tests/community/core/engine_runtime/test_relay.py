@@ -460,6 +460,26 @@ async def test_other_statuses_become_upstream_errors(status):
 
 
 @pytest.mark.asyncio
+async def test_agentclaw_stale_sandbox_is_not_upstream_error():
+    """Stale sandbox must not be reported as a generic engine-service failure."""
+    transport = _Transport(raises=DeviceAdapterHTTPStatusError(500, "sandbox info not exist"))
+    with pytest.raises(EngineDeviceNotReadyError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/engine/status"
+        )
+
+
+@pytest.mark.asyncio
+async def test_agentclaw_missing_sandbox_is_upstream_error():
+    """A generic 500 still reports a generic engine-service failure."""
+    transport = _Transport(raises=DeviceAdapterHTTPStatusError(500, "boom"))
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/engine/status"
+        )
+
+
+@pytest.mark.asyncio
 async def test_timeout_propagates_unwrapped():
     """504 is already the right public answer; wrapping would lose it."""
     transport = _Transport(raises=DeviceAdapterTimeoutError("too slow"))
