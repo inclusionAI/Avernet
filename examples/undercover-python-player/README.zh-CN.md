@@ -34,6 +34,7 @@ BCS/主持人 --chat.send(节点指令)--> 本玩家
 - 重复 `chat.send` 只 ACK，不重复生成；`HistoryStore` 与 session 记忆有会话数/TTL 上限，
   活跃 run 的会话不会被清理，跨会话词不串。
 - 游戏 state machine 节点无法识别时发送明确的 `state=error`，不伪造成功 final；
+  已识别节点若无法生成合法答案，也回传错误终态，避免主持人静默等到超时；
   普通聊天无法识别时只回一句保守拒绝。
 - 心跳：60s `bot.status`；断线指数退避重连；持久化 token 复用身份。
 - 首次连接自动 HTTP onboard（名称/能力）并设 `visibility=public`。

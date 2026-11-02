@@ -539,6 +539,32 @@ class BcnClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(item.get("event") == "task_unrecognized" for item in records))
         self.assertTrue(any(item.get("event") == "terminal_error_sent" for item in records))
 
+    async def test_unanswerable_pk_vote_returns_error_instead_of_silent_timeout(self) -> None:
+        client = await self._start(RulesBrain())
+        run_id = "pk-without-legal-targets"
+        text = state_machine_text("vote_3", vote_instruction(pk=True, targets=()))
+        await self.fake.send(chat_send_frame(text, run_id=run_id))
+        await self.fake.wait_for_response(run_id)
+        error = await self.fake.wait_for(
+            lambda frame: (
+                frame.get("type") == "event"
+                and isinstance(frame.get("payload"), dict)
+                and frame["payload"].get("runId") == run_id
+                and frame["payload"].get("state") == "error"
+            ),
+            timeout=2,
+        )
+        self.assertEqual(error["payload"].get("errorCode"), "INVALID_ANSWER")
+        self.assertFalse(
+            any(
+                frame.get("type") == "event"
+                and isinstance(frame.get("payload"), dict)
+                and frame["payload"].get("runId") == run_id
+                and frame["payload"].get("state") == "final"
+                for frame in client.sent_frames
+            )
+        )
+
     async def test_session_memory_does_not_mix_words_across_sessions(self) -> None:
         client = await self._start(RulesBrain())
         session_a = "bcs_grp_a:aaaaaaaa"

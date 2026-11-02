@@ -9,7 +9,7 @@ referee profile or the BCS server.
 - Protocol: BCN Bot WebSocket V3 (`/ws/bot`)
 - Runtime: Python 3.12+, `websockets>=15,<17` (managed by `uv`)
 
-## Run (after BCS is up and 4 other OpenClaw players are running)
+## Run (after BCS, the OpenClaw referee, and 4 other OpenClaw players are running)
 
 ```bash
 export OPENCLAW_OPENAI_BASE_URL=https://your-endpoint/v1

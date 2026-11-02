@@ -569,7 +569,7 @@ class BcnClient:
                 emergency = self._emergency_text(task)
                 if emergency is None or validate_answer(task, emergency) is not None:
                     self._log("brain_unavailable", run_id=run.run_id, error=str(error))
-                    self.registry.mark_terminal(run)
+                    await self._send_error(run, "ANSWER_UNAVAILABLE", "cannot produce a valid game answer")
                     return
                 answer = Answer(emergency, "rules", f"brain unavailable: {error}")
                 self._log("brain_unavailable", run_id=run.run_id, error=str(error))
@@ -582,7 +582,7 @@ class BcnClient:
                     issue = None
             if issue is not None:
                 self._log("answer_invalid", run_id=run.run_id, kind=task.kind.value, issue=issue)
-                self.registry.mark_terminal(run)
+                await self._send_error(run, "INVALID_ANSWER", "game answer failed validation")
                 return
             sent = await self._send_final(run, text)
             if not sent:
@@ -611,7 +611,7 @@ class BcnClient:
             self.registry.mark_terminal(run)
         except Exception as error:
             self._log("task_failed", run_id=run.run_id, error=f"{type(error).__name__}: {error}")
-            self.registry.mark_terminal(run)
+            await self._send_error(run, "TASK_FAILED", "player task failed")
         finally:
             if not run.terminal:
                 self.registry.mark_terminal(run, aborted=run.aborted)
