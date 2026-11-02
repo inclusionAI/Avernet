@@ -1,0 +1,38 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_9e428ec8192673::t_585df6147544f5 15,25,60,66
+apps/bcsfuse/tests/deployment/test_zbcsfuse_config.py
+  s_9e428ec8192673::t_585df6147544f5 56
+apps/bcsfuse/tests/deployment/test_zbcsfuse_runtime.py
+  s_9e428ec8192673::t_c105e81f13c766 273,304
+  s_9e428ec8192673::t_d5e4dfa816a179 57,61-67,70-73,79-84
+apps/bcsfuse/internal/bcsfuse_internal/config/zbcsfuse.py
+  s_9e428ec8192673::t_585df6147544f5 42
+apps/bcsfuse/docs/deployment/zbcsfuse-pre-card-validation-20261102.md
+  s_9e428ec8192673::t_cf98e72362f5dd 1-50
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_9e428ec8192673::t_585df6147544f5 39,41-43,58,60
+apps/bcsfuse/configs/zbcsfuse/application-dev.yaml
+  s_9e428ec8192673::t_9cfac5e3be9b0a 15
+apps/bcsfuse/docs/architecture/alipay-catalog-mvp.md
+  s_9e428ec8192673::t_10e826dea8e940 26
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_b9c2a76de244cf 61
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/card_http.py
+  s_9e428ec8192673::t_2e5e6e564fe089 1,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "776db5fd6d7d2cd6ef55f5e7e2156cb20c75094f",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
