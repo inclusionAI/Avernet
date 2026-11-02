@@ -897,6 +897,7 @@ dependencies = [
  "bcs-auth-api",
  "bcs-jwt",
  "bcs-test-support",
+ "subtle",
  "tokio",
  "tracing",
  "uuid",

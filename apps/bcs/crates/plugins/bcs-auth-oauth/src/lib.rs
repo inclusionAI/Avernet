@@ -13,10 +13,12 @@
 //! taxonomy live in `bcs_auth_api::session`.
 
 mod plugin;
+mod login_state;
 mod session_lifecycle;
 mod strict;
 mod verify;
 
+pub use login_state::MemoryPendingOAuthLoginStore;
 pub use plugin::OAuthSessionPlugin;
 pub use strict::OAuthSessionEngine;
 pub use verify::{verify_oauth_session, verify_oauth_session_unsafe_construction_transition};

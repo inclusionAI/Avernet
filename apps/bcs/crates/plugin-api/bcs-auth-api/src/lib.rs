@@ -7,6 +7,7 @@
 
 pub mod types;
 pub mod actor;
+pub mod login_state;
 pub mod credentials;
 pub use credentials::validate_bot_credentials;
 pub mod jwt;
@@ -19,6 +20,9 @@ pub mod oauth_provider;
 pub mod session;
 
 pub use chain::{AuthPlugin, AuthPluginChain};
+pub use login_state::{
+    LoginBatch, LoginStateError, PendingOAuthLoginStore, PENDING_LOGIN_TTL_SECS,
+};
 pub use actor::{BCN_ACTOR_BOT_ID_HEADER, expected_actor_id, validate_actor};
 pub use config::{AuthConfig, LocalAuthConfig, OAuthConfig};
 pub use cookie::{extract_session_cookie, BCS_SESSION_COOKIE};

@@ -88,6 +88,7 @@ where
 pub mod caller_identity;
 pub mod auth_session_identity;
 pub mod oauth_session_engine;
+pub mod pending_oauth_login;
 
 /// Contract tests every strict `AuthSessionIdentityPort` bridge must pass
 /// (V1 API auth plugin chain).
@@ -106,3 +107,15 @@ pub use auth_session_identity::auth_session_identity_port_contract_tests;
 /// now; Task 13's real repository bridge later), the injected environment,
 /// and the idle window; the harness owns the sequence and the asserts.
 pub use oauth_session_engine::oauth_session_engine_contract_tests;
+
+/// Contract tests every `PendingOAuthLoginStore` must pass (V1 API auth
+/// plugin chain, Task 9): browser-bound one-time OAuth state from plan
+/// §8.4 — wrong-browser consume never burns the pending record, any
+/// single consume invalidates the whole batch, TTL/expiry fail closed,
+/// store failures yield no login URLs, and one barrier-released
+/// concurrent consume has exactly ONE winner.
+///
+/// Drivers pass the store under test (the memory store now; Task 13's
+/// shared persistence store later); the harness owns the sequence and
+/// the asserts.
+pub use pending_oauth_login::pending_oauth_login_contract_tests;
