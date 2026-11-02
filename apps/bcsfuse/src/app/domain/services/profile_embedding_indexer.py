@@ -50,10 +50,24 @@ class IndexingResult:
     skipped_count: int = 0
     duration_seconds: float = 0.0
     errors: list[str] = None
-    
+    indexed_profile_keys: list[str] = None
+    failed_profile_keys: list[str] = None
+
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
+        if self.indexed_profile_keys is None:
+            self.indexed_profile_keys = []
+        if self.failed_profile_keys is None:
+            self.failed_profile_keys = []
+
+    def mark_profile_failed(self, profile_key: str) -> None:
+        if profile_key not in self.failed_profile_keys:
+            self.failed_profile_keys.append(profile_key)
+
+    def mark_profile_indexed(self, profile_key: str) -> None:
+        if profile_key not in self.indexed_profile_keys:
+            self.indexed_profile_keys.append(profile_key)
 
 
 class ProfileEmbeddingIndexer:
@@ -103,13 +117,31 @@ class ProfileEmbeddingIndexer:
         return self._batch_size
 
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Use provider batching when available, retaining the legacy ``embed`` API."""
-        embed_batch = getattr(self._embedding_provider, "embed_batch", None)
-        if callable(embed_batch):
-            return embed_batch(texts)
+        """Embed unique texts once, then map the results back to every fragment.
+
+        Concurrent profile activations and repeated fragments can contain the
+        same embedding text. Sending duplicates to the model wastes the shared
+        request quota and makes activation bursts much more likely to hit 429.
+        """
         if not texts:
             return []
-        return [self._embedding_provider.embed(text) for text in texts]
+
+        unique_texts = list(dict.fromkeys(texts))
+        embed_batch = getattr(self._embedding_provider, "embed_batch", None)
+        if callable(embed_batch):
+            unique_vectors = embed_batch(unique_texts)
+        else:
+            unique_vectors = [
+                self._embedding_provider.embed(text) for text in unique_texts
+            ]
+
+        if len(unique_vectors) != len(unique_texts):
+            raise ValueError(
+                "embedding provider returned a mismatched batch count"
+            )
+
+        vector_by_text = dict(zip(unique_texts, unique_vectors))
+        return [vector_by_text[text] for text in texts]
 
     def _resolve_worker_state(
         self,
@@ -255,6 +287,7 @@ class ProfileEmbeddingIndexer:
                     result.errors.append(
                         f"No embeddable fragments for {profile.profile_key}"
                     )
+                    result.mark_profile_failed(profile.profile_key)
                     continue
 
                 for fragment_id, embedding_text, metadata in profile_plans:
@@ -265,6 +298,7 @@ class ProfileEmbeddingIndexer:
                 result.failed_count += 1
                 error_msg = f"Error planning {profile.profile_key}: {str(e)}"
                 result.errors.append(error_msg)
+                result.mark_profile_failed(profile.profile_key)
                 logger.error("[ProfileEmbeddingIndexer] %s", error_msg, exc_info=True)
 
         completed_counts = {profile_key: 0 for profile_key in planned_counts}
@@ -304,6 +338,7 @@ class ProfileEmbeddingIndexer:
                     )
                     result.failed_count += 1
                     result.errors.append(f"Error index batch {profile_key}: {str(e)}")
+                    result.mark_profile_failed(profile_key)
                     logger.error(
                         "[ProfileEmbeddingIndexer] Batch failed for %s: %s",
                         profile_key,
@@ -321,6 +356,7 @@ class ProfileEmbeddingIndexer:
                     and profile_key not in failed_profile_keys
                 ):
                     result.indexed_count += 1
+                    result.mark_profile_indexed(profile_key)
 
         # 计算耗时
         result.duration_seconds = (datetime.now() - start_time).total_seconds()

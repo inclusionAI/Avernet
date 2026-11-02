@@ -414,7 +414,12 @@ async def activate_worker_profile(
     from app.bootstrap.profile_activation_index import refresh_activated_profile_index
 
     try:
-        refresh_activated_profile_index(registry, persisted_worker, profile_id)
+        await run_in_threadpool(
+            refresh_activated_profile_index,
+            registry,
+            persisted_worker,
+            profile_id,
+        )
     except Exception as error:
         logger.exception("[Profiles OSS] Activated profile index refresh failed for %s", worker_id)
         raise HTTPException(
