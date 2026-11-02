@@ -9,7 +9,8 @@ used — no network.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import httpx
 
 import pytest
 
@@ -20,6 +21,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
     NoopStoragePolicy,
 )
 from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
@@ -209,6 +211,33 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("put")[0]
         assert call.args[0] == "/api/v1/paas/devices/PAAS-1/outbound-rule"
         assert call.kwargs["json"] == {"header_operation_rules": []}
+
+    def test_update_device_outbound_rule_http_error_is_warning_not_error(self):
+        """Durable Teclaw callers retry this operation; keep alarms at the caller."""
+        service, http = _make_service()
+        request = httpx.Request("PUT", "http://baas.test/outbound-rule")
+        response = httpx.Response(500, text="PLATFORM_ERROR", request=request)
+        http.set_override(
+            "put",
+            lambda *_args, **_kwargs: response,
+        )
+        rule = MagicMock()
+        rule.header_operation_rules = []
+
+        with patch.object(baas_service_module, "logger") as logger_spy:
+            with pytest.raises(BaasServiceError) as raised:
+                service.update_device_outbound_rule("PAAS-1", rule)
+
+        assert "500 - PLATFORM_ERROR" in str(raised.value)
+        error_calls = [
+            c for c in logger_spy.error.call_args_list if "update_device_outbound_rule" in c.args[0]
+        ]
+        warning_calls = [
+            c for c in logger_spy.warning.call_args_list if "update_device_outbound_rule" in c.args[0]
+        ]
+        assert not error_calls
+        assert warning_calls
+        assert "500 - PLATFORM_ERROR" in warning_calls[0].args[0]
 
     def test_append_token_uses_exact_append_path_and_jit_header(self, monkeypatch):
         service, http = _make_service()

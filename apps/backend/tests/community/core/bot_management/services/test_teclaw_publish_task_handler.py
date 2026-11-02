@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -18,6 +18,8 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+from agentclaw.community.core.bot_management.services import teclaw_publish_task_handler as teclaw_publish_task_handler_module
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
@@ -362,6 +364,28 @@ def test_delivery_failure_retries_so_the_queue_re_drives_it(failure):
 
     assert isinstance(outcome, Retry)
     binding_repo.transition_teclaw_publish_terminal.assert_called_once()
+
+
+def test_rule_push_failure_retries_and_warns_not_errors():
+    """HTTP failure remains a durable Retry; no client-level false alarm."""
+    handler, baas, binding_repo, passport = _handler()
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.side_effect = BaasServiceError(
+        "BaaS API error: 500 - transient"
+    )
+
+    with patch.object(
+        teclaw_publish_task_handler_module,
+        "logger",
+    ) as logger_spy:
+        outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    assert "update Teclaw outbound rule failed" in outcome.error
+    logger_spy.error.assert_not_called()
+    warnings = [c for c in logger_spy.warning.call_args_list if "rule update failed" in c.args[0]]
+    assert warnings
+    assert (warnings[0].args[1], warnings[0].args[2]) == ("b1", "BOT-x")
 
 
 def test_delivery_retry_after_status_persisted_does_not_rewrite_status():
