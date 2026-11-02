@@ -113,38 +113,19 @@ class BuildStageRunner:
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
 
-    def _current_status_and_attempt(self, publish_id: int) -> tuple[str | None, str | None]:
-        try:
-            value = self._ext_state.latest_status_and_build_attempt(publish_id)
-            if isinstance(value, tuple):
-                return value
-        except Exception:
-            pass
-        return None, None
-
-    def _is_status_ok(self, status: str) -> bool:
-        return status == PublishStatus.BUILDING.value
-
-    def _build_attempt_matches(
-        self,
-        *,
-        build_attempt: str | None,
-        current_attempt: str,
-    ) -> bool:
-        # Legacy queue tasks have no token. Let them complete rather than
-        # strand an already-running flow across this schema-level enhancement.
-        return build_attempt is None or build_attempt == current_attempt
-
     def _build_guard(
         self,
         *,
         publish_id: int,
         build_attempt: str | None,
     ) -> bool:
-        status, current_attempt = self._current_status_and_attempt(publish_id)
-        if build_attempt is not None and build_attempt != current_attempt:
-            return False
-        return True
+        # Legacy tasks have no token and must stay runnable across this schema
+        # enhancement. Tokenized callers are fenced against a newer attempt.
+        if build_attempt is None:
+            return True
+        value = self._ext_state.latest_status_and_build_attempt(publish_id)
+        _, current_attempt = value
+        return build_attempt == current_attempt
     async def build_artifact_only(
         self,
         publish_record: BotPublishRecord,
