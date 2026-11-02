@@ -1622,6 +1622,33 @@ class TestSyncMcpDetailsForBot:
             )
 
     @pytest.mark.asyncio
+    async def test_resolved_engine_type_is_forwarded_to_device_payload(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        resolver.resolve_for_bot.return_value = DeviceContext(
+            provider="baas",
+            conn_info={"engine_type": "deepseek_harness"},
+            binding_id=42,
+            bot_id="bot1",
+            user_id="u1",
+        )
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1",
+            mcp_entries=self._entries(1),
+            bot_id="bot1",
+            entity_id="u1",
+            engine_type="deepseek_harness",
+        )
+
+        assert result["success"] is True
+        assert (
+            plugin.sync_single_mcp.call_args.kwargs["engine_type"]
+            == "deepseek_harness"
+        )
+
+    @pytest.mark.asyncio
     async def test_empty_batch_does_not_touch_the_device(self):
         resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
         svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)

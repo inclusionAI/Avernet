@@ -177,6 +177,7 @@ def push_single_mcp(
         transport_protocol: Optional[str] = None,
         url_override: Optional[str] = None,
         strict_transport_protocol: bool = False,
+        engine_type: Optional[str] = None,
 ) -> bool:
     """增量同步：将单个 MCP 添加（或更新）到设备。"""
     try:
@@ -185,6 +186,7 @@ def push_single_mcp(
             endpoint_env=endpoint_env, transport_protocol=transport_protocol,
             url_override=url_override,
             strict_transport_protocol=strict_transport_protocol,
+            engine_type=engine_type,
         )
 
         try:

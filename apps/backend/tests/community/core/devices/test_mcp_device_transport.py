@@ -322,3 +322,45 @@ class TestDeleteMcp:
 
         assert len(t.calls) == 4
         assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
+
+
+class TestPushSingleEngineConstraint:
+    def test_dsh_sse_payload_rejects_before_device_post(self):
+        sse_only = {
+            "server_code": "mcp.ant.antcodemcp.code.mcpserver",
+            "run_mode": "REMOTE",
+            "endpoints": [
+                {
+                    "url": "https://mcp/sse",
+                    "networkType": "INTERNET",
+                    "env": "PROD",
+                    "transportProtocol": "SSE",
+                }
+            ],
+        }
+        transport = FakeTransport(None)
+
+        with pytest.raises(Exception, match="没有可用的 STREAMABLE_HTTP端点"):
+            mcp_transport.push_single_mcp(
+                transport,
+                sse_only,
+                engine_type="deepseek_harness",
+            )
+
+        assert transport.calls == []
+
+    def test_engine_type_is_forwarded_to_payload_selection(self):
+        with patch.object(mcp_transport, "convert_to_device_format", return_value=_make_config()) as convert, \
+                patch.object(mcp_transport, "_create_mcp") as create:
+            assert mcp_transport.push_single_mcp(
+                FakeTransport(None),
+                {"server_code": "x"},
+                endpoint_env="PRE",
+                transport_protocol="SSE",
+                engine_type="deepseek_harness",
+            ) is True
+
+        convert.assert_called_once()
+        assert convert.call_args.kwargs["engine_type"] == "deepseek_harness"
+        assert convert.call_args.kwargs["transport_protocol"] == "SSE"
+        create.assert_called_once()

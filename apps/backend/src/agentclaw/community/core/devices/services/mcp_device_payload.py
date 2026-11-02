@@ -76,8 +76,13 @@ def convert_to_device_format(
         transport_protocol: Optional[str] = None,
         url_override: Optional[str] = None,
         strict_transport_protocol: bool = False,
+        engine_type: Optional[str] = None,
 ) -> DeviceMCPConfig:
-    """将 MCP market 数据转换为设备格式"""
+    """将 MCP market 数据转换为设备格式。
+
+    ``engine_type`` 只影响唯一引擎约束：DSH 不支持投递 SSE 配置。它不改变其他
+    引擎的用户偏好和回退语义。
+    """
     server_code = mcp_data.get("server_code") or mcp_data.get("serverCode")
     description = mcp_data.get("description") or mcp_data.get("name")
 
@@ -136,6 +141,24 @@ def convert_to_device_format(
                 ep for ep in endpoints
                 if ep.get("networkType") in ("OFFICE", "INTERNET") and ep.get("env") == endpoint_env
             ]
+            if engine_type == "deepseek_harness":
+                # DSH's device-side MCP only accepts streamable HTTP. Filter
+                # before preference handling so an SSE-only server cannot be
+                # pushed, and an explicit SSE preference cannot fall back to SSE.
+                valid_endpoints = [
+                    ep for ep in valid_endpoints
+                    if ep.get("transportProtocol") == "STREAMABLE_HTTP"
+                ]
+                if not valid_endpoints:
+                    raise Exception(
+                        f"MCP服务器 {server_code} 在{endpoint_env}环境没有可用的 "
+                        "STREAMABLE_HTTP端点（DSH不支持SSE MCP transport），"
+                        "请检查MCP Center配置"
+                    )
+                # Keep the DSH selection independent from any persisted SSE
+                # preference. The only endpoint in this list is the supported
+                # STREAMABLE_HTTP one.
+                transport_protocol = "STREAMABLE_HTTP"
             if not valid_endpoints:
                 raise Exception(f"MCP服务器 {server_code} 没有可用的{endpoint_env}环境端点(OFFICE/INTERNET网络)，请检查MCP Center配置")
 

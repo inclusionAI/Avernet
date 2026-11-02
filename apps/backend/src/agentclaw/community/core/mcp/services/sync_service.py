@@ -935,6 +935,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             transport_protocol=_transport_protocol,
             url_override=url_override,
             strict_transport_protocol=strict_transport_protocol,
+            engine_type=engine_type,
         )
 
     def _enrich_from_mcp_center(self, mcps: list[dict[str, Any]]) -> None:
