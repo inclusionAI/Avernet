@@ -25,7 +25,8 @@ const baseGroup = {
 };
 
 // 可变 mock 状态：测试内切换 selectedGroupId 后 rerender，模拟侧栏切群。
-const mockState: { selectedGroupId: string | null } = { selectedGroupId: 'g1' };
+const mockState: { selectedGroupId: string | null; hideGroup?: boolean; expandedGroupIds?: Record<string, true> } = { selectedGroupId: 'g1' };
+const mockSessionLoad = jest.fn();
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
 const mockOpenSession = jest.fn();
@@ -52,8 +53,8 @@ jest.mock('sonner', () => ({ toast: { info: jest.fn(), error: jest.fn(), success
 
 jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
   useGroupWorkspace: () => ({
-    groups: [baseGroup],
-    expandedGroupIds: {} as Record<string, true>,
+    groups: mockState.hideGroup ? [] : [baseGroup],
+    expandedGroupIds: mockState.expandedGroupIds ?? {},
     selectedGroupId: mockState.selectedGroupId,
     selectedGroup: baseGroup,
     canManageGroup: { allowed: true },
@@ -82,7 +83,9 @@ jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
 // 会话数据可切换：接线守护用例需注入选中会话（resources 副屏渲染条件之一）。
 const sessionsMock = { selectedSession: null as { sessionId: string; title: string } | null };
 jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
-  useGroupSessions: () => ({
+  useGroupSessions: (groupId: string, expandedGroupIds: string[]) => {
+    mockSessionLoad(groupId, expandedGroupIds);
+    return ({
     sessionsByGroupId: {},
     hasMoreSessionsByGroupId: {},
     totalSessionsByGroupId: {},
@@ -104,7 +107,8 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     toggleFavorite: jest.fn(),
     renameSession: jest.fn(),
     deleteSession: jest.fn(),
-  }),
+  });
+  },
 }));
 // GroupWorkspaceArea 直接读 chat.chat.messages / chat.panelRef（头部图标域编排），
 // 桩件需提供最小 chat 契约（其余 chat.* 字段仅作为 props 透传给已 mock 的 GroupChatPane）。
@@ -184,6 +188,9 @@ function renderArea() {
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
+    mockState.hideGroup = false;
+    mockState.expandedGroupIds = {};
+    mockSessionLoad.mockClear();
     sessionsMock.selectedSession = null;
     mockOpenSession.mockClear();
     mockOnSelectGroup.mockClear();
@@ -194,14 +201,36 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     mockCreateSessionShare.mockClear();
   });
 
-  it('本地管理面板打开时提升整个隔离会话层级，关闭后恢复持久副屏层级', () => {
+  it('筛选隐藏/恢复当前已展开群不改变数据加载的 expandedGroupIds', () => {
+    mockState.expandedGroupIds = { g1: true };
+    const view = renderArea();
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+    mockState.hideGroup = true;
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+    mockState.hideGroup = false;
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+  });
+
+  it('受限群入口仍只加载 scope 内的展开群', () => {
+    mockState.expandedGroupIds = { g1: true, other: true };
+    render(<GroupWorkspaceArea
+      scope={{ identityId: 'human-1', group: baseGroup, session: null }}
+      mobileListOpen={false} onCloseMobileList={jest.fn()}
+    />);
+    expect(mockSessionLoad).toHaveBeenLastCalledWith('g1', ['g1']);
+  });
+
+  it('本地覆盖层通过 Portal 定位，不再抬高整个会话遮挡持久副屏', () => {
     sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
     renderArea();
     const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
     expect(conversation).not.toHaveClass('z-20');
 
     fireEvent.click(screen.getByRole('button', { name: '打开会话管理面板' }));
-    expect(conversation).toHaveClass('isolate', 'z-20');
+    expect(conversation).toHaveClass('isolate');
+    expect(conversation).not.toHaveClass('z-20');
     fireEvent.click(screen.getByRole('button', { name: '关闭临时面板' }));
     expect(conversation).not.toHaveClass('z-20');
   });
@@ -217,7 +246,7 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     await waitFor(() => expect(mockApplySessionUpdate).toHaveBeenCalledWith('s1', {
       sessionId: 's1', title: '会话详情',
     }));
-    expect(screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]')).toHaveClass('z-20');
+    expect(screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]')).not.toHaveClass('z-20');
   });
 
   it.each([

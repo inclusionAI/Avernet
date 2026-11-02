@@ -120,6 +120,8 @@ export const SessionItem = React.memo(function SessionItem({
         <Button
           variant="ghost"
           aria-current={selected ? 'page' : undefined}
+          data-group-session-id={session.sessionId}
+          data-group-id={session.groupId}
           onClick={() => onSelectSession(session.sessionId)}
           className={cn(
             'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
