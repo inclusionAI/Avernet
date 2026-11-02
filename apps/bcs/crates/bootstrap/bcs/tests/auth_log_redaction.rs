@@ -280,21 +280,21 @@ impl IdentityEntry {
         }
     }
 
-    fn engines(&self) -> [OAuthSessionEngine; 2] {
+    fn engines(&self) -> [std::sync::Arc<OAuthSessionEngine>; 2] {
         let identities = self.identities();
         [
-            OAuthSessionEngine::new(
+            std::sync::Arc::new(OAuthSessionEngine::new(
                 OAuthSessionJwt::new(JWT_SECRET),
                 identities.clone(),
                 ENV.to_string(),
                 1800,
-            ),
-            OAuthSessionEngine::new(
+            )),
+            std::sync::Arc::new(OAuthSessionEngine::new(
                 OAuthSessionJwt::new(JWT_SECRET),
                 identities,
                 ENV.to_string(),
                 1800,
-            ),
+            )),
         ]
     }
 }

@@ -783,6 +783,18 @@ impl BcsServer {
             eventing_runtime.lifecycle.as_ref(),
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
+        // The FULL V1 authentication selection (legacy chain + explicit
+        // `[api.auth]` assembly or the compat Gateway verifier), built
+        // before the OpenAPI state pins its principal verifier.
+        let authentication = super::auth_resources::build_authentication_selection(
+            &config,
+            &infrastructure_plugins,
+            &extensions,
+            &bot_registry,
+            group_session_secret_access.clone(),
+            gateway_principal_verifier.clone(),
+        )
+        .await?;
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -807,7 +819,7 @@ impl BcsServer {
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
-            gateway_principal_verifier.clone(),
+            authentication.principal_verifier.clone(),
             connect_service.clone(),
             frontend_connections.clone(),
             eventing_runtime.service,
@@ -859,6 +871,9 @@ impl BcsServer {
         } else {
             openapi_v1
         };
+        // Per-actual-source CSRF origins composed by the explicit-chain
+        // assembly attach to the SAME ApiState the verifier lives in.
+        let openapi_v1 = authentication.apply_origins(openapi_v1);
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
@@ -928,17 +943,6 @@ impl BcsServer {
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
-        let AuthChainResources {
-            auth_config,
-            user_identity_port,
-            auth_session_identity,
-            auth_chain,
-        } = super::auth_resources::build_auth_chain_resources(
-            &config,
-            &infrastructure_plugins,
-            &extensions,
-            &bot_registry,
-        )?;
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
@@ -961,16 +965,17 @@ impl BcsServer {
             bot_metrics_snapshot,
             direct_chat_run_snapshot,
             metrics,
-            auth_chain,
-            auth_config,
+            auth_chain: authentication.auth_chain.clone(),
+            auth_config: authentication.auth_config.clone(),
+            explicit_api_auth: authentication.explicit_api_auth,
             bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
             group_session_secret_access,
-            user_identity_port,
-            auth_session_identity,
+            user_identity_port: authentication.user_identity_port.clone(),
+            auth_session_identity: authentication.auth_session_identity.clone(),
             outbound_url_guard,
             admin_invocation_runs,
             connect_service,

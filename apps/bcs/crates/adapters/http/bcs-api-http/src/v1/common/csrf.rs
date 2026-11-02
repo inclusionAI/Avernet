@@ -150,7 +150,20 @@ fn split_host_port(remainder: &str) -> Result<(String, Option<&str>), String> {
         }
     } else {
         match remainder.rsplit_once(':') {
-            Some((host, port)) => Ok((host.to_string(), Some(port))),
+            // Task 7 review tightening: a non-bracketed host may contain at
+            // most ONE colon (the port separator). Extra colons — an
+            // unbracketed IPv6 literal or a malformed authority — must
+            // reject, not silently parse as `host = "a:b"` with a bogus
+            // port string that the digit check would then catch by
+            // accident, or worse, accept.
+            Some((host, port)) => {
+                if host.contains(':') {
+                    return Err(format!(
+                        "trusted browser origin has an unbracketed multi-colon host: {remainder:?}"
+                    ));
+                }
+                Ok((host.to_string(), Some(port)))
+            }
             None => Ok((remainder.to_string(), None)),
         }
     }

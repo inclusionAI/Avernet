@@ -95,6 +95,11 @@ fn trusted_browser_origins_constructor_enforces_exact_scheme_host_port() {
         "https://:8443",
         "https://example:not-a-port",
         "https://[::1",
+        // Task 7 review tightening (Task 12): an unbracketed multi-colon
+        // authority (a bare IPv6 literal or a malformed host:port:extra)
+        // rejects instead of mis-splitting on the last colon.
+        "https://2001:db8::1",
+        "https://a:b:80",
     ] {
         assert!(TrustedBrowserOrigins::new(vec![entry.to_string()]).is_err(), "entry {entry:?}");
     }

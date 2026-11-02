@@ -783,6 +783,7 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            explicit_api_auth: None,
             bot_ws_admission,
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),

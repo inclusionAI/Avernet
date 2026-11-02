@@ -129,15 +129,20 @@ fn provider_userinfo_category(_error: &OAuthError) -> ApplicationError {
 /// error-swallowing lookup), then installs through the engine's CAS
 /// lifecycle. `env` is trusted injection-time configuration — never an
 /// environment read.
+///
+/// The engine arrives as an `Arc` (Task 12): entries that share a chain
+/// with the OAuth verifier sources hold ONE engine instance, so the login
+/// lifecycle and the request-time strict verification stay consistent by
+/// construction, with the state in the shared identity store.
 pub struct StrictSessionPortBridge {
-    engine: bcs_auth_oauth::OAuthSessionEngine,
+    engine: Arc<bcs_auth_oauth::OAuthSessionEngine>,
     identities: Arc<dyn AuthSessionIdentityPort>,
     env: String,
 }
 
 impl StrictSessionPortBridge {
     pub fn new(
-        engine: bcs_auth_oauth::OAuthSessionEngine,
+        engine: Arc<bcs_auth_oauth::OAuthSessionEngine>,
         identities: Arc<dyn AuthSessionIdentityPort>,
         env: String,
     ) -> Self {
@@ -443,12 +448,12 @@ mod tests {
     #[tokio::test]
     async fn session_bridge_lowering_maps_dependency_outage_to_unavailable() {
         let jwt = OAuthSessionJwt::new("bridge-test-secret");
-        let engine = bcs_auth_oauth::OAuthSessionEngine::new(
+        let engine = std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
             jwt,
             Arc::new(FailingIdentityPort),
             "test-env".to_string(),
             1800,
-        );
+        ));
         let bridge = StrictSessionPortBridge::new(
             engine,
             Arc::new(FailingIdentityPort),

@@ -47,6 +47,23 @@ fn recorded_tables() -> Vec<serde_json::Value> {
     std::mem::take(&mut *guard)
 }
 
+/// The build pointer these registry-phase tests never expect to run: an
+/// assembly attempt would surface it, not silent acceptance.
+fn test_build(
+    _ctx: bcs::api_auth_registry::ApiAuthBuildContext,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = Result<
+                    std::sync::Arc<dyn bcs_api_http::PrincipalVerifier>,
+                    String,
+                >,
+            > + Send,
+    >,
+> {
+    Box::pin(async { Err("test registration build must not be called".to_string()) })
+}
+
 fn registration(
     name: &str,
     uses_browser_cookie: bool,
@@ -60,6 +77,7 @@ fn registration(
             is_oauth_provider,
         },
         validate,
+        build: test_build,
     }
 }
 

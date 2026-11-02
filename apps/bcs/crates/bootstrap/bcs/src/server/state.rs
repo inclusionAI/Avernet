@@ -88,6 +88,13 @@ pub struct BcsServerState {
     /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
     pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
 
+    /// The V1 auth application facade assembled from an EXPLICIT
+    /// `[api.auth]` chain with an enabled OAuth source, plus the externally
+    /// addressable public base URL. `None` keeps the compat
+    /// `[auth.oauth]`-derived mount (or none at all); `/user` never 404s on
+    /// a missing facade — it projects the verified Human caller.
+    pub explicit_api_auth: Option<crate::api_auth_wiring::ExplicitApiAuthFacade>,
+
     /// Invite-token HMAC secret resolved once for every HTTP surface.
     pub invite_token_secret: Vec<u8>,
 
@@ -154,6 +161,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("auth_chain", &"<AuthPluginChain>")
             .field("auth_config", &self.auth_config)
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
+            .field("explicit_api_auth", &self.explicit_api_auth.is_some())
             .field("invite_token_secret", &"<redacted>")
             .field("openapi_v1", &"<ApiState>")
             .field(
@@ -800,6 +808,7 @@ impl Default for BcsServerState {
             auth_config,
             bot_ws_admission,
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
+            explicit_api_auth: None,
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,

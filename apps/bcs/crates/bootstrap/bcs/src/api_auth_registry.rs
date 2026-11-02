@@ -18,19 +18,25 @@
 //! - normalizes the OAuth public format (URL, in-site redirect, checked
 //!   minutes->seconds conversion) into the verbatim [`ValidatedApiAuthConfig`].
 //!
-//! Prototype scope: registrations carry `name` / `capabilities` / `validate`.
-//! Task 12 adds the `build` pointer and construction context in place; this
-//! file must not reference those types before they exist.
+//! Prototype scope: registrations carry `name` / `capabilities` / `validate`;
+//! Task 12 adds the `build` pointer and the construction context in place.
 //!
 //! Error contract (spec C3): every message is a field path plus a category;
 //! raw configuration values are never echoed.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
+use bcs_api_http::PrincipalVerifier;
+use bcs_auth_api::session::AuthSessionIdentityPort;
+use bcs_auth_oauth::OAuthSessionEngine;
 use bcs_config_api::api_auth::{
     ApiAuthConfig, RESERVED_API_AUTH_FIELD_NAMES, is_valid_api_source_name,
     validate_idle_timeout_minutes,
 };
+use bcs_service_api::port::secret::SecretAccessPort;
 
 /// Capabilities a registered API-auth source declares to the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +49,63 @@ pub struct ApiAuthCapabilities {
     pub is_oauth_provider: bool,
 }
 
-/// A registered API-auth source (validate-only prototype).
-#[derive(Debug, Clone)]
+/// The one construction context handed to every registered source's
+/// `build` (plan Task 12). It carries HANDLES only:
+///
+/// - `options` are the SAME value-domain JSON parameters the descriptor
+///   validated in phase one (`ValidatedApiAuthConfig.plugin_options`, no
+///   TOML/JSON/float/string round-trip in between; a chain source without
+///   a table arrives as `Value::Null`);
+/// - `secret_access` is the secret PORT, never a resolved value — the
+///   source resolves the secrets it needs only when it is ENABLED;
+/// - `sessions` is the strict session identity port over the one store
+///   the login entries use;
+/// - `oauth` is the shared OAuth engine context, constructed by bootstrap
+///   when (and only when) an OAuth source is enabled.
+///
+/// No `Debug` is derived on purpose: nothing here may ever print resolved
+/// secret material (spec §8.4 redaction; the context never carries values).
+pub struct ApiAuthBuildContext {
+    /// The registered source's own name (the chain entry position being
+    /// built).
+    pub name: String,
+    /// The already-validated `[api.auth.<name>]` parameter table.
+    pub options: serde_json::Value,
+    /// Secret resolution port; errors must carry logical field paths only.
+    pub secret_access: Arc<dyn SecretAccessPort>,
+    /// Strict session identity port (the shared login-session store).
+    pub sessions: Arc<dyn AuthSessionIdentityPort>,
+    /// The shared strict OAuth engine context. `None` for non-OAuth
+    /// sources; always `Some` for every source built while an OAuth
+    /// source is enabled.
+    pub oauth: Option<Arc<OAuthSourceContext>>,
+}
+
+/// The shared OAuth verification context bootstrap constructs exactly once
+/// per configured chain when an OAuth source is enabled: ONE engine
+/// instance (Task 8 lifecycle over the single session store) and the
+/// allowlist of chain-enabled OAuth provider names, in CHAIN order.
+///
+/// No `Debug` derivation: the engine embeds the session HMAC secret.
+pub struct OAuthSourceContext {
+    /// Strict session engine built from `ValidatedOAuthSettings.idle_secs`
+    /// AS-IS (default/minutes conversion happened once in Task 6).
+    pub engine: Arc<OAuthSessionEngine>,
+    /// Provider instance names enabled in the chain (chain order). A
+    /// verified session whose provider is outside this list is Forbidden,
+    /// even if the signature and store checks passed (spec §7.2).
+    pub allowed_providers: Vec<String>,
+}
+
+/// The build pointer every registered source supplies. It receives the
+/// validated options plus the shared handles and resolves ITS OWN secrets
+/// (enabled sources only). Errors are startup-fatal strings carrying a
+/// logical field path plus a category, never raw configuration values.
+pub type ApiAuthSourceBuild =
+    fn(ApiAuthBuildContext) -> Pin<Box<dyn Future<Output = Result<Arc<dyn PrincipalVerifier>, String>> + Send>>;
+
+/// A registered API-auth source.
+#[derive(Clone)]
 pub struct ApiAuthSourceRegistration {
     /// Source name; must be a legal name and must not collide with a reserved
     /// `[api.auth]` public field name.
@@ -60,6 +121,10 @@ pub struct ApiAuthSourceRegistration {
     /// (Task 12). The same validated parameters flow to `build`; no
     /// re-conversion happens in between.
     pub validate: fn(&serde_json::Value) -> Result<(), String>,
+    /// Per-chain-entry construction: wrap the shared primitives (or build
+    /// the source's own verifier) and return the delivery `PrincipalVerifier`
+    /// pinned to this source's fixed provenance name.
+    pub build: ApiAuthSourceBuild,
 }
 
 /// Normalized OAuth session settings; consumed as-is by the build phase.

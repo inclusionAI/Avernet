@@ -94,22 +94,22 @@ impl BcsServer {
                             // namespace / callback base, which the routes pin.
                             let legacy_bridge =
                                 crate::api_auth_ports::StrictSessionPortBridge::new(
-                                    bcs_auth_oauth::OAuthSessionEngine::new(
+                                    std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
                                         bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
                                         identities.clone(),
                                         resolved.env.clone(),
                                         resolved.idle_timeout_secs(),
-                                    ),
+                                    )),
                                     identities.clone(),
                                     resolved.env.clone(),
                                 );
                             let v1_bridge = crate::api_auth_ports::StrictSessionPortBridge::new(
-                                bcs_auth_oauth::OAuthSessionEngine::new(
+                                std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
                                     bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
                                     identities.clone(),
                                     resolved.env.clone(),
                                     resolved.idle_timeout_secs(),
-                                ),
+                                )),
                                 identities,
                                 resolved.env.clone(),
                             );
@@ -247,10 +247,29 @@ impl BcsServer {
         );
         let secure_oauth = self.build_secure_oauth_entries();
         let oauth_state = secure_oauth.as_ref().map(|entries| entries.legacy_state.clone());
-        let oauth_v1_service = secure_oauth.as_ref().map(|entries| entries.v1_service.clone());
-        let oauth_v1_base_url = secure_oauth
-            .as_ref()
-            .map(|entries| entries.v1_public_base_url.clone());
+        // The V1 login family's mount: an EXPLICIT [api.auth] decides it
+        // outright (OAuth-less chains keep auth_service unset, so the login
+        // family answers auth_not_configured while /user still projects the
+        // verified Human — spec §4.3/§8.2); the [auth.oauth]-derived mount
+        // exists only for the compat selection. The legacy /auth/* router
+        // state mounts either way: the native Human chain keeps its own
+        // primitives.
+        let (oauth_v1_service, oauth_v1_base_url) = if self.state.config.api.auth.is_some() {
+            match &self.state.explicit_api_auth {
+                Some(explicit) => (
+                    Some(Arc::clone(&explicit.auth_service)),
+                    Some(explicit.public_base_url.clone()),
+                ),
+                None => (None, None),
+            }
+        } else {
+            (
+                secure_oauth.as_ref().map(|entries| entries.v1_service.clone()),
+                secure_oauth
+                    .as_ref()
+                    .map(|entries| entries.v1_public_base_url.clone()),
+            )
+        };
         let mut openapi_v1 = self.state.openapi_v1.clone()
             .with_bot_self_service(Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
                 crate::agent_identity::build_agent_identity_port()?,
@@ -287,11 +306,10 @@ impl BcsServer {
             .merge(bcs_api_http::v1::human::router(browser_v1))
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
+                // ONE final stateful verifier Arc with the main V1 ApiState;
+                // the per-actual-source CSRF origins travel with it.
                 self.state.gateway_principal_verifier.clone(),
-                // Task 12 composes the real cookie sources alongside the
-                // trusted browser origins; the Gateway-only chain carries
-                // no cookie provenance, so no origins are wired yet.
-                None,
+                self.state.openapi_v1.trusted_browser_origins.clone(),
             ))
             .merge(group_session_websocket_router);
 
