@@ -32,7 +32,14 @@ use serde::{Deserialize, Serialize};
 pub struct ApiConfig {
     /// `[api.auth]`. Absent keeps compatibility semantics: the V1 API auth
     /// chain is simply not configured and nothing consumes it.
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if` keeps the strict value-domain contract intact on
+    /// the round trip: printing a default config must not emit an explicit
+    /// `"auth": null`, which this section's own validation rejects (absent
+    /// and null are not equivalent). Consumers that overlay `--print-config`
+    /// output and load it back — like the caller-execution e2e story — would
+    /// otherwise break against a config that never configured `[api.auth]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<ApiAuthConfig>,
 }
 

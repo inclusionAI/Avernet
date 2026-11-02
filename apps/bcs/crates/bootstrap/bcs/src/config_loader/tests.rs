@@ -714,6 +714,21 @@ fn json_null_float_and_beyond_i64_integers_in_api_auth_are_rejected() {
 }
 
 #[test]
+fn default_config_print_round_trips_without_an_explicit_null_api_auth() {
+    // The `bcs-caller-e2e` runner prints `BcsConfig::default()` as JSON;
+    // stories overlay fields and load the result back through the strict
+    // loader. An unconfigured `[api.auth]` must therefore stay ABSENT in the
+    // printed config — an explicit `"auth": null` is rejected by the
+    // value-domain validation above ("absent and null are not equivalent").
+    let printed = serde_json::to_string(&bcs::BcsConfig::default()).unwrap();
+    assert!(
+        !printed.contains(r#""auth":null"#),
+        "printed default must not contain an explicit null api.auth section: {printed}"
+    );
+    parse_config_content("json", &printed, "print-config-round-trip.json").unwrap();
+}
+
+#[test]
 fn api_auth_integer_boundary_values_are_preserved_exactly() {
     // TOML side: the values must survive the TOML->JSON conversion as exact
     // integers, including above the f64-exact integer range and at the i64

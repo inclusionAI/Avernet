@@ -600,4 +600,3 @@ pub(crate) fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> 
     )
     .with_friend_connection_service(service))
 }
-
