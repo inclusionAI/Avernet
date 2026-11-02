@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/dual_case_run.py
+  s_cecdc98e721f4b::t_2ea619113a430e 256-257
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/story.py
+  s_cecdc98e721f4b::t_db5cccc31f925a 65,72-83,104-105,597-598,619,626-627
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/contract.py
+  s_cecdc98e721f4b::t_df2a8ba30b6221 163
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/dual_case_run.py
+  s_cecdc98e721f4b::t_0009f5902f040a 8-10
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/story.py
+  s_cecdc98e721f4b::t_f1641397e6eb5c 25-29,99-103,112,125-129,185
+apps/bcs/scripts/e2e-runner/bcs_e2e/slow_judge/contract.py
+  s_cecdc98e721f4b::t_8da4beee01e65c 214
+apps/bcs/scripts/e2e-runner/service-policy-dual-migration-contract.json
+  s_cecdc98e721f4b::t_8028b686dd3141 4
+apps/bcs/scripts/e2e-runner/slow-judge-dual-migration-contract.json
+  s_cecdc98e721f4b::t_fa4c7d22c40190 3
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_dual_case_run.py
+  s_cecdc98e721f4b::t_eb6c418ab80bea 283-285,734-760
+apps/bcs/scripts/e2e-runner/tests/test_service_policy_dual_case_run.py
+  s_cecdc98e721f4b::t_887b295d129a14 104,1121-1143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f2905e2d3c3123a9971b8d5c612899a257799ace",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
