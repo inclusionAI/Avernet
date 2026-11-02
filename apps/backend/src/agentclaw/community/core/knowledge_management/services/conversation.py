@@ -84,8 +84,10 @@ class ConversationKnowledgeService:
         stage = self.source.stage_selection(bot=bot, runtime_stage=runtime_stage)
         metadata = ({key: value for key, value in stage.items() if key != "kb_ids"}
                     if stage is not None else {})
+        if stage is not None and runtime_stage != "draft" and stage["kb_ids"] is None:
+            return {"items": [], "next_cursor": None}
         if runtime_stage != "draft":
-            # Unknown and all-off both avoid provider I/O but remain distinct.
+            # Explicit all-off also avoids provider I/O; unknown returned above.
             if not stage["kb_ids"]:
                 return {"items": [], "next_cursor": None, **metadata}
         elif not self.source.has_enabled_selection(bot=bot):

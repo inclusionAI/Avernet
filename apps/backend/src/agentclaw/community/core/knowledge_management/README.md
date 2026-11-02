@@ -87,13 +87,14 @@ retain their original checks. ACLs, grants and enablement rows are never mutated
 
 Both Bot GET URLs now accept `runtime_stage=draft|verify|online` (default draft).
 Personal draft responses retain their exact original fields. Service responses
-also expose selection_status, publication_id and captured_at. The shared local
+with valid stage state also expose selection_status, publication_id and captured_at. The shared local
 stage reader resolves native publications; draft uses enabled, verify uses the
 publication observation, online uses online_enabled with exact version/workflow
-provenance. Unknown management items have enabled=null and revision=null; valid
-non-draft items have a boolean enabled and revision=null (read-only). Unknown
-conversation responses have items=[] plus explicit unrecorded/unavailable status,
-not an assertion that no knowledge is enabled. Service draft/verify additionally
+provenance. Valid non-draft items have a boolean enabled and revision=null
+(read-only). Missing/corrupt stage data or optional stage-store failures return
+exactly {"items": [], "next_cursor": null} for both URLs: no unknown-state notice,
+status metadata or underlying exception is exposed. This is not a disabled-state
+write; existing permissions/invalid-input/provider errors are not swallowed. Service draft/verify additionally
 require native Editor standing; online keeps native conversation admission.
 Neither interface substitutes draft data for unknown historical state. Snapshots
 are always intersected with current grants and conversation-ready metadata.

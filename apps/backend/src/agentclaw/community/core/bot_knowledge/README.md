@@ -99,19 +99,31 @@ The existing management and conversation GET URLs accept `runtime_stage`:
 publication and its observation; `online` resolves native SUCCESS and reads the
 existing `online_enabled` column, with provenance from `projection:online` in
 common-config. The marker must match source PK/tenant/env/space/publication,
-version and native online workflow. Missing/corrupt/mismatched observations return
-`unrecorded`; store failures return `unavailable`; enabled is then null, not false.
+version, native online workflow and existing native rollback intent identity.
+Missing/corrupt/mismatched observations or optional storage errors return a normal
+empty HTTP page `{ "items": [], "next_cursor": null }`, without unknown-state
+notices, diagnostic metadata or underlying errors. Internal reads retain diagnostic
+status; unknown never writes disabled state back. Normal admission errors remain.
 Only a valid last_recorded observation with an empty ID list means all-off.
 The native publication remains the version authority. Never infer a version from
 the highest stored snapshot or substitute a draft into an online/verify read.
 
 After actual ONLINE BaaS SUCCESS, the existing progress/restart poll attempts a
-best-effort projection in its own auxiliary transaction. That transaction writes
+best-effort projection in its own `transactional_orm_session` auxiliary unit. That transaction writes
 only common-config plus at most 200 binding IDs from the old/new selections.
 It never modifies draft enabled, revision or updated_by on existing rows, never
 locks/mutates native publish rows and is not a native success prerequisite.
 Rollback uses the target publication after its actual deployment success, not
-the early SUCCESS admission flip. Late lower-workflow projections are rejected.
+the early SUCCESS admission flip. Its existing rollback timestamp/origin token
+invalidates prior provenance before redeploy. Late lower-workflow projections
+are rejected. Online reads probe the complete binding unique key before
+space/flag filtering. Missing rows use one tenant-stamped bounded bulk insert;
+identical projection replays do not write business rows. The poll captures a
+bounded native workflow/rollback identity before its existing native sync call;
+projection requires that same identity, so a delayed callback cannot sign a
+new rollback token even if no marker was previously saved. In-place restart
+identities include the native restart.online workflow. Identity-read failure
+merely skips the auxiliary projection; native sync still runs.
 No new worker, retry, ledger, task or table is added. No ext fields are added.
 
 Snapshots are not grants or ACLs. Management retains Editor authorization;
@@ -119,8 +131,8 @@ conversation retains native conversation admission and requires Editor standing
 for service draft/verify. Public/friend admission can expose online references,
 not draft configuration. Every result is intersected with current catalog grants
 and conversation metadata must be ready. Knowledge source/space/tenant ownership
-is checked before exposing a snapshot. Unknown conversation state returns no
-references plus explicit selection metadata; it does not assert all-off.
+is checked before exposing a snapshot. Unknown state returns the ordinary empty page without diagnostic metadata
+or notices; it never writes an all-off configuration.
 
 The existing production `online_enabled` column must already exist before this
 code is deployed; ORM mapping is not a schema migration. No DDL or data backfill

@@ -43,6 +43,11 @@ class BotKnowledgePublicationSelectionProtocol(Protocol):
     ) -> dict: ...
 
     @abstractmethod
-    def project_online_selection(self, *, publication_id: int) -> bool:
+    def observe_online_selection(self, *, publication_id: int) -> dict | None:
+        """Optional native deployment identity read before the progress call."""
+        ...
+
+    @abstractmethod
+    def project_online_selection(self, *, publication_id: int, observed: dict) -> bool:
         """Best effort after actual native online deployment, not admission SUCCESS."""
         ...

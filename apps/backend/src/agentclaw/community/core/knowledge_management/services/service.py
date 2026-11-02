@@ -312,13 +312,15 @@ class KnowledgeManagementService:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         bot = self.source.bot_context(scope, actor_id)
         stage = self.source.stage_selection(bot=bot, runtime_stage=runtime_stage)
+        if stage is not None and runtime_stage != "draft" and stage["kb_ids"] is None:
+            return {"items": [], "next_cursor": None}
         space_id = bot["space_id"]
         page = self.catalog.page_authorized(
             scope=scope, space_id=space_id, cursor=cursor, limit=limit
         )
         selected = page["kb_ids"]
         saved = self.source.selections(bot=bot, kb_ids=selected) if runtime_stage == "draft" else {
-            kb_id: {"enabled": kb_id in stage["kb_ids"] if stage["kb_ids"] is not None else None,
+            kb_id: {"enabled": kb_id in stage["kb_ids"],
                     "revision": None}
             for kb_id in selected
         }

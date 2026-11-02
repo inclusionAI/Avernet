@@ -230,12 +230,20 @@ class BotKnowledgePublicationSelection:
             "captured_at": stored.model_dump(mode="json")["captured_at"],
         }
 
-    def project_online_selection(self, *, publication_id: int) -> bool:
-        """Called only after a native terminal deployment; never controls its result."""
+    def observe_online_selection(self, *, publication_id: int) -> dict | None:
+        """Capture native identity before progress sync; failure only skips projection."""
+        from agentclaw.community.core.bot_knowledge.stage_selection import (
+            BotKnowledgeStageSelection,
+        )
+
+        return BotKnowledgeStageSelection(self.db).observe_online(publication_id=publication_id)
+
+    def project_online_selection(self, *, publication_id: int, observed: dict) -> bool:
+        """Called after native terminal success, using the pre-sync observation fence."""
         from agentclaw.community.core.bot_knowledge.stage_selection import (
             BotKnowledgeStageSelection,
         )
 
         return BotKnowledgeStageSelection(self.db).project_online(
-            publication_id=publication_id
+            publication_id=publication_id, observed=observed
         )

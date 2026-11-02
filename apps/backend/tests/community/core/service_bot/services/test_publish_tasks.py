@@ -632,7 +632,9 @@ def test_online_projection_runs_only_after_actual_native_terminal_progress(fails
     flow.advance_publish_progress = sync
     handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
     assert isinstance(handler.handle({"publish_id": 1}), Complete)
-    selection.project_online_selection.assert_called_once_with(publication_id=1)
+    selection.project_online_selection.assert_called_once_with(
+        publication_id=1, observed=selection.observe_online_selection.return_value
+    )
     assert flow.status == PublishStatus.SUCCESS.value
 
 
@@ -642,4 +644,34 @@ def test_native_pending_and_failure_never_project_online_selection():
         provider = Mock()
         handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=provider)
         handler.handle({"publish_id": 1})
-        provider.assert_not_called()
+        provider.return_value.project_online_selection.assert_not_called()
+
+
+def test_optional_identity_failure_never_blocks_native_terminal_progress():
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    selection.observe_online_selection.side_effect = RuntimeError("optional read failed")
+    def sync(publish_id):
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    assert flow.status == PublishStatus.SUCCESS.value
+    selection.project_online_selection.assert_not_called()
+
+
+def test_projection_uses_identity_observed_before_native_sync_not_late_re_read():
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    original = {"workflow_id": 301, "rollback_token": None}
+    selection.observe_online_selection.return_value = original
+    def sync(publish_id):
+        selection.observe_online_selection.return_value = {"workflow_id": 305, "rollback_token": [2, "new"]}
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    selection.observe_online_selection.assert_called_once_with(publication_id=1)
+    selection.project_online_selection.assert_called_once_with(publication_id=1, observed=original)

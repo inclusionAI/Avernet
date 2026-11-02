@@ -24,7 +24,8 @@ class ConversationKnowledgeServiceProtocol(Protocol):
         Never grants direct access to assets and never changes selections or ACLs.
         No local enabled selections returns an empty terminal page without
         contacting the provider. Enabled selections retain provider error checks.
-        Service stage reads return explicit observation metadata. Unknown history
+        Valid service stage reads return observation metadata. Unknown history
+        returns a normal empty page, without metadata or underlying errors, and
         never falls back to draft; draft/verify additionally require Editor access.
         Empty pages may have a next_cursor when disabled entries were filtered.
         """

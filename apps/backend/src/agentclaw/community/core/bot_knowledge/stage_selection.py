@@ -2,8 +2,6 @@
 
 import json
 
-from sqlalchemy import update
-
 from agentclaw.community.core.bot_knowledge.publication_selection import (
     SelectionRecord,
     selection_coordinates,
@@ -29,10 +27,44 @@ logger = get_logger()
 
 def _workflow(publication) -> int:
     ext = json.loads(publication.ext or "{}")
-    value = ext.get("publish", {}).get("online")
-    if type(value) is not int or value <= 0:
+    # Native in-place restarts write restart.online; recreate/release writes
+    # publish.online. Both are native BaaS workflow IDs with monotonic identity.
+    values = [ext.get(section, {}).get("online") for section in ("publish", "restart")]
+    valid = [value for value in values if type(value) is int and value > 0]
+    if not valid:
         raise ValueError("missing native online workflow")
-    return value
+    return max(valid)
+
+
+def _rollback_token(session, publication):
+    """Use native rollback intent identity; an early SUCCESS is not a deployment."""
+    restored_from = json.loads(publication.ext or "{}").get("rollback_restored_from")
+    if restored_from is None:
+        return None
+    if type(restored_from) is not int or restored_from <= 0:
+        raise ValueError("invalid native rollback origin")
+    demoted = (
+        session.query(Publication)
+        .filter_by(
+            id=restored_from,
+            source_bot_pk=publication.source_bot_pk,
+            source_bot_id=publication.source_bot_id,
+            env=publication.env,
+        )
+        .one_or_none()
+    )
+    if demoted is None:
+        raise ValueError("missing native rollback origin")
+    rollback = json.loads(demoted.ext or "{}").get("rollback", {})
+    token = rollback.get("rolled_back_at")
+    if (
+        rollback.get("target_publish_id") != publication.id
+        or not isinstance(token, str)
+        or not token
+        or len(token) > 64
+    ):
+        raise ValueError("invalid native rollback identity")
+    return [restored_from, token]
 
 
 def _record(raw, identity):
@@ -121,24 +153,35 @@ class BotKnowledgeStageSelection:
                         "workflow_id"
                     ] != _workflow(publication):
                         return result
+                    if marker.get("rollback_token") != _rollback_token(
+                        session, publication
+                    ):
+                        return result
                     value = _record(json.dumps(marker["selection"]), identity)
                     # Read the projection through the same binding rows; a marker
                     # is provenance, not a substitute for persisted enablement.
                     rows = (
-                        session.query(Binding.kb_id)
-                        .filter(
-                            Binding.bot_pk == bot["id"],
-                            Binding.env == bot["env"],
-                            Binding.space_id == bot["space_id"],
-                            Binding.kb_id.in_(value.kb_ids),
-                            Binding.online_enabled.is_(True),
+                        session.query(
+                            Binding.kb_id, Binding.space_id, Binding.online_enabled
                         )
-                        .limit(101)
+                        .filter(
+                            Binding.avernet_tenant == get_current_avernet_tenant(),
+                            Binding.env == bot["env"],
+                            Binding.bot_pk == bot["id"],
+                            Binding.kb_id.in_(value.kb_ids),
+                        )
                         .all()
                         if value.kb_ids
                         else []
                     )
-                    ids = sorted(row[0] for row in rows)
+                    # Complete unique-key probes first; secondary space/flag
+                    # predicates otherwise invite scans of disabled history.
+                    ids = sorted(
+                        row.kb_id
+                        for row in rows
+                        if row.space_id == bot["space_id"]
+                        and row.online_enabled is True
+                    )
                     if ids != value.kb_ids:
                         return result
                 return dict(
@@ -155,9 +198,26 @@ class BotKnowledgeStageSelection:
             )
             return {**result, "selection_status": "unavailable"}
 
-    def project_online(self, *, publication_id: int) -> bool:
+    def observe_online(self, *, publication_id: int):
+        """Fence the upcoming native terminal observation, not an execution-time guess."""
         try:
             with self.db.orm_session() as session:
+                publication = session.query(Publication).filter_by(
+                    id=publication_id, env=get_current_env()
+                ).one_or_none()
+                if publication is None:
+                    return None
+                return dict(
+                    workflow_id=_workflow(publication),
+                    rollback_token=_rollback_token(session, publication),
+                )
+        except Exception:
+            logger.exception("Knowledge deployment identity unavailable: publication_id=%s", publication_id)
+            return None
+
+    def project_online(self, *, publication_id: int, observed: dict) -> bool:
+        try:
+            with self.db.transactional_orm_session() as session:
                 publication = (
                     session.query(Publication)
                     .filter_by(
@@ -186,13 +246,8 @@ class BotKnowledgeStageSelection:
                     "space_id": require_space(session, bot)
                 }
                 marker = _config(session, identity, "projection:online", lock=True)
-                # Serialize only auxiliary writes. Never lock or write native rows.
-                if marker is not None:
-                    session.execute(
-                        update(BotCommonConfig)
-                        .where(BotCommonConfig.id == marker.id)
-                        .values(id=marker.id)
-                    )
+                # The transactional session keeps only this auxiliary row lock;
+                # native publication rows are never locked or written here.
                 session.refresh(publication)
                 if publication.status != PublishStatus.SUCCESS:
                     return False
@@ -210,6 +265,9 @@ class BotKnowledgeStageSelection:
                 if current is None or current[0] != publication_id:
                     return False
                 workflow = _workflow(publication)
+                rollback_token = _rollback_token(session, publication)
+                if observed != dict(workflow_id=workflow, rollback_token=rollback_token):
+                    return False  # A late callback cannot endorse a new deployment.
                 snapshot = _config(session, identity)
                 if snapshot is None:
                     return False
@@ -221,6 +279,10 @@ class BotKnowledgeStageSelection:
                     if (
                         type(previous["workflow_id"]) is not int
                         or previous["workflow_id"] > workflow
+                        or (
+                            previous.get("rollback_token") != rollback_token
+                            and previous["workflow_id"] == workflow
+                        )
                     ):
                         return False
                     previous_selection = SelectionRecord.model_validate_json(
@@ -237,29 +299,54 @@ class BotKnowledgeStageSelection:
                 rows = (
                     session.query(Binding)
                     .filter(
+                        Binding.avernet_tenant == bot.avernet_tenant,
                         Binding.bot_pk == bot.id,
                         Binding.env == bot.env,
                         Binding.kb_id.in_(ids),
                     )
-                    .limit(201)
                     .all()
                     if ids
                     else []
                 )
                 existing = {row.kb_id: row for row in rows}
+                projection = dict(
+                    workflow_id=workflow,
+                    rollback_token=rollback_token,
+                    selection=value.model_dump(mode="json"),
+                )
+                payload = json.dumps(projection)
+                if (
+                    marker is not None
+                    and json.loads(marker.config_value) == projection
+                    and all(
+                        row is not None
+                        and row.space_id == identity["space_id"]
+                        and row.online_enabled is (kb_id in value.kb_ids)
+                        for kb_id in ids
+                        for row in [existing.get(kb_id)]
+                    )
+                ):
+                    return True  # Replay: no repeated binding or marker writes.
+                missing = []
                 for kb_id in ids:
                     row = existing.get(kb_id)
                     if row is None:
-                        row = Binding(
-                            env=bot.env,
-                            bot_pk=bot.id,
-                            space_id=identity["space_id"],
-                            kb_id=kb_id,
-                            enabled=False,
-                            revision=0,
-                            updated_by=bot.owner_id,
+                        # Bulk inserts bypass mapper before_insert; stamp the
+                        # trusted, current source tenant explicitly.
+                        missing.append(
+                            dict(
+                                avernet_tenant=bot.avernet_tenant,
+                                env=bot.env,
+                                bot_pk=bot.id,
+                                space_id=identity["space_id"],
+                                kb_id=kb_id,
+                                enabled=False,
+                                revision=0,
+                                updated_by=bot.owner_id,
+                                online_enabled=kb_id in value.kb_ids,
+                            )
                         )
-                        session.add(row)
+                        continue
                     if row.space_id != identity["space_id"]:
                         if kb_id in value.kb_ids:
                             raise ValueError(
@@ -267,9 +354,8 @@ class BotKnowledgeStageSelection:
                             )
                         continue
                     row.online_enabled = kb_id in value.kb_ids
-                payload = json.dumps(
-                    dict(workflow_id=workflow, selection=value.model_dump(mode="json"))
-                )
+                if missing:
+                    session.execute(Binding.__table__.insert(), missing)
                 if len(payload.encode("utf-8")) > 65535:
                     raise ValueError("online projection exceeds storage limit")
                 if marker is None:

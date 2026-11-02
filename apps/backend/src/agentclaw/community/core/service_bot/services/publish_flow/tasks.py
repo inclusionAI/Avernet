@@ -589,11 +589,22 @@ class PublishApprovalTriggerHandler:
         return Complete()
 
 
-def _project_online_selection(provider, publish_id):
+def _observe_online_selection(provider, publish_id):
+    # Failure here must not prevent native sync from running.
+    try:
+        return provider().observe_online_selection(publication_id=publish_id)
+    except Exception:
+        logger.exception("Optional knowledge identity read failed: publish_id=%s", publish_id)
+        return None
+
+
+def _project_online_selection(provider, publish_id, observed):
     # Native sync has already completed. This optional, separate transaction
     # cannot change its outcome and must never wrap the native call itself.
+    if observed is None:
+        return
     try:
-        provider().project_online_selection(publication_id=publish_id)
+        provider().project_online_selection(publication_id=publish_id, observed=observed)
     except Exception:
         logger.exception("Optional knowledge projection failed: publish_id=%s", publish_id)
 
@@ -627,11 +638,13 @@ class PublishProgressPollHandler(_PublishTaskBase):
 
         # advance_publish_progress advances on BaaS SUCCESS/FAILED (and internally
         # redirects a retry record to restart-sync); a no-op on PENDING.
+        observed = (_observe_online_selection(self._selection_provider, publish_id)
+                    if status == PublishStatus.ONLINE_PUB else None)
         sync_result = self._flow.advance_publish_progress(publish_id)
 
         if (getattr(sync_result, "status", None) == PublishStatus.SUCCESS
                 and (getattr(sync_result, "data", None) or {}).get("status") == "SUCCESS"):
-            _project_online_selection(self._selection_provider, publish_id)
+            _project_online_selection(self._selection_provider, publish_id, observed)
 
         _record, status = self._status(publish_id)
         if status in _POLL_ACTIVE_STATES:
@@ -700,11 +713,13 @@ class PublishRestartPollHandler(_PublishTaskBase):
         if not self._flow.is_restart_in_progress(publish_id):
             return Complete()
 
+        observed = (_observe_online_selection(self._selection_provider, publish_id)
+                    if _status in {PublishStatus.SUCCESS, PublishStatus.ONLINE_PUB} else None)
         sync_result = self._flow.sync_restart_progress(publish_id)
         baas_status = (sync_result.data or {}).get("status", "")
         if baas_status == "SUCCESS":
             if getattr(sync_result, "status", None) == PublishStatus.SUCCESS:
-                _project_online_selection(self._selection_provider, publish_id)
+                _project_online_selection(self._selection_provider, publish_id, observed)
             return Complete()
         if baas_status == "FAILED":
             # The sync already marked the record FAILED with ext.error_message —
