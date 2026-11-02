@@ -288,10 +288,11 @@ class TestDesktopListFiles:
 
     def test_list_files_machine_not_connected_is_client_visible(self, client, desktop_service):
         """BaaS 503 MACHINE_NOT_CONNECTED does not surface as server 5xx."""
-        from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotServiceError
-        desktop_service.list_directory.side_effect = DesktopBotServiceError(
+        from agentclaw.community.core.desktop_bot.errors import MachineNotConnectedError
+        desktop_service.list_directory.side_effect = MachineNotConnectedError(
             'BaaS API error: 503 - {"detail":{"error_code":"MACHINE_NOT_CONNECTED",'
             '"message":"Machine <machine-id> WebSocket not connected"}}',
+            baas_error_code="MACHINE_NOT_CONNECTED",
         )
 
         resp = client.get(self.FILES_PATH)
@@ -299,7 +300,7 @@ class TestDesktopListFiles:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is False
-        assert data["error_code"] == 50303
+        assert data["error_code"] == 503
         assert data["message"] == "机器未连接，请连接后重试"
 
     def test_list_files_service_error(self, client, desktop_service):
