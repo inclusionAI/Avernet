@@ -102,7 +102,10 @@ def mock_bot_repo():
             "owner_id": "test_owner",
             "device_id": "device_001",
             "binding_id": 1001,
-            "template_config": {"must": "not leak"},
+            "template_config": {
+                "template_type": "applicationCoding",
+                "workspace": {"image": "latest"},
+            },
             "ext": {
                 "existing_key": "existing_value",
                 "arch_domain": "测试架构域",
@@ -138,7 +141,10 @@ class TestGetBotBindingPublic:
         assert body["data"]["bot_id"] == "default"
         assert body["data"]["device_id"] == "device_001"
         assert body["data"]["binding_id"] == 1001
-        assert "template_config" not in body["data"]
+        assert body["data"]["template_config"] == {
+            "template_type": "applicationCoding",
+            "workspace": {"image": "latest"},
+        }
         mock_bot_repo.list_by_conditions.assert_called_once_with(
             bot_id="arch_001", page=1, page_size=1
         )
@@ -149,7 +155,10 @@ class TestGetBotBindingPublic:
         bot = resp.json()["data"]
         assert bot["device_id"] == "device_001"
         assert bot["binding_id"] == 1001
-        assert "template_config" not in bot
+        assert bot["template_config"] == {
+            "template_type": "applicationCoding",
+            "workspace": {"image": "latest"},
+        }
         assert "iam_token" not in bot["ext"]
         assert "token" not in bot["ext"]
         assert bot["ext"]["arch_domain"] == "测试架构域"

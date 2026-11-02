@@ -24,6 +24,10 @@ def _seed_bot(world) -> None:
             "status": "ACTIVE",
             "device_id": "device_001",
             "binding_id": 1001,
+            "template_config": {
+                "template_type": "applicationCoding",
+                "workspace": {"image": "latest"},
+            },
             "ext": {
                 "arch_domain": "测试架构域",
                 "iam_token": "not-a-real-token",
@@ -37,7 +41,10 @@ def _assert_public_projection(response, _world) -> None:
     data = response.json()["data"]
     assert data["device_id"] == "device_001"
     assert data["binding_id"] == 1001
-    assert "template_config" not in data
+    assert data["template_config"] == {
+        "template_type": "applicationCoding",
+        "workspace": {"image": "latest"},
+    }
     assert "iam_token" not in data["ext"]
     assert "token" not in data["ext"]
 

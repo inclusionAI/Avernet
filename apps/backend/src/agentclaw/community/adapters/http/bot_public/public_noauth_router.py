@@ -92,11 +92,10 @@ def _scrub_sensitive(value: Any) -> Any:
 
 
 def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
-    """构造架构 Bot 公开详情，不暴露模板配置或 token 等敏感信息。"""
+    """构造架构 Bot 公开详情，递归去除 token 等敏感信息。"""
     scrubbed = _scrub_sensitive(bot)
     if not isinstance(scrubbed, dict):
         return {}
-    scrubbed.pop("template_config", None)
     for field in ("device_id", "binding_id"):
         if field in bot:
             scrubbed[field] = bot[field]
@@ -115,7 +114,7 @@ async def get_bot_binding_public(
 
     GET /api/public/bots/{bot_id}/binding
 
-    返回架构师 Bot 详情，不包含 template_config；保留 device_id 和 binding_id，
+    返回架构师 Bot 详情，包含 template_config；保留 device_id 和 binding_id，
     并递归去除 token 类敏感字段。
     """
     try:
