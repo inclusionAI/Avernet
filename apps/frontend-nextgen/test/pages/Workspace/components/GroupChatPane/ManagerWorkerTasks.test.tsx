@@ -239,3 +239,22 @@ it('stops a task resolved from a receipt with its complete intent instead of a B
   await waitFor(() => expect(screen.getByText('已取消')).toBeInTheDocument());
   expect(cancel).not.toHaveBeenCalled();
 });
+
+it('keeps the Manager reply stop control beside tasks even when the control panel is hidden', async () => {
+  const abortBot = jest.fn().mockResolvedValue(undefined);
+  const participants = [
+    { actorId: 'manager', kind: 'bot', name: 'Manager', role: 'manager', mode: 'auto' },
+    { actorId: 'worker', kind: 'bot', name: 'Worker', role: 'member', mode: 'auto' },
+  ];
+  const messages = ['manager', 'worker'].map((botUuid) => ({
+    id: botUuid, role: 'assistant', status: 'streaming', content: '处理中', extra: { botUuid, runId: botUuid },
+  }));
+  render(<GroupChatCollabPanel panel={{ visible: false } as never} session={{ ...session, participants } as never}
+    group={{ kind: 'task_master_slave' } as never} messages={messages as never}
+    abortingBotIds={new Set()} abortBot={abortBot} />);
+  expect(screen.getByRole('button', { name: /暂无任务，查看任务/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '选择要停止回复的 Bot' }));
+  fireEvent.click(screen.getByRole('button', { name: '停止 Manager 的当前回复' }));
+  await waitFor(() => expect(abortBot).toHaveBeenCalledWith('manager'));
+  expect(screen.queryByRole('button', { name: '停止 Worker 的当前回复' })).not.toBeInTheDocument();
+});

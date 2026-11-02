@@ -138,12 +138,13 @@ describe('authoritative worker task status', () => {
 });
 
 
-it('keeps a persisted terminal delivery when the short-lived task lookup has expired', () => {
-  const [task] = projectGroupTasks([{ ...delivery('T-12345678', 'completed'), task: { ...delivery().task!, finished_at: 4000 } }], [], []);
-  const [result] = applyTaskStatuses([task], { [task.taskRef]: {
-    row: { ref: task.taskRef, status: 'not_found' }, observedAt: 100000,
-  } });
-  expect(result.status).toBe('completed');
-  expect(result.finishedAt).toBe(4000);
-  expect(result.source).toBe('delivery');
+it.each(['completed', 'failed', 'cancelled'] as const)('preserves persisted %s after correlation expires', (terminal) => {
+  const [task] = projectGroupTasks([{ ...delivery('T-12345678', terminal), task: { ...delivery().task!, finished_at: 4000 } }], [], []);
+  task.intentId = `bcs_intent_${'a'.repeat(32)}`;
+  for (const status of ['not_found', 'unknown'] as const) {
+    const [result] = applyTaskStatuses([task], { [task.intentId]: {
+      row: { ref: task.intentId, status }, observedAt: 100000,
+    } });
+    expect(result).toEqual(task);
+  }
 });

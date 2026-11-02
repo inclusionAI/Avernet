@@ -29,10 +29,19 @@ export function GroupChatCollabPanel({
   onCancelDelivery?: (messageId: string, deliveryId: string) => Promise<void>;
 }) {
   if (session && group?.kind === 'task_master_slave') {
+    const managers = session.participants.filter((participant) => participant.kind === 'bot' && participant.role === 'manager');
+    const managerMessages = messages.filter((message) => managers.some((manager) => manager.actorId === message.extra?.botUuid));
     return (
       <>
         <div className="border-t border-border bg-background px-3 pb-1 pt-1.5 sm:px-6">
           <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">
+            <GroupChatActiveRuns
+              key={`manager-${session.sessionId}`}
+              messages={managerMessages}
+              participants={managers}
+              abortingBotIds={abortingBotIds}
+              onAbortBot={abortBot}
+            />
             <ManagerWorkerTasks key={session.sessionId} session={session} messages={messages} />
           </div>
         </div>
