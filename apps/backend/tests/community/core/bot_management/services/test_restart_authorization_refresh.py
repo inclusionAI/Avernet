@@ -149,6 +149,20 @@ def test_aicoding_refresh_uses_one_full_runtime_projection_not_double_projection
     skill_set_service.project_skills.assert_not_awaited()
 
 
+def test_aicoding_refresh_unavailable_projections_fail_this_attempt_and_stay_best_effort() -> None:
+    """Without both runtime and legacy authority, no projection occurs for this restart."""
+    strategy = AicodingProvisioningStrategy("aicoding")
+
+    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            skill_set_factory=None,
+            runtime_reconciler=None,
+        ) is True
+
+
 def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_error() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
