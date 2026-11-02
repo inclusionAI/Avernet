@@ -565,11 +565,16 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     ) -> Dict[str, Any]:
         """查询 bot 在指定阶段对应的 BaaS/binding 侧信息。"""
         biz_id: Optional[str] = None
-        if stage.startswith(f"{PublishStage.EVAL.value}-"):
+        # 归一化大小写：部分调用方传入大写阶段名（如 "ONLINE"），与 PublishStage
+        # 枚举值（全小写）比较前统一转小写；eval-{task_uuid} 的 task_uuid 原样保留。
+        normalized_stage = stage.strip().lower()
+        if normalized_stage.startswith(f"{PublishStage.EVAL.value}-"):
             _, biz_id = stage.split("-", 1)
             stage = PublishStage.EVAL.value
-        elif stage == PublishStage.EVAL.value:
-            biz_id = stage
+        elif normalized_stage == PublishStage.EVAL.value:
+            biz_id = PublishStage.EVAL.value
+        else:
+            stage = normalized_stage
 
         bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
 

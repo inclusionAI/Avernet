@@ -2806,6 +2806,63 @@ class TestGetBotStageBindingInfo:
             "device_id": "BOT-UUID-ONLINE",
         }
 
+    def test_service_bot_online_success_uppercase_stage(self):
+        """大写 stage="ONLINE" 应回落到与 "online" 相同的成功结果（修复 Unsupported stage）。"""
+        mock_repo = Mock()
+        mock_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = _create_mock_record(
+            record_id=13,
+            status=PublishStatus.SUCCESS,
+            ext={"binding": {"online": 602}},
+        )
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "teclaw",
+            "template_type": "online-template",
+        }
+        device_binding_repo = Mock()
+        device_binding_repo.get_by_id.return_value = Mock(
+            device_id="BOT-UUID-ONLINE",
+            device_provider="teclaw",
+        )
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "ONLINE")
+
+        assert result == {
+            "bot_id": "bot_001",
+            "owner_id": "user_001",
+            "bot_type": "service",
+            "engine_type": "teclaw",
+            "template_type": "online-template",
+            "active_runtime_engine_type": "",
+            "publish_id": 13,
+            "publish_status": PublishStatus.SUCCESS,
+            "binding_id": 602,
+            "device_provider": "teclaw",
+            "device_id": "BOT-UUID-ONLINE",
+        }
+
+    def test_service_bot_verify_publish_not_found_uppercase_stage(self):
+        """大写 stage="VERIFY" 应进入 verify 查询路径（报未找到发布），而非 Unsupported stage。"""
+        mock_repo = Mock()
+        mock_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "teclaw",
+        }
+        service = _make_service(bot_publish_repo=mock_repo, bot_repo=bot_repo)
+
+        with pytest.raises(BotPublishServiceError, match="No validating publish found for service bot"):
+            service.get_bot_stage_binding_info("bot_001", "user_001", "VERIFY")
+
     def test_bot_not_found(self):
         mock_repo = Mock()
         bot_repo = Mock()
