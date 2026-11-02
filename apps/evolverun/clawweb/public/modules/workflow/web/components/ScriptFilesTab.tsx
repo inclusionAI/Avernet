@@ -94,7 +94,7 @@ function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty, savePending =
       {state.reconciliation
         ? <FrozenPackVersionViewer key={version} files={version === state.reconciliation.version ? state.reconciliation.attemptedFiles : current.files} />
         : <fieldset disabled={state.saving || state.uploading || current.loading}>
-          <PackVersionEditor key={version} files={current.files} onUploadStateChange={uploading => {
+          <PackVersionEditor key={version} files={current.files} versionSource={{ version, packId: current.snapshot.packId, baseRef: current.snapshot.baseRef, baseCommit: current.snapshot.baseCommit }} saveStatus={state.saving ? 'saving' : dirty(current) ? 'dirty' : 'clean'} onUploadStateChange={uploading => {
             publish(session, { ...session.state, uploading })
           }} onChange={files => {
             if (!session.state.saving && !session.state.reconciliation && !session.state.versions[version].loading) updateVersion(session, version, { files, notice: null })
