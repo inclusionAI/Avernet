@@ -20,19 +20,11 @@ impl BcsServer {
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
-        let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
-            &config.gateway_principal,
-            group_session_secret_access.clone(),
-        )
-        .await?;
-        info!(
-            issuers = ?config.gateway_principal.issuers,
-            audience = %config.gateway_principal.audience,
-            key_id = %config.gateway_principal.key_id,
-            "Gateway Principal verifier initialized"
-        );
+        let GatewayPrincipalAuthResources {
+            group_session_secret_access,
+            invite_token_secret,
+            gateway_principal_verifier,
+        } = super::auth_resources::build_gateway_principal_auth_resources(&config).await?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -936,26 +928,16 @@ impl BcsServer {
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
-        let auth_config = crate::auth_wiring::resolve_auth_config(
-            &config.auth,
-            crate::config_loader::Environment::resolve().as_str(),
-        );
-        let user_identity_port = match infrastructure_plugins.db() {
-            Some(db) => Some(crate::identity_wiring::db_user_identity_port(
-                infrastructure_plugins.db_kind(),
-                db,
-            )),
-            None => Some(crate::identity_wiring::memory_user_identity_port()),
-        };
-        let auth_chain = Arc::new(
-            crate::auth_wiring::try_build_auth_chain_with_factories(
-                &auth_config,
-                bot_registry.clone(),
-                user_identity_port.clone(),
-                &extensions.auth_plugin_factories,
-            )
-            .map_err(crate::BcsError::InvalidConfig)?,
-        );
+        let AuthChainResources {
+            auth_config,
+            user_identity_port,
+            auth_chain,
+        } = super::auth_resources::build_auth_chain_resources(
+            &config,
+            &infrastructure_plugins,
+            &extensions,
+            &bot_registry,
+        )?;
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
