@@ -20,7 +20,7 @@
 ## Task 4 [x]: Verification and independent review
 - **Goal:** 更新文档、运行门禁、独立评审并修复。
 - **Done when:** 记录实际测试结果和未验证范围，不复用旧绿灯。
-- **Verification:** final code/test fa2ebc90c完整Backend CI 28087 passed / 40 skipped / 6 subtests，覆盖率90.72%，变更93.31%，原门禁通过；三路固定Head增量复审无新P2+，Performance保留真实DB延迟/锁竞争边界。验证文档保留全部初始失败与修复证据；未推送/更新PR/部署。
+- **Verification:** final code/test e0d4f4a468完整Backend CI 28095 passed / 40 skipped / 6 subtests，覆盖率90.72%，变更93.37%，原门禁通过；整体复审发现的空间准入P2已修复，真实HTTP8个新增权限回归和24个状态HTTP用例通过。正常github/dev pre-push通过；保留scanner组合测试43 passed / 1 failed的已复现Release基线问题及真实DB延迟/锁竞争边界。验证文档保留失败证据；仅授权更新原PR，不合并或部署。
 
 ## Groups
 - Group A: Tasks 1, 2
