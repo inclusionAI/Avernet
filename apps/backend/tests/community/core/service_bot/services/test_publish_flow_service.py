@@ -3846,12 +3846,17 @@ async def test_process_draft_advances_to_building_and_enqueues_verify_flow():
     record = _make_publish_record(status=PublishStatus.DRAFT.value)
     tq = Mock()
     svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    updated = _make_publish_record(status=PublishStatus.BUILDING.value, id=1)
+    publish_service.update_publish_status_with_ext.return_value = updated
     result = await svc.process(publish_id=1, operator="op")
     # User-driven advance: move DRAFT -> BUILDING synchronously under the lock,
     # then enqueue the durable verify_flow task for the remainder.
-    publish_service.update_publish_status.assert_called_once_with(
-        1, PublishStatus.BUILDING.value, PublishStatus.DRAFT.value
-    )
+    publish_service.update_publish_status_with_ext.assert_called_once()
+    kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
+    assert kwargs["publish_id"] == 1
+    assert kwargs["target_status"] == PublishStatus.BUILDING.value
+    assert kwargs["source_status"] == PublishStatus.DRAFT.value
+    assert kwargs["ext"]["build_attempt"]
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.status == PublishStatus.BUILDING

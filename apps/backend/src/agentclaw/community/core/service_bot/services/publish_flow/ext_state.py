@@ -10,6 +10,7 @@ across the flow. Behavior is a verbatim lift from the former private helpers on
 from __future__ import annotations
 
 import copy
+import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -148,7 +149,49 @@ class PublishExtState:
             env=env,
         )
 
-    # ── per-stage engine_overrides / artifact stamping ───────────────────
+
+    # ── build attempt fencing ───────────────────────────────────────────
+    def declare_build_attempt(
+        self,
+        publish_id: int,
+        *,
+        source_status: str,
+        target_status: str,
+    ) -> str:
+        """Allocate a fresh token and CAS status + ext in one write."""
+        latest_record = self._publish_service.get_publish_by_id(publish_id)
+        if not latest_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+        expected_ext = copy.deepcopy(latest_record.ext)
+        ext = copy.deepcopy(latest_record.ext or {})
+        token = uuid.uuid4().hex
+        ext["build_attempt"] = token
+        record = self._publish_service.update_publish_status_with_ext(
+            publish_id=publish_id,
+            target_status=target_status,
+            ext=ext,
+            source_status=source_status,
+            expected_ext=expected_ext,
+        )
+        if record is None:
+            raise PublishNotFoundError(
+                f"Publish record CAS conflict: publish_id={publish_id}"
+            )
+        return token
+
+    def latest_status_and_build_attempt(self, publish_id: int) -> tuple[str, str]:
+        """Read the current status and build attempt from the live record.
+
+        This is a single read back before any gated state write, so a concurrent
+        retry / status override / ext merge can be checked without mutating state.
+        """
+        latest_record = self._publish_service.get_publish_by_id(publish_id)
+        if not latest_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+        ext = latest_record.ext or {}
+        token = ext.get("build_attempt")
+        return latest_record.status, (token if isinstance(token, str) and token else "")
+
     def stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage
     ) -> dict | None:

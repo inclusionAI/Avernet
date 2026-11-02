@@ -368,13 +368,21 @@ class PublishFlowService(
         # release within ONLINE_PUB and the poll drives ONLINE_PUB -> SUCCESS.
         # Every other status is a side-effect-free status query.
         if current_status == PublishStatus.DRAFT:
-            if not self._advance_status(
-                publish_id, PublishStatus.BUILDING, PublishStatus.DRAFT
-            ):
-                # Lost the race to a concurrent submit → report current progress.
+            try:
+                build_attempt = self._ext_state.declare_build_attempt(
+                    publish_id,
+                    source_status=PublishStatus.DRAFT.value,
+                    target_status=PublishStatus.BUILDING.value,
+                )
+            except PublishNotFoundError:
+                # A concurrent submit changed either DRAFT status or ext. Report
+                # the current winner instead of enqueueing a second build.
                 return self._describe_current_status(publish_id)
             enqueue_verify_flow(
-                self._task_queue_service, publish_id=publish_id, operator=operator
+                self._task_queue_service,
+                publish_id=publish_id,
+                operator=operator,
+                build_attempt=build_attempt,
             )
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -508,9 +516,11 @@ class PublishFlowService(
         self,
         publish_record: BotPublishRecord,
         operator: str,
+        *,
+        build_attempt: str | None = None,
     ) -> PublishFlowResult:
         """Run the build stage (BUILDING → BUILT). Delegates to BuildStageRunner."""
-        return await self._build_stage_runner.build(publish_record, operator)
+        return await self._build_stage_runner.build(publish_record, operator, build_attempt=build_attempt)
 
     async def execute_build_artifact_only(
         self,
