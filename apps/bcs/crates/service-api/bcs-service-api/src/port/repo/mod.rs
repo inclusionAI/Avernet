@@ -7,6 +7,7 @@ pub use collaboration_recovery::*;
 pub use collaboration_terminal_im::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};
 pub mod collaboration_publication;
 pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
+pub mod auth_session;
 pub mod bot;
 pub mod a2a_bot;
 pub mod a2a_run;
@@ -41,6 +42,11 @@ pub mod session_registry;
 pub mod session_file;
 pub mod user_identity;
 
+pub use auth_session::{
+    AuthSessionRevoke, AuthSessionRepoPort, AuthSessionScope, AuthSessionSnapshot,
+    AuthSessionStoreError, AuthSessionVersion, AuthSessionWrite, InstallAuthSession,
+    RotateAuthSession,
+};
 pub use bot::BotRepoPort;
 pub use bot_actor_config::BotActorConfigRepoPort;
 pub use bot_authority::BotAuthorityRepoPort;

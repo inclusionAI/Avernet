@@ -680,3 +680,27 @@ within a trusted scope. Repository CAS returns the committed projection and
 fences both run and shared Task revisions. Pending input is Task-owned; budgets
 and local states remain run-owned. Run-scoped cancellation rejects a shared Task
 with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+## Strict atomic auth session repository
+
+`AuthSessionRepoPort` is the strict, environment-scoped login-session
+persistence contract for the V1 API auth plugin chain. `AuthSessionScope`
+includes `env`, and scope values come from trusted configuration plus an
+already-verified identity, never from unverified JWT claims. Session versions
+CAS on a revision that advances by `checked_add(1)` within SQL signed BIGINT
+bounds. Install and rotate are compare-and-swap writes returning
+`Applied`/`Conflict`; a conflict is a lost race, never a persistence error,
+and callers restart the login batch or fail authentication instead of writing
+unconditionally. Revoking bumps the revision and clears the token hash, so a
+revoked or rotated-out hash no longer resolves; repeating a revoke reports
+`NotCurrent`. Reads separate absence (`None` for a missing session), the
+current revision, and persistence failure through the closed two-category
+`AuthSessionStoreError` whose display text never carries SQL, endpoint, or
+credential material. The port is independent of `UserIdentityRepoPort`: an
+implementation may implement both, but the strict trait has no default
+methods delegating to the legacy Option-returning lookups, and a session
+write never auto-creates a missing identity row. Snapshot display fields are
+joined from the identity row. Concrete implementations prove conformance
+against the shared `bcs-test-support` harness
+(`auth_session_repo_port_contract_tests`), which takes any
+`AuthSessionRepoPort` trait object and a scope.
