@@ -1,5 +1,6 @@
 """Unit tests for DesktopBotLifecycle periodic health scan."""
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,7 @@ from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotServiceError,
 )
 from agentclaw.community.di.config import DesktopBotPeriodicScanConfig
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 
 
 def _cfg(
@@ -47,7 +49,7 @@ def _make_lifecycle(
     svc = MagicMock()
     if cache is None:
         cache = MagicMock()
-        cache.acquire_lock.return_value = "test-lock-token"
+        cache.acquire_lock_strict.return_value = "test-lock-token"
         cache.release_lock.return_value = True
         cache.get.return_value = None  # no last_scan_ts → scan proceeds
     lifecycle = DesktopBotLifecycle(
@@ -364,7 +366,7 @@ class TestSingleInstanceGuard:
     @pytest.mark.asyncio
     async def test_scan_runs_when_lock_acquired(self):
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok-1"
+        cache.acquire_lock_strict.return_value = "tok-1"
         cache.release_lock.return_value = True
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
         # one empty page so _scan_all_bots returns quickly
@@ -372,26 +374,26 @@ class TestSingleInstanceGuard:
 
         await lifecycle._guarded_scan()
 
-        cache.acquire_lock.assert_called_once()
+        cache.acquire_lock_strict.assert_called_once()
         assert bot_repo.search_bots.called  # scan actually ran
         cache.release_lock.assert_called_once_with(lifecycle._scan_lock_key, "tok-1")
 
     @pytest.mark.asyncio
     async def test_scan_skipped_when_lock_held_by_other(self):
         cache = MagicMock()
-        cache.acquire_lock.return_value = None  # another worker holds it
+        cache.acquire_lock_strict.return_value = None  # another worker holds it
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
 
         await lifecycle._guarded_scan()
 
-        cache.acquire_lock.assert_called_once()
+        cache.acquire_lock_strict.assert_called_once()
         assert not bot_repo.search_bots.called  # scan did NOT run
         assert not cache.release_lock.called
 
     @pytest.mark.asyncio
     async def test_lock_released_even_if_scan_raises(self):
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok-2"
+        cache.acquire_lock_strict.return_value = "tok-2"
         cache.release_lock.return_value = True
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
         bot_repo.search_bots.side_effect = RuntimeError("boom")
@@ -404,7 +406,7 @@ class TestSingleInstanceGuard:
     @pytest.mark.asyncio
     async def test_lock_acquire_failure_skips_round_safely(self):
         cache = MagicMock()
-        cache.acquire_lock.side_effect = RuntimeError("zcache down")
+        cache.acquire_lock_strict.side_effect = RuntimeError("zcache down")
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
 
         # _guarded_scan should swallow the acquire error and not scan
@@ -412,6 +414,27 @@ class TestSingleInstanceGuard:
 
         assert not bot_repo.search_bots.called
         assert not cache.release_lock.called
+
+    @pytest.mark.asyncio
+    async def test_cache_lock_outage_is_reported_as_transient(self, caplog):
+        cache = MagicMock()
+        cache.acquire_lock_strict.side_effect = CacheLockInfrastructureError(
+            "cache lock backend is unavailable"
+        )
+        lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
+
+        with caplog.at_level(logging.INFO, logger="start"):
+            await lifecycle._guarded_scan()
+
+        assert cache.acquire_lock_strict.called
+        assert not bot_repo.search_bots.called
+        assert not cache.release_lock.called
+        records = [
+            record
+            for record in caplog.records
+            if "periodic-scan" in record.getMessage()
+        ]
+        assert records and records[-1].levelno == logging.WARNING
 
 
 class TestScanThrottle:
@@ -422,7 +445,7 @@ class TestScanThrottle:
     async def test_skips_scan_when_last_scan_too_recent(self):
         recent = datetime.now().isoformat()
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok"
+        cache.acquire_lock_strict.return_value = "tok"
         cache.release_lock.return_value = True
         cache.get.return_value = recent  # scanned just now
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
@@ -430,7 +453,7 @@ class TestScanThrottle:
         await lifecycle._guarded_scan()
 
         # lock acquired but scan skipped because too recent
-        cache.acquire_lock.assert_called_once()
+        cache.acquire_lock_strict.assert_called_once()
         cache.get.assert_called_once_with(lifecycle._scan_ts_key)
         assert not bot_repo.search_bots.called  # did NOT scan
         # lock released so others aren't blocked
@@ -447,7 +470,7 @@ class TestScanThrottle:
             datetime.now() - timedelta(minutes=_SCAN_INTERVAL_MINUTES + 1)
         ).isoformat()
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok"
+        cache.acquire_lock_strict.return_value = "tok"
         cache.release_lock.return_value = True
         cache.get.return_value = old
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
@@ -463,7 +486,7 @@ class TestScanThrottle:
     @pytest.mark.asyncio
     async def test_scans_when_no_last_scan_ts(self):
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok"
+        cache.acquire_lock_strict.return_value = "tok"
         cache.release_lock.return_value = True
         cache.get.return_value = None  # first run, never scanned
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
@@ -477,7 +500,7 @@ class TestScanThrottle:
     @pytest.mark.asyncio
     async def test_scans_when_last_scan_ts_malformed(self):
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok"
+        cache.acquire_lock_strict.return_value = "tok"
         cache.release_lock.return_value = True
         cache.get.return_value = "not-a-timestamp"  # corrupt → treat as scannable
         lifecycle, bot_repo, svc = _make_lifecycle(cache=cache)
@@ -875,7 +898,7 @@ class TestEnvScopedKeys:
     async def test_pre_not_starved_by_prod_timestamp(self):
         """A timestamp stamped under prod's key must not throttle pre's scan."""
         cache = MagicMock()
-        cache.acquire_lock.return_value = "tok"
+        cache.acquire_lock_strict.return_value = "tok"
         cache.release_lock.return_value = True
         # Cache holds a fresh ts ONLY under prod's key; pre's key is empty.
         prod_ts_key = "desktop_bot_periodic_scan:last_ts:prod"
