@@ -1,4 +1,4 @@
-import { readWorkflowDocument } from '../api/workflowDocument'
+import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
@@ -95,6 +95,8 @@ export default function WorkflowWorkspace() {
     targetId: string
     approval: WorkflowTransition | null
     prepared: WorkflowSpec | null
+    databaseSpec?: WorkflowSpec | null
+    activeDeployNumber?: number | null
     phase: 'restoring' | 'loading' | 'replaying'
     request: number
     syncRouterOnRestore?: boolean
@@ -153,7 +155,7 @@ export default function WorkflowWorkspace() {
         if (pending.phase === 'replaying' && currentIndex === pending.targetIndex && window.location.href === pending.targetHref) {
           if (pending.request === transitionRequest.current && pending.prepared && pending.approval
             && workflowTransitionIsCurrent(pending.approval)
-            && commitWorkflowTransition(pending.approval, pending.prepared, pending.targetId)) {
+            && commitWorkflowTransition(pending.approval, pending.prepared, pending.targetId, false, pending.databaseSpec, pending.activeDeployNumber)) {
             popTransaction.current = null
             releasePopOwner()
             rememberCommittedPop(event, pending.targetId)
@@ -185,7 +187,7 @@ export default function WorkflowWorkspace() {
             return
           }
           pending.phase = 'loading'
-          void readWorkflowDocument(pending.targetId).then(target => {
+          void readEditorWorkflowSource(pending.targetId).then(({ spec: target, databaseSpec, activeDeployNumber }) => {
             if (!mounted || popTransaction.current !== pending) return
             if (pending.request !== transitionRequest.current || popContext.current.locationKey !== pending.source.key) {
               popTransaction.current = null
@@ -195,6 +197,7 @@ export default function WorkflowWorkspace() {
             const prepared = prepareWorkflowTransition(pending.approval!, target, pending.targetId)
             if (!prepared) throw new Error('目标无效或确认后编辑内容已变化')
             pending.prepared = prepared
+            pending.databaseSpec = databaseSpec; pending.activeDeployNumber = activeDeployNumber
             pending.phase = 'replaying'
             window.history.go(pending.targetIndex - pending.source.index)
           }).catch(error => {
@@ -285,12 +288,12 @@ export default function WorkflowWorkspace() {
     if (!approval) return
     setTransitionError(null)
     try {
-      const target = await readWorkflowDocument(id)
+      const { spec: target, databaseSpec, activeDeployNumber } = await readEditorWorkflowSource(id)
       if (request !== transitionRequest.current || sourceLocation !== locationRef.current) return
       const prepared = prepareWorkflowTransition(approval, target, id)
       if (!prepared) throw new Error('目标无效或确认后编辑内容已变化')
       const committed = commitWorkflowRoute(approval, () => setSearchParams(next),
-        () => commitWorkflowTransition(approval, prepared, id),
+        () => commitWorkflowTransition(approval, prepared, id, false, databaseSpec, activeDeployNumber),
         () => setSearchParams(searchParams, { replace: true }))
       if (!committed) throw new Error('路由或画布状态已变化')
       setSelectedId(id)
@@ -317,7 +320,7 @@ export default function WorkflowWorkspace() {
     try {
       await createMutation.mutateAsync({ workflowId: input.workflowId, spec: input.spec, facade: input.facade, botOwnerId: user.userId })
       created = true
-      const target = await readWorkflowDocument(input.workflowId)
+      const { spec: target, databaseSpec, activeDeployNumber } = await readEditorWorkflowSource(input.workflowId)
       const refreshed = await refetch()
       if (request !== transitionRequest.current || sourceLocation !== locationRef.current) throw new Error('页面已变化')
       if (!refreshed.data?.some(workflow => workflow.workflow_id === input.workflowId)) throw new Error('新工作流尚未出现在列表中')
@@ -327,7 +330,7 @@ export default function WorkflowWorkspace() {
       if (!prepared) throw new Error('目标无效或确认后编辑内容已变化')
       const committed = commitWorkflowRoute(creationApproval,
         () => setSearchParams({ workflowId: input.workflowId, tab: 'editor' }),
-        () => commitWorkflowTransition(creationApproval, prepared, input.workflowId),
+        () => commitWorkflowTransition(creationApproval, prepared, input.workflowId, false, databaseSpec, activeDeployNumber),
         () => setSearchParams(searchParams, { replace: true }))
       if (!committed) throw new Error('路由或画布状态已变化')
       setSelectedId(input.workflowId)

@@ -41,6 +41,11 @@ const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, ca
 export class BotWorkflowPermissionRepository implements RunViewPermissions {
   constructor(private db: IDatabase, private botDirectory?: Pick<BotDirectory, "listBots">) {}
 
+  /** Rebind persistence without dropping the host's permission-policy dependencies. */
+  withDatabase(db: IDatabase): BotWorkflowPermissionRepository {
+    return new BotWorkflowPermissionRepository(db, this.botDirectory);
+  }
+
   /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
    * Directory failures remove this additional access path; direct grants still work.
    * Do not cache relationships here: membership removal must take effect on the next check.

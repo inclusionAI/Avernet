@@ -6,12 +6,12 @@ import PackVersionEditor from './PackVersionEditor'
 import { savePackVersion } from '../editor/packVersionSave'
 
 
-type Props = { workflowId: string | null; onSave?: () => void; canvasDirty?: boolean }
-export default function ScriptFilesTab({ workflowId, onSave, canvasDirty = false }: Props) {
+type Props = { workflowId: string | null; onSave?: () => void; canvasDirty?: boolean; savePending?: boolean }
+export default function ScriptFilesTab({ workflowId, onSave, canvasDirty = false, savePending = false }: Props) {
   if (!workflowId) return <p className="p-5 text-sm text-muted-foreground">请先保存工作流，再查看版本文件。</p>
-  return <ScriptFilesForWorkflow key={workflowId} workflowId={workflowId} onSave={onSave} canvasDirty={canvasDirty} />
+  return <ScriptFilesForWorkflow key={workflowId} workflowId={workflowId} onSave={onSave} canvasDirty={canvasDirty} savePending={savePending} />
 }
-function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty }: Props & { workflowId: string }) {
+function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty, savePending = false }: Props & { workflowId: string }) {
   const session = sessionFor(workflowId)
   const state = useSyncExternalStore(listener => { session.listeners.add(listener); return () => { session.listeners.delete(listener) } }, () => session.state, () => session.state)
   const [downloadError, setDownloadError] = useState(false)
@@ -50,6 +50,7 @@ function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty }: Props & { w
     load(session, workflowId, version)
   }
   function save() {
+    if (savePending) return // A workflow or Pack save owns the shared document write.
     if (onSave) onSave()
     else void savePackVersion(session, workflowId, version)
   }
@@ -99,7 +100,7 @@ function ScriptFilesForWorkflow({ workflowId, onSave, canvasDirty }: Props & { w
             if (!session.state.saving && !session.state.reconciliation && !session.state.versions[version].loading) updateVersion(session, version, { files, notice: null })
           }} />
         </fieldset>}
-      <button type="button" disabled={!packVersionWritesEnabled(current.snapshot) || (!dirty(current) && !canvasDirty) || current.blocked || !!state.reconciliation || state.saving || state.uploading || !!state.deployment || current.loading} onClick={() => void save()}>{state.saving ? '正在保存…' : '保存到草稿'}</button>
+      <button type="button" disabled={savePending || !packVersionWritesEnabled(current.snapshot) || (!dirty(current) && !canvasDirty) || current.blocked || !!state.reconciliation || state.saving || state.uploading || !!state.deployment || current.loading} onClick={() => void save()}>{state.saving ? '正在保存…' : '保存到草稿'}</button>
     </>}
   </div>
 }

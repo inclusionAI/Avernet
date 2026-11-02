@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stringify } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ validate: vi.fn() }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { validate: mocks.validate } } }))
+const mocks = vi.hoisted(() => ({ validate: vi.fn(), fetchJson: vi.fn() }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: mocks.fetchJson, api: { workflows: { validate: mocks.validate } } }))
 import { useEditorStore } from '../../editor/store'
 import YamlEditor from '../YamlEditor'
 
@@ -116,4 +117,98 @@ it('retains a rejected YAML apply across remount and allows retry without losing
   fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
   await waitFor(() => expect(onImport).toHaveBeenCalledTimes(2))
   expect(useEditorStore.getState().pendingEdits).toEqual({})
+})
+
+
+describe('YAML apply notice follows the actual DB save state', () => {
+  const state = () => useEditorStore.getState()
+  const initial: WorkflowSpec = { ...spec, nodes: [{ id: 'done', title: 'Done', phase: 'execute', executor: { type: 'done' } }] }
+  function LiveEditor() {
+    const { spec, importYaml } = useEditorStore()
+    return <YamlEditor spec={spec} onImport={importYaml} />
+  }
+  function mountLive(databaseSpec: WorkflowSpec | null = initial) {
+    state().loadSpec(initial, databaseSpec, databaseSpec === null ? 7 : undefined)
+    mocks.validate.mockResolvedValue({ valid: true })
+    render(<LiveEditor />)
+  }
+  async function apply(next: WorkflowSpec = { ...initial, title: 'Applied' }) {
+    // Even semantically unchanged YAML may be edited/reformatted and applied.
+    change(`${stringify(next)}# applied locally\n`)
+    fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+    await screen.findByText(/已应用 1 个节点的配置/)
+    expect(mocks.validate).toHaveBeenLastCalledWith(next)
+    expect(mocks.fetchJson).not.toHaveBeenCalled()
+    return structuredClone(state().spec!)
+  }
+  function completeSave(submitted = state().spec!) {
+    act(() => { expect(state().completeSave(submitted, submitted, state().sessionId)).toBe(true) })
+  }
+
+  it('keeps the immediate Apply acknowledgement and reports applied changes as unsaved', async () => {
+    mountLive(); await apply()
+    expect(state().isDirty).toBe(true); expect(state()._databaseSpec).toEqual(initial)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。尚未保存到服务器。')
+    expect(state().pendingEdits).toEqual({}); expect(mocks.validate).toHaveBeenCalledOnce()
+  })
+
+  it('updates the retained Apply notice after completeSave instead of still claiming unsaved', async () => {
+    mountLive(); const applied = await apply()
+    completeSave(applied)
+    expect(state().isDirty).toBe(false); expect(state()._databaseSpec).toEqual(applied)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。已保存到数据库。')
+    expect(screen.queryByText(/尚未保存到服务器/)).not.toBeInTheDocument()
+    expect(mocks.validate).toHaveBeenCalledOnce(); expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
+
+  it('returns to unsaved after a later canvas edit without requiring another Apply', async () => {
+    mountLive(); await apply(); completeSave()
+    expect(screen.getByRole('status')).toHaveTextContent('已保存到数据库。')
+    act(() => state().updateSpecField('title', 'Later canvas edit'))
+    expect(state().isDirty).toBe(true)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。尚未保存到服务器。')
+    expect(screen.queryByText(/已保存到数据库/)).not.toBeInTheDocument()
+    expect(mocks.validate).toHaveBeenCalledOnce(); expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
+
+  it('does not claim later typed or reapplied YAML was saved', async () => {
+    mountLive(); await apply(); completeSave()
+    change(stringify({ ...initial, title: 'Later YAML edit' }))
+    expect(screen.queryByText(/已保存到数据库/)).not.toBeInTheDocument()
+    expect(screen.getByText('未应用草稿')).toBeInTheDocument()
+    expect(state().isDirty).toBe(false); expect(state().pendingEdits).toHaveProperty('yaml')
+    fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+    await screen.findByText(/已应用 1 个节点的配置。尚未保存到服务器/)
+    expect(state().isDirty).toBe(true); expect(state()._databaseSpec?.title).toBe('Applied')
+    expect(mocks.validate).toHaveBeenCalledTimes(2); expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
+
+  it('treats an unchanged active fallback as unsaved until its absent draft is actually saved', async () => {
+    mountLive(null); const applied = await apply(initial)
+    expect(state().isDirty).toBe(false); expect(state()._databaseSpec).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。尚未保存到服务器。')
+    completeSave(applied)
+    expect(state()._databaseSpec).toEqual(initial); expect(state().isDirty).toBe(false)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。已保存到数据库。')
+    expect(screen.queryByText(/尚未保存到服务器/)).not.toBeInTheDocument()
+    expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
+
+  it('does not mark content identical to an existing DB draft as unsaved just because it was applied', async () => {
+    mountLive(); await apply(initial)
+    expect(state().isDirty).toBe(false)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。已保存到数据库。')
+    expect(screen.queryByText(/尚未保存到服务器/)).not.toBeInTheDocument()
+    expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
+
+  it('keeps reporting unsaved when a completed save did not include newer canvas changes', async () => {
+    mountLive(); const submitted = await apply()
+    act(() => state().updateSpecField('title', 'Changed while saving'))
+    completeSave(submitted)
+    expect(state().isDirty).toBe(true); expect(state()._databaseSpec).toEqual(submitted)
+    expect(screen.getByRole('status')).toHaveTextContent('已应用 1 个节点的配置。尚未保存到服务器。')
+    expect(screen.queryByText(/已保存到数据库/)).not.toBeInTheDocument()
+    expect(mocks.fetchJson).not.toHaveBeenCalled()
+  })
 })
