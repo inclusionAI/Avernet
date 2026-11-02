@@ -12,11 +12,12 @@
 - **Done when:** HTTP/真实DI/会话与管理边界测试通过。
 - **Verification:** 独立新worktree完整定向组621 passed（包含真实HTTP/DI、模块边界、永久Protocol契约）。原worktree单文件反复回写旧内容，保留现场并迁移到新worktree，未继续覆盖旧文件。
 
-## Task 3 [~]: Frontend stage propagation and readonly states
+## Task 3 [x]: Frontend stage propagation and readonly states
 - **Goal:** 现有管理和会话界面接入stage-aware选择。
-- **Done when:** 预发/线上只读、未知提示、会话懒加载和分页测试通过。
+- **Done when:** 预发/线上只读、未知空列表无提示、会话懒加载和分页测试通过。
+- **Verification:** assembled前端28 suites / 243 tests、tsc、lint、Bigfish build通过；真实组件+外部catalog fixture浏览器smoke确认未知只有正常空列表。team chat entity和真实知识Owner分离，缺Owner不猜测。
 
-## Task 4 [ ]: Verification and independent review
+## Task 4 [~]: Verification and independent review
 - **Goal:** 更新文档、运行门禁、独立评审并修复。
 - **Done when:** 记录实际测试结果和未验证范围，不复用旧绿灯。
 
