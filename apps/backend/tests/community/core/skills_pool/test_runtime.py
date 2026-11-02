@@ -8,7 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    DeviceNotBoundError,
+)
 from agentclaw.community.core.skills_pool.models import (
     MappingProjectionStatus,
     MappingResultReason,
@@ -713,6 +716,36 @@ async def test_pool_runtime_fails_closed_for_unknown_engine_status() -> None:
         "source": "newer-engine",
         "raw_status": "FUTURE_STATUS",
     }
+
+
+@pytest.mark.asyncio
+async def test_pool_runtime_marks_unbound_device_cleanup_as_invalid(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class UnboundResolver:
+        def resolve_for_bot(self, bot_id, user_id):
+            raise DeviceNotBoundError("no active binding")
+
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=UnboundResolver(),
+        adapter_transport=FakeTransport(),
+        probe_service=FakeProbe(),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        result = await runtime.cleanup_quarantine(
+            bot_id="bot-1",
+            user_id="owner-1",
+            engine="openclaw",
+            migration_generation="generation-1",
+        )
+
+    assert result.status is RuntimeQuarantineCleanupStatus.INVALID
+    assert result.evidence == {
+        "reason": "device_not_bound",
+        "error_type": "DeviceNotBoundError",
+    }
+    assert not any(record.levelname == "ERROR" for record in caplog.records)
 
 
 @pytest.mark.asyncio

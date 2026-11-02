@@ -12,7 +12,10 @@ from injector import inject
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    DeviceNotBoundError,
+)
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentRequest,
 )
@@ -573,17 +576,17 @@ class SkillsPoolRuntime:
                 path="/api/skills/layout/quarantine/cleanup",
                 body={"migration_generation": migration_generation},
             )
-        except Exception as error:
-            logger.exception(
-                "[skills_pool.runtime] quarantine cleanup failed "
+        except DeviceNotBoundError as error:
+            logger.warning(
+                "[skills_pool.runtime] quarantine cleanup blocked by unbound device "
                 "bot_id=%s generation=%s",
                 bot_id,
                 migration_generation,
             )
             return RuntimeQuarantineCleanupResult(
-                status=RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR,
+                status=RuntimeQuarantineCleanupStatus.INVALID,
                 evidence={
-                    "reason": "runtime_cleanup_outcome_unknown",
+                    "reason": "device_not_bound",
                     "error_type": type(error).__name__,
                 },
             )
