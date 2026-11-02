@@ -45,6 +45,8 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   defaultWidth?: number;
   /** 宽度持久化 key（默认为左栏 key）；不同面板传独立 key 避免互相覆盖。 */
   storageKey?: string;
+  /** 定位请求递增时展开侧栏，不改动所选会话。 */
+  expandRequest?: number;
   onDismiss?: () => void; // 右侧临时面板点击外部关闭；左侧常驻列表不启用。
 }
 
@@ -59,6 +61,7 @@ export function ResizableWorkspaceSidebar({
   maxWidth: maxWidthProp,
   defaultWidth: defaultWidthProp,
   storageKey: storageKeyProp,
+  expandRequest,
   onDismiss,
   ...rest
 }: ResizableWorkspaceSidebarProps) {
@@ -74,6 +77,11 @@ export function ResizableWorkspaceSidebar({
   const contentId = `workspace-sidebar-content-${useId().replace(/:/g, '')}`;
   const [preferredWidth, setPreferredWidth] = useState(() => readStoredWidth(storageK, defaultW, minW, maxW));
   const [collapsed, setCollapsed] = useState(() => (isRight ? false : readStoredCollapsed()));
+  useLayoutEffect(() => {
+    if (!expandRequest || isRight) return;
+    setCollapsed(false);
+    persistCollapsed(false);
+  }, [expandRequest, isRight]);
   const preferredWidthRef = useRef(preferredWidth);
   const dragStartRef = useRef<{ clientX: number; width: number } | null>(null);
   const [maxWidth, setMaxWidth] = useState(maxW);
