@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
+from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterEndpointNotFoundError
 
 
 def creation_adapter_ready(*, spec: dict[str, Any], bot: dict[str, Any], bot_id: str,
@@ -30,10 +31,21 @@ def expert_adapter_ready(
     )
 
     async def probe() -> dict[str, Any]:
-        return await asyncio.wait_for(
-            transport.invoke(context.conn_info, "GET", "/readiness", timeout=3.0),
-            timeout=3.0,
-        )
+        try:
+            return await asyncio.wait_for(
+                transport.invoke(context.conn_info, "GET", "/readiness", timeout=3.0),
+                timeout=3.0,
+            )
+        except DeviceAdapterEndpointNotFoundError as exc:
+            if not exc.standard_route_missing:
+                raise
+            # Older adapters lack /readiness. Do not treat 404 as ready: the
+            # same authenticated route must successfully answer /health.
+            health = await asyncio.wait_for(
+                transport.invoke(context.conn_info, "GET", "/health", timeout=3.0),
+                timeout=3.0,
+            )
+            return {"state": "ready"} if health.get("status") == "ok" else {}
 
     response = asyncio.run(probe())
     return response.get("state") == "ready"
