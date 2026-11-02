@@ -23,6 +23,7 @@ from agentclaw.community.core.services import resource_file_service
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
+    is_write_forbidden,
 )
 
 
@@ -501,11 +502,36 @@ async def test_publish_resolve_failure_raises_valueerror():
         await svc.read_file(**_COORDS, path="a.txt", publish_id="99")
 
 
-def test_is_readonly_rules():
-    assert is_readonly(".env") is True
-    assert is_readonly("AGENTS.md") is True       # identity file at root
-    assert is_readonly("sub/AGENTS.md") is False  # only at root
-    assert is_readonly("data/report.csv") is False
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-repo",
+        "skills-pool/skills-repo/test1",
+        "skills/skills-repo/test1",
+        "skills-pool//skills-repo/test1",
+        "skills-pool/./skills-repo/test1",
+    ],
+)
+def test_is_readonly_community_skill_repos(path):
+    """Shared skill-repo trees aren't deletable workspace resources."""
+    assert is_readonly(path) is True
+    assert is_write_forbidden(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-local",
+        "skills-pool/skills-local/test1",
+        "skills-pool/skills-repositories/test1",
+        "data/skills-repo/test1",
+        "data/report.csv",
+    ],
+)
+def test_is_write_allowed_for_non_skill_repo_paths(path):
+    """The guard targets repo roots exactly, not every pool/skills name."""
+    assert is_readonly(path) is False
+    assert is_write_forbidden(path) is False
 
 
 def test_resolves_from_di(test_injector):

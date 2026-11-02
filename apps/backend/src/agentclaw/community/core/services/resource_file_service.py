@@ -79,6 +79,24 @@ logger = get_logger()
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
 _POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
+# Shared skill repositories backed by ARCA's READ_ONLY skill-repo mount. Their
+# runtime paths vary by engine, but the workspace-relative address is stable.
+# Keep the exact prefix so skills-local and other pool trees stay writable.
+_READONLY_SKILL_REPO_RELPATHS = (
+    "skills/skills-repo",
+    "skills-pool/skills-repo",
+)
+
+
+def _readonly_repo_prefix(path: str) -> bool:
+    """Normalize a workspace address before matching read-only skill-repo roots."""
+    segments = [s for s in path.split("/") if s and s != "."]
+    relpath = "/".join(segments)
+    return any(
+        relpath == prefix or relpath.startswith(f"{prefix}/")
+        for prefix in _READONLY_SKILL_REPO_RELPATHS
+    )
+
 # System files excluded from search/archive and protected from deletion, and
 # system directories excluded from search/archive: the one list lives in
 # ``core/workspace/protected_entries.py`` (the apply engine's clear skips the
@@ -88,8 +106,15 @@ _HIDDEN_DIRNAMES = PROTECTED_ROOT_DIRS
 
 
 def is_readonly(path: str) -> bool:
-    """Whether a file/dir is read-only (cannot delete): dotfiles, or an OpenClaw
-    identity ``.md`` file in the workspace root."""
+    """Whether a file/dir is read-only (cannot delete).
+
+    This covers dotfiles and workspace-root identity files that the API must
+    not manage. It also covers shared skill repositories: ARCA mounts them
+    READ_ONLY. An otherwise authorized delete must refuse here instead of
+    surfacing the ARCA/Bolt refusal as a misleading not-found.
+    """
+    if _readonly_repo_prefix(path):
+        return True
     basename = path.rsplit("/", 1)[-1] if "/" in path else path
     if basename.startswith("."):
         return True
