@@ -284,7 +284,7 @@ class SkillService:
             # local_dir: 已移动到 skills/skills-local，由 get_bot_skills_local_dir 管理
             logger.info(f"[SkillService._ensure_directories] Directories ensured: active_dir={self.active_dir.exists()}")
         except Exception as e:
-            logger.error(f"[SkillService._ensure_directories] Warning: {e}")
+            logger.warning(f"[SkillService._ensure_directories] Warning: {e}")
 
     # ========================================================================
     # 路径转换工具方法
