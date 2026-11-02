@@ -3,8 +3,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { BotDomain } from '@/services/botWorkshop';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import React from 'react';
-import { lifecycleLabel } from './config';
 import { BotStatusPublicationMenu } from './BotStatusPublicationMenu';
+import { lifecycleLabel } from './config';
 
 export interface BotStatusCellProps {
   bot: BotDomain;
@@ -35,9 +35,26 @@ function dotColor(lifecycle: BotDomain['lifecycle']): string {
   }
 }
 
-const BotStatusCell: React.FC<BotStatusCellProps> = ({ bot, progressExpanded, onToggleProgress, onManagePublication }) => {
+const BotStatusCell: React.FC<BotStatusCellProps> = ({
+  bot,
+  progressExpanded,
+  onToggleProgress,
+  onManagePublication,
+}) => {
   const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
-  const statusLabel = bot.serviceMode === 'service' && bot.lifecycle === 'failed' ? '部署失败' : lifecycleLabel[bot.lifecycle];
+  const personalCloud = bot.serviceMode === 'non-service' && bot.deployment === 'cloud';
+  const recoveryLabel = personalCloud
+    ? ({ RECYCLED: '已回收', REACTIVATING: '激活中', RECYCLING: '回收中' } as Record<string, string>)[
+        bot.rawStatus?.toUpperCase() ?? ''
+      ]
+    : undefined;
+  const statusLabel =
+    recoveryLabel ??
+    (personalCloud && bot.rawDisplayState === 'dormant'
+      ? '已回收'
+      : bot.serviceMode === 'service' && bot.lifecycle === 'failed'
+      ? '部署失败'
+      : lifecycleLabel[bot.lifecycle]);
   const statusDisplay = (
     <span className="inline-flex items-center gap-1.5">
       <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotColor(bot.lifecycle)}`} />
