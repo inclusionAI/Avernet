@@ -80,6 +80,7 @@ export function DebugChatPanel({
       botId: bot.id,
       realBotId: bot.id,
       ownerId: ownerId ?? bot.ownerId,
+      engineOwnerId: bot.ownerId,
       displayName: bot.name,
       online: bot.lifecycle === 'running',
       chatable: true,

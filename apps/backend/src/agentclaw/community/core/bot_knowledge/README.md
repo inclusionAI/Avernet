@@ -1,9 +1,10 @@
 # Bot knowledge
 
-Current application selection only; external platforms own grants. The platform catalog uses
+Current selection and best-effort publication observations; external platforms own grants. The platform catalog uses
 the existing business Bot ID and target user identifier; no new UUID contract.
-Service Bots require the current draft editing state. No knowledge versions,
-release hooks, audit tables or membership synchronization are introduced.
+Service Bots require the current draft editing state. Version observations are
+optional display data, not a new knowledge lifecycle or publication authority.
+No new tables or membership synchronization are introduced.
 
 ## Context Boundary
 
@@ -13,14 +14,18 @@ provides:
   - BotKnowledgeService
   - BotKnowledgeRepository
   - BotKnowledgeAgentsMdSync
+  - BotKnowledgePublicationSelection
+  - BotKnowledgeStageSelection
 consumes:
   - DatabasePlugin
+  - BotCommonConfigRepositoryProtocol
   - KnowledgeCatalogPlugin
   - KnowledgeCatalog
 internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.plugin_api
   - agentclaw.community.core.base
+  - agentclaw.community.core.repository.protocols.config
   - agentclaw.community.core.bot_knowledge
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.knowledge_management
@@ -81,6 +86,67 @@ broken fence (start marker without its end marker) suggests hand-editing
 damage rather than risk eating user-written content. An empty selection removes
 the section; an unchanged projection is not written back.
 
+## Stage selections and optional publication observations
+
+Draft continues to use `ac_bot_knowledge_binding.enabled`, its revision CAS and
+native Editor/draft admission. BUILDING captures at most 100 enabled IDs (LIMIT
+101 rejects overflow) into the existing common-config store in an independent
+session. Historical versions are never backfilled. Rebuilds replace the latest
+successful observation, not an immutable build-generation artifact.
+
+The existing management and conversation GET URLs accept `runtime_stage`:
+`draft` uses current binding state; `verify` resolves the latest native validating
+publication and its observation; `online` resolves native SUCCESS and reads the
+existing `online_enabled` column, with provenance from `projection:online` in
+common-config. The marker must match source PK/tenant/env/space/publication,
+version, native online workflow and existing native rollback intent identity.
+Missing/corrupt/mismatched observations or optional storage errors return a normal
+empty HTTP page `{ "items": [], "next_cursor": null }`, without unknown-state
+notices, diagnostic metadata or underlying errors. Internal reads retain diagnostic
+status; unknown never writes disabled state back. Normal admission errors remain.
+Only a valid last_recorded observation with an empty ID list means all-off.
+The native publication remains the version authority. Never infer a version from
+the highest stored snapshot or substitute a draft into an online/verify read.
+
+After actual ONLINE BaaS SUCCESS, the existing publication progress poll attempts a
+best-effort projection in its own `transactional_orm_session` auxiliary unit. That transaction writes
+only common-config plus at most 200 binding IDs from the old/new selections.
+It never modifies draft enabled, revision or updated_by on existing rows, never
+locks/mutates native publish rows and is not a native success prerequisite.
+Rollback uses the target publication after its actual deployment success, not
+the early SUCCESS admission flip. Its existing rollback timestamp/origin token
+invalidates prior provenance before redeploy. Late lower-workflow projections
+are rejected. Online reads probe the complete binding unique key before
+space/flag filtering. Missing rows use one tenant-stamped bounded bulk insert;
+identical projection replays do not write business rows. Marker updates also
+compare-and-swap the previously read value; a lost race rolls back all auxiliary
+writes, including on SQLite where FOR UPDATE is not enforced. The poll captures a
+bounded native workflow/rollback identity before its existing native sync call;
+projection requires that same identity, so a delayed callback cannot sign a
+new rollback token even if no marker was previously saved. Plain in-place
+restart redeploys the same publication and does not resample, copy selections
+or endorse rollback tokens; its poll has no knowledge dependency. Identity-read failure
+merely skips the auxiliary projection; native sync still runs.
+No new worker, retry, ledger, task or table is added. No ext fields are added.
+
+Snapshots are not grants or ACLs. Management retains Editor authorization;
+conversation retains native conversation admission and requires Editor standing
+for service draft/verify. Public/friend admission can expose online references,
+not draft configuration. Every result is intersected with current catalog grants
+and conversation metadata must be ready. Knowledge source/space/tenant ownership
+is checked before exposing a snapshot. Unknown state returns the ordinary empty page without diagnostic metadata
+or notices; it never writes an all-off configuration.
+
+The existing production `online_enabled` column must already exist before this
+code is deployed; ORM mapping is not a schema migration. No DDL or data backfill
+is run by this feature. Existing AGENTS.md projection and native runtime behavior
+are unchanged. A failed optional write leaves stale/missing auxiliary data; reads
+validate version provenance rather than presenting a stale projection as current.
+Exception isolation does not impose a hard DB deadline: connection/driver waits,
+shared-DB failures and real device/file synchronization require separate runtime
+validation. Generic common-config operators retain their current privileges;
+these records are not a tamper-proof audit log.
+
 ## Live local acceptance
 
 The unified Singlebox manifest registers all production Core files, both HTTP
@@ -135,3 +201,7 @@ transaction locks and re-resolves both Bot and space after the external grant
 check. A real intervening move is rejected, while normalizing NULL to the same
 personal space preserves selections and CAS revisions. Limits, binding pages
 and runtime selection reads use the same effective scope.
+
+A recreate/retry that changes native publication identity but does not pass a
+publication progress observation may leave this optional display empty. There
+is deliberately no compensation or restart-specific knowledge transaction.

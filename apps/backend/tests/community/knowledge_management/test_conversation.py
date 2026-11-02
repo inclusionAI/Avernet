@@ -294,17 +294,21 @@ def test_deleted_or_missing_bot_cannot_share_knowledge(world, conversation, scop
     world.catalog.page_authorized.assert_not_called()
 
 
-def test_service_bot_draft_selection_is_not_exposed(world, conversation):
-    from agentclaw.community.kernel.knowledge_management import KnowledgeManagementError
+def test_service_bot_draft_is_readable_by_its_native_owner(world, conversation):
+    assert conversation[0].list_for_bot(
+        scope=BotKnowledgeScope("bot", "other-owner", "pre"),
+        actor_id="other-owner", request_headers={},
+    ) == {"items": [], "next_cursor": None, "selection_status": "current",
+          "publication_id": None, "captured_at": None}
+    world.catalog.page_authorized.assert_not_called()
 
-    with pytest.raises(
-        KnowledgeManagementError, match="KNOWLEDGE_CONVERSATION_UNSUPPORTED"
-    ):
-        conversation[0].list_for_bot(
-            scope=BotKnowledgeScope("bot", "other-owner", "pre"),
-            actor_id="other-owner",
-            request_headers={},
-        )
+
+def test_service_bot_draft_cannot_be_read_through_online_friend_admission(world, conversation):
+    from agentclaw.community.plugin_api.models import BotModel
+    with world.db.orm_session() as session:
+        session.get(BotModel, 1).bot_type = "service"
+    with pytest.raises(KnowledgeError, match="SPACE_MEMBER_REQUIRED|BOT_EDITOR_REQUIRED"):
+        read(conversation)
     world.catalog.page_authorized.assert_not_called()
 
 

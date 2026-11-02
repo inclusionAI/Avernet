@@ -85,6 +85,17 @@ Owner, and only reference IDs/names are returned. This never grants direct KB
 asset, original-file, management or Editor access; existing management routes
 retain their original checks. ACLs, grants and enablement rows are never mutated.
 
-This contract covers personal/current Bot selections only. Service-Bot draft or
-online selections are not substituted; requests for those return
-`KNOWLEDGE_CONVERSATION_UNSUPPORTED` (422). No schema or runtime retrieval change.
+Both Bot GET URLs now accept `runtime_stage=draft|verify|online` (default draft).
+Personal draft responses retain their exact original fields. Service responses
+with valid stage state also expose selection_status, publication_id and captured_at. The shared local
+stage reader resolves native publications; draft uses enabled, verify uses the
+publication observation, online uses online_enabled with exact version/workflow
+provenance. Valid non-draft items have a boolean enabled and revision=null
+(read-only). Missing/corrupt stage data or optional stage-store failures return
+exactly {"items": [], "next_cursor": null} for both URLs: no unknown-state notice,
+status metadata or underlying exception is exposed. This is not a disabled-state
+write; existing permissions/invalid-input/provider errors are not swallowed. Service draft/verify additionally
+require native Editor standing; online keeps native conversation admission.
+Neither interface substitutes draft data for unknown historical state. Snapshots
+are always intersected with current grants and conversation-ready metadata.
+No new URL, runtime retrieval policy, ACL or native publish transaction is added.
