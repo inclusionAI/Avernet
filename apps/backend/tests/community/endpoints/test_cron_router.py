@@ -101,7 +101,7 @@ class TestResolveUserIdentity:
     """Tests for _resolve_user_identity helper function."""
 
     def test_owner_scenario_returns_current_user(self):
-        """When owner_id is None, returns current user's identity."""
+        """A non-owner match falls back to the current request identity."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
         user = AuthenticatedUser(
@@ -110,16 +110,23 @@ class TestResolveUserIdentity:
             nickName="Test User",
             operatorName="Test User",
         )
-        bot_service = _RecordingBotService()
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "", "owner_name": ""},
+        )
         user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        # Current-user branch is used when no Bot ID is provided.
+        assert bot_service.list_bots_by_conditions_calls == [{
+            "bot_id": "bot1",
+            "page": 1,
+            "page_size": 1,
+            "attach_templates": False,
+        }]
         assert bot_service.get_bot_calls == []
 
     def test_owner_scenario_with_empty_owner_id(self):
-        """When owner_id is empty string, returns current user's identity."""
+        """An empty query result still falls back to the current identity."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
         user = AuthenticatedUser(
@@ -128,11 +135,19 @@ class TestResolveUserIdentity:
             nickName="Test User",
             operatorName="Test User",
         )
-        bot_service = _RecordingBotService()
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "", "owner_name": ""},
+        )
         user_id, nick_name = _resolve_user_identity("", "bot1", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "Test User"
+        assert bot_service.list_bots_by_conditions_calls == [{
+            "bot_id": "bot1",
+            "page": 1,
+            "page_size": 1,
+            "attach_templates": False,
+        }]
         assert bot_service.get_bot_calls == []
 
     def test_bot_id_all_returns_current_user(self):
@@ -205,6 +220,26 @@ class TestResolveUserIdentity:
         user = self.make_collaborator()
 
         bot_service = _RecordingBotService(total=2)
+
+        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+
+        assert user_id == "u_collab"
+        assert nick_name == "Collab User"
+        assert bot_service.list_bots_by_conditions_calls == [{
+            "bot_id": "bot1",
+            "page": 1,
+            "page_size": 1,
+            "attach_templates": False,
+        }]
+        assert bot_service.get_bot_calls == []
+
+    def test_resolver_failure_without_owner_id_falls_back_to_caller(self):
+        """Inventory errors keep the cron request in the caller namespace."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = self.make_collaborator()
+
+        bot_service = _RecordingBotService(unique_error=Exception("inventory unavailable"))
 
         user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
 
