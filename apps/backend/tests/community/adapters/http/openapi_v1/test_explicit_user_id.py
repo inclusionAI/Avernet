@@ -420,6 +420,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
+    # task_config match is a typed-config probe: env is resolved server-side
+    # and the probed value (a bot id) arrives in the body, so the operation
+    # names no caller-supplied user dimension.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/config/match"),
     # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
@@ -623,7 +627,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 140}
+# The task_config match probe adds one operation without a path/query bot_id.
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 141}
 
 
 def _schema() -> dict:
