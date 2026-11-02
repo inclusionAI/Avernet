@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing, contextmanager
+from decimal import Decimal
 
 from search_core.plugin_api.index_documents import (
     DocumentChanges,
@@ -17,12 +18,12 @@ from search_core.plugin_api.index_documents import (
 from search_core.plugin_api.vector_point import VectorPoint
 
 TABLE = "search_index_documents"
-COLUMNS = "id, vector, payload, source_revision, extra, is_deleted, version, gmt_modify"
+COLUMNS = "id, vector, payload, source_revision, extra, is_deleted, version, gmt_modify, filters"
 VERSION_COLUMNS = "id, source_id, version, is_deleted, gmt_modify"
 SQLITE_SCHEMA = f"""CREATE TABLE IF NOT EXISTS {TABLE} (
     environment TEXT NOT NULL, index_key TEXT NOT NULL, id TEXT NOT NULL,
     source_id TEXT NOT NULL,
-    vector TEXT NOT NULL, payload TEXT NOT NULL, extra TEXT NOT NULL,
+    vector TEXT NOT NULL, payload TEXT NOT NULL, extra TEXT NOT NULL, filters TEXT,
     source_revision INTEGER NOT NULL, version INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL, gmt_modify REAL NOT NULL,
     PRIMARY KEY(environment, index_key, id))"""
@@ -64,6 +65,19 @@ class SqlIndexDocuments:
         return cur.execute(sql.replace("?", self.placeholder), params)
 
     @property
+    def columns(self):
+        return self._read_columns(COLUMNS)
+
+    def _read_columns(self, columns):
+        if self.placeholder == "?":
+            return columns
+        return columns.replace("gmt_modify", "UNIX_TIMESTAMP(gmt_modify) AS gmt_modify")
+
+    @property
+    def _time_parameter(self):
+        return "?" if self.placeholder == "?" else "FROM_UNIXTIME(?)"
+
+    @property
     def scope(self):
         return self.environment, self.index_key
 
@@ -82,13 +96,16 @@ class SqlIndexDocuments:
             bool(row[5]),
             int(row[6]),
             float(row[7]),
+            None
+            if row[8] is None
+            else {k: tuple(v) for k, v in json.loads(row[8]).items()},
         )
 
     def load_by_id(self, id):
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {COLUMNS} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
                 (*self.scope, id),
             )
             return self.decode(cur.fetchone())
@@ -104,7 +121,7 @@ class SqlIndexDocuments:
             marks = ",".join("?" for _ in ids)
             self._execute(
                 cur,
-                f"SELECT {COLUMNS} FROM {TABLE} WHERE environment=? AND index_key=? AND id IN ({marks})",
+                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id IN ({marks})",
                 (*self.scope, *ids),
             )
             documents = [self.decode(row) for row in cur.fetchall()]
@@ -115,7 +132,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {COLUMNS} FROM {TABLE} WHERE environment=? AND index_key=? AND source_id=?",
+                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND source_id=?",
                 (*self.scope, source_id),
             )
             return [self.decode(row) for row in cur.fetchall()]
@@ -144,7 +161,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"SELECT {VERSION_COLUMNS} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    f"SELECT {self._read_columns(VERSION_COLUMNS)} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
                     (*self.scope, after, upper, batch_size),
                 )
                 rows = cur.fetchall()
@@ -165,7 +182,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {COLUMNS} FROM {TABLE} WHERE environment=? AND id=? ORDER BY gmt_modify DESC LIMIT 1",
+                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND id=? ORDER BY gmt_modify DESC LIMIT 1",
                 (self.environment, id),
             )
             return self.decode(cur.fetchone())
@@ -178,7 +195,7 @@ class SqlIndexDocuments:
         """
         self._execute(
             cur,
-            f"SELECT source_revision, version, gmt_modify FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+            f"SELECT {self._read_columns('source_revision, version, gmt_modify')} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
             (*self.scope, document.id),
         )
         current = cur.fetchone()
@@ -189,13 +206,25 @@ class SqlIndexDocuments:
         if current is not None and current[0] > document.source_revision:
             return False
         self._execute(cur, f"SELECT {self.now_expression}")
-        now = float(cur.fetchone()[0])
-        modified = max(now, float(current[2]) + 0.000001) if current else now
+        raw_now = cur.fetchone()[0]
+        if self.placeholder == "?":
+            now = float(raw_now)
+            modified = max(now, float(current[2]) + 0.000001) if current else now
+        else:
+            now = Decimal(str(raw_now))
+            modified = (
+                max(now, Decimal(str(current[2])) + Decimal("0.000001"))
+                if current
+                else now
+            )
         values = (
             document.source_id,
             json.dumps(document.point.vector, allow_nan=False),
             json.dumps(document.point.payload, ensure_ascii=False, allow_nan=False),
             json.dumps(document.metadata, ensure_ascii=False, allow_nan=False),
+            None
+            if document.filters is None
+            else json.dumps(document.filters, ensure_ascii=False, allow_nan=False),
             document.source_revision,
             (int(current[1]) + 1) if current else 1,
             int(document.is_deleted),
@@ -204,13 +233,13 @@ class SqlIndexDocuments:
         if current is None:
             self._execute(
                 cur,
-                f"INSERT INTO {TABLE} (source_id,vector,payload,extra,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO {TABLE} (source_id,vector,payload,extra,filters,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,{self._time_parameter},?,?,?)",
                 (*values, *self.scope, document.id),
             )
         else:
             self._execute(
                 cur,
-                f"UPDATE {TABLE} SET source_id=?,vector=?,payload=?,extra=?,source_revision=?,version=?,is_deleted=?,gmt_modify=? WHERE environment=? AND index_key=? AND id=?",
+                f"UPDATE {TABLE} SET source_id=?,vector=?,payload=?,extra=?,filters=?,source_revision=?,version=?,is_deleted=?,gmt_modify={self._time_parameter} WHERE environment=? AND index_key=? AND id=?",
                 (*values, *self.scope, document.id),
             )
         return True
@@ -219,7 +248,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT MAX(gmt_modify) FROM {TABLE} WHERE environment=? AND index_key=?",
+                f"SELECT {('MAX(gmt_modify)' if self.placeholder == '?' else 'UNIX_TIMESTAMP(MAX(gmt_modify))')} FROM {TABLE} WHERE environment=? AND index_key=?",
                 self.scope,
             )
             row = cur.fetchone()
@@ -242,7 +271,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"SELECT {COLUMNS} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
                     (*self.scope, after, upper, batch_size),
                 )
                 rows = cur.fetchall()
@@ -288,19 +317,21 @@ class SqlIndexDocuments:
     def _iter_changes(self, checkpoint, batch_size, *, lightweight):
         if batch_size < 1:
             raise ValueError("positive batch size required")
-        columns = VERSION_COLUMNS if lightweight else COLUMNS
+        columns = self._read_columns(VERSION_COLUMNS if lightweight else COLUMNS)
         decode = self.decode_version if lightweight else self.decode
         upper = self.get_last_modified_time()
         if not upper:
             return
-        after_time, after_id = -1.0, ""
+        # FROM_UNIXTIME(-1) is NULL in MySQL; epoch zero is the lower bound.
+        after_time, after_id = (0.0 if self.placeholder == "%s" else -1.0), ""
+        stamp = self._time_parameter
         while True:
             with self._cursor() as cur:
                 self._execute(
                     cur,
                     f"""SELECT {columns} FROM {TABLE}
-                    WHERE environment=? AND index_key=? AND gmt_modify>=? AND gmt_modify<=?
-                    AND (gmt_modify>? OR (gmt_modify=? AND id>?))
+                    WHERE environment=? AND index_key=? AND gmt_modify>={stamp} AND gmt_modify<={stamp}
+                    AND (gmt_modify>{stamp} OR (gmt_modify={stamp} AND id>?))
                     ORDER BY gmt_modify,id LIMIT ?""",
                     (
                         *self.scope,
@@ -326,6 +357,8 @@ class SqlIndexDocuments:
 def initialize_sqlite_documents(conn):
     conn.execute(SQLITE_SCHEMA)
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
+    if "filters" not in columns:
+        conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN filters TEXT")
     if "source_id" not in columns:
         conn.execute(
             f"ALTER TABLE {TABLE} ADD COLUMN source_id TEXT NOT NULL DEFAULT ''"
