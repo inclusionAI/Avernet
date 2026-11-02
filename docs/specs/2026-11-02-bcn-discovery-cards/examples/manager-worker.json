@@ -1,0 +1,70 @@
+{
+  "name": "数据库诊断协作群",
+  "description": "Manager–Worker 群：数据库诊断协作群",
+  "version": "7",
+  "supportedInterfaces": [
+    {
+      "url": "https://non-invocable.invalid/groups/group-mw-001",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery identity and composition",
+        "required": true,
+        "params": {
+          "resourceId": "bcn://demo/groups/group-mw-001",
+          "resourceKind": "group",
+          "groupKind": "manager_worker",
+          "execution": {
+            "mode": "local",
+            "runtimeProfile": "bcn.manager-worker.a2a/v1"
+          },
+          "composition": {
+            "definition": {
+              "managerSlot": "manager",
+              "workerSlots": [
+                "worker:bot-worker-001"
+              ],
+              "instruction": "由 manager 分解任务，分配给 worker 后汇总结果。"
+            },
+            "bindings": {
+              "manager": [
+                {
+                  "resourceId": "bcn://demo/agents/bot-manager-001",
+                  "revision": "sha256:988301d530c424148832bb01e969622e6e5ec660e0568c6e8ffaabdb4c5902e8"
+                }
+              ],
+              "worker:bot-worker-001": [
+                {
+                  "resourceId": "bcn://demo/agents/bot-worker-001",
+                  "revision": "sha256:410c8334e700b5c4693a814cced101f50143ee5e260a236d02de47b72cd39b6c"
+                }
+              ]
+            }
+          },
+          "revision": "sha256:08021aaf0a6768d5f1584804848d26fe8f6389f54e6adbd46ece62483d1a5cfa"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "group.execute",
+      "name": "数据库诊断协作群",
+      "description": "Manager–Worker 群：数据库诊断协作群",
+      "tags": [
+        "manager_worker"
+      ]
+    }
+  ]
+}

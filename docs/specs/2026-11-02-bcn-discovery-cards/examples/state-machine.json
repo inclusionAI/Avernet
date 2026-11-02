@@ -1,0 +1,70 @@
+{
+  "name": "数据库诊断与复核",
+  "description": "State Machine 群：数据库诊断与复核",
+  "version": "12",
+  "supportedInterfaces": [
+    {
+      "url": "https://non-invocable.invalid/groups/group-sm-001",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery identity and composition",
+        "required": true,
+        "params": {
+          "resourceId": "bcn://demo/groups/group-sm-001",
+          "resourceKind": "group",
+          "groupKind": "state_machine",
+          "execution": {
+            "mode": "local",
+            "runtimeProfile": "bcn.state-machine.a2a/v1"
+          },
+          "composition": {
+            "definition": {
+              "definitionId": "definition-db-review",
+              "definitionVersion": 3,
+              "mediaType": "application/yaml",
+              "content": "name: 数据库诊断与复核\nparticipants:\n  analyst:\n    required: true\n  reviewer:\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    nodes:\n      diagnose:\n        kind: bot_task\n        assignee: {type: bot_binding, binding: analyst}\n        instruction: 分析 SQL 并形成诊断结论。\n        transitions:\n          complete: {targets: [review]}\n      review:\n        kind: bot_task\n        assignee: {type: bot_binding, binding: reviewer}\n        instruction: 复核诊断并输出最终报告。\n        final_output: true\n",
+              "sha256": "d387e46c421f41cc4efd2daa6d6dafa98f1018bc66e03b26bea306bca9f28490"
+            },
+            "bindings": {
+              "analyst": [
+                {
+                  "resourceId": "bcn://demo/agents/bot-analyst-001",
+                  "revision": "sha256:6c855201bfe931d53d53df4cdf085757c825dadd454d341116801853e409c80e"
+                }
+              ],
+              "reviewer": [
+                {
+                  "resourceId": "bcn://demo/agents/bot-reviewer-001",
+                  "revision": "sha256:788e30166112ca9f61d8de60d9330d6b8dcb8dfd0e1aacb9433bf2986c56ec37"
+                }
+              ]
+            }
+          },
+          "revision": "sha256:ff77ab6f46b40b6b32c52cd7d3bdadac53e87c20838b3c3469279d38ab8d590d"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "group.execute",
+      "name": "数据库诊断与复核",
+      "description": "State Machine 群：数据库诊断与复核",
+      "tags": [
+        "state_machine"
+      ]
+    }
+  ]
+}

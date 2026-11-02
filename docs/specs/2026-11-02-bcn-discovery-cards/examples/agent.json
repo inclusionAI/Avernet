@@ -1,0 +1,46 @@
+{
+  "name": "SQL 分析师",
+  "description": "分析 SQL 并形成诊断结论。",
+  "version": "1.0.0",
+  "supportedInterfaces": [
+    {
+      "url": "https://agents.example.com/a2a/bot-analyst-001",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery identity and composition",
+        "required": false,
+        "params": {
+          "resourceId": "bcn://demo/agents/bot-analyst-001",
+          "resourceKind": "agent",
+          "execution": {
+            "mode": "remote"
+          },
+          "revision": "sha256:6c855201bfe931d53d53df4cdf085757c825dadd454d341116801853e409c80e"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "sql.analyze",
+      "name": "SQL 分析师",
+      "description": "分析 SQL 并形成诊断结论。",
+      "tags": [
+        "database"
+      ]
+    }
+  ]
+}
