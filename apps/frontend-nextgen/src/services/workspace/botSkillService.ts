@@ -1,5 +1,8 @@
-/** botSkillService — 查询 Bot 的 Skill 列表。 */
+/** botSkillService — 查询 Bot 的 Skill 列表 + 「任务」入口的意图识别 Skill 探针。 */
 import { listBotSkillsByBot, type BotSkillDto } from '@/services/backendApi/bots/botSkillController';
+import { matchTaskConfig } from '@/services/backendApi/tasks/taskConfigController';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
+import { unwrapEnvelope } from '@/services/tasks/taskMapper';
 import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainError, DomainResult } from './identityService';
 
@@ -13,6 +16,13 @@ export interface BotSkillView {
 
 /** 对话「任务」入口依赖的意图识别 Skill。 */
 export const TASK_INTENT_SKILL_NAME = 'task-intent-recognition';
+
+/**
+ * task_config 中维护「装了 task-intent-recognition 的 bot_id 集合」的配置名（spec 2026-11-02）。
+ * 维护方（属主/外部服务）通过 POST /collaboration/tasks/config/set 写入 set 类型配置；
+ * 非属主调用方无权列他人 Bot 的技能列表，改走 match 探针只回 matched: bool。
+ */
+export const TASK_INTENT_INSTALLED_BOTS_CONFIG = 'task_skill_installed_bots';
 
 function toDomainError(e: unknown): DomainError {
   const msg = e instanceof Error ? e.message : 'Skill 列表请求失败';
@@ -31,6 +41,11 @@ function toView(s: BotSkillDto): BotSkillView {
 
 function hasSkill(skills: BotSkillView[], name: string): boolean {
   return skills.some((skill) => skill.active && (skill.name === name || skill.skillId === name));
+}
+
+/** Bot 是否属当前用户（compound botId 无 owner 尾 → 视为自有 bot，走属主可见的技能列表）。 */
+function isOwnedByCurrentUser(ownerId: string | undefined, currentUserId: string): boolean {
+  return ownerId === undefined || isSameHumanIdentity(ownerId, currentUserId);
 }
 
 export const botSkillService = {
@@ -59,5 +74,36 @@ export const botSkillService = {
   },
   hasTaskIntentSkill(skills: BotSkillView[]): boolean {
     return hasSkill(skills, TASK_INTENT_SKILL_NAME);
+  },
+  /**
+   * 判定当前 Bot / 协作群 Driver Bot 是否安装可用的 task-intent-recognition。
+   *
+   * - Bot 属当前用户 → 走属主可见的 `/openapi/v1/bots/{bot_id}/skills` 列表再判 `hasTaskIntentSkill`
+   *   （自有 bot，可列技能）。
+   * - 否则（好友 / 协作群 Driver 等非属主 bot，当前用户无权列他人技能）→ 走 task_config
+   *   `/collaboration/tasks/config/match` 探针：传 `config_name=task_skill_installed_bots`、
+   *   `value=realBotId`，按匹配结果取 `matched`（只回布尔，不回集合本身）。
+   */
+  async hasTaskIntentSkillForBot(query: {
+    realBotId: string;
+    ownerId?: string;
+    currentUserId: string;
+  }): Promise<DomainResult<boolean>> {
+    const { realBotId, ownerId, currentUserId } = query;
+    if (isOwnedByCurrentUser(ownerId, currentUserId)) {
+      const res = await botSkillService.listSkillsForBotId(realBotId, currentUserId, ownerId, 1, 100);
+      if (!res.ok) return { ok: false, error: res.error };
+      return { ok: true, data: botSkillService.hasTaskIntentSkill(res.data) };
+    }
+    try {
+      const env = await matchTaskConfig({
+        config_name: TASK_INTENT_INSTALLED_BOTS_CONFIG,
+        value: realBotId,
+      });
+      const matched = unwrapEnvelope(env);
+      return { ok: true, data: Boolean(matched.matched) };
+    } catch (err) {
+      return { ok: false, error: toDomainError(err) };
+    }
   },
 };
