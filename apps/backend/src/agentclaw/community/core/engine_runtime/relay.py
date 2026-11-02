@@ -66,6 +66,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
     DeviceAdapterTransport,
 )
 from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol import EngineRuntimeRelayProtocol
@@ -82,6 +83,11 @@ _CAPABILITY_UNSUPPORTED_STATUS = 501
 #: ``ac_bots.binding_id`` names. See
 #: :meth:`EngineRuntimeRelay._resolve_published_device`.
 _SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
+
+#: A relay call that does not name a request timeout still uses a deliberate
+#: transport budget. ``BaasService``'s generic client defaults to 30s per leg,
+#: which is too short for slow runtime requests such as session creation.
+_DEFAULT_TIMEOUT = 120.0
 
 
 class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
@@ -369,7 +375,15 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             ctx.provider not in {"baas", "teclaw"} or ctx.bot_type == "desktop"
         ):
             raise EngineResourceNotFoundError("instance selection is unavailable")
-        raw = await self._invoke(ctx, method, path, body, params, timeout)
+        relay_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
+        raw = await self._invoke(
+            ctx,
+            method,
+            path,
+            body,
+            params,
+            relay_timeout,
+        )
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
 
     async def _invoke(
@@ -387,9 +401,17 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         already a precise, publicly meaningful failure and the adapter maps it
         straight to 504. Wrapping it would lose that.
         """
+        if timeout is not None and timeout <= 0:
+            raise DeviceAdapterTimeoutError("timeout must be positive")
+
         try:
             return await self._transport.invoke(
-                ctx.conn_info, method, path, body=body, params=params, timeout=timeout
+                ctx.conn_info,
+                method,
+                path,
+                body=body,
+                params=params,
+                timeout=timeout,
             )
         except DeviceAdapterEndpointNotFoundError as exc:
             # Any adapter 404, NOT just "this runtime has no such route" — the
@@ -407,6 +429,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             raise EngineUpstreamError(
                 f"engine returned HTTP {exc.status_code} for {path}"
             ) from exc
+        except DeviceAdapterTimeoutError:
+            raise
         except ValueError as exc:
             # The transport contract documents a bare ``ValueError`` for
             # transport/HTTP failure in the production implementation, and
