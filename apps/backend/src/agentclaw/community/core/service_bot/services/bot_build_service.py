@@ -106,8 +106,8 @@ _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 
 # The NFS/transient rsync failure seen in production is a mkstemp-era
 # "Transport endpoint is not connected" error. Retry the exact command only
-# for this failure surface, and only for rsync commands where a retry is
-# idempotent (the commandees are a same-direction copy of the same source).
+# for this failure surface. Current callers are same-direction copies of a
+# stable source, so a retry can reconcile a partially written destination.
 _TRANSIENT_RSYNC_ATTEMPTS = 3
 _TRANSIENT_RSYNC_RETRY_DELAYS = (0.5, 1.0)
 
