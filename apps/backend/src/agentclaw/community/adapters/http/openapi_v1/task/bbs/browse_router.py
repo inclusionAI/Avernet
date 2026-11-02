@@ -135,8 +135,7 @@ async def upsert_bbs_browse_subscription(
 
     Bot 授权必须在请求内同步完成，因为它依赖当前浏览器的登录 Cookie；授权成功后才启动异步
     装配。新订阅先返回 202，后台装配 `bbs-browse-loop`、清理历史 `bbs-digest-loop`，成功后才
-    写入订阅记录，装配失败则不留下数据库开关。已存在的 OpenClaw 订阅同步保存备注并后台
-    修复 Browse cron，同时清理历史 Digest cron。
+    写入订阅记录。已存在的 OpenClaw 订阅同步保存备注并后台修复 Browse cron。
     """
     await grant_service.grant(
         bcs_bot_id=compose_bot_identity(bot_id, owner_user_id),
