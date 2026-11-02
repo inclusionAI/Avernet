@@ -1010,6 +1010,36 @@ class BotBuildService:
             ) from exc
 
         if result.returncode != 0:
+            if _is_rsync_command(cmd) and _is_transient_nfs_failure(result.stderr):
+                for attempt in range(1, _TRANSIENT_RSYNC_ATTEMPTS):
+                    logger.warning(
+                        f"[BotBuildService._run_local_command] "
+                        f"{command_name} transient NFS failure; "
+                        f"retry {attempt + 1} of {_TRANSIENT_RSYNC_ATTEMPTS}"
+                    )
+                    time.sleep(_TRANSIENT_RSYNC_RETRY_DELAYS[attempt - 1])
+                    try:
+                        result = subprocess.run(cmd, **run_kwargs)
+                    except FileNotFoundError:
+                        logger.error(
+                            f"[BotBuildService._run_local_command] "
+                            f"{command_name} command not found"
+                        )
+                        raise BotBuildMigrationError(
+                            f"{command_name} command not found"
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        logger.error(
+                            f"[BotBuildService._run_local_command] "
+                            f"{command_name} timed out after {timeout_seconds} seconds"
+                        )
+                        raise BotBuildMigrationError(
+                            f"{error_message}: command timed out after "
+                            f"{timeout_seconds:g} seconds"
+                        ) from exc
+                    if result.returncode == 0:
+                        return result
+
             logger.error(
                 f"[BotBuildService._run_local_command] "
                 f"{command_name} failed: {result.stderr}"
