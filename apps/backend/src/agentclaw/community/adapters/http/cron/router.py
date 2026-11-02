@@ -67,19 +67,26 @@ def _resolve_user_identity(
     Returns:
         (user_id, nick_name) 元组
     """
-    # 未传 owner_id 时先按 bot_id 解析真实归属；协作者请求由此沿用
-    # Bot owner 身份，而不是把当前协作者当作下游 Cron 服务的调用者。
-    if not owner_id and bot_id and bot_id != "all":
+    # 未传 owner_id 且指定具体 Bot 时，先唯一解析归属；legacy default 保持
+    # 每个用户的旧语义。协作者请求由此沿用 Bot owner 身份，而不是把当前
+    # 协作者当作下游 Cron 服务的调用者。
+    if not owner_id and bot_id and bot_id != "all" and bot_id != "default":
         try:
-            bot = bot_service.get_bot_by_id(bot_id)
-            resolved_owner_id = bot.get("owner_id") if bot else None
-            if resolved_owner_id:
-                return resolved_owner_id, bot.get("owner_name") or resolved_owner_id
+            page = bot_service.list_bots_by_conditions(
+                bot_id=bot_id, page=1, page_size=1, attach_templates=False,
+            )
+            total = page.get("total") or 0
+            items = page.get("items") or []
+            if total == 1 and items:
+                bot = items[0]
+                resolved_owner_id = bot.get("owner_id") if bot else None
+                if resolved_owner_id:
+                    return resolved_owner_id, bot.get("owner_name") or resolved_owner_id
         except Exception as e:
             logger.warning(f"[_resolve_user_identity] Failed to resolve bot owner: {e}")
 
-    # bot_id="all"、bot_id 缺失或归属解析失败时，使用当前用户身份。
-    if not owner_id or bot_id == "all":
+    # bot_id="all"、default、缺失、歧义或归属解析失败时，使用当前用户身份。
+    if not owner_id or bot_id == "all" or bot_id == "default":
         return user.staffId, user.nickName or user.staffId
 
     # 协作者场景：调用方显式传入 owner_id，从该 owner 的 bot 信息取显示名。
