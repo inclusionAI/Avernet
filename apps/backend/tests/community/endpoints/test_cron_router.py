@@ -48,7 +48,7 @@ class _RecordingBotService:
         self._addressed_error = addressed_error
         self.get_bot_calls: list[tuple[str, str]] = []
         self.get_bot_by_id_calls: list[str] = []
-        self.get_bot_by_address_calls: list[tuple[str, str]] = []
+        self.get_bot_by_address_calls: list[tuple[str | None, str | None, bool]] = []
 
     def get_bot(self, bot_id, user_id):
         """Keep the legacy owner-scoped contract observable, but unused."""
@@ -63,8 +63,8 @@ class _RecordingBotService:
             raise self._error
         return self._bot
 
-    def get_bot_by_address(self, bot_id, user_id):
-        self.get_bot_by_address_calls.append((bot_id, user_id))
+    def get_bot_by_address(self, bot_id, user_id=None, *, allow_unique_bot_id=False):
+        self.get_bot_by_address_calls.append((bot_id, user_id, allow_unique_bot_id))
         if self._addressed_error is not None:
             raise self._addressed_error
         return self._addressed_bot
@@ -112,7 +112,7 @@ class TestResolveUserIdentity:
         operatorName="Contact User",
     )
 
-    def test_authorized_bot_without_owner_uses_stored_owner_identity(self):
+    def test_authorized_bot_without_owner_uses_unique_address(self):
         """No explicit owner_id still routes Relay to the target Bot owner.
 
         Calling with the contact's identity would find no Bot and return the
@@ -130,8 +130,8 @@ class TestResolveUserIdentity:
 
         assert user_id == "u_observed_owner"
         assert nick_name == "Observed Owner"
-        assert bot_service.get_bot_by_id_calls == ["service-bot"]
-        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_address_calls == [("service-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
         assert bot_service.get_bot_calls == []
 
     def test_empty_owner_id_uses_stored_owner_identity(self):
@@ -148,8 +148,8 @@ class TestResolveUserIdentity:
 
         assert user_id == "u_observed_owner"
         assert nick_name == "Observed Owner"
-        assert bot_service.get_bot_by_id_calls == ["service-bot"]
-        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_address_calls == [("service-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
         assert bot_service.get_bot_calls == []
 
     def test_missing_stored_bot_without_owner_preserves_caller_identity(self):
@@ -162,8 +162,8 @@ class TestResolveUserIdentity:
             None, "missing-bot", self._cooperator, bot_service
         )
 
-        assert bot_service.get_bot_by_id_calls == ["missing-bot"]
-        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_address_calls == [("missing-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
         assert bot_service.get_bot_calls == []
         assert (user_id, nick_name) == ("u_contact", "u_contact")
 
@@ -187,6 +187,42 @@ class TestResolveUserIdentity:
         assert bot_service.get_bot_by_address_calls == []
         assert bot_service.get_bot_calls == []
 
+    def test_legacy_default_without_owner_uses_caller_without_unique_lookup(self):
+        """A legacy default Bot never borrows another Owner's same bot_id."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity(
+            None, "default", self._cooperator, bot_service
+        )
+
+        assert (
+            user_id,
+            nick_name,
+        ) == (self._cooperator.staffId, self._cooperator.nickName)
+        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
+    def test_empty_bot_id_without_owner_uses_caller_without_lookup(self):
+        """The empty aggregate shape misses no owner locator before the relay."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity(
+            None, "", self._cooperator, bot_service
+        )
+
+        assert (
+            user_id,
+            nick_name,
+        ) == (self._cooperator.staffId, self._cooperator.nickName)
+        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
     def test_explicit_owner_uses_address_resolution_not_owner_scoped_get(self):
         """The explicit wire locator uses BotAddressResolver semantics."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
@@ -203,7 +239,7 @@ class TestResolveUserIdentity:
         )
 
         assert (user_id, nick_name) == ("u_current_owner", "Current Owner")
-        assert bot_service.get_bot_by_address_calls == [("service-bot", "u_owner")]
+        assert bot_service.get_bot_by_address_calls == [("service-bot", "u_owner", False)]
         assert bot_service.get_bot_by_id_calls == []
         assert bot_service.get_bot_calls == []
 
@@ -222,7 +258,7 @@ class TestResolveUserIdentity:
         assert user_id == "u_new_owner"
         assert nick_name == "u_new_owner"
         assert bot_service.get_bot_by_address_calls == [
-            ("service-bot", "u_historical_owner")
+            ("service-bot", "u_historical_owner", False)
         ]
         assert bot_service.get_bot_by_id_calls == []
         assert bot_service.get_bot_calls == []
@@ -237,7 +273,7 @@ class TestResolveUserIdentity:
         )
 
         assert (user_id, nick_name) == ("u_owner", "u_owner")
-        assert bot_service.get_bot_by_address_calls == [("missing-bot", "u_owner")]
+        assert bot_service.get_bot_by_address_calls == [("missing-bot", "u_owner", False)]
         assert bot_service.get_bot_by_id_calls == []
 
     def test_explicit_missing_owner_name_falls_back_to_owner_id(self):
@@ -252,6 +288,22 @@ class TestResolveUserIdentity:
         )
 
         assert (user_id, nick_name) == ("u_current_owner", "u_current_owner")
+
+    def test_explicit_empty_bot_id_keeps_owner_locator(self):
+        """An empty bot_id cannot silently switch to the caller's identity."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            addressed_error=Exception("Bot not found"),
+        )
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "", self._cooperator, bot_service
+        )
+
+        assert (user_id, nick_name) == ("u_owner", "u_owner")
+        assert bot_service.get_bot_by_address_calls == [("", "u_owner", False)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
 
 
 # =============================================================================
@@ -832,6 +884,7 @@ class TestResolveUserIdentityEdgeCases:
 
         assert user_id == "u_owner"
         assert nick_name == "u_owner"
+        assert bot_service.get_bot_by_address_calls == [("bot1", "u_owner", False)]
         assert bot_service.get_bot_by_id_calls == []
 
 

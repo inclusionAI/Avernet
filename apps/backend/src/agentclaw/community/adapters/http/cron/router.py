@@ -72,14 +72,20 @@ def _resolve_user_identity(
     Returns:
         ``(user_id, nick_name)``；nick_name 优先使用 Bot 当前 Owner 名称。
     """
-    if not bot_id or bot_id == "all":
+    if bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
     try:
         # No explicit locator: the interceptor authorized the stored Bot by
-        # its real owner. Read that stored identity once and use it for Relay.
+        # its real owner. Resolve the unique Bot address for the Relay target.
+        # ``default`` is a legacy per-Owner alias, not a unique address; keep
+        # the same per-Owner short circuit as the collaborator interceptor.
         if not owner_id:
-            bot = bot_service.get_bot_by_id(bot_id)
+            if not bot_id or bot_id == "default":
+                return user.staffId, user.nickName or user.staffId
+            bot = bot_service.get_bot_by_address(
+                bot_id, allow_unique_bot_id=True
+            )
             user_id = str(bot.get("owner_id") or user.staffId) if bot else user.staffId
         # Explicit legacy owner_id may refer to the historical owner as well as
         # the current owner. Keep that through the address resolver contract.

@@ -5,10 +5,12 @@ Publication consumers resolve their Bot through
 over both historical Owner values and new entity values in publish `owner_id`.
 The resolved Bot supplies the current Owner for authorization and the immutable
 entity for resource coordinates. `get_bot_by_address(..., source_bot_pk=...)`
-uses the same rule while retaining the enriched Bot response. Strict `get_bot`
-remains Owner-scoped. A missing non-default source or conflicting source ID is
-an error; only historical orphaned `default` lineages retain a unique legacy
-metadata lookup, without changing their source PK or published stage bindings.
+uses the same rule while retaining the enriched Bot response. When an authorized
+caller has no per-Owner locator, `get_bot_by_address` can also resolve an
+unambiguous live `bot_id` with `allow_unique_bot_id=True`; duplicate IDs fail
+closed. Strict `get_bot` remains Owner-scoped. A missing non-default source or
+conflicting source ID is an error; only historical orphaned `default` lineages
+retain a unique legacy metadata lookup, without changing their source PK or published stage bindings.
 
 Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
@@ -264,8 +266,11 @@ addressing remains shared with normal Bot lifecycle callers.
 `BotService.get_bot_by_address(bot_id, user_id)` is an internal resource query:
 `user_id` is a legacy entity/current-Owner locator, not caller authority. It uses
 `BotAddressResolver` and enriches the resolved Bot through the strict current-Owner
-`get_bot` query. Transport callers must authorize the authenticated actor before
-using this resource lookup. Ambiguity and database errors propagate.
+`get_bot` query. Publication callers still supply an immutable `source_bot_pk`
+with that legacy locator. A caller may omit the locator only for an unambiguous
+live `bot_id` with `allow_unique_bot_id=True`; duplicate IDs fail closed.
+Transport callers must authorize the authenticated actor before using this
+resource lookup. Ambiguity and database errors propagate.
 
 `validate_delete_bot` checks current ownership and existing deletion protections
 without releasing devices or credentials. Publishing calls it before tearing
