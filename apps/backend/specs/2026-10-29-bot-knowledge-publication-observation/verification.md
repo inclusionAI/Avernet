@@ -1,7 +1,20 @@
-# Verification: 服务 Bot 知识库分版本尽力记录
+# Verification: 服务 Bot 分状态知识库选择
 
-## Current Delivery Verification
-- Current GitHub Release base: `ed61d43cbf0da75b04de2d872aa4eccdc0ddc8c7` (`REL20261029`).
+## Current revision (2026-11-02)
+- Base `9fd60385f93f36fe819c8130f3f93525e844d29d`，首轮测试Head `d6034a01f`。
+- 本次改变了生产代码和接口消费；下方旧Head的绿灯均仅为历史记录，不能复用。
+- 定向核心/任务192 passed；管理/会话/HTTP/DI/architecture/Protocol 621 passed。
+- 第一轮完整CI真实结果：14 failed / 28048 passed / 40 skipped / 6 subtests。
+  其中12个原生流程用例因测试harness未传新增必需provider失败；1个boot用例仍期待已删除URL；
+  1个只读观察用例混入native Bot异步初始化写入。修复测试组装和准确断言边界后重新验证。
+- ODC只读核实 online_enabled 为现存 NOT NULL DEFAULT0；native publication查询实际走
+  idx_sbp_e_s(source_bot_pk,env,status)范围扫描+TOP-N，无全表扫描；仅当前样本计划证据，非高基数延迟验收。
+- OCB前端独立worktree：27 suites / 235 tests，TypeScript通过；前端构建/独立评审待最终记录。
+- 没有推送、合并、部署、DDL或数据回填。完整CI后续结果在最终验收记录追加。
+
+
+## Historical Delivery Verification (superseded by 2026-11-02 revision)
+- Historical GitHub Release base: `ed61d43cbf0da75b04de2d872aa4eccdc0ddc8c7` (`REL20261029`).
 - Tested source/test head after rebase and review follow-up: `1e276db8d13520127e53f112e901283ad3af8c0d`.
 - Follow-up changes are limited to HTTP README boundary/response semantics and permanent Protocol/concrete registration in `test_service_api_conformance.py`; no feature behavior was changed.
 - Focused conformance/architecture/DI/boot/HTTP checks: **237 passed**, 0 failed before rebase.
@@ -19,12 +32,12 @@ BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=8 \
 
 ### Release Integration Limitation
 The new Release supports resolving an existing personal space for a legacy Bot
-whose persisted `space_id` is null. The observation still uses the persisted
-space ID, so such a legacy service Bot cannot be captured and returns the
+whose persisted `space_id` is null. The historical implementation used the persisted
+space ID, so such a legacy service Bot could not be captured and returns the
 unrecorded result instead; native publication remains unaffected. This is an
-explicit missing-observation limitation, not a history migration in this PR.
+historical limitation, corrected in the current revision by using the existing effective-space resolver; no history migration is introduced.
 
-## Initial Verification Scope
+## Historical Initial Verification Scope
 - Base: `2508dcabaa5f533321325e0549b724cd916650d9` (`REL20261029`).
 - Tested code/test head: `223090213aff10bf90d9885daa674e6f7bdf1858`.
 - Worktree: `feat/bot-knowledge-stage-best-effort`；原 PR #3177 未修改。
