@@ -258,6 +258,171 @@ async fn a_legacy_run_without_managed_facts_stays_ordinary_but_never_borrows_lin
     );
 }
 
+// ---- spec L62: session-capture fallback for owner-mode masters ------------
+
+/// Build a flow that has a caller relay with a live/expired capture for
+/// the given session, but NO managed row marks and NO lineage — the exact
+/// state of an ordinary (non-caller-ON) master dispatching a task.
+async fn relay_fallback_fixture(
+    capture_live: bool,
+    run_live: bool,
+) -> (crate::BcsMessageFlow, BotEventCommand, Arc<MemoryBotRunContextStore>) {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let now = chrono::Utc::now().timestamp_millis();
+    let relay = crate::caller_relay::CallerRelayState::new(60_000);
+    if capture_live {
+        assert!(relay.ledger.record(
+            &bcs_config::resolve_env_str(),
+            "session",
+            "turn-owner",
+            bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress::new(
+                bcs_service_api::application::principal::HumanActor {
+                    actor_id: "human_152819".into(),
+                    staff_no: "152819".into(),
+                },
+                bcs_service_api::application::caller_identity::HumanCallerAuthSource::HttpAuth,
+                now,
+                &bcs_config::resolve_env_str(),
+            )
+            .expect("valid ingress"),
+            now,
+            300_000,
+        ));
+    }
+    let runs = Arc::new(MemoryBotRunContextStore::default());
+    if run_live {
+        runs.put_context(BotRunContext {
+            run_id: "master-run".into(),
+            bot_id: "bot-driver".into(),
+            group_id: "group-1".into(),
+            bcs_session_id: Some("session".into()),
+            deadline_ms: (now + 60_000) as u64,
+            terminal: false,
+        })
+        .await;
+    }
+    let flow = crate::BcsMessageFlow::new(
+        support.group,
+        support.routing,
+        support.registry,
+        support.bot_delivery,
+        support.frontend_delivery,
+    )
+    .with_bot_run_context(runs.clone())
+    .with_caller_relay(relay);
+    let event = BotEventCommand {
+        bot_id: "bot-driver".into(),
+        run_id: "master-run".into(),
+        group_id: "group-1".into(),
+        event_type: "agent".into(),
+        event_payload: json!({}),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("session".into()),
+    };
+    (flow, event, runs)
+}
+
+#[tokio::test]
+async fn a_relay_capture_with_a_live_run_mints_the_delegation() {
+    let (flow, event, _) = relay_fallback_fixture(true, true).await;
+    let assignment = prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+        .await
+        .unwrap()
+        .expect("fallback should mint");
+    assert_eq!(assignment.parent_run_id, "master-run");
+    assert_eq!(assignment.parent_bot_id, "bot-driver");
+    assert_eq!(assignment.invocation_id, "relay-call");
+}
+
+#[tokio::test]
+async fn without_a_relay_capture_or_run_the_fallback_stays_closed() {
+    // no capture → closed
+    let (flow, event, _) = relay_fallback_fixture(false, true).await;
+    assert!(
+        prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // capture but no live run context → closed
+    let (flow, event, _) = relay_fallback_fixture(true, false).await;
+    assert!(
+        prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // no relay at all → closed
+    let (support, event) = {
+        let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+        let event = BotEventCommand {
+            bot_id: "bot-driver".into(),
+            run_id: "master-run".into(),
+            group_id: "group-1".into(),
+            event_type: "agent".into(),
+            event_payload: json!({}),
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("session".into()),
+        };
+        (support, event)
+    };
+    let flow = crate::BcsMessageFlow::new(
+        support.group, support.routing, support.registry, support.bot_delivery, support.frontend_delivery,
+    );
+    assert!(
+        prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn a_terminal_run_with_a_live_capture_does_not_mint() {
+    let (flow, event, runs) = relay_fallback_fixture(true, true).await;
+    let mut context = runs.get_context(&event.run_id).await.unwrap();
+    context.terminal = true;
+    runs.put_context(context).await;
+    assert!(
+        prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn an_expired_relay_capture_does_not_mint_even_with_a_live_run() {
+    let (flow, event, _) = relay_fallback_fixture(true, true).await;
+    // overwrite with an already-expired entry
+    let relay = flow.caller_relay.as_ref().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    assert!(relay.ledger.record(
+        &bcs_config::resolve_env_str(),
+        "session",
+        "turn-expired",
+        bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress::new(
+            bcs_service_api::application::principal::HumanActor {
+                actor_id: "human_152819".into(),
+                staff_no: "152819".into(),
+            },
+            bcs_service_api::application::caller_identity::HumanCallerAuthSource::HttpAuth,
+            now,
+            &bcs_config::resolve_env_str(),
+        )
+        .expect("valid ingress"),
+        now,
+        1, // 1ms TTL — effectively expired
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    assert!(
+        prepare_assignment(&flow, &event, "relay-call", "bot-observer")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
 // ---- review-VII P1: Workflow node parents --------------------------------
 
 async fn workflow_fixture(
