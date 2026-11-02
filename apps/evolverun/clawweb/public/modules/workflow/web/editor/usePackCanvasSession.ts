@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { useEditorStore } from './store'
 import { sessionFor, load, releaseCleanSession, publish, dirty, diff, updateVersion, type Version, type Session } from './packVersionSession'
@@ -7,48 +6,14 @@ import { packVersionWritesEnabled } from './packVersionWritePolicy'
 import { savePackVersion } from './packVersionSave'
 import { packWorkflow } from './packCanvas'
 import { normalizationChanges } from './yamlDraft'
-import { readWorkflowDocument } from '../api/workflowDocument'
+import { saveVerifiedWorkflowDocument } from './workflowDocumentSave'
 
 // A split identity write requires explicit manual reconciliation before another save.
 // This guard is deliberately session-local, not a durable recovery journal.
 const uncertainRenames = new WeakMap<Session, string>()
 
-type IdentityWrite = { newPackId: string; onStart: () => void; onResponse: (packId: string) => void }
-/** The save response contains no document; read the DB rather than guessing what was stored. */
-async function saveVerifiedDocument(id: string, baseline: WorkflowSpec, requestSpec: WorkflowSpec, isCurrent: () => boolean, packId?: string, identityWrite?: IdentityWrite): Promise<WorkflowSpec> {
-  let before: WorkflowSpec
-  try { before = await readWorkflowDocument(id) }
-  catch { throw new Error('无法核对数据库草稿，未发送保存；本地画布和文件仍保留。') }
-  if (normalizationChanges(baseline, before).length) throw new Error('数据库草稿自读取后已变化；未发送保存，请先核对并合并，本地草稿仍保留。')
-  if (!isCurrent()) throw new Error('核对数据库期间编辑内容或会话已变化；未发送保存，本地草稿仍保留。')
-  let result: { ok?: boolean; saved?: boolean; workflowId?: string; packId?: string }
-  try {
-    identityWrite?.onStart()
-    result = await fetchJson('/api/auto-heal/save', {
-      method: 'POST', headers: { 'X-Pack-Version-CSRF': '1' },
-      // Only an explicit Pack rename changes the DB identity.
-      body: new Blob([JSON.stringify({ workflowId: id, spec: requestSpec, ...(identityWrite ? { packId: identityWrite.newPackId } : {}) })], { type: 'application/json' }),
-    })
-  } catch (cause) {
-    const detail = cause instanceof Error ? `（${cause.message}）` : ''
-    throw new Error(`数据库保存失败或结果未知${detail}；Git 文件未保存，本地草稿仍保留，请先核对数据库，不要盲目重试。`)
-  }
-  if (!result || result.ok !== true || result.saved !== true || result.workflowId !== id
-    || typeof result.packId !== 'string' || !result.packId) {
-    throw new Error('数据库保存响应无法验证，结果未知；请核对数据库后再试。')
-  }
-  identityWrite?.onResponse(result.packId)
-  if (packId && result.packId !== packId) throw new Error('部分成功：数据库报告已保存，但 Pack 身份与 Git 基线不一致；文件未保存，本地草稿仍保留，请核对。')
-  let stored: WorkflowSpec
-  try { stored = await readWorkflowDocument(id) }
-  catch { throw new Error('数据库已报告保存成功，但无法重新读取核对；本地草稿仍保留，文件未保存，请先核对数据库。') }
-  const changed = normalizationChanges(requestSpec, stored)
-  if (changed.length) throw new Error(`数据库已报告保存成功，但保存内容与请求不同（字段：${changed.slice(0, 5).join('、')}${changed.length > 5 ? '等' : ''}）；本地草稿仍保留，文件未保存，请核对规范化或并发更改。`)
-  return stored
-}
-
 /** DB owns the workflow document; Git owns the other Pack files. */
-export function usePackCanvasSession(id: string | null, _databaseSpec?: WorkflowSpec) {
+export function usePackCanvasSession(id: string | null, _databaseSpec?: WorkflowSpec | null, { enabled = true }: { enabled?: boolean } = {}) {
   const session = id ? sessionFor(id) : null
   const state = useSyncExternalStore(listener => {
     session?.listeners.add(listener)
@@ -59,19 +24,18 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   const version = state?.version ?? 'current'
   const current = state?.versions[version]
   const snapshot = current?.snapshot
-  const [error, setError] = useState<string | null>(null)
   const busy = useRef(false)
 
   useEffect(() => {
-    if (session && id && !current?.snapshot && !current?.loading && !current?.error) load(session, id, version)
-  }, [session, id, version, current?.snapshot, current?.loading, current?.error])
+    if (enabled && session && id && !current?.snapshot && !current?.loading && !current?.error) load(session, id, version)
+  }, [enabled, session, id, version, current?.snapshot, current?.loading, current?.error])
   useEffect(() => () => { if (session && id) queueMicrotask(() => releaseCleanSession(id, session)) }, [session, id])
   useEffect(() => {
-    if (!session || !snapshot || session.canvasInitialized) return
+    if (!enabled || !session || !snapshot || session.canvasInitialized) return
     session.canvasInitialized = true
     if (version === 'current' && snapshot.draftHead !== null && snapshot.draftHead !== snapshot.baseCommit
       && !dirty(current!) && !state?.reconciliation) publish(session, { ...session.state, version: 'draft' })
-  }, [session, snapshot, version, current, state?.reconciliation])
+  }, [enabled, session, snapshot, version, current, state?.reconciliation])
 
   async function save() {
     const live = useEditorStore.getState()
@@ -82,13 +46,16 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     if (Object.keys(live.pendingEdits ?? {}).length) throw new Error('存在未应用的配置草稿；请先应用或放弃，再保存。')
     if (live.validationErrors?.length) throw new Error(`保存前请修复验证错误：${live.validationErrors[0].message}`)
     if (!live.spec || live.spec.id !== id || !live._savedSpec) throw new Error('缺少数据库文档基线；本地草稿仍保留。')
+    const databaseBaseline = live._databaseSpec === undefined ? live._savedSpec : live._databaseSpec
     const selected: Version = session.state.version
     const source = session.state.versions[selected]
     const base = source.snapshot
     const isCurrent = () => {
       const now = useEditorStore.getState(), currentSource = session.state.versions[selected]
+      const nowDatabase = now._databaseSpec === undefined ? now._savedSpec : now._databaseSpec
       return now.sessionId === live.sessionId && !!now.spec && !!now._savedSpec
         && !normalizationChanges(live.spec, now.spec).length && !normalizationChanges(live._savedSpec, now._savedSpec).length
+        && (databaseBaseline === null ? nowDatabase === null : nowDatabase !== null && !normalizationChanges(databaseBaseline, nowDatabase).length)
         && !Object.keys(now.pendingEdits ?? {}).length && !now.validationErrors.length && !session.state.uploading
         && session.state.version === selected && currentSource.snapshot === base && !diff(source.files, currentSource.files).length
         && !Object.entries(session.state.versions).some(([key, value]) => key !== selected && dirty(value))
@@ -100,7 +67,8 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
       busy.current = true
       publish(session, { ...session.state, saving: true })
       try {
-        const stored = await saveVerifiedDocument(id, live._savedSpec, requestSpec, isCurrent)
+        const stored = await saveVerifiedWorkflowDocument(id, databaseBaseline, requestSpec, isCurrent,
+          { expectedActiveDeployNumber: live._databaseSpec === null ? live._activeDeployNumber : undefined })
         const latest = useEditorStore.getState()
         if (latest.sessionId === sessionId && latest.spec?.id === id) latest.completeSave(stored, requestSpec, sessionId)
         return { dbSaved: true, commit: null as string | null }
@@ -124,9 +92,9 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     const fileChanged = candidateFile.contentBase64 !== originalFile.contentBase64
     const canvasChanged = normalizationChanges(live.spec, live._savedSpec).length > 0
     if (fileChanged && canvasChanged && normalizationChanges(candidate.spec, live.spec).length > 0) throw new Error('画布和文件同时修改了工作流 YAML，请先统一内容；所有草稿仍保留。')
-    if (fileChanged && normalizationChanges(original.spec, live._savedSpec).length > 0 && normalizationChanges(candidate.spec, live._savedSpec).length > 0) {
-      const dbPaths = normalizationChanges(original.spec, live._savedSpec)
-      const candidatePaths = normalizationChanges(live._savedSpec, candidate.spec)
+    if (fileChanged && databaseBaseline && normalizationChanges(original.spec, databaseBaseline).length > 0 && normalizationChanges(candidate.spec, databaseBaseline).length > 0) {
+      const dbPaths = normalizationChanges(original.spec, databaseBaseline)
+      const candidatePaths = normalizationChanges(databaseBaseline, candidate.spec)
       const describe = (paths: string[]) => `${paths.slice(0, 5).join('、')}${paths.length > 5 ? '等' : ''}`
       const capturedState = session.state
       if (!window.confirm(`文件 YAML 基于较旧的 Git 版本，数据库草稿已有不同内容（字段：${describe(dbPaths)}）。继续将用文件候选完整替换数据库草稿，候选与数据库不同的字段：${describe(candidatePaths)}。这不是自动合并，可能丢失数据库修改。确定替换？取消可保留两份草稿并先手动合并。`)) {
@@ -149,11 +117,14 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     publish(session, { ...session.state, saving: true })
     try {
       if (dbChanged) {
-        const stored = await saveVerifiedDocument(id, live._savedSpec, requestSpec, isCurrent, candidate.packId, renaming ? {
+        const stored = await saveVerifiedWorkflowDocument(id, databaseBaseline, requestSpec, isCurrent, {
+          packId: candidate.packId,
+          expectedActiveDeployNumber: live._databaseSpec === null ? live._activeDeployNumber : undefined,
+          identityWrite: renaming ? {
           newPackId: candidate.packId,
           onStart: () => { renameDbState = '已发送，结果未知' },
           onResponse: returned => { renameDbState = `服务报告已保存 Pack ID ${returned}，文档尚未核对` },
-        } : undefined)
+        } : undefined })
         dbSaved = true
         if (renaming) renameDbState = `已确认 Pack ID ${candidate.packId}，文档已核对`
         const latest = useEditorStore.getState()
@@ -209,16 +180,6 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     }
   }
 
-  function adoptGit() {
-    if (!id || !snapshot || !session || state?.saving || state?.uploading || state?.reconciliation) return
-    try {
-      const incoming = packWorkflow(snapshot.versionFiles, id, snapshot.packId).spec
-      const live = useEditorStore.getState()
-      if (!window.confirm('以 Git 中的工作流 YAML 替换画布？数据库草稿不会被修改，替换后需保存。')) return
-      live.importYaml(incoming)
-      setError(null)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '无法加载 Git 工作流。') }
-  }
-  return { save, adoptGit, error: error ?? current?.error ?? null, loading: !!current?.loading,
+  return { save, error: current?.error ?? null, loading: !!current?.loading,
     canWrite: packVersionWritesEnabled(snapshot ?? null), saving: !!state?.saving, snapshot }
 }
