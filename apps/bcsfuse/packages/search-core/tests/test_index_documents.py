@@ -1,6 +1,7 @@
 """Environment-scoped durable artifacts obey TC-style bounded replay contracts."""
 
 import sqlite3
+from dataclasses import replace
 
 import pytest
 from search_core.plugin_api.index_documents import IndexDocument
@@ -91,6 +92,46 @@ def test_local_schema_upgrade_preserves_legacy_source_ids(tmp_path):
     store = sqlite_index_documents(path, environment="local", index_key="one")
     assert [d.id for d in store.load_by_source("agent")] == ["doc"]
     assert next(iter(store.iter_version_batches(10)))[0].source_id == "agent"
+    assert store.load_by_id("doc").filters is None
+
+
+def test_filters_roundtrip_replay_and_explicit_clear(tmp_path):
+    store = sqlite_index_documents(
+        str(tmp_path / "docs.db"), environment="local", index_key="one"
+    )
+    document = IndexDocument(
+        VectorPoint(
+            id="a", vector=[1.0], payload={"source_id": "agent", "search_text": "body"}
+        ),
+        1,
+        filters={"category": ("health",), "region": ("cn", "sg")},
+    )
+    with sqlite3.connect(store.path) as conn:
+        store.save_in_transaction(conn.cursor(), document)
+    loaded = store.load_by_id("a")
+    assert loaded.filters == document.filters
+    assert "category" not in loaded.point.payload
+    assert loaded.to_index_point().payload["category"] == ["health"]
+    assert (
+        next(iter(store.iter_change_batches_since(0, 10))).upserts[0].filters
+        == document.filters
+    )
+    with sqlite3.connect(store.path) as conn:
+        store.save_in_transaction(
+            conn.cursor(), replace(document, source_revision=2, filters={})
+        )
+    assert store.load_by_id("a").filters == {}
+    legacy = replace(
+        document,
+        filters=None,
+        point=VectorPoint(
+            id="a", vector=[1.0], payload={"source_id": "agent", "category": ["old"]}
+        ),
+    )
+    assert legacy.to_index_point(("category",)).payload["category"] == ["old"]
+    assert replace(legacy, filters={}).to_index_point(("category",)).payload == {
+        "source_id": "agent"
+    }
 
 
 def test_local_migration_failure_rolls_back_schema_for_safe_retry(tmp_path):
