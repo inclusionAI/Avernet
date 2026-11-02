@@ -5,7 +5,18 @@ if [[ -n "$(mock_view_base_url)" ]]; then
     E2E_TESTS_STORIES+=(story_fixed_loop_human_editor_workflow)
     E2E_TESTS_STORIES+=(story_nested_fixed_loop_workflows)
     E2E_TESTS_STORIES+=(story_state_machine_result_queue)
+    E2E_TESTS_STORIES+=(story_state_machine_failure_results)
 fi
+
+story_state_machine_failure_results() {
+    info "Story: abnormal Runs publish private results and deleted Sessions suppress delivery"
+    local result=0
+    python3 "$SCRIPT_DIR/run_failure_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$(mock_view_base_url)" \
+        --mock-sink-url "$(mock_sink_base_url)" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Abnormal Run results preserve privacy, typed reasons, scope and delivery with queues off/on" "$result" "0"
+}
 
 story_state_machine_result_queue() {
     info "Story: one-shot result reaches its owner and becomes queued observer context"

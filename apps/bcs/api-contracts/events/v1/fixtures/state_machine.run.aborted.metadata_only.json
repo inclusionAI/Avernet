@@ -1,0 +1,43 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt_run_aborted",
+  "event_type": "state_machine.run.aborted",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-18T10:09:00.000Z",
+  "recorded_at": "2026-08-18T10:09:00.004Z",
+  "subject": {
+    "type": "state_machine.run",
+    "id": "run-1"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "run_id": "run-1"
+  },
+  "stream": {
+    "key": "state-machine-run:run-1",
+    "sequence": 12
+  },
+  "actor": {
+    "type": "system",
+    "id": "bcs-runtime"
+  },
+  "correlation_id": "run-1",
+  "causation_event_id": "evt-node-completed-2",
+  "data": {
+    "result": {
+      "schema_version": 1,
+      "run_id": "run-1",
+      "workflow_name": "undercover-speak",
+      "status": "aborted",
+      "failed_node_id": null,
+      "attempt": null,
+      "reason_category": "user_aborted",
+      "completed_node_ids": []
+    },
+    "completed_at": "2026-08-18T10:09:00.000Z",
+    "duration_ms": 540000,
+    "scope_invalid": false
+  }
+}

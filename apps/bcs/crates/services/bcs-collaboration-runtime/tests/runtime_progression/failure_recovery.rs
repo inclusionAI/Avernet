@@ -59,6 +59,10 @@ async fn exhausted_failure_recovers_run_and_session_without_retrying_bot() {
     let after = h.store.get_run(&run.run_id).await.unwrap().unwrap();
     assert_eq!(after.status, StateMachineRunStatus::Failed);
     assert_eq!(after.error.as_deref(), Some("durable failure"));
+    let summary = h.store.get_terminal_result(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(summary.reason_category, Some(bcs_service_api::port::repo::StateMachineRunReason::NodeFailed));
+    assert_eq!((summary.failed_node_id.as_deref(), summary.attempt), (Some(node_id.as_str()), Some(0)));
+    assert!(!summary.text().unwrap().contains("durable failure"));
     assert_eq!(h.sessions.get(&run.session_id).await.unwrap().unwrap().status, SessionStatus::Completed);
     assert_eq!(h.delivery.commands.lock().await.len(), 1);
     assert_eq!(serde_json::to_value(saved.node).unwrap(), serde_json::to_value(h.store.get_node_run(&run.run_id, &node_id).await.unwrap().unwrap()).unwrap());

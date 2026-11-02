@@ -12,6 +12,9 @@ mod bootstrap_migrations;
 #[path = "session_recovery.rs"]
 mod session_recovery_tests;
 
+#[path = "disconnect_sqlite.rs"]
+mod disconnect_sqlite_tests;
+
 async fn send_terminal(runtime: &CollaborationRuntime, delivery: &RecordingDelivery, index: usize, session: &str, text: &str) -> Result<bcs_service_api::HandleBotTerminalEventOutcome, CollaborationRuntimeError> {
     let id = delivery.commands.lock().await[index].run_id.clone();
     runtime.handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {

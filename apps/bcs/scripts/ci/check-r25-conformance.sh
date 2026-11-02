@@ -109,8 +109,13 @@ check_r25_2_boundary_impls_have_entries() {
 
 check_r25_3_conformance_discoverable() {
   local listed
-  listed=$(cargo test --workspace --no-fail-fast -- --list 2>/dev/null || true)
-  if echo "$listed" | rg -q 'conformance_'; then
+  if ! listed=$(cargo test --workspace --no-fail-fast -- --list 2>/dev/null); then
+    echo "FAIL [R25.3]: cargo test discovery command failed"
+    return 1
+  fi
+  # rg -q exits at the first match. A pipe can then SIGPIPE echo under
+  # pipefail for a large workspace listing, incorrectly rejecting discovery.
+  if rg -q 'conformance_' <<< "$listed"; then
     echo "PASS [R25.3]: cargo test discovers conformance_ tests"
     return 0
   fi

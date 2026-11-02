@@ -73,7 +73,7 @@ def _engine_upsert_mcp(
 @pytest.mark.acceptance
 def test_mcp_user_config_sync_reaches_live_singlebox_engine(
     live_backend,
-    acceptance_fs_root,
+    acceptance_fs_root, request,
 ):
     user_id = _fresh_id("e2e_mcp_user")
     server_code = "mcp.singlebox.acceptance"
@@ -81,7 +81,7 @@ def test_mcp_user_config_sync_reaches_live_singlebox_engine(
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="MCP Acceptance",
             bot_desc="MCP live sync acceptance bot",

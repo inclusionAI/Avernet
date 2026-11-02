@@ -178,6 +178,41 @@ StateMachineJudgeOutputView:
       type: string
       minLength: 1
 
+StateMachineRunResultV1:
+  type: object
+  additionalProperties: false
+  required: [schema_version, run_id, workflow_name, status, failed_node_id, attempt, reason_category, completed_node_ids]
+  properties:
+    schema_version: {const: 1}
+    run_id: {type: string, minLength: 1, maxLength: 256}
+    workflow_name: {type: string, minLength: 1, maxLength: 256}
+    status: {type: string, enum: [failed, aborted]}
+    failed_node_id: {type: [string, "null"], maxLength: 256}
+    attempt: {type: [integer, "null"]}
+    reason_category:
+      enum: [node_failed, human_timeout, startup_failed, publication_failed, user_aborted, null]
+    completed_node_ids:
+      type: array
+      items: {type: string, minLength: 1, maxLength: 256}
+
+StateMachineBotRunResultView:
+  description: Minimal result facts for the authenticated original Bot creator in a running session. The legacy route is GET /state-machine-runs/{run_id}/result.
+  type: object
+  additionalProperties: false
+  required: [run_id, session_id, group_id, created_by, status, client_reference, terminal_result]
+  properties:
+    run_id: {type: string, minLength: 1}
+    session_id: {type: string, minLength: 1}
+    group_id: {type: string, minLength: 1}
+    created_by: {type: string, minLength: 1}
+    status:
+      $ref: "#/StateMachineRunStatus"
+    client_reference: {type: [string, "null"], pattern: "^[0-9a-fA-F]{32}$"}
+    terminal_result:
+      anyOf:
+        - $ref: "#/StateMachineRunResultV1"
+        - {type: "null"}
+
 StateMachineRunView:
   type: object
   additionalProperties: false
@@ -185,6 +220,8 @@ StateMachineRunView:
   properties:
     run:
       $ref: "#/StateMachineRun"
+    terminal_result:
+      $ref: "#/StateMachineRunResultV1"
     nodes:
       type: array
       items:

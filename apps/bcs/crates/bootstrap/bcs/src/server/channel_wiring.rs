@@ -87,6 +87,10 @@ impl MessageFlowStateMachineResultPublisher {
 
 #[async_trait]
 impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher {
+    async fn prepare_run_result(&self, cmd: StateMachineResultPublishCommand)
+        -> ServiceResult<Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>> {
+        self.message_flow.prepare_state_machine_run_result(cmd).await
+    }
     async fn publish_state_machine_result(
         &self,
         cmd: StateMachineResultPublishCommand,

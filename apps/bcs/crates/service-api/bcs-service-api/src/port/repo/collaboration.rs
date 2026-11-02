@@ -57,6 +57,7 @@ pub enum StateMachineFailureAction {
 
 #[derive(Debug, Clone)]
 pub struct FailStateMachineNodeAttempt {
+    pub reason_category: super::StateMachineRunReason,
     pub run_id: String,
     pub node_id: String,
     pub attempt: i32,
@@ -67,6 +68,7 @@ pub struct FailStateMachineNodeAttempt {
 
 #[derive(Debug, Clone)]
 pub struct StateMachineNodeAttemptFailure {
+    pub reason_category: Option<super::StateMachineRunReason>,
     pub node: StateMachineNodeRun,
     /// None identifies a legacy failure without a durable continuation decision.
     /// Recovery must not infer its action from the error text or current policy.
@@ -273,6 +275,27 @@ pub trait GroupRuntimeBindingRepoPort: Send + Sync {
 
 #[async_trait]
 pub trait StateMachineRunRepoPort: Send + Sync {
+    /// Page running Bot attempts begun no later than a connection loss. Results are
+    /// candidates only: callers must verify the immutable dispatch target and CAS.
+    async fn disconnected_bot_nodes(&self, _bot: &str, _at: u64, _after: Option<(&str, &str)>, _limit: usize) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        Err(crate::ServiceError::InternalError("disconnect candidate lookup unavailable".into()))
+    }
+    /// Fail only this exact still-running, artifact-free attempt and request.
+    async fn fail_disconnected_bot_node(&self, _node: &StateMachineNodeRun, _at: u64) -> ServiceResult<bool> {
+        Err(crate::ServiceError::InternalError("disconnect failure persistence unavailable".into()))
+    }
+    async fn completed_node_ids(&self, _run: &str) -> ServiceResult<Vec<String>> {
+        Err(crate::ServiceError::InternalError("completed Node identity read unavailable".into()))
+    }
+    /// CAS nonterminal Run, retire pending dispatches, save the safe summary,
+    /// canonical result, target Send and public event in one transaction.
+    /// False means another terminal transition won; no new business records.
+    async fn commit_terminal(&self, _command: super::CommitStateMachineTerminal) -> ServiceResult<bool> {
+        Err(crate::ServiceError::InternalError("atomic Run terminal persistence unavailable".into()))
+    }
+    async fn get_terminal_result(&self, _run: &str) -> ServiceResult<Option<super::StateMachineRunResultV1>> {
+        Err(crate::ServiceError::InternalError("Run result read unavailable".into()))
+    }
     /// Return the committed immutable fact without re-reading the normal write.
     async fn accept_history_message(&self, _command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
         Err(crate::ServiceError::InternalError("atomic history acceptance unavailable".into()))

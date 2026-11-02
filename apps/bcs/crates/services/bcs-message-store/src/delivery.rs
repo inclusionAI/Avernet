@@ -367,8 +367,20 @@ fn insert_message(
 impl MySqlMessageStore {
     async fn delivery_transaction(
         &self,
+        changes: Vec<DeliveryCompareAndSet>,
+        admission: Vec<AdmitMessageDeliveries>,
+    ) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
+        self.compose_delivery_transaction(changes, admission, Vec::new(), Vec::new()).await
+    }
+
+    /// Store-only composition: business CAS, canonical admission and public
+    /// events share one commit. Never perform network I/O in this transaction.
+    pub async fn compose_delivery_transaction(
+        &self,
         mut changes: Vec<DeliveryCompareAndSet>,
         admission: Vec<AdmitMessageDeliveries>,
+        mut steps: Vec<DbTransactionStep>,
+        mut events: Vec<bcs_service_api::port::repo::AppendEventRecord>,
     ) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
         if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id || (w[0].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) != (w[1].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a)) { return Err(MessageDeliveryRepoError::Invalid("batch must share a session".into())); }
         let waiting = WriterTimer::new("repository.writer_wait");
@@ -430,12 +442,10 @@ impl MySqlMessageStore {
                 for row in context { let row = row_to_delivery(row)?; if !rows.iter().any(|d| d.delivery_id == row.delivery_id) { rows.push(row); } }
             }
         }
-        let mut steps = Vec::new();
         let mut admitted = Vec::new();
-        let mut events = Vec::new();
         let mut staged_seq = None;
         let mut staged_messages: Vec<PersistedMessage> = Vec::new();
-        let has_transition = !changes.is_empty();
+        let has_transition = !changes.is_empty() || !steps.is_empty();
         for command in admission {
             // Sender-scoped idempotency lookup, including env. Re-entry returns
             // the old target outcomes, never inserts a fresh set of deliveries.

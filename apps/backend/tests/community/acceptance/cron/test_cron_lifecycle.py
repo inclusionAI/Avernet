@@ -80,14 +80,14 @@ def _seed_success_publish(
 
 
 @pytest.mark.acceptance
-def test_cron_crud_and_published_baas_runtime_live(live_backend, acceptance_fs_root):
+def test_cron_crud_and_published_baas_runtime_live(live_backend, acceptance_fs_root, request):
     """Cover personal CRUD and published service runtime with one live BaaS bot."""
     user_id = fresh_id("e2e_cron_user")
     headers = {"x-user-id": user_id}
 
     with httpx.Client(base_url=live_backend, headers=headers, timeout=60.0) as client:
         bot = create_live_personal_bot(
-            client,
+            client, request=request,
             user_id=user_id,
             bot_name_prefix="Cron Acceptance",
             bot_desc="cron live adapter acceptance bot",
