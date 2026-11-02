@@ -111,6 +111,7 @@ class PlayerConfig:
         if ceiling < max_tokens:
             raise ValueError("UNDERCOVER_LLM_MAX_TOKENS_CEILING must be >= UNDERCOVER_LLM_MAX_TOKENS")
         attempts = _env_int("UNDERCOVER_LLM_MAX_ATTEMPTS", 3, minimum=1)
+        llm_key = _optional_env("UNDERCOVER_LLM_API_KEY", "OPENCLAW_OPENAI_API_KEY")
         return cls(
             bcs_url=os.environ.get("UNDERCOVER_BCS_URL", "http://127.0.0.1:21000").strip(),
             ws_url=os.environ.get("UNDERCOVER_BCS_WS_URL", "").strip() or None,
@@ -124,7 +125,7 @@ class PlayerConfig:
                 Path.home() / ".avernet" / "undercover-python-player" / "logs",
             ),
             llm_base_url=_optional_env("UNDERCOVER_LLM_BASE_URL", "OPENCLAW_OPENAI_BASE_URL"),
-            llm_api_key=_optional_env("UNDERCOVER_LLM_API_KEY", "OPENCLAW_OPENAI_API_KEY"),
+            llm_api_key=llm_key,
             llm_model=_optional_env("UNDERCOVER_LLM_MODEL", "OPENCLAW_OPENAI_MODEL_ID"),
             llm_timeout_seconds=llm_timeout,
             llm_max_tokens=max_tokens,
