@@ -1,7 +1,7 @@
 """Endpoint coverage for GET /api/public/bots/{bot_id}/binding."""
 from __future__ import annotations
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 
 
@@ -10,6 +10,15 @@ PATH = "/api/public/bots/{bot_id}/binding"
 
 
 def _seed_bot(world) -> None:
+    world.get(TemplateRepository).insert(
+        {
+            "bot_id": BOT_ID,
+            "ext": {
+                "template_type": "applicationCoding",
+                "workspace": {"image": "latest"},
+            },
+        }
+    )
     world.get(BotRepository).insert(
         {
             "bot_id": BOT_ID,
@@ -37,7 +46,10 @@ def _assert_public_projection(response, _world) -> None:
     data = response.json()["data"]
     assert data["device_id"] == "device_001"
     assert data["binding_id"] == 1001
-    assert "template_config" not in data
+    assert data["template_config"] == {
+        "template_type": "applicationCoding",
+        "workspace": {"image": "latest"},
+    }
     assert "iam_token" not in data["ext"]
     assert "token" not in data["ext"]
 
