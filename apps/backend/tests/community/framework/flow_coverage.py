@@ -227,6 +227,12 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "repository and architecture tests; drain when a real singlebox flow "
         "exercises the feedback submission end-to-end."
     ),
+    "bot_copy": (
+        "Bot-copy v1 module (Stage A: ac_bot_copy ledger + copy_state + "
+        "POST /copy route + retry). Covered by repository, derive, and "
+        "handler-unit tests; drain when Stage B lands CopyCompiler + create_job "
+        "state_ref threading + a real singlebox e2e copy flow (Task 7)."
+    ),
     "approval": _EXEMPT_REASON,
     "apply_engine": (
         "The engine the Manifest's and the genome's compilers feed: the "
