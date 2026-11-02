@@ -157,7 +157,7 @@ async fn callback(
     // this GET (plan §8.4): missing / duplicated / empty challenge cookie
     // is an `invalid_state` rejection BEFORE the service is entered. A
     // nonce in the query can never substitute.
-    let nonce = match extract_login_challenge(&headers) {
+    let nonce = match extract_login_challenge(&headers, secure_transport(&state)) {
         Ok(nonce) => nonce,
         Err(()) => {
             tracing::warn!(category = "invalid_state", "callback rejected: no browser challenge cookie");
@@ -384,8 +384,13 @@ fn presented_session_cookie(headers: &HeaderMap) -> Result<Option<String>, ()> {
 
 /// The unique, REQUIRED browser-challenge cookie value (plan §8.4):
 /// `Err(())` for missing / duplicated / empty; a query nonce never
-/// substitutes.
-fn extract_login_challenge(headers: &HeaderMap) -> Result<String, ()> {
+/// substitutes. `secure` selects the ONE accepted name for this transport
+/// mode (`__Host-` in production HTTPS, the separate local name over
+/// plain HTTP): the OTHER mode's name is NEVER accepted, so over
+/// production HTTPS a `Domain`-scoped `bcs_oauth_login` cookie planted by
+/// a hostile subdomain cannot satisfy the binding (Login CSRF).
+fn extract_login_challenge(headers: &HeaderMap, secure: bool) -> Result<String, ()> {
+    let expected_name = crate::v1::common::challenge_cookie_name(secure);
     let mut found: Option<String> = None;
     for value in headers.get_all(axum::http::header::COOKIE) {
         let raw = value.to_str().map_err(|_| ())?;
@@ -395,7 +400,7 @@ fn extract_login_challenge(headers: &HeaderMap) -> Result<String, ()> {
                 Some(name) => name.trim(),
                 None => continue,
             };
-            let is_challenge = name == "__Host-bcs_oauth_login" || name == "bcs_oauth_login";
+            let is_challenge = name == expected_name;
             if !is_challenge {
                 continue;
             }

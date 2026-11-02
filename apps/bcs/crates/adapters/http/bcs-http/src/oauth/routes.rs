@@ -156,8 +156,12 @@ fn legacy_error(error: ApplicationError) -> axum::response::Response {
 
 /// The unique, REQUIRED browser-challenge cookie value (plan §8.4):
 /// missing / duplicated / empty is an `invalid state` rejection BEFORE the
-/// service is entered; a nonce in the query never substitutes.
-pub(super) fn extract_login_challenge(headers: &HeaderMap) -> Result<String, ()> {
+/// service is entered; a nonce in the query never substitutes. `secure`
+/// selects the ONE accepted name for this transport mode — the other
+/// mode's name is NEVER accepted, so a `Domain`-scoped local-name cookie
+/// planted by a hostile subdomain cannot satisfy the production binding.
+pub(super) fn extract_login_challenge(headers: &HeaderMap, secure: bool) -> Result<String, ()> {
+    let expected_name = challenge_cookie_name(secure);
     let mut found: Option<String> = None;
     for value in headers.get_all(axum::http::header::COOKIE) {
         let raw = value.to_str().map_err(|_| ())?;
@@ -167,8 +171,7 @@ pub(super) fn extract_login_challenge(headers: &HeaderMap) -> Result<String, ()>
                 Some(name) => name.trim(),
                 None => continue,
             };
-            let is_challenge = name == super::HOST_CHALLENGE_COOKIE
-                || name == super::LOCAL_CHALLENGE_COOKIE;
+            let is_challenge = name == expected_name;
             if !is_challenge {
                 continue;
             }
@@ -273,7 +276,7 @@ pub async fn callback_handler(
     // The temporary cookie binding comes FIRST: the callback GET is
     // protected by this binding plus the one-time state, never by the
     // write-CSRF path.
-    let nonce = match extract_login_challenge(&headers) {
+    let nonce = match extract_login_challenge(&headers, state.config.cookie_secure) {
         Ok(nonce) => nonce,
         Err(()) => {
             warn!(request_id = %bcs_observability::CurrentRequestId, category = "invalid_state", "OAuth callback: browser challenge cookie missing or invalid");

@@ -45,7 +45,7 @@ use bcs_service_api::port::oauth::{
 // Fixture services (noops, copied shape-for-shape from manifest_routes.rs).
 
 mod noops {
-    include!("oauth_browser_binding_noops.rs");
+    include!("oauth_browser_binding/noops.rs");
 }
 
 use noops::{NoopFriendshipService, NoopGroupService, NoopInvitationService, NoopMessageService,
@@ -443,7 +443,7 @@ async fn cross_browser_callback_fails_without_exchange_and_a_still_completes() {
     let (app, providers, sessions) =
         test_router("https://bcs.example.com/openapi/v1/auth", None);
     let mut browser_a = Browser::new();
-    let mut browser_b = Browser::new();
+    let browser_b = Browser::new();
 
     // Browser A discovers the login URLs and receives the challenge cookie.
     let mut response = send(
@@ -782,4 +782,126 @@ async fn without_oauth_user_projects_the_verified_human_and_login_fails_closed()
         let body = json_body(&mut response).await;
         assert_eq!(body["data"]["error_code"], "auth_not_configured");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cookie-name transport confinement (review fix): the callback accepts ONLY
+// the mode-correct challenge name — over production HTTPS a local-name
+// `Domain`-scoped cookie planted by a hostile subdomain must not satisfy
+// the binding, and over local HTTP the `__Host-` name is equally refused.
+
+#[tokio::test]
+async fn production_callback_rejects_the_local_http_challenge_name() {
+    let (app, providers, sessions) =
+        test_router("https://bcs.example.com/openapi/v1/auth", None);
+    let mut response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/openapi/v1/auth/url")
+            .body(Body::empty())
+            .expect("url request"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let raw_cookie = response
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("challenge")
+        .to_string();
+    let body = json_body(&mut response).await;
+    let state = reqwest_url_query(
+        body["data"]["providers"][0]["url"].as_str().expect("url"),
+        "state",
+    )
+    .expect("state");
+    // The real nonce VALUE, planted under the WRONG (local-HTTP) name: a
+    // hostile-subdomain `Domain` cookie carrying the right value must still
+    // fail the binding over production HTTPS.
+    let real_nonce = raw_cookie
+        .split(';')
+        .next()
+        .and_then(|pair| pair.split_once('=').map(|(_, value)| value))
+        .expect("nonce value");
+
+    let b_response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/openapi/v1/auth/callback/mocked?code=code-wrong-name&state={state}"
+            ))
+            .header("cookie", format!("bcs_oauth_login={real_nonce}"))
+            .body(Body::empty())
+            .expect("callback"),
+    )
+    .await;
+    assert_eq!(
+        b_response.status(),
+        StatusCode::BAD_REQUEST,
+        "the local-HTTP name never satisfies production binding"
+    );
+    let mut b_response = b_response;
+    let b_body = json_body(&mut b_response).await;
+    assert_eq!(b_body["data"]["error_code"], "invalid_state");
+    // Nothing was exchanged or installed for the wrong-name attempt.
+    assert_eq!(providers.exchanges.load(Ordering::SeqCst), 0);
+    assert_eq!(sessions.installs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn local_http_callback_rejects_the_host_challenge_name() {
+    let (app, providers, sessions) =
+        test_router("http://127.0.0.1:21000/openapi/v1/auth", None);
+    let mut response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/openapi/v1/auth/url")
+            .body(Body::empty())
+            .expect("url request"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let raw_cookie = response
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .expect("challenge")
+        .to_string();
+    let body = json_body(&mut response).await;
+    let state = reqwest_url_query(
+        body["data"]["providers"][0]["url"].as_str().expect("url"),
+        "state",
+    )
+    .expect("state");
+    let real_nonce = raw_cookie
+        .split(';')
+        .next()
+        .and_then(|pair| pair.split_once('=').map(|(_, value)| value))
+        .expect("nonce value");
+
+    let b_response = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!(
+                "/openapi/v1/auth/callback/mocked?code=code-wrong-name&state={state}"
+            ))
+            .header("cookie", format!("__Host-bcs_oauth_login={real_nonce}"))
+            .body(Body::empty())
+            .expect("callback"),
+    )
+    .await;
+    assert_eq!(
+        b_response.status(),
+        StatusCode::BAD_REQUEST,
+        "the __Host- name never satisfies local-HTTP binding"
+    );
+    let mut b_response = b_response;
+    let b_body = json_body(&mut b_response).await;
+    assert_eq!(b_body["data"]["error_code"], "invalid_state");
+    assert_eq!(providers.exchanges.load(Ordering::SeqCst), 0);
+    assert_eq!(sessions.installs.load(Ordering::SeqCst), 0);
 }

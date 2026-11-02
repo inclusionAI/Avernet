@@ -33,7 +33,14 @@ pub const HOST_CHALLENGE_COOKIE: &str = "__Host-bcs_oauth_login";
 /// different name, never a downgraded `__Host-` one.
 pub const LOCAL_CHALLENGE_COOKIE: &str = "bcs_oauth_login";
 
-fn challenge_cookie_name(secure: bool) -> &'static str {
+/// The one challenge cookie name for a transport mode. EXACTLY ONE name is
+/// valid per mode: over HTTPS production only the host-only `__Host-` name
+/// is honored (a `Domain`-scoped cookie from a hostile subdomain can never
+/// satisfy the browser binding — that is the `__Host-` guarantee), and
+/// plain-HTTP local development uses the separate non-`__Host` name (a
+/// `Secure` cookie would be dropped there). The OTHER mode's name is never
+/// accepted (plan §8.4: 生产不能降级).
+pub fn challenge_cookie_name(secure: bool) -> &'static str {
     if secure {
         HOST_CHALLENGE_COOKIE
     } else {

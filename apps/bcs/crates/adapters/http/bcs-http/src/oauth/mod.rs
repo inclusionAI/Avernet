@@ -115,7 +115,14 @@ impl OAuthRouteState {
     }
 }
 
-fn challenge_cookie_name(secure: bool) -> &'static str {
+/// The one challenge cookie name for a transport mode. EXACTLY ONE name is
+/// valid per mode (plan §8.4): production HTTPS honors only the
+/// host-only `__Host-` name (subdomains cannot forge host-only cookies,
+/// closing the Login CSRF hole of a `Domain`-scoped local-name cookie),
+/// and plain-HTTP local development uses the separate non-`__Host` name
+/// (a `Secure` cookie would be dropped there). The OTHER mode's name is
+/// never accepted.
+pub fn challenge_cookie_name(secure: bool) -> &'static str {
     if secure {
         HOST_CHALLENGE_COOKIE
     } else {

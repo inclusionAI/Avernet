@@ -114,31 +114,42 @@ fn cookie_header(value: &str) -> HeaderMap {
 }
 
 #[test]
-fn challenge_extraction_accepts_the_last_present_value() {
-    let headers = cookie_header("first=1; __Host-bcs_oauth_login=nonce-a; other=2");
+fn challenge_extraction_accepts_only_the_mode_correct_name() {
+    // Production HTTPS honors the host-only __Host- name...
+    let production = cookie_header("first=1; __Host-bcs_oauth_login=nonce-a; other=2");
     assert_eq!(
-        extract_login_challenge(&headers).ok().as_deref(),
+        extract_login_challenge(&production, true).ok().as_deref(),
         Some("nonce-a")
     );
+    // ...and REJECTS the local-HTTP name: over production HTTPS a
+    // Domain-scoped bcs_oauth_login cookie planted by a hostile subdomain
+    // must not satisfy the browser binding (Login CSRF).
+    let planted = cookie_header("bcs_oauth_login=subdomain-plant");
+    assert_eq!(extract_login_challenge(&planted, true), Err(()));
+
+    // Local plain-HTTP uses the separate non-__Host name...
     let local = cookie_header("bcs_oauth_login=nonce-b");
     assert_eq!(
-        extract_login_challenge(&local).ok().as_deref(),
+        extract_login_challenge(&local, false).ok().as_deref(),
         Some("nonce-b")
     );
+    // ...and never accepts a Secure __Host- cookie as its binding.
+    let wrong_mode = cookie_header("__Host-bcs_oauth_login=nonce-b");
+    assert_eq!(extract_login_challenge(&wrong_mode, false), Err(()));
 }
 
 #[test]
 fn challenge_extraction_rejects_missing_duplicate_and_empty() {
     let none = cookie_header("bcs_session=abc");
-    assert_eq!(extract_login_challenge(&none), Err(()));
+    assert_eq!(extract_login_challenge(&none, true), Err(()));
     let empty = cookie_header("__Host-bcs_oauth_login=");
-    assert_eq!(extract_login_challenge(&empty), Err(()));
+    assert_eq!(extract_login_challenge(&empty, true), Err(()));
     let mut duplicated = cookie_header("__Host-bcs_oauth_login=a");
     duplicated.append(
         axum::http::header::COOKIE,
-        axum::http::HeaderValue::from_static("bcs_oauth_login=b"),
+        axum::http::HeaderValue::from_static("__Host-bcs_oauth_login=b"),
     );
-    assert_eq!(extract_login_challenge(&duplicated), Err(()));
+    assert_eq!(extract_login_challenge(&duplicated, true), Err(()));
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +432,7 @@ async fn url_handler_appends_the_challenge_cookie_and_keeps_the_legacy_json_shap
 async fn callback_success_sets_session_and_clears_challenge_as_separate_headers() {
     let service = ScriptedAuthService::new();
     let state = legacy_state(service.clone());
-    let headers = cookie_header("__Host-bcs_oauth_login=challenge-nonce");
+    let headers = cookie_header("bcs_oauth_login=challenge-nonce");
     let resp = callback_handler(
         State(state),
         axum::extract::Path("google".to_string()),
@@ -450,6 +461,78 @@ async fn callback_success_sets_session_and_clears_challenge_as_separate_headers(
     );
     assert_eq!(cache, "no-store");
     assert_eq!(service.calls.lock().unwrap().as_slice(), ["complete_login"]);
+}
+
+/// Production-mode handlers must reject the LOCAL-HTTP challenge cookie
+/// name (a subdomain-planted Domain cookie must not satisfy binding).
+#[tokio::test]
+async fn callback_rejects_the_wrong_transport_mode_cookie_name() {
+    // Production config: cookie_secure = true, but the attacker only got a
+    // Domain-scoped local-name cookie planted.
+    let service = ScriptedAuthService::new();
+    let state = Arc::new(OAuthRouteState::new(
+        service.clone(),
+        Arc::new(NoopUserIdentityPort),
+        OAuthConfig {
+            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
+            idle_timeout_minutes: 30,
+            base_url: "https://bcs.example.com".to_string(),
+            cookie_secure: true,
+            env: "test".to_string(),
+            success_redirect_path: "/".to_string(),
+        },
+        None,
+        vec!["https://work.example".to_string()],
+    ));
+    let headers = cookie_header("bcs_oauth_login=attacker-nonce");
+    let resp = callback_handler(
+        State(state),
+        axum::extract::Path("google".to_string()),
+        axum::extract::Query(CallbackParams {
+            code: Some("code-1".to_string()),
+            auth_code: None,
+            state: "state-1".to_string(),
+        }),
+        headers,
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "production rejects the local name");
+    assert!(service.calls.lock().unwrap().is_empty(), "no service call may happen");
+
+    // Local-HTTP config: cookie_secure = false; a __Host- name is equally
+    // wrong there (its cookie cannot arrive intact, and the mode's one name
+    // is the local one).
+    let service = ScriptedAuthService::new();
+    let state = Arc::new(OAuthRouteState::new(
+        service.clone(),
+        Arc::new(NoopUserIdentityPort),
+        OAuthConfig {
+            jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
+            idle_timeout_minutes: 30,
+            base_url: "http://127.0.0.1:21000".to_string(),
+            cookie_secure: false,
+            env: "test".to_string(),
+            success_redirect_path: "/".to_string(),
+        },
+        None,
+        vec![],
+    ));
+    let headers = cookie_header("__Host-bcs_oauth_login=wrong-mode-nonce");
+    let resp = callback_handler(
+        State(state),
+        axum::extract::Path("google".to_string()),
+        axum::extract::Query(CallbackParams {
+            code: Some("code-1".to_string()),
+            auth_code: None,
+            state: "state-1".to_string(),
+        }),
+        headers,
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "local mode rejects the __Host- name");
+    assert!(service.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

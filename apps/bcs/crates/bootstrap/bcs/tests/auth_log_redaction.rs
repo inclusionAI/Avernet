@@ -50,7 +50,7 @@ const JWT_SECRET: &str = "log-redaction-test-secret-32-bytes!!";
 const ENV: &str = "redaction-test";
 
 // --- noops needed by ApiState::new (shared shape with the V1 suite) --------
-#[path = "../../../adapters/http/bcs-api-http/tests/oauth_browser_binding_noops.rs"]
+#[path = "../../../adapters/http/bcs-api-http/tests/oauth_browser_binding/noops.rs"]
 mod api_state_noops;
 
 // ---------------------------------------------------------------------------
