@@ -52,6 +52,8 @@ export const routes = [
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/task-instances', component: '@/pages/BotWorkshop/TaskInstances' },
+      { path: '/bot-workshop/scheduled-tasks', component: '@/pages/BotWorkshop/ScheduledTasks' },
+      { path: '/bot-workshop/scheduled-tasks/detail', component: '@/pages/BotWorkshop/ScheduledTasks' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },
       { path: '/bot-workshop/health-check', component: '@/pages/BotWorkshop/HealthCheck' },
       // split-admin-space-ticket-pages：管理后台单页拆分，空间管理/通知中心为独立路由，均不占导航位

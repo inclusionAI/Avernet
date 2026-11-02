@@ -253,7 +253,7 @@ describe('BotTable task instances action', () => {
 
     expect(screen.getByRole('button', { name: '查看 Task Bot 日志' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '管理 Task Bot' }));
-    fireEvent.click(screen.getByRole('button', { name: '查看 Task Bot 任务实例' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看 Task Bot 定时任务' }));
     expect(onOpenTaskInstances).toHaveBeenCalledWith(bot);
   });
 
@@ -262,7 +262,7 @@ describe('BotTable task instances action', () => {
     renderTable(bot, { onOpenTaskInstances: jest.fn(), canOpenTaskInstances: () => false, onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 Other Bot' }));
-    expect(screen.queryByRole('button', { name: '查看 Other Bot 任务实例' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 Other Bot 定时任务' })).not.toBeInTheDocument();
   });
 });
 
@@ -870,7 +870,7 @@ describe('Agent Coding Bot row actions', () => {
     // 授权点击关闭气泡；重新打开后验证 Coding Bot 固定的任务实例入口可达。
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     const taskInstancesButton = screen.getByRole('button', {
-      name: '查看 Agent Coding 模版 Bot 任务实例',
+      name: '查看 Agent Coding 模版 Bot 定时任务',
     });
     expect(taskInstancesButton).toBeInTheDocument();
     fireEvent.click(taskInstancesButton);

@@ -14,9 +14,11 @@ Architecture compliance:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Any, Optional
 
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.cron.services.cron_management_targets import CronManagementTargetsMixin
 from agentclaw.community.core.cron.services.cron_targeted_operations import CronTargetedOperationsMixin
 
 from injector import inject
@@ -60,7 +62,7 @@ logger = get_logger()
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
 
 
-class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
+class CronRelayService(CronManagementTargetsMixin, CronTargetedOperationsMixin, CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject
@@ -208,9 +210,28 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
                 t for t in failed_targets if t.get("runtime_stage") == runtime_stage
             ]
 
-        # Tasks are container-local; query every instance so none disappear from the list.
-        targets, instance_failed_targets = await self._expand_runtime_targets(targets)
+        # Teclaw online jobs belong to the logical binding, not a device UUID.
+        # Limit this projection to job listing; admin/broadcast response contracts stay unchanged.
+        teclaw_ids = {
+            bot.get("bot_id") for bot in bots
+            if str(bot.get("active_engine") or bot.get("engine") or "").lower() == "teclaw"
+        }
+        logical = [t for t in targets if t.bot_id in teclaw_ids and t.runtime_stage == RUNTIME_STAGE_ONLINE]
+        physical = [t for t in targets if t not in logical]
+        targets, instance_failed_targets = await self._expand_runtime_targets(physical)
+        targets.extend(logical)
         failed_targets.extend(instance_failed_targets)
+        # Single-instance service listings must expose the UID needed by later targeted operations.
+        for index, target in enumerate(targets):
+            if target.bot_type != "service" or target.device_uuid or target in logical:
+                continue
+            try:
+                device = self._device_provider.get_device(binding_id=target.binding_id)
+                uid = self._read_field(device, "device_id")
+                if uid:
+                    targets[index] = replace(target, device_uuid=str(uid))
+            except Exception:
+                pass  # The actual query below reports unavailable targets through failed_targets.
 
         tasks = []
         for target in targets:
