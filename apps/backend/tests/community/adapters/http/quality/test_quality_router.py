@@ -6,6 +6,7 @@ Uses simple Fake/Stub implementations instead of mocking.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -124,18 +125,16 @@ class FakeQualityTaskService:
         ext: Optional[dict] = None,
         operator_id: Optional[str] = None,
     ) -> QualityTaskRecord:
-        record = _make_record(
-            id=self._next_id,
+        return self.add_task(_make_record(
+            id=0,
+            uuid=uuid.uuid4().hex,
             task_type=task_type,
             biz_type=biz_type,
             bot_id=bot_id,
             owner_id=owner_id,
             ext=ext,
             operator_id=operator_id,
-        )
-        self._next_id += 1
-        self._tasks[record.id] = record
-        return record
+        ))
 
     def update_task_status(
         self, id: int, status: str, ext: Optional[dict] = None

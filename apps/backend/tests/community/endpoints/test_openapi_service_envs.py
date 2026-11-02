@@ -8,7 +8,9 @@ import time
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from tests.community.adapters.http.quality.test_quality_router import FakeQualityTaskService
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
+from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.utils.env_utils import get_current_env
@@ -62,6 +64,18 @@ def _teardown(self, bot_uuid, *, operator, publish_id):
     return {"success": True, "bot_uuid": bot_uuid, "default_tag": "eval", "message": "enqueued"}
 
 
+_quality_tasks: FakeQualityTaskService | None = None
+
+
+def _bind_fake_quality_tasks(world):
+    """Bind the test-quality double so the seeded public publish call can
+    exercise the endpoint's new task-linking dependency without real BaaS flow.
+    """
+    global _quality_tasks
+    _quality_tasks = FakeQualityTaskService()
+    bind_overrides(world, QualityTaskServiceProtocol, {"create_task": _quality_tasks.create_task})
+
+
 def _seed(world):
     _auth(world)
     bot = make_bot(world, bot_id=_BOT, owner_id=_OWNER)
@@ -74,12 +88,25 @@ def _seed(world):
     bind_overrides(world, PublishFlowServiceProtocol, {
         "eval_publish": _publish, "get_baas_publish_progress": _progress, "eval_teardown": _teardown,
     })
+    _bind_fake_quality_tasks(world)
+
+
+def _assert_publish_linked_quality_task(_world, response):
+    assert _quality_tasks is not None
+    task = _quality_tasks.get_task_by_uuid(response.json()["data"]["quality_task_uuid"])
+    assert task is not None
+    assert task.id == response.json()["data"]["quality_task_id"]
+    assert task.ext == {
+        "publish_id": 1, "bot_uuid": "eval-1", "baas_publish_id": 42,
+        "operator": "operator-1", "biz_id": "task-1",
+    }
 
 
 @endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_ok", seed=_seed,
     input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
         query_params={"owner_id": _OWNER, "operator": "operator-1", "biz_id": "task-1"}, headers=_headers()),
-    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True, "baas_publish_id": 42}}))
+    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True, "baas_publish_id": 42}}),
+    extra_assertions=(_assert_publish_linked_quality_task,))
 def publish_ok():
     pass
 

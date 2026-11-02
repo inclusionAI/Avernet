@@ -10,6 +10,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import accepted, envelope, envelope_errors
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
+from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.core.service_bot.errors import (
@@ -41,6 +42,7 @@ async def publish_eval_env(
     service: PublishFlowServiceProtocol = Injected(PublishFlowServiceProtocol),
     bots: BotServiceProtocol = Injected(BotServiceProtocol),
     publications: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+    quality_tasks: QualityTaskServiceProtocol = Injected(QualityTaskServiceProtocol),
     *,
     device_count: Annotated[
         int,
@@ -76,6 +78,8 @@ async def publish_eval_env(
     - `operator` 是调用方传入的业务字段，不作为身份凭据。
     - HTTP 202 表示提交成功，不代表环境已就绪。保存响应 `data` 中的
       `baas_publish_id` 用于查询进度，`bot_uuid` 用于释放环境。
+      同时会创建一条 Quality Task，记录返回的 `publish_id`、`bot_uuid` 与
+      `baas_publish_id`；响应中的 `quality_task_uuid` 可用于后续按任务关联该环境。
     """
     resource_spec = None
     if cpu is not None or memory is not None or disk is not None:
@@ -94,7 +98,27 @@ async def publish_eval_env(
         device_count=device_count,
         resource_spec=resource_spec,
     )
-    return accepted(EvalEnvPublishResult.model_validate(deployment), request)
+    quality_task = quality_tasks.create_task(
+        task_type="eval",
+        biz_type="service_bot_single",
+        bot_id=bot_id,
+        owner_id=owner_id,
+        ext={
+            "publish_id": deployment["publish_id"],
+            "bot_uuid": deployment["bot_uuid"],
+            "baas_publish_id": deployment["baas_publish_id"],
+            "operator": operator,
+            "biz_id": biz_id,
+        },
+        operator_id=operator,
+    )
+    return accepted(
+        EvalEnvPublishResult.model_validate({
+            **deployment, "quality_task_id": quality_task.id,
+            "quality_task_uuid": quality_task.uuid,
+        }),
+        request,
+    )
 
 
 def _validate_publication_address(
