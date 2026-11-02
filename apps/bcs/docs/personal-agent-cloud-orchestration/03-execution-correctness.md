@@ -86,6 +86,15 @@ queryable via `GetTask`. On takeover, for every dispatch record not terminal:
 | `DISPATCHED` | task `working` / `input-required` | subscribe and wait |
 | `DISPATCHED` | task `completed` / `failed` | fetch result, advance — **no re-execution** |
 
+This pull path is **not takeover-only**: the *owning node* runs the same
+trichotomy whenever a dispatch channel dies without a genuine terminal —
+e.g. a dial-out SSE stream drops mid-step and the adapter synthesizes an
+error terminal. A synthesized terminal reports the *channel's* death, not
+the task's outcome: the agent may still be executing. Before treating such
+an attempt as `failed`, the owner probes/`GetTask`s the agent's durable
+task — resolving "the stream died but the booking completed" by reading,
+instead of stalling the step as outcome-unknown or minting a fresh key.
+
 Scope of this protocol: it presupposes a **profile-verified agent** — which
 the dispatch gate (Doc 04) guarantees for every side-effecting step, since
 such steps are never dispatched to an agent without verified dedup. A

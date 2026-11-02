@@ -125,7 +125,10 @@ cannot rebuild — the remote side holds the other end:
   with a synthesized error terminal when a stream ends without one. In this
   design an interrupted dispatch is therefore recovered through **Doc 03's
   task-state reconciliation** (probe/`GetTask` against the agent's durable
-  task), which is correct without any stream replay; durable cursor-based
+  task) — run by the **owning node itself** when a stream dies with the
+  node alive (no takeover involved; a synthesized terminal is a channel
+  death, not an outcome), and by the successor at takeover: the same path
+  either way, correct without any stream replay; durable cursor-based
   stream resumption is *optional* net-new adapter+provider work that would
   improve liveness of partial output, never correctness. The provider's
   reachability (its URL) is node-independent.
