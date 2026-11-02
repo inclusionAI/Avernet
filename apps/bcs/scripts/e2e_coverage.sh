@@ -352,6 +352,7 @@ if [[ "$no_stop" -eq 0 ]]; then
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
     bcs-bot-store/src/memory_authority.rs
+    bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
     bcs-bot-store/src/memory_control_plane.rs

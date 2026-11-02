@@ -26,14 +26,15 @@
 #   4. both inboxes (`direction=received` / `sent`) list the
 #      accepted round.
 #
-# Lenient-sync note (spec §5.2): the trusted-App full-set sync
-# legs (unknown/malformed member skipped, missing target bot
-# zeros) are covered by the shared conformance suites and the
-# Rust e2e chain (`e2e_bot_authority.rs` configures a
-# trusted-app rule); THIS script's stack has no trusted-app
-# scope configured, so the sync surface cannot be driven here
-# without a mid-story server restart. The bash story pins the
-# human-registry fix through the mine-ensured edit leg instead.
+# Owned-sync note (2026-10-29 design): the singlebox/local
+# coverage template authorizes the Backend service under the rule
+# `app="backend", tenant="teamclaw",
+# actions=[managers:sync, ownership:sync]`,
+# so the trusted ownership sync is driven REAL at the end of this
+# story (swap/full-removal/read-back/replay/pending-closure/
+# unknown/missing legs). The managers full-set sync stays
+# undriven here (its lenient legs are covered by the conformance
+# suites and the Rust e2e chain).
 #
 # Auth: every `/api/v1/collaboration` call carries the Gateway
 # Principal JWT (`X-Avernet-Principal`, signed with
@@ -272,4 +273,89 @@ assert new - old < 300_000, "renewal stays within the re-stamp gap"' \
     _au_request GET "${prefix}/ownership-transfers?direction=sent" "$principal_a"
     require_status "the ex-owner lists sent transfers" "200" || return
     assert_contains "sent outbox contains the accepted bot" "$RESPONSE" "$owner_bot"
+
+    # 5. Trusted ownership sync (2026-10-29 design): swap B -> A via
+    #    the fixture App; full-removal read-back; idempotent replay;
+    #    pending closure; unknown/missing legs.
+    # The rule matches byte-exact app NAME + tenant: mint the
+    # Backend service identity the stack template authorizes
+    # (app_id is informational to the policy, 7 is a stand-in).
+    local app_principal
+    if ! app_principal=$(python3 "$probe" app-principal \
+            --app-id 7 \
+            --app-name "backend" \
+            --tenant "teamclaw" \
+            --signing-key "$signing_key"); then
+        fail "Gateway App-Principal generation failed"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+
+    # Human-only ownership sync stays denied with the pinned code.
+    _au_request PUT "${prefix}/bots/${owner_bot}/ownership" "$principal_a" \
+        "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}"
+    require_status "human-only ownership sync is denied" "403" || return
+    assert_json_eq "human-only sync uses the stable forbidden code" \
+        "$RESPONSE" "data.error_code" "bot_authority_operator_forbidden"
+
+    # Trusted swap B -> A: A's owner edge restores from revoked,
+    # A's manager edge is stripped (target 不占 manager 名额), B is
+    # fully removed.
+    _au_request PUT "${prefix}/bots/${owner_bot}/ownership" "$app_principal" \
+        "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}"
+    require_status "trusted app syncs the owner" "200" || return
+    assert_json_eq "ownership sync reports the change" "$RESPONSE" "data.changed" "true"
+    assert_json_eq "ownership sync names the new owner" \
+        "$RESPONSE" "data.owner_user_id" "$BCS_MOCK_USER_ID"
+    assert_json_eq "ownership sync names the previous owner" \
+        "$RESPONSE" "data.previous_owner_user_id" "$_AU_STAFF_B"
+    _au_request GET "${prefix}/bots/${owner_bot}/ownership" "$principal_b"
+    require_status "the swapped-out owner lost every Human rule" "403" || return
+    _au_request GET "${prefix}/bots/${owner_bot}/managers" "$principal_a"
+    require_status "the new owner reads the manager ledger" "200" || return
+    assert_json_eq "the ledger reports the owner" \
+        "$RESPONSE" "data.owner.owner_user_id" "$BCS_MOCK_USER_ID"
+    # The new owner's old manager edge is gone from the items.
+    local items
+    items=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["data"]["items"]))' 2>/dev/null)
+    case "${items}" in
+        *"${BCS_MOCK_USER_ID}"*) fail "the swapped-in owner's manager edge survived the swap"; TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1));;
+        *) pass "the swapped-in owner's manager edge was stripped"; TESTS_PASSED=$((TESTS_PASSED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1));;
+    esac
+
+    # Idempotent replay: zero diff.
+    _au_request PUT "${prefix}/bots/${owner_bot}/ownership" "$app_principal" \
+        "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}"
+    require_status "ownership sync replay is a successful no-op" "200" || return
+    assert_json_eq "replay reports no change" "$RESPONSE" "data.changed" "false"
+
+    # Pending closure: A initiates a fresh A -> B transfer, the App
+    # syncs A -> B directly, and the pending row closes invalidated
+    # with the frozen system marker and reason.
+    _au_request PUT "$transfer_path" "$principal_a"
+    require_status "owner initiates a fresh transfer" "201" || return
+    assert_json_eq "fresh transfer is pending" "$RESPONSE" "data.status" "pending"
+    _au_request PUT "${prefix}/bots/${owner_bot}/ownership" "$app_principal" \
+        "{\"owner_user_id\":\"${_AU_STAFF_B}\"}"
+    require_status "ownership sync under a live pending commits" "200" || return
+    assert_json_eq "swap under pending reports the change" "$RESPONSE" "data.changed" "true"
+    _au_request GET "$transfer_path" "$principal_b"
+    require_status "the closed transfer row is still readable" "200" || return
+    assert_json_eq "sync closed the pending transfer" "$RESPONSE" "data.status" "invalidated"
+    assert_json_eq "closure uses the system marker" "$RESPONSE" "data.decided_by_kind" "system"
+    assert_json_eq "closure uses the frozen sync reason" "$RESPONSE" "data.reason" "ownership_sync"
+
+    # Unknown/deleted target: pinned whole-request 400.
+    _au_request PUT "${prefix}/bots/${owner_bot}/ownership" "$app_principal" \
+        "{\"owner_user_id\":\"never-seen-$$\"}"
+    require_status "unknown sync target is rejected" "400" || return
+    assert_json_eq "unknown target uses the stable error code" \
+        "$RESPONSE" "data.error_code" "bot_authority_human_unknown"
+
+    # Missing bot: tolerated no-op (200, changed=false), never 404.
+    _au_request PUT "${prefix}/bots/00000000-0000-0000-0000-000000000000/ownership" "$app_principal" \
+        "{\"owner_user_id\":\"${BCS_MOCK_USER_ID}\"}"
+    require_status "missing-bot sync is a tolerated no-op" "200" || return
+    assert_json_eq "missing-bot sync reports no change" "$RESPONSE" "data.changed" "false"
 }

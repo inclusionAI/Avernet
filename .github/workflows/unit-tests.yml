@@ -216,7 +216,7 @@ jobs:
           echo "$output"
           echo "$output" | grep -q 'test result: ok. 1 passed; 0 failed; 0 ignored' \
             || { echo "expected summary: 1 passed / 0 failed / 0 ignored" >&2; exit 1; }
-          echo "$output" | grep -q 'authority-mysql-gate=edge-authority scenarios=55' \
+          echo "$output" | grep -q 'authority-mysql-gate=edge-authority scenarios=63' \
             || { echo "authority scenario inventory unfinished" >&2; exit 1; }
 
       - name: Run Bot Authority provider lifecycle MySQL conformance

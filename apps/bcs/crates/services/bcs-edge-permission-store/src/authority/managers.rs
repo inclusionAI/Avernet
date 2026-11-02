@@ -130,7 +130,7 @@ enum EdgeRowState {
 /// Write-state classification of the sync target bot
 /// (the lenient-sync pre-read; spec §5.2 ruling).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SyncBotState {
+pub(super) enum SyncBotState {
     /// Absent or tombstoned: zeros with a warn log.
     Missing,
     /// Live but `ownership_version = 0`: hard error.
@@ -234,7 +234,7 @@ fn assign_sequences(
 /// `DbError::Timeout` is never among them: its outcome is
 /// governed by the plugin contract and must not be
 /// re-run.
-fn is_retryable(err: &DbError) -> bool {
+pub(super) fn is_retryable(err: &DbError) -> bool {
     matches!(
         err,
         DbError::ConditionFailed { .. } | DbError::InvalidInput(_)
@@ -333,7 +333,7 @@ impl DbBotAuthorityStore {
     /// target returns zeros with a warn log, while an
     /// uninitialized live bot still carries the hard
     /// `bot_ownership_not_initialized` error.
-    async fn sync_bot_state(
+    pub(super) async fn sync_bot_state(
         &self,
         bot_id: &str,
     ) -> ServiceResult<SyncBotState> {
@@ -346,7 +346,7 @@ impl DbBotAuthorityStore {
 
     /// Pre-read owner identity. Final arbitration
     /// happens via the in-transaction owner guard.
-    async fn pre_read_owner(&self, bot_id: &str) -> ServiceResult<String> {
+    pub(super) async fn pre_read_owner(&self, bot_id: &str) -> ServiceResult<String> {
         let mut owners = self.approved_owner_rows(bot_id).await?;
         match owners.len() {
             1 => Ok(owners.pop().expect("exactly one owner row")),
