@@ -33,6 +33,8 @@ async def _instant_sleep(*_args, **_kwargs):
     await _real_sleep(0)
 
 
+
+
 @pytest.mark.asyncio
 async def test_bootstrap_no_lock_waits_until_repo_ready():
     svc = _make_service([False, False, True])  # 入口检查 + 等待循环
@@ -42,6 +44,8 @@ async def test_bootstrap_no_lock_waits_until_repo_ready():
     assert result["method"] == "existing"
 
 
+
+
 @pytest.mark.asyncio
 async def test_bootstrap_no_lock_times_out_returns_failed():
     svc = _make_service([False] + [False] * 10)
@@ -49,6 +53,8 @@ async def test_bootstrap_no_lock_times_out_returns_failed():
         result = await svc.sync_bootstrap()
     assert result["success"] is False
     assert result["method"] == "wait_timeout"
+
+
 
 
 @pytest.mark.asyncio
@@ -127,6 +133,8 @@ def test_oss_fallback_does_not_extract_over_partial_repo(tmp_path):
     tar.assert_not_called()
 
 
+
+
 @pytest.mark.asyncio
 async def test_post_clone_failure_preserves_valid_bare_repo(tmp_path):
     svc = GitSyncService.__new__(GitSyncService)
@@ -150,6 +158,9 @@ async def test_post_clone_failure_preserves_valid_bare_repo(tmp_path):
     svc._sync_subtree = AsyncMock(return_value={"success": True})
     svc._run_sync = _run_sync
     svc._download_from_oss_and_extract = AsyncMock(side_effect=_fallback)
+    svc._bootstrap_existing_result = AsyncMock(
+        return_value={"success": False, "method": "existing_repair_failed"}
+    )
 
     result = await svc._bootstrap_clone_or_fallback()
 
