@@ -78,6 +78,11 @@ _BOT_STATUS_DESC = (
 class Bot(BaseModel):
     """An agent (bot) record."""
 
+    entity_id: str = Field(default="", description="Immutable Bot resource locator.")
+    bcn_bot_id: str = Field(
+        default="", description="Established BCN address; stable across Owner handoff."
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -114,7 +119,10 @@ class Bot(BaseModel):
         "lifecycle is not managed through this API."
     )
     status: str = Field(description=_BOT_STATUS_DESC)
-    expert_name: str | None = Field(default=None, description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.")
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+    )
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )
@@ -683,9 +691,7 @@ class ManifestSourceCell(BaseModel):
     it.
     """
 
-    category: str = Field(
-        description="One of the six categories under `manifest`."
-    )
+    category: str = Field(description="One of the six categories under `manifest`.")
     protocol: str = Field(
         description=(
             "How the content travels: `content` (inline in the document), "

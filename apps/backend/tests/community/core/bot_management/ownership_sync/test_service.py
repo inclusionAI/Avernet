@@ -30,7 +30,7 @@ from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipError
 from agentclaw.community.plugins.local.bcs_ownership import RecordingBcsOwnershipPlugin
 
 KEY = SyncKey("tenant", "dev", 7)
-FACTS = OwnershipFacts(KEY, "bot", "stable", "B")
+FACTS = OwnershipFacts(KEY, "bot", "stable", "B", bot_type="service")
 
 
 class Clock:

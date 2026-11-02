@@ -406,3 +406,15 @@ describe('collaborationCandidateService', () => {
     expect(!res.ok && res.error.friendlyMessage).toBe('推荐可协作 Bot 失败，请稍后重试。');
   });
 });
+
+it('matches friend metadata by stable BCN address after Owner handoff', async () => {
+  connections.listFriendConnections.mockResolvedValue({
+    code: 20000, data: { items: [{ actor: { type: 'bot', id: 'b1:old' } }], total: 1 },
+  });
+  bots.listBotMetadata.mockResolvedValue({
+    code: 200000,
+    data: { items: [{ bot_id: 'b1', owner_id: 'new', bcn_bot_id: 'b1:old', bot_name: 'Transferred', status: 'ACTIVE' }], total: 1 },
+  });
+  const result = await collaborationCandidateService.listFriends('new', { actorType: 'human' });
+  expect(result).toMatchObject({ ok: true, data: { items: [{ id: 'b1:old', name: 'Transferred' }] } });
+});

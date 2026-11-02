@@ -6,6 +6,7 @@ export interface CollaboratingBotDto {
   bot_id: string;
   bot_name: string;
   bot_desc: string;
+  bcn_bot_id?: string;
   entity_id: string;
   owner_id: string;
   engine: string;

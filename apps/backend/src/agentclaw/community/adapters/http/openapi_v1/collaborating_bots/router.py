@@ -26,6 +26,7 @@ from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.di import Injected
 from fastapi import APIRouter, Query, Request
 
@@ -47,6 +48,7 @@ def _to_item(
 ) -> CollaboratingBot:
     engine = bot.get("active_engine") or ""
     return CollaboratingBot(
+        bcn_bot_id=bcn_bot_reference(bot),
         bot_id=bot["bot_id"],
         bot_name=bot.get("bot_name") or "",
         bot_desc=bot.get("bot_desc") or "",

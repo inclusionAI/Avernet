@@ -58,6 +58,8 @@ class SyncFacts:
     entity_id: str
     owner_id: str
     collaborators: tuple[CollaboratorFact, ...]
+    bot_type: str | None  # NULL is the existing legacy non-service registration.
+    bcn_provider_bot_ref: str | None = None
 
 
 @dataclass(frozen=True)
