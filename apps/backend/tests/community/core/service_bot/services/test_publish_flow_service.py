@@ -4642,7 +4642,7 @@ def test_publish_ext_state_attempt_token_is_atomic():
     call_kwargs = publish_service.update_publish_status_with_ext.call_args.kwargs
     assert call_kwargs["source_status"] == PublishStatus.DRAFT.value
     assert call_kwargs["target_status"] == PublishStatus.BUILDING.value
-    assert call_kwargs["ext"]["build_attempt"] == token
+    assert call_kwargs["ext"]["build_attempt"] == new_attempt
 
 
 def test_verify_flow_payload_rejects_non_string_attempt():
