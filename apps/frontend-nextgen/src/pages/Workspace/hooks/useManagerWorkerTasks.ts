@@ -1,10 +1,10 @@
 import { applyTaskStatuses, type TaskStatusSnapshot } from '@/domain/groupTasks/statusProjection';
 import type { ParticipantView } from '@/domain/collaboration';
 import { isTerminalTask, projectGroupTasks, type GroupTask } from '@/domain/groupTasks/projection';
-import { cancelQueuedDelivery, queryTaskDeliveries, queryWorkerTasks, cancelWorkerTask } from '@/services/workspace/messageDeliveryService';
+import { queryTaskDeliveries, queryWorkerTasks, cancelWorkerTask } from '@/services/workspace/messageDeliveryService';
 import { useMessageDeliveryStore } from '@/stores/messageDeliveryStore';
 import type { ChatMessage } from '@tc-chat/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 /** Session-scoped, rebuildable task projection. Never infer completion from an individual text segment. */
 export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[], participants: ParticipantView[]) {
@@ -13,6 +13,21 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     () => projectGroupTasks(Object.values(deliveries ?? {}), messages, participants),
     [deliveries, messages, participants],
   );
+  const [uncertain, setUncertain] = useState<Record<string, number>>({});
+  const requestSequence = useRef(0);
+  const cancellationBarrier = useRef(new Map<string, number>());
+  const currentTasks = useRef(baseTasks);
+  currentTasks.current = baseTasks;
+  const clearConfirmed = useCallback((refs: string[], started: number) => {
+    const confirmed = new Set(currentTasks.current.filter((task) =>
+      refs.includes(task.taskRef) || (task.intentId && refs.includes(task.intentId)),
+    ).map((task) => task.taskRef));
+    setUncertain((previous) => {
+      const retained = Object.entries(previous).filter(([ref, after]) => !confirmed.has(ref) || started <= after);
+      return retained.length === Object.keys(previous).length ? previous : Object.fromEntries(retained);
+    });
+  }, []);
+  useEffect(() => { setUncertain({}); cancellationBarrier.current.clear(); }, [sessionId]);
   const [error, setError] = useState<string>();
   const [statusState, setStatusState] = useState<{ sessionId: string; rows: Record<string, TaskStatusSnapshot> }>({ sessionId, rows: {} });
   const tasks = useMemo(() => applyTaskStatuses(baseTasks, statusState.sessionId === sessionId ? statusState.rows : {}), [baseTasks, statusState, sessionId]);
@@ -22,13 +37,15 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
+      const started = ++requestSequence.current;
       try {
         const refs = JSON.parse(taskRefs) as string[];
         if (refs.length) {
-          const rows = await queryWorkerTasks(refs);
+          const rows = (await queryWorkerTasks(refs)).filter((row) => started > (cancellationBarrier.current.get(row.ref) ?? -1));
           const observedAt = Date.now();
           if (!disposed) {
-            setStatusState({ sessionId, rows: Object.fromEntries(rows.map((row) => [row.ref, { row, observedAt }])) });
+            setStatusState((previous) => ({ sessionId, rows: { ...(previous.sessionId === sessionId ? previous.rows : {}), ...Object.fromEntries(rows.map((row) => [row.ref, { row, observedAt }])) } }));
+            clearConfirmed(rows.filter((row) => ['queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out'].includes(row.status)).map((row) => row.ref), started);
             setError(undefined);
           }
         }
@@ -40,10 +57,9 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     };
     void refresh();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [sessionId, taskRefs]);
+  }, [sessionId, taskRefs, clearConfirmed]);
   const [read, setRead] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Set<string>>(new Set());
-  const [uncertain, setUncertain] = useState<Record<string, number>>({});
   const [now, setNow] = useState(Date.now);
   const pendingRef = useRef(new Set<string>());
   const observedRuns = useRef(new Map<string, string>());
@@ -76,12 +92,29 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
+      const started = ++requestSequence.current;
+      const startedAt = Date.now();
       const ids = JSON.parse(messageIds) as string[];
       try {
         if (ids.length) {
-          const rows = await queryTaskDeliveries(sessionId, ids);
+          const rows = (await queryTaskDeliveries(sessionId, ids)).filter((row) => started > (cancellationBarrier.current.get(row.task?.task_ref ?? '') ?? -1));
           if (!disposed) {
             for (const row of rows) if (row.task) useMessageDeliveryStore.getState().upsertDelivery(sessionId, row);
+            const confirmed = projectGroupTasks(rows, [], []).filter((task) => task.status !== 'unknown').map((task) => task.taskRef);
+            clearConfirmed(confirmed, started);
+            // A newer delivery read can recover an uncertain task-API response.
+            setStatusState((previous) => {
+              if (previous.sessionId !== sessionId) return previous;
+              const next = { ...previous.rows };
+              for (const task of currentTasks.current) {
+                const snapshot = task.intentId ? next[task.intentId] : undefined;
+                if (task.intentId && confirmed.includes(task.taskRef) && snapshot && snapshot.observedAt <= startedAt &&
+                    ['unknown', 'not_found', 'ambiguous', 'already_finished', 'cancel_failed'].includes(snapshot.row.status)) {
+                  delete next[task.intentId];
+                }
+              }
+              return Object.keys(next).length === Object.keys(previous.rows).length ? previous : { sessionId, rows: next };
+            });
           }
         }
       } catch {
@@ -95,7 +128,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       disposed = true;
       clearTimeout(timer);
     };
-  }, [sessionId, messageIds]);
+  }, [sessionId, messageIds, clearConfirmed]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -104,7 +137,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     ...task,
     lastActivityAt: Math.max(task.lastActivityAt, task.runId ? streamActivity[task.runId] ?? 0 : 0),
     status:
-      uncertain[task.taskRef] !== undefined && task.version <= uncertain[task.taskRef]
+      uncertain[task.taskRef] !== undefined
         ? ('unknown' as const)
         : task.status,
   }));
@@ -116,25 +149,27 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       ...Object.fromEntries(displayed.filter((t) => isTerminalTask(t.status)).map((t) => [t.taskRef, signature(t)])),
     }));
   const cancelTask = async (task: GroupTask) => {
-    if ((!task.deliveryId && !task.intentId) || pendingRef.current.has(task.taskRef)) return;
+    if (!task.intentId || pendingRef.current.has(task.taskRef)) return;
+    cancellationBarrier.current.set(task.taskRef, Infinity);
+    cancellationBarrier.current.set(task.intentId, Infinity);
     pendingRef.current.add(task.taskRef);
     setPending(new Set(pendingRef.current));
-    setUncertain((previous) => ({ ...previous, [task.taskRef]: task.version }));
+    setUncertain((previous) => ({ ...previous, [task.taskRef]: Infinity }));
     try {
-      if (!task.deliveryId) {
-        const row = await cancelWorkerTask(task.intentId!);
-        const observedAt = Date.now();
-        setStatusState((previous) => ({ sessionId, rows: { ...(previous.sessionId === sessionId ? previous.rows : {}), [row.ref]: { row, observedAt } } }));
-        setError(row.status === 'cancel_failed' ? '停止失败，请稍后重试' : undefined);
-        return;
+      const row = await cancelWorkerTask(task.intentId);
+      const observedAt = Date.now();
+      setStatusState((previous) => ({ sessionId, rows: { ...(previous.sessionId === sessionId ? previous.rows : {}), [row.ref]: { row, observedAt } } }));
+      if (['queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out'].includes(row.status)) {
+        setUncertain((previous) => { const next = { ...previous }; delete next[task.taskRef]; return next; });
       }
-      const outcome = await cancelQueuedDelivery(task.sourceMessageId, task.deliveryId, sessionId);
-      for (const result of outcome.results)
-        useMessageDeliveryStore.getState().upsertDelivery(sessionId, result.delivery);
-      setError(outcome.firstError ?? undefined);
+      setError(row.status === 'cancel_failed' ? '停止失败，请稍后重试' : undefined);
     } catch {
       setError('停止结果未确认，请等待状态更新');
     } finally {
+      const after = ++requestSequence.current;
+      cancellationBarrier.current.set(task.taskRef, after);
+      cancellationBarrier.current.set(task.intentId, after);
+      setUncertain((previous) => previous[task.taskRef] === undefined ? previous : { ...previous, [task.taskRef]: after });
       pendingRef.current.delete(task.taskRef);
       setPending(new Set(pendingRef.current));
     }

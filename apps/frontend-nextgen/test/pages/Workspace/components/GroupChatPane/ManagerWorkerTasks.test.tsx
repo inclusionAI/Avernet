@@ -1,11 +1,12 @@
 /** @jest-environment jsdom */
+import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
 import { GroupChatCollabPanel } from '@/pages/Workspace/components/GroupChatPane/GroupChatCollabPanel';
 import type { DeliveryStatusView, SessionView } from '@/domain/collaboration';
 import { ManagerWorkerTasks } from '@/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks';
 import { cancelQueuedDelivery, queryTaskDeliveries, queryWorkerTasks, cancelWorkerTask } from '@/services/workspace/messageDeliveryService';
 import { useMessageDeliveryStore } from '@/stores/messageDeliveryStore';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 
 jest.mock('@/services/workspace/messageDeliveryService', () => ({
   cancelQueuedDelivery: jest.fn(),
@@ -50,6 +51,7 @@ beforeEach(() => {
   query.mockResolvedValue([]);
   jest.mocked(queryWorkerTasks).mockResolvedValue([]);
   cancel.mockReset();
+  jest.mocked(cancelWorkerTask).mockReset();
 });
 
 it('shows task counts, separate cards for the same worker, and clears terminal unread on opening', async () => {
@@ -62,41 +64,46 @@ it('shows task counts, separate cards for the same worker, and clears terminal u
   expect(within(panel).getAllByRole('article')).toHaveLength(3);
   expect(within(panel).getAllByText('日志 Bot')).toHaveLength(3);
   await waitFor(() => expect(screen.queryByText('1 个任务有新结果')).not.toBeInTheDocument());
-  expect(within(panel).getByRole('button', { name: '停止' })).toBeInTheDocument();
-  expect(within(panel).getByRole('button', { name: '取消' })).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
   fireEvent.click(within(panel).getByRole('button', { name: '关闭任务面板' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-it('cancels the selected delivery only and waits for server confirmation', async () => {
-  const running = row('T-1', 'running');
-  insert(running, row('T-2', 'running'));
-  let resolve!: (result: Awaited<ReturnType<typeof cancelQueuedDelivery>>) => void;
-  cancel.mockImplementation(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
-  render(<ManagerWorkerTasks session={session} messages={[]} />);
-  open();
-  fireEvent.click(screen.getAllByRole('button', { name: '停止' })[0]);
-  expect(cancel).toHaveBeenCalledTimes(1);
-  const selectedId = cancel.mock.calls[0][1];
-  expect(['d-T-1', 'd-T-2']).toContain(selectedId);
-  expect(screen.getByText('正在确认…')).toBeDisabled();
-  const selected = selectedId === running.delivery_id ? running : row('T-2', 'running');
-  await act(async () =>
-    resolve({
-      results: [{ delivery: { ...selected, status: 'cancel_unknown', state_version: 2 }, error: null }],
-      firstError: null,
-    }),
-  );
-  expect(screen.queryByText('已取消')).not.toBeInTheDocument();
-  expect(screen.getAllByText('状态待确认').length).toBeGreaterThan(0);
-  expect(screen.getAllByRole('button', { name: '停止' })).toHaveLength(1);
-  insert({ ...selected, status: 'cancelled', state_version: 3 });
-  expect(screen.getByText('已取消')).toBeInTheDocument();
+it.each(['network error', 'unknown response'])('recovers managed cancellation after %s without a version change', async (failure) => {
+  jest.useFakeTimers();
+  try {
+    const intentId = `bcs_intent_${'a'.repeat(32)}`;
+    const delivery = row('T-aaaaaaaa', 'running');
+    insert(delivery);
+    const messages = [{ id: 'manager', role: 'assistant', content: '', createdAt: Date.now(),
+      blocks: [{ type: 'tool_execution', steps: [{ id: 'tool', tool: 'bcs_assign_task', status: 'success',
+        input: JSON.stringify({ target_bot: 'worker', message: '检查日志' }),
+        output: JSON.stringify({ __bcs_coordination__: true, v: 2, tool: 'bcs_assign_task', status: 'stored', intent_id: intentId }),
+      }] }],
+    }] as never;
+    let recover!: (rows: DeliveryStatusView[]) => void;
+    query.mockImplementationOnce(() => new Promise((resolve) => { recover = resolve; }));
+    query.mockResolvedValue([delivery]);
+    if (failure === 'network error') jest.mocked(cancelWorkerTask).mockRejectedValueOnce(new Error('temporary failure'));
+    else jest.mocked(cancelWorkerTask).mockResolvedValueOnce({ ref: intentId, status: 'unknown' });
+    const view = renderHook(() => useManagerWorkerTasks('s1', messages, []));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await view.result.current.cancelTask(view.result.current.tasks[0]); });
+    expect(cancelWorkerTask).toHaveBeenCalledWith(intentId);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(view.result.current.tasks[0].status).toBe('unknown');
+    // This read started before cancellation and cannot confirm its outcome.
+    await act(async () => { recover([delivery]); });
+    expect(view.result.current.tasks[0].status).toBe('unknown');
+    await act(async () => { jest.advanceTimersByTime(10_000); });
+    expect(view.result.current.tasks[0].status).toBe('running');
+    expect(view.result.current.tasks[0].version).toBe(1);
+    jest.mocked(cancelWorkerTask).mockResolvedValueOnce({ ref: intentId, status: 'cancelled' });
+    await act(async () => { await view.result.current.cancelTask(view.result.current.tasks[0]); });
+    expect(view.result.current.tasks[0].status).toBe('cancelled');
+    view.unmount();
+  } finally { jest.useRealTimers(); }
 });
 
 it('recovers delivery state from source messages and shows an empty task panel without legacy guessing', async () => {

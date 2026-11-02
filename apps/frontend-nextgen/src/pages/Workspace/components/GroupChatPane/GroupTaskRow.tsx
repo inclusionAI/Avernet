@@ -89,7 +89,7 @@ export function GroupTaskRow({
             aria-hidden
           />
         </button>
-        {(task.deliveryId || task.intentId) && (task.status === 'queued' || task.status === 'running' || pending) ? (
+        {task.intentId && (task.status === 'queued' || task.status === 'running' || pending) ? (
           <Button
             variant="ghost"
             size="sm"
