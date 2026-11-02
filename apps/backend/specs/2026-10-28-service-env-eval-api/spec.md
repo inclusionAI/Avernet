@@ -80,7 +80,7 @@ checks. Live BaaS provisioning requires an integration environment.
 
 ## Environment publish progress
 
-`GET /openapi/v1/service-envs/env-publish/{baas_publish_id}/progress`
+`GET /openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress`
 
 The only business input is the positive `baas_publish_id` returned by env-publish.
 No Bot ID, publication ID, owner/entity locator, or request body is required.
@@ -89,9 +89,10 @@ NoCheck. It deliberately does not verify Bot membership or workflow ownership:
 a caller admitted by the existing public identity layer can query a known workflow ID.
 
 The handler directly reuses PublishFlowService.get_baas_publish_progress with
-include_devices=False, matching Quality TaskProcessor.to_env_ready. No new service,
-repository dependency, or DI binding is introduced. HTTP 200 returns the existing
-Envelope with the BaaS progress dictionary as data. Querying does not transition
+`include_devices=True`. Unlike internal Quality callers, this public progress response
+intentionally exposes BaaS `device_details` and `failed_devices` alongside standard progress.
+No new service, repository dependency, or DI binding is introduced. HTTP 200 returns the
+existing Envelope with the BaaS progress dictionary as data. Querying does not transition
 Quality tasks or the main publication. Provider errors propagate through existing
 error handling. The publishing endpoint and its resource validation are unchanged.
 
@@ -101,7 +102,7 @@ positive path parameter, OPEN admission and NoCheck registration.
 
 ## Environment teardown
 
-`POST /openapi/v1/service-envs/{bot_uuid}/env-teardown?operator=user-1&publish_id=7`
+`POST /openapi/v1/bots/service-envs/{bot_uuid}/env-teardown?operator=user-1&publish_id=7`
 
 Reuses PublishFlowService.eval_teardown as called by Quality TaskProcessor.to_env_released.
 The non-empty path parameter bot_uuid is the environment ID returned by env-publish,
@@ -130,11 +131,13 @@ parameter. Publication keeps its required `owner_id` locator, distinct from the
 optional caller-derived owner on engine-runtime operations. The public contract
 inventories explicitly assert these differences rather than disabling their gates.
 
-Gateway configuration declares `service-envs` as a Backend domain using the
-existing Backend schema, with optional user/app/bot identity shapes matching
-OPEN admission. A verified principal is still required by Backend. Existing URL
-paths and service method contracts are unchanged; no new core service is added.
-Deployment must ship the matching gateway configuration to route this domain.
+Gateway configuration continues to declare `service-envs` as a Backend domain using the
+existing Backend schema; the publish operation remains in that dedicated domain. Progress and
+teardown now ride the declared `bots` domain, inheriting its optional user/app identity shape
+while using the same OPEN admission and explicit NoCheck. A verified principal is still
+required by Backend. The two route paths therefore moved under `/openapi/v1/bots/service-envs`
+without new legacy aliases; the service method contracts are otherwise unchanged, and no new
+core service is added. Deployment must ship the matching gateway configuration to route these domains.
 
 Response fields carry descriptions, and curl examples use indented Markdown
 rather than fenced code to comply with the published-document contract.

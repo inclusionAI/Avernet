@@ -102,7 +102,7 @@ async def test_foreign_publication_rejected(resource_services, field, value):
 
 
 _PROGRESS_PATH = (
-    "/openapi/v1/service-envs"
+    "/openapi/v1/bots/service-envs"
     "/env-publish/{baas_publish_id}/progress"
 )
 
@@ -123,7 +123,7 @@ async def test_env_progress(status):
     assert result.data == progress
     assert result.request_id == "progress-trace"
     service.get_baas_publish_progress.assert_called_once_with(
-        baas_publish_id=42, include_devices=False,
+        baas_publish_id=42, include_devices=True,
     )
     service.eval_publish.assert_not_called()
 
@@ -157,7 +157,7 @@ async def test_progress_provider_error_propagates():
         )
 
 
-_TEARDOWN_PATH = "/openapi/v1/service-envs/{bot_uuid}/env-teardown"
+_TEARDOWN_PATH = "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"
 
 
 @pytest.mark.asyncio

@@ -20,8 +20,8 @@ _KEY = "service-env-test-signing-key-at-least-32-bytes"
 _OWNER = "env-owner"
 _BOT = "env-source"
 _PUBLISH = "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"
-_PROGRESS = "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"
-_TEARDOWN = "/openapi/v1/service-envs/{bot_uuid}/env-teardown"
+_PROGRESS = "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"
+_TEARDOWN = "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"
 
 
 class _Secret:
@@ -53,7 +53,7 @@ async def _publish(self, *, publish_id, operator, biz_id, resource_spec=None):
 
 
 def _progress(self, *, baas_publish_id, include_devices):
-    assert baas_publish_id == 42 and include_devices is False
+    assert baas_publish_id == 42 and include_devices is True
     return {"publish_id": 42, "status": "SUCCESS"}
 
 

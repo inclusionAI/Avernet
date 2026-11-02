@@ -105,7 +105,7 @@ def _validate_publication_address(
 
 
 @router.get(
-    "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress",
+    "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress",
     response_model=Envelope[dict[str, Any]],
 )
 @envelope_errors
@@ -121,21 +121,21 @@ async def get_env_publish_progress(
     将 `BASE_URL` 设置为实际 API 服务入口，并按部署要求附带身份凭据。
     用发布响应 `data.baas_publish_id` 的实际值替换示例中的 `42`。
 
-        curl "${BASE_URL}/openapi/v1/service-envs/env-publish/42/progress"
+        curl "${BASE_URL}/openapi/v1/bots/service-envs/env-publish/42/progress"
 
     只需 `baas_publish_id`，无需 Bot ID、owner_id 或请求体。
-    HTTP 200 的 `data` 为 BaaS 进度信息；检查 `data.status` 判断结果：
+    HTTP 200 的 `data` 为 BaaS 进度信息，并包含设备详情与失败设备（若 BaaS 返回）；检查 `data.status` 判断结果：
     `SUCCESS` 表示成功，`FAILED` 表示失败，其他状态可能仍在处理中。
     此查询不推进 Quality 任务状态。
     """
     progress = service.get_baas_publish_progress(
-        baas_publish_id=baas_publish_id, include_devices=False,
+        baas_publish_id=baas_publish_id, include_devices=True,
     )
     return envelope(progress, request)
 
 
 @router.post(
-    "/openapi/v1/service-envs/{bot_uuid}/env-teardown",
+    "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown",
     status_code=202,
     response_model=Envelope[EvalEnvTeardownResult],
 )
@@ -155,7 +155,7 @@ async def teardown_eval_env(
     用发布响应 `data.bot_uuid` 替换 `eval-bot-1`，用原 Backend 发布记录 ID
     替换 `publish_id=7`；不要将 BaaS 工作流 ID 当作 publish_id。
 
-        curl -X POST "${BASE_URL}/openapi/v1/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
+        curl -X POST "${BASE_URL}/openapi/v1/bots/service-envs/eval-bot-1/env-teardown?operator=user-1&publish_id=7"
 
     无需请求体。`operator` 默认 `system`；`publish_id` 默认 `0`，建议传入
     原发布记录 ID，使主动释放和 TTL 自动释放使用同一操作记录。
