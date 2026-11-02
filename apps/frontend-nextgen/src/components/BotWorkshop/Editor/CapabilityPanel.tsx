@@ -8,8 +8,6 @@ interface CapabilityPanelProps
     'sets' | 'marketSkills' | 'skillCenterSkills' | 'workshopSkills' | 'marketMcps'
   > {
   desktop?: boolean;
-  /** 调试面板打开时，编辑区域较窄，成员卡片保持单列。 */
-  compact?: boolean;
   onLocalToggle?: (skill: BotEditorSkill) => Promise<void>;
   onLocalDelete?: (id: string) => Promise<void>;
   onLocalUpload?: (file: File) => Promise<void>;
@@ -25,7 +23,6 @@ interface CapabilityPanelProps
 
 export function CapabilityPanel({
   desktop,
-  compact,
   onLocalToggle,
   onLocalDelete,
   onLocalUpload,
@@ -72,7 +69,6 @@ export function CapabilityPanel({
           （DELETE /bots/{bot_id}/skills/{skill_id}）；本地管理面板(toggle+upload)仍仅本地 Bot */}
       <CapabilitySetManager
         {...actions}
-        compact={compact}
         onLocalToggle={desktop ? onLocalToggle : undefined}
         onLocalDelete={onLocalDelete}
         onLocalUpload={desktop ? onLocalUpload : undefined}

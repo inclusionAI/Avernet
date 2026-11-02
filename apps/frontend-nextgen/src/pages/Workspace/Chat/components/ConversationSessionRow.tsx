@@ -59,12 +59,12 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         aria-hidden="true"
         className={cn(
           'absolute inset-y-0 left-2 right-2 rounded-md',
-          // 选中胶囊升级为品牌蓝（2026-10-22 体验精修二轮）：原 dmore #EBEBEB 灰底与
-          // hover muted/60 几乎不可辨，「当前会话」一眼认不出。改判与 shell 主导航
-          // SpaceSwitcher 同语言（bg-primary/10 激活 pill），Bot 蓝名 → 会话蓝胶囊
-          // 构成完整的蓝色路径；几何槽位契约（inset-x-2 全宽 rx6）原样保留。
+          // 选中胶囊回归中性深（2026-11-02 稿：#09090B0F ≈ foreground 6%，即
+          // bg-foreground/[6%]）：品牌蓝底与目录的灰阶层次落差过大，改回稿面灰阶
+          // 选中语言，选中文字同步 #09090B（text-foreground）；几何槽位契约
+          // （inset-x-2 全宽 rx6）原样保留。
           selected
-            ? 'bg-primary/10'
+            ? 'bg-foreground/[6%]'
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
@@ -108,9 +108,9 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         <span
           className={cn(
             'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
-            // 选中行标题点亮品牌蓝（twMerge 后发覆盖 text-content-strong）：
-            // 与蓝胶囊共同构成选中锚点，不加粗维持稿「选中不加黑」的克制。
-            selected && 'text-primary',
+            // 选中行标题点亮 #09090B（2026-11-02 稿 = text-foreground，twMerge 后发覆盖）：
+            // 与 6% 灰阶选中胶囊共同构成选中锚点，不加粗维持稿「选中不加黑加粗」的克制。
+            selected && 'text-foreground',
           )}
         >
           {session.title}

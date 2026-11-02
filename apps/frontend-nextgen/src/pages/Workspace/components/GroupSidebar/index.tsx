@@ -82,7 +82,6 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     isLoading,
     groupsError,
     onRetryGroups,
-    onSelectGroup,
     groupSearchText,
     onSearchTextChange,
     kindFilter,
@@ -194,19 +193,21 @@ export function GroupSidebarList(props: GroupSidebarProps) {
           <div className="overflow-hidden">
             {groups.map((group) => {
               const sessions = sessionsByGroupId[group.groupId];
+              // 群是否挂着舞台选中会话（双命中才算）：不依赖会话列表是否已加载，
+              // 深链/身份恢复后未展开过的群也能正确点亮群名。
+              const hasSelectedSession = selectedGroupId === group.groupId && selectedSessionId !== null;
               return (
                 <GroupItem
                   key={group.groupId}
                   group={group}
                   viewerKind={viewerKind}
                   expanded={!!expandedGroupIds[group.groupId]}
+                  hasSelectedSession={hasSelectedSession}
                   sessions={sessions}
                   sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
                   onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
                   favoriteSessionIds={favoriteSessionIds}
-                  selectedGroupId={selectedGroupId}
                   selectedSessionId={selectedSessionId}
-                  onSelectGroup={onSelectGroup}
                   onToggleGroupExpanded={onToggleGroupExpanded}
                   onSelectSession={onSelectSession}
                   onToggleFavorite={onToggleFavorite}
