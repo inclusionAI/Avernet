@@ -85,9 +85,10 @@ class EvalPublishMixin:
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
+        publish_ext = publish_record.ext or {}
         owner_id = self._get_owner_id(publish_record)
-        mp = migration_path or (publish_record.ext or {}).get("migration_path", "")
-        ca = config_artifact or (publish_record.ext or {}).get("config_artifact")
+        mp = migration_path or publish_ext.get("migration_path", "")
+        ca = config_artifact or publish_ext.get("config_artifact")
         if not mp and not ca:
             raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
@@ -119,8 +120,8 @@ class EvalPublishMixin:
             ext_info["biz_id"] = biz_id
         if default_tag:
             ext_info["default_tag"] = default_tag
-        if publish_record.ext.get("skills_manifest") is not None:
-            ext_info["skills_manifest"] = publish_record.ext["skills_manifest"]
+        if publish_ext.get("skills_manifest") is not None:
+            ext_info["skills_manifest"] = publish_ext["skills_manifest"]
 
         # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
         # (no bot to adopt), so a crash after the BaaS create but before the id is
@@ -136,7 +137,7 @@ class EvalPublishMixin:
 
         async def _issue():
             # 注入评测环境容器环境变量，使容器内进程可通过 os.environ 感知区标识
-            eval_envs = dict(service_publish_extra_envs(publish_record.ext, bot))
+            eval_envs = dict(service_publish_extra_envs(publish_ext, bot))
             if default_tag:
                 eval_envs[DYNAMIC_ENV_TAG_KEY] = default_tag
 

@@ -216,3 +216,78 @@ async def test_eval_publish_rejects_non_positive_device_count() -> None:
         match="device_count must be at least 1",
     ):
         await svc.eval_publish(42, "tester", device_count=0)
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_with_nullable_record_ext_and_external_artifact() -> None:
+    """发布记录 ext 允许为 NULL；外部 artifact 保证 eval 构建仍可继续。"""
+    record = _record()
+    record.ext = None
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(
+            42,
+            "tester",
+            migration_path="/external/snapshot",
+        )
+
+    assert result["success"] is True
+    assert result["bot_uuid"] == "eval-uuid"
+    assert result["baas_publish_id"] == 99
+    kwargs = svc._build_service.release_async.await_args.kwargs
+    assert kwargs["migration_path"] == "/external/snapshot"
+    assert "skills_manifest" not in kwargs["ext_info"]
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_with_nullable_record_ext_without_artifact_fails_cleanly() -> None:
+    """ext=None 仍不放宽规则：无任何构建产物时给显式业务错误。"""
+    record = _record()
+    record.ext = None
+    svc = _FakeEvalPublishService(publish_record=record)
+
+    with patch(_TEARDOWN_PATCH):
+        with pytest.raises(
+            PublishFlowServiceError,
+            match="Build artifact path not found",
+        ):
+            await svc.eval_publish(42, "tester")
+
+    svc._build_service.release_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_passes_through_record_skills_manifest() -> None:
+    """ext 中的 skills_manifest 仍原样透传到 BaaS release。"""
+    manifest = {
+        "schema_version": 1,
+        "engine": "openclaw",
+        "active_layout": "legacy",
+    }
+    record = _record(
+        ext={
+            "migration_path": "/external/snapshot",
+            "skills_manifest": manifest,
+        }
+    )
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(42, "tester")
+
+    assert result["success"] is True
+    kwargs = svc._build_service.release_async.await_args.kwargs
+    assert kwargs["ext_info"]["skills_manifest"] == manifest
