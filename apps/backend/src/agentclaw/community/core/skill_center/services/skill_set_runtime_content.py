@@ -223,20 +223,16 @@ class SkillSetRuntimeContent:
 
         # The engine bindpath contract requires one mapping per target. Drop
         # exact repeat links always, not only when this request added direct
-        # paths. When fixed active rows collide with different sources and a
-        # caller has not additionally requested a direct variant, keep the
-        # first source; the later rows are redundant resolved mapping sources.
+        # paths. When active rows collide on the same target with different
+        # sources and a caller has not additionally requested a direct variant,
+        # keep the deterministic first resolved source; the retained source may
+        # still be stale data, so make the suppressed mapping observable.
         resolved_mappings: list[SynlinkMappingInfo] = []
+        mappings_by_target: dict[str, SynlinkMappingInfo] = {}
         for mapping in symlinks:
-            existing = next(
-                (
-                    current
-                    for current in resolved_mappings
-                    if current.target == mapping.target
-                ),
-                None,
-            )
+            existing = mappings_by_target.get(mapping.target)
             if existing is None:
+                mappings_by_target[mapping.target] = mapping
                 resolved_mappings.append(mapping)
                 continue
             if existing.source == mapping.source:
@@ -251,6 +247,12 @@ class SkillSetRuntimeContent:
                     f"{mapping.target!r}: {existing.source!r} != "
                     f"{mapping.source!r}"
                 )
+            logger.warning(
+                "[get_symlink_mappings] runtime target conflicts without "
+                "requested direct paths; keeping the first source "
+                f"and suppressing the later row: target={mapping.target!r}, "
+                f"kept={existing.source!r}, dropped={mapping.source!r}"
+            )
 
         logger.info(
             f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(resolved_mappings)}"

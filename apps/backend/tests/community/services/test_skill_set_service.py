@@ -417,7 +417,12 @@ class TestGetSymlinkMappings:
                 "id": "1",
                 "name": "same",
                 "git_path": "git://business/same",
-            }
+            },
+            {
+                "id": "2",
+                "name": "same",
+                "git_path": "git://business/same",
+            },
         ]
 
         mappings = skill_set_service.get_symlink_mappings(
@@ -426,6 +431,7 @@ class TestGetSymlinkMappings:
 
         assert len(mappings) == 1
         assert mappings[0].target.endswith("/same")
+        assert mappings[0].source.endswith("/skills-repo/business/same")
 
     def test_active_mapping_without_direct_paths_preserves_first_source(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
