@@ -5,18 +5,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentclaw.community.core.bot_knowledge.publication_selection import (
-    BotKnowledgePublicationSelection,
-)
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel,
 )
-from agentclaw.community.core.repository.implementations.config.bot_common_config import (
-    BotCommonConfigRepository,
-)
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel,
-    PublishStatus,
 )
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
@@ -25,37 +18,6 @@ from agentclaw.community.core.spaces.repository.models import (
 from agentclaw.community.kernel.knowledge import KnowledgeError
 from agentclaw.community.plugin_api.models import BotCommonConfig, BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
-
-
-@pytest.fixture
-def observation(knowledge):
-    db, _, current, scope = knowledge
-    current.catalog.authorized = ("kb", "kb-b")
-    # Seed with the normal current selection path before becoming a service Bot.
-    current.set_enabled(
-        scope=scope, actor_id="owner", kb_id="kb", enabled=True, expected_revision=0
-    )
-    with db.orm_session() as session:
-        session.query(BotModel).filter(BotModel.id == 1).update({"bot_type": "service"})
-        session.add(
-            BotPublishModel(
-                id=101,
-                source_bot_pk=1,
-                source_bot_id="bot",
-                publish_bot_id="botpub1",
-                name="Bot",
-                owner_id="legacy-owner",
-                status=PublishStatus.BUILDING,
-                version=1,
-                env="dev",
-                permission_owner="owner",
-            )
-        )
-    return (
-        db,
-        BotKnowledgePublicationSelection(db, BotCommonConfigRepository(db)),
-        scope,
-    )
 
 
 def read(observation, **kwargs):
@@ -139,8 +101,8 @@ def test_rebuild_success_replaces_only_this_versions_observation(observation):
 
 
 def test_auxiliary_read_failure_is_unavailable_without_draft_fallback(observation):
-    _, service, _ = observation
-    service._read_record = Mock(side_effect=RuntimeError("read unavailable"))
+    db, service, _ = observation
+    BotCommonConfig.__table__.drop(db.factory.kw["bind"])
     result = read(observation)
     assert result["observation_status"] == "unavailable"
     assert result["kb_ids"] is None
@@ -150,8 +112,10 @@ def test_auxiliary_read_failure_is_unavailable_without_draft_fallback(observatio
     "value", ["bad-json", "{}", "[]", "null", '"text"', "x" * 65536]
 )
 def test_malformed_payload_is_unrecorded(observation, value):
-    _, service, _ = observation
-    service._read_record = Mock(return_value=value)
+    db, service, _ = observation
+    assert service.record_build_selection(publication_id=101)
+    with db.orm_session() as session:
+        session.query(BotCommonConfig).one().config_value = value
     assert read(observation)["observation_status"] == "unrecorded"
 
 
@@ -182,13 +146,12 @@ def test_wrong_or_invalid_record_is_not_a_selection(observation, field, value):
 
 
 def test_authorization_errors_are_not_swallowed(observation):
-    _, service, scope = observation
-    service._read_record = Mock(side_effect=AssertionError("must not query config"))
+    db, service, scope = observation
+    BotCommonConfig.__table__.drop(db.factory.kw["bind"])
     with pytest.raises(KnowledgeError, match="BOT_EDITOR_REQUIRED"):
         service.get_publication_selection(
             scope=scope, actor_id="other", publication_id=101
         )
-    service._read_record.assert_not_called()
 
 
 def test_old_owner_is_not_authority_but_current_owner_can_read(observation):

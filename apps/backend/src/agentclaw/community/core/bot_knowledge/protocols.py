@@ -41,3 +41,8 @@ class BotKnowledgePublicationSelectionProtocol(Protocol):
     def get_publication_selection(
         self, *, scope: BotKnowledgeScope, actor_id: str, publication_id: int,
     ) -> dict: ...
+
+    @abstractmethod
+    def project_online_selection(self, *, publication_id: int) -> bool:
+        """Best effort after actual native online deployment, not admission SUCCESS."""
+        ...

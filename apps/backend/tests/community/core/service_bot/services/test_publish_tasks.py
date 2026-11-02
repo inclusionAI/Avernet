@@ -97,7 +97,7 @@ def _handlers(flow):
         PublishVerifyFlowHandler(flow=flow, task_queue_service=tq, selection_provider=Mock()),
         PublishOnlineReleaseHandler(flow=flow, task_queue_service=tq),
         PublishProgressPollHandler(
-            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
+            flow=flow, task_queue_service=tq, selection_provider=Mock(), poll_delay_seconds=1.0
         ),
         tq,
     )
@@ -371,7 +371,7 @@ def _restart_handlers(flow):
     return (
         PublishRestartHandler(flow=flow, task_queue_service=tq),
         PublishRestartPollHandler(
-            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
+            flow=flow, task_queue_service=tq, selection_provider=Mock(), poll_delay_seconds=1.0
         ),
         tq,
     )
@@ -619,3 +619,27 @@ def test_completed_build_replay_does_not_record_selection(status):
                                       selection_provider=provider)
     assert isinstance(handler.handle({"publish_id": 1, "operator": "op"}), Complete)
     provider.assert_not_called()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_online_projection_runs_only_after_actual_native_terminal_progress(fails):
+    flow = _FakeFlow(PublishStatus.ONLINE_PUB)
+    selection = Mock()
+    selection.project_online_selection.side_effect = RuntimeError("optional failed") if fails else None
+    def sync(publish_id):
+        flow.status = PublishStatus.SUCCESS.value
+        return SimpleNamespace(status=PublishStatus.SUCCESS, message="deployed", data={"status": "SUCCESS"})
+    flow.advance_publish_progress = sync
+    handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=lambda: selection)
+    assert isinstance(handler.handle({"publish_id": 1}), Complete)
+    selection.project_online_selection.assert_called_once_with(publication_id=1)
+    assert flow.status == PublishStatus.SUCCESS.value
+
+
+def test_native_pending_and_failure_never_project_online_selection():
+    for target in [None, PublishStatus.FAILED]:
+        flow = _FakeFlow(PublishStatus.ONLINE_PUB, sync_to=target)
+        provider = Mock()
+        handler = PublishProgressPollHandler(flow=flow, task_queue_service=Mock(), selection_provider=provider)
+        handler.handle({"publish_id": 1})
+        provider.assert_not_called()

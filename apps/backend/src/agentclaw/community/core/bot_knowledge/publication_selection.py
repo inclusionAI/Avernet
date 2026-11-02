@@ -35,7 +35,7 @@ logger = get_logger()
 _MAX_BYTES = 65535
 
 
-class _SelectionRecord(BaseModel):
+class SelectionRecord(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
     schema_version: Literal[1]
@@ -58,7 +58,7 @@ class _SelectionRecord(BaseModel):
         return value
 
 
-def _identity(bot: BotModel, publication: BotPublishModel) -> dict:
+def selection_identity(bot: BotModel, publication: BotPublishModel) -> dict:
     return dict(
         schema_version=1,
         avernet_tenant=bot.avernet_tenant,
@@ -70,7 +70,7 @@ def _identity(bot: BotModel, publication: BotPublishModel) -> dict:
     )
 
 
-def _coordinates(identity: dict) -> dict[str, str]:
+def selection_coordinates(identity: dict) -> dict[str, str]:
     return dict(
         bot_id=f"knowledge:{identity['source_bot_pk']}",
         entity_id="tenant:"
@@ -125,28 +125,28 @@ class BotKnowledgePublicationSelection:
                 )
                 if bot is None:
                     raise KnowledgeError("BOT_NOT_FOUND", 404)
-                require_space(session, bot)
-                identity = _identity(bot, publication)
+                space_id = require_space(session, bot)
+                identity = selection_identity(bot, publication) | {"space_id": space_id}
                 ids = (
                     session.query(BotKnowledgeBindingModel.kb_id)
                     .filter_by(
                         bot_pk=bot.id,
                         env=bot.env,
-                        space_id=bot.space_id,
+                        space_id=space_id,
                         enabled=True,
                     )
                     .order_by(BotKnowledgeBindingModel.kb_id)
                     .limit(101)
                     .all()
                 )
-                payload = _SelectionRecord(
+                payload = SelectionRecord(
                     **identity,
                     kb_ids=sorted(row[0] for row in ids),
                     captured_at=datetime.now(UTC),
                 ).model_dump_json()
             if len(payload.encode("utf-8")) > _MAX_BYTES:
                 raise ValueError("knowledge observation exceeds storage limit")
-            self.configs.put(**_coordinates(identity), config_value=payload)
+            self.configs.put(**selection_coordinates(identity), config_value=payload)
             return True
         except Exception:
             logger.exception(
@@ -162,7 +162,7 @@ class BotKnowledgePublicationSelection:
             row = (
                 session.query(BotCommonConfig)
                 .filter_by(
-                    **_coordinates(identity),
+                    **selection_coordinates(identity),
                     is_delete=0,
                 )
                 .one_or_none()
@@ -180,7 +180,7 @@ class BotKnowledgePublicationSelection:
         # Access/resource checks are NOT optional observation-store operations.
         with self.db.orm_session() as session:
             bot = resolve_bot(session, scope)
-            require_editor(session, bot, actor_id)
+            space_id = require_editor(session, bot, actor_id)
             if bot.bot_type != "service":
                 raise KnowledgeError("SERVICE_BOT_REQUIRED", 400)
             publication = (
@@ -195,7 +195,7 @@ class BotKnowledgePublicationSelection:
             )
             if publication is None:
                 raise KnowledgeError("PUBLICATION_NOT_FOUND", 404)
-            identity = _identity(bot, publication)
+            identity = selection_identity(bot, publication) | {"space_id": space_id}
         result = dict(
             publication_id=publication_id,
             version=identity["version"],
@@ -215,7 +215,7 @@ class BotKnowledgePublicationSelection:
         try:
             if len(raw.encode("utf-8")) > _MAX_BYTES:
                 raise ValueError("knowledge observation exceeds storage limit")
-            stored = _SelectionRecord.model_validate_json(raw)
+            stored = SelectionRecord.model_validate_json(raw)
             if any(getattr(stored, key) != value for key, value in identity.items()):
                 raise ValueError("knowledge observation identity mismatch")
         except (ValueError, TypeError, AttributeError):
@@ -229,3 +229,13 @@ class BotKnowledgePublicationSelection:
             "kb_ids": stored.kb_ids,
             "captured_at": stored.model_dump(mode="json")["captured_at"],
         }
+
+    def project_online_selection(self, *, publication_id: int) -> bool:
+        """Called only after a native terminal deployment; never controls its result."""
+        from agentclaw.community.core.bot_knowledge.stage_selection import (
+            BotKnowledgeStageSelection,
+        )
+
+        return BotKnowledgeStageSelection(self.db).project_online(
+            publication_id=publication_id
+        )

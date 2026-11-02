@@ -589,6 +589,15 @@ class PublishApprovalTriggerHandler:
         return Complete()
 
 
+def _project_online_selection(provider, publish_id):
+    # Native sync has already completed. This optional, separate transaction
+    # cannot change its outcome and must never wrap the native call itself.
+    try:
+        provider().project_online_selection(publication_id=publish_id)
+    except Exception:
+        logger.exception("Optional knowledge projection failed: publish_id=%s", publish_id)
+
+
 class PublishProgressPollHandler(_PublishTaskBase):
     """Drive a BaaS-publish wait to terminal by reusing ``advance_publish_progress``."""
 
@@ -597,10 +606,12 @@ class PublishProgressPollHandler(_PublishTaskBase):
         *,
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
         poll_delay_seconds: float = _POLL_DELAY_SECONDS,
     ) -> None:
         super().__init__(flow=flow, task_queue_service=task_queue_service)
         self._poll_delay = poll_delay_seconds
+        self._selection_provider = selection_provider
 
     @property
     def task_type(self) -> str:
@@ -617,6 +628,10 @@ class PublishProgressPollHandler(_PublishTaskBase):
         # advance_publish_progress advances on BaaS SUCCESS/FAILED (and internally
         # redirects a retry record to restart-sync); a no-op on PENDING.
         sync_result = self._flow.advance_publish_progress(publish_id)
+
+        if (getattr(sync_result, "status", None) == PublishStatus.SUCCESS
+                and (getattr(sync_result, "data", None) or {}).get("status") == "SUCCESS"):
+            _project_online_selection(self._selection_provider, publish_id)
 
         _record, status = self._status(publish_id)
         if status in _POLL_ACTIVE_STATES:
@@ -662,10 +677,12 @@ class PublishRestartPollHandler(_PublishTaskBase):
         *,
         flow: "PublishFlowService",
         task_queue_service: TaskQueueService,
+        selection_provider: Callable[[], BotKnowledgePublicationSelectionProtocol],
         poll_delay_seconds: float = _RESTART_POLL_DELAY_SECONDS,
     ) -> None:
         super().__init__(flow=flow, task_queue_service=task_queue_service)
         self._poll_delay = poll_delay_seconds
+        self._selection_provider = selection_provider
 
     @property
     def task_type(self) -> str:
@@ -686,6 +703,8 @@ class PublishRestartPollHandler(_PublishTaskBase):
         sync_result = self._flow.sync_restart_progress(publish_id)
         baas_status = (sync_result.data or {}).get("status", "")
         if baas_status == "SUCCESS":
+            if getattr(sync_result, "status", None) == PublishStatus.SUCCESS:
+                _project_online_selection(self._selection_provider, publish_id)
             return Complete()
         if baas_status == "FAILED":
             # The sync already marked the record FAILED with ext.error_message —
@@ -804,12 +823,14 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishProgressPollHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service
+                flow=self._flow, task_queue_service=self._task_queue_service,
+                selection_provider=self._selection_provider
             )
         )
         self._registry.register(
             PublishRestartPollHandler(
-                flow=self._flow, task_queue_service=self._task_queue_service
+                flow=self._flow, task_queue_service=self._task_queue_service,
+                selection_provider=self._selection_provider
             )
         )
         self._registry.register(
