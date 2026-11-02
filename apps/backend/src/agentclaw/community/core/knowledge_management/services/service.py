@@ -306,17 +306,22 @@ class KnowledgeManagementService:
             expected_revision=expected_revision,
         )
 
-    def available_for_bot(self, *, scope, actor_id, cursor=0, limit=20):
+    def available_for_bot(self, *, scope, actor_id, cursor=0, limit=20, runtime_stage="draft"):
         page_size(limit, cursor)
         if limit > 20:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         bot = self.source.bot_context(scope, actor_id)
+        stage = self.source.stage_selection(bot=bot, runtime_stage=runtime_stage)
         space_id = bot["space_id"]
         page = self.catalog.page_authorized(
             scope=scope, space_id=space_id, cursor=cursor, limit=limit
         )
         selected = page["kb_ids"]
-        saved = self.source.selections(bot=bot, kb_ids=selected)
+        saved = self.source.selections(bot=bot, kb_ids=selected) if runtime_stage == "draft" else {
+            kb_id: {"enabled": kb_id in stage["kb_ids"] if stage["kb_ids"] is not None else None,
+                    "revision": None}
+            for kb_id in selected
+        }
         # Only fetch this page's metadata, not every authorized KB on every request.
         space = self._scope(space_id, actor_id)
         facts = self.catalog.details(
@@ -339,4 +344,5 @@ class KnowledgeManagementService:
         return {
             "items": items,
             "next_cursor": page["next_cursor"],
+            **({key: value for key, value in stage.items() if key != "kb_ids"} if stage is not None else {}),
         }

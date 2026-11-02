@@ -47,7 +47,7 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
-  - agentclaw.community.core.bot_knowledge.protocols    # optional build observation Service API
+  - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
@@ -308,9 +308,14 @@ arguments retain the existing provider call/default behavior.
 
 ## Optional knowledge observation
 
-The existing verify-flow task attempts a best-effort knowledge-selection capture
-only at BUILDING entry. It is a lazy ordinary Service API call, not a publication
-transaction participant or success condition. Observer/provider errors are logged
-and isolated; actual native build/release failures retain their Fail results.
-Online success, restart, rollback, draft restore and publication ext/CAS remain
-unchanged. The record is last-observed display metadata, not runtime authority.
+The verify-flow task captures knowledge selection at BUILDING entry through a
+lazy ordinary Service API. After a real online deployment reports terminal BaaS
+SUCCESS, progress/restart polling may project the target version to existing
+online selection fields. Rollback follows the same target-deploy completion;
+its early native SUCCESS admission flip never triggers the projection.
+Each observer call is failure-isolated outside native phase calls and outside
+native transactions. Provider/encoding/storage failures do not change native
+Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,
+retry/compensation infrastructure or publish lock is introduced. These optional
+DB calls can still wait on existing driver/connection timeouts; this is not a
+promise of hard time isolation or DB-outage resilience.

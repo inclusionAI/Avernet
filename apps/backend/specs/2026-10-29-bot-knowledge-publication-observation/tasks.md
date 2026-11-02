@@ -7,11 +7,12 @@
 - **Done when:** 状态隔离、回滚、未知、CAS不变、失败隔离测试通过。
 - **Verification:** 12个真实DB状态用例通过；任务回归及管理/会话相关581个用例通过，3个新HTTP用例修正外部Port绑定后单独通过。
 
-## Task 2 [~]: Existing management and conversation HTTP contract
+## Task 2 [x]: Existing management and conversation HTTP contract
 - **Goal:** 复用两个现有URL，删除独立发布读取URL，保留authorization和个人Bot兼容。
 - **Done when:** HTTP/真实DI/会话与管理边界测试通过。
+- **Verification:** 独立新worktree完整定向组621 passed（包含真实HTTP/DI、模块边界、永久Protocol契约）。原worktree单文件反复回写旧内容，保留现场并迁移到新worktree，未继续覆盖旧文件。
 
-## Task 3 [ ]: Frontend stage propagation and readonly states
+## Task 3 [~]: Frontend stage propagation and readonly states
 - **Goal:** 现有管理和会话界面接入stage-aware选择。
 - **Done when:** 预发/线上只读、未知提示、会话懒加载和分页测试通过。
 

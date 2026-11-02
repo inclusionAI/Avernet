@@ -68,7 +68,6 @@ def test_observer_cannot_mutate_native_state_or_create_retry_infrastructure():
                 ("fastapi", "starlette", "asyncio", "concurrent")
             )
     source = inspect.getsource(publication_selection)
-    assert "online_enabled" not in source
     assert "knowledge_selection_result" not in source
 
 

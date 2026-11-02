@@ -15,6 +15,7 @@ provides:
   - BotKnowledgeRepository
   - BotKnowledgeAgentsMdSync
   - BotKnowledgePublicationSelection
+  - BotKnowledgeStageSelection
 consumes:
   - DatabasePlugin
   - BotCommonConfigRepositoryProtocol
@@ -85,46 +86,51 @@ broken fence (start marker without its end marker) suggests hand-editing
 damage rather than risk eating user-written content. An empty selection removes
 the section; an unchanged projection is not written back.
 
-## Publication selection observations
+## Stage selections and optional publication observations
 
-The existing build task attempts `record_build_selection` only while BUILDING,
-using a separate session before the native build. Source Bot PK, current tenant,
-environment and space scope the capture. It rereads at most 101 enabled IDs,
-stores at most 100, and never turns an invalid source/space into an empty record.
-`ac_bot_common_config` holds one last observation per source/tenant/env/publication;
-no `online_enabled`, Bot ext or publication ext is added or modified.
+Draft continues to use `ac_bot_knowledge_binding.enabled`, its revision CAS and
+native Editor/draft admission. BUILDING captures at most 100 enabled IDs (LIMIT
+101 rejects overflow) into the existing common-config store in an independent
+session. Historical versions are never backfilled. Rebuilds replace the latest
+successful observation, not an immutable build-generation artifact.
 
-`GET /api/bot-knowledge/{bot_id}/publications/{publication_id}/selection`
-requires the same current Owner/Editor standing as current-selection reads. The
-publication must belong to that source Bot and environment. Callers use the
-native publication card's ID/status; this endpoint never chooses a live version,
-advances progress, grants access, or asserts that deployed files match the record.
+The existing management and conversation GET URLs accept `runtime_stage`:
+`draft` uses current binding state; `verify` resolves the latest native validating
+publication and its observation; `online` resolves native SUCCESS and reads the
+existing `online_enabled` column, with provenance from `projection:online` in
+common-config. The marker must match source PK/tenant/env/space/publication,
+version and native online workflow. Missing/corrupt/mismatched observations return
+`unrecorded`; store failures return `unavailable`; enabled is then null, not false.
+Only a valid last_recorded observation with an empty ID list means all-off.
+The native publication remains the version authority. Never infer a version from
+the highest stored snapshot or substitute a draft into an online/verify read.
 
-- `last_recorded` + IDs + `captured_at`: last successful capture, including `[]`
-  for explicit all-off. It is not proof that the current build was captured.
-- `unrecorded` + null: absent, malformed or wrong-scope observation; never fall
-  back to current draft or interpret this as all-off.
-- `unavailable` + null: optional storage failed. Current access/resource-check
-  failures remain ordinary errors, not optional-data degradation.
+After actual ONLINE BaaS SUCCESS, the existing progress/restart poll attempts a
+best-effort projection in its own auxiliary transaction. That transaction writes
+only common-config plus at most 200 binding IDs from the old/new selections.
+It never modifies draft enabled, revision or updated_by on existing rows, never
+locks/mutates native publish rows and is not a native success prerequisite.
+Rollback uses the target publication after its actual deployment success, not
+the early SUCCESS admission flip. Late lower-workflow projections are rejected.
+No new worker, retry, ledger, task or table is added. No ext fields are added.
 
-Historical Bots receive no migration, backfill or file refresh. Their existing
-files, draft choices and original lifecycle keep their semantics. Only later
-normal BUILDING executions attempt a record. Online promotion, restart and
-rollback do not copy configuration; a rollback-selected historical version may
-have no record. Draft restore never restores its checkboxes through this feature.
+Snapshots are not grants or ACLs. Management retains Editor authorization;
+conversation retains native conversation admission and requires Editor standing
+for service draft/verify. Public/friend admission can expose online references,
+not draft configuration. Every result is intersected with current catalog grants
+and conversation metadata must be ready. Knowledge source/space/tenant ownership
+is checked before exposing a snapshot. Unknown conversation state returns no
+references plus explicit selection metadata; it does not assert all-off.
 
-A reused publication can be rebuilt: successful capture replaces its observation;
-failure may leave an older record and its original timestamp. No generation,
-compensation, retry job or consistency guarantee with AGENTS.md is introduced.
-Generic common-config operators retain their existing management privileges;
-this is neither a tamper-proof audit log nor runtime authorization.
-
-Failures are logged and cannot alter native task results or publication state.
-The task-level guard includes lazy-provider resolution, but deliberately excludes
-native build/release execution. Exception isolation is not time isolation: SQL
-uses existing connection/driver waits, and the entire DB being unavailable can
-still break native publication. Live production timeout/topology validation and
-device-bound AGENTS.md acceptance remain separate from local HTTP/DB evidence.
+The existing production `online_enabled` column must already exist before this
+code is deployed; ORM mapping is not a schema migration. No DDL or data backfill
+is run by this feature. Existing AGENTS.md projection and native runtime behavior
+are unchanged. A failed optional write leaves stale/missing auxiliary data; reads
+validate version provenance rather than presenting a stale projection as current.
+Exception isolation does not impose a hard DB deadline: connection/driver waits,
+shared-DB failures and real device/file synchronization require separate runtime
+validation. Generic common-config operators retain their current privileges;
+these records are not a tamper-proof audit log.
 
 ## Live local acceptance
 
