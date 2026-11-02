@@ -37,6 +37,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
 from agentclaw.community.core.cron.errors import CronRelayError
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -113,10 +114,30 @@ async def extract_cron_body_params(ctx) -> PermissionParams:
 # API Endpoints
 # =============================================================================
 
+@router.get("/targets", response_model=ApiResponse)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    bot_id="$bot_id", owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
+    persist_audit_log=False,
+))
+async def get_management_targets(
+    bot_id: str = Query(...),
+    owner_id: str | None = Query(None),
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+) -> ApiResponse:
+    """Discover per-stage Cron instances and management permission; never provision."""
+    data = await service.get_management_targets(
+        bot_id=bot_id, owner_id=owner_id or user.staffId, actor_id=user.staffId,
+    )
+    return ApiResponse(success=True, data=data)
+
+
 @router.get("", response_model=CronListApiResponse)
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def list_crons(
@@ -166,6 +187,7 @@ async def list_crons(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def get_cron_status(
@@ -204,6 +226,7 @@ async def get_cron_status(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def get_running_crons(
@@ -260,6 +283,7 @@ async def get_running_crons(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def get_cron(
@@ -525,6 +549,7 @@ async def run_cron(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    required_level=PermissionLevel.MEMBER,
     persist_audit_log=False,  # 查询操作不记录操作日志
 ))
 async def get_cron_runs(

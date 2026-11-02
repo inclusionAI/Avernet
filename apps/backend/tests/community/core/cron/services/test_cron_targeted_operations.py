@@ -663,3 +663,86 @@ async def test_unsupported_caller_engine_is_not_resolved_or_queried():
     assert result["data"] == [] and result["failed_targets"] == []
     svc._runtime_bindings.resolve.assert_not_called()
     svc._transport.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_teclaw_online_uses_binding_without_enumerating_instances():
+    svc = service(provider="teclaw", devices=("a", "b"))
+    svc._bot_provider.get_bot.return_value["active_engine"] = "teclaw"
+    svc._transport.invoke.return_value = {"success": True, "data": {"task_id": "job"}}
+    await svc.create_cron(bot_id="bot", user_id="owner", nick_name="Owner", body={},
+                          runtime_stage="online", operator_id="owner", authenticated_user_id="owner")
+    svc._device_provider.list_devices_by_runtime_binding.assert_not_called()
+    svc._resolver.resolve_for_binding.assert_called_once_with(99, "owner", bot_id="bot")
+
+
+@pytest.mark.asyncio
+async def test_teclaw_online_rejects_explicit_instance():
+    svc = service(provider="teclaw")
+    svc._bot_provider.get_bot.return_value["active_engine"] = "teclaw"
+    with pytest.raises(CronRelayError, match="does not accept"):
+        await svc.create_cron(bot_id="bot", user_id="owner", nick_name="Owner", body={},
+                              runtime_stage="online", device_uuid="instance-a", authenticated_user_id="owner")
+    svc._transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_target_discovery_caller_has_only_online_and_member_cannot_manage():
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    svc = service(caller=True)
+    svc._bot_provider.get_bot.return_value["active_engine"] = "openclaw"
+    svc._collaborators.get_operable_permission_level.return_value = PermissionLevel.MEMBER
+    result = await svc.get_management_targets(bot_id="bot", owner_id="owner", actor_id="member")
+    assert result["can_manage"] is False
+    assert result["caller_mode"] is True
+    assert [item["available"] for item in result["environments"]] == [False, False, True]
+    assert result["environments"][2]["instances"] == ["instance-a", "instance-b"]
+    assert svc._runtime_bindings.resolve.call_args.args[0].actor_user_id == "member"
+    svc._transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_target_discovery_teclaw_online_does_not_require_instances():
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    svc = service(caller=True, provider="teclaw")
+    svc._bot_provider.get_bot.return_value["active_engine"] = "teclaw"
+    svc._collaborators.get_operable_permission_level.return_value = PermissionLevel.ADMIN
+    result = await svc.get_management_targets(bot_id="bot", owner_id="owner", actor_id="admin")
+    assert result["can_manage"] is True
+    assert result["environments"][2] == {"runtime_stage": "online", "available": True,
+                                         "requires_instance": False, "instances": []}
+    svc._device_provider.list_devices_by_runtime_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_target_discovery_unavailable_does_not_leak_provider_credentials():
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+    svc = service(caller=True)
+    svc._bot_provider.get_bot.return_value["active_engine"] = "openclaw"
+    svc._collaborators.get_operable_permission_level.return_value = PermissionLevel.OWNER
+    svc._runtime_bindings.resolve.side_effect = ValueError("private connection credential")
+    result = await svc.get_management_targets(bot_id="bot", owner_id="owner", actor_id="owner")
+    assert result["environments"][2]["available"] is False
+    assert "credential" not in str(result)
+    svc._transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_teclaw_online_list_queries_one_logical_target_without_uuid():
+    svc = service(caller=True, provider="teclaw", devices=("a", "b"))
+    svc._bot_provider.get_bot.return_value["active_engine"] = "teclaw"
+    svc._transport.invoke.return_value = {"success": True, "data": [{"id": "job"}]}
+    result = await svc.list_all_crons(user_id="owner", nick_name="Owner", bot_id="bot", authenticated_user_id="owner")
+    assert len(result["data"]) == 1
+    assert "device_uuid" not in result["data"][0]
+    svc._device_provider.list_devices_by_runtime_binding.assert_not_called()
+    assert svc._transport.invoke.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_single_instance_service_list_exposes_uid_for_later_management():
+    svc = service(caller=True, provider="arca")
+    svc._transport.invoke.return_value = {"success": True, "data": [{"id": "job"}]}
+    result = await svc.list_all_crons(user_id="owner", nick_name="Owner", bot_id="bot", authenticated_user_id="owner")
+    assert result["data"][0]["device_uuid"] == "sandbox"
+    assert svc._resolver.resolve_for_binding.call_args.kwargs["device_uuid"] == "sandbox"
