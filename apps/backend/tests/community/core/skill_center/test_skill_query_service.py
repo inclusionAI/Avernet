@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
@@ -51,6 +52,7 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 from agentclaw.community.core.skill_center.services.skill_query_service import (
     SkillQueryService,
 )
+from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -397,6 +399,44 @@ async def test_invalid_recorded_local_locator_maps_to_storage_failure() -> None:
             raise ValueError("Local Skill cleanup locator escapes skills-local")
 
     service._skill_service_factory = _RejectingFactory()
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.get_content(
+            skill_id="42", bot_id="bot", owner_id="owner", user_id="owner"
+        )
+
+
+@pytest.mark.parametrize(
+    "transport_error",
+    [
+        BaasServiceError("BaaS unavailable"),
+        httpx.ReadTimeout("device read timed out"),
+        httpx.HTTPStatusError(
+            "storage endpoint failed", request=None, response=None
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_local_content_maps_transport_failures_to_storage_error(
+    transport_error,
+) -> None:
+    """BaaS and device-HTTP failures must not leak as openapi 500s.
+
+    The content route maps storage failures to a controlled 502 envelope; the
+    production CLI surface reuses the same error bridge. This test keeps that
+    translated boundary in the service after the HTTP/device path is isolated.
+    """
+    service, _parameters, _reader = _asset_service()
+
+    class _FailingStorage:
+        async def read_file(self, _path: str):
+            raise transport_error
+
+    class _FailingFactory:
+        def local_skill_package_storage_for_locator(self, **_kwargs):
+            return _FailingStorage()
+
+    service._skill_service_factory = _FailingFactory()
 
     with pytest.raises(LocalSkillStorageError):
         await service.get_content(

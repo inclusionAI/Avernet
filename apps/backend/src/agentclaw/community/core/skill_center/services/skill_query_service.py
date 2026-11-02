@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
+import httpx
 from injector import inject
 
 from agentclaw.community.core.skill_center.skill_query_service_protocol import (
@@ -62,6 +63,7 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
     SkillVersionResolutionError,
     SkillVersionResolverProtocol,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
 from agentclaw.community.core.spaces.errors import SpaceError
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.utils.env_utils import get_current_env
@@ -408,9 +410,12 @@ class SkillQueryService(SkillQueryServiceProtocol, SharedSkillPort):
                 skill_id
             )
         elif kind is SkillAssetKind.LOCAL:
-            content = await self._local_storage(skill, bot, owner_id).read_file(
-                "SKILL.md"
-            )
+            try:
+                content = await self._local_storage(skill, bot, owner_id).read_file(
+                    "SKILL.md"
+                )
+            except (BaasServiceError, httpx.HTTPError) as exc:
+                raise LocalSkillStorageError() from exc
         else:
             content = self._center_content(skill=skill, actor_id=user_id)
         if content is None:
