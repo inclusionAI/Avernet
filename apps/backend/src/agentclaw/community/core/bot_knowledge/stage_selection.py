@@ -57,15 +57,15 @@ def _rollback_token(session, publication):
     if demoted is None:
         raise ValueError("missing native rollback origin")
     rollback = json.loads(demoted.ext or "{}").get("rollback", {})
-    token = rollback.get("rolled_back_at")
+    rolled_back_at = rollback.get("rolled_back_at")
     if (
         rollback.get("target_publish_id") != publication.id
-        or not isinstance(token, str)
-        or not token
-        or len(token) > 64
+        or not isinstance(rolled_back_at, str)
+        or not rolled_back_at
+        or len(rolled_back_at) > 64
     ):
         raise ValueError("invalid native rollback identity")
-    return [restored_from, token]
+    return [restored_from, rolled_back_at]
 
 
 def _record(raw, identity):
@@ -267,7 +267,10 @@ class BotKnowledgeStageSelection:
                     return False
                 workflow = _workflow(publication)
                 rollback_token = _rollback_token(session, publication)
-                if observed != dict(workflow_id=workflow, rollback_token=rollback_token):
+                if observed != dict(
+                    workflow_id=workflow,
+                    rollback_token=rollback_token,
+                ):
                     return False  # A late callback cannot endorse a new deployment.
                 snapshot = _config(session, identity)
                 if snapshot is None:

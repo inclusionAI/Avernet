@@ -89,3 +89,24 @@ def test_rust_array_elements_are_not_exempted_as_index_keys() -> None:
         findings = _findings(_diff(line, path="example.rs"))
         assert findings, expression
         assert all(secret not in finding.content for finding in findings)
+
+
+def test_open_api_machine_caller_addresses_are_not_certified_credentials() -> None:
+    # Public machine-caller identity, not an opaque credential. Zero-check still
+    # authorizes the addressed app; this does not exempt JWT/Bearer/token forms.
+    field = "api_" + "token"
+    for address in ["OPEN_API:app:agentswarm", "OPEN_API:app:security_app"]:
+        assert _findings(_diff(f'{field} = "{address}"')) == []
+
+
+def test_machine_caller_address_rule_does_not_exempt_other_credentials() -> None:
+    field = "api_" + "token"
+    for value in [
+        "a-real-looking-" + "secret-value-12345",
+        "OPEN_API:app:agentswarm:extra-secret",
+        "OTHER_API:app:agentswarm",
+        "OPEN_API:unknown:agentswarm",
+        "OPEN_API:app:" + "ghp_" + "a" * 30,
+        "Bearer " + "b" * 30,
+    ]:
+        assert _findings(_diff(f'{field} = "{value}"')), value
