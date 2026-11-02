@@ -112,6 +112,32 @@ migration replaces the envelope and transport on this layer; those semantics
 carry over as A2A messages. The diagram shows today's frames because that is
 what runs now.
 
+### How a step dispatch gets prior-round context
+
+A dispatched step prompt does **not** carry the full history. Three
+mechanisms stack, in order of the load they bear:
+
+1. **The agent's own session (primary).** The dispatch carries the same
+   `session_id` as every earlier round, and the agent's engine resumes its
+   own session under that key — its memory of prior rounds is local, like a
+   resumed coding-assistant session. This is contractual: BCN never pushes
+   full history (the provider-integration contract makes providers keep
+   context per `session_id`), and during each round participants also
+   accumulated the *group's* traffic as it happened, via observe-only
+   delivery. This is exactly the state whose retention buys revision
+   quality (Decision 4).
+2. **The composed instruction (the L2→L3 downward projection).** BCN builds
+   the step prompt from durable state: the new ask, the delegation-relevant
+   delta, references to the prior deliverable, plus the group-context
+   header. Small, because mechanism 1 carries the bulk.
+3. **Pull on demand (fallback).** An agent without the session — newly
+   bound into the task, swapped in, or past its retention — is re-briefed
+   from the durable transcript (history query today, session-record reads
+   under A2A), and a step that needs several participants' perspectives
+   *merged* uses the fusion call. The fresh-expert re-brief is the
+   graceful-degradation path from Decision 4: slower, correct, never an
+   error.
+
 ## Decision 3 — three lifetimes: run, episode, task session
 
 ![Timeline of one task: a durable task-session bar spans months in the shared DB; two short episodes sit on it, warm in memory on a node, each containing one or two workflow runs; between them the task is cold but durable, with GC evicting the warm copy and rehydration bringing it back — the same path failover uses.](assets/lifetimes.svg)
