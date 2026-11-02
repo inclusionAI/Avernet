@@ -17,9 +17,10 @@
 - **Done when:** 预发/线上只读、未知空列表无提示、会话懒加载和分页测试通过。
 - **Verification:** assembled前端28 suites / 243 tests、tsc、lint、Bigfish build通过；真实组件+外部catalog fixture浏览器smoke确认未知只有正常空列表。team chat entity和真实知识Owner分离，缺Owner不猜测。
 
-## Task 4 [~]: Verification and independent review
+## Task 4 [x]: Verification and independent review
 - **Goal:** 更新文档、运行门禁、独立评审并修复。
 - **Done when:** 记录实际测试结果和未验证范围，不复用旧绿灯。
+- **Verification:** final code/test fa2ebc90c完整Backend CI 28087 passed / 40 skipped / 6 subtests，覆盖率90.72%，变更93.31%，原门禁通过；三路固定Head增量复审无新P2+，Performance保留真实DB延迟/锁竞争边界。验证文档保留全部初始失败与修复证据；未推送/更新PR/部署。
 
 ## Groups
 - Group A: Tasks 1, 2

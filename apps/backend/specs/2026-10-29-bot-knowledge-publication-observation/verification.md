@@ -1,17 +1,55 @@
 # Verification: 服务 Bot 分状态知识库选择
 
 ## Current revision (2026-11-02)
-- Base `9fd60385f93f36fe819c8130f3f93525e844d29d`，首轮测试Head `d6034a01f`。
-- 本次改变了生产代码和接口消费；下方旧Head的绿灯均仅为历史记录，不能复用。
-- 定向核心/任务192 passed；管理/会话/HTTP/DI/architecture/Protocol 621 passed。
-- 第一轮完整CI真实结果：14 failed / 28048 passed / 40 skipped / 6 subtests。
-  其中12个原生流程用例因测试harness未传新增必需provider失败；1个boot用例仍期待已删除URL；
-  1个只读观察用例混入native Bot异步初始化写入。修复测试组装和准确断言边界后重新验证。
-- ODC只读核实 online_enabled 为现存 NOT NULL DEFAULT0；native publication查询实际走
-  idx_sbp_e_s(source_bot_pk,env,status)范围扫描+TOP-N，无全表扫描；仅当前样本计划证据，非高基数延迟验收。
-- OCB前端独立worktree：27 suites / 235 tests，TypeScript通过；前端构建/独立评审待最终记录。
-- 没有推送、合并、部署、DDL或数据回填。完整CI后续结果在最终验收记录追加。
+- Base `9fd60385f93f36fe819c8130f3f93525e844d29d` (`REL20261029`); final source/test head `fa2ebc90c9927271918115e54f067e20e9036658`.
+- OCB frontend code/test head `d0459b63b3f511079aede70e31b7de7568d23c82`, isolated branch `codex/service-bot-knowledge-stages`; no gitlink update.
+- Latest user clarification: unknown auxiliary history is a normal exact empty HTTP page `{ "items": [], "next_cursor": null }` for both existing queries. No unknown notice, diagnostic metadata or underlying error is exposed; normal admission/parameter/provider errors are preserved and unknown never writes disabled state back.
 
+### Fresh local validation
+- Feature storage/HTTP/native task group: **219 passed** (`/tmp/stage-restart-isolation-tests.log`). Includes real DB missing/corrupt/missing-table HTTP matrix, precise empty body/no catalog calls/no draft write, 100-ID unique-key read under 1/1000/10000 disabled histories, one bulk insert at 1/100 missing rows/external tenant, transactional failure rollback, replay zero-DML and two-writer auxiliary consistency.
+- Native publish-boundary / durable HTTP / task regression group: **67 passed** (`/tmp/stage-native-restart-rollback-tests.log`): build/release/rollback/re-promote/restart/recreate flows through existing test assembly; no real device acceptance implied.
+- Assembled frontend: **28 suites / 243 tests passed**, TypeScript `--noEmit`, lint and Bigfish production build passed. Build retains a bundle-size warning. Public composer regressions preserve native team entity while knowledge requests use real Owner; missing team Owner does not guess.
+- Local browser smoke uses the actual KnowledgePanel plus an external catalog fixture, not a deployed backend. Exact empty response shows ordinary empty list with no unknown/error notice. Screenshot: `/Users/qiaoyifan/.codex/visualizations/2026/11/02/service-bot-knowledge/unknown-empty.png`; temporary server/tab stopped. Earlier unknown-notice screenshot is obsolete and not current evidence.
+- Additional real CommunityDatabase(SQLite) cross-version concurrency regression was RED against `0ebfcc268` and GREEN after auxiliary marker CAS; the **22 state tests passed** (`/tmp/stage-cas-green.log`).
+- Local backend SAST block scan and `git diff --check` passed without lowering thresholds. Complete Backend CI at final source/test head: **28087 passed, 40 skipped, 6 subtests passed**, 301.10 seconds. Case pass rate **100.00%** (28133/28133), line coverage **90.72%**, changed coverage **93.31%** (321/344); existing gate passed. Log: `/tmp/stage-full-backend-ci-cas-final.log`.
+
+```bash
+PATH=/Users/qiaoyifan/.codex/worktrees/bot-knowledge-stage-best-effort/Avernet/apps/backend/.venv/bin:$PATH \
+BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=8 \
+bash apps/backend/scripts/ci_test.sh \
+  --base 9fd60385f93f36fe819c8130f3f93525e844d29d \
+  --head fa2ebc90c9927271918115e54f067e20e9036658
+```
+
+### Review fixes and isolation boundary
+- Auxiliary projection explicitly uses `transactional_orm_session`, not a potentially AUTOCOMMIT ordinary session. Only auxiliary marker/binding writes participate; native publish rows are never locked or mutated.
+- Online bindings use complete unique-key probes then in-memory space/flag checks; missing bindings use one bounded Core insert with explicit trusted source-tenant stamp; identical projection replay produces no business DML.
+- Real `rollback_flip` regression covers old marker present/absent. Pre-sync identity capture is compared inside the auxiliary write, so a paused old progress callback cannot endorse a new rollback token. The token reuses native rollback origin/timestamp; no ext field is introduced.
+- Independent review additionally proved an old restart poll beginning after early rollback admission could bless old restart SUCCESS. The minimal correction removes all knowledge dependencies/calls from plain restart polling. Same-publication in-place restart retains its existing knowledge projection. True rollback still writes a new `publish.online`, enters `ONLINE_PUB` and uses the existing publication progress poll after actual deployment success.
+- Recreate/retry that changes publication identity without a publication-progress observation may conservatively leave the optional display empty. No restart-specific transaction, ledger, worker or compensation is added.
+- Independent Performance also reproduced a Community SQLite cross-version writer overwriting a newer marker because SQLite ignores FOR UPDATE. Final marker writes now CAS the old value; a lost race rolls back the entire auxiliary transaction. This adds no native lock, schema, retry or background task. The permanent real CommunityDatabase concurrency test pauses old v2 before its first DML, completes v3, resumes v2, and asserts v2 fails without changing v3 marker/bindings.
+- Online publication progress adds one optional pre-sync publication-PK read (plus one origin-PK lookup for rollback); verify and plain restart add no such I/O. Identity-read failure skips auxiliary projection but still runs native sync. Exception isolation is not hard latency/worker isolation; shared DB waits remain a deployment concern.
+
+### Prior runs and failures retained
+- Initial source/test head `d6034a01f`: **14 failed / 28048 passed / 40 skipped / 6 subtests**. Twelve native test harnesses omitted the new provider, one boot test expected the removed URL, one read audit included unrelated native background initialization writes. Tests were corrected without replacing production assembly.
+- Intermediate head `b54c7fe53`: full Backend CI **28062 passed / 40 skipped / 6 subtests**, line coverage **90.73%**, changed **93.90%** (277/295); superseded by subsequent production fixes, not reused as final proof.
+- Intermediate head `67d627d12`: full Backend CI **1 failed / 28085 passed / 40 skipped / 6 subtests**. The new missing-table test used raw engine DROP outside the local DatabasePlugin lock while native background sessions shared SQLite StaticPool. It now executes real DROP through `session.connection()` under the plugin lock, retaining all original assertions. Failed log retained at `/tmp/stage-full-backend-ci-67d627d-failed.log`.
+
+- Intermediate head `0ebfcc268`: complete Backend CI **28086 passed / 40 skipped / 6 subtests**, line coverage **90.73%**, changed **93.26%** (318/341), gate passed. Superseded only by the final auxiliary CAS fix/test and not reused as final proof.
+
+### Fixed-head independent review closure
+- **Standards:** final CAS delta `0ebfcc268...fa2ebc90c` has no new P2/P3; auxiliary-only CAS/rollback boundary and real CommunityDatabase test shape confirmed. Final full source/test Head is the same as the successful CI above.
+- **Spec:** no new P2+; stale-restart case closed by removing observer calls from restart polling. Independent native probes cover marker absent/present, ordinary restart preservation and true rollback publication-progress completion. Independent final CAS/failure/replay probes: 3 passed.
+- **Performance:** PASS WITH RISKS, no new P2+; old cross-version P2 closed. Independent final related tests **121 passed**; original cross-version probe **3/3**, plus missing-old-binding INSERT-before-failed-CAS probe **3/3**, show no stale marker/binding survives. Final 100-ID reads remain 3 SELECT / 2020 SQLite VM steps at disabled history 1/1000/10000, missing row creation remains one bulk binding INSERT at 1/100, replay has 0 DML. CAS replaces the marker UPDATE without added SELECT or scans. Per-active-task 8-second polling cost and production lock/latency uncertainty remain explicit, not a deployment claim. Evidence: `/tmp/avernet-perf-fa2ebc90c`.
+
+### Live read-only schema/plan evidence
+- ODC confirmed existing `online_enabled` is `tinyint(1) NOT NULL DEFAULT 0`; no DDL or backfill performed.
+- Actual native publication index is `idx_sbp_e_s(source_bot_pk,env,status)`; sampled online/verify EXPLAIN used RANGE SCAN + TOP-N (estimated one row), not a full table scan. This is a sample plan, not high-cardinality OceanBase latency acceptance; the ORM-only proposed index was not claimed deployed.
+
+### Current acceptance mapping / exclusions
+AC-01 draft/CAS/Editor and personal wire compatibility; AC-02 bounded BUILDING capture; AC-03 native stage provenance; AC-04 isolated actual-publish completion; AC-05 rollback target with no draft overwrite; AC-06 same existing APIs/current grant and ready admission; AC-07 exact empty unknown response; AC-08 20/page and 100/snapshot bounds; AC-09 existing schema/no history migration; AC-10 stage propagation/readonly/empty frontend/lazy conversation are covered by the groups above and independent review below.
+
+No push, PR update, merge, deployment, production writes, DDL or history backfill. Full Singlebox, real prepub/device/AGENTS.md acceptance, corp startup and production fault-timeout behavior remain unverified. Old sections below are explicitly historical and do not describe current API semantics.
 
 ## Historical Delivery Verification (superseded by 2026-11-02 revision)
 - Historical GitHub Release base: `ed61d43cbf0da75b04de2d872aa4eccdc0ddc8c7` (`REL20261029`).
