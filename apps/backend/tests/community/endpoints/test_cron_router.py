@@ -35,14 +35,19 @@ class _RecordingBotService:
     """
 
     def __init__(self, *, bot: dict | None = None, error: Exception | None = None):
-        self.get_bot_calls: list[tuple[str, str]] = []
+        self.get_bot_by_address_calls: list[tuple[str, str]] = []
         self._bot = bot
         self._error = error
 
-    def get_bot(self, bot_id, user_id):
-        self.get_bot_calls.append((bot_id, user_id))
+    def get_bot_by_address(self, bot_id, user_id):
+        self.get_bot_by_address_calls.append((bot_id, user_id))
         if self._error is not None:
             raise self._error
+        if self._bot is None:
+            from agentclaw.community.core.bot_management.errors import (
+                BotAddressNotFoundError,
+            )
+            raise BotAddressNotFoundError("Bot not found")
         return self._bot
 
 
@@ -97,7 +102,7 @@ class TestResolveUserIdentity:
         assert user_id == "u001"
         assert nick_name == "Test User"
         # bot_service should not be called when owner_id is None
-        assert bot_service.get_bot_calls == []
+        assert bot_service.get_bot_by_address_calls == []
 
     def test_owner_scenario_with_empty_owner_id(self):
         """When owner_id is empty string, returns current user's identity."""
@@ -114,7 +119,7 @@ class TestResolveUserIdentity:
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        assert bot_service.get_bot_calls == []
+        assert bot_service.get_bot_by_address_calls == []
 
     def test_bot_id_all_returns_current_user(self):
         """When bot_id is 'all', returns current user's identity regardless of owner_id."""
@@ -132,7 +137,7 @@ class TestResolveUserIdentity:
 
         assert user_id == "u001"
         assert nick_name == "Test User"
-        assert bot_service.get_bot_calls == []
+        assert bot_service.get_bot_by_address_calls == []
 
     def test_collaborator_scenario_returns_owner_identity(self):
         """When owner_id is set, returns owner's identity from bot info."""
@@ -153,7 +158,7 @@ class TestResolveUserIdentity:
 
         assert user_id == "u_owner"
         assert nick_name == "Owner User"
-        assert bot_service.get_bot_calls == [("bot1", "u_owner")]
+        assert bot_service.get_bot_by_address_calls == [("bot1", "u_owner")]
 
     def test_collaborator_scenario_bot_not_found(self):
         """When bot is not found, falls back to owner_id."""
@@ -191,6 +196,49 @@ class TestResolveUserIdentity:
 
         assert user_id == "u_owner"
         assert nick_name == "u_owner"
+
+    def test_collaborator_scenario_resolves_legacy_owner_id(self):
+        """A historical owner locator maps to the Bot's current owner."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "u_owner", "owner_name": "Owner User"},
+        )
+
+        user_id, nick_name = _resolve_user_identity(
+            "legacy_owner", "bot1", user, bot_service
+        )
+
+        assert user_id == "u_owner"
+        assert nick_name == "Owner User"
+        assert bot_service.get_bot_by_address_calls == [("bot1", "legacy_owner")]
+
+    def test_collaborator_scenario_ambiguous_address_is_business_error(self):
+        """Ambiguous legacy ownership is rejected instead of silently forwarding."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+        from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+        from agentclaw.community.core.cron.errors import CronRelayError
+
+        user = AuthenticatedUser(
+            id="u_collab",
+            staffId="u_collab",
+            nickName="Collab User",
+            operatorName="Collab User",
+        )
+        bot_service = _RecordingBotService(
+            error=BotLookupAmbiguousError("Bot address is ambiguous")
+        )
+
+        with pytest.raises(CronRelayError) as caught:
+            _resolve_user_identity("ambiguous_owner", "bot1", user, bot_service)
+
+        assert caught.value.error_code == 409
 
 
 # =============================================================================

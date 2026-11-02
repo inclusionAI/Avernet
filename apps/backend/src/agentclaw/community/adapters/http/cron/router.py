@@ -36,6 +36,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -71,12 +72,17 @@ def _resolve_user_identity(
     if not owner_id or bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
-    # 协作者场景：从 bot 信息获取 owner 身份
+    # 协作者场景：owner_id 是历史契约中的 Bot locator，可能遇到 ownership
+    # 迁移后的 legacy owner。先通过 address resolver 将它映射到 current_owner，
+    # 再由下游 CRON 服务执行 current-owner lookup。
     try:
-        bot = bot_service.get_bot(bot_id, owner_id)
-        return owner_id, bot.get("owner_name") or owner_id if bot else owner_id
+        bot = bot_service.get_bot_by_address(bot_id, owner_id)
+        effective_owner_id = str(bot.get("owner_id") or owner_id)
+        return effective_owner_id, bot.get("owner_name") or effective_owner_id
+    except BotLookupAmbiguousError as e:
+        raise CronRelayError(str(e), error_code=409) from e
     except Exception as e:
-        logger.warning(f"[_resolve_user_identity] Failed to get bot: {e}")
+        logger.warning(f"[_resolve_user_identity] Failed to resolve bot address: {e}")
         return owner_id, owner_id
 
 
