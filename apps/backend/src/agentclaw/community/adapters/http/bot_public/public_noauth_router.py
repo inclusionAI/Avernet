@@ -15,7 +15,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -109,8 +109,9 @@ def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
 async def get_bot_binding_public(
     bot_id: str = Path(..., description="Bot ID"),
     bot_repo: BotRepository = Injected(BotRepository),
+    template_repo: TemplateRepository = Injected(TemplateRepository),
 ) -> ApiResponse:
-    """获取架构师 bot 绑定详情。
+    """获取架构师 bot 绑定详情.
 
     GET /api/public/bots/{bot_id}/binding
 
@@ -129,7 +130,13 @@ async def get_bot_binding_public(
                 data=None,
             )
 
-        scrubbed = _public_bot_detail(items[0])
+        bot = {**items[0], "template_config": items[0].get("template_config")}
+        if bot["template_config"] is None:
+            template = template_repo.get_by_bot_id(bot_id)
+            if template is not None:
+                bot["template_config"] = template.get("ext")
+
+        scrubbed = _public_bot_detail(bot)
         logger.info("[public_noauth.get_bot_binding] bot_id=%s", bot_id)
         return ApiResponse(success=True, data=scrubbed)
     except BotServiceError as e:

@@ -20,12 +20,12 @@ from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
     router,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
 
 
 # --- Helpers ---
 
-def _bind_services(mock_bot_service=None, mock_bot_repo=None):
+def _bind_services(mock_bot_service=None, mock_bot_repo=None, mock_template_repo=None):
     """Bind mock services via injector Module."""
     class _M(Module):
         def configure(self, binder):
@@ -35,6 +35,8 @@ def _bind_services(mock_bot_service=None, mock_bot_repo=None):
                 binder.bind(BotServiceProtocol, to=mock_bot_service)
             if mock_bot_repo is not None:
                 binder.bind(BotRepository, to=mock_bot_repo)
+            if mock_template_repo is not None:
+                binder.bind(TemplateRepository, to=mock_template_repo)
     return _M()
 
 
@@ -119,11 +121,18 @@ def mock_bot_repo():
 
 
 @pytest.fixture
-def client(mock_bot_service, mock_bot_repo):
+def mock_template_repo():
+    repo = MagicMock()
+    repo.get_by_bot_id = MagicMock(return_value=None)
+    return repo
+
+
+@pytest.fixture
+def client(mock_bot_service, mock_bot_repo, mock_template_repo):
     """TestClient with mocked services."""
     app = FastAPI()
     app.include_router(router)
-    attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo)]))
+    attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo, mock_template_repo)]))
     return TestClient(app)
 
 
