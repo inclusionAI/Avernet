@@ -295,6 +295,9 @@ class TaskContext:
     capability_failure_reason: str | None = None
     accepted_execution_patch: TaskNodePatch | None = None
     accepted_plan_report: TaskReportResult | None = None
+    # S5D must exclude every executor already used on this relay chain, even
+    # when the repeat is not consecutive.
+    used_executor_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
