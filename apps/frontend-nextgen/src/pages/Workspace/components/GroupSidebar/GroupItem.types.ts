@@ -10,9 +10,10 @@ export interface GroupItemProps {
   sessionTab: SessionTab;
   onSessionTabChange: (t: SessionTab) => void;
   favoriteSessionIds: string[];
-  selectedGroupId: string | null;
   selectedSessionId: string | null;
-  onSelectGroup: (groupId: string) => void;
+  /** 该群是否挂着当前舞台选中会话（selectedGroupId/selectedSessionId 同时命中）：群名点亮
+   *  #09090B（text-foreground）——收起时下挂会话不可见，群名顶位承载选中语义（2026-11-02 稿）。 */
+  hasSelectedSession?: boolean;
   onToggleGroupExpanded: (groupId: string) => void;
   onSelectSession: (groupId: string, sessionId: string) => void;
   onToggleFavorite: (sessionId: string) => void;
