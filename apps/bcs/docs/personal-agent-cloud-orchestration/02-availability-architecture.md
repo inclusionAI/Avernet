@@ -118,11 +118,17 @@ cannot rebuild — the remote side holds the other end:
   socket may land on any node.
 - **Dial-out webhook+SSE providers**: each dispatch is one self-contained
   HTTP exchange whose SSE response streams only that one step's events — its
-  "feed" (lifecycle, output chunks, tool events). Each event carries a
-  monotonically increasing per-stream sequence number (Provider 2.0), so a
-  dropped stream is re-attached and resumed from the last number seen, with
-  no gaps and no duplicates. The provider's reachability (its URL) is
-  node-independent.
+  "feed" (lifecycle, output chunks, tool events), with per-stream sequence
+  numbers used today to dedupe *within* a stream. **A dropped stream does
+  not resume today**: Provider 2.0 explicitly supports no `Last-Event-ID`,
+  auto-reconnect, or resumable delivery, and the adapter closes the run
+  with a synthesized error terminal when a stream ends without one. In this
+  design an interrupted dispatch is therefore recovered through **Doc 03's
+  task-state reconciliation** (probe/`GetTask` against the agent's durable
+  task), which is correct without any stream replay; durable cursor-based
+  stream resumption is *optional* net-new adapter+provider work that would
+  improve liveness of partial output, never correctness. The provider's
+  reachability (its URL) is node-independent.
 
 Net-new: a **connection-location registry** (shared store or gossip) mapping
 bot → node currently holding its socket, plus inter-node delivery forwarding,
@@ -180,6 +186,7 @@ practice.
 | Hash-based placement | **net-new** |
 | Fenced task leases + takeover + storage-side token checks | **net-new** |
 | Connection-location registry + forwarding | **net-new** |
+| Provider SSE stream resumption (cursor/replay) | **net-new, optional** — correctness is covered by Doc 03 reconciliation; this would only improve partial-output liveness |
 | BCSFuse decoupling/caching | **net-new** |
 
 ## Rejected alternatives
