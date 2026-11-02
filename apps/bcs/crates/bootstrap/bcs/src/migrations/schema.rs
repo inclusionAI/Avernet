@@ -845,3 +845,55 @@ pub(super) async fn add_sqlite_task_handle_lookup(db: &dyn DbPlugin) -> DbResult
     db.transaction(steps).await?;
     Ok(())
 }
+
+/// 040_auth_session_version: the versioned login-session columns on
+/// `bcs_user_identities` — nullable `session_id`, non-null
+/// `session_revision` (default 0), and the `session_expires_at`
+/// Unix-seconds column — plus the historical token/expiry clear.
+///
+/// The published file is split with the shared `split_sql_statements`
+/// splitter, never an ad hoc split. Its three ALTER statements are
+/// column-guarded (SQLite has no `ADD COLUMN IF NOT EXISTS`), so a partially
+/// applied or resumed migration re-applies cleanly, and each statement is
+/// verified against its expected column so the file and the runner cannot
+/// drift apart. The clear runs only while the version-40 record is absent:
+/// once recorded, the runner never applies this body again, so re-running
+/// migrations never invalidates live sessions a second time (spec §8.5: the
+/// historical tokens are cleared exactly once, on purpose).
+pub(super) async fn add_sqlite_auth_session_version_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    let statements = bcs_db_api::split_sql_statements(include_str!(
+        "../../../../../migrations/sqlite/040_auth_session_version.sql"
+    ));
+    let [add_session_id, add_session_revision, add_session_expires_at, clear_legacy] =
+        statements.as_slice()
+    else {
+        return Err(DbError::InvalidInput(
+            "unexpected auth session migration statements".into(),
+        ));
+    };
+    let columns_with_sql = [
+        ("session_id", add_session_id.as_str()),
+        ("session_revision", add_session_revision.as_str()),
+        ("session_expires_at", add_session_expires_at.as_str()),
+    ];
+    for (column, sql) in columns_with_sql {
+        if !sql.contains(&format!("ADD COLUMN {column} ")) {
+            return Err(DbError::InvalidInput(format!(
+                "unexpected auth session DDL for bcs_user_identities.{column}"
+            )));
+        }
+    }
+    if !clear_legacy.contains("UPDATE bcs_user_identities SET token = NULL, token_expire_at = NULL") {
+        return Err(DbError::InvalidInput(
+            "missing the historical token clear in the auth session migration".into(),
+        ));
+    }
+    let columns = sqlite_table_columns(db, "bcs_user_identities").await?;
+    for (column, sql) in columns_with_sql {
+        if !columns.iter().any(|existing| existing == column) {
+            db.execute(DbStatement::new(sql)).await?;
+        }
+    }
+    db.execute(DbStatement::new(clear_legacy.as_str())).await?;
+    Ok(())
+}

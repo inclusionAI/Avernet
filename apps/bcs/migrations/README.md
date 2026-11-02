@@ -578,3 +578,26 @@ been migrated by this source change.
 
 See repository-root `docs/specs/a2a/task-bindings-v1.md` for query/write costs and
 `docs/specs/a2a/minimal-card-registration-v1.md` for Card registration/refresh.
+
+## Versioned login sessions (MySQL/SQLite 040)
+
+`040_auth_session_version.sql` adds the strict versioned login-session columns
+to `bcs_user_identities`: nullable `session_id`, non-null `session_revision`
+(default 0), and the `session_expires_at` BIGINT/INTEGER Unix-seconds column
+used for dialect-neutral expiry comparisons. The legacy `token_expire_at`
+datetime column is kept in lockstep only for legacy tooling. Session scope
+stays `(user_id, auth_source, env)` via the existing `uk_user_id` unique
+index; the migration adds no index, table, or cache, and every session
+operation remains exactly one SELECT or one conditional UPDATE.
+
+Historical opaque browser tokens are invalidated on purpose: the V1 API auth
+chain resolves sessions only by token hash + revision under scope, never by
+the legacy token, so the migration clears `token`/`token_expire_at` exactly
+once (spec §8.5/§9). The clear is guarded by the recorded version-40 migration
+row — never by column guards — so re-running migrations never invalidates
+live sessions a second time. Fresh databases go through the same body: the
+columns are added by the chain's version-40 step, keeping fresh and upgraded
+schemas identical. SQLite splits the file with the shared
+`split_sql_statements` splitter and column-guards each `ADD COLUMN` so a
+partially applied step resumes cleanly; bcs-admin applies the MySQL file and
+records the version plus the file checksum itself.

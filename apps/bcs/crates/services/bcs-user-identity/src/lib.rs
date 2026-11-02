@@ -13,6 +13,7 @@ use tracing::warn;
 pub mod memory;
 pub use memory::{generate_user_id, MemoryUserIdentityRepo};
 
+mod session_db;
 mod session_memory;
 
 pub type MysqlUserIdentityRepo = DbUserIdentityStore;

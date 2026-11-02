@@ -263,7 +263,8 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (36, "collaboration_drafts".to_string(), "sqlite".to_string()),
             (37, "bot_authority".to_string(), "sqlite".to_string()),
             (38, "task_handle_lookup".to_string(), "sqlite".to_string()),
-            (39, "bot_a2a".to_string(), "sqlite".to_string())
+            (39, "bot_a2a".to_string(), "sqlite".to_string()),
+            (40, "auth_session_version".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())
@@ -274,7 +275,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
 
     let report = check_sqlite_migrations(&db).await?;
-    assert_eq!(report.pending_versions.len(), 39);
+    assert_eq!(report.pending_versions.len(), 40);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -728,7 +729,8 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (36, "collaboration_drafts".to_string(), "sqlite".to_string()),
             (37, "bot_authority".to_string(), "sqlite".to_string()),
             (38, "task_handle_lookup".to_string(), "sqlite".to_string()),
-            (39, "bot_a2a".to_string(), "sqlite".to_string())
+            (39, "bot_a2a".to_string(), "sqlite".to_string()),
+            (40, "auth_session_version".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())

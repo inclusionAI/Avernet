@@ -260,7 +260,7 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         authority.get("name"),
         Some(&DbValue::String("bot_authority".into()))
     );
-    assert_eq!(history.last().expect("A2A migration present").get("name"),Some(&DbValue::String("bot_a2a".into())));
+    assert_eq!(history.last().expect("chain tail present").get("name"),Some(&DbValue::String("auth_session_version".into())));
     bcs::migrations::run_sqlite_migrations(db.as_ref())
         .await
         .expect("idempotent re-run");
