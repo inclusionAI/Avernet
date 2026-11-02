@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const baseGroup = {
   groupId: 'g1',
@@ -28,6 +28,12 @@ const baseGroup = {
 const mockState: { selectedGroupId: string | null } = { selectedGroupId: 'g1' };
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
+const mockOpenSession = jest.fn();
+const mockApplySessionUpdate = jest.fn();
+const mockGetSessionDetail = jest.fn(async (sessionId: string) => ({
+  ok: true,
+  data: { sessionId, title: '会话详情' },
+}));
 const mockCreateGroupShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/groups/test' } }));
 const mockCreateSessionShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/sessions/test' } }));
 
@@ -41,7 +47,7 @@ const mockStore = {
 jest.mock('@/stores/workspaceStore', () => ({
   useWorkspaceStore: (selector?: (s: typeof mockStore) => unknown) => (selector ? selector(mockStore) : mockStore),
 }));
-jest.mock('@/services/workspace/sessionService', () => ({ sessionService: { getSessionDetail: jest.fn() } }));
+jest.mock('@/services/workspace/sessionService', () => ({ sessionService: { getSessionDetail: mockGetSessionDetail } }));
 jest.mock('sonner', () => ({ toast: { info: jest.fn(), error: jest.fn(), success: jest.fn() } }));
 
 jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
@@ -87,11 +93,11 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     reloadGroup: jest.fn(),
     selectedSession: sessionsMock.selectedSession,
     selectedSessionId: sessionsMock.selectedSession?.sessionId ?? null,
-    openSession: jest.fn(),
+    openSession: mockOpenSession,
     createSessionIn: jest.fn(),
     leaveSession: jest.fn(),
     updateMemberMode: jest.fn(),
-    applySessionUpdate: jest.fn(),
+    applySessionUpdate: mockApplySessionUpdate,
     favoriteSessionIds: [],
     sessionSearchText: '',
     setSessionSearchText: jest.fn(),
@@ -125,6 +131,8 @@ jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
       <button type="button" onClick={() => onTogglePanel('manage')}>
         打开管理面板
       </button>
+      <button type="button" onClick={() => onTogglePanel('sessionManage')}>打开会话管理面板</button>
+      <button type="button" onClick={() => onTogglePanel('none')}>关闭临时面板</button>
       <button type="button" onClick={() => onTogglePanel('resources')}>
         打开资源面板
       </button>
@@ -156,7 +164,14 @@ jest.mock('@/pages/Workspace/components/GroupSidebar', () => {
   const actual = jest.requireActual<typeof import('@/pages/Workspace/components/GroupSidebar')>(
     '@/pages/Workspace/components/GroupSidebar',
   );
-  return { ...actual, GroupSidebar: () => <aside data-testid="in-flow-group-sidebar" /> };
+  return {
+    ...actual,
+    GroupSidebar: ({ onManageSession }: { onManageSession: (groupId: string, sessionId: string) => void }) => (
+      <aside data-testid="in-flow-group-sidebar">
+        <button type="button" onClick={() => onManageSession('g1', 's1')}>侧栏管理会话</button>
+      </aside>
+    ),
+  };
 });
 
 const { GroupWorkspaceArea } =
@@ -169,9 +184,55 @@ function renderArea() {
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
+    sessionsMock.selectedSession = null;
+    mockOpenSession.mockClear();
+    mockOnSelectGroup.mockClear();
+    mockGetSessionDetail.mockClear();
+    mockApplySessionUpdate.mockClear();
     mockReloadSelectedGroup.mockClear();
     mockCreateGroupShare.mockClear();
     mockCreateSessionShare.mockClear();
+  });
+
+  it('本地管理面板打开时提升整个隔离会话层级，关闭后恢复持久副屏层级', () => {
+    sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
+    renderArea();
+    const conversation = screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]');
+    expect(conversation).not.toHaveClass('z-20');
+
+    fireEvent.click(screen.getByRole('button', { name: '打开会话管理面板' }));
+    expect(conversation).toHaveClass('isolate', 'z-20');
+    fireEvent.click(screen.getByRole('button', { name: '关闭临时面板' }));
+    expect(conversation).not.toHaveClass('z-20');
+  });
+
+  it('侧栏管理当前会话只补拉详情，不重新选群或触发会话历史刷新', async () => {
+    sessionsMock.selectedSession = { sessionId: 's1', title: '自定义协作会话' };
+    renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '侧栏管理会话' }));
+
+    expect(mockOnSelectGroup).not.toHaveBeenCalled();
+    expect(mockOpenSession).not.toHaveBeenCalled();
+    expect(mockGetSessionDetail).toHaveBeenCalledWith('s1');
+    await waitFor(() => expect(mockApplySessionUpdate).toHaveBeenCalledWith('s1', {
+      sessionId: 's1', title: '会话详情',
+    }));
+    expect(screen.getByTestId('group-chat-pane').closest('[data-workspace-conversation]')).toHaveClass('z-20');
+  });
+
+  it.each([
+    ['g1', 's2'],
+    ['g2', 's1'],
+  ])('管理非当前会话仍通过 openSession 选中目标（当前 %s/%s）', async (groupId, sessionId) => {
+    mockState.selectedGroupId = groupId;
+    sessionsMock.selectedSession = { sessionId, title: '其他会话' };
+    renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '侧栏管理会话' }));
+
+    expect(mockOnSelectGroup).not.toHaveBeenCalled();
+    expect(mockOpenSession).toHaveBeenCalledTimes(1);
+    expect(mockOpenSession).toHaveBeenCalledWith('g1', 's1');
+    await waitFor(() => expect(mockApplySessionUpdate).toHaveBeenCalled());
   });
 
   it('管理面板分享有效期传入 createShare 的第二个参数，不作为目标 ID', () => {
