@@ -1,0 +1,41 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/__init__.py
+  s_cecdc98e721f4b::t_af70999cf75e49 1-50
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/contract.py
+  s_cecdc98e721f4b::t_8576fd75ca338a 1-229
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/defect.py
+  s_cecdc98e721f4b::t_8f49f627a9a28a 1-34
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/profile.py
+  s_cecdc98e721f4b::t_1ea978f8e8bd6d 1-64
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/registration_proposal.py
+  s_cecdc98e721f4b::t_1e7312af995648 1-31
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/reporting.py
+  s_cecdc98e721f4b::t_239db27060c91e 1-51
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/run.py
+  s_cecdc98e721f4b::t_c6cd633031771d 1-160
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_density/transport.py
+  s_cecdc98e721f4b::t_ba4b721be75aa9 1-70
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_7e11556a640a6c 87,116
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_9dba1735ea6f70 149-150
+apps/bcs/scripts/e2e-runner/tests/test_group_context_density.py
+  s_cecdc98e721f4b::t_9f28b9bb49c03c 1-295
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_80ee1d8dcfee0b 655
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f0be65cf80abff1f89e6635887bfc744ac01423a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

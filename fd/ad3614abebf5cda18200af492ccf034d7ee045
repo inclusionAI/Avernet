@@ -1,0 +1,22 @@
+apps/backend/src/agentclaw/community/core/engine_runtime/relay.py
+  s_84c18a6c4dc595::t_a2a60510d01441 87-91,412-414
+  s_84c18a6c4dc595::t_50a5bb1f8c3619 415
+apps/backend/tests/community/core/engine_runtime/test_relay.py
+  s_84c18a6c4dc595::t_a2a60510d01441 462-481
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fdad3614abebf5cda18200af492ccf034d7ee045",
+  "prompts": {},
+  "sessions": {
+    "s_84c18a6c4dc595": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac2-2b7f-7b63-98ae-67dbadf214cd",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
