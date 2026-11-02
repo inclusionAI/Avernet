@@ -171,26 +171,9 @@ pub(super) fn node_mut<'a>(
         })
 }
 
-pub(super) fn retry_is_within_limit(attempt: i32, max_attempts: i32) -> bool {
-    attempt >= 0 && attempt.checked_add(1).is_some_and(|next| next < max_attempts.max(1))
-}
-
-pub(super) fn failure_action_name(action: StateMachineFailureAction) -> &'static str {
-    match action { StateMachineFailureAction::Retry => "retry", StateMachineFailureAction::FailRun => "fail_run" }
-}
-
 pub(super) fn run_is_running(inner: &StoreInner, run_id: &str) -> ServiceResult<bool> {
     let run = inner.runs.get(run_id).ok_or_else(|| {
         ServiceError::InternalError(format!("state machine run not found: {run_id}"))
     })?;
     Ok(run.status == StateMachineRunStatus::Running)
-}
-
-pub(super) fn is_terminal(status: StateMachineRunStatus) -> bool {
-    matches!(
-        status,
-        StateMachineRunStatus::Completed
-            | StateMachineRunStatus::Failed
-            | StateMachineRunStatus::Aborted
-    )
 }

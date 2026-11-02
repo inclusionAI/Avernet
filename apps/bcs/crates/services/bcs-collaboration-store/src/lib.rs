@@ -54,6 +54,27 @@ const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeou
 const SM_CORRELATION_SELECT_COLS: &str = "state_machine_run_id, node_id, attempt, \
     assignee_bot_id, delivery_request_id, bot_delivery_run_id";
 
+// Shared state-machine transition vocabulary used by BOTH persistence
+// implementations (the SQL transition path via sql_node_state/dispatch and the
+// memory store via memory_runs). They live at the crate root, beside the
+// shared select-column constants, because neither impl family owns them.
+fn retry_is_within_limit(attempt: i32, max_attempts: i32) -> bool {
+    attempt >= 0 && attempt.checked_add(1).is_some_and(|next| next < max_attempts.max(1))
+}
+
+fn failure_action_name(action: StateMachineFailureAction) -> &'static str {
+    match action { StateMachineFailureAction::Retry => "retry", StateMachineFailureAction::FailRun => "fail_run" }
+}
+
+fn is_terminal(status: StateMachineRunStatus) -> bool {
+    matches!(
+        status,
+        StateMachineRunStatus::Completed
+            | StateMachineRunStatus::Failed
+            | StateMachineRunStatus::Aborted
+    )
+}
+
 #[derive(Debug, Default, Clone)]
 struct StoreInner {
     history_messages: BTreeMap<String, StateMachineHistoryCheckpoint>,
@@ -162,7 +183,7 @@ mod memory_runs;
 
 mod memory_transition;
 use memory_transition::{
-    apply_memory_state_machine_transition, node_mut, retry_is_within_limit, failure_action_name, run_is_running, is_terminal,
+    apply_memory_state_machine_transition, node_mut, run_is_running,
 };
 
 mod snapshot_validation;
