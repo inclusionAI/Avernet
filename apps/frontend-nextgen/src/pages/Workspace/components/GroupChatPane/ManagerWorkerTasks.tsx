@@ -68,11 +68,12 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
       }}
     >
       <Dialog.Trigger asChild>
-        <button
+        <Button
+          variant="ghost"
           ref={trigger}
           type="button"
           aria-label={`${summary}，查看任务`}
-          className="flex min-h-9 w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-md py-1 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-auto min-h-9 w-full min-w-0 flex-wrap items-center justify-between gap-2 rounded-md py-1 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="flex min-w-0 items-center gap-2" role="status">
             {running.length ? (
@@ -92,7 +93,7 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
             ) : null}
             查看任务 <ChevronUp className="size-3" aria-hidden />
           </span>
-        </button>
+        </Button>
       </Dialog.Trigger>
       <Dialog.Portal container={container}>
         <Dialog.Overlay className="absolute inset-0 z-40 bg-foreground/10" />
@@ -158,16 +159,17 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
               ))}
             {historicalReceipts.length > 0 ? (
               <section aria-label="历史派发回执" className="mt-4 border-t border-border pt-2">
-                <button
+                <Button
+                  variant="ghost"
                   type="button"
                   aria-expanded={historyOpen}
                   onClick={() => setHistoryOpen((value) => !value)}
-                  className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex h-auto min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <ChevronRight className={`size-3.5 ${historyOpen ? 'rotate-90' : ''}`} aria-hidden />
                   <span className="flex-1">历史派发</span>
                   <span>{historicalReceipts.length}</span>
-                </button>
+                </Button>
                 {historyOpen ? (
                   <div className="divide-y divide-border/60">
                     {historicalReceipts.map((task) => (

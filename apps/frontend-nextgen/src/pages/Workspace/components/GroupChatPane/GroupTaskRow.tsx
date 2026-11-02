@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { Button } from '@/components/ui';
 import { formatTaskDuration, isTerminalTask, taskStatusLabels, type GroupTask } from '@/domain/groupTasks/projection';
 import { CheckCircle2, ChevronRight, CircleHelp, Clock3, LoaderCircle, XCircle } from 'lucide-react';
@@ -62,20 +63,26 @@ export function GroupTaskRow({
   return (
     <article aria-label={`${task.summary}，${taskStatusLabels[task.status]}`} className="min-w-0">
       <div className="flex min-w-0 items-center gap-1">
-        <button
+        <Button
+          variant="ghost"
           type="button"
           aria-expanded={expanded}
           aria-controls={detailId}
           aria-label={`${expanded ? '收起' : '展开'}任务：${task.summary}`}
           onClick={() => setExpanded((value) => !value)}
-          className="flex min-h-16 min-w-0 flex-1 items-start gap-2.5 rounded-md px-2 py-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-auto min-h-16 min-w-0 flex-1 items-start gap-2.5 rounded-md px-2 py-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Icon className={`mt-0.5 size-4 shrink-0 ${color}`} aria-hidden />
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={task.summary}>
-                {task.summary}
-              </span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{task.summary}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>{task.summary}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               {unread ? <span className="shrink-0 text-xs text-primary">未读</span> : null}
               <span className={`shrink-0 text-xs ${color}`}>{status}</span>
             </span>
@@ -88,7 +95,7 @@ export function GroupTaskRow({
             className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground ${expanded ? 'rotate-90' : ''}`}
             aria-hidden
           />
-        </button>
+        </Button>
         {task.intentId && !terminal && (task.status === 'queued' || task.status === 'running' || pending) ? (
           <Button
             variant="ghost"
