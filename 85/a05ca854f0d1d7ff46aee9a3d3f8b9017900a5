@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  s_3829018997cfde::t_598e26da65927b 85-87
+apps/backend/tests/corp/core/config/test_corp_overlay_merge.py
+  s_3829018997cfde::t_79d0f42b3f565b 192-197,199,202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "85a05ca854f0d1d7ff46aee9a3d3f8b9017900a5",
+  "prompts": {},
+  "sessions": {
+    "s_3829018997cfde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-fe9d-7333-a924-df073e247434",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

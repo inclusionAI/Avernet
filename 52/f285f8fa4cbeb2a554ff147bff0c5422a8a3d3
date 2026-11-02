@@ -1,0 +1,33 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52f285f8fa4cbeb2a554ff147bff0c5422a8a3d3",
+  "prompts": {},
+  "sessions": {
+    "s_a94046ffb15d68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a94046ffb15d68",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_e36835d494c14c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_e36835d494c14c",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_f34bddef00d9b0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0146ab22-33c9-4afb-a36f-26c1d576d45a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
