@@ -129,8 +129,6 @@ export interface PublicApproval {
  * Bot 扩展字段
  */
 export interface BotExt {
-  /** Established BCN address retained across service conversion and handoff. */
-  bcn_provider_bot_ref?: string;
   /** 权限控制: caller=直接更新, owner=需要审批 */
   permission_owner?: PermissionOwner;
   /** 当前审批信息 */
