@@ -35,11 +35,11 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 稿二级行:无前置消息图标、右余部无「N 条」列。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 文字 13px/18px；未选中与一级名称同色,选中点亮品牌蓝(2026-10-22 二轮)但不加黑加粗。
+    // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
     const title = screen.getByText('对话会话');
     expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
     expect(title).toHaveClass('font-normal');
-    expect(title).toHaveClass(selected ? 'text-primary' : 'text-content-strong');
+    expect(title).toHaveClass(selected ? 'text-foreground' : 'text-content-strong');
   });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
@@ -50,7 +50,7 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     // 52px margin + 8px padding，与一级名称的 16px 外距 + 36px 头像槽 + 8px 间隔一致。
     expect(plainButton).toHaveClass('ml-[52px]', 'mr-4');
     // hover 背景由全宽胶囊承载（见下条同几何用例），选中不再使用行首品牌指示棒。
-    expect(plainButton).not.toHaveClass('bg-primary/10');
+    expect(plainButton).not.toHaveClass('bg-foreground/[6%]');
 
     rerender(
       <ConversationSessionRow
@@ -66,12 +66,12 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     expect(container.firstElementChild).not.toBeNull();
   });
 
-  it('选中胶囊升级品牌蓝：全宽 bg-primary/10 rx6（2026-10-22 二轮，告别与 hover 灰底不可辨）', () => {
+  it('选中胶囊中性深：全宽 bg-foreground/[6%] rx6（2026-11-02 稿，选中底 #09090B0F）', () => {
     const { container } = render(<ConversationSessionRow session={session} selected onSelect={jest.fn()} />);
     const row = container.firstElementChild as HTMLElement;
     const capsule = row.querySelector('span[aria-hidden="true"]') as HTMLElement;
-    // 几何契约不变(inset-x-2 全宽 rx6);选 中改壳 shell 主导航同语言的品牌蓝底。
-    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-primary/10');
+    // 几何契约不变(inset-x-2 全宽 rx6);选中底回归稿面 #09090B0F ≈ foreground 6%。
+    expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-foreground/[6%]');
   });
 
   it('hover 胶囊与选中胶囊同几何：同样 inset-x-2 全宽，背景不随热区分级变短', () => {

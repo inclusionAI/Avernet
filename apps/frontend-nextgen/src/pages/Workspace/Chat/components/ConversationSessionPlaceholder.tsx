@@ -21,9 +21,9 @@ export function ConversationSessionPlaceholder({
         <IconButton label="打开会话列表" icon={<List className="h-4 w-4" />} onClick={onOpenSessionList} />
       </div>
       {model.status === 'loading' ? (
-        // 展开 Bot 后会话列表在途：借用 ChatMessageSkeleton 的「誊写稿」占位——
-        // 主导走向是自动选中会话后 ChatPanel 仍以同一骨架装载消息，全程同一画布语言
-        // （expand-selection spec 的零跳变延伸）；本段仅短暂在途，读屏话术覆写为「加载会话列表」。
+        // 目标 Bot 会话列表在途（深链/删除回退进入未选态）：借用 ChatMessageSkeleton 的
+        // 「誊写稿」占位，用户随后点行后 ChatPanel 仍以同一骨架装载消息，全程同一画布语言；
+        // 本段仅短暂在途，读屏话术覆写为「加载会话列表」。
         <ChatMessageSkeleton ariaLabel="加载会话列表" />
       ) : (
         <div className="flex flex-1 items-center justify-center">
