@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_40fbd3aa6a15d3 5,9-11,14-19,146-150,161-164,167-174,177-185
+apps/bcs/scripts/e2e-runner/tests/test_artifact_budget_gate.py
+  s_cecdc98e721f4b::t_900b185da4d0ab 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2bd70e9a59f6288bb93d54f47b1e949332cfe20d",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
