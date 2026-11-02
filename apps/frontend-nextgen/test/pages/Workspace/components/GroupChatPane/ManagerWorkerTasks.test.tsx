@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
+import { GroupTaskRow } from '@/pages/Workspace/components/GroupChatPane/GroupTaskRow';
 import { GroupChatCollabPanel } from '@/pages/Workspace/components/GroupChatPane/GroupChatCollabPanel';
 import type { DeliveryStatusView, SessionView } from '@/domain/collaboration';
 import { ManagerWorkerTasks } from '@/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks';
@@ -286,5 +287,61 @@ it('isolates cancellation, pending state and unread results for colliding displa
   expect(view.result.current.unread).toHaveLength(0);
   await act(async () => { finish({ ref: ids[0], status: 'cancelled' }); await first; });
   expect(view.result.current.unread.map((t) => t.intentId)).toEqual([ids[0]]);
+  view.unmount();
+});
+
+it('retains ordinary Manager queue controls and processing activity in task sessions', async () => {
+  const onCancelDelivery = jest.fn().mockResolvedValue(undefined);
+  const queued = { ...row('manager-queue', 'queued'), flow_kind: 'group', task: undefined, target_bot_id: 'manager', content_preview: 'Next request' } as DeliveryStatusView;
+  const processing = { ...queued, delivery_id: 'processing', status: 'running' } as DeliveryStatusView;
+  const props = {
+    panel: { visible: false } as never,
+    session: { ...session, participants: [{ actorId: 'manager', kind: 'bot', name: 'Manager', role: 'manager' }] } as never,
+    group: { kind: 'task_master_slave' } as never, messages: [], abortingBotIds: new Set<string>(), abortBot: jest.fn(),
+    queuedDeliveries: [queued, { ...queued, delivery_id: 'worker-queue', target_bot_id: 'worker' }, { ...queued, delivery_id: 'task-queue', flow_kind: 'task' } as DeliveryStatusView],
+    processingDeliveries: [processing], onCancelDelivery,
+  };
+  const view = render(<GroupChatCollabPanel {...props} />);
+  expect(screen.getByText('1 个 Bot 处理中 · 1 项待处理')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '查看处理列表' }));
+  const button = screen.getByRole('button', { name: /取消发往 Manager 的排队消息/ });
+  fireEvent.click(button);
+  await waitFor(() => expect(onCancelDelivery).toHaveBeenCalledWith(queued.message_id, queued.delivery_id));
+  view.rerender(<GroupChatCollabPanel {...props} cancellingDeliveryIds={new Set([queued.delivery_id])} />);
+  expect(button).toBeDisabled();
+});
+
+it.each(['late status', 'already_finished', 'network failure'])('preserves a completion event through %s', async (outcome) => {
+  const intentId = `bcs_intent_${'c'.repeat(32)}`;
+  const running = row('T-cccccccc', 'running');
+  running.task!.intent_id = intentId;
+  insert(running);
+  let resolveStatus!: (value: { ref: string; status: 'running' }[]) => void;
+  jest.mocked(queryWorkerTasks).mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
+  const messages: never[] = [];
+  const participants: never[] = [];
+  const view = renderHook(() => useManagerWorkerTasks('s1', messages, participants));
+  await act(async () => { await Promise.resolve(); });
+  let cancelRequest: Promise<void> | undefined;
+  let settle!: () => void;
+  if (outcome !== 'late status') {
+    jest.mocked(cancelWorkerTask).mockImplementationOnce(() => new Promise((resolve, reject) => {
+      settle = () => outcome === 'network failure' ? reject(new Error('offline')) : resolve({ ref: intentId, status: 'already_finished' });
+    }));
+    act(() => { cancelRequest = view.result.current.cancelTask(view.result.current.tasks[0]); });
+  }
+  const completed = { ...running, status: 'completed', state_version: 2,
+    task: { ...running.task!, finished_at: Date.now() - 1, last_activity_at: Date.now() - 1 } } as DeliveryStatusView;
+  insert(completed);
+  expect(view.result.current.tasks[0].status).toBe('completed');
+  const rendered = render(<GroupTaskRow task={view.result.current.tasks[0]} now={Date.now()} unread pending={outcome !== 'late status'} onCancel={jest.fn()} onViewSource={jest.fn()} />);
+  expect(screen.queryByRole('button', { name: /^(停止|取消|正在确认…)$/ })).not.toBeInTheDocument();
+  rendered.unmount();
+  await act(async () => {
+    resolveStatus([{ ref: intentId, status: 'running' }]);
+    if (cancelRequest) { settle(); await cancelRequest; }
+  });
+  expect(view.result.current.tasks[0]).toMatchObject({ status: 'completed', finishedAt: completed.task!.finished_at });
+  expect(view.result.current.unread).toHaveLength(1);
   view.unmount();
 });

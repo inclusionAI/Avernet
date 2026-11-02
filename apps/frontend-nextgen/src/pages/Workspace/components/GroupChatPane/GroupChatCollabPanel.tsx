@@ -30,6 +30,8 @@ export function GroupChatCollabPanel({
 }) {
   if (session && group?.kind === 'task_master_slave') {
     const managers = session.participants.filter((participant) => participant.kind === 'bot' && participant.role === 'manager');
+    const isManagerMessage = (delivery: DeliveryStatusView) =>
+      delivery.flow_kind === 'group' && managers.some((manager) => manager.actorId === delivery.target_bot_id);
     const managerMessages = messages.filter((message) => managers.some((manager) => manager.actorId === message.extra?.botUuid));
     return (
       <>
@@ -41,6 +43,10 @@ export function GroupChatCollabPanel({
               participants={managers}
               abortingBotIds={abortingBotIds}
               onAbortBot={abortBot}
+              queuedDeliveries={queuedDeliveries?.filter(isManagerMessage)}
+              processingDeliveries={processingDeliveries?.filter(isManagerMessage)}
+              cancellingDeliveryIds={cancellingDeliveryIds}
+              onCancelDelivery={onCancelDelivery}
             />
             <ManagerWorkerTasks key={session.sessionId} session={session} messages={messages} />
           </div>

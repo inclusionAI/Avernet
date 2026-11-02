@@ -141,7 +141,7 @@ describe('authoritative worker task status', () => {
 it.each(['completed', 'failed', 'cancelled'] as const)('preserves persisted %s after correlation expires', (terminal) => {
   const [task] = projectGroupTasks([{ ...delivery('T-12345678', terminal), task: { ...delivery().task!, finished_at: 4000 } }], [], []);
   task.intentId = `bcs_intent_${'a'.repeat(32)}`;
-  for (const status of ['not_found', 'unknown'] as const) {
+  for (const status of ['not_found', 'unknown', 'queued', 'running', 'already_finished', 'ambiguous', 'cancel_failed', 'cancelled'] as const) {
     const [result] = applyTaskStatuses([task], { [task.intentId]: {
       row: { ref: task.intentId, status }, observedAt: 100000,
     } });

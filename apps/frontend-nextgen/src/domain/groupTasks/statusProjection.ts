@@ -17,8 +17,8 @@ export function applyTaskStatuses(tasks: GroupTask[], snapshots: Record<string, 
     const snapshot = snapshots[taskIdentity(task)];
     if (!snapshot || (task.source === 'delivery' && task.lastActivityAt > snapshot.observedAt)) return task;
     const { row, observedAt } = snapshot;
-    // Persisted terminal delivery evidence survives missing or expired cache correlation.
-    if (['not_found', 'unknown'].includes(row.status) && task.source === 'delivery' && isTerminalTask(task.status)) return task;
+    // A response arrival time cannot establish freshness over a persisted terminal event.
+    if (task.source === 'delivery' && isTerminalTask(task.status)) return task;
     if (['not_found', 'ambiguous', 'unknown', 'already_finished', 'cancel_failed'].includes(row.status)) {
       const notes: Record<string, string> = {
         not_found: '未查到任务关联记录，可能尚未建立或已超过 7 天缓存保留期，无法确认执行状态。',

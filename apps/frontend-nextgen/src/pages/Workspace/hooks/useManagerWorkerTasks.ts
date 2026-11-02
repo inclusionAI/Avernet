@@ -137,7 +137,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     ...task,
     lastActivityAt: Math.max(task.lastActivityAt, task.runId ? streamActivity[task.runId] ?? 0 : 0),
     status:
-      uncertain[taskIdentity(task)] !== undefined
+      uncertain[taskIdentity(task)] !== undefined && !isTerminalTask(task.status)
         ? ('unknown' as const)
         : task.status,
   }));
@@ -149,7 +149,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       ...Object.fromEntries(displayed.filter((t) => isTerminalTask(t.status)).map((t) => [taskIdentity(t), signature(t)])),
     }));
   const cancelTask = async (task: GroupTask) => {
-    if (!task.intentId || pendingRef.current.has(taskIdentity(task))) return;
+    if (!task.intentId || isTerminalTask(task.status) || pendingRef.current.has(taskIdentity(task))) return;
     cancellationBarrier.current.set(taskIdentity(task), Infinity);
     pendingRef.current.add(taskIdentity(task));
     setPending(new Set(pendingRef.current));
