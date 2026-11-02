@@ -65,12 +65,5 @@ Send 最终 completed；恢复窗口人类消息和节点完成数均为 0。
 75.920 秒实时脱敏监视页视频已本地交付，尚无公开附件链接，未展示产品副屏。
 
 逐次时间链与批次范围见
-[真实恢复报告](https://github.com/inclusionAI/Avernet/pull/3389#issuecomment-6558741766)。
+[真实恢复报告](https://github.com/inclusionAI/Avernet/pull/3389#issuecomment-6557885443)。
 本次 mock E2E 与真实模型验收分别保留，不混算成功率。
-
-## 历史证据
-
-此前 Singlebox 的启动失败、覆盖率不足和 expert_chat 超时已经本轮全量实跑补验，
-不再作为当前结论。Cargo、MySQL、整仓架构及协议检查保留各自批次范围，本轮
-Singlebox 通过不覆盖其结果。失败原始资料保留，公开批次说明见
-[历史完整测试报告](https://github.com/inclusionAI/Avernet/pull/3389#issuecomment-6557885443)。
