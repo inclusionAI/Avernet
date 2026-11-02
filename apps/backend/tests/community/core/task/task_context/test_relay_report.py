@@ -137,6 +137,7 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     assert context.all_done_output == []
     next_context = service.get_node_context("task-1", result.target_node_id)
     assert [fact.node_id for fact in next_context.all_done_output] == ["task-1"]
+    assert next_context.used_executor_ids == ["bot-1", "bot-2"]
     actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
     assert [event.action for event in actions] == [
         NodeAction.EXECUTE,
