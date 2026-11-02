@@ -1,6 +1,6 @@
 import { applyTaskStatuses, type TaskStatusSnapshot } from '@/domain/groupTasks/statusProjection';
 import type { ParticipantView } from '@/domain/collaboration';
-import { isTerminalTask, projectGroupTasks, type GroupTask } from '@/domain/groupTasks/projection';
+import { isTerminalTask, projectGroupTasks, taskIdentity, completeIntentId, type GroupTask } from '@/domain/groupTasks/projection';
 import { queryTaskDeliveries, queryWorkerTasks, cancelWorkerTask } from '@/services/workspace/messageDeliveryService';
 import { useMessageDeliveryStore } from '@/stores/messageDeliveryStore';
 import type { ChatMessage } from '@tc-chat/core';
@@ -20,8 +20,8 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
   currentTasks.current = baseTasks;
   const clearConfirmed = useCallback((refs: string[], started: number) => {
     const confirmed = new Set(currentTasks.current.filter((task) =>
-      refs.includes(task.taskRef) || (task.intentId && refs.includes(task.intentId)),
-    ).map((task) => task.taskRef));
+      refs.includes(taskIdentity(task)),
+    ).map(taskIdentity));
     setUncertain((previous) => {
       const retained = Object.entries(previous).filter(([ref, after]) => !confirmed.has(ref) || started <= after);
       return retained.length === Object.keys(previous).length ? previous : Object.fromEntries(retained);
@@ -97,10 +97,10 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
       const ids = JSON.parse(messageIds) as string[];
       try {
         if (ids.length) {
-          const rows = (await queryTaskDeliveries(sessionId, ids)).filter((row) => started > (cancellationBarrier.current.get(row.task?.task_ref ?? '') ?? -1));
+          const rows = (await queryTaskDeliveries(sessionId, ids)).filter((row) => started > (cancellationBarrier.current.get(completeIntentId(row.task?.intent_id) ?? `delivery:${row.delivery_id}`) ?? -1));
           if (!disposed) {
             for (const row of rows) if (row.task) useMessageDeliveryStore.getState().upsertDelivery(sessionId, row);
-            const confirmed = projectGroupTasks(rows, [], []).filter((task) => task.status !== 'unknown').map((task) => task.taskRef);
+            const confirmed = projectGroupTasks(rows, [], []).filter((task) => task.status !== 'unknown').map(taskIdentity);
             clearConfirmed(confirmed, started);
             // A newer delivery read can recover an uncertain task-API response.
             setStatusState((previous) => {
@@ -108,7 +108,7 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
               const next = { ...previous.rows };
               for (const task of currentTasks.current) {
                 const snapshot = task.intentId ? next[task.intentId] : undefined;
-                if (task.intentId && confirmed.includes(task.taskRef) && snapshot && snapshot.observedAt <= startedAt &&
+                if (task.intentId && confirmed.includes(taskIdentity(task)) && snapshot && snapshot.observedAt <= startedAt &&
                     ['unknown', 'not_found', 'ambiguous', 'already_finished', 'cancel_failed'].includes(snapshot.row.status)) {
                   delete next[task.intentId];
                 }
@@ -137,40 +137,38 @@ export function useManagerWorkerTasks(sessionId: string, messages: ChatMessage[]
     ...task,
     lastActivityAt: Math.max(task.lastActivityAt, task.runId ? streamActivity[task.runId] ?? 0 : 0),
     status:
-      uncertain[task.taskRef] !== undefined
+      uncertain[taskIdentity(task)] !== undefined
         ? ('unknown' as const)
         : task.status,
   }));
   const signature = (task: GroupTask) => `${task.status}:${task.finishedAt ?? (task.source === 'status' ? 0 : task.version)}`;
-  const unread = displayed.filter((task) => isTerminalTask(task.status) && read[task.taskRef] !== signature(task));
+  const unread = displayed.filter((task) => isTerminalTask(task.status) && read[taskIdentity(task)] !== signature(task));
   const markRead = () =>
     setRead((previous) => ({
       ...previous,
-      ...Object.fromEntries(displayed.filter((t) => isTerminalTask(t.status)).map((t) => [t.taskRef, signature(t)])),
+      ...Object.fromEntries(displayed.filter((t) => isTerminalTask(t.status)).map((t) => [taskIdentity(t), signature(t)])),
     }));
   const cancelTask = async (task: GroupTask) => {
-    if (!task.intentId || pendingRef.current.has(task.taskRef)) return;
-    cancellationBarrier.current.set(task.taskRef, Infinity);
-    cancellationBarrier.current.set(task.intentId, Infinity);
-    pendingRef.current.add(task.taskRef);
+    if (!task.intentId || pendingRef.current.has(taskIdentity(task))) return;
+    cancellationBarrier.current.set(taskIdentity(task), Infinity);
+    pendingRef.current.add(taskIdentity(task));
     setPending(new Set(pendingRef.current));
-    setUncertain((previous) => ({ ...previous, [task.taskRef]: Infinity }));
+    setUncertain((previous) => ({ ...previous, [taskIdentity(task)]: Infinity }));
     try {
       const row = await cancelWorkerTask(task.intentId);
       const observedAt = Date.now();
       setStatusState((previous) => ({ sessionId, rows: { ...(previous.sessionId === sessionId ? previous.rows : {}), [row.ref]: { row, observedAt } } }));
       if (['queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out'].includes(row.status)) {
-        setUncertain((previous) => { const next = { ...previous }; delete next[task.taskRef]; return next; });
+        setUncertain((previous) => { const next = { ...previous }; delete next[taskIdentity(task)]; return next; });
       }
       setError(row.status === 'cancel_failed' ? '停止失败，请稍后重试' : undefined);
     } catch {
       setError('停止结果未确认，请等待状态更新');
     } finally {
       const after = ++requestSequence.current;
-      cancellationBarrier.current.set(task.taskRef, after);
-      cancellationBarrier.current.set(task.intentId, after);
-      setUncertain((previous) => previous[task.taskRef] === undefined ? previous : { ...previous, [task.taskRef]: after });
-      pendingRef.current.delete(task.taskRef);
+      cancellationBarrier.current.set(taskIdentity(task), after);
+      setUncertain((previous) => previous[taskIdentity(task)] === undefined ? previous : { ...previous, [taskIdentity(task)]: after });
+      pendingRef.current.delete(taskIdentity(task));
       setPending(new Set(pendingRef.current));
     }
   };

@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui';
 import type { SessionView } from '@/domain/collaboration';
-import { isTerminalTask } from '@/domain/groupTasks/projection';
+import { isTerminalTask, taskIdentity } from '@/domain/groupTasks/projection';
 import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { ChatMessage } from '@tc-chat/core';
@@ -42,7 +42,7 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
       ? `暂无可确认任务 · ${historicalReceipts.length} 条历史回执`
       : '暂无任务';
   // Opening acknowledges the terminal records actually rendered, including arrivals while open.
-  const unreadKey = model.unread.map((t) => `${t.taskRef}:${t.status}:${t.finishedAt ?? t.version}`).join('|');
+  const unreadKey = model.unread.map((t) => `${taskIdentity(t)}:${t.status}:${t.finishedAt ?? t.version}`).join('|');
   useEffect(() => {
     if (open && unreadKey) model.markRead();
   }, [open, unreadKey]);
@@ -144,11 +144,11 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
                   <div className="divide-y divide-border/60">
                     {section.tasks.map((task) => (
                       <GroupTaskRow
-                        key={task.taskRef}
+                        key={taskIdentity(task)}
                         task={task}
                         now={model.now}
-                        unread={model.unread.some((item) => item.taskRef === task.taskRef)}
-                        pending={model.pending.has(task.taskRef)}
+                        unread={model.unread.some((item) => taskIdentity(item) === taskIdentity(task))}
+                        pending={model.pending.has(taskIdentity(task))}
                         onCancel={() => void model.cancelTask(task)}
                         onViewSource={() => viewSource(task.sourceMessageId)}
                       />
@@ -172,7 +172,7 @@ export function ManagerWorkerTasks({ session, messages }: { session: SessionView
                   <div className="divide-y divide-border/60">
                     {historicalReceipts.map((task) => (
                       <GroupTaskRow
-                        key={task.taskRef}
+                        key={taskIdentity(task)}
                         task={task}
                         now={model.now}
                         unread={false}

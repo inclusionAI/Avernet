@@ -157,6 +157,8 @@ export type DeliveryType = 'send' | 'inject';
 
 /** 服务端白名单任务投影；仅任务派发投递携带，时间均为 epoch 毫秒。 */
 export interface TaskDeliveryView {
+  /** Complete admitted assignment identity; absent for legacy deliveries. */
+  intent_id?: string;
   task_ref: string;
   summary: string;
   manager_id: string;

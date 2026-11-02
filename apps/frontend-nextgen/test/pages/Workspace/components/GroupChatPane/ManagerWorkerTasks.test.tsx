@@ -75,6 +75,7 @@ it.each(['network error', 'unknown response'])('recovers managed cancellation af
   try {
     const intentId = `bcs_intent_${'a'.repeat(32)}`;
     const delivery = row('T-aaaaaaaa', 'running');
+    delivery.task!.intent_id = intentId;
     insert(delivery);
     const messages = [{ id: 'manager', role: 'assistant', content: '', createdAt: Date.now(),
       blocks: [{ type: 'tool_execution', steps: [{ id: 'tool', tool: 'bcs_assign_task', status: 'success',
@@ -257,4 +258,33 @@ it('keeps the Manager reply stop control beside tasks even when the control pane
   fireEvent.click(screen.getByRole('button', { name: '停止 Manager 的当前回复' }));
   await waitFor(() => expect(abortBot).toHaveBeenCalledWith('manager'));
   expect(screen.queryByRole('button', { name: '停止 Worker 的当前回复' })).not.toBeInTheDocument();
+});
+
+
+it('isolates cancellation, pending state and unread results for colliding display refs', async () => {
+  const ids = ['1', '2'].map((suffix) => `bcs_intent_12345678${suffix.repeat(24)}`);
+  insert(...ids.map((intent_id, index) => ({ ...row('T-12345678', 'running'), delivery_id: `collision-${index}`,
+    task: { ...row('T-12345678', 'running').task!, intent_id, summary: `Assignment ${index}` } })));
+  const messages: never[] = [];
+  const participants: never[] = [];
+  const view = renderHook(() => useManagerWorkerTasks('s1', messages, participants));
+  await act(async () => { await Promise.resolve(); });
+  expect(view.result.current.tasks).toHaveLength(2);
+  expect(queryWorkerTasks).toHaveBeenCalledWith(ids);
+  let finish!: (value: { ref: string; status: 'cancelled' }) => void;
+  jest.mocked(cancelWorkerTask).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  let first!: Promise<void>;
+  act(() => { first = view.result.current.cancelTask(view.result.current.tasks.find((t) => t.intentId === ids[0])!); });
+  expect(view.result.current.pending.has(ids[0])).toBe(true);
+  expect(view.result.current.pending.has(ids[1])).toBe(false);
+  expect(view.result.current.tasks.find((t) => t.intentId === ids[1])!.status).toBe('running');
+  jest.mocked(cancelWorkerTask).mockResolvedValueOnce({ ref: ids[1], status: 'cancelled' });
+  await act(async () => { await view.result.current.cancelTask(view.result.current.tasks.find((t) => t.intentId === ids[1])!); });
+  expect(cancelWorkerTask).toHaveBeenNthCalledWith(1, ids[0]);
+  expect(cancelWorkerTask).toHaveBeenNthCalledWith(2, ids[1]);
+  act(() => { view.result.current.markRead(); });
+  expect(view.result.current.unread).toHaveLength(0);
+  await act(async () => { finish({ ref: ids[0], status: 'cancelled' }); await first; });
+  expect(view.result.current.unread.map((t) => t.intentId)).toEqual([ids[0]]);
+  view.unmount();
 });

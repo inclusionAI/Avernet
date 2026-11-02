@@ -118,9 +118,31 @@ it('replaces the provisional receipt with its authoritative delivery without dou
   const tasks = projectGroupTasks([{
     delivery_id: 'd1', message_id: 'dispatch', target_bot_id: 'worker-ray', kind: 'send', flow_kind: 'task', status: 'running',
     state_version: 1, run_id: 'run-1', admission_error: null, wait_reason: null,
-    task: { task_ref: 'T-04485427', summary: '已确认任务', manager_id: 'manager', worker_id: 'worker-ray', worker_name: 'ray',
+    task: { intent_id: receipt.intent_id, task_ref: 'T-04485427', summary: '已确认任务', manager_id: 'manager', worker_id: 'worker-ray', worker_name: 'ray',
       queued_at: 1, started_at: 2, last_activity_at: 3, finished_at: null, timed_out: false },
   }], [toolMessage()], [...participants]);
   expect(tasks).toHaveLength(1);
   expect(tasks[0]).toMatchObject({ source: 'delivery', status: 'running', summary: '已确认任务' });
+});
+
+
+it('keeps colliding full intents separate and only joins deliveries by complete identity', () => {
+  const otherId = 'bcs_intent_04485427ffffffffffffffffffffffff';
+  const messages = [toolMessage(), toolMessage(JSON.stringify({ ...receipt, intent_id: otherId }))];
+  expect(projectTaskReceipts([...messages, ...messages], [])).toHaveLength(2);
+  const delivery = {
+    delivery_id: 'other-delivery', message_id: 'dispatch', target_bot_id: 'other-worker', kind: 'send', flow_kind: 'task', status: 'running',
+    state_version: 1, run_id: 'run-2', admission_error: null, wait_reason: null,
+    task: { intent_id: otherId, task_ref: 'T-04485427', summary: 'Other assignment', manager_id: 'manager', worker_id: 'other-worker', worker_name: 'Other',
+      queued_at: 1, started_at: 2, last_activity_at: 3, finished_at: null, timed_out: false },
+  } as const;
+  const tasks = projectGroupTasks([delivery], messages, []);
+  expect(tasks).toHaveLength(2);
+  expect(tasks.find((t) => t.intentId === receipt.intent_id)).toMatchObject({ source: 'receipt', summary: '检查支付日志' });
+  expect(tasks.find((t) => t.intentId === otherId)).toMatchObject({ source: 'delivery', workerId: 'other-worker', deliveryId: 'other-delivery' });
+  const legacy = projectGroupTasks([{ ...delivery, task: { ...delivery.task, intent_id: undefined } }], messages, []);
+  expect(legacy).toHaveLength(3);
+  expect(legacy.find((t) => t.deliveryId)).toMatchObject({ intentId: undefined });
+  // A collision may be outside loaded history: even one visible receipt cannot prove a short-ref join.
+  expect(projectGroupTasks([{ ...delivery, task: { ...delivery.task, intent_id: undefined } }], [messages[0]], [])).toHaveLength(2);
 });

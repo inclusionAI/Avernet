@@ -24,6 +24,15 @@ export interface GroupTask {
   version: number;
 }
 
+/** Short references are display labels, never task identities. */
+export function taskIdentity(task: GroupTask): string {
+  return task.intentId ?? (task.deliveryId ? `delivery:${task.deliveryId}` : `receipt:${task.sourceMessageId}:${task.taskRef}`);
+}
+
+export function completeIntentId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^bcs_intent_[a-f0-9]{32}$/i.test(value) ? value.toLowerCase() : undefined;
+}
+
 export const taskStatusLabels: Record<GroupTaskStatus, string> = {
   queued: '排队中',
   running: '执行中',
@@ -64,11 +73,13 @@ export function projectGroupTasks(
   messages: ChatMessage[],
   participants: ParticipantView[],
 ): GroupTask[] {
-  const byRef = new Map(projectTaskReceipts(messages, participants).map((task) => [task.taskRef, task]));
+  const byRef = new Map(projectTaskReceipts(messages, participants).map((task) => [taskIdentity(task), task]));
   for (const delivery of deliveries) {
     const task = delivery.task;
     if (!task?.task_ref || delivery.flow_kind !== 'task' || task.worker_id !== delivery.target_bot_id) continue;
-    const current = byRef.get(task.task_ref);
+    const intentId = completeIntentId(task.intent_id);
+    const identity = intentId ?? `delivery:${delivery.delivery_id}`;
+    const current = byRef.get(identity);
     if (
       current?.deliveryId &&
       (current.lastActivityAt > task.last_activity_at ||
@@ -76,9 +87,9 @@ export function projectGroupTasks(
     )
       continue;
     const status = deliveryTaskStatus(delivery);
-    byRef.set(task.task_ref, {
+    byRef.set(identity, {
       taskRef: task.task_ref,
-      intentId: current?.intentId,
+      intentId,
       source: 'delivery',
       summary: task.summary || delivery.content_preview || '未记录任务摘要',
       workerId: task.worker_id,

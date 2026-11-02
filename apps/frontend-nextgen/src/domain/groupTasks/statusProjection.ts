@@ -1,4 +1,4 @@
-import { isTerminalTask, type GroupTask } from './projection';
+import { isTerminalTask, taskIdentity, type GroupTask } from './projection';
 
 export interface WorkerTaskStatusView {
   ref: string;
@@ -14,7 +14,7 @@ export interface TaskStatusSnapshot { row: WorkerTaskStatusView; observedAt: num
 /** Only an authoritative task status upgrades a stored receipt to an execution task. */
 export function applyTaskStatuses(tasks: GroupTask[], snapshots: Record<string, TaskStatusSnapshot>): GroupTask[] {
   return tasks.map((task) => {
-    const snapshot = snapshots[task.intentId ?? task.taskRef];
+    const snapshot = snapshots[taskIdentity(task)];
     if (!snapshot || (task.source === 'delivery' && task.lastActivityAt > snapshot.observedAt)) return task;
     const { row, observedAt } = snapshot;
     // Persisted terminal delivery evidence survives missing or expired cache correlation.

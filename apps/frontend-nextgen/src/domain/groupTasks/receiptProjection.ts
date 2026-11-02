@@ -135,11 +135,12 @@ export function projectTaskReceipts(messages: ChatMessage[], participants: Parti
             : typeof receipt.task_ref === 'string' && /^T-[a-f0-9]{8}$/i.test(receipt.task_ref)
             ? receipt.task_ref.toLowerCase().replace(/^t-/, 'T-')
             : undefined;
-          if (!ref || tasks.has(ref)) continue;
+          const identity = intentId ?? `receipt:${message.id}:${ref}`;
+          if (!ref || tasks.has(identity)) continue;
           const worker = participants.find(
             (p) => p.kind === 'bot' && (p.actorId === input.target || p.name === input.target),
           );
-          tasks.set(ref, {
+          tasks.set(identity, {
             taskRef: ref,
             intentId,
             source: 'receipt',
