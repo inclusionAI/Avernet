@@ -12,6 +12,8 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
+  - BcsOwnershipPlugin
+  - BcsOwnershipError
   - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
   - "LocalSkillSecurityProviderProtocol V1"
   - "Plugin marker"
@@ -21,6 +23,7 @@ provides:
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
@@ -162,3 +165,19 @@ DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
 contract. The old HTTP errors module re-exports the same class identity for
 compatibility; core consumers do not import HTTP exceptions. No-department still
 returns StaffDeptInfo with null fields, and infrastructure failure remains distinct.
+
+## Ownership delivery Plugin API v1
+
+`BcsOwnershipPlugin.replace_ownership(snapshot: OwnershipSnapshot, *,
+timeout_seconds: float) -> OwnershipChange` is async and sends once. Async
+`aclose() -> None` releases owned resources on the shared delivery loop.
+`BcsOwnershipError(kind, code)` exposes only `NOT_SENT`, `UNKNOWN`, or `REJECTED`
+delivery classifications and stable codes; Core owns retries and interprets
+confirmation against the snapshot. A missing-Bot 200 no-op is not alignment.
+
+The v1 consumer is `BotOwnershipSyncService`; implementations are
+`HttpBcsOwnershipPlugin` in `plugins/community/bcs_ownership.py` and
+`RecordingBcsOwnershipPlugin` in `plugins/local/bcs_ownership.py`. The
+`tests/community/contracts/test_bcs_ownership.py` consumer suite obtains the
+service through `world`, checks success/failure and actual plugin calls; no
+protocol waiver is required. Existing `BcsManagersPlugin` remains managers-only.

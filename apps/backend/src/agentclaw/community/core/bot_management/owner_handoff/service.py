@@ -8,6 +8,10 @@ from uuid import uuid4
 from injector import inject
 
 from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.api.bot_ownership_sync import BotOwnershipSyncProtocol
+from agentclaw.community.core.bot_management.ownership_sync.notifications import (
+    notify_bot_ownership_sync,
+)
 from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
     notify_bot_manager_sync,
 )
@@ -64,11 +68,13 @@ class OwnerHandoffService:
         manager_sync: BotManagerSyncProtocol,
         spaces: SpaceServiceProtocol,
         space_access: SpaceAccessServiceProtocol,
+        ownership_sync: BotOwnershipSyncProtocol,
     ):
         self._repo, self._passport, self._runtime = repository, passport, runtime
         self._staff, self._queue, self._policy = staff, queue, policy
         self._bots = bots
         self._manager_sync = manager_sync
+        self._ownership_sync = ownership_sync
         self._spaces, self._space_access = spaces, space_access
 
     @staticmethod
@@ -339,13 +345,19 @@ class OwnerHandoffService:
             elif phase == "COMMITTING_OWNER":
                 self._selected(row)
                 self._repo.finish(operation_id, worker)
-                # The owner change is durable — BCS's stale manager set must
-                # be refreshed via the side-channel only. The shared helper
-                # contains the notification failure, so it cannot reach the
-                # outer error-state handling, re-enter a Passport admin path,
-                # or call a BCS owner transfer.
+                # The owner change is durable. Independently isolated hints
+                # refresh managers and authoritative ownership, not the human
+                # transfer protocol. Notification failures cannot re-enter
+                # credential work or change the committed business result.
                 notify_bot_manager_sync(
                     self._manager_sync,
+                    bot_pk=row["bot_pk"],
+                    env=row["env"],
+                    avernet_tenant=row["avernet_tenant"],
+                    reason=SyncReason.OWNER_HANDOFF,
+                )
+                notify_bot_ownership_sync(
+                    self._ownership_sync,
                     bot_pk=row["bot_pk"],
                     env=row["env"],
                     avernet_tenant=row["avernet_tenant"],

@@ -4,6 +4,9 @@ This runbook covers enabling, observing, and manually resubmitting the Backend â
 manager projection. The feature is genuinely best-effort: it has no durable queue,
 distributed ordering, in-flight marker, or convergence guarantee.
 
+The explicit Owner channel is documented in [ownership sync operations](bot-ownership-sync-operations.md).
+The managers-only API remains unchanged; handoff now submits both kinds when enabled.
+
 ## 1. Operational contract
 
 - Backend business writes are authoritative and complete independently of BCS.
@@ -13,18 +16,20 @@ distributed ordering, in-flight marker, or convergence guarantee.
 - A process restart can lose queued or dirty work.
 - Stale managers, including revoked permissions, may remain until a later successful
   sync or a manual resync.
-- Disabling the feature stops future sends; it does not clear existing BCS managers.
+- Disabling and restarting stops new admission; in-flight requests may still finish
+  and existing BCS managers are not cleared.
 
 Do not interpret this feature as an outbox, distributed lock, or eventual-consistency
 system. Existing editor locks reduce common overlap but do not serialize every trigger.
 
 ## 2. Enablement checklist
 
-The only Backend configuration is:
+The shared Backend configuration (under `user_config`) is:
 
 ```yaml
 bot_manager_sync:
   enabled: true
+  ownership_enabled: false  # default; true also enables explicit Owner delivery
   env: prod
   bcs_base_url: "https://bcs.example.com"
 ```
@@ -214,8 +219,9 @@ Queued/coalesced counts are not delivery confirmation. Repair sends no stored pa
 the worker re-reads current Backend facts when it executes.
 
 There are no marker-read, marker-clear, CAS, owner-hold, or drain-proof repair methods.
-Owner handoff compensation is the same `request_bot` call as any other refresh; it
-does not transfer BCS ownership or prove owners match.
+Managers repair remains managers-only and cannot align ownership. For a lost
+post-handoff Owner notification, use `OwnershipSyncRepairService` as described in
+the [ownership extension](bot-ownership-sync-operations.md#controlled-manual-repair).
 
 ## 6. Common incidents
 
@@ -251,7 +257,8 @@ an empty manager list.
 
 ## 7. Rollback
 
-Set `bot_manager_sync.enabled: false` and roll the Backend deployment. This stops new
+Set `bot_manager_sync.enabled: false` and also `ownership_enabled: false` if it
+was enabled, then roll the Backend deployment (no hot reload). This stops new
 admission and removes the worker/pool on restart. It does not undo manager sets already
 written to BCS and does not guarantee queued work from a stopping process completed.
 

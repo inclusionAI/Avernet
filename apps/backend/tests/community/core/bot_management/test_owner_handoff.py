@@ -127,6 +127,7 @@ def world(persisted):
         Queue(),
     )
     manager_sync = MagicMock()
+    ownership_sync = MagicMock()
     from agentclaw.community.core.repository.implementations.spaces.space import SpaceRepository
     from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
     from agentclaw.community.core.spaces.services.space_access_service import SpaceAccessService
@@ -153,6 +154,7 @@ def world(persisted):
             notifier if notifier is not None else manager_sync,
             spaces,
             space_access,
+            ownership_sync=ownership_sync,
         )
 
     return SimpleNamespace(
@@ -164,6 +166,7 @@ def world(persisted):
         runtime=runtime,
         queue=queue,
         manager_sync=manager_sync,
+        ownership_sync=ownership_sync,
         spaces=spaces,
         spaces_repo=spaces_repo,
         space_access=space_access,

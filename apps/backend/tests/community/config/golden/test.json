@@ -147,6 +147,12 @@
       "langfuse_public_key": "",
       "langfuse_secret_key": ""
     },
+    "bot_manager_sync": {
+      "bcs_base_url": "",
+      "enabled": false,
+      "env": "",
+      "ownership_enabled": false
+    },
     "bot_oss": {
       "bucket_name": "",
       "endpoint": "",
