@@ -36,7 +36,7 @@ class RunFailureStory(ResultQueueStory):
         session = self.post(f"/groups/{segment(self.group_id)}/sessions", {"session_title": "Failure recovery"})
         self.session_id = session["session_id"]
         self.replace_policy(policy)
-        secret = "private-input-" + uuid.uuid4().hex
+        private_input = "private-input-" + uuid.uuid4().hex
         reference = uuid.uuid4().hex
         first = {**bot_node("Prepare private state"), "transitions": {"complete": {"targets": ["fail"]}}}
         target = {**bot_node("Fail after preparation"), "max_attempts": 1}
@@ -48,7 +48,7 @@ class RunFailureStory(ResultQueueStory):
                "runtime": {"kind": "state_machine", "state_machine": {"nodes": {
                    "prepare": first, "fail": target, "finish": {**bot_node("Finish"), "final_output": True}}}}}
         run = self.post(f"/sessions/{segment(self.session_id)}/state-machine-runs", {
-            "definition_yaml": json.dumps(doc), "input": {"secret": secret, "bcs_client_reference": reference},
+            "definition_yaml": json.dumps(doc), "input": {"private_input": private_input, "bcs_client_reference": reference},
             "participant_bindings": {"worker": {"source": "manual", "bot_ids": [self.args.driver]}},
         }, headers={"Authorization": "Bearer " + self.driver["bot_runtime_token"]})
         run_id = run["run"]["run_id"]
@@ -66,7 +66,7 @@ class RunFailureStory(ResultQueueStory):
         prepare = self.wait("preparation dispatch", lambda: node_requests("prepare"), bool)
         prepare_request = prepare[0]
         self.post("/control/provider/clear", mock=True)
-        self.callback(prepare_request, self.driver, secret)
+        self.callback(prepare_request, self.driver, private_input)
         if mode == "timeout":
             expected, reason = "failed", "human_timeout"
         else:
@@ -84,7 +84,7 @@ class RunFailureStory(ResultQueueStory):
                 print(f"Run scope closed, queue={queued}: active Run aborted, result access and Send suppressed", flush=True)
                 return
             if mode == "abort":
-                self.post(path + "/cancel", {"reason": secret})
+                self.post(path + "/cancel", {"reason": private_input})
                 expected, reason = "aborted", "user_aborted"
             else:
                 # A final without visible output is a genuine node failure.
@@ -97,7 +97,7 @@ class RunFailureStory(ResultQueueStory):
         assert terminal["completed_node_ids"] == ["prepare"], terminal
         if mode != "abort":
             assert terminal["failed_node_id"] == "fail" and terminal["attempt"] == 0, terminal
-        assert secret not in json.dumps(result), "Private input or diagnostic leaked into the result"
+        assert private_input not in json.dumps(result), "Private input or diagnostic leaked into the result"
         message_id = "run-result:" + run_id
         rows = self.wait("private result admission", lambda: self.deliveries(message_id), bool)
         assert len(rows) == 1 and rows[0]["target_bot_id"] == self.args.driver and rows[0]["kind"] == "send", rows
@@ -107,7 +107,7 @@ class RunFailureStory(ResultQueueStory):
                     and run_id in json.dumps(row["body"].get("message"))]
 
         delivered = self.wait("private result Send", result_requests, bool)
-        assert len(delivered) == 1 and secret not in json.dumps(delivered[0]["body"])
+        assert len(delivered) == 1 and private_input not in json.dumps(delivered[0]["body"])
         self.callback(delivered[0], self.driver, "Private failure result received")
         self.wait("completed private Send", lambda: self.deliveries(message_id),
                   lambda rows: len(rows) == 1 and rows[0]["status"] == "completed")
