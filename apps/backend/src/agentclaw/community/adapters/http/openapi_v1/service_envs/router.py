@@ -42,6 +42,13 @@ async def publish_eval_env(
     bots: BotServiceProtocol = Injected(BotServiceProtocol),
     publications: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
     *,
+    device_count: Annotated[
+        int,
+        Query(
+            ge=1,
+            description="BaaS deployment instance count for this eval environment; provider-defined upper limit.",
+        ),
+    ] = 1,
     cpu: Annotated[int | None, Query(gt=0, description="CPU cores; requires memory.")] = None,
     memory: Annotated[int | None, Query(gt=0, description="Memory in GiB; requires cpu.")] = None,
     disk: Annotated[int | None, Query(gt=0, description="Disk capacity passed to the provider; units and support are provider-defined. Requires cpu and memory.")] = None,
@@ -55,8 +62,12 @@ async def publish_eval_env(
 
         curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&biz_id=task-1"
 
+        curl -X POST "${BASE_URL}/openapi/v1/bots/bot-1/service-envs/7/env-publish?owner_id=owner-1&operator=user-1&biz_id=task-1&device_count=3"
+
     - `bot-1`：源 Bot ID；`7`：Backend 发布记录 ID。
     - `owner_id`、`operator` 必填；`biz_id` 可省略，默认空字符串。
+    - `device_count` 可选，默认 1，表示本次评估环境要创建的实例数量。
+      只接受正整数；超出提供方上限时由 BaaS 直接返回错误。
     - 可选资源覆盖示例：在上述 URL 后追加 `&cpu=4&memory=8&disk=200`。
       `cpu`、`memory` 必须同时提供且为正整数；`disk` 可选且为正整数，不能单独传。
       CPU 为核数，内存为 GiB；磁盘值按底层提供方约定透传，不保证单位或支持情况。
@@ -77,7 +88,11 @@ async def publish_eval_env(
         resource_spec = ResourceSpecification(cpu=cpu, memory=memory, disk=disk)
     _validate_publication_address(bot_id, publication_id, owner_id, bots, publications)
     deployment = await service.eval_publish(
-        publish_id=publication_id, operator=operator, biz_id=biz_id, resource_spec=resource_spec,
+        publish_id=publication_id,
+        operator=operator,
+        biz_id=biz_id,
+        device_count=device_count,
+        resource_spec=resource_spec,
     )
     return accepted(EvalEnvPublishResult.model_validate(deployment), request)
 

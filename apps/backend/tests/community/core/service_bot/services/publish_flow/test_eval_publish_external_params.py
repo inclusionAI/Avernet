@@ -184,3 +184,23 @@ async def test_eval_publish_resource_override_is_deployment_local(with_template,
     assert kwargs["template_config"] == expected
     assert kwargs["docker_image"] == "registry/image:tag"
     assert bot == original
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_device_count_forwarded() -> None:
+    """外部传入 device_count 时应原样转发给 release_async。"""
+    record = _record(ext={"migration_path": "/arca/snapshot"})
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc._build_service.release_async = AsyncMock()
+
+    async def issue(op, callback):
+        await callback()
+        return op
+
+    svc._operation_runner.acquire_workflow.side_effect = issue
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(42, "tester", device_count=3)
+
+    assert result["success"] is True
+    assert svc._build_service.release_async.await_args.kwargs["device_count"] == 3

@@ -163,6 +163,17 @@ Validation of the CI integration fix (2026-10-29):
 
 ## Per-deployment resource override
 
+### Optional deployment instance count
+
+The publish endpoint accepts an optional positive integer `device_count` Query
+parameter. This is a per-request deployment intent for eval environments: the
+BaaS provider may create more than one device under the same workflow, and
+progress already returns device detail when the provider reports it. The public
+default remains 1, so the existing no-query behavior is unchanged and the failure
+envelope has not changed. There is no separate backend-side maximum; applying a
+provider-defined limit is the provider contract's responsibility. This does not
+change admission or teardown, and it does not multiply resource overrides.
+
 The publish endpoint accepts optional positive integer Query parameters `cpu`
 (cores), `memory` (GiB), and `disk` (provider-defined capacity units/support).
 CPU and memory must be provided together; disk is optional but cannot be passed

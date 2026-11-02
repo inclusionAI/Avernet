@@ -62,8 +62,31 @@ def test_openapi_contract():
     assert params["biz_id"]["in"] == "query"
     assert params["biz_id"]["required"] is False
     assert params["biz_id"]["schema"]["default"] == ""
+    assert params["device_count"]["in"] == "query"
+    assert params["device_count"]["required"] is False
+    assert params["device_count"]["schema"]["default"] == 1
+    assert params["device_count"]["schema"]["minimum"] == 1
     publication = next(p for p in operation["parameters"] if p["name"] == "publication_id")
     assert publication["schema"]["minimum"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_eval_env_device_count_forwarded(resource_services):
+    service = Mock()
+    service.eval_publish = AsyncMock(return_value={
+        "success": True, "publish_id": 7, "stage": "eval", "bot_uuid": "eval-bot",
+        "baas_publish_id": 42,
+    })
+    request = Request({"type": "http", "method": "POST", "path": "/"})
+    result = await publish_eval_env(
+        "bot-1", 7, request, "actor", "owner", "task-1", service, *resource_services,
+        device_count=3,
+    )
+    assert result.code == 202000
+    service.eval_publish.assert_awaited_once_with(
+        publish_id=7, operator="actor", biz_id="task-1",
+        device_count=3, resource_spec=None,
+    )
 
 
 @pytest.mark.asyncio
