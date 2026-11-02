@@ -43,7 +43,7 @@ async def deliver_mcp_detail(
     resource_entity_id: str,
     bot_id: str,
     mcp_data: dict[str, Any],
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     custom_headers: Optional[dict[str, str]] = None,
     endpoint_env: Optional[str] = None,
     transport_protocol: Optional[str] = None,
