@@ -389,6 +389,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/discover"),
+    # Catalogue profile is readable exactly when BCS returns the bot for the
+    # addressed bot_uuid: catalogue membership is itself the authorization
+    # decision, so there is no caller-supplied user scope on the wire.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/profile/{{bot_uuid}}"),
     # Tenant-identical marketplace searches expose no user-scoped state.
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/skills"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/market/mcp-servers"),
@@ -628,7 +632,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
 # The task_config match probe adds one operation without a path/query bot_id.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 141}
+# Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 142}
 
 
 def _schema() -> dict:
