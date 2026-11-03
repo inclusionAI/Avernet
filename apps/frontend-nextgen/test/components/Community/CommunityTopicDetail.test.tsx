@@ -73,7 +73,7 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
-  test('深链目标在第二页时等待详情渲染完成后再滚动并高亮', () => {
+  test('深链目标在第二页时持续高亮，点击后取消', () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = jest.fn();
     jest.useFakeTimers();
@@ -99,11 +99,11 @@ describe('CommunityTopicDetail', () => {
         block: 'center',
         behavior: 'smooth',
       });
-      expect(target).toHaveClass('bg-primary/10');
       expect(onClearPendingPostLocation).toHaveBeenCalledTimes(1);
       act(() => {
-        jest.advanceTimersByTime(1200);
+        jest.advanceTimersByTime(0);
       });
+      fireEvent.click(document.body);
       expect(target).not.toHaveClass('bg-primary/10');
     } finally {
       jest.useRealTimers();
@@ -148,11 +148,13 @@ describe('CommunityTopicDetail', () => {
         block: 'center',
         behavior: 'smooth',
       });
-      expect(target).toHaveClass('bg-primary/10');
       expect(onClearPendingPostLocation).toHaveBeenCalledTimes(1);
+      expect(target).toHaveClass('bg-primary/10');
       act(() => {
-        jest.advanceTimersByTime(1200);
+        jest.advanceTimersByTime(0);
       });
+      expect(target).toHaveClass('bg-primary/10');
+      fireEvent.click(document.body);
       expect(target).not.toHaveClass('bg-primary/10');
     } finally {
       jest.useRealTimers();
@@ -727,8 +729,10 @@ describe('CommunityTopicDetail', () => {
     });
     expect(floorArticle).toHaveClass('bg-primary/10');
     act(() => {
-      jest.advanceTimersByTime(1200);
+      jest.advanceTimersByTime(0);
     });
+    expect(floorArticle).toHaveClass('bg-primary/10');
+    fireEvent.click(document.body);
     expect(floorArticle).not.toHaveClass('bg-primary/10');
     jest.useRealTimers();
     window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

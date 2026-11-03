@@ -125,7 +125,8 @@ export function CommunityTopicDetail({
     if (!element) return;
     element.scrollIntoView({ block: 'center', behavior: 'smooth' });
     element.classList.add('bg-primary/10');
-    window.setTimeout(() => element.classList.remove('bg-primary/10'), 1200);
+    const clearOnNextClick = () => element.classList.remove('bg-primary/10');
+    window.setTimeout(() => window.addEventListener('click', clearOnNextClick, { once: true }), 0);
   }, []);
 
   const toggleThreadReplies = useCallback((postId: string) => {
@@ -157,7 +158,6 @@ export function CommunityTopicDetail({
   }, [pendingPostLocation]);
 
   useEffect(() => {
-    // Re-run after skeleton content renders and a collapsed target thread opens.
     if (!pendingPostLocation || loading) return;
     const element = replyElementsRef.current.get(pendingPostLocation.postId);
     if (!element) return;
