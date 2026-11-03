@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
-// Bot 行折叠契约:展开箭头是鼠标可点的折叠入口(转发同一 toggle),
-// 主按钮仍是唯一的键盘/读屏控件(箭头不进 Tab 序)。
+// Bot 行折叠契约:展开态在右侧操作组首位提供独立的「收起会话列表」按钮，
+// 主 Bot 按钮仍可切换展开状态，两者共享同一个 onToggle。
 import { ConversationBotItem } from '@/pages/Workspace/Chat/components/ConversationBotItem';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import '@testing-library/jest-dom';
@@ -83,9 +83,9 @@ function rerenderBotItem(
 }
 
 describe('ConversationBotItem 归属增强（2026-10-22 体验精修二轮）', () => {
-  it('收起态不渲染行内折叠角标(#2990 紧凑单行:角标仅在展开期出现,展开入口由主按钮承载)', () => {
-    const { container } = renderBotItem({ expanded: false });
-    expect(container.querySelector('span[role="presentation"]')).toBeNull();
+  it('收起态不渲染收起按钮，展开入口由主 Bot 按钮承载', () => {
+    renderBotItem({ expanded: false });
+    expect(screen.queryByRole('button', { name: '收起会话列表' })).not.toBeInTheDocument();
   });
 
   it('展开区带 conversation-area-in 进入动效类(reduced-motion 由 global.css 静止)', () => {
@@ -111,6 +111,11 @@ describe('ConversationBotItem 紧凑单行几何（#2990 形态回退, 2026-10-2
     ) as HTMLElement;
     const column = title.parentElement as HTMLElement;
     expect(column).toHaveClass('items-center', 'gap-1');
+    // 操作按钮让位后的“剩余内容盒”才是响应基准,避免窄侧栏 hover 时名称为 0。
+    expect(column).toHaveClass('@container/conversation-bot-title');
+    // 名称保留最小可视宽但不用 flex-1 吃满整行:tag 紧跟名称之后,不被固定推到行尾。
+    expect(title).toHaveClass('min-w-12');
+    expect(title).not.toHaveClass('flex-1');
     expect(column).not.toHaveClass('flex-col');
     // 名称不再独占整行(w-full 移除),与徽章互为兄弟共享一行。
     expect(title).not.toHaveClass('w-full');
@@ -134,15 +139,15 @@ describe('ConversationBotItem 操作区', () => {
     expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开或筛选激活时文字让位:行内标题获得 pr-[86px] 预留,图标不被文字压底', () => {
+  it('展开时文字为右侧 4 个操作按钮预留 112px，图标不被文字压底', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[86px]');
+    expect(title?.parentElement).toHaveClass('pr-[112px]');
   });
 
-  it('有「更多操作」入口时让位扩至 pr-[112px](4 按钮几何,2026-11-03 紧凑化重算)', () => {
+  it('展开且有「更多操作」入口时让位扩至 pr-[138px]（5 按钮紧凑几何）', () => {
     const { container } = renderBotItem({
       expanded: true,
       bot: { spaceId: '101' },
@@ -151,7 +156,7 @@ describe('ConversationBotItem 操作区', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[112px]');
+    expect(title?.parentElement).toHaveClass('pr-[138px]');
     // 非钉住态(收起且无筛选/检索)走临时让位变体,菜单打开期间(data-state=open)同样让位,
     // 鼠标移出行、菜单仍开时不塌缩。
     const { container: collapsed } = renderBotItem({
@@ -183,32 +188,24 @@ describe('ConversationBotItem 操作区', () => {
   });
 });
 
-describe('ConversationBotItem 行内折叠角标（#2990 形态）', () => {
-  it('仅展开的 Bot 渲染角标,点击角标触发同一 toggle(截断冒泡避免双触发)', () => {
+describe('ConversationBotItem 右侧操作组收起按钮', () => {
+  it('仅展开的 Bot 渲染独立收起按钮，并与其他操作位于同一按钮组', () => {
     const { onToggle } = renderBotItem({ expanded: true });
-    const chevron = document.querySelector('span[role="presentation"]') as HTMLElement;
-    expect(chevron).toBeTruthy();
-    // 角标槽位 20px(2026-11-03 紧凑化:24→20,让宽度归还名称)。
-    expect(chevron).toHaveClass('h-5', 'w-5');
-    fireEvent.click(chevron);
+    const collapse = screen.getByRole('button', { name: '收起会话列表' });
+    const create = screen.getByRole('button', { name: '新建会话' });
+    expect(collapse.parentElement).toBe(create.parentElement);
+    fireEvent.click(collapse);
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it('角标不进 Tab 序(纯 span,键盘折叠由主按钮承载),主按钮点击同样触发 onToggle', () => {
+  it('收起按钮具备键盘/读屏语义，主 Bot 按钮仍可触发同一 toggle', () => {
     const { onToggle } = renderBotItem({ expanded: true });
-    // 角标为 span 不产生可聚焦控件,主按钮唯一承担键盘语义。
-    const tabbables = Array.from(document.querySelectorAll('button')).filter(
-      (el) => el.getAttribute('tabIndex') !== '-1',
-    );
-    expect(tabbables.map((el) => el.getAttribute('aria-label'))).toContain('测试 Bot');
-    fireEvent(
-      tabbables.find((el) => el.getAttribute('aria-label') === '测试 Bot') as HTMLElement,
-      new MouseEvent('click', { bubbles: true }),
-    );
+    expect(screen.getByRole('button', { name: '收起会话列表' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it('不可chatable的 Bot 不渲染角标', () => {
+  it('不可chatable的 Bot 不渲染收起按钮', () => {
     const { container } = render(
       <ConversationBotItem
         bot={{ ...bot, chatable: false }}
@@ -229,9 +226,9 @@ describe('ConversationBotItem 行内折叠角标（#2990 形态）', () => {
         isFavoritePending={() => false}
         />,
     );
-    // 整行只剩主按钮,无行内角标。
+    // 整行只剩主按钮，无会话操作组。
     expect(container.querySelectorAll('button').length).toBe(1);
-    expect(container.querySelector('span[role="presentation"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: '收起会话列表' })).not.toBeInTheDocument();
   });
 });
 
@@ -518,7 +515,7 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
 
 describe('ConversationBotItem 行徽标', () => {
   const renderBadgeRow = (overrides: Partial<ChatBotView> = {}) => {
-    render(
+    return render(
       <ConversationBotItem
         bot={{ ...bot, ...overrides }}
         section="managed"
@@ -552,14 +549,16 @@ describe('ConversationBotItem 行徽标', () => {
     expect(screen.queryByText('AgentCoding')).not.toBeInTheDocument();
   });
 
-  it('徽章与名称同行(#2990 形态),超长模板名按整行截断且不新增 Tooltip', () => {
+  it('徽章与名称同行(#2990 形态),长类型使用标题剩余空间而不再受 35% 上限限制', () => {
     renderBadgeRow({
+      displayName: '新tc 服务架构bot 天寻 2',
       isAgentCodingBot: true,
       chatable: false,
-      templateName: '非常长非常长非常长非常长模板名',
+      templateName: '架构 Bot【快速】【异步持久化】',
     });
-    const label = screen.getByText('非常长非常长非常长非常长模板名');
-    expect(label).toHaveClass('max-w-full', 'truncate');
+    const label = screen.getByText('架构 Bot【快速】【异步持久化】');
+    expect(label).toHaveClass('min-w-0', 'max-w-full', 'shrink-[4]', 'truncate');
+    expect(label).not.toHaveClass('max-w-[min(100%,max(5rem,35%))]', 'shrink-0');
     expect(label.closest('[data-state="tooltip"]')).toBeNull();
     // 同容器水平排布:徽章直接挂名称兄弟位,不在下方独立行。
     expect(label.parentElement).toHaveClass('items-center', 'gap-1');
@@ -610,9 +609,31 @@ describe('ConversationBotItem 行徽标', () => {
     ['teclaw', 'TEClaw'],
     ['claude_code', 'ClaudeCode'],
     ['hermes', 'Hermes'],
-  ] as const)('引擎 %s 徽章与 Bot 管理同源：统一默认中性底', (engine, label) => {
+  ] as const)('引擎 %s 徽章保留完整展示下限并与 Bot 管理同源', (engine, label) => {
     renderBadgeRow({ engine });
-    expect(screen.getByText(label)).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(screen.getByText(label)).toHaveClass(
+      'max-w-full',
+      'shrink-[4]',
+      'truncate',
+      'bg-muted',
+      'text-muted-foreground',
+    );
+  });
+
+  it('操作按钮侵入后内容不足 8.5rem 时,tag 先降级隐藏而名称保住最小可视宽', () => {
+    const { container } = renderBadgeRow({ isAgentCodingBot: true, templateName: 'ClaudeCode' });
+    const title = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.className.includes('min-w-12'),
+    ) as HTMLElement;
+    const tag = screen.getByText('ClaudeCode');
+    // 静态布局契约:container query 以扣除 4 按钮让位(pr-[112px])后的内容盒为宽度,
+    // 不足时 tag 降级,不再用 80px 下限挤压 Bot 名称。
+    expect(title).toHaveClass('min-w-12', 'truncate');
+    expect(title).not.toHaveClass('flex-1');
+    expect(tag).toHaveClass('@max-[8.5rem]/conversation-bot-title:hidden');
+    // 不是无条件隐藏:默认态(topbar/操作区未让位)仍由宽度足够时保留,
+    // 只有容器查询命中窄态才降级。
+    expect(tag).not.toHaveClass('hidden');
   });
 
   it('AgentCoding 模板徽章保持模板名标签，色彩同样取默认中性底', () => {
