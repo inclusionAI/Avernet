@@ -3017,10 +3017,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 )
                 if updated_rows == 0:
                     logger.warning(
-                        f"Device configuration update affected no rows; "
-                        f"continuing update publish (device_id={device_record.id}, "
-                        f"publish_id={publish_record.id}, tenant={tenant}, env={env})"
+                        f"Device configuration update affected no rows "
+                        f"(device_id={device_record.id}, publish_id={publish_record.id}, "
+                        f"tenant={tenant}, env={env})"
                     )
+                    raise RuntimeError("Device configuration update affected no rows")
                 image_config_ready = True
                 # Only expose PROCESSING to callback/timeout retries after
                 # the operation's configuration is durable.
