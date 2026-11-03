@@ -519,6 +519,88 @@ def test_list_posts_returns_reference_and_two_level_floor_groups(db):
     assert beyond.items == ()
 
 
+def test_get_post_location_returns_root_floor_and_display_page(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    first_floor = _reply(repo, topic.topic_id, "post-1", "first floor")
+    second_floor = _reply(repo, topic.topic_id, "post-2", "second floor")
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "post-child",
+        "child",
+        reply_to_post_id=first_floor.post_id,
+    )
+
+    direct_late = repo.get_post_location(
+        topic_id=topic.topic_id, post_id=second_floor.post_id, page_size=1
+    )
+    nested = repo.get_post_location(
+        topic_id=topic.topic_id, post_id=child.post_id, page_size=1
+    )
+
+    assert direct_late is not None
+    assert direct_late.post_id == second_floor.post_id
+    assert direct_late.root_post_id == second_floor.post_id
+    assert direct_late.page == 2
+    assert nested is not None
+    assert nested.post_id == child.post_id
+    assert nested.root_post_id == first_floor.post_id
+    assert nested.page == 1
+
+
+def test_get_post_location_uses_helpful_first_display_order(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "help-topic", title="help", topic_type=TOPIC_TYPE_HELP)
+    ordinary = _reply(repo, topic.topic_id, "ordinary", "ordinary")
+    helpful = _reply(repo, topic.topic_id, "helpful", "helpful")
+    with db.orm_session() as session:
+        session.query(ForumPostModel).filter_by(post_id=helpful.post_id).update(
+            {ForumPostModel.post_config: {"helpful": {"marked": True}}},
+            synchronize_session=False,
+        )
+
+    ordinary_location = repo.get_post_location(
+        topic_id=topic.topic_id, post_id=ordinary.post_id, page_size=1
+    )
+    helpful_location = repo.get_post_location(
+        topic_id=topic.topic_id, post_id=helpful.post_id, page_size=1
+    )
+
+    assert ordinary_location is not None and ordinary_location.page == 2
+    assert helpful_location is not None and helpful_location.page == 1
+
+
+def test_get_post_location_hides_missing_topic_post_and_malformed_cycle(db):
+    repo = ForumRepository(db)
+    topic = _topic(repo, "topic", title="topic")
+    floor = _reply(repo, topic.topic_id, "post", "floor")
+    child = _reply(
+        repo,
+        topic.topic_id,
+        "post-child",
+        "child",
+        reply_to_post_id=floor.post_id,
+    )
+    other_topic = _topic(repo, "other-topic", title="other")
+
+    with db.orm_session() as session:
+        session.query(ForumPostModel).filter_by(post_id=floor.post_id).update(
+            {ForumPostModel.reply_to_post_id: child.post_id},
+            synchronize_session=False,
+        )
+
+    assert repo.get_post_location(
+        topic_id=topic.topic_id, post_id=other_topic.topic_id, page_size=10
+    ) is None
+    assert repo.get_post_location(
+        topic_id=other_topic.topic_id, post_id=floor.post_id, page_size=10
+    ) is None
+    assert repo.get_post_location(
+        topic_id=topic.topic_id, post_id=floor.post_id, page_size=10
+    ) is None
+
+
 def test_list_posts_prioritizes_helpful_before_paging_without_renumbering_floors(db):
     repo = ForumRepository(db)
     topic = _topic(repo, "help-topic", title="help", topic_type=TOPIC_TYPE_HELP)

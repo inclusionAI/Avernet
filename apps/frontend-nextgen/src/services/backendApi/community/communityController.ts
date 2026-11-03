@@ -35,6 +35,12 @@ export interface CommunityCreatedReplyDto {
   post_id?: string;
 }
 
+export interface CommunityPostLocationDto {
+  post_id?: string;
+  root_post_id?: string;
+  page?: number;
+}
+
 export interface CommunityPostHelpfulDto {
   post_id?: string;
   helpful?: boolean;
@@ -192,6 +198,23 @@ export function createCommunityReply(input: CreateCommunityReplyInput, signal?: 
   return backendRequest<CommunityEnvelope<CommunityCreatedReplyDto>>(
     `${bbsApiBase()}/${encodeURIComponent(input.topicId)}/posts`,
     { method: 'POST', data, signal },
+  );
+}
+
+export function getCommunityPostLocation(
+  topicId: string,
+  postId: string,
+  pageSize: number,
+  signal?: AbortSignal,
+) {
+  const base = bbsApiBase();
+  return backendRequest<CommunityEnvelope<CommunityPostLocationDto>>(
+    `${base}/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}/location`,
+    {
+      method: 'GET',
+      params: { page_size: Math.max(1, pageSize) },
+      signal,
+    },
   );
 }
 

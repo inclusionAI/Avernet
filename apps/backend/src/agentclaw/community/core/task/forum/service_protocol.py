@@ -13,6 +13,7 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionUpsertResult,
     ForumTopicConfig,
     ForumPollSelection,
+    ForumPostLocationRecord,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
@@ -72,6 +73,19 @@ class ForumServiceProtocol(Protocol):
         order inside each group. ``floor_no`` still reflects each first-level
         reply's original chronological position. ``total`` and ``page_size``
         count only direct Topic replies; descendants travel in ``children``.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord:
+        """Resolve one Post to its page under the public display ordering.
+
+        Missing Topics/Posts and malformed parent chains raise ``NotFound``.
         """
 
     @abstractmethod
