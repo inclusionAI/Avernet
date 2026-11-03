@@ -25,9 +25,9 @@ OCB additionally run their existing compatibility/composition suites.
 ## Durable index documents
 
 `IndexDocument` carries a storage-neutral `VectorPoint`, source revision, artifact
-version, deletion marker and opaque auxiliary metadata. Business applications own
-Card/Profile conversion; this package neither parses them nor calls models while
-loading artifacts. `SqlIndexDocuments` is an optional DB-API provider scoped by
+version, deletion marker and opaque auxiliary metadata. Business applications can supply Card/Profile conversion. The optional default
+converter selects documented semantic fields; recovery always consumes saved
+artifacts without calling converters or models. `SqlIndexDocuments` is an optional DB-API provider scoped by
 explicit `environment` and `index_key`. Every restore/change/version read is scoped.
 Provision production tables externally; SQLite helpers are for local execution.
 
@@ -105,3 +105,28 @@ for TC; its existing startup remains unchanged. The wire paths, status codes,
 partial-update behavior and SQL table layout are preserved. Public and host
 packages must be released together at compatible revisions; extraction alone
 is not deployment evidence.
+
+## Optional catalog runtime
+
+`bootstrap.catalog.create_catalog_search_app` explicitly assembles the public
+preparation/synchronization and query flow. `catalog.updates.CardUpdates` owns
+leases, source-revision checks, restoration, incremental reads and reconciliation;
+`SqlCatalogRepository` publishes Doc groups and their source marker atomically.
+The host supplies DB connections, model/index providers and authentication.
+`application` holds optional Pydantic-backed policy models; `core` and `api`
+remain framework-independent. No background activity starts at import time.
+
+`DefaultCardDocumentConverter` returns one `CardProjection` containing `main`.
+Applications replace it through the existing `CardDocumentConverter` contract:
+`convert(snapshot)` returns text documents and explicitly allowed filter labels.
+The runtime embeds/reuses vectors, publishes the complete group, retires removed
+Docs, and groups retrieval by source ID. Converter `version` participates in the
+configuration key; changing conversion behavior requires a new version or an
+explicit repair/rebuild. OCB retains its historical version/key calculation.
+
+The catalog factory accepts application-specific update, metadata and HTTP factories
+for hosts that need legacy Card decoding, operational state or a different response
+projection. These are ordinary injected callables, not a plugin registry.
+`QdrantProcessProvider` and `VectorIndexLifecycleProvider` are public optional
+providers; binary paths, process environment, schedules and internal SDK clients
+remain the host's responsibility. Install the `scheduler` extra for the latter.
