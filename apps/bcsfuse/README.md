@@ -9,6 +9,9 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 - Do not commit runtime data, logs, SQLite/Qdrant storage, or real secrets
 - Enterprise hosts compose the public TC application with their own providers
 
+Documentation starts at the [BCSFuse document index](docs/README.md).
+The shared Card API is available as a library; TC does not enable it automatically.
+
 ## Quick Start
 
 For the `app` / `search_core` package layout, current extraction scope and
