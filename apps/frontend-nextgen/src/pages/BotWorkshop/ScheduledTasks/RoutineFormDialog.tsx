@@ -180,10 +180,7 @@ export function RoutineFormDialog({
                   </Select>
                 </div>
               )}
-              {context.caller_mode && (
-                <p className="text-xs text-muted-foreground sm:col-span-2">Caller 模式仅支持生产态。</p>
-              )}
-              {!original && form.runtime_stage && targetError && (
+              {!original && form.runtime_stage && instanceMode !== 'unknown' && targetError && (
                 <p className="text-xs text-destructive sm:col-span-2" role="status">
                   {targetError}
                 </p>
