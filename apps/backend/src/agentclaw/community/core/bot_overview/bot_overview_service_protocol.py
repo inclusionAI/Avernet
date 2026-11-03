@@ -15,8 +15,8 @@ class BotOverviewNotFoundError(LookupError):
 class BotOverviewServiceProtocol(Protocol):
     """Assemble the non-user overview of a Bot."""
 
-    def get_overview(self, bot_id: str, *, activity_days: int) -> BotOverview:
-        """Overview of ``bot_id`` with ``activity_days`` days of session activity.
+    def get_overview(self, bot_id: str) -> BotOverview:
+        """Non-user overview of ``bot_id``.
 
         Raises :class:`BotOverviewNotFoundError` when the Bot does not exist.
         """

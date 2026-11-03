@@ -14,9 +14,7 @@ caller, because it carries only non-user data about the Bot (see
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
@@ -35,10 +33,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.bot_overview.models import BotOverview
 from agentclaw.community.di import Injected
 
-#: Upper bound on the session-activity window, so one request cannot make an
-#: engine aggregate unbounded history.
-MAX_ACTIVITY_DAYS = 90
-
 router = APIRouter(
     prefix="/openapi/v1/bots",
     tags=["Bots"],
@@ -52,21 +46,11 @@ router = APIRouter(
 async def get_bot_overview(
     request: Request,
     bot_id: BotIdPath,
-    activity_days: Annotated[
-        int,
-        Query(
-            ge=1,
-            le=MAX_ACTIVITY_DAYS,
-            description="Days of session activity in sessions.daily, "
-            "counting back from observed_at.",
-            examples=[14],
-        ),
-    ] = 14,
     service: BotOverviewServiceProtocol = Injected(BotOverviewServiceProtocol),
 ) -> Envelope[BotOverview]:
     """Non-user overview of a Bot: engine-neutral fields plus engine payload."""
     try:
-        overview = service.get_overview(bot_id, activity_days=activity_days)
+        overview = service.get_overview(bot_id)
     except BotOverviewNotFoundError:
         raise BotNotFoundError("Bot was not found") from None
     return envelope(overview, request)

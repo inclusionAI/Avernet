@@ -7,7 +7,7 @@ Bot's engine.
 ## Context Boundary
 
 ```yaml
-purpose: "Non-user Bot overview — engine-neutral status/model/skills (local/repo/center)/MCPs/daily session activity plus a discriminated per-engine payload, filled by per-engine providers."
+purpose: "Non-user Bot overview — engine-neutral status/model/skills (local/repo/center)/MCPs/last session time plus a discriminated per-engine payload, filled by per-engine providers."
 provides:
   - "BotOverviewService"
   - "BotOverview / EngineSpecificPayload models"
@@ -27,9 +27,9 @@ still verifies the gateway-signed principal; the operation is admission
 `OPEN`, authorization `NoCheck`, no `user_id`). Anything added to the models
 or an engine payload is readable by any caller in the tenant who knows a Bot
 id, so it must be non-user data: no owner identity, conversation
-content, credentials or device identifiers. Session data stays aggregated
-per day (`SessionActivity.daily`) so clients apply their own policy, such as "any
-conversation in the last two weeks".
+content, credentials or device identifiers. Session data is reduced to the
+last session time (`SessionActivity.last_session_at`) so clients apply their
+own policy, such as "any conversation in the last two weeks".
 
 ### Adding an engine
 

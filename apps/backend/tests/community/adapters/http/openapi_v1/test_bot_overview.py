@@ -5,7 +5,7 @@ fake overview service, so each case pins one rule:
 
 - an application acting alone (no end user) is admitted, as is a person;
 - there is still no anonymous access: an unsigned request is a 401;
-- an unknown Bot is the surface's 404, the window is bounded;
+- an unknown Bot is the surface's 404;
 - the published document types the engine payload as a discriminated union.
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _overview(engine: str = "claude_code") -> BotOverview:
         engine=engine,
         status="ACTIVE",
         observed_at=NOW,
-        sessions=SessionActivity(window_start=NOW - timedelta(days=14)),
+        sessions=SessionActivity(last_session_at=NOW - timedelta(days=3)),
         payload=AICodingEnginePayload(engine=engine),
     )
 
@@ -78,8 +78,8 @@ def test_app_only_caller_is_admitted(overview_client):
     assert data["engine"] == "claude_code"
     assert data["payload"] == {"engine": "claude_code"}
     assert data["skills"] == [] and data["mcps"] == []
-    assert data["sessions"]["daily"] == []
-    service.get_overview.assert_called_once_with("b1", activity_days=14)
+    assert data["sessions"] == {"last_session_at": "2026-10-31T12:00:00Z"}
+    service.get_overview.assert_called_once_with("b1")
 
 
 def test_person_is_admitted_too(overview_client):
@@ -94,33 +94,6 @@ def test_unsigned_request_is_refused(overview_client):
     client, service = overview_client
 
     assert client.get(_PATH).status_code == 401
-    service.get_overview.assert_not_called()
-
-
-def test_passes_activity_window(overview_client):
-    client, service = overview_client
-
-    response = client.get(
-        _PATH,
-        params={"activity_days": 30},
-        headers={PRINCIPAL_HEADER: mint(user_id=None)},
-    )
-
-    assert response.status_code == 200
-    service.get_overview.assert_called_once_with("b1", activity_days=30)
-
-
-@pytest.mark.parametrize("days", [0, 91])
-def test_rejects_out_of_range_activity_window(overview_client, days):
-    client, service = overview_client
-
-    response = client.get(
-        _PATH,
-        params={"activity_days": days},
-        headers={PRINCIPAL_HEADER: mint(user_id=None)},
-    )
-
-    assert response.status_code == 422
     service.get_overview.assert_not_called()
 
 

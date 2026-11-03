@@ -2,18 +2,18 @@
 
 The overview is served to callers that present **no user credential**, so
 every field here must be non-user data about the Bot: no owner identity, no
-conversation content, no credentials. Session information is deliberately reduced to activity
-aggregates so a client can apply its own policy (for example "was there any
+conversation content, no credentials. Session information is deliberately
+reduced to the time of the last session so a client can apply its own policy (for example "was there any
 conversation in the last two weeks") without the API hard-coding one.
 
 Collections default to empty: an engine without an overview provider, or one
-whose provider does not fill a field yet, reports no skills, MCP servers or
-session activity.
+whose provider does not fill a field yet, reports no skills or MCP servers
+and no last session.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,30 +66,15 @@ class McpServerSummary(BaseModel):
     )
 
 
-class DailySessionActivity(BaseModel):
-    """Session activity aggregated over one UTC calendar day."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    day: date = Field(description="UTC calendar day the counts cover.")
-    session_count: int = Field(
-        ge=0, description="Distinct sessions with at least one message that day."
-    )
-    message_count: int = Field(ge=0, description="Messages exchanged that day.")
-
-
 class SessionActivity(BaseModel):
     """Generic session activity, for clients to apply their own policy."""
 
     model_config = ConfigDict(extra="forbid")
 
-    window_start: datetime = Field(
-        description="Inclusive UTC start of the window that daily covers."
-    )
-    daily: list[DailySessionActivity] = Field(
-        default_factory=list,
-        description="One entry per UTC day inside the window that had "
-        "activity, oldest first. Days without activity are omitted.",
+    last_session_at: datetime | None = Field(
+        default=None,
+        description="UTC time of the Bot's most recent session activity; null "
+        "when the Bot has had no session.",
     )
 
 
@@ -97,8 +82,7 @@ class EngineBotOverview(BaseModel):
     """What an engine provider contributes to a Bot overview.
 
     Every field defaults to "nothing reported", so a provider fills only what
-    its engine can answer. The session window itself is set by the service;
-    a provider reports the days inside ``BotOverviewQuery.activity_since``.
+    its engine can answer.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -106,7 +90,7 @@ class EngineBotOverview(BaseModel):
     default_model: str | None = None
     skills: list[SkillSummary] = Field(default_factory=list)
     mcps: list[McpServerSummary] = Field(default_factory=list)
-    daily_sessions: list[DailySessionActivity] = Field(default_factory=list)
+    sessions: SessionActivity = Field(default_factory=SessionActivity)
     payload: EngineSpecificPayload | None = None
 
 
@@ -122,7 +106,7 @@ class BotOverview(BaseModel):
     )
     status: str = Field(description="The Bot's lifecycle status, e.g. 'ACTIVE'.")
     observed_at: datetime = Field(
-        description="UTC time this overview was assembled. Compare activity "
+        description="UTC time this overview was assembled. Compare session "
         "timestamps against it rather than the client clock."
     )
     default_model: str | None = Field(
@@ -139,7 +123,8 @@ class BotOverview(BaseModel):
         description="MCP servers configured on the Bot.",
     )
     sessions: SessionActivity = Field(
-        description="Per-day session activity over the requested window.",
+        default_factory=SessionActivity,
+        description="Session activity, e.g. when the Bot last had a session.",
     )
     payload: EngineSpecificPayload | None = Field(
         default=None,
@@ -150,7 +135,6 @@ class BotOverview(BaseModel):
 
 __all__ = [
     "BotOverview",
-    "DailySessionActivity",
     "EngineBotOverview",
     "McpServerSummary",
     "SessionActivity",

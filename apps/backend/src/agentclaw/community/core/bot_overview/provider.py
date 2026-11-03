@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from .models import EngineBotOverview
@@ -26,8 +25,6 @@ class BotOverviewQuery:
     #: The Bot record as the repository returned it. Read-only; anything taken
     #: from it into the answer must be non-user data.
     bot: Mapping[str, Any]
-    #: Inclusive UTC start of the session-activity window to aggregate.
-    activity_since: datetime
 
 
 @runtime_checkable

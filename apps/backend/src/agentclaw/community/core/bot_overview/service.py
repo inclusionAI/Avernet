@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -12,7 +12,7 @@ from .bot_overview_service_protocol import (
     BotOverviewNotFoundError,
     BotOverviewServiceProtocol,
 )
-from .models import BotOverview, EngineBotOverview, SessionActivity
+from .models import BotOverview, EngineBotOverview
 from .provider import BotOverviewProviderRegistry, BotOverviewQuery
 
 
@@ -34,24 +34,16 @@ class BotOverviewService(BotOverviewServiceProtocol):
         self._providers = providers
         self._clock = clock
 
-    def get_overview(self, bot_id: str, *, activity_days: int) -> BotOverview:
+    def get_overview(self, bot_id: str) -> BotOverview:
         bot = self._bot_repo.get_by_id(bot_id)
         if not bot:
             raise BotOverviewNotFoundError(bot_id)
 
         engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
         now = self._clock()
-        activity_since = now - timedelta(days=activity_days)
         provider = self._providers.resolve(engine)
         contribution = (
-            provider.collect(
-                BotOverviewQuery(
-                    bot_id=bot_id,
-                    engine=engine,
-                    bot=bot,
-                    activity_since=activity_since,
-                )
-            )
+            provider.collect(BotOverviewQuery(bot_id=bot_id, engine=engine, bot=bot))
             if provider is not None
             else EngineBotOverview()
         )
@@ -63,9 +55,7 @@ class BotOverviewService(BotOverviewServiceProtocol):
             default_model=contribution.default_model,
             skills=contribution.skills,
             mcps=contribution.mcps,
-            sessions=SessionActivity(
-                window_start=activity_since, daily=contribution.daily_sessions
-            ),
+            sessions=contribution.sessions,
             payload=contribution.payload,
         )
 
