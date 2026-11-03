@@ -74,14 +74,3 @@ the existing targeted-list contract requiring a specific Bot and runtime_stage.
 Auto-selected Caller reads reuse its transport and request/response/failure
 diagnostics after binding resolution and instance enumeration establish
 authorization and device membership.
-
-### Management target discovery
-
-GET /api/cron/targets discovers existing stages and instance UUIDs without creating
-runtimes. The response includes bot_type, engine, caller_mode, supported, explicit
-can_manage (ADMIN/OWNER), and environments with available/reason/requires_instance/instances.
-Caller mode only permits online. Teclaw online omits instance selection and device_uuid.
-Other service targets require an explicit discovered UUID. Personal bots keep the
-legacy request shape. The endpoint and ordinary Cron reads require MEMBER without
-an edit lock; management still requires ADMIN and the existing Bot edit lock.
-This response does not introduce offline job persistence or container migration.
