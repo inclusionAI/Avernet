@@ -1,6 +1,5 @@
 import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { addressFromKey, isStage, type OperationResult, type ManagedRoutine } from '@/services/botScheduledTasks/types';
 import { history, useLocation } from '@umijs/max';
@@ -93,44 +92,18 @@ const ScheduledTasksPage = () => {
         )}
         {state.identity.error && <Empty title="身份加载失败" description={state.identity.error} />}
         {context?.can_manage && (
-          <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
+          <section role="status" className="rounded-xl border border-border bg-card px-5 py-4">
             <p className="m-0 text-sm text-muted-foreground">
               {state.editable
                 ? lock?.need_lock === false
                   ? '当前 Bot 无需编辑锁，可管理定时任务'
                   : '已持有 Bot 编辑锁，可管理定时任务'
+                : !lock
+                ? '暂无法确认 Bot 编辑锁状态，当前仅可查看，请刷新重试'
                 : other
-                ? `${holder} 正在持有 Bot 编辑锁，当前可查看任务`
-                : '获取 Bot 编辑锁后可创建和管理定时任务'}
+                ? `${holder} 正在持有 Bot 编辑锁，当前仅可查看；如需操作，请到 Bot 列表管理编辑锁`
+                : '当前未持有 Bot 编辑锁，仅可查看；请到 Bot 列表获取编辑锁后再操作'}
             </p>
-            {state.editable && lock?.locked ? (
-              <ConfirmDialog
-                title="释放 Bot 编辑锁"
-                description="释放后将无法继续管理定时任务。"
-                onConfirm={() => state.lockAction('release')}
-              >
-                <Button size="sm" variant="outline" disabled={state.busy}>
-                  释放编辑锁
-                </Button>
-              </ConfirmDialog>
-            ) : !state.editable ? (
-              other ? (
-                <ConfirmDialog
-                  title="接管 Bot 编辑锁"
-                  description={`将接管 ${holder} 的编辑锁，请先确认对方已停止编辑。`}
-                  confirmVariant="destructive"
-                  onConfirm={() => state.lockAction('steal')}
-                >
-                  <Button size="sm" variant="outline" disabled={state.busy}>
-                    接管编辑锁
-                  </Button>
-                </ConfirmDialog>
-              ) : (
-                <Button size="sm" disabled={state.busy} onClick={() => void state.lockAction('acquire')}>
-                  获取编辑锁
-                </Button>
-              )
-            ) : null}
           </section>
         )}
         {context && !context.supported && <Empty title="当前 Bot 引擎暂不支持定时任务" />}
@@ -204,21 +177,6 @@ const ScheduledTasksPage = () => {
           context={context}
           original={editing || undefined}
           editable={state.editable && !state.busy}
-          lockRecovery={
-            context.can_manage ? (
-              <ConfirmDialog
-                title={other ? '接管 Bot 编辑锁' : '重新获取编辑锁'}
-                description={
-                  other ? `将接管 ${holder} 的编辑锁，请先确认对方已停止编辑。` : '获取后可继续保存当前输入。'
-                }
-                onConfirm={() => state.lockAction(other ? 'steal' : 'acquire')}
-              >
-                <Button size="sm" variant="outline" disabled={state.busy}>
-                  重新获取编辑锁
-                </Button>
-              </ConfirmDialog>
-            ) : undefined
-          }
           onClose={() => setEditing(undefined)}
           onLoadModels={state.loadModels}
           onSave={async (form) => {

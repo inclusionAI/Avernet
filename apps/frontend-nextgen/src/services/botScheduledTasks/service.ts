@@ -80,18 +80,6 @@ export function createRoutineClient(botId: string, ownerId: string | undefined, 
     scope,
     context: () => loadRoutineContext(scope),
     getLock: () => sendRoutineRequest<EditLockDto>(`${base}/edit-lock`, { params }),
-    async lockAction(action: 'acquire' | 'steal' | 'release') {
-      const result = await sendRoutineRequest<EditLockDto & { released?: boolean }>(
-        `${base}/edit-lock${action === 'steal' ? '/steal' : ''}`,
-        { method: action === 'release' ? 'DELETE' : 'POST', params },
-      );
-      if (
-        action === 'release'
-          ? result.released !== true
-          : !(result.acquired || (result.need_lock === false && !result.locked))
-      )
-        throw new Error('编辑锁操作未成功，请刷新重试');
-    },
     async list(target: RoutineTarget = {}, page = 1, pageSize = 20): Promise<RuntimePage<ManagedRoutine>> {
       const result = await request<RuntimePage<RoutineDto>>('', 'GET', {
         ...completeTarget(target),
