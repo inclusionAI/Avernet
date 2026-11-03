@@ -130,3 +130,18 @@ projection. These are ordinary injected callables, not a plugin registry.
 `QdrantProcessProvider` and `VectorIndexLifecycleProvider` are public optional
 providers; binary paths, process environment, schedules and internal SDK clients
 remain the host's responsibility. Install the `scheduler` extra for the latter.
+
+## Optional index statistics
+
+`IndexStatistics.point_counts()` is a Plugin API capability implemented by
+`QdrantRetrievalIndex` for Local and Server. It returns exactly `vector_points`
+and `keyword_points`, using exact point counts of the two currently bound
+collections. It does not enumerate IDs or fetch vectors, and does not sum old
+versions or other replicas. Errors propagate; unavailable storage is never zero.
+The counts are observations, not a distributed snapshot or source Card count.
+Existing `RetrievalIndex` implementations do not have to provide this capability.
+
+The catalog HTTP composition requests it only for `/ready?include_counts=true`,
+using its bounded probe executor. Default readiness checks remain unchanged.
+Provider conformance is exercised by `tests/test_qdrant_modes.py`; HTTP behavior
+and normal readiness under count failures by `tests/test_public_catalog.py`.

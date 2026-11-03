@@ -147,6 +147,18 @@ class QdrantRetrievalIndex:
                 **self._query_options,
             )
 
+    def point_counts(self) -> dict[str, int]:
+        """Count only this runtime's collections; never scan IDs or read vectors."""
+        with self._lock.read(self.read_timeout_seconds):
+            return {
+                "vector_points": self._dense._client.count(
+                    self._dense.collection_name, exact=True, **self._query_options
+                ).count,
+                "keyword_points": self._keyword._client.count(
+                    self._keyword.collection_name, exact=True, **self._query_options
+                ).count,
+            }
+
     def get_vector_ids(self):
         """Snapshot IDs for recovery cleanup; never queried by online retrieval."""
         with self._lock.read(self.read_timeout_seconds):
