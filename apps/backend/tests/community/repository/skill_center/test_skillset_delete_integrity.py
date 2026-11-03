@@ -39,8 +39,11 @@ class _Database:
         with self._sessions.begin() as session:
             yield session
 
+    @contextmanager
     def transactional_orm_session(self):
-        return self.orm_session()
+        with self.orm_session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            yield session
 
 
 def test_legacy_skillset_delete_removes_its_memberships(tmp_path):
@@ -214,6 +217,60 @@ def test_owned_bot_cleanup_with_sqlite_foreign_keys_enabled(tmp_path):
         assert session.query(Skill).filter_by(id=skill_id).count() == 0
 
 
+def test_bot_cleanup_rolls_back_all_assets_on_unexpected_write_failure(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'failure.db'}")
+    for model in (
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        SkillSetMCPServer,
+        BotSkillInstallation,
+        SkillDraftEditLease,
+        SkillGrant,
+        SkillPublicationAttempt,
+        SkillSpaceBinding,
+        SkillVersion,
+        SkillDraftUpgradeRequest,
+        AcSkillMember,
+    ):
+        model.__table__.create(engine)
+    db = _Database(engine)
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                Skill(
+                    name="one",
+                    git_path="local:///one",
+                    bolt_id="bot",
+                    user_id="owner",
+                    env="dev",
+                ),
+                Skill(
+                    name="two",
+                    git_path="local:///two",
+                    bolt_id="bot",
+                    user_id="owner",
+                    env="dev",
+                ),
+            ]
+        )
+    calls = 0
+
+    def fail_second_delete(conn, cursor, statement, parameters, context, executemany):
+        nonlocal calls
+        if statement.lstrip().lower().startswith("delete from ac_skill "):
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("injected write failure")
+
+    event.listen(engine, "before_cursor_execute", fail_second_delete)
+    with pytest.raises(RuntimeError, match="injected write failure"):
+        SkillRepository(db).cleanup_by_bot_id("bot", "owner")
+    event.remove(engine, "before_cursor_execute", fail_second_delete)
+    with db.orm_session() as session:
+        assert session.query(Skill).count() == 2
+
+
 @pytest.mark.parametrize(
     "set_bot,set_owner",
     [("bot-b", "owner"), ("default", "owner"), ("bot-a", None)],
@@ -249,7 +306,13 @@ def test_bot_deletion_does_not_remove_another_bots_membership(
         foreign = SkillSet(
             name="foreign", bolt_id=set_bot, user_id=set_owner, env="dev"
         )
-        free_skill = Skill(name="free", git_path="local:///free", bolt_id="bot-a", user_id="owner", env="dev")
+        free_skill = Skill(
+            name="free",
+            git_path="local:///free",
+            bolt_id="bot-a",
+            user_id="owner",
+            env="dev",
+        )
         session.add_all([skill, foreign, free_skill])
         session.flush()
         skill_id = skill.id
