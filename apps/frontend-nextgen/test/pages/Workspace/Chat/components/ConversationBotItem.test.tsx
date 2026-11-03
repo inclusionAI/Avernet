@@ -110,7 +110,7 @@ describe('ConversationBotItem 紧凑单行几何（#2990 形态回退, 2026-10-2
       el.className.includes('truncate'),
     ) as HTMLElement;
     const column = title.parentElement as HTMLElement;
-    expect(column).toHaveClass('items-center', 'gap-1.5');
+    expect(column).toHaveClass('items-center', 'gap-1');
     expect(column).not.toHaveClass('flex-col');
     // 名称不再独占整行(w-full 移除),与徽章互为兄弟共享一行。
     expect(title).not.toHaveClass('w-full');
@@ -129,17 +129,20 @@ describe('ConversationBotItem 操作区', () => {
     // 间隙节奏统一:按钮间 gap-0.5(2px);#2990 紧凑单行后行尾无箭头位,操作区贴行右缘(right-2)。
     expect(cover.className).toContain('gap-0.5');
     expect(cover.className).toContain('right-2');
+    // 渐隐区紧凑化(2026-11-03):20px→10px,让位预算同步收紧。
+    expect(cover).toHaveClass('pl-2.5');
+    expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开或筛选激活时文字让位:行内标题获得 pr-24 预留,图标不被文字压底', () => {
+  it('展开或筛选激活时文字让位:行内标题获得 pr-[86px] 预留,图标不被文字压底', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-24');
+    expect(title?.parentElement).toHaveClass('pr-[86px]');
   });
 
-  it('有「更多操作」入口时让位扩至 pr-[122px](4 按钮几何,#2990 还原)', () => {
+  it('有「更多操作」入口时让位扩至 pr-[112px](4 按钮几何,2026-11-03 紧凑化重算)', () => {
     const { container } = renderBotItem({
       expanded: true,
       bot: { spaceId: '101' },
@@ -148,7 +151,7 @@ describe('ConversationBotItem 操作区', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[122px]');
+    expect(title?.parentElement).toHaveClass('pr-[112px]');
     // 非钉住态(收起且无筛选/检索)走临时让位变体,菜单打开期间(data-state=open)同样让位,
     // 鼠标移出行、菜单仍开时不塌缩。
     const { container: collapsed } = renderBotItem({
@@ -159,8 +162,8 @@ describe('ConversationBotItem 操作区', () => {
       el.className.includes('truncate'),
     ) as HTMLElement;
     const collapsedColumn = collapsedTitle.parentElement as HTMLElement;
-    expect(collapsedColumn.className).toContain('group-hover:pr-[122px]');
-    expect(collapsedColumn.className).toContain('group-has-[[data-state=open]]:pr-[122px]');
+    expect(collapsedColumn.className).toContain('group-hover:pr-[112px]');
+    expect(collapsedColumn.className).toContain('group-has-[[data-state=open]]:pr-[112px]');
   });
 
   it('当前舞台所属 Bot 名称点亮 #09090B(行锚点,与会话胶囊两级选中;2026-11-02 回归中性深)', () => {
@@ -185,6 +188,8 @@ describe('ConversationBotItem 行内折叠角标（#2990 形态）', () => {
     const { onToggle } = renderBotItem({ expanded: true });
     const chevron = document.querySelector('span[role="presentation"]') as HTMLElement;
     expect(chevron).toBeTruthy();
+    // 角标槽位 20px(2026-11-03 紧凑化:24→20,让宽度归还名称)。
+    expect(chevron).toHaveClass('h-5', 'w-5');
     fireEvent.click(chevron);
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
@@ -338,8 +343,8 @@ describe('ConversationBotItem 会话ID检索入口', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    // 生效中的检索钉住操作区,行名称让位 pr-24。
-    expect(title?.parentElement).toHaveClass('pr-24');
+    // 生效中的检索钉住操作区,行名称让位 pr-[86px]。
+    expect(title?.parentElement).toHaveClass('pr-[86px]');
     const actions = Array.from(container.querySelectorAll('div')).find((el) =>
       el.className.includes('right-2'),
     ) as HTMLElement;
@@ -460,12 +465,12 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
     ) as HTMLElement;
     // 常驻可见;不随 hover 变化。
     expect(actions.className).toContain('opacity-100');
-    // 不可用行让位收敛到单按钮几何:20 渐隐区+「…」+右内边距(#2990 口径),不从 hover 变化。
+    // 不可用行让位收敛到单按钮几何:10 渐隐区+「…」+右内边距(2026-11-03 紧凑化),不从 hover 变化。
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title.parentElement).toHaveClass('pr-[52px]');
-    expect(title.parentElement).not.toHaveClass('group-hover:pr-[122px]');
+    expect(title.parentElement).toHaveClass('pr-9');
+    expect(title.parentElement).not.toHaveClass('group-hover:pr-[112px]');
     // 会话类入口不渲染。
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
@@ -557,8 +562,47 @@ describe('ConversationBotItem 行徽标', () => {
     expect(label).toHaveClass('max-w-full', 'truncate');
     expect(label.closest('[data-state="tooltip"]')).toBeNull();
     // 同容器水平排布:徽章直接挂名称兄弟位,不在下方独立行。
-    expect(label.parentElement).toHaveClass('items-center', 'gap-1.5');
+    expect(label.parentElement).toHaveClass('items-center', 'gap-1');
     expect(label.parentElement).not.toHaveClass('flex-col');
+  });
+
+  it('引擎徽章让位优先于名称(2026-11-03 紧凑化):展开钉住时整徽章隐藏', () => {
+    const { container } = renderBotItem({ expanded: true, bot: { engine: 'openclaw' } });
+    const badge = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.textContent === 'OpenClaw',
+    ) as HTMLElement;
+    expect(badge).toHaveClass('hidden');
+  });
+
+  it('收起态徽章静默常显:仅悬停/聚焦/菜单开/触屏类让位,不强制 hidden', () => {
+    const { container } = renderBotItem({ bot: { engine: 'openclaw' } });
+    const badge = Array.from(container.querySelectorAll('span')).find((el) =>
+      el.textContent === 'OpenClaw',
+    ) as HTMLElement;
+    expect(badge).not.toHaveClass('hidden');
+    expect(badge.className).toContain('group-hover:hidden');
+    expect(badge.className).toContain('group-focus-within:hidden');
+    expect(badge.className).toContain('group-has-[[data-state=open]]:hidden');
+    expect(badge.className).toContain('[@media(hover:none)]:hidden');
+  });
+
+  it('不可用 Bot 的常驻操作区同样令徽章恒定让位,无操作区行徽章不注入显隐类', () => {
+    // 不可用 + 有「更多操作」(操作区常驻)→ 徽章恒定 hidden。
+    const { container: unavailable } = renderBotItem({
+      bot: { status: 'FAILED', spaceId: '101', engine: 'openclaw' },
+      onOpenBotManagement: noop,
+    });
+    const unavailableBadge = Array.from(unavailable.querySelectorAll('span')).find((el) =>
+      el.textContent === 'OpenClaw',
+    ) as HTMLElement;
+    expect(unavailableBadge).toHaveClass('hidden');
+    // chatable=false 且无菜单 → 无操作区,徽章不带任何让位类。
+    const { container: bare } = renderBotItem({ bot: { chatable: false, engine: 'openclaw' } });
+    const bareBadge = Array.from(bare.querySelectorAll('span')).find((el) =>
+      el.textContent === 'OpenClaw',
+    ) as HTMLElement;
+    expect(bareBadge).not.toHaveClass('hidden');
+    expect(bareBadge.className).not.toContain('group-hover:hidden');
   });
 
   it.each([
