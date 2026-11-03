@@ -908,6 +908,10 @@ async def test_upload_keeps_the_directories_carried_by_the_path():
         ".private.md",
         "docs/.private.md",
         "AGENTS.md",
+        # Shared skill repos are mounted read-only; child paths inherit
+        # that, and creating beneath them would be unmanageable.
+        "skills-pool/skills-repo/test1",
+        "skills/skills-repo/test1",
         # Protected *ancestors*: the leaf is an ordinary name, but creating
         # the path brings a hidden directory into existence along the way.
         ".private/file.md",
@@ -1479,7 +1483,16 @@ async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", [".env", "AGENTS.md", "docs/.hidden"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env",
+        "AGENTS.md",
+        "docs/.hidden",
+        "skills-pool/skills-repo/test1",
+        "skills/skills-repo/test1",
+    ],
+)
 async def test_delete_file_403s_a_read_only_path(path):
     """Same policy the console's delete enforces. Addressing by path is what
     makes these reachable at all — they never had a resource record, so the old
@@ -1492,7 +1505,7 @@ async def test_delete_file_403s_a_read_only_path(path):
             user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
-            factory=SimpleNamespace(create=lambda **kw: None),
+            factory=_StubFactory(),
             bot_repo=_StubBotRepo(),
             file_svc=file_svc,
             request=_request_without_trace(),
