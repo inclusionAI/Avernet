@@ -2567,7 +2567,7 @@ def test_update_bot_status_on_device_active_env_isolation(repo, db):
         )
 
 
-def test_list_active_caller_refresh_bindings_isolates_arca_scope(repo):
+def test_list_active_caller_refresh_bindings_isolates_scope(repo):
     values = dict(
         entity_id="stable-entity", entity_type="staff", device_id="arca-1",
         device_provider="arca", env="prod", status="ACTIVE",
@@ -2579,7 +2579,7 @@ def test_list_active_caller_refresh_bindings_isolates_arca_scope(repo):
     second = repo.insert_binding(**_binding(**{**values, "device_id": "arca-2", "applied_by": "005678"}))
     for index, override in enumerate([
         {"entity_id": "other"}, {"env": "pre"}, {"status": "RELEASED"},
-        {"device_provider": "baas"}, {"entity_type": "team"},
+        {"device_provider": "teclaw"}, {"entity_type": "team"},
         {"apply_reason": "caller_instance:service-1-extra"},
     ]):
         repo.insert_binding(**_binding(**{**values, "device_id": f"excluded-{index}", **override}))
@@ -2599,3 +2599,18 @@ def test_list_active_caller_refresh_bindings_propagates_database_failure(repo, c
     assert "caller_refresh_bindings_requested" in caplog.text
     assert "caller_refresh_bindings_failed" in caplog.text
     assert "database unavailable" not in caplog.text
+
+
+def test_refresh_query_includes_product_baas_callers_with_arca_underlay(repo):
+    binding_id = repo.insert_binding(**_binding(
+        entity_id="stable-entity", entity_type="staff", device_id="baas-caller-bot",
+        device_provider="baas", env="prod", status="ACTIVE",
+        apply_reason="caller_instance:service-1", applied_by="001234",
+        device_props={"bolt_id": "service-1"},
+    ))
+    bindings = repo.list_active_caller_refresh_bindings(
+        bot_id="service-1", entity_id="stable-entity", env="prod"
+    )
+    assert [item.id for item in bindings] == [binding_id]
+    assert bindings[0].device_provider == "baas"
+    assert bindings[0].applied_by == "001234"

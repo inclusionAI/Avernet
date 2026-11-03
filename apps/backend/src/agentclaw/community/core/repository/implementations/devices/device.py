@@ -380,7 +380,7 @@ class DeviceRepository(
     def list_active_caller_refresh_bindings(
         self, *, bot_id: str, entity_id: str, env: str,
     ) -> list[DeviceBindingRecord]:
-        fields = {"bot_id": bot_id, "entity_id": entity_id, "env": env, "provider": "arca"}
+        fields = {"bot_id": bot_id, "entity_id": entity_id, "env": env, "providers": ("baas", "arca")}
         logger.info("caller_refresh_bindings_requested fields=%s", fields)
         try:
             with self._db.orm_session() as db:
@@ -391,7 +391,7 @@ class DeviceRepository(
                         EntityDeviceBinding.entity_id == entity_id,
                         EntityDeviceBinding.entity_type == "staff",
                         EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
-                        EntityDeviceBinding.device_provider == "arca",
+                        EntityDeviceBinding.device_provider.in_(("baas", "arca")),
                         EntityDeviceBinding.apply_reason == f"caller_instance:{bot_id}",
                     )
                     .order_by(EntityDeviceBinding.id.desc())

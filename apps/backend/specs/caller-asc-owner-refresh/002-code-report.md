@@ -48,3 +48,7 @@ The first architecture invocation lacked exported `PYTHONPATH` for a cold-import
 ## Limitations
 
 The ARCA query does not create missing Caller instances. The inspected current creation flow creates BaaS Caller bindings; whether target production data contains ARCA Caller bindings is not verified. Empty eligible sets therefore remain empty. No new timer means no promise that a one-hour Caller stays valid between owner renewal callbacks. Main agent owns integration, independent Review/regression, final dev rebase and PR/CI convergence.
+
+## Independent-review correction
+
+The actual product creates Caller bindings through BaaS even when the physical runtime is ARCA. A new real-SQLite regression reproduced the ARCA-only filter returning no product targets. The dedicated refresh query now includes BaaS and direct ARCA; TeClaw is excluded and the existing owner fanout query is unchanged. After rebasing onto dev a66ef97e65, the focused repository/callback/DI suites passed 95/95 (JUnit /tmp/asc-avernet-product-target.xml).

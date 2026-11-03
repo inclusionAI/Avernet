@@ -6,7 +6,7 @@ User-confirmed scope (2026-11-03): reuse the existing owner renewal trigger; do 
 
 Avernet owns an injectable `ScheduledCallerRefreshProtocol.refresh(bot_id, owner_user_id, entity_id, env)` service contract, its community no-op implementation, and the call after successful owner runtime updates for service Bots. Enterprise code implements the port and owns ASC exchange and runtime installation. Runtime failure must propagate as a fixed safe BotServiceError so the existing owner notification retry can retry. Personal/unsupported Bots do not invoke the service.
 
-Add a dedicated `DeviceBindingRepository.list_active_caller_refresh_bindings(bot_id, entity_id, env)` query for ACTIVE ARCA Caller bindings. Keep existing BaaS owner-token fanout unchanged. Filter environment, stable Bot entity, staff type, provider, status and exact Caller reason; return newest binding for each device identity. `applied_by` identifies the actual Caller. The method does not invent ARCA bindings or prove any currently exist.
+Add a dedicated `DeviceBindingRepository.list_active_caller_refresh_bindings(bot_id, entity_id, env)` query for ACTIVE BaaS and direct ARCA Caller bindings. Keep existing BaaS owner-token fanout unchanged. Filter environment, stable Bot entity, staff type, provider, status and exact Caller reason; return newest binding for each device identity. `applied_by` identifies the actual Caller. BaaS is the actual product Caller control plane; its physical ARCA sandbox is resolved by the enterprise adapter. TeClaw is outside this feature.
 
 ## Review and test
 

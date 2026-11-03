@@ -238,7 +238,7 @@ class DeviceBindingRepository(Protocol):
     def list_active_caller_refresh_bindings(
         self, *, bot_id: str, entity_id: str, env: str,
     ) -> list[DeviceBindingRecord]:
-        """List ACTIVE ARCA Caller bindings for an exact stable Bot address.
+        """List ACTIVE BaaS/ARCA Caller bindings for an exact stable Bot address.
 
         ``applied_by`` identifies the Caller. Return the latest binding for
         each device identity; BaaS Owner-token fanout retains its separate query.
