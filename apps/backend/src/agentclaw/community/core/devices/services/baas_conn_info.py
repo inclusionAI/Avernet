@@ -176,6 +176,15 @@ def build_baas_conn_info_for_http(
             else:
                 info["url"] = f"{proxy_base}/proxypass/{target}"
         info["sandbox_id"] = target
+    elif target.startswith("TECLAW_"):
+        # TeClaw 平台不支持 BaaS invoke-http。
+        # data_init 的 _send_to_engine 通过 conn_info["url"] 创建 session 时，
+        # 若走 invoke-http 会触发 secbaas PLATFORM_ERROR 500。
+        # 改为走 agentclawproxy 代理 URL（与 ws_info.ws_url 同域）。
+        # 证据：trace 21d59aa817936849913116766ed117
+        #   (bot 20261103_pt5qi09x, device_provider=teclaw)
+        info["url"] = _to_http_base(ws_info.ws_url)
+        info["sandbox_id"] = target
     else:
         # 真 BaaS 后端（desktop bot / 未来 personal+baas）走 invoke-http 网关。
         # caller 直接 url + path POST 命中 BaaS 网关 invoke-http 端点。
