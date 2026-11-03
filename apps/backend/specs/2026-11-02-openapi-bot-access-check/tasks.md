@@ -36,12 +36,12 @@
   - [x] `responses.py` and `authorization_rules.py` stay under 1000 lines.
 - **Depends on:** Task 1
 
-## Task 3: Route tests
+## Task 3: Route tests [x]
 - **Goal:** Pin the behavior and keep the surface-wide inventory and convention tests green.
 - **Files:** `tests/community/adapters/http/openapi_v1/test_bot_access_check.py` (new)
 - **Done when:**
-  - [ ] Each case has a passing test: owner → owner; admin editor passes the admin bar; a member fails the admin bar but reports `member`; a Space member → `member`; a revoked editor → `none`; unknown Bot → 200 with no access; missing `entity_id` or `user_id` → 422; a non-allowlisted app or a human caller → 403; a lookup failure → 500; the route is absent from `app.openapi()`.
-  - [ ] `test_admission_inventory.py`, `test_authorization_inventory.py`, `test_path_convention.py`, `test_explicit_user_id.py`, `test_openapi_error_schema.py` and `test_schema_docs.py` pass.
+  - [x] Each case has a passing test: owner → owner; admin editor passes the admin bar; a member fails the admin bar but reports `member`; a Space member → `member`; a revoked editor → `none`; unknown Bot → 200 with no access; missing `entity_id` or `user_id` → 422; a non-allowlisted app or a human caller → 403; a lookup failure → 500; the route is absent from `app.openapi()`.
+  - [x] `test_admission_inventory.py`, `test_authorization_inventory.py`, `test_path_convention.py`, `test_explicit_user_id.py`, `test_openapi_error_schema.py` and `test_schema_docs.py` pass.
 - **Depends on:** Task 2
 
 ## Task 4: Tests & Verification
