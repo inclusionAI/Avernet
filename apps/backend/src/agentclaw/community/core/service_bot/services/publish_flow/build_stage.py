@@ -113,6 +113,36 @@ class BuildStageRunner:
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
 
+    def _build_guard(
+        self,
+        *,
+        publish_id: int,
+        build_attempt: str | None,
+    ) -> bool:
+        # Legacy tasks have no token and must stay runnable across this schema
+        # enhancement. Tokenized callers are fenced against a newer attempt.
+        if build_attempt is None:
+            return True
+        value = self._ext_state.latest_status_and_build_attempt(publish_id)
+        _, current_attempt = value
+        return build_attempt == current_attempt
+
+    def _build_attempt_superseded(
+        self, publish_id: int, build_attempt: str | None
+    ) -> PublishFlowResult:
+        logger.info(
+            "[BuildStageRunner] Stale build attempt skipped: publish_id=%s, "
+            "attempt=%s",
+            publish_id,
+            build_attempt,
+        )
+        return PublishFlowResult(
+            publish_id=publish_id,
+            status=PublishStatus.FAILED,
+            message=f"Build attempt superseded: {build_attempt or 'unknown'}",
+            action="process",
+        )
+
     async def build_artifact_only(
         self,
         publish_record: BotPublishRecord,
@@ -261,6 +291,8 @@ class BuildStageRunner:
         self,
         publish_record: BotPublishRecord,
         operator: str,
+        *,
+        build_attempt: str | None = None,
     ) -> PublishFlowResult:
         publish_id = publish_record.id
 
@@ -274,6 +306,11 @@ class BuildStageRunner:
                 self._ext_state.owner_id(publish_record),
             )
 
+            if not self._build_guard(
+                publish_id=publish_id,
+                build_attempt=build_attempt,
+            ):
+                return self._build_attempt_superseded(publish_id, build_attempt)
             result = await self.build_artifact_only(publish_record)
 
             # 阶段 B：提交 / 状态推进（BUILDING → BUILT）
@@ -307,6 +344,11 @@ class BuildStageRunner:
                     }
                 )
             )
+            if not self._build_guard(
+                publish_id=publish_id,
+                build_attempt=build_attempt,
+            ):
+                return self._build_attempt_superseded(publish_id, build_attempt)
             self._ext_state.commit_built_artifact(
                 publish_id=publish_id,
                 ext=ext,
@@ -331,6 +373,11 @@ class BuildStageRunner:
             logger.exception("[BuildStageRunner] Build failed: %s", e)
 
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
+            if not self._build_guard(
+                publish_id=publish_id,
+                build_attempt=build_attempt,
+            ):
+                return self._build_attempt_superseded(publish_id, build_attempt)
             PublishExtState.clear_retry_flag(ext)
             if isinstance(e, ServiceArtifactBuildError):
                 ext["error_code"] = e.code.value

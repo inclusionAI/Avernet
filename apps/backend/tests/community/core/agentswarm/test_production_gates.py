@@ -97,6 +97,34 @@ class _StoryLLM:
         )
 
 
+class _StateLLM:
+    """Deterministic scripted decision provider for saturation flows.
+
+    CI can interleave five runs on one backend, so a global queued story is
+    not stable. The orchestrator prompt already reports the exact admission
+    state we need, so drive the decision from that instead.
+    """
+
+    async def complete(self, request):
+        import re
+
+        prompt = request.user_prompt
+        spawned = re.search(r"agents_spawned=(\d+)", prompt)
+        routed = re.search(r"routed_results=(\d+)", prompt)
+        spawned = int(spawned.group(1)) if spawned else 0
+        routed = int(routed.group(1)) if routed else 0
+        if spawned == 0:
+            text = _spawn_decision("a1", "loaded")
+        elif routed < spawned:
+            text = _wait_decision("a1")
+        else:
+            text = _finish_decision("loaded")
+        return dm.CompletionResponse(
+            text=text, model=dm.ModelId("story"),
+            token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
+        )
+
+
 class _FailingLLM:
 
     def __init__(self) -> None:
@@ -194,17 +222,10 @@ class TestLoadQueueSaturation:
 
     def test_saturation_rejects_without_side_effects_then_backlog_drains(self):
         db = _gate_db()
-        story = []
-        for i in range(5):
-            story.extend([
-                _spawn_decision("a1", "work"),
-                _wait_decision("a1"),
-                _finish_decision("loaded"),
-            ])
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
             config=_gate_config(),
-            llm=_StoryLLM(story),
+            llm=_StateLLM(),
         )
         svc = AgentSwarmService(
             run_repo=env.run_repo, dispatch_repo=env.dispatch_repo,

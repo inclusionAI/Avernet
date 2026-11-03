@@ -128,8 +128,20 @@ def _require_str(payload: Optional[dict], key: str) -> str:
     return value
 
 
-def build_stage_payload(*, publish_id: int, operator: str) -> dict:
-    return {"publish_id": publish_id, "operator": operator}
+def _require_optional_str(payload: Optional[dict], key: str) -> Optional[str]:
+    if not isinstance(payload, dict) or key not in payload:
+        return None
+    value = payload[key]
+    if not isinstance(value, str):
+        raise ValueError(f"field {key} must be str")
+    return value
+
+
+def build_stage_payload(*, publish_id: int, operator: str, build_attempt: str | None = None) -> dict:
+    payload = {"publish_id": publish_id, "operator": operator}
+    if build_attempt:
+        payload["build_attempt"] = build_attempt
+    return payload
 
 
 def build_poll_payload(*, publish_id: int) -> dict:
@@ -137,11 +149,19 @@ def build_poll_payload(*, publish_id: int) -> dict:
 
 
 def enqueue_verify_flow(
-    task_queue_service: TaskQueueService, *, publish_id: int, operator: str
+    task_queue_service: TaskQueueService,
+    *,
+    publish_id: int,
+    operator: str,
+    build_attempt: str | None = None,
 ) -> None:
     task_queue_service.enqueue(
         VERIFY_FLOW_TASK,
-        build_stage_payload(publish_id=publish_id, operator=operator),
+        build_stage_payload(
+            publish_id=publish_id,
+            operator=operator,
+            build_attempt=build_attempt,
+        ),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
@@ -317,9 +337,10 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
     def handle(self, payload: Optional[dict]) -> TaskOutcome:
         publish_id = _require_int(payload, "publish_id")
         operator = _require_str(payload, "operator")
-        return asyncio.run(self._run(publish_id, operator))
+        build_attempt = _require_optional_str(payload, "build_attempt")
+        return asyncio.run(self._run(publish_id, operator, build_attempt))
 
-    async def _run(self, publish_id: int, operator: str) -> TaskOutcome:
+    async def _run(self, publish_id: int, operator: str, build_attempt: str | None = None) -> TaskOutcome:
         record, status = self._status(publish_id)
         if record is None:
             return Fail(f"publish record not found: publish_id={publish_id}")
@@ -328,7 +349,11 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
         # (FAILED + ext.error_message); the Fail outcome mirrors it onto the task
         # so the queue row is semantically honest (FAILED, not SUCCEEDED).
         if status == PublishStatus.BUILDING:
-            build_result = await self._flow.execute_build_phase(record, operator)
+            build_result = await self._flow.execute_build_phase(
+                record,
+                operator,
+                **({"build_attempt": build_attempt} if build_attempt else {}),
+            )
             if build_result.status != PublishStatus.BUILT:
                 return Fail(
                     f"build failed: publish_id={publish_id}, {build_result.message}"

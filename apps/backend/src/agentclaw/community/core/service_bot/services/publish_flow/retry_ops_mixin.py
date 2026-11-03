@@ -8,6 +8,7 @@ Extracted from ``publish_flow_service.py`` to keep that file within the R9 line 
 from __future__ import annotations
 
 import copy
+import uuid
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -141,7 +142,14 @@ class RetryOpsMixin:
         # stale restart workflow instead of the fresh release
         # (``ext.publish.<stage>``) and strand the record.
         use_restart = rollback_status in _RESTART_RETRY_STATUSES
-        if use_restart:
+        rebuild = rollback_status is PublishStatus.BUILDING
+        if rebuild:
+            # Stamp the new attempt in the same CAS as FAILED -> BUILDING. A
+            # separate post-rollback write would leave a window where a record
+            # has a BUILDING attempt with no stable attempt token.
+            build_attempt = uuid.uuid4().hex
+            ext["build_attempt"] = build_attempt
+        elif use_restart:
             ext["retry"] = True
         else:
             self._clear_retry_flag(ext)
@@ -159,7 +167,8 @@ class RetryOpsMixin:
             )
         logger.info(
             "[PublishFlowService.retry] Status rolled back: publish_id=%s, FAILED -> %s",
-            publish_id, rollback_status.value,
+            publish_id,
+            rollback_status.value,
         )
 
         # Step 6: dispatch by how far the failed attempt had progressed.
@@ -167,7 +176,12 @@ class RetryOpsMixin:
             return await self._retry_via_restart(publish_id, operator, rollback_status)
         if rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
             return self._retry_via_online_release(publish_id, operator, rollback_status)
-        return self._retry_via_verify_flow(publish_id, operator, rollback_status)
+        return self._retry_via_verify_flow(
+            publish_id,
+            operator,
+            rollback_status,
+            build_attempt=build_attempt if rebuild else None,
+        )
 
     def _resolve_retry_rollback_status(
         self, source_status: str, publish_id: int
@@ -256,10 +270,20 @@ class RetryOpsMixin:
         return self._retry_submitted_result(publish_id, rollback_status)
 
     def _retry_via_verify_flow(
-        self, publish_id: int, operator: str, rollback_status: PublishStatus
+        self,
+        publish_id: int,
+        operator: str,
+        rollback_status: PublishStatus,
+        *,
+        build_attempt: str | None = None,
     ) -> PublishFlowResult:
         """BUILDING / BUILT: re-enqueue verify_flow (the build sub-step is skipped
         when already BUILT)."""
+        if rollback_status == PublishStatus.BUILDING and build_attempt is None:
+            raise PublishFlowServiceError(
+                "A rebuild retry must record a build_attempt before dispatch: "
+                f"publish_id={publish_id}"
+            )
         if rollback_status == PublishStatus.BUILDING:
             # A rebuild changes the artifact, so any release op from the failed
             # attempt is superseded — abandon it so the fresh attempt opens new
@@ -269,7 +293,10 @@ class RetryOpsMixin:
                 publish_id, reason="retry rebuild — superseded"
             )
         enqueue_verify_flow(
-            self._task_queue_service, publish_id=publish_id, operator=operator
+            self._task_queue_service,
+            publish_id=publish_id,
+            operator=operator,
+            build_attempt=build_attempt,
         )
         return self._retry_submitted_result(publish_id, rollback_status)
 
