@@ -232,6 +232,12 @@ async def sync_symlinks(body: SyncSymlinkRequest) -> ApiResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:  # SkillsConflictError subclass + base 目录无效
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except OSError as e:
+        log.exception("[skills.symlink] filesystem error during sync")
+        raise HTTPException(status_code=502, detail="Symlink sync failed due to filesystem error") from e
+    except Exception as e:
+        log.exception("[skills.symlink] unexpected error during sync")
+        raise HTTPException(status_code=500, detail="Internal server error during symlink sync") from e
 
     return ApiResponse(
         success=True,
@@ -266,6 +272,12 @@ async def sync_bindpath_symlinks(body: BindPathRequest) -> ApiResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except OSError as e:
+        log.exception("[skills.bindpath] filesystem error during sync")
+        raise HTTPException(status_code=502, detail="Bindpath sync failed due to filesystem error") from e
+    except Exception as e:
+        log.exception("[skills.bindpath] unexpected error during sync")
+        raise HTTPException(status_code=500, detail="Internal server error during bindpath sync") from e
 
     return ApiResponse(
         success=True,
@@ -293,6 +305,12 @@ async def clean_symlinks(body: CleanSymlinkRequest) -> ApiResponse:
         raise HTTPException(status_code=501, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except OSError as e:
+        log.exception("[skills.clean] filesystem error during symlink cleanup")
+        raise HTTPException(status_code=502, detail="Symlink cleanup failed due to filesystem error") from e
+    except Exception as e:
+        log.exception("[skills.clean] unexpected error during symlink cleanup")
+        raise HTTPException(status_code=500, detail="Internal server error during symlink cleanup") from e
 
     return ApiResponse(
         success=True,
