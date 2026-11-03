@@ -33,7 +33,7 @@ class _FakeDeviceFs:
         self._contents = contents
         self.read_calls: list[str] = []
 
-    async def list_dir(self, dir_path, *, recursive=False):
+    async def list_dir(self, dir_path, *, recursive=False, **kwargs):
         return self._listings.get(dir_path, [])
 
     async def read_file(self, file_path, **kwargs):
@@ -276,7 +276,7 @@ class _FailingReadDeviceFs:
         self._read_errors = read_errors
         self.read_calls: list[str] = []
 
-    async def list_dir(self, dir_path, *, recursive=False):
+    async def list_dir(self, dir_path, *, recursive=False, **kwargs):
         return self._listings.get(dir_path, [])
 
     async def read_file(self, file_path, **kwargs):
@@ -313,3 +313,51 @@ async def test_unreadable_source_file_network_error():
     with pytest.raises(TeclawFilePromotionError) as exc_info:
         await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
     assert "(OSError:" in str(exc_info.value)
+
+
+# ── list_dir error propagation ──────────────────────────────────────────
+
+
+class _FailingListDirDeviceFs:
+    """Device FS whose list_dir raises the given exception."""
+
+    def __init__(self, *, read_errors: dict | None = None):
+        self._read_errors = read_errors or {}
+
+    async def list_dir(self, dir_path, *, recursive=False, **kwargs):
+        raise NotImplementedError("subclass must override")
+
+    async def read_file(self, file_path, **kwargs):
+        return None
+
+
+class _Http503ListDirFs(_FailingListDirDeviceFs):
+    async def list_dir(self, dir_path, *, recursive=False, **kwargs):
+        raise httpx.HTTPStatusError(
+            "Service Unavailable",
+            request=MagicMock(),
+            response=MagicMock(status_code=503),
+        )
+
+
+class _OsErrorListDirFs(_FailingListDirDeviceFs):
+    async def list_dir(self, dir_path, *, recursive=False, **kwargs):
+        raise OSError("Connection refused")
+
+
+@pytest.mark.asyncio
+async def test_list_dir_http_503_includes_status_code():
+    """HTTP 503 from list_dir → error message includes status code."""
+    fs = _Http503ListDirFs()
+    with pytest.raises(TeclawFilePromotionError) as exc_info:
+        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    assert "(HTTP 503)" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_list_dir_os_error_includes_type_name():
+    """OSError from list_dir → error message includes exception type name."""
+    fs = _OsErrorListDirFs()
+    with pytest.raises(TeclawFilePromotionError) as exc_info:
+        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    assert "(OSError)" in str(exc_info.value)

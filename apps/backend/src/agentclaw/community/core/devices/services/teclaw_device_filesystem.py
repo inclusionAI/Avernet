@@ -176,7 +176,8 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             return None
 
     async def list_dir(
-        self, dir_path: str, *, recursive: bool = False
+        self, dir_path: str, *, recursive: bool = False,
+        preserve_errors: bool = False,
     ) -> list[dict[str, Any]] | None:
         # Address the engine by the canonical key (same as the artifact ref / OSS
         # key), not the raw host path.
@@ -194,8 +195,23 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             response.raise_for_status()
             result = response.json()
             return result.get("data", {}).get("files", [])
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.debug(
+                    "[TeclawDeviceFileSystem.list_dir] not found: %s", dir_path,
+                )
+            else:
+                logger.error(
+                    "[TeclawDeviceFileSystem.list_dir] HTTP %d: %s",
+                    e.response.status_code, dir_path,
+                )
+                if preserve_errors:
+                    raise
+            return None
         except Exception as e:
             logger.error("[TeclawDeviceFileSystem.list_dir] error: %s", e)
+            if preserve_errors:
+                raise
             return None
 
     async def exists(self, path: str) -> bool:
