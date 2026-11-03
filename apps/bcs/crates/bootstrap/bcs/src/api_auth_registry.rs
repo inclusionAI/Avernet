@@ -127,6 +127,24 @@ pub struct ApiAuthSourceRegistration {
     pub build: ApiAuthSourceBuild,
 }
 
+/// The inventory-submitted artifact: a constructor thunk for one source
+/// registration, wrapped in a tuple newtype. Two const-correctness
+/// constraints shape this: registration values embed `String` descriptors
+/// and cannot be const-built (hence thunks, not values), and the registry's
+/// marker-trait impl is orphan-rule-blocked on a bare fn-pointer alias
+/// (hence the newtype). Downstream crates submit:
+///
+/// ```ignore
+/// inventory::submit! { ApiAuthSourceRegistrationFactory(make_my_registration) }
+/// ```
+///
+/// Bootstrap merges the thunks into the production inventory in
+/// `production_registrations()`; illegal, reserved, or duplicate names
+/// stay startup-fatal in `index_registrations`.
+pub struct ApiAuthSourceRegistrationFactory(pub fn() -> ApiAuthSourceRegistration);
+
+inventory::collect!(ApiAuthSourceRegistrationFactory);
+
 /// Normalized OAuth session settings; consumed as-is by the build phase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedOAuthSettings {
