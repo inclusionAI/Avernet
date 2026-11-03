@@ -146,9 +146,12 @@ class BotCleanupService:
             logger.error(f"[BotCleanupService] {error_msg}")
             result["errors"].append(error_msg)
 
-        logger.info(
-            f"[BotCleanupService] Cleanup completed for bot {bot_id}: "
-            f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}"
-        )
+        if result["errors"] or result["skills_retained"]:
+            logger.warning("[BotCleanupService] Cleanup incomplete for bot %s", bot_id)
+        else:
+            logger.info(
+                f"[BotCleanupService] Cleanup completed for bot {bot_id}: "
+                f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}"
+            )
 
         return result

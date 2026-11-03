@@ -369,15 +369,28 @@ class SkillAssetPart2:
                     )
                     if foreign_refs:
                         raise SkillAssetInUseError({"membership": foreign_refs})
+                    owned_sets = db.query(self.SkillSet.id).filter(
+                        self.SkillSet.bolt_id == bot_id,
+                        self.SkillSet.user_id == _normalize_user_id(owner_id),
+                        self.SkillSet.env == env,
+                    )
                     db.query(self.SkillSetSkill).filter(
                         self.SkillSetSkill.skill_id == skill.id,
                         self.SkillSetSkill.env == env,
+                        self.SkillSetSkill.skill_set_id.in_(owned_sets),
                     ).delete(synchronize_session=False)
                 self._require_unreferenced_for_delete(
                     db, skill, env=env, ignore_membership=local
                 )
-            for skill in skills:
-                db.delete(skill)
+            # Object deletion cascades to associations of unknown ownership;
+            # a scoped bulk delete preserves those historical orphan rows.
+            if skills:
+                db.query(self.Skill).filter(
+                    self.Skill.id.in_([skill.id for skill in skills]),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.user_id == _normalize_user_id(owner_id),
+                    self.Skill.env == env,
+                ).delete(synchronize_session=False)
             db.flush()
             return len(skills)
 

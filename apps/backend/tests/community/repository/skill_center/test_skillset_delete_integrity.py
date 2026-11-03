@@ -70,17 +70,31 @@ def test_legacy_writer_rejects_another_bots_local_skill(tmp_path):
     db = _Database(engine)
     with db.orm_session() as session:
         skill = Skill(
-            name="local", git_path="local:///skill", bolt_id="bot-a", env="dev"
+            name="local",
+            git_path="local:///skill",
+            bolt_id="bot-a",
+            user_id="owner",
+            env="dev",
         )
-        own = SkillSet(name="own", bolt_id="bot-a", env="dev")
-        foreign = SkillSet(name="foreign", bolt_id="bot-b", env="dev")
-        session.add_all([skill, own, foreign])
+        own = SkillSet(name="own", bolt_id="bot-a", user_id="owner", env="dev")
+        foreign = SkillSet(name="foreign", bolt_id="bot-b", user_id="owner", env="dev")
+        wrong_owner = SkillSet(
+            name="wrong-owner", bolt_id="bot-a", user_id="other", env="dev"
+        )
+        session.add_all([skill, own, foreign, wrong_owner])
         session.flush()
-        skill_id, own_id, foreign_id = skill.id, own.id, foreign.id
+        skill_id, own_id, foreign_id, wrong_owner_id = (
+            skill.id,
+            own.id,
+            foreign.id,
+            wrong_owner.id,
+        )
 
     sets = SkillSetRepository(db)
     with pytest.raises(SkillSetControlPlaneNotFoundError):
         sets.add_skill_to_set(str(foreign_id), str(skill_id))
+    with pytest.raises(SkillSetControlPlaneNotFoundError):
+        sets.add_skill_to_set(str(wrong_owner_id), str(skill_id))
     assert sets.add_skill_to_set(str(own_id), str(skill_id))
     with db.orm_session() as session:
         assert (
@@ -115,7 +129,7 @@ def test_skillset_delete_rolls_back_members_when_parent_delete_fails(tmp_path):
         assert session.query(SkillSetSkill).filter_by(skill_set_id=set_id).count() == 1
 
 
-def test_bot_deletion_removes_owned_local_skill_memberships(tmp_path):
+def test_bot_deletion_is_not_blocked_by_historical_orphan_membership(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'bot.db'}")
     for model in (
         Skill,
@@ -150,7 +164,9 @@ def test_bot_deletion_removes_owned_local_skill_memberships(tmp_path):
     assert SkillRepository(db).delete_by_bot_id("bot", "owner") == 1
     with db.orm_session() as session:
         assert session.query(Skill).filter_by(id=skill_id).count() == 0
-        assert session.query(SkillSetSkill).filter_by(skill_id=skill_id).count() == 0
+        # The orphan's Set cannot be scoped to a Bot and owner. Historical
+        # membership cleanup is deliberately outside this operation.
+        assert session.query(SkillSetSkill).filter_by(skill_id=skill_id).count() == 1
 
 
 @pytest.mark.parametrize(
@@ -185,7 +201,9 @@ def test_bot_deletion_does_not_remove_another_bots_membership(
             user_id="owner",
             env="dev",
         )
-        foreign = SkillSet(name="foreign", bolt_id=set_bot, user_id=set_owner, env="dev")
+        foreign = SkillSet(
+            name="foreign", bolt_id=set_bot, user_id=set_owner, env="dev"
+        )
         session.add_all([skill, foreign])
         session.flush()
         skill_id = skill.id

@@ -322,9 +322,8 @@ class SkillSetPart1:
             )
             if skill_set is None or skill is None:
                 return False
-            if (
-                str(skill.git_path or "").startswith("local://")
-                and skill.bolt_id != skill_set.bolt_id
+            if str(skill.git_path or "").startswith("local://") and (
+                skill.bolt_id != skill_set.bolt_id or skill.user_id != skill_set.user_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
