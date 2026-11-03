@@ -226,7 +226,8 @@ handler 内 `env_utils.get_current_env()` 取,不入参。
 
 ```jsonc
 { "config_name": "task_skill_installed_bots", "config_type": "set",
-  "config_value": ["bot_a","bot_b"] }
+  "config_value": ["bot_a:owner_a","bot_b:owner_b"] }
+// task set 元素是 `bot_uuid`（`bot_id:owner_id`），不是裸 `bot_id`。
 // -> { ... Envelope, "data": { "config_id": <id> } }
 ```
 
@@ -243,7 +244,7 @@ handler 内 `env_utils.get_current_env()` 取,不入参。
 **match**(请求体 / 200 Envelope,只回布尔):
 
 ```jsonc
-{ "config_name": "task_skill_installed_bots", "value": "bot_a" }
+{ "config_name": "task_skill_installed_bots", "value": "bot_a:owner_a" }
 // -> { ... Envelope, "data": { "matched": true } }
 ```
 

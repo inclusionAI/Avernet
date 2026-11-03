@@ -50,7 +50,8 @@ class ArtifactReportItemDTO(BaseModel):
     content 对象不含 kind tag——判别由字段名承载;结构性校验(互斥/交叉校验/上限)
     在核心 ``parse_artifact_report_item`` 收口,HTTP 层只转协议(Rule 22)。
     content 对象形态为线上契约(2026-10-22 用户定稿);核心解析对 JSON 字符串
-    仍容忍(手动 API 兼容),但本 DTO(线上口)只收对象。
+    仍容忍(手动 API 兼容),但本 DTO(线上口)只收对象。四个分支均支持字符串枚举
+    ``is_final_artifact``(``"true"``/``"false"``,缺省 ``"false"``)标记最终产物。
     """
 
     model_config = ConfigDict(extra="forbid")
