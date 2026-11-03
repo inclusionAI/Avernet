@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { main, selectWorkspacePackages } from './run-tests.mjs';
 import { classifyResult, writeReports } from './test-reports.mjs';
 import { verifyPackageBoundaries } from './verify-package-boundaries.mjs';
@@ -80,6 +82,43 @@ test('collection errors are tracked separately from assertion failures', () => {
 test('signals and timeouts cannot produce success', () => {
   assert.equal(classifyResult(json, { status: null, signal: 'SIGKILL' }).status, 'FAIL');
   assert.equal(classifyResult(json, { status: 0, error: new Error('timeout') }).status, 'FAIL');
+});
+test('keeps passing console output in JUnit and failing output visible without weakening failures', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clawweb-console-'));
+  try {
+    const pkg = join(root, 'public/sample');
+    mkdirSync(join(pkg, 'src'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['public/sample'] }));
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({
+      name: 'console-fixture', type: 'module', scripts: { test: 'vitest run' },
+    }));
+    symlinkSync(fileURLToPath(new URL('../../node_modules', import.meta.url)), join(pkg, 'node_modules'), 'dir');
+    writeFileSync(join(pkg, 'src/sample.js'), 'export const value = 1;');
+    writeFileSync(join(pkg, 'src/passes.test.js'), `
+      import { expect, it } from 'vitest';
+      import { value } from './sample.js';
+      it('passes', () => { console.log('passing-console-marker'); expect(value).toBe(1); });
+    `);
+    writeFileSync(join(pkg, 'src/fails.test.js'), `
+      import { expect, it } from 'vitest';
+      import { value } from './sample.js';
+      it('fails', () => { console.error('failing-console-marker'); expect(value).toBe(2); });
+    `);
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('./run-tests.mjs', import.meta.url)), 'test', root], {
+      encoding: 'utf8', timeout: 30_000, env: { ...process.env, CI: 'true' },
+    });
+    assert.ifError(child.error);
+    assert.equal(child.status, 1);
+    const output = child.stdout + child.stderr;
+    assert.doesNotMatch(output, /passing-console-marker/);
+    assert.match(output, /failing-console-marker/);
+    const report = JSON.parse(readFileSync(join(root, 'test-results/summary.json'), 'utf8'));
+    assert.equal(report.totals.total, 2);
+    assert.equal(report.totals.failed, 1);
+    const junit = readFileSync(join(root, 'test-results/junit.xml'), 'utf8');
+    assert.match(junit, /passing-console-marker/);
+    assert.match(junit, /failing-console-marker/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test('package scope selects only OCB-owned internal packages', () => {
   const packages = [
