@@ -90,12 +90,15 @@ export const botSkillService = {
     currentUserId: string;
   }): Promise<DomainResult<boolean>> {
     const { realBotId, ownerId, currentUserId } = query;
-    if (isOwnedByCurrentUser(ownerId, currentUserId)) {
-      const res = await botSkillService.listSkillsForBotId(realBotId, currentUserId, ownerId, 1, 100);
-      if (!res.ok) return { ok: false, error: res.error };
-      return { ok: true, data: botSkillService.hasTaskIntentSkill(res.data) };
-    }
+    // DomainResult 是本方法的稳定边界：底层列表接口、match 探针、信封解析或防御性
+    // 判断异常都必须收敛为可观测的 error，不向调用方抛出，也不触发全局错误 UI。
     try {
+      if (isOwnedByCurrentUser(ownerId, currentUserId)) {
+        const res = await botSkillService.listSkillsForBotId(realBotId, currentUserId, ownerId, 1, 100);
+        if (!res.ok) return { ok: false, error: res.error };
+        return { ok: true, data: botSkillService.hasTaskIntentSkill(res.data) };
+      }
+
       const env = await matchTaskConfig({
         config_name: TASK_INTENT_INSTALLED_BOTS_CONFIG,
         value: realBotId,

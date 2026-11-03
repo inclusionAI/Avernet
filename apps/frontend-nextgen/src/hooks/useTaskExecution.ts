@@ -89,6 +89,11 @@ export function useTaskExecution({
         if (cancelled) return;
         setDynamicTaskEnabled(result.ok && result.data);
       })
+      .catch(() => {
+        // 技能探测只决定任务入口是否可点；意外失败需安全降级为不可点，
+        // 不产生未处理 Promise，也不触发全局错误提示。
+        if (!cancelled) setDynamicTaskEnabled(false);
+      })
       .finally(() => {
         if (!cancelled) setDynamicTaskChecking(false);
       });

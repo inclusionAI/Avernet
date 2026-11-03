@@ -91,4 +91,37 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     });
     expect(res).toEqual({ ok: false, error: expect.objectContaining({ code: 'BOT_SKILL_FAILED' }) });
   });
+
+  it('技能列表请求异常 → DomainResult error,不向上抛', async () => {
+    mocked.listBotSkillsByBot.mockRejectedValueOnce(new Error('Not Found'));
+    const res = await botSkillService.hasTaskIntentSkillForBot({
+      realBotId: 'bot-main',
+      currentUserId: 'user-1',
+    });
+    expect(res).toEqual({
+      ok: false,
+      error: {
+        code: 'BOT_SKILL_FAILED',
+        friendlyMessage: 'Not Found',
+        canRetry: true,
+      },
+    });
+  });
+
+  it('match 请求异常 → DomainResult error,不向上抛', async () => {
+    mockedMatch.matchTaskConfig.mockRejectedValueOnce(new Error('Not Found'));
+    const res = await botSkillService.hasTaskIntentSkillForBot({
+      realBotId: 'botX',
+      ownerId: 'other-user',
+      currentUserId: 'user-1',
+    });
+    expect(res).toEqual({
+      ok: false,
+      error: {
+        code: 'BOT_SKILL_FAILED',
+        friendlyMessage: 'Not Found',
+        canRetry: true,
+      },
+    });
+  });
 });

@@ -99,6 +99,22 @@ describe('useTaskExecution relay bootstrap', () => {
     expect(result.current.selections).toEqual([]);
   });
 
+  it('技能探测 Promise 异常 → 安全降级为不可点且不向上抛', async () => {
+    mockedHasTaskIntent.mockRejectedValueOnce(new Error('Not Found'));
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(result.current.dynamicTaskEnabled).toBe(false);
+    act(() => result.current.selectDynamic());
+    expect(result.current.selections).toEqual([]);
+  });
+
   it('中心化任务继续只发送原副屏消息', async () => {
     mockedExecute.mockResolvedValue(taskRecord('centralized'));
     const submitPanelMessage = jest.fn();
