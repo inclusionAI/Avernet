@@ -1,5 +1,6 @@
 """Deployment image snapshots must survive execution and retry boundaries."""
 
+import logging
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -108,15 +109,17 @@ async def test_update_config_write_failure_never_enters_provider_retry(image):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("image", [None, "new:image"])
-async def test_update_continues_when_config_update_affects_zero_rows(image):
+async def test_update_continues_when_config_update_affects_zero_rows(image, caplog):
     service, _, publish, batch = _service(
         snapshot={"deploy_config": {"docker_image": image}}
     )
     service._device_repo.update_device.return_value = 0
 
-    result = await _execute(service, publish, batch, "update")
+    with caplog.at_level(logging.WARNING, logger="core-service"):
+        result = await _execute(service, publish, batch, "update")
 
     assert result.success and result.processed_count == 1
+    assert "Device configuration update affected no rows" in caplog.text
     service._device_service.update_device.assert_awaited_once()
     assert [
         call.kwargs["result_status"]

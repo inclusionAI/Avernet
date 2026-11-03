@@ -3008,13 +3008,19 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     else bot_record.template_uuid,
                     deploy_config=new_bot_config.deploy_config,
                 )
-                device_repo.update_device(
+                updated_rows = device_repo.update_device(
                     device_id=device_record.id,
                     tenant=tenant,
                     env=env,
                     extra_config=new_device_extra_config.model_dump(exclude_none=True),
                     modifier=operator,
                 )
+                if updated_rows == 0:
+                    logger.warning(
+                        f"Device configuration update affected no rows; "
+                        f"continuing update publish (device_id={device_record.id}, "
+                        f"publish_id={publish_record.id}, tenant={tenant}, env={env})"
+                    )
                 image_config_ready = True
                 # Only expose PROCESSING to callback/timeout retries after
                 # the operation's configuration is durable.
