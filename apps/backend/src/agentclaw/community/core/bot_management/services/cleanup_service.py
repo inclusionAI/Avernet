@@ -119,6 +119,10 @@ class BotCleanupService:
             error_msg = f"Cleanup skill_sets error for bot {bot_id}: {e}"
             logger.error(f"[BotCleanupService] {error_msg}")
             result["errors"].append(error_msg)
+            # Membership cleanup is a prerequisite for deleting owned skills.
+            # Continuing after a partial failure obscures the original error and
+            # can leave a different, non-retryable cleanup result.
+            return result
 
         # 3. Delete only assets owned by this exact owner + Bot scope.
         try:

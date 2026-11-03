@@ -136,6 +136,16 @@ def test_bot_cleanup_reports_retained_skills_when_still_in_use(caplog):
     assert any("Retained skill assets" in record.message for record in caplog.records)
 
 
+def test_bot_cleanup_stops_before_skills_when_skill_set_cleanup_fails():
+    service = _make_service()
+    service._skill_set_repo.delete_by_bot_id.side_effect = RuntimeError("db down")
+
+    result = service.cleanup_single_bot_data("bot1", "user1")
+
+    assert result["errors"] == ["Cleanup skill_sets error for bot bot1: db down"]
+    service._skill_repo.delete_by_bot_id.assert_not_called()
+
+
 def test_bot_cleanup_keeps_non_in_use_skill_failures_as_errors():
     service = _make_service()
     service._skill_repo.delete_by_bot_id.side_effect = RuntimeError("db down")
