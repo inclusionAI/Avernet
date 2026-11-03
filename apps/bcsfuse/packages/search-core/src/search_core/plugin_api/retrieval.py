@@ -30,8 +30,12 @@ class RetrievalIndex(Protocol):
 class IndexStatistics(Protocol):
     """Optional exact counts of the currently bound vector and keyword collections.
 
-    Return vector_points and keyword_points. Failures raise; never report zero
+    Return vector_points and keyword_points. With a nonempty index_key, also return
+    vector/keyword_matching_points and vector/keyword_mismatched_points from actual
+    payload filters. Missing payload keys count as mismatched. Counts are collected
+    sequentially, not a transactional snapshot across external Qdrant writers.
+    Failures raise; never report zero
     for an unavailable collection. Counts describe index points, not source Cards.
     """
 
-    def point_counts(self) -> dict[str, int]: ...
+    def point_counts(self, index_key: str = "") -> dict[str, int]: ...
