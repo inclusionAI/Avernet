@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 import { mapDashboard } from '@/assets/TaskPanel/taskPanelMapper';
 import { collectTaskArtifacts } from '@/assets/TaskPanel/v2/TaskArtifactsList';
-import type { TaskArtifactView } from '@/assets/TaskPanel/types';
+import type { TaskArtifactView, TaskView } from '@/assets/TaskPanel/types';
 import type { TaskDashboardResponse } from '@/assets/TaskPanel/contract';
 import { describe, expect, it } from '@jest/globals';
 
@@ -61,6 +61,72 @@ describe('Task artifact relay stage', () => {
   it('保留任务级产物的 node_id', () => {
     const task = mapDashboard(relayTask);
     expect(task.artifacts[0]?.nodeId).toBe('n-second');
+  });
+
+  it('产物列表按棒次分组，棒内按创建时间和产物 ID 正序展示', () => {
+    const makeArtifact = (
+      id: string,
+      nodeId: string,
+      updatedAt: string,
+      sourceOrder: number,
+    ): TaskArtifactView => ({
+      id,
+      name: id,
+      type: 'document',
+      nodeId,
+      updatedAt,
+      sourceOrder,
+    });
+    const makeNode = (id: string, sequence: number, artifacts: TaskArtifactView[]) => ({
+      id,
+      name: id,
+      sequence,
+      status: 'pending',
+      artifacts,
+      hasSubTask: false,
+      stepTraces: [],
+    });
+
+    const task = {
+      id: 'task-artifact-order',
+      name: '产物排序任务',
+      description: '',
+      goal: '',
+      objective: '',
+      acceptances: [],
+      status: 'EXECUTING',
+      taskType: 'dynamic',
+      taskTypeLabel: '',
+      sourceLabel: '',
+      ownerBotName: '',
+      ownerBotId: '',
+      ownerUserId: '',
+      createdAt: '',
+      finishedAt: null,
+      loopRound: 1,
+      needsAttention: false,
+      progress: { total: 2, pending: 2, planning: 0, running: 0, done: 0, failed: 0, hung: 0, skipped: 0, percent: 0 },
+      artifacts: [],
+      nodes: [
+        makeNode('node-first', 0, [
+          makeArtifact('newer-first', 'node-first', '2026-11-01T10:00:00Z', 0),
+          makeArtifact('same-time-10', 'node-first', '2026-11-01T09:00:00Z', 1),
+          makeArtifact('same-time-2', 'node-first', '2026-11-01T09:00:00Z', 2),
+        ]),
+        makeNode('node-second', 1, [
+          makeArtifact('later-second', 'node-second', '2026-11-01T11:00:00Z', 0),
+        ]),
+      ],
+      dagNodes: [],
+      dagEdges: [],
+    } as TaskView;
+
+    expect(collectTaskArtifacts(task).map((artifact) => [artifact.id, artifact.stage])).toEqual([
+      ['same-time-2', 1],
+      ['same-time-10', 1],
+      ['newer-first', 1],
+      ['later-second', 2],
+    ]);
   });
 
   it('产物聚合时按节点展示顺序标记棒次,并以 is_final_artifact 标记最终产物', () => {

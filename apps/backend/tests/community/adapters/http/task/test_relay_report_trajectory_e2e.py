@@ -208,6 +208,7 @@ PLAN_BODY = {
     "relay_token": GENERATION,
     "event_type": "PLAN_RESULT",
     "event": None,
+    "final_conclusion": "业务整体结论：已完成四大维度分析并给出投资判断",
     "failure_reason": None,
     "task_acceptance_result": {
         "verdict": "DONE",

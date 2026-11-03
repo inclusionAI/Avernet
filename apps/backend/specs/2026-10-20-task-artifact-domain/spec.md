@@ -252,7 +252,7 @@ is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付�
 
 | 通道 | 行为 |
 |---|---|
-| **relay(/callback/report)** | 报文顶层 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验。`EXECUTION_RESULT+ACCEPTED` 转 `TaskNodePatch.artifact_patch`;终态 `PLAN_RESULT(event=null)` 转 `TaskReportCommand.artifact_patch` 并在任务收口或 HUNG 停止派发时capture。`PLAN_RESULT(event=TaskNode)` 与 DECLINED 携带即非法;产物与图状态变更同批生效(写入同一原子变更,见 5.1 relay 发布点) |
+| **relay(/callback/report)** | 报文顶层 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验。`EXECUTION_RESULT+ACCEPTED` 转 `TaskNodePatch.artifact_patch`;终态 `PLAN_RESULT(event=null)` 转 `TaskReportCommand.artifact_patch` 并在任务收口或 HUNG 停止派发时capture。`PLAN_RESULT(event=TaskNode)` 与 DECLINED 携带即非法;产物与图状态变更同批生效(写入同一原子变更,见 5.1 relay 发布点)。relay 回调 `artifacts` 只收用户显式要求的 url_link/code 最终非文本交付与节点 text/url_link/code 非文件交付,file 交付必须经 object-file 上传登记;relay 通道不启用 output 端文本双轨,`output_patch.result` 仅作为节点轨迹归因事实输出,终态 PLAN_RESULT 的任务级最终结论改由顶层 `final_conclusion` 进入 `TaskExecutionGraph.output`,均不是 artifact 来源 |
 | 集中 pull / 技能 HTTP push | **协议不动**:报文不加 artifacts 字段,`artifact_patch` 恒为 None;文本双轨产物照常经由 `update_task_node_info` fold 生效 |
 | BBS | 协议不动(其 output 为 BBS 编排文本),文本双轨照常生效 |
 
@@ -572,7 +572,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **token 校验**:与 `require_relay_attempt` 同款恒时比对——路由透传 `relay_token` 进 `upload_object_file` / `add_artifact`,服务在既有图/节点/attempt 交叉校验的同一位置对 `node.run_info.extend_props.relay_token` 做 `hmac.compare_digest`;失配/缺失 → `TaskStateError("relay execution attempt has expired")` → 既有 409 映射,不新增错误类型。代次轮转(重试/重派发时重新 mint)即自然吊销。
 - **creator 派生**:取图上该节点的 `run_info.assignee`(claim 时绑定的 bot_id)为 creator;`assignee` 为空(节点已被派发 token 但无人认领)→ `TaskStateError`,拒绝无认领上下文的写入。**两写口的用户分支现状行为逐字节不动**——object-file 用户分支照旧 creator=登录 `user.id`(`TaskArtifactObjectFileService` 入参);`add_artifact` 用户分支照旧现状(creator=`assignee or "system"`,从不看登录用户,`artifact_api_service.py:169` 既有契约),故 `POST /artifacts` 的 relay 分支只新增 token fence,creator 派生零改动。
 - **归属交叉校验不动**:表单/JSON 的 `task_id/node_id/attempt` 与图交叉校验(§12.1 口径)在两分支下一致;relay_token 是代次 fence,不替代也不放宽 attempt 快照对齐。`POST /artifacts` 补录口的 `session_id` 归属校验两分支共用。
-- **上传即交付**(用户定稿):relay 分支上传/登记成功 = 产物行落库、面板可见;不要求该产物再进 `EXECUTION_RESULT` 报文 `artifacts` 列表(与 §4 引用上报互不排斥,报了也不重复落行——幂等键不变)。
+- **上传即交付**(用户定稿):relay 分支上传/登记成功 = 产物行落库、面板可见;该 file 不得再进 `EXECUTION_RESULT` / 终态 `PLAN_RESULT` 的回调 `artifacts` 列表。回调 artifacts 对终态 PLAN_RESULT 只承载用户显式要求的 url_link/code 等非文本交付;最终结论文本走顶层 final_conclusion。
 
 ### 14.3 读口不动(用户定稿)
 
@@ -592,3 +592,14 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **信任模型与配额**:relay 字节口信任级与 relay attach/result 口一致——生产网络白名单准入 + 代次 fence 即凭证强度,**不引入 per-node 上传配额/频控**(anti-goal,本期留 max_upload_mb 单笔上限;滥用面与 relay 报文同数量级,超出再按运维证据增设)。
 - **relay 读分支预不铺**(14.3 已列 anti-goal,此处重申为勘定项):bot 拉取上游产物字节的需求一旦出现,走新 spec,不在本缝上悄悄扩。
 
+
+## 16. 增补(2026-11-03,用户定稿):轨迹输出、文件交付与最终产物双通道
+
+本节为 relay 产物上行协议的最新执行语义,覆盖前文与本节冲突的旧表述。
+
+1. **轨迹输出**: `EXECUTION_RESULT.event.output_patch.result` 是节点轨迹归因、效果分析和后续棒决策的事实输出,不是 artifact 来源;服务端不再从该值派生 relay text artifact 行。
+2. **文件交付**: 文件形态节点交付产物与最终交付产物必须经 `POST /api/v1/collaboration/tasks/artifacts/object-file` 一步上传并登记产物行。上传成功即完成产物挂账;不得把同一 file item 再写入 `/callback/report.artifacts`。
+3. **回调非文件交付**: 节点 `EXECUTION_RESULT` 的 `artifacts[]` 只承载 `text/url_link/code` 等非文件交付产物。终态 `PLAN_RESULT(event=null)` 的 `artifacts[]` 只承载用户显式要求的 `url_link/code`,不得携带最终 `text` item;仅存在文件交付时,回调可省略 `artifacts` 或传 `[]`;任何回调携带 file item,本次整体按 422 拒绝。
+4. **默认文件格式**: 用户未显式指定输出格式时,节点交付和最终交付默认生成业务命名的 Markdown 文件;用户显式指定 PDF/CSV 等格式时按指定扩展名上传。
+5. **最终产物与结论**: 最后一棒默认通过 object-file 以 `is_final_artifact="true"` 上传最终 Markdown 文件,该文件是唯一默认最终交付产物。终态 `PLAN_RESULT(event=null)` 必须同时携带顶层 `final_conclusion`;它是面向轨迹归因与效果分析的任务级结论文本,本协议不限制其长度。用户可见回复的长度限制由 task-loop S6 指令约束。服务端把它写入 `TaskExecutionGraph.output["final_conclusion"]`,只用于轨迹追踪与效果分析,不创建最终 `text` artifact。
+6. **命名**: 节点交付产物和最终交付产物的 `artifact_name` 必须是业务用户可读的短标题,建议 `<业务对象> <结论/交付类型>`;禁止数字文件名、内部 ID、attempt、Relay/S1~S6 等无业务语义名称。
