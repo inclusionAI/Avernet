@@ -1,5 +1,6 @@
 /** botSkillService — 查询 Bot 的 Skill 列表 + 「任务」入口的意图识别 Skill 探针。 */
 import { listBotSkillsByBot, type BotSkillDto } from '@/services/backendApi/bots/botSkillController';
+import { resolveBotFriendPlatform } from '@/domain/botFriendPlatform';
 import { matchTaskConfig } from '@/services/backendApi/tasks/taskConfigController';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { unwrapEnvelope } from '@/services/tasks/taskMapper';
@@ -41,6 +42,11 @@ function toView(s: BotSkillDto): BotSkillView {
 
 function hasSkill(skills: BotSkillView[], name: string): boolean {
   return skills.some((skill) => skill.active && (skill.name === name || skill.skillId === name));
+}
+
+/** third_party Bot 不是 Teamclaw 本地 Skill 面，不能用 Skills 列表接口做能力探测。 */
+function supportsTaskIntentSkillProbe(botUuid: string): boolean {
+  return resolveBotFriendPlatform(botUuid) !== 'third_party';
 }
 
 /** Bot 是否属当前用户（compound botId 无 owner 尾 → 视为自有 bot，走属主可见的技能列表）。 */
@@ -94,6 +100,10 @@ export const botSkillService = {
     // DomainResult 是本方法的稳定边界：底层列表接口、match 探针、信封解析或防御性
     // 判断异常都必须收敛为可观测的 error，不向调用方抛出，也不触发全局错误 UI。
     try {
+      if (!supportsTaskIntentSkillProbe(botUuid)) {
+        return { ok: true, data: false };
+      }
+
       if (isOwnedByCurrentUser(ownerId, currentUserId)) {
         const res = await botSkillService.listSkillsForBotId(realBotId, currentUserId, ownerId, 1, 100);
         if (!res.ok) return { ok: false, error: res.error };

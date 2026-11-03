@@ -30,6 +30,17 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     jest.clearAllMocks();
   });
 
+  it('third_party Bot 不走 Skills 列表/任务配置探针,直接判不可用', async () => {
+    const res = await botSkillService.hasTaskIntentSkillForBot({
+      realBotId: 'bot_external',
+      botUuid: 'bot_external',
+      currentUserId: 'user-1',
+    });
+    expect(res).toEqual({ ok: true, data: false });
+    expect(mocked.listBotSkillsByBot).not.toHaveBeenCalled();
+    expect(mockedMatch.matchTaskConfig).not.toHaveBeenCalled();
+  });
+
   it('属主 bot(combotId 无 owner 尾)走技能列表,命中 task-intent-recognition → true', async () => {
     mocked.listBotSkillsByBot.mockResolvedValue(
       skillsEnvelope([{ skill_id: 's1', name: 'task-intent-recognition', active: true }]),
