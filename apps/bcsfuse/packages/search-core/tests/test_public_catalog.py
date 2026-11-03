@@ -1,0 +1,155 @@
+"""Real SQLite/Qdrant Local acceptance, with no internal application imports."""
+
+import importlib.util
+import time
+
+from fastapi.testclient import TestClient
+
+
+def local_factory():
+    assert importlib.util.find_spec("search_core.bootstrap"), (
+        "public standalone startup is required"
+    )
+    from search_core.bootstrap.local import create_local_app
+
+    return create_local_app
+
+
+def applied(client, revision, deleted=False):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        response = client.get("/api/v1/agent-cards/demo/index-status")
+        if response.status_code == 200:
+            status = response.json()
+            if (
+                status["local_applied_revision"] == revision
+                and status["deleted"] == deleted
+            ):
+                return status
+        time.sleep(0.05)
+    raise AssertionError(
+        f"Card revision {revision} did not become searchable: {response.text}"
+    )
+
+
+def search(client, query):
+    result = client.post("/api/v2/search", json={"query": query, "limit": 5})
+    assert result.status_code == 200, result.text
+    return result.json()
+
+
+def test_public_write_search_update_delete_and_restart(tmp_path):
+    create = local_factory()
+    with TestClient(
+        create(tmp_path, poll_seconds=0.05),
+        client=("127.0.0.1", 50000),
+        base_url="http://127.0.0.1",
+    ) as client:
+        saved = client.put(
+            "/api/v1/agent-cards/demo",
+            json={"card": {"name": "Nutrition", "description": None}},
+        )
+        assert saved.status_code == 202, saved.text
+        applied(client, saved.json()["saved_revision"])
+        assert client.get("/ready").status_code == 200
+        assert search(client, "nutrition")["items"][0]["id"] == "demo"
+        assert search(client, "nutrition")["items"][0]["summary"] == ""
+        changed = client.put(
+            "/api/v1/agent-cards/demo",
+            json={
+                "card": {"name": "Travel", "description": "railway journey planning"}
+            },
+        )
+        applied(client, changed.json()["saved_revision"])
+        assert search(client, "railway")["items"][0]["name"] == "Travel"
+    # Restore durable artifacts, then delete through the same public endpoint.
+    with TestClient(
+        create(tmp_path, poll_seconds=0.05),
+        client=("127.0.0.1", 50000),
+        base_url="http://127.0.0.1",
+    ) as client:
+        applied(client, changed.json()["saved_revision"])
+        assert search(client, "railway")["items"][0]["id"] == "demo"
+        assert client.delete("/api/v1/agent-cards/demo").status_code == 202
+        state = client.get("/api/v1/agent-cards/demo/index-status").json()
+        applied(client, state["saved_revision"], deleted=True)
+        assert search(client, "railway")["items"] == []
+
+
+def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path):
+    from search_core.catalog.cards import CardSnapshot
+    from search_core.catalog.updates import CardUpdates, configuration_index_key
+    from search_core.plugin_api.card_documents import CardProjection
+    from search_core.plugin_api.index_documents import DocumentText
+    from search_core.providers.demo_embedding import DemoEmbedding
+    from search_core.providers.qdrant_index import QdrantRetrievalIndex
+    from search_core.providers.sql_catalog import sqlite_catalog_repository
+
+    class Converter:
+        version = "business-v1"
+        calls = 0
+
+        def convert(self, card):
+            self.calls += 1
+            docs = [DocumentText("main", card.source_card["name"])]
+            if card.source_card.get("question"):
+                docs.append(DocumentText("question", card.source_card["question"]))
+            return CardProjection(docs, {})
+
+    class Model(DemoEmbedding):
+        calls = 0
+
+        def embed(self, text):
+            self.calls += 1
+            return super().embed(text)
+
+    repository = sqlite_catalog_repository(str(tmp_path / "cards.db"))
+    converter, model = Converter(), Model()
+    card = CardSnapshot(
+        agent_id="demo",
+        source_version="1",
+        source_card={"name": "nutrition", "question": "food labels"},
+    )
+    repository.save(card, 0)
+    for instance in ("first", "restored"):
+        index = QdrantRetrievalIndex(
+            path=str(tmp_path / instance), dimension=model.dimension
+        )
+        try:
+            updates = CardUpdates(
+                repository,
+                model,
+                index,
+                embedding_key="demo/256",
+                instance_id=instance,
+                document_converter=converter,
+            )
+            assert updates.index_key == configuration_index_key(
+                "demo/256", frozenset(), converter
+            )
+            updates.run_once()
+            assert len(index.get_vector_ids()) == 2
+            assert converter.calls == 1 and model.calls == 2
+            if instance == "restored":
+                repository.save(
+                    card.model_copy(
+                        update={
+                            "source_version": "2",
+                            "source_card": {"name": "railway"},
+                        }
+                    ),
+                    1,
+                )
+                updates.run_once()
+                assert len(index.get_vector_ids()) == 1
+                assert converter.calls == 2 and model.calls == 3
+                assert updates.status("demo")["local_applied_revision"] == 2
+                assert (
+                    len(updates.documents.load_by_source("demo")) == 2
+                )  # removed Doc retained as a tombstone
+                repository.delete("demo", 2)
+                updates.run_once()
+                assert not index.get_vector_ids()
+                assert model.calls == 3
+        finally:
+            index.close()
