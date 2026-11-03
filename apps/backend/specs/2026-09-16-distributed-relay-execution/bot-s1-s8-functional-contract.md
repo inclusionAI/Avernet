@@ -665,7 +665,6 @@ class TaskReportCommand:
     trace: TaskReportTrace | None = None
     # 终态 PLAN_RESULT(event=null) 必填；写入 TaskExecutionGraph.output[
     # "final_conclusion"]，仅用于轨迹归因与效果分析，不是产物。
-    # 面向业务用户的最终结论不超过 300 个 Unicode code points。
     final_conclusion: str | None = None
 
 

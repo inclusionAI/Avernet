@@ -601,5 +601,5 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 2. **文件交付**: 文件形态节点交付产物与最终交付产物必须经 `POST /api/v1/collaboration/tasks/artifacts/object-file` 一步上传并登记产物行。上传成功即完成产物挂账;不得把同一 file item 再写入 `/callback/report.artifacts`。
 3. **回调非文件交付**: 节点 `EXECUTION_RESULT` 的 `artifacts[]` 只承载 `text/url_link/code` 等非文件交付产物。终态 `PLAN_RESULT(event=null)` 的 `artifacts[]` 只承载用户显式要求的 `url_link/code`,不得携带最终 `text` item;仅存在文件交付时,回调可省略 `artifacts` 或传 `[]`;任何回调携带 file item,本次整体按 422 拒绝。
 4. **默认文件格式**: 用户未显式指定输出格式时,节点交付和最终交付默认生成业务命名的 Markdown 文件;用户显式指定 PDF/CSV 等格式时按指定扩展名上传。
-5. **最终产物与结论**: 最后一棒默认通过 object-file 以 `is_final_artifact="true"` 上传最终 Markdown 文件,该文件是唯一默认最终交付产物。终态 `PLAN_RESULT(event=null)` 必须同时携带顶层 `final_conclusion`;它是面向业务用户的精炼结论,非空且不超过 300 个 Unicode code points。服务端把它写入 `TaskExecutionGraph.output["final_conclusion"]`,只用于轨迹追踪与效果分析,不创建最终 `text` artifact。
+5. **最终产物与结论**: 最后一棒默认通过 object-file 以 `is_final_artifact="true"` 上传最终 Markdown 文件,该文件是唯一默认最终交付产物。终态 `PLAN_RESULT(event=null)` 必须同时携带顶层 `final_conclusion`;它是面向轨迹归因与效果分析的任务级结论文本,本协议不限制其长度。用户可见回复的长度限制由 task-loop S6 指令约束。服务端把它写入 `TaskExecutionGraph.output["final_conclusion"]`,只用于轨迹追踪与效果分析,不创建最终 `text` artifact。
 6. **命名**: 节点交付产物和最终交付产物的 `artifact_name` 必须是业务用户可读的短标题,建议 `<业务对象> <结论/交付类型>`;禁止数字文件名、内部 ID、attempt、Relay/S1~S6 等无业务语义名称。

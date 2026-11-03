@@ -191,9 +191,6 @@ def _step_contains_relay_token(step: TaskReportTraceStepDTO, relay_token: str) -
     )
 
 
-_MAX_FINAL_CONCLUSION_CHARS = 300
-
-
 class TaskReportCommandDTO(BaseModel):
     """Two-event Relay report command; ``trace`` is optional on the wire.
 
@@ -269,10 +266,6 @@ class TaskReportCommandDTO(BaseModel):
                     "terminal PLAN_RESULT requires final_conclusion for trajectory analysis"
                 )
             final_conclusion = final_conclusion.strip()
-            if len(final_conclusion) > _MAX_FINAL_CONCLUSION_CHARS:
-                raise TaskStateError(
-                    "terminal PLAN_RESULT final_conclusion exceeds 300 characters"
-                )
             terminal_artifact_patch = (
                 parse_artifact_report_items(
                     [item.model_dump() for item in self.artifacts],

@@ -485,14 +485,6 @@ class TestRelayDtoContract:
         ):
             _terminal_plan_dto(final_conclusion=None).to_domain()
 
-    def test_terminal_plan_result_rejects_too_long_final_conclusion(self):
-        with pytest.raises(
-            TaskStateError, match="final_conclusion exceeds 300 characters"
-        ):
-            _terminal_plan_dto(final_conclusion="好" * 301).to_domain()
-
-        assert _terminal_plan_dto(final_conclusion="好" * 300).to_domain()
-
     def test_terminal_plan_result_rejects_text_as_final_conclusion_artifact(self):
         text_final = _wire_item(
             artifact_kind="text",
