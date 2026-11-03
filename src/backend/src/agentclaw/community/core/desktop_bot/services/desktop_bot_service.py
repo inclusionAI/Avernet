@@ -935,6 +935,21 @@ class DesktopBotService:
                     logger.warning(
                         "[DesktopBotService.delete] approve failed: %s", e,
                     )
+        except BaasServiceError as e:
+            err_msg = str(e)
+            if "INVALID_REQUEST" in err_msg and "No eligible devices" in err_msg:
+                logger.warning(
+                    "[DesktopBotService.delete] BaaS destroy_bot skipped "
+                    "(no eligible devices), proceeding with local cleanup: "
+                    "bot_id=%s device_id=%s error=%s",
+                    bot_id, device_id, e,
+                )
+            else:
+                logger.error(
+                    "[DesktopBotService.delete] BaaS destroy_bot failed, "
+                    "proceeding with local cleanup: bot_id=%s device_id=%s error=%s",
+                    bot_id, device_id, e,
+                )
         except Exception as e:
             logger.error(
                 "[DesktopBotService.delete] BaaS destroy_bot failed, "
