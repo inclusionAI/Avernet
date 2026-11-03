@@ -359,8 +359,12 @@ AuthRefreshPath:
           configured for the facade. A missing, duplicated, malformed,
           or untrusted Origin is rejected 403 — the Gateway identity
           never substitutes for the cookie and Origins are never inferred
-          from Host/Referer.
-        x-error-codes: [browser_origin_untrusted]
+          from Host/Referer. A strictly verified session from a provider
+          outside the explicit V1 OAuth chain, or a foreign environment,
+          is rejected with session_forbidden before signing or rotating;
+          no Set-Cookie is issued on refusal. Logout can still revoke a
+          disabled provider's session.
+        x-error-codes: [browser_origin_untrusted, session_forbidden]
         content:
           application/json:
             schema:

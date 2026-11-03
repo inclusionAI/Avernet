@@ -450,3 +450,60 @@ async fn issued_session_redaction_and_sizing() {
     assert_ne!(claims.session_id, second.session_id);
     assert_eq!(second.revision, claims.revision + 1);
 }
+
+#[tokio::test]
+async fn refresh_provider_policy_runs_on_verified_state_before_any_write() {
+    let identities = Arc::new(TestSessionIdentity::new());
+    let engine = engine_for(&identities, IDLE_SECS);
+    let scope = registered_scope(&identities).await;
+    let issued = engine.install(scope.clone(), None, NOW).await.expect("install");
+    let before = identities.current_version(&scope);
+    let result = engine.refresh_with_provider_check(&issued.token, NOW, |provider| {
+        assert_eq!(provider, PROVIDER);
+        false
+    }).await;
+    assert!(matches!(result, Err(SessionAuthError::Forbidden)));
+    assert_eq!(count_op(&identities, "get_session_by_hash"), 1);
+    assert_eq!(count_op(&identities, "rotate_session"), 0);
+    assert_eq!(identities.current_version(&scope), before);
+
+    // An allowed request reuses its verification read, then rotates exactly once.
+    let rotated = engine.refresh_with_provider_check(&issued.token, NOW, |provider| {
+        provider == PROVIDER
+    }).await.expect("allowed refresh");
+    assert_ne!(rotated.token, issued.token);
+    assert_eq!(count_op(&identities, "get_session_by_hash"), 2);
+    assert_eq!(count_op(&identities, "rotate_session"), 1);
+}
+
+#[tokio::test]
+async fn refresh_provider_policy_never_sees_invalid_or_unbound_credentials() {
+    let identities = Arc::new(TestSessionIdentity::new());
+    let engine = engine_for(&identities, IDLE_SECS);
+    let scope = registered_scope(&identities).await;
+    let issued = engine.install(scope, None, NOW).await.expect("install");
+    for (token, now) in [
+        ("malformed".to_string(), NOW),
+        (issued.token, NOW + IDLE_SECS),
+        (sign_for_seed("unbound", 1, NOW + IDLE_SECS), NOW),
+    ] {
+        let result = engine.refresh_with_provider_check(&token, now, |_| {
+            panic!("policy must never inspect an unverified provider")
+        }).await;
+        assert!(matches!(result, Err(SessionAuthError::Invalid)));
+    }
+    assert_eq!(count_op(&identities, "rotate_session"), 0);
+}
+
+#[tokio::test]
+async fn allowed_provider_cannot_bypass_a_lost_refresh_cas() {
+    let identities = Arc::new(TestSessionIdentity::new());
+    let engine = engine_for(&identities, IDLE_SECS);
+    let scope = registered_scope(&identities).await;
+    let issued = engine.install(scope, None, NOW).await.expect("install");
+    identities.force_rotate_conflict();
+    let result = engine.refresh_with_provider_check(&issued.token, NOW, |_| true).await;
+    assert!(matches!(result, Err(SessionAuthError::Invalid)));
+    assert_eq!(count_op(&identities, "get_session_by_hash"), 1);
+    assert_eq!(count_op(&identities, "rotate_session"), 1);
+}

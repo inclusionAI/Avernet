@@ -146,7 +146,8 @@ impl std::fmt::Debug for IssuedSession {
 pub enum SessionAuthError {
     #[error("invalid session credential")]
     Invalid,
-    #[error("session credential not accepted in this environment")]
+    /// The deployment environment or the entry's provider policy refuses it.
+    #[error("session credential not accepted by this authentication policy")]
     Forbidden,
     #[error("session identity store unavailable")]
     Unavailable,

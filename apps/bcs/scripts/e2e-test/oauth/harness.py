@@ -169,12 +169,13 @@ class Environment:
             self.gateway_key, {'alg': 'HS256', 'typ': 'JWT', 'kid': 'bare'})
 
     @contextmanager
-    def server(self, config, root, base, memory=False):
+    def server(self, config, root, base, memory=False, *, process_env=None):
         path = root / 'bcs-config.json'
         path.write_text(json.dumps(config))
         with (root / 'server.log').open('w') as log:
             command = [self.binary, '-c', str(path)] + (['--memory'] if memory else [])
-            process = subprocess.Popen(command, cwd=root, env=self.env(), stdout=log, stderr=log)
+            process = subprocess.Popen(command, cwd=root,
+                env=self.env() if process_env is None else process_env, stdout=log, stderr=log)
             succeeded = False
             try:
                 browser = self.browser()

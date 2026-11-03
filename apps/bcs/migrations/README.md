@@ -647,12 +647,29 @@ sessions (see `api-contracts/v1/authentication/contract.md` §4):
 
 ### Rollback runbook
 
-- **Close the OAuth lifecycle entry first:** remove `[api.auth]` — the
-  chain degrades to gateway-only business authentication and the login
-  family fails closed with `auth_not_configured` while `/user` keeps
-  resolving Humans through the remaining sources. Group-session signing
-  and the `friend_auth_sync` resigner keep their own independent secret
-  contracts and stay working.
+- **Choose compatibility rollback or OAuth shutdown explicitly.** Removing
+  `[api.auth]` restores Gateway-only business authentication, but it does NOT
+  close OAuth: when `[auth.oauth]` still has usable providers, BOTH legacy
+  `/auth/*` and the compatibility `/openapi/v1/auth/*` lifecycle remain live.
+  Restore the legacy `[gateway_principal]` secret/config before this rollback.
+- **To close only the V1 OAuth lifecycle**, keep an explicit gateway-only
+  `[api.auth]` with `chain = ["gateway"]` and the required
+  `[api.auth.gateway].signing_key_secret`. Remove OAuth-only public fields
+  (`public_base_url`, `session_signing_key_secret`, `success_redirect_path`,
+  `session_idle_timeout_minutes`) and `trusted_browser_origins` from the final
+  merged section; gateway-only configuration rejects them. After restarting,
+  V1 URL/callback/refresh/logout must return `auth_not_configured` 404, while
+  V1 `/user` still accepts a valid Gateway Human. Legacy OAuth is unaffected.
+- **To close ALL OAuth lifecycle writers**, also remove `[auth.oauth]` and
+  remove `oauth_session` from the legacy `[auth].chain` (retain the deployment's
+  explicitly approved non-OAuth sources), or block and drain both route
+  families at ingress before any binary rollback. Account for base/overlay
+  merging: deleting an overlay key does not erase a base-file provider table.
+  After restart, verify URL/callback/refresh/logout are unavailable on BOTH
+  route families. Disabling routes alone does not revoke existing sessions
+  or invalidate offline JWT readers; apply the deployment's session-revocation
+  procedure as needed. Group-session signing and the `friend_auth_sync`
+  resigner retain their independent configuration/secret contracts.
 - **Never roll binaries back across the writer boundary.** Binary rollback
   must be coordinated with the configuration AND the JWT/schema
   compatibility policy: the `session_id`/`session_revision` columns and

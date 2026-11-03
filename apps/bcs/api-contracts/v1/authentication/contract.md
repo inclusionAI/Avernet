@@ -25,6 +25,7 @@ errors carry `data.error_code`. Status families:
 | 401 | 40100 | `unauthenticated` | No source matched, or the presented session is invalid/expired/revoked/superseded — INCLUDING a lost refresh rotation race (never a 500) |
 | 403 | 40300 | `forbidden` | A verified identity is rejected by source policy on the protected surface (final — the chain is never re-entered) |
 | 403 | 40300 | `forbidden` | Pinned current behavior: an ordinary cookie-authenticated write on any OTHER protected route whose browser Origin fails the per-source CSRF gate also surfaces as plain 403 `forbidden` — only the login-family writes `/auth/refresh` and cookie-bearing `/auth/logout` use the distinct `browser_origin_untrusted` code below |
+| 403 | 40300 | `session_forbidden` | Refresh rejected because the verified session provider is not enabled in the explicit V1 OAuth chain, or its environment is not accepted; no rotation and no session cookie |
 | 403 | 40300 | `browser_origin_untrusted` | Cookie-authenticated unsafe write (`/auth/refresh`, cookie-bearing `/auth/logout`) with a missing, malformed, or untrusted Origin |
 | 404 | 40400 | `auth_not_configured` / `provider_not_found` / `provider_not_enabled` | No OAuth source configured, or the callback path names a provider outside the enabled chain |
 | 409 | 40900 | `login_session_conflict` | A concurrent login replaced this identity's session instance between the revision read and the atomic install; the browser restarts the login batch |
@@ -90,6 +91,10 @@ JWT whose REQUIRED claims are:
 - `iat`, `exp` — unix seconds; `exp` is enforced inclusively;
 - `name` — OPTIONAL display snapshot; verification joins the live identity row.
 
+Both login entries use the configuration loader's environment resolution,
+including its `local` fallback when the environment variables are absent or
+unrecognized; changing the entry must not create another identity namespace.
+
 Legacy tokens without `env`/`session_id`/`revision` are rejected by the
 strict verifier and by the refresh/revoke paths — the 2026-11 security
 upgrade invalidates them; users must re-login. External JWT-only verifiers
@@ -118,6 +123,14 @@ Lifecycle writes are compare-and-swap and atomic per instance:
 - `revoke_session` (logout) — revokes BY session instance, killing the
   rotated descendant too; a stale logout of an already-replaced instance is
   an idempotent success and cannot touch a newer login.
+
+Explicit V1 refresh additionally checks the provider from the strictly verified
+session against the configured OAuth allowlist before signing or writing. A
+valid session from a disabled provider returns 403 `session_forbidden`, without
+`Set-Cookie` or a rotation UPDATE. Verification still costs one session SELECT;
+an allowed refresh adds exactly one CAS UPDATE. A Gateway credential cannot
+substitute for this policy. Legacy/compat refresh keeps its own selection, and
+logout remains available for a disabled provider so its session can be revoked.
 
 Cookies:
 
@@ -174,7 +187,11 @@ avatar keep returning null.
   shared pending-login state store, or explicit single-instance/sticky
   routing. Without one of them the OAuth source must stay disabled.
 - Rollback: removing `[api.auth]` returns to the compatibility assembly,
-  but never to unconditional identity/session writes; the schema (sid/revision
+  including its OAuth lifecycle routes when `[auth.oauth]` still configures
+  providers. It does NOT close either OAuth entry. Use explicit gateway-only
+  `[api.auth]` to close V1 login-family routes, and disable legacy OAuth or
+  block both entries to close every writer (see the migration rollback runbook).
+  Compatibility never restores unconditional identity/session writes; the schema (sid/revision
   columns) and the session JWT contract persist. Pre-upgrade sid-less
   sessions are invalidated in either direction — re-login is the recovery.
 - The identity model stays: `ensure_identity` per

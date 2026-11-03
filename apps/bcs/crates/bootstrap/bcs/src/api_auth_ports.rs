@@ -138,6 +138,8 @@ pub struct StrictSessionPortBridge {
     engine: Arc<bcs_auth_oauth::OAuthSessionEngine>,
     identities: Arc<dyn AuthSessionIdentityPort>,
     env: String,
+    // None preserves the independent legacy/compat refresh policy.
+    refresh_provider_allowlist: Option<Vec<String>>,
 }
 
 impl StrictSessionPortBridge {
@@ -150,7 +152,16 @@ impl StrictSessionPortBridge {
             engine,
             identities,
             env,
+            refresh_provider_allowlist: None,
         }
+    }
+
+    /// Restrict explicit V1 refresh to its configured OAuth sources. An empty
+    /// allowlist denies every refresh; it never means the legacy policy.
+    /// Logout remains unrestricted so a disabled source's session can be revoked.
+    pub fn with_refresh_provider_allowlist(mut self, providers: Vec<String>) -> Self {
+        self.refresh_provider_allowlist = Some(providers);
+        self
     }
 }
 
@@ -163,7 +174,7 @@ fn session_category(error: SessionAuthError) -> ApplicationError {
         SessionAuthError::Invalid => ApplicationError::Unauthenticated,
         SessionAuthError::Forbidden => ApplicationError::forbidden_code(
             "session_forbidden",
-            "session credential not accepted in this environment",
+            "session credential not accepted by this authentication policy",
         ),
         SessionAuthError::Unavailable => ApplicationError::unavailable(
             "auth_dependency_unavailable",
@@ -223,7 +234,11 @@ impl OAuthSessionPort for StrictSessionPortBridge {
     async fn refresh(&self, token: &str, now: u64) -> Result<BrowserSession, ApplicationError> {
         let issued = self
             .engine
-            .refresh(token, now)
+            .refresh_with_provider_check(token, now, |provider| {
+                self.refresh_provider_allowlist.as_ref().map_or(true, |allowed| {
+                    allowed.iter().any(|name| name == provider)
+                })
+            })
             .await
             .map_err(session_category)?;
         Ok(browser_session(issued))

@@ -249,6 +249,13 @@ class RefreshContract(unittest.TestCase):
             "cookie-authenticated unsafe writes require a trusted Origin (403)",
         )
 
+    def test_disabled_provider_refresh_is_403_without_issuance(self):
+        operation = _operation(self.contract, "refresh_auth_session")
+        response = operation["responses"]["403"]
+        self.assertIn("session_forbidden", response.get("x-error-codes", []))
+        self.assertIn("outside the explicit V1 OAuth chain", response["description"])
+        self.assertIn("no Set-Cookie", response["description"])
+
 
 class LogoutContract(unittest.TestCase):
     """POST /openapi/v1/auth/logout — atomic revoke, no best-effort success."""

@@ -289,3 +289,61 @@ async fn current_user_preserves_the_stored_avatar_with_one_strict_select() {
             "display projection must not perform a second credential lookup");
     }
 }
+
+#[tokio::test]
+async fn refresh_rejects_disabled_provider_without_writing_or_issuing_a_cookie() {
+    let mut spec = FixtureSpec::standard();
+    spec.chain = vec!["google", "gateway"];
+    spec.table_fragments.push((
+        "google".to_string(),
+        "client_id = \"google-refresh-test\"\nclient_secret_secret = \"google-refresh-secret\"".to_string(),
+    ));
+    spec.secrets.push(("google-refresh-secret".to_string(), "test-value".to_string()));
+    let fixture = ApiChainFixture::assemble(spec).await;
+    // A shared legacy session is valid, but GitHub is not enabled in V1.
+    let seeded = fixture.seed_session("disabled-provider-refresh").await;
+    for gateway in [false, true] {
+        let mut headers = session_headers(&seeded.token);
+        if gateway {
+            headers.push(("x-avernet-principal", api_chain::gateway_user_principal_token("gateway-user")));
+        }
+        fixture.db.reset_counts();
+        let rejected = drive(&fixture.v1_router, "POST", V1_REFRESH, &headers).await;
+        assert_eq!(rejected.status, StatusCode::FORBIDDEN);
+        assert_eq!(rejected.body["data"]["error_code"], "session_forbidden");
+        assert_no_session_cookie(&rejected);
+        assert_eq!(fixture.db.control.strict_selects.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.db.control.rotates.load(Ordering::SeqCst), 0);
+    }
+    // The refusal did not modify the shared session; legacy refresh remains
+    // independent of the explicit V1 provider selection.
+    fixture.db.reset_counts();
+    let legacy = drive(
+        &fixture.legacy_router, "POST", LEGACY_REFRESH, &session_headers(&seeded.token),
+    ).await;
+    assert_eq!(legacy.status, StatusCode::OK);
+    assert_eq!(fixture.db.control.strict_selects.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.db.control.rotates.load(Ordering::SeqCst), 1);
+    // Disabled providers must still be able to revoke their own sessions.
+    let logout = drive(
+        &fixture.v1_router, "POST", "/openapi/v1/auth/logout",
+        &session_headers(&api_chain::rotated_token_of(&legacy)),
+    ).await;
+    assert_eq!(logout.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn allowed_provider_refresh_keeps_one_select_and_one_cas() {
+    let fixture = ApiChainFixture::assemble(FixtureSpec::standard()).await;
+    let seeded = fixture.seed_session("allowed-provider-refresh").await;
+    fixture.db.reset_counts();
+    let response = drive(
+        &fixture.v1_router, "POST", V1_REFRESH, &session_headers(&seeded.token),
+    ).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_ne!(api_chain::rotated_token_of(&response), seeded.token);
+    assert_eq!(fixture.db.control.strict_selects.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.db.control.rows_returned.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.db.control.rotates.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.db.control.applied_rotates.load(Ordering::SeqCst), 1);
+}

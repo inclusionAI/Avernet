@@ -43,6 +43,13 @@ codes live only in a temporary directory/in memory and are not artifacts.
   untrusted origins and first-success chain precedence.
 - Deployment compatibility: absent `[api.auth]`, gateway-only, gateway-first,
   OAuth-only/disabled provider and independent explicit versus legacy origins.
+- Default environment: with all environment-selection variables absent, both
+  entry families retain `local`, the same internal user ID, and cross-entry
+  refresh/revoke behavior over both SQLite and memory.
+- Rollback: removing `[api.auth]` restores the compatibility OAuth facade;
+  explicit gateway-only closes V1 only; disabling legacy OAuth too closes both.
+  Disabled-provider refresh is rejected without a new cookie, while legacy
+  refresh and logout remain governed by their independent contracts.
 - Pending-state capacity: fill the public URL endpoint to its documented limit,
   reject excess issuance with 503 without a cookie, then complete an existing
   login to prove saturation neither evicts live batches nor prevents recovery.

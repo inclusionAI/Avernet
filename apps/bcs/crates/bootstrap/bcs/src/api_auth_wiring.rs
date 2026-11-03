@@ -513,7 +513,7 @@ pub async fn assemble_v1_api_auth(
                 Arc::clone(&oauth_context.engine),
                 Arc::clone(&identities),
                 env,
-            ));
+            ).with_refresh_provider_allowlist(oauth_context.allowed_providers.clone()));
             let pending = Arc::new(crate::api_auth_ports::PendingLoginStoreBridge::new(Arc::new(
                 bcs_auth_oauth::MemoryPendingOAuthLoginStore::new(),
             )));
@@ -563,7 +563,8 @@ pub async fn select_v1_authentication(
                 .to_string(),
         ));
     };
-    let env = crate::env::resolve_env().as_str().to_string();
+    // Match the legacy OAuth identity namespace, including the local fallback.
+    let env = crate::config_loader::Environment::resolve().as_str().to_string();
     let built = assemble_v1_api_auth(
         auth,
         &production_registrations(),

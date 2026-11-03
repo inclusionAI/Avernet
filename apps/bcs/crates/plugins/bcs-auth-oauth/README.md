@@ -47,6 +47,18 @@ store is likewise consumed atomically: the first consume of any provider
 state invalidates the whole batch, and a cross-browser consume never burns
 the initiating browser's record.
 
+### Refresh provider policy
+
+The explicit V1 bootstrap bridge injects its configured OAuth allowlist through
+`OAuthSessionEngine::refresh_with_provider_check`. The callback receives only the
+provider from the fully verified current session, after signature, environment,
+hash and sid/revision validation. It runs before signing or CAS; denial returns
+`SessionAuthError::Forbidden` without a write or credential. The engine does not
+select providers or read configuration. Legacy `refresh` keeps its independent
+policy, and revoke deliberately has no provider filter. Allowed refresh remains
+one indexed session SELECT (at most one row) and one CAS UPDATE; a policy denial
+uses one SELECT and zero writes, with no retry or cross-request cache.
+
 ### Pending-login resource bounds
 
 The memory store holds at most 4,096 provider states (including all states of

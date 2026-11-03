@@ -117,6 +117,21 @@ impl OAuthSessionEngine {
     /// return IssuedSession only after Applied
     /// ```
     pub async fn refresh(&self, token: &str, now: u64) -> Result<IssuedSession, SessionAuthError> {
+        self.refresh_with_provider_check(token, now, |_| true).await
+    }
+
+    /// Rotate only if the entry's provider policy accepts the STRICTLY verified
+    /// session. The registering wrapper owns the policy; the engine runs it
+    /// after signature/env/hash/version checks and before signing or CAS.
+    /// Rejection is Forbidden, spends one SELECT and performs no write. Allowed
+    /// refresh still spends one SELECT plus one CAS; no second verification or
+    /// retry is introduced. Legacy callers use `refresh` without a source filter.
+    pub async fn refresh_with_provider_check(
+        &self,
+        token: &str,
+        now: u64,
+        accepts_provider: impl FnOnce(&str) -> bool + Send,
+    ) -> Result<IssuedSession, SessionAuthError> {
         let claims = self
             .jwt
             .verify_at(token, now)
@@ -136,6 +151,10 @@ impl OAuthSessionEngine {
             || snapshot.version.revision != claims.revision
         {
             return Err(SessionAuthError::Invalid);
+        }
+
+        if !accepts_provider(&snapshot.scope.provider) {
+            return Err(SessionAuthError::Forbidden);
         }
 
         let next_rev = next_revision(snapshot.version.revision)?;

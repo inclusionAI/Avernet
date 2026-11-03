@@ -67,10 +67,13 @@ async fn second_connection_on_the_conformance_database(
         .with_statement_protocol(StatementProtocol::Text);
     config.pool_size = 4;
     config.min_pool_size = 1;
+    // Plugin keys address registered data sources, not individual connections.
+    // The new manager already gives this race party its own connection pool.
+    let datasource_name = config.datasource_name();
     let manager = MysqlDbManager::new(config).await.expect(
         "open the SECOND independent MySQL connection for the auth-session race",
     );
-    Arc::new(MysqlDbPlugin::new(manager, "bcs-race-connection"))
+    Arc::new(MysqlDbPlugin::new(manager, datasource_name))
 }
 
 fn version(session_id: &str, revision: u64, token_hash: &str) -> AuthSessionVersion {

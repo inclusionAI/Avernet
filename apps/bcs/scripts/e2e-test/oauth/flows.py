@@ -182,7 +182,15 @@ def compatibility(env):
         a = env.browser()
         a.login(base, 'github', family=LEGACY)
         user(a, base, expected=403)
+        before = a.cookie()
+        body, headers, _ = a.request('POST', base + V1 + '/refresh', 403, {'Origin': base})
+        assert body['data']['error_code'] == 'session_forbidden'
+        assert not headers.get_all('Set-Cookie') and a.cookie() == before
         user(a, base, family=LEGACY)
+        a.request('POST', base + LEGACY + '/refresh', headers={'Origin': base})
+        assert a.cookie() != before  # Legacy selection is independent.
+        a.request('POST', base + V1 + '/logout', headers={'Origin': base})
+        user(a, base, expected=401, family=LEGACY)
         b = env.browser()
         b.login(base, 'google')
         assert user(b, base)['provider'] == 'google'

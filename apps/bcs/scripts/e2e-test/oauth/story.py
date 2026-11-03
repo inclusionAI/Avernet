@@ -7,6 +7,7 @@ import tempfile
 from provider_stub import provider_stub
 from harness import Environment
 from config_cases import invalid_configs
+from regressions import default_environment, rollback_modes
 from flows import lifecycle, browser_binding, rejection_and_precedence, compatibility, concurrent_refresh, pending_capacity
 
 
@@ -34,6 +35,10 @@ def main():
                     result['scenarios'].append('mixed-' + ('memory' if memory else 'sqlite'))
                 compatibility(env)
                 result['scenarios'].append('compatibility-and-chain-selection')
+                default_environment(env)
+                result['scenarios'].append('default-environment')
+                rollback_modes(env)
+                result['scenarios'].append('rollback-modes')
                 pending_capacity(env)
                 result['scenarios'].append('pending-capacity')
                 invalid_configs(env)
