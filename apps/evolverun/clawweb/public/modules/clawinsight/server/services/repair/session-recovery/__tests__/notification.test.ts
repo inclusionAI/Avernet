@@ -349,30 +349,29 @@ it("checks the independent Owner notification switch on each send", async () => 
   expect(await notifier.notify(input)).toBe(false);
   expect(sender.sendNotification).not.toHaveBeenCalled();
   config.findByKey.mockResolvedValue({ enabled: 1, config_json: "{}" });
-  expect(await notifier.notify(input)).toBe(false);
-  expect(sender.sendNotification).not.toHaveBeenCalled();
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: '{"default_enabled":true}' });
   expect(await notifier.notify(input)).toBe(true);
   expect(config.findByKey).toHaveBeenLastCalledWith(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
   expect(sender.sendNotification).toHaveBeenCalledOnce();
   expect(sender.sendNotification.mock.calls[0][0]).toMatchObject({ recipientUserId: "owner", title: "会话自愈方案待确认" });
-  config.findByKey.mockResolvedValue({ enabled: 0, config_json: '{"default_enabled":true}' });
+  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
   expect(await notifier.notify(input)).toBe(false);
   expect(sender.sendNotification).toHaveBeenCalledOnce();
 });
 
 it.each([
-  [{}, false],
-  [{ default_enabled: false }, false],
-  [{ default_enabled: true }, true],
-  [{ bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: true }] }, true],
-  [{ default_enabled: false, bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: true }] }, true],
-  [{ default_enabled: true, bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: false }] }, false],
-  [{ bot_overrides: [{ bot_id: "other", entity_id: "001234", env: "prod", enabled: true }] }, false],
-  [{ default_enabled: true, bot_overrides: [{ bot_id: "other", entity_id: "001234", env: "prod", enabled: false }] }, true],
-])("requires an explicit matching or default Owner notification grant: %j", async (policy, allowed) => {
+  [0, {}, false],
+  [1, {}, true],
+  [0, { bot_overrides: [] }, false],
+  [1, { bot_overrides: [] }, true],
+  [0, { bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: true }] }, true],
+  [1, { bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: true }] }, true],
+  [0, { bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: false }] }, false],
+  [1, { bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: false }] }, false],
+  [0, { bot_overrides: [{ bot_id: "other", entity_id: "001234", env: "prod", enabled: true }] }, false],
+  [1, { bot_overrides: [{ bot_id: "other", entity_id: "001234", env: "prod", enabled: false }] }, true],
+])("uses a matching Bot override before the enabled default %s: %j", async (enabled, policy, allowed) => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify(policy) }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled, config_json: JSON.stringify(policy) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
   for (const kind of ["plan", "result"] as const) {
     expect(await notifier.notify({ ownerId: "001234", botId: "default", targetEnvironment: "prod", taskId: "SR-owner", kind, summary: "处理事项" })).toBe(allowed);
@@ -387,7 +386,7 @@ it.each([
   ["default", "1234", "prod"],
 ] as const)("keeps Bot overrides scoped to the exact Bot, Owner and target environment: %s/%s/%s", async (botId, ownerId, targetEnvironment) => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 0, config_json: JSON.stringify({
     bot_overrides: [{ bot_id: "default", entity_id: "001234", env: "prod", enabled: true }],
   }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
@@ -397,47 +396,50 @@ it.each([
 
 it("rechecks Bot overrides for subsequent notification events without replaying skipped sends", async () => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 0, config_json: "{}" }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
   const input = { ownerId: "owner", botId: "bot", targetEnvironment: "prod" as const, taskId: "SR-owner", kind: "result" as const, summary: "处理事项" };
   expect(await notifier.notify(input)).toBe(false);
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ bot_overrides: [
+  config.findByKey.mockResolvedValue({ enabled: 0, config_json: JSON.stringify({ bot_overrides: [
     { bot_id: "bot", entity_id: "owner", env: "prod", enabled: true },
   ] }) });
   expect(await notifier.notify(input)).toBe(true);
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: "{}" });
+  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
   expect(await notifier.notify(input)).toBe(false);
   expect(sender.sendNotification).toHaveBeenCalledOnce();
 });
 
 it.each([
+  "",
   "PRIVATE_CONFIG_NOT_JSON",
   "null",
   "[]",
-  '{"default_enabled":"true"}',
-  '{"default_enabled":true,"unknown":true}',
-  '{"default_enabled":true,"bot_overrides":{}}',
-  '{"default_enabled":true,"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod"}]}',
-  '{"default_enabled":true,"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"dev","enabled":true}]}',
-  '{"default_enabled":true,"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":"true"}]}',
-  '{"default_enabled":true,"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":true},null]}',
-  '{"default_enabled":true,"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":true},{"bot_id":"default","entity_id":"owner","env":"prod","enabled":false}]}',
+  '{"unknown":true}',
+  '{"bot_overrides":{}}',
+  '{"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod"}]}',
+  '{"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"dev","enabled":true}]}',
+  '{"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":"true"}]}',
+  '{"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":true},null]}',
+  '{"bot_overrides":[{"bot_id":"default","entity_id":"owner","env":"prod","enabled":true},{"bot_id":"default","entity_id":"owner","env":"prod","enabled":false}]}',
 ])("fails closed for invalid Owner notification policies without exposing the config: %s", async config_json => {
   vi.mocked(logRepairEvent).mockClear();
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json }) };
+  const config = { findByKey: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
-  expect(await notifier.notify({ ownerId: "owner", botId: "default", targetEnvironment: "prod", taskId: "SR-owner", kind: "result", summary: "处理事项" })).toBe(false);
+  for (const enabled of [0, 1]) {
+    config.findByKey.mockResolvedValue({ enabled, config_json });
+    expect(await notifier.notify({ ownerId: "owner", botId: "default", targetEnvironment: "prod", taskId: "SR-owner", kind: "result", summary: "处理事项" })).toBe(false);
+  }
   expect(sender.sendNotification).not.toHaveBeenCalled();
   expect(logRepairEvent).toHaveBeenCalledWith("session-recovery", "session_recovery_notification", "configuration_invalid", expect.objectContaining({
     taskId: "SR-owner", botId: "default", targetEnvironment: "prod", operation: "result",
   }));
-  expect(JSON.stringify(vi.mocked(logRepairEvent).mock.calls)).not.toContain(config_json);
+  if (config_json) expect(JSON.stringify(vi.mocked(logRepairEvent).mock.calls)).not.toContain(config_json);
 });
 
-it("does not let an explicit Bot grant bypass the disabled Owner notification master switch", async () => {
+it.each([-1, 2, "1", null])("fails closed for an invalid enabled default even with a matching Bot grant: %s", async enabled => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 0, config_json: JSON.stringify({ default_enabled: true,
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled, config_json: JSON.stringify({
     bot_overrides: [{ bot_id: "bot", entity_id: "owner", env: "prod", enabled: true }],
   }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
@@ -462,7 +464,7 @@ it("notifies user handoff after intervention without claiming business recovery"
 
 it("reuses the direct Owner DingTalk channel for ended permission cases without an approval link label", async () => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: '{"default_enabled":true}' }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
   await expect(notifier.notify({ ownerId: "owner-fixture", botId: "bot", targetEnvironment: "prod", taskId: "SR-permission", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
   expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner-fixture", title: "会话自愈需要人工处理",
@@ -474,7 +476,7 @@ it("reuses the direct Owner DingTalk channel for ended permission cases without 
 
 it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: '{"default_enabled":true}' }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
   await notifier.notify({ ownerId: "owner", botId: "bot", targetEnvironment: "prod", taskId: "SR-suggestion", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
   expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner", title: "会话自愈已恢复，有后续建议",
