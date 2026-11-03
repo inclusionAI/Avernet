@@ -13,6 +13,7 @@ import {
 } from '@/services/botScheduledTasks/types';
 import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import { useEffect, useState, type ReactNode } from 'react';
+import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
 export const formatTime = (value?: string) =>
   value
     ? Number.isNaN(Date.parse(value))
@@ -32,6 +33,7 @@ export function RoutineDetail({
   revision: number;
   actions: (task: ManagedRoutine) => ReactNode;
 }) {
+  const now = useRoutineClock();
   const [detail, setDetail] = useState<ManagedRoutine>();
   const [history, setHistory] = useState<RuntimePage<RoutineRun>>({ items: [], total: 0, failed_targets: [] });
   const [detailError, setDetailError] = useState('');
@@ -68,7 +70,7 @@ export function RoutineDetail({
       active = false;
     };
   }, [client, context, key, page, pageSize, refresh, revision]);
-  const fields = detail
+  const fields: Array<[string, ReactNode]> = detail
     ? [
         ['任务名称', detail.name],
         ['调度状态', detail.enabled ? '已启用' : '已停用'],
@@ -76,6 +78,7 @@ export function RoutineDetail({
         ['运行实例', detail.device_uuid || '未报告'],
         ['Caller', detail.operator_id || '未报告'],
         ['执行频率', getRoutineScheduleLabel(detail.cron)],
+        ['下次执行（预计）', <RoutineNextRun key="next" task={detail} now={now} />],
         ['时区', detail.timezone || '未报告'],
         ['模型', detail.model || '跟随 Bot 默认模型'],
         ['超时时间', `${detail.timeoutSecs} 秒`],

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import { stageNames, type ManagedRoutine, type RoutineStage } from '@/services/botScheduledTasks/types';
 import type { ReactNode } from 'react';
+import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
 export function RoutineList({
   tasks,
   total,
@@ -43,8 +44,9 @@ export function RoutineList({
   onSelect: (task: ManagedRoutine) => void;
   actions: (task: ManagedRoutine) => ReactNode;
 }) {
+  const now = useRoutineClock();
   const visible = tasks.filter((task) =>
-    `${task.name} ${task.command} ${task.cron} ${task.device_uuid || ''} ${task.operator_id || ''}`
+    `${task.name} ${task.command} ${task.cron} ${task.device_uuid || ''}`
       .toLowerCase()
       .includes(keyword.trim().toLowerCase()),
   );
@@ -67,7 +69,7 @@ export function RoutineList({
         <Input
           className="max-w-sm"
           aria-label="当前页筛选"
-          placeholder="当前页筛选：名称、指令、实例或 Caller"
+          placeholder="当前页筛选：名称、指令或实例"
           value={keyword}
           onChange={(event) => onKeyword(event.target.value)}
         />
@@ -82,7 +84,7 @@ export function RoutineList({
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-muted-foreground">
               <tr>
-                {['任务', '运行目标', 'Caller', '频率 / 时区', '调度状态', '操作'].map((title) => (
+                {['任务', '运行目标', '频率 / 时区', '下次执行（预计）', '调度状态', '操作'].map((title) => (
                   <th key={title} className="px-3 py-3 font-medium">
                     {title}
                   </th>
@@ -114,10 +116,12 @@ export function RoutineList({
                     {task.runtime_stage ? stageNames[task.runtime_stage] || task.runtime_stage : '运行态未报告'}
                     <p className="mt-1 text-muted-foreground">{task.device_uuid || '实例未报告'}</p>
                   </td>
-                  <td className="break-all px-3 py-4 text-xs">{task.operator_id || '未报告'}</td>
                   <td className="px-3 py-4 text-xs">
                     {getRoutineScheduleLabel(task.cron)}
                     <p className="mt-1 text-muted-foreground">{task.timezone || '时区未报告'}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-4 text-xs">
+                    <RoutineNextRun task={task} now={now} />
                   </td>
                   <td className="px-3 py-4">{task.enabled ? '已启用' : '已停用'}</td>
                   <td className="px-3 py-4">{actions(task)}</td>
