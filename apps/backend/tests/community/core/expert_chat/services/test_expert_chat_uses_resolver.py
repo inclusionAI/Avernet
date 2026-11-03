@@ -61,7 +61,9 @@ class TestGetConnectionUsesResolver:
         conn = svc._get_connection(bot, user_id="owner1")
 
         # 1. resolver 被调一次,入参 (binding_id, user_id, bot_id)
-        resolver.resolve_for_binding.assert_called_once_with(123, "owner1", bot_id="bot1")
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "owner1", bot_id="bot1", connection_identity="owner1"
+        )
 
         # 2. v2 完全不被调(资源被 resolver 接管)
         device_provider.get_device_connection_v2.assert_not_called()

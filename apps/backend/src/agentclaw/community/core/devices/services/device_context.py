@@ -27,7 +27,7 @@ class DeviceContext:
         bot_id: caller 透传。两条入口都必填 — ``resolve_for_bot`` 入参自带,
             ``resolve_for_binding`` 由 caller 显式 kwarg 传(downstream
             ``_build_binding_ctx`` 真用它去 bot_repo 做 owner 校验)。
-        user_id: caller 透传(操作者身份;非 owner 时通过权限校验)
+        user_id: caller/operator identity preserved for session affinity and audit.
         bot_type: ``ac_bots.bot_type`` 字段值(``"desktop"`` / ``"personal"`` /
             ``"service"`` 等),resolver 内部从 ``bot_repo`` 拿。dispatcher 用
             ``(provider, bot_type)`` 二维分流(本期 baas 内部按 bot_type 二次分,
