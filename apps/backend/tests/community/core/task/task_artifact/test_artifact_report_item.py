@@ -349,6 +349,7 @@ def _terminal_plan_dto(
     *,
     artifacts=None,
     failure_reason=None,
+    final_conclusion="业务整体结论：已完成排查并给出建议",
 ) -> TaskReportCommandDTO:
     return TaskReportCommandDTO(
         task_id="t-a1b2",
@@ -363,6 +364,7 @@ def _terminal_plan_dto(
             else {"verdict": "DONE", "done_items": [], "gap_items": []}
         ),
         failure_reason=failure_reason,
+        final_conclusion=final_conclusion,
         artifacts=artifacts,
     )
 
@@ -457,6 +459,41 @@ class TestRelayDtoContract:
     def test_terminal_plan_result_artifacts_land_in_command_patch(self):
         """终态 PLAN_RESULT(event=null) 的最终产物放命令级 artifact_patch。"""
 
+        url_final = _wire_item(
+            artifact_kind="url_link",
+            file_content=None,
+            text_content=None,
+            url_link_content={
+                "url": "https://example.com/final-report",
+                "type": "最终报告",
+                "is_final_artifact": "true",
+            },
+        )
+        command = _terminal_plan_dto(
+            artifacts=[url_final],
+        ).to_domain()
+
+        assert command.final_conclusion == "业务整体结论：已完成排查并给出建议"
+        assert command.artifact_patch is not None
+        assert len(command.artifact_patch) == 1
+        assert command.artifact_patch[0].artifact_kind == "url_link"
+        assert command.artifact_patch[0].content.is_final_artifact == "true"
+
+    def test_terminal_plan_result_requires_final_conclusion(self):
+        with pytest.raises(
+            TaskStateError, match="terminal PLAN_RESULT requires final_conclusion"
+        ):
+            _terminal_plan_dto(final_conclusion=None).to_domain()
+
+    def test_terminal_plan_result_rejects_too_long_final_conclusion(self):
+        with pytest.raises(
+            TaskStateError, match="final_conclusion exceeds 300 characters"
+        ):
+            _terminal_plan_dto(final_conclusion="好" * 301).to_domain()
+
+        assert _terminal_plan_dto(final_conclusion="好" * 300).to_domain()
+
+    def test_terminal_plan_result_rejects_text_as_final_conclusion_artifact(self):
         text_final = _wire_item(
             artifact_kind="text",
             file_content=None,
@@ -465,13 +502,21 @@ class TestRelayDtoContract:
                 "is_final_artifact": "true",
             },
         )
-        command = _terminal_plan_dto(
-            artifacts=[text_final],
-        ).to_domain()
 
-        assert command.artifact_patch is not None
-        assert len(command.artifact_patch) == 1
-        assert command.artifact_patch[0].content.is_final_artifact == "true"
+        with pytest.raises(TaskStateError, match="final conclusion must not be reported"):
+            _terminal_plan_dto(artifacts=[text_final]).to_domain()
+
+    def test_successor_plan_result_with_final_conclusion_rejected(self):
+        with pytest.raises(TaskStateError, match="only allowed on terminal"):
+            TaskReportCommandDTO(
+                task_id="t-a1b2",
+                node_id="relay-ab12cd34",
+                event_id="plan-event-2",
+                relay_token="token-1",
+                event_type=TaskReportEventType.PLAN_RESULT,
+                event=_successor_plan_event(),
+                final_conclusion="业务整体结论",
+            ).to_domain()
 
     def test_successor_plan_result_with_artifacts_rejected(self):
         """带后继计划的 PLAN_RESULT(event=下一棒)不得夹带产物。"""
