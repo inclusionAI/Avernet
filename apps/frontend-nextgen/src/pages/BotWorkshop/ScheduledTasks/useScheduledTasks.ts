@@ -28,6 +28,7 @@ export function useScheduledTasks(
   const [total, setTotal] = useState(0);
   const [failures, setFailures] = useState<FailedTarget[]>([]);
   const [lock, setLock] = useState<RoutineLock>();
+  const [lockError, setLockError] = useState('');
   const [error, setError] = useState('');
   const [contextError, setContextError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -82,6 +83,7 @@ export function useScheduledTasks(
   useEffect(() => {
     setContext(undefined);
     setLock(undefined);
+    setLockError('');
     setLastResult(undefined);
     void refreshContext();
     return () => {
@@ -98,16 +100,25 @@ export function useScheduledTasks(
       requestId.current += 1;
     };
   }, [load]);
+  const lockBotType = context?.bot_type;
+  const lockOwner = context?.owner_id;
   const refreshLock = useCallback(async () => {
     try {
-      const value = await client.getLock();
-      if (currentClient.current === client) setLock(value);
+      if (!lockBotType || !lockOwner) throw new Error('Bot 信息尚未就绪');
+      const value = await client.getLock({ bot_type: lockBotType, owner_id: lockOwner });
+      if (currentClient.current === client) {
+        setLock(value);
+        setLockError('');
+      }
       return value;
     } catch (reason) {
-      if (currentClient.current === client) setLock(undefined);
+      if (currentClient.current === client) {
+        setLock(undefined);
+        setLockError(reason instanceof Error ? reason.message : '锁查询失败');
+      }
       throw reason;
     }
-  }, [client]);
+  }, [client, lockBotType, lockOwner]);
   useEffect(() => {
     if (!identity.ready || !botId || !context?.can_manage) return;
     let active = true;
@@ -167,6 +178,7 @@ export function useScheduledTasks(
     total,
     failures,
     lock,
+    lockError,
     editable,
     error: contextError || error,
     lastResult,
