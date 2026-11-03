@@ -2565,3 +2565,77 @@ def test_update_bot_status_on_device_active_env_isolation(repo, db):
             s.query(BotModel).filter_by(bot_id="bot-prod").one().status
             == "ACTIVE"
         )
+
+
+# ── get_active_by_bot_and_owner — status filtering ─────────────────
+
+def test_get_active_by_bot_and_owner_excludes_stopped_binding(repo, db):
+    """STOPPED binding → returns None (treated as device not ready)."""
+    bid = repo.insert_binding(
+        **_binding(
+            device_id="dev-stopped",
+            device_provider="arca",
+            status="STOPPED",
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-stopped",
+        owner_id="emp-resolver",
+        binding_id=bid,
+        device_id="dev-stopped",
+    )
+    assert (
+        repo.get_active_by_bot_and_owner(
+            bot_id="bot-stopped", owner_id="emp-resolver"
+        )
+        is None
+    )
+
+
+def test_get_active_by_bot_and_owner_excludes_failed_binding(repo, db):
+    """FAILED binding → returns None (treated as device not ready)."""
+    bid = repo.insert_binding(
+        **_binding(
+            device_id="dev-failed",
+            device_provider="arca",
+            status="FAILED",
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-failed",
+        owner_id="emp-resolver",
+        binding_id=bid,
+        device_id="dev-failed",
+    )
+    assert (
+        repo.get_active_by_bot_and_owner(
+            bot_id="bot-failed", owner_id="emp-resolver"
+        )
+        is None
+    )
+
+
+def test_get_active_by_bot_and_owner_includes_pending_binding(repo, db):
+    """PENDING binding → returns record (device may be initialising)."""
+    bid = repo.insert_binding(
+        **_binding(
+            device_id="dev-pending",
+            device_provider="arca",
+            status="PENDING",
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-pending",
+        owner_id="emp-resolver",
+        binding_id=bid,
+        device_id="dev-pending",
+    )
+    rec = repo.get_active_by_bot_and_owner(
+        bot_id="bot-pending", owner_id="emp-resolver"
+    )
+    assert rec is not None
+    assert rec.id == bid
+    assert rec.status == "PENDING"
