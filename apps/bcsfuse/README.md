@@ -484,3 +484,7 @@ files. Model credentials and dimensions must match the selected local dataset.
 SQLite snapshots use `vector_embeddings.sqlite`; old FAISS snapshots are unsupported.
 Qdrant applies payload filters before top-k, so indexed test records must contain
 the expected runtime state, visibility and other requested filter fields.
+
+### 独立 Card 搜索示例
+
+只依赖公共包的 SQLite + Qdrant Local 写入/检索/更新/删除示例，见 [独立启动指南](packages/search-core/docs/local-catalog.md)。TC 原有启动方式不变。

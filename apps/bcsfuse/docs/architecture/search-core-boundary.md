@@ -9,12 +9,14 @@ Avernet 维护可独立安装的 `search_core` 和 TC 应用 `app`。宿主维�
 | --- | --- |
 | 通用搜索契约、关键词/向量召回、融合、可选精排 | Avernet search-core |
 | Card 管理 HTTP 接口、按字段合并、内部版本控制、SQL 保存与删除 | Avernet search-core |
-| CardDocumentConverter / CardProjection、Doc 存储与模型/索引接口 | Avernet search-core |
+| 默认 Card 转换器、CardDocumentConverter / CardProjection、Doc 存储与模型/索引接口 | Avernet search-core |
+| Doc 加工与成组发布、增量同步/核对、恢复、缓存/流控/降级、Qdrant 进程生命周期 | Avernet search-core |
 | TC 的 Worker/Profile、ID 优先、分片聚合、生命周期和 Fuse | Avernet app |
 | 某业务 Card 字段的含义、正文和前置标签选择 | 对应应用的构建器 |
 | 私有数据库、模型协议、鉴权、配置订阅、TR 和部署组装 | 内部宿主 |
 
 公共包不判断调用方属于哪个业务，不导入 OCB/内部 SDK，不通过安装或导入自动启动服务。
+默认转换器选择名称、描述、技能名称/描述/标签，生成一条 Doc；业务可替换转换器，返回多条 Doc 和明确的筛选标签。
 业务 Card 是完整 JSON，status、deleted、version 只是业务字段；运维删除由 DELETE 处理。
 源数据、加工画像、运行状态、索引产物各有职责，不能用一种数据覆盖另一种。
 
@@ -27,7 +29,9 @@ apps/bcsfuse/
 │   └── src/search_core/
 │       ├── api/               Service API
 │       ├── core/              检索与 Card 通用服务
-│       ├── catalog/           Card 源数据模型
+│       ├── application/       可选的公共搜索运行流程
+│       ├── catalog/           Card 模型、默认转换器、Doc 加工与同步
+│       ├── bootstrap/         公共组装与独立本地入口
 │       ├── plugin_api/        存储、模型、索引、构建器契约
 │       ├── providers/         公开协议实现
 │       ├── config/            显式配置装配
@@ -62,3 +66,18 @@ TC 后续迁移遵循 [Card / Doc 迁移计划](tc-card-migration.md)，本轮�
 
 独立导入、契约、存储和 TC 兼容测试用于验证上述边界；历史执行结果见 [验证归档](../archive/validation/retrieval-extraction-20261027.md)。
 本地合成模型或临时索引测试不是生产效果、容量或已部署的证据。
+
+## 不依赖 OCB 的本地链路
+
+```text
+HTTP Card 写入 → SQLite 源 Card
+                       ↓ 公共后台加工（默认或业务转换器 + Embedding）
+                 SQLite 已发布 Doc → 本地 Qdrant
+                                             ↓
+HTTP 搜索/推荐 → 公共检索流程 → Card 元数据回查 → 返回结果
+```
+
+`search_core.bootstrap.local` 组装 SQLite、Qdrant Local 和离线示例向量；
+真实业务在组装入口替换转换器、模型、索引与鉴权，复用同一加工和检索流程。
+具体步骤见 [独立启动指南](../../packages/search-core/docs/local-catalog.md)。
+本次抽取不新增表、不改变 TC 已有入口，也不改变支付宝历史 index_key 的计算方式。
