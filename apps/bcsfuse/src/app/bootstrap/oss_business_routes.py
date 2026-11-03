@@ -747,6 +747,9 @@ def include_oss_business_routes(app) -> None:
                     if registry is not None
                     else None
                 ),
+                retrieval_dependency_circuit=(
+                    getattr(app_state, "retrieval_dependency_circuit", None)
+                ),
             )
             outcome = await agent_search_service.search(
                 AgentSearchCommand(

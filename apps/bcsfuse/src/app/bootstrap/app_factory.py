@@ -516,6 +516,13 @@ def create_bcsfuse_app(
 
     resilience_cache = AgentSearchResilienceCache.from_context(context)
     execution_budget = AgentSearchExecutionBudget.from_context(context)
+    from app.application.services.retrieval_dependency_circuit import (
+        RetrievalDependencyCircuit,
+    )
+
+    retrieval_dependency_circuit = RetrievalDependencyCircuit(
+        outage_probe_seconds=1.0
+    )
     shared_response_cache = context.registry.get("shared_response_cache")
     shared_cache_reader = None
     shared_cache_writers: list[Any] = []
@@ -548,6 +555,7 @@ def create_bcsfuse_app(
     app.state.local_retrieval_snapshot = local_retrieval_snapshot
     app.state.agent_search_resilience_cache = resilience_cache
     app.state.agent_search_execution_budget = execution_budget
+    app.state.retrieval_dependency_circuit = retrieval_dependency_circuit
     app.state.shared_response_cache = shared_response_cache
     app.state.shared_cache_reader = shared_cache_reader
     app.state.shared_cache_writers = shared_cache_writers

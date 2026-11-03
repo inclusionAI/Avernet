@@ -43,6 +43,10 @@ from app.domain.models.candidate_recommendation import (
 )
 from app.application.services.query_intent_policy import resolve_query_intent
 from app.application.services.query_normalizer import normalize_query_text
+from app.application.services.retrieval_dependency_circuit import (
+    RetrievalDependencyCircuit,
+    mark_dual_retrieval_dependency_outage,
+)
 from app.application.services.search_index_state import (
     INDEX_STATE_FIELDS,
     index_state_from_provider,
@@ -233,6 +237,7 @@ class AgentSearchService:
         resilience_cache: AgentSearchResilienceCache | None = None,
         local_snapshot: Any | None = None,
         index_state_provider: Callable[[], Mapping[str, Any]] | None = None,
+        retrieval_dependency_circuit: RetrievalDependencyCircuit | None = None,
         execution_budget: AgentSearchExecutionBudget | None = None,
         offload: Offload = _default_offload,
         clock: Callable[[], float] = time.monotonic,
@@ -253,6 +258,7 @@ class AgentSearchService:
             else None
         )
         self._index_state_provider = index_state_provider
+        self._retrieval_dependency_circuit = retrieval_dependency_circuit
         self._execution_budget = execution_budget
         self._offload = offload
         self._clock = clock
@@ -648,6 +654,16 @@ class AgentSearchService:
                         config_applied=direct_config,
                         elapsed_ms=(self._clock() - started) * 1000,
                     )
+            circuit = self._retrieval_dependency_circuit
+            if circuit is not None and circuit.should_fail_fast():
+                outcome = self.final_search_outcome(
+                    command,
+                    error_type="RetrievalDependencyOutage",
+                    local_snapshot=self._local_snapshot,
+                )
+                mark_dual_retrieval_dependency_outage(outcome.metadata)
+                self._publish_status(outcome.metadata)
+                return outcome
             if query_intent.route == "direct_keyword":
                 query_embedding = []
             else:
@@ -695,6 +711,10 @@ class AgentSearchService:
             # because it is transport-independent. Publish it here as outcome
             # metadata so projection and cache policy can reject degraded data.
             metadata.update(config_applied.get("_retrieval", {}))
+            if self._retrieval_dependency_circuit is not None:
+                self._retrieval_dependency_circuit.observe_retrieval(
+                    config_applied.get("_retrieval", {})
+                )
             if not results:
                 # A dependency outage is not the only condition that would leave
                 # a client with no actionable result. A healthy zero-hit query
@@ -845,6 +865,22 @@ class AgentSearchService:
                         },
                         metadata=metadata,
                     )
+            circuit = self._retrieval_dependency_circuit
+            if circuit is not None and circuit.should_fail_fast():
+                outcome = self.final_recommendation_outcome(
+                    command,
+                    error_type="RetrievalDependencyOutage",
+                    local_snapshot=self._local_snapshot,
+                )
+                mark_dual_retrieval_dependency_outage(
+                    outcome.response.metadata
+                )
+                self._publish_status(outcome.response.metadata)
+                outcome.metadata.update(
+                    status=outcome.response.metadata["status"],
+                    reasons=outcome.response.metadata["reasons"],
+                )
+                return outcome
             try:
                 with search_stage_metrics("recommend", "retrieval"):
                     response = await self._run(
@@ -876,6 +912,10 @@ class AgentSearchService:
                     response.metadata.setdefault(key, value)
             response.question = normalized_question
             response.metadata.update(metadata)
+            if self._retrieval_dependency_circuit is not None:
+                self._retrieval_dependency_circuit.observe_retrieval(
+                    response.metadata
+                )
             _annotate_semantic_failure(response.metadata)
             if not response.recommendations:
                 # Healthy zero-candidate outcomes use the same explicit snapshot

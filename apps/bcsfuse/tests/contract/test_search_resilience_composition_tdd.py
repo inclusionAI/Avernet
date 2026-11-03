@@ -151,6 +151,7 @@ def test_composition_wires_resilience_budget_and_process_snapshot(monkeypatch) -
     snapshot = VectorStoreWithSnapshot.literal_fallback_index
     app = create_bcsfuse_app(_context(VectorStoreWithSnapshot()))
     assert app.state.local_retrieval_snapshot is snapshot
+    assert app.state.retrieval_dependency_circuit is not None
     assert app.state.agent_search_resilience_cache is not None
     assert app.state.agent_search_execution_budget is not None
     assert app.state.agent_search_resilience_cache.current_index_version() == 9
@@ -184,6 +185,10 @@ def test_search_route_uses_composition_dependencies(monkeypatch) -> None:
     assert kwargs["resilience_cache"] is app.state.agent_search_resilience_cache
     assert kwargs["execution_budget"] is app.state.agent_search_execution_budget
     assert kwargs["local_snapshot"] is app.state.local_retrieval_snapshot
+    assert (
+        kwargs["retrieval_dependency_circuit"]
+        is app.state.retrieval_dependency_circuit
+    )
 
 
 def test_recommend_route_uses_composition_dependencies(monkeypatch) -> None:

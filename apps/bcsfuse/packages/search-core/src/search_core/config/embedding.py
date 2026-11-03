@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 _QWEN_MODEL_DIMENSIONS: dict[str, set[int]] = {
@@ -84,6 +84,16 @@ class EmbeddingSettings(BaseModel):
         le=120000,
         description="请求超时（毫秒）",
     )
+
+    @field_validator("base_url", "auth_token", "model", mode="after")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        """Treat external text input as configuration, not wire header bytes."""
+
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @model_validator(mode="after")
     def validate_model_dimension_contract(self) -> "EmbeddingSettings":

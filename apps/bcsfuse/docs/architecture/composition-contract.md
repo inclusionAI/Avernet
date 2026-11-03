@@ -307,6 +307,15 @@ remains ``hybrid``, and a process-local exact lookup remains
 ``direct_snapshot``. A ``direct_keyword`` route alone does not imply that source:
 only an actual direct snapshot hit reports ``candidate_source="direct_snapshot"``.
 
+When a completed retrieval pass reports both dense and keyword Qdrant
+dependencies unavailable, the shared application circuit records a terminal
+dual-Qdrant outage. While that circuit is live, search and recommendation skip
+embedding and backend candidate calls and consume the process-local snapshot.
+Responses retain ``retrieval_dependency_failfast=true`` plus the dependency and
+local-fallback fields, and the circuit admits one bounded recovery probe per
+interval instead of repeatedly filling the admission queue behind dead
+backends.
+
 The process-local literal index normalizes each published profile's searchable
 text once when the snapshot is rebuilt. Search-time queries reuse that immutable
 text; no request rebuilds NFKC-normalized text for the entire snapshot.

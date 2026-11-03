@@ -360,6 +360,9 @@ async def recommend_bots(
                 if registry is not None
                 else None
             ),
+            retrieval_dependency_circuit=(
+                getattr(app_state, "retrieval_dependency_circuit", None)
+            ),
             offload=run_search_in_threadpool,
         )
         outcome = await agent_search_service.recommend(command)
