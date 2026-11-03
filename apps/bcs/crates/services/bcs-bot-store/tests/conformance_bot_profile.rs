@@ -45,6 +45,45 @@ async fn sqlite_avatar_contract() {
 }
 
 #[tokio::test]
+async fn memory_avatar_read_excludes_file_backed_humans_after_restart_and_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+    repo.ensure_human_actor("avatar-reader", "Human").await.unwrap();
+    let id = "human_avatar-reader";
+    let caps = repo.try_get(id).await.unwrap().unwrap().capabilities;
+    repo.save_to_storage(id, &caps).await.unwrap();
+    assert!(dir.path().join(id).join("bot.json").exists());
+    let restarted = MemoryBotRepo::with_base_dir(dir.path().into());
+    assert!(restarted.read_avatar_batch(&[id.into()]).await.unwrap().is_empty());
+    assert!(repo.soft_delete(id).await);
+    assert!(repo.read_avatar_batch(&[id.into()]).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_avatar_read_does_not_open_known_human_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+    repo.ensure_human_actor("avatar-reader", "Human").await.unwrap();
+    let path = dir.path().join("human_avatar-reader/bot.json");
+    tokio::fs::create_dir_all(path.parent().unwrap()).await.unwrap();
+    tokio::fs::write(path, "invalid leftover record").await.unwrap();
+    assert!(repo.read_avatar_batch(&["human_avatar-reader".into()]).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_avatar_read_prefers_live_bot_kind_over_namespace_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+    repo.create_registration_if_absent(
+        "human_named_bot".into(), BotCapabilities::default(), "owner", "test-token",
+    ).await.unwrap();
+    repo.update_avatar_existing("human_named_bot", AvatarChange::Set("https://example.test/bot.png".into()))
+        .await.unwrap();
+    let avatars = repo.read_avatar_batch(&["human_named_bot".into()]).await.unwrap();
+    assert_eq!(avatars["human_named_bot"].as_deref(), Some("https://example.test/bot.png"));
+}
+
+#[tokio::test]
 async fn memory_avatar_survives_restart_and_legacy_files_read_without_avatar() {
     let dir = tempfile::tempdir().unwrap();
     let repo = MemoryBotRepo::with_base_dir(dir.path().into());

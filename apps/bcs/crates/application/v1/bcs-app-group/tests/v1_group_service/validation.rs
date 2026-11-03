@@ -551,7 +551,7 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
     // bot.json files).
     let bots_dir = tempfile::tempdir().expect("temp bots base dir");
     let fixture =
-        Fixture::new_with_bots(Arc::new(BotCore::with_base_dir(bots_dir.keep()))).await;
+        Fixture::new_with_bots(Arc::new(BotCore::with_base_dir(bots_dir.path().to_path_buf()))).await;
     for bot in ["bot-a", "bot-b", "target"] {
         fixture.add_public_bot(bot).await;
     }

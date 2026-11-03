@@ -124,6 +124,12 @@ role/fallback reads accept only physical Bot targets (scalar and batch).
 
 ## Bot profile existing-only writes and avatar reads
 
+Memory avatar reads exclude live Human actor kinds before opening any local
+record, including records created by ordinary profile/token APIs. When no live
+registry row exists (restart or deletion), the reserved `human_` namespace is
+excluded just as in the existing Agent Bot disk scan; legacy local files have
+no actor-kind column. A retained ordinary Bot record still supplies its avatar.
+
 Memory/file record rewrites share the existing repository write mutex, acquired
 before authority/bot/token guards and held from snapshot read through durable
 replacement and memory publication. Profile/avatar, capabilities, control-plane,

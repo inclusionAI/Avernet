@@ -17,10 +17,11 @@ use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
 use serde_json::{Value, json};
 
 /// A `BotCore` whose stored-profile records (the avatar writes below) live in
-/// a process-scoped temp directory instead of the crate working directory.
-fn avatar_backed_core() -> Arc<BotCore> {
+/// a test-scoped temp directory instead of the crate working directory.
+fn avatar_backed_core() -> (tempfile::TempDir, Arc<BotCore>) {
     let dir = tempfile::tempdir().expect("temp bots base dir");
-    Arc::new(BotCore::with_base_dir(dir.keep()))
+    let bots = Arc::new(BotCore::with_base_dir(dir.path().to_path_buf()));
+    (dir, bots)
 }
 
 /// Seed one Bot's avatar through the Task 4/5 existing-only write contract.
@@ -158,7 +159,7 @@ async fn seed_session_with(
 
 #[tokio::test]
 async fn session_views_use_their_own_members_for_avatars() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["driver", "worker-a", "worker-b", "worker-c", "session-dynamic"] {
         fixture.add_bot(bot).await;
@@ -306,7 +307,7 @@ async fn session_views_use_their_own_members_for_avatars() {
 
 #[tokio::test]
 async fn session_list_names_are_snapshots() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["driver", "snapshot-member", "missing-snapshot"] {
         add_public_bot_named_current_profile(&fixture, bot).await;
@@ -399,7 +400,7 @@ async fn session_list_names_are_snapshots() {
 
 #[tokio::test]
 async fn cleared_or_replaced_avatars_follow_the_profile_on_old_sessions() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["driver", "profile-peer"] {
         fixture.add_bot(bot).await;
@@ -470,7 +471,7 @@ async fn cleared_or_replaced_avatars_follow_the_profile_on_old_sessions() {
 
 #[tokio::test]
 async fn tombstoned_and_missing_members_keep_session_avatar_rows() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["driver", "tomb-peer"] {
         fixture.add_bot(bot).await;
@@ -539,7 +540,7 @@ async fn tombstoned_and_missing_members_keep_session_avatar_rows() {
 
 #[tokio::test]
 async fn create_update_and_participant_mutations_reuse_avatar_responses() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["driver", "member-a", "member-b"] {
         fixture.add_bot(bot).await;

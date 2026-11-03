@@ -322,9 +322,18 @@ impl MemoryBotRepo {
         let mut avatars = BotAvatarMap::with_capacity(distinct.len());
         for bot_id in &distinct {
             let snapshot = self.memory_bot_snapshot(bot_id).await;
-            let registry_bot = snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.actor_kind != bcs_service_api::ActorKind::Human);
+            // A Human may have a record written through ordinary profile/token
+            // APIs. Exclude it before opening that file. After restart/deletion,
+            // match load_agent_bots' reserved human_ namespace fallback because
+            // legacy files do not carry actor_kind; live registry kind wins.
+            let is_human = snapshot.as_ref().map_or_else(
+                || bot_id.starts_with("human_"),
+                |snapshot| snapshot.actor_kind == bcs_service_api::ActorKind::Human,
+            );
+            if is_human {
+                continue;
+            }
+            let registry_bot = snapshot.is_some();
             let stored = self.read_stored_profile(bot_id).await?;
             match (registry_bot, stored) {
                 (true, stored) => {

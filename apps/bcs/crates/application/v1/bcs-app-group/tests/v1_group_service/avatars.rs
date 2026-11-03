@@ -18,10 +18,11 @@ use bcs_service_api::{GroupKind, ParticipantMode};
 use serde_json::{Value, json};
 
 /// A `BotCore` whose stored-profile records (the avatar writes below) live in
-/// a process-scoped temp directory instead of the crate working directory.
-fn avatar_backed_core() -> Arc<BotCore> {
+/// a test-scoped temp directory instead of the crate working directory.
+fn avatar_backed_core() -> (tempfile::TempDir, Arc<BotCore>) {
     let dir = tempfile::tempdir().expect("temp bots base dir");
-    Arc::new(BotCore::with_base_dir(dir.keep()))
+    let bots = Arc::new(BotCore::with_base_dir(dir.path().to_path_buf()));
+    (dir, bots)
 }
 
 /// Seed one Bot's avatar through the Task 4/5 write contract.
@@ -42,7 +43,10 @@ fn assert_participant_shape(value: &Value) {
     assert!(row.get("actor_kind").is_some());
     assert!(row.get("name").is_some());
     assert!(row.get("avatar_url").is_some());
+    assert!(row.get("role").is_none());
+    assert!(row.get("mode").is_none());
     assert!(row.get("message_view_scope").is_none());
+    assert!(row.get("tags").is_none());
 }
 
 /// A list-summary row's `name` is the stored membership snapshot verbatim —
@@ -127,7 +131,7 @@ async fn add_public_bot_named_current_profile(fixture: &Fixture, bot_uuid: &str)
 
 #[tokio::test]
 async fn group_avatars_follow_current_profile() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["viewer", "avatar-driver", "avatar-peer"] {
         fixture.add_public_bot(bot).await;
@@ -399,7 +403,7 @@ async fn group_avatars_follow_current_profile() {
 
 #[tokio::test]
 async fn group_list_names_are_snapshots() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["viewer", "snap-driver", "snap-peer"] {
         add_public_bot_named_current_profile(&fixture, bot).await;
@@ -541,7 +545,7 @@ async fn group_list_names_are_snapshots() {
 
 #[tokio::test]
 async fn session_only_group_summaries_carry_avatars() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["viewer", "session-driver"] {
         fixture.add_public_bot(bot).await;
@@ -605,7 +609,7 @@ async fn session_only_group_summaries_carry_avatars() {
 
 #[tokio::test]
 async fn tombstoned_and_missing_participants_keep_list_avatar_rows() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["viewer", "tomb-driver", "tomb-peer"] {
         fixture.add_public_bot(bot).await;
@@ -678,7 +682,7 @@ async fn tombstoned_and_missing_participants_keep_list_avatar_rows() {
 
 #[tokio::test]
 async fn shared_participant_models_carry_avatars() {
-    let bots = avatar_backed_core();
+    let (_bots_dir, bots) = avatar_backed_core();
     let fixture = Fixture::new_with_bots(bots.clone()).await;
     for bot in ["participant-driver", "participant-a", "participant-b"] {
         fixture.add_public_bot(bot).await;

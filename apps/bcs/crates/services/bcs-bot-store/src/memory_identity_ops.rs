@@ -1,8 +1,8 @@
 //! Registration and credential identity bodies for `MemoryBotRepo`.
 //!
-//! Moved verbatim from the `BotRepoPort` trait impl during the bot-avatar
-//! plan Task 1 file-size split; the trait impl keeps explicit delegations
-//! to these `*_impl` inherent methods.
+//! Extracted from the `BotRepoPort` trait impl during the bot-avatar split.
+//! These operations now share the record write guard and atomic persistence
+//! helper with profile writes; the trait impl delegates to these methods.
 
 use std::time::Instant;
 

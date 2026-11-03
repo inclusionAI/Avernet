@@ -11,10 +11,10 @@
 //! relation reads no avatar batch at all.
 
 use super::*;
-use bcs_service_api::application::v1::Page;
+use bcs_service_api::application::v1::{AddGroupParticipant, Page, UpdateGroupParticipant};
 use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
 use bcs_service_api::{
-    ActorStatus, AgentCredentials, EnsureHumanResult, RegisteredBot,
+    ActorStatus, AgentCredentials, EnsureHumanResult, ParticipantMode, RegisteredBot,
 };
 use serde_json::{Value, json};
 
@@ -23,9 +23,10 @@ use serde_json::{Value, json};
 /// It is duplicated here (sibling modules do not share private items), in the
 /// same spirit as the parallel `Fixture`/`normal_group` helpers of the parent
 /// suites.
-fn avatar_backed_core() -> Arc<BotCore> {
+fn avatar_backed_core() -> (tempfile::TempDir, Arc<BotCore>) {
     let dir = tempfile::tempdir().expect("temp bots base dir");
-    Arc::new(BotCore::with_base_dir(dir.keep()))
+    let bots = Arc::new(BotCore::with_base_dir(dir.path().to_path_buf()));
+    (dir, bots)
 }
 
 async fn seed_avatar(bots: &BotCore, bot_id: &str, url: &str) {
@@ -317,12 +318,13 @@ struct CountingFixture {
     bots: Arc<BotCore>,
     counting: Arc<CountingRegistry>,
     authority_repo: Arc<MemoryBotRepo>,
+    _bots_dir: tempfile::TempDir,
 }
 
 async fn counting_fixture() -> CountingFixture {
     let group_repo = Arc::new(MemoryGroupRepo::new());
     let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-    let bots = avatar_backed_core();
+    let (bots_dir, bots) = avatar_backed_core();
     let counting = Arc::new(CountingRegistry::new(bots.clone()));
     let relation = Arc::new(RelationCore::memory());
     let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
@@ -363,6 +365,7 @@ async fn counting_fixture() -> CountingFixture {
         bots,
         counting,
         authority_repo,
+        _bots_dir: bots_dir,
     }
 }
 
@@ -693,4 +696,76 @@ async fn public_page_avatar_query_budget_is_one_batch_and_human_rows_are_never_s
         participant_row(&value, "pub-member")["avatar_url"],
         Value::Null
     );
+}
+
+#[tokio::test]
+async fn avatar_read_failure_on_add_participant_is_internal_after_commit() {
+    let fixture = counting_fixture().await;
+    for bot in ["add-driver", "add-worker"] {
+        register_public_bot(&fixture, bot).await;
+    }
+    fixture.groups.upsert(normal_group(
+        "add-failure-group", "add-driver",
+        vec![Participant::bot("add-driver", ParticipantRole::Driver)],
+        GroupStrategy::Chat, 10,
+    )).await.expect("store group");
+    fixture.counting.fail_avatar.store(true, Ordering::SeqCst);
+    let error = fixture.service.add_participant(AddGroupParticipant {
+        caller: human_principal_with_profile("add-driver", "add-driver", None, None),
+        group_id: "add-failure-group".into(),
+        actor_id: "add-worker".into(),
+        message_view_scope: None,
+    }).await.expect_err("add response must surface the avatar read failure");
+    assert!(matches!(error, ApplicationError::Internal(_)), "expected Internal, got {error:?}");
+    assert_eq!(error.code(), "internal_error");
+    assert_eq!(fixture.counting.avatar_calls(), 1);
+    assert_eq!(fixture.counting.submitted_ids(), vec!["add-worker"]);
+    let stored = fixture.groups.get("add-failure-group").await.expect("stored group");
+    assert_eq!(stored.participants.iter().filter(|p| p.bot_uuid == "add-worker").count(), 1,
+        "the participant addition commits before response projection fails");
+
+    fixture.counting.fail_avatar.store(false, Ordering::SeqCst);
+    let detail = fixture.service.get(GetGroup {
+        caller: bot_principal("add-driver"), group_id: "add-failure-group".into(),
+    }).await.expect("detail after recovery");
+    let detail = serde_json::to_value(detail).expect("serialize detail");
+    assert!(detail["participants"].as_array().unwrap().iter().any(|p| p["actor_id"] == "add-worker"));
+}
+
+#[tokio::test]
+async fn avatar_read_failure_on_update_participant_is_internal_after_commit() {
+    let fixture = counting_fixture().await;
+    for bot in ["update-driver", "update-worker"] {
+        register_public_bot(&fixture, bot).await;
+    }
+    fixture.groups.upsert(normal_group(
+        "update-failure-group", "update-driver",
+        vec![Participant::bot("update-driver", ParticipantRole::Driver),
+            Participant::bot("update-worker", ParticipantRole::Worker)],
+        GroupStrategy::Chat, 10,
+    )).await.expect("store group");
+    fixture.counting.fail_avatar.store(true, Ordering::SeqCst);
+    let update = || UpdateGroupParticipant {
+        caller: human_principal_with_profile("update-worker", "update-worker", None, None),
+        group_id: "update-failure-group".into(),
+        actor_id: "update-worker".into(),
+        mode: Some(ParticipantMode::Muted),
+        message_view_scope: None,
+    };
+    let error = fixture.service.update_participant(update()).await
+        .expect_err("update response must surface the avatar read failure");
+    assert!(matches!(error, ApplicationError::Internal(_)), "expected Internal, got {error:?}");
+    assert_eq!(error.code(), "internal_error");
+    assert_eq!(fixture.counting.avatar_calls(), 1);
+    assert_eq!(fixture.counting.submitted_ids(), vec!["update-worker"]);
+    let stored = fixture.groups.get("update-failure-group").await.expect("stored group");
+    let participant = stored.participants.iter().find(|p| p.bot_uuid == "update-worker")
+        .expect("stored participant");
+    assert_eq!(participant.mode, Some(ParticipantMode::Muted),
+        "the mode update commits before response projection fails");
+
+    fixture.counting.fail_avatar.store(false, Ordering::SeqCst);
+    let updated = fixture.service.update_participant(update()).await.expect("update after recovery");
+    assert_eq!(updated.mode, ParticipantMode::Muted);
+    assert!(updated.avatar_url.is_none());
 }

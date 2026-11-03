@@ -590,8 +590,8 @@ async fn provider_register_route_replay_applies_the_avatar_without_new_credentia
     let replay_body = response_json(replay).await;
     assert_eq!(replay_body["bot_uuid"], bot_uuid);
     assert!(
-        replay_body["bot_runtime_token"].is_null(),
-        "a replay must not issue or expose new credentials: {replay_body}"
+        replay_body.get("bot_runtime_token").is_none(),
+        "a replay must omit the runtime token field: {replay_body}"
     );
 
     assert_eq!(

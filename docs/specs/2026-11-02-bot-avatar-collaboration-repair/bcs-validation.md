@@ -178,12 +178,10 @@ Backend 可按 §2 的请求依次验证（使用真实签名 principal 或内�
 - 最终采用第六跑结果（§1 表）作为交付数字；第六跑之后立刻由 verifier 对同一 reports 目录校验通过。
 - 端口区间为 `apps/baas/.../_process_manager.py` 常量，无隔离配置可改；上述清理只针对已死会话（PPID=1）的端口 listener，实施前确认 21000/8889/8890 等栈端口无存活服务。
 
-## 8. Pre-merge 必办（不在本分支任务范围）
+## 8. Pre-merge 跟踪
 
-1. **service-api 版本与 API-1**：本功能对 `bcs-service-api` 的公共 API 仅有新增（`BotRegistryCoreService::avatar_urls`、`BotRepoPort::update_profile_existing/update_avatar_existing/read_avatar_batch` 均带 fail-closed 默认实现，新增 `AvatarChange/ProfileWrite/BotAvatarMap/ExistingProfileUpdate/ParticipantSummary` 等类型与 DTO 字段），版本自基线起保持 `1.0.0` 未动。按 `apps/bcs/scripts/ci/check-public-api.sh`（API-1：public API 变化必须升版本 + PR 含"影响的 consumer"传播分析），合并前需要：
-   - 在装有 `cargo-public-api` 的环境跑 API-1 确认无 `^-` 移除行；若纯新增，建议 `bcs-service-api` 升 minor（`1.0.0 → 1.1.0`）；若出现移除行则按规则升 major，由维护者定夺；
-   - `bcs-protocol`（新增 `AvatarField`、wire 字段）随 workspace 版本管理，需同步决策；
-   - PR 描述补一节"影响的 consumer"传播分析（列出：BotRegistryCoreService/BotRepoPort 的实现方 bcs-bot、bcs-bot-store 与各 Noop；V1/legacy HTTP 适配层；WS connect 投影；含表格)。
+1. **service-api 版本已修复为 2.0.0**：新 trait 方法虽然带默认实现，但 `AdminBotOnboardCommand`、`RegisterProviderBotCommand`、Actor/Participant 和 Group/Session summary 新增公开字段会破坏旧 Rust struct literal；serde 默认值只提供反序列化兼容，不能证明 Rust 源码兼容。因此更正此前“纯新增可升 1.1.0”的建议，按 major 版本升级，同时更新 Cargo.lock。所有 workspace consumer 使用 path 依赖；迁移构造点见 `bcs-service-api/CONTEXT.md`。HTTP v1 字段增量语义与部署顺序保持不变。`bcs-protocol` 随 workspace 版本管理，本轮不扩大为整个 workspace 发布。现有 PR 描述已含传播分析；外部 consumer 需按新字段重编译。
+   - 本机未安装 `cargo-public-api`，未声称执行完整 API diff。当前 `architecture-checks.yml` 仅监听 main 的 PR/push 与手动触发；本 PR 目标为 dev，不能把此项描述成已发生的 PR CI 阻断。
 2. **waiver 到期处置**：见 §6.5（2026-11-10 前完成拆分或续期）。
 3. 既有失败治理均不属于本任务：conformance cases_2/cases_3、OpenAPI 三项措辞、admin_invocation_terminal 负载敏感超时——留待对应模块负责人；若对合并形成阻塞，按仓库既有流程另行记录。
 
@@ -224,3 +222,38 @@ Backend 可按 §2 的请求依次验证（使用真实签名 principal 或内�
 断言分别仍为 `Lifecycle Attributes`/`Lifecycle Attributes Saved` 与缺少 `pub-online row`。
 本轮没有为这些既有失败修改实现、测试或门禁。真实 MySQL、完整 Singlebox/E2E 未重跑；
 前文的对应结果属于原功能验证，不能视为本轮修复后的新结果。
+
+## 10. 桌面评审意见核实与处理（2026-11-03）
+
+依据 `pr-3488-review.md` 对提交 `29352dcd17` 的复审，逐项核实后处理：
+
+| 意见 | 核实与处理 |
+| --- | --- |
+| service-api 未升级 | 属实。升到 **2.0.0** 并同步唯一 Cargo.lock；八个既有公开结构体新增字段，旧 literal 构造会报 E0063，不能按纯 additions 升 minor。workspace consumer 均为 path 依赖，迁移说明写入 `bcs-service-api/CONTEXT.md`。 |
+| 架构 CI 会阻断本 dev PR | 表述不准确。现有 `architecture-checks.yml` 自动触发仅针对 main；版本维护仍按破坏性 Rust 源码变更处理，本轮不修改 CI 触发范围。 |
+| 第二笔提交后 Singlebox 未验证 | 已查询 GitHub：**29352dcd17** 的 `Singlebox coverage`、`BCS unit tests` 均 success；该结果只证明此已推送提交，不代替当前未提交修改的验证。 |
+| Group add/update 提交后头像读失败未测试 | 属实，补两个确定性注入测试，同时断言 Internal、实际头像读取、变更已持久化，以及故障解除后的读取/更新行为。 |
+| Human 不会有本地记录文件 | 假设不成立：`ensure_human_actor` 后调用普通 `save_to_storage` 就会生成文件，原 batch read 会返回该 Human。共享 Memory/SQLite 契约补此场景；memory 在读取文件前排除 Human，重启/删除后的旧文件复用现有 Agent Bot 磁盘扫描的 `human_` 保留命名空间规则。活 registry 的 actor_kind 优先。另测损坏 Human 遗留文件不会污染 Bot 展示读取。 |
+| memory identity 文件称 verbatim | 修正文档，说明抽取后增加了共享记录锁和原子写入。 |
+| `tempdir().keep()` 泄漏目录 | 四个 avatar helper 改为返回 TempDir，由测试或 fixture 持有；Group validation 中另一处 keep 同样去掉，测试结束自动清理。 |
+| Group 摘要未防 detail 字段泄漏 | 补 `role/mode/tags` 缺席断言，保留已有字段存在性和 `message_view_scope` 缺席断言。 |
+| replay token 的 `is_null()` 有歧义 | 依据 DTO 的 skip-none 契约，改为断言 `bot_runtime_token` **键缺席**。 |
+| URL 长度/格式验证 | 本轮不增加约束。design §4.2 已明确保持已有来源及校验规则兼容，不探测/下载 URL。64 KiB 测试值用于验证并发完整文件读取，不作为新增 API 长度承诺。 |
+| 文件大小 waiver 将到期 | 截至 2026-11-03 尚未到期（2026-11-10）；保留 §6.5 跟踪，不在本轮重构无关的大文件或续期 waiver。 |
+
+Human 缺陷修复前：`memory_avatar_contract`、重启/删除读、损坏 Human 文件读三个测试失败，分别暴露错误成员返回及非法 JSON 错误。修复后继续运行相同契约，保留普通 Bot tombstone/旧文件头像读取语义。
+
+本轮验证（未提交工作区）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo check --workspace --all-targets --locked` | exit 0；service-api 2.0.0 的所有 workspace 构造点编译通过 |
+| `cargo nextest run -p bcs-service-api -p bcs-bot -p bcs-app-group -p bcs-app-session --locked --no-fail-fast --retries 0 --test-threads 8` | 952/952 passed，0 skipped、无重试 |
+| `cargo test -p bcs-app-group -p bcs-app-session --test v1_group_service --test v1_session_service avatar` | Group 11、Session 9 passed；隔离 TMPDIR 运行后残留条目为 0 |
+| `cargo test -p bcs-http --test avatar_write_contract` | 8 passed |
+| `cargo test -p bcs-bot-store --locked --test conformance_bot_profile --test bot_avatar_queries --test memory_profile_concurrency` | 111 passed（56 + 49 + 6），包含最终版本的新 Human 读取用例 |
+| `cargo metadata --format-version 1 --offline` | service-api 解析为 2.0.0，65 个直接 consumer；lockfile 仅更新该本地包版本 |
+| `BCS_BASE_REF=a9b62a1f27 bash scripts/ci/check-public-api.sh` | exit 77，缺少 cargo-public-api，未执行完整公开 API diff |
+| `check-store-boundaries.sh` / `check-forbidden-symbols.sh` | exit 0 |
+
+独立复审未发现新增逻辑问题；10 个修改的 Rust 源文件均不超过 1,000 行（最大 795），`git diff --check` 通过。本轮未修改或弱化 CI gate，未重跑真实 MySQL 或完整 Singlebox 栈。

@@ -1,5 +1,17 @@
 # bcs-service-api Context
 
+## Version 2.0.0: avatar source compatibility
+
+The avatar extension adds fields to public Rust structs, including
+`AdminBotOnboardCommand`, `RegisterProviderBotCommand`, `Actor`, `Participant`,
+`SessionParticipant` and Group/Session summaries. Existing external struct
+literals must supply the new fields, so this is a major Rust API version change
+even though the JSON fields are additive and serde accepts their omission.
+Consumers should use `AvatarChange::Keep` for omitted write intent, `None` for
+unknown display avatars, and construct the new participant summary vectors.
+All workspace consumers use path dependencies and rebuild together. HTTP clients
+retain the existing v1 routes, and no additional database migration is required.
+
 `A2aBotManagementService::register_provider_bot` orchestrates Provider-admin
 Card-aware creation using the existing Provider command/response. Its
 `A2aProviderRegistrationCoreService` dependency owns reauthorization and the

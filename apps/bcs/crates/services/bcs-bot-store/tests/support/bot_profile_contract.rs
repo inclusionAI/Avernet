@@ -287,9 +287,8 @@ pub async fn avatar_contract(repo: &dyn BotRepoPort) {
         Some("avatar-bot"),
     );
 
-    // Human actors never appear in the Bot display read: the memory human
-    // is a registry-only identity, the SQL human is an `actor_kind='human'`
-    // row.
+    // Human actors never appear in the Bot display read, including after
+    // an ordinary profile save has persisted a local record for the Human.
     repo.ensure_human_actor("avatar-staff", "Human Contract")
         .await
         .unwrap();
@@ -298,6 +297,9 @@ pub async fn avatar_contract(repo: &dyn BotRepoPort) {
         .await
         .unwrap();
     assert!(!humans.contains_key("human_avatar-staff"));
+    let human_caps = repo.try_get("human_avatar-staff").await.unwrap().unwrap().capabilities;
+    repo.save_to_storage("human_avatar-staff", &human_caps).await.unwrap();
+    assert!(repo.read_avatar_batch(&["human_avatar-staff".into()]).await.unwrap().is_empty());
 
     // 软删除: tombstoned targets refuse a profile or avatar write, but the
     // retained row still serves tombstone display reads.

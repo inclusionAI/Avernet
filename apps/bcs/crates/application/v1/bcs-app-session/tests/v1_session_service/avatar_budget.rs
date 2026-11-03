@@ -24,9 +24,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// helper shape: stored-profile writes must not pollute the crate directory.
 /// It is duplicated here (sibling modules do not share private items), in the
 /// same spirit as the group suite's parallel helpers.
-fn avatar_backed_core() -> Arc<BotCore> {
+fn avatar_backed_core() -> (tempfile::TempDir, Arc<BotCore>) {
     let dir = tempfile::tempdir().expect("temp bots base dir");
-    Arc::new(BotCore::with_base_dir(dir.keep()))
+    let bots = Arc::new(BotCore::with_base_dir(dir.path().to_path_buf()));
+    (dir, bots)
 }
 
 async fn seed_avatar(bots: &BotCore, bot_id: &str, url: &str) {
@@ -299,13 +300,14 @@ struct CountingFixture {
     session_repo: Arc<MemorySessionRepo>,
     counting: Arc<CountingRegistry>,
     authority_repo: Arc<MemoryBotRepo>,
+    _bots_dir: tempfile::TempDir,
 }
 
 async fn counting_fixture() -> CountingFixture {
     let group_repo: Arc<dyn bcs_service_api::port::repo::GroupRepoPort> =
         Arc::new(MemoryGroupRepo::new());
     let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-    let bots = avatar_backed_core();
+    let (bots_dir, bots) = avatar_backed_core();
     let counting = Arc::new(CountingRegistry::new(bots.clone()));
     let relation = Arc::new(RelationCore::memory());
     let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
@@ -348,6 +350,7 @@ async fn counting_fixture() -> CountingFixture {
         session_repo,
         counting,
         authority_repo,
+        _bots_dir: bots_dir,
     }
 }
 
