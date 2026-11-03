@@ -762,8 +762,11 @@ async def acquire_lock(
             data=AcquireLockResponse(acquired=False, lock=None).model_dump(),
             message="锁被其他用户持有",
         )
+    except BotNotFoundError as e:
+        logger.warning("[acquire_lock] Bot not found: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except Exception as e:
-        logger.error(f"[acquire_lock] error: {e}")
+        logger.error("[acquire_lock] error: %s", e)
         return ApiResponse(success=False, message=f"获取锁失败: {e}", error_code=500, data=None)
 
 
@@ -789,8 +792,15 @@ async def release_lock(
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except LockReleaseDeniedError as e:
         return ApiResponse(success=False, message=str(e), error_code=403, data=None)
+    except BotNotFoundError as e:
+        logger.warning("[release_lock] Bot not found (release is idempotent): %s", e)
+        return ApiResponse(
+            success=True,
+            data=ReleaseLockResponse(released=True).model_dump(),
+            message="释放锁成功",
+        )
     except Exception as e:
-        logger.error(f"[release_lock] error: {e}")
+        logger.error("[release_lock] error: %s", e)
         return ApiResponse(success=False, message=f"释放锁失败: {e}", error_code=500, data=None)
 
 
@@ -831,6 +841,9 @@ async def steal_lock(
             ).model_dump(),
             message="抢锁成功",
         )
+    except BotNotFoundError as e:
+        logger.warning("[steal_lock] Bot not found: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except Exception as e:
         logger.error("[steal_lock] Failed to steal lock: %s", e)
         return ApiResponse(success=False, message=f"抢锁失败: {e}", error_code=500, data=None)
@@ -875,8 +888,11 @@ async def get_lock_info(
             ).model_dump(),
             message="Bot 未被锁定",
         )
+    except BotNotFoundError as e:
+        logger.warning("[get_lock_info] Bot not found: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except Exception as e:
-        logger.error(f"[get_lock_info] error: {e}")
+        logger.error("[get_lock_info] error: %s", e)
         return ApiResponse(success=False, message=f"查询锁信息失败: {e}", error_code=500, data=None)
 
 
@@ -911,8 +927,11 @@ async def acquire_session_lock(
             data=SessionLockResponse(acquired=False, lock=None).model_dump(),
             message="会话锁被其他用户持有",
         )
+    except BotNotFoundError as e:
+        logger.warning("[acquire_session_lock] Bot not found: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except Exception as e:
-        logger.error(f"[acquire_session_lock] error: {e}")
+        logger.error("[acquire_session_lock] error: %s", e)
         return ApiResponse(success=False, message=f"获取会话锁失败: {e}", error_code=500, data=None)
 
 
@@ -937,8 +956,15 @@ async def release_session_lock(
         )
     except LockReleaseDeniedError as e:
         return ApiResponse(success=False, message=str(e), error_code=403, data=None)
+    except BotNotFoundError as e:
+        logger.warning("[release_session_lock] Bot not found (release is idempotent): %s", e)
+        return ApiResponse(
+            success=True,
+            data=ReleaseLockResponse(released=True).model_dump(),
+            message="释放会话锁成功",
+        )
     except Exception as e:
-        logger.error(f"[release_session_lock] error: {e}")
+        logger.error("[release_session_lock] error: %s", e)
         return ApiResponse(success=False, message=f"释放会话锁失败: {e}", error_code=500, data=None)
 
 
@@ -961,8 +987,11 @@ async def steal_session_lock(
             data=SessionLockResponse(acquired=True, lock=_lock_info(lock)).model_dump(),
             message="抢锁成功",
         )
+    except BotNotFoundError as e:
+        logger.warning("[steal_session_lock] Bot not found: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
     except Exception as e:
-        logger.error(f"[steal_session_lock] error: {e}")
+        logger.error("[steal_session_lock] error: %s", e)
         return ApiResponse(success=False, message=f"抢会话锁失败: {e}", error_code=500, data=None)
 
 
