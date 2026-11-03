@@ -136,6 +136,32 @@ describe('mapWorkOrderDto', () => {
       content: { text: '目标缺失', target: { postId: 'post-1' } },
     }).item;
     expect(invalidTarget.bbsTarget).toBeUndefined();
+
+    const aggregate = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: {
+        text: '张三、李四 回复了你的帖子（5 条）',
+        first_post_id: 'post-1',
+        latest_post_id: 'post-5',
+        post_ids: ['post-1', 'post-5'],
+        target: { topicId: 'topic-1', postId: 'post-1' },
+      },
+    }).item;
+    expect(aggregate.bbsTarget).toEqual({ topicId: 'topic-1', postId: 'post-1' });
+
+    const legacyAggregate = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: {
+        text: '张三、李四 回复了你的帖子（5 条）',
+        post_ids: ['post-1', 'post-5'],
+        target: { topicId: 'topic-1', postId: 'post-5' },
+      },
+    }).item;
+    expect(legacyAggregate.bbsTarget).toEqual({ topicId: 'topic-1', postId: 'post-1' });
   });
 
   it('maps legacy numeric biz_id to string for back-compat', () => {

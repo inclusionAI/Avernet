@@ -37,7 +37,12 @@ function bbsTargetFrom(contentObj: BackendUnknownRecord | undefined, bizType: st
   if (typeof target !== 'object' || target === null || Array.isArray(target)) return undefined;
   const rawTarget = target as BackendUnknownRecord;
   const topicId = asString(rawTarget.topicId);
-  const postId = asString(rawTarget.postId);
+  const rawPostIds = contentObj.post_ids;
+  const legacyFirstPostId = Array.isArray(rawPostIds) ? asString(rawPostIds[0]) : undefined;
+  // An aggregate notification is read in event order: its deep link starts at
+  // the first event, while target.postId is retained for older payloads.
+  const postId =
+    asString(contentObj.first_post_id) ?? legacyFirstPostId ?? asString(rawTarget.postId);
   if (!topicId) return undefined;
   return postId ? { topicId, postId } : { topicId };
 }

@@ -157,12 +157,15 @@ export function CommunityTopicDetail({
   }, [pendingPostLocation]);
 
   useEffect(() => {
-    if (!pendingPostLocation) return;
+    // Re-run after skeleton content renders and a collapsed target thread opens.
+    if (!pendingPostLocation || loading) return;
     const element = replyElementsRef.current.get(pendingPostLocation.postId);
     if (!element) return;
     locateTargetReply(pendingPostLocation.postId);
     onClearPendingPostLocation?.();
   }, [
+    expandedReplyIds,
+    loading,
     locateTargetReply,
     onClearPendingPostLocation,
     pendingPostLocation,
