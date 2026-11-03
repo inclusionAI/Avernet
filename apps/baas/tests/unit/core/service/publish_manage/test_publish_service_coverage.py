@@ -686,6 +686,31 @@ class TestGenerateBatchesAdditionalTypes:
         batches = svc._generate_batches(PublishType.DESTROY, config)
         assert len(batches) >= 1
 
+    def test_generate_batches_destroy_uses_target_device_count(self):
+        """DESTROY without replica_desired must cover the live device count."""
+        svc = _make_service()
+        batches = svc._generate_batches(
+            PublishType.DESTROY, None, target_device_count=3
+        )
+        assert sum(b.device_count for b in batches) == 3
+
+    def test_generate_batches_stop_uses_target_device_count(self):
+        """STOP without replica_desired must cover the live device count."""
+        svc = _make_service()
+        batches = svc._generate_batches(PublishType.STOP, None, target_device_count=4)
+        assert sum(b.device_count for b in batches) == 4
+
+    def test_generate_batches_destroy_without_target_still_collapses(self):
+        """Regression guard: the pre-fix call shape collapses to 1 device.
+
+        This documents *why* callers must pass target_device_count for terminal
+        ops. If this assertion ever fails, the defaulting changed and the
+        callers in _create_publish_locked must be re-checked.
+        """
+        svc = _make_service()
+        batches = svc._generate_batches(PublishType.DESTROY, None)
+        assert sum(b.device_count for b in batches) == 1
+
     def test_generate_batches_scale_up_cooldown_zero(self):
         svc = _make_service()
         config = PublishConfig(replica_desired=3, batch_capacity=5)
@@ -787,6 +812,64 @@ class TestCreateDeviceRecordsForPublish:
                 operator="op",
             )
         svc._publish_record_repo.insert_record.assert_called_once()
+
+    def test_destroy_batch_plan_shorter_than_devices_raises(self):
+        """A batch plan that under-covers the eligible devices must fail loudly.
+
+        DESTROY used to plan a single device regardless of how many the bot
+        had, and the remainder was sliced away silently, leaving ACTIVE
+        sandboxes behind a soft-deleted bot.
+        """
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="dev-1", status="ACTIVE"),
+            _make_device(id=2, device_uuid="dev-2", status="ACTIVE"),
+            _make_device(id=3, device_uuid="dev-3", status="ACTIVE"),
+        ]
+        # The buggy plan: one batch that only covers a single device
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with pytest.raises(ValueError, match="refusing to drop"):
+                svc._create_device_records_for_publish(
+                    tenant="t",
+                    env="test",
+                    publish_id=1,
+                    publish_type=PublishType.DESTROY,
+                    bot_record=bot,
+                    batch_records=[batch],
+                    operator="op",
+                )
+
+    def test_destroy_batch_plan_covering_all_devices_succeeds(self):
+        """The corrected plan (one batch sized to the device count) is accepted."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="dev-1", status="ACTIVE"),
+            _make_device(id=2, device_uuid="dev-2", status="ACTIVE"),
+            _make_device(id=3, device_uuid="dev-3", status="ACTIVE"),
+        ]
+        batch = _make_batch_record(batch_capacity=3)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.DESTROY,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+        assert svc._publish_record_repo.insert_record.call_count == 3
 
     def test_scale_up_no_template_uuid_returns_early(self):
         svc = _make_service()
