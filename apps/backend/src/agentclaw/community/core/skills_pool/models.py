@@ -90,6 +90,7 @@ class MappingResultReason(StrEnum):
     """Stable reason for an operation-level Mapping result."""
 
     ENGINE_SKILL_MAPPING_UNSUPPORTED = "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    DEVICE_OFFLINE = "DEVICE_OFFLINE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +119,7 @@ class MappingApplyResult:
     items: tuple[MappingItemResult, ...] = ()
     issues: tuple[MappingItemResult, ...] = ()
     evidence: dict[str, object] = field(default_factory=dict)
+    reason: MappingResultReason | None = None
 
 
 @dataclass(frozen=True, slots=True)

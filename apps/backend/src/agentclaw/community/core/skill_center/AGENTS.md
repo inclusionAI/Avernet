@@ -181,7 +181,7 @@ SC Public 引用已是持久异步批量 Operation：
 
 `services/skill_symlink_listener.py` 处理设备激活和重投影事件；通过正式 Projector 恢复当前 Desired State。既有兼容 fallback 不是新增业务写入入口。
 
-Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是当前任务可修复的故障：`ACTIVE/PENDING` 可运行，`OFFLINE` 等待重连事件，`FAILED/RELEASING/RELEASED` 与未知状态停止。BaaS 仅按可信非 2xx JSON 的精确 `detail.error=NO_ACTIVE_DEVICES` 产生结构化离线错误；Runtime 返回 `DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`，其中 `retryable` 表示未来再次投影可能恢复，不授权当前任务高频重试。当前任务结束并释放 live key，健康扫描实际提交 `OFFLINE -> ACTIVE` 后发布 `RuntimeProjectionRequestedEvent` 立即唤醒。恢复只由 Runtime Ready 事件与 Desired State 变化触发，不运行周期性全量 Sweeper。timeout/5xx 继续故障退避，Center 正常下载仍按五秒进度跟进；单 Task 总 deadline 为十分钟。
+Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是当前任务可修复的故障：`ACTIVE/PENDING` 可运行，`OFFLINE` 等待重连事件，`FAILED/RELEASING/RELEASED` 与未知状态停止。BaaS 仅按可信非 2xx JSON 的精确 `detail.error=NO_ACTIVE_DEVICES` 产生结构化离线错误；Runtime 返回 `DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`，其中 `retryable` 表示未来再次投影可能恢复，不授权当前任务高频重试。若本次运行时发现离线而 Bot 状态仍为 `ACTIVE/PENDING`，当前任务按既有期限和退避重试；下一轮读到 `OFFLINE` 后结束并释放 live key，健康扫描实际提交 `OFFLINE -> ACTIVE` 后发布 `RuntimeProjectionRequestedEvent` 立即唤醒。恢复只由 Runtime Ready 事件与 Desired State 变化触发，不运行周期性全量 Sweeper。timeout/5xx 继续故障退避，Center 正常下载仍按五秒进度跟进；单 Task 总 deadline 为十分钟。
 
 Service Bot 的边界在 `community/core/service_bot/services/`：
 

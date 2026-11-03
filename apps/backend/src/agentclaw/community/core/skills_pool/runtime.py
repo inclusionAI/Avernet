@@ -12,7 +12,10 @@ from injector import inject
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
-from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentRequest,
 )
@@ -118,11 +121,21 @@ class SkillsPoolRuntime:
                     "/health",
                     timeout=10.0,
                 )
+            except DeviceOfflineError:
+                return MappingApplyResult(
+                    status=MappingProjectionStatus.PENDING,
+                    reason=MappingResultReason.DEVICE_OFFLINE,
+                )
             except Exception:
                 return self._unavailable_apply_result("runtime_mapping_apply_health_unavailable")
             if health.get("status") == "ok" and health.get("engine") == engine:
                 raise LegacyMappingApplyRequired() from error
             return self._unavailable_apply_result("runtime_mapping_apply_health_mismatch")
+        except DeviceOfflineError:
+            return MappingApplyResult(
+                status=MappingProjectionStatus.PENDING,
+                reason=MappingResultReason.DEVICE_OFFLINE,
+            )
         except DeviceAdapterHTTPStatusError as error:
             # Validation responses can echo request fields, including a short-lived
             # signed URL. Preserve only structured non-secret diagnostics.
@@ -329,12 +342,16 @@ class SkillsPoolRuntime:
         mappings: list[PoolSkillMapping],
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> PoolCutoverResult:
-        if not await self._ensure_center_mappings(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-            mapping_contract_version=mapping_contract_version,
-        ):
+        try:
+            center_ready = await self._ensure_center_mappings(
+                bot_id=bot_id,
+                user_id=user_id,
+                mappings=mappings,
+                mapping_contract_version=mapping_contract_version,
+            )
+        except DeviceOfflineError:
+            center_ready = False
+        if not center_ready:
             return PoolCutoverResult(
                 committed=False,
                 status=PoolCutoverStatus.TRANSIENT_ERROR,
@@ -406,12 +423,16 @@ class SkillsPoolRuntime:
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
         apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
     ) -> MappingPublishResult:
-        if not await self._ensure_center_mappings(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-            mapping_contract_version=mapping_contract_version,
-        ):
+        try:
+            center_ready = await self._ensure_center_mappings(
+                bot_id=bot_id,
+                user_id=user_id,
+                mappings=mappings,
+                mapping_contract_version=mapping_contract_version,
+            )
+        except DeviceOfflineError:
+            return self._offline_mapping_publish_result()
+        if not center_ready:
             return MappingPublishResult(
                 published=False,
                 status=MappingProjectionStatus.PENDING,
@@ -444,21 +465,15 @@ class SkillsPoolRuntime:
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:
                 return self._unsupported_mapping_publish_result()
-            if error.status_code >= 500:
-                logger.warning(
-                    "[skills_pool.runtime] mapping publish HTTP failure bot_id=%s "
-                    "status=%s",
-                    bot_id,
-                    error.status_code,
-                )
-                return self._unavailable_mapping_publish_result()
-            logger.exception(
+            logger.error(
                 "[skills_pool.runtime] mapping publish HTTP failure bot_id=%s "
                 "status=%s",
                 bot_id,
                 error.status_code,
             )
             return self._unavailable_mapping_publish_result()
+        except DeviceOfflineError:
+            return self._offline_mapping_publish_result()
         except Exception:
             logger.exception(
                 "[skills_pool.runtime] mapping publish failed bot_id=%s",
@@ -487,6 +502,14 @@ class SkillsPoolRuntime:
                 sorted(response.keys()),
             )
         return result
+
+    @staticmethod
+    def _offline_mapping_publish_result() -> MappingPublishResult:
+        return MappingPublishResult(
+            published=False,
+            status=MappingProjectionStatus.PENDING,
+            reason=MappingResultReason.DEVICE_OFFLINE,
+        )
 
     @staticmethod
     def _unsupported_mapping_publish_result() -> MappingPublishResult:
@@ -656,21 +679,15 @@ class SkillsPoolRuntime:
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:
                 return self._unsupported_mapping_verification_result()
-            if error.status_code >= 500:
-                logger.warning(
-                    "[skills_pool.runtime] mapping verify HTTP failure bot_id=%s "
-                    "status=%s",
-                    bot_id,
-                    error.status_code,
-                )
-                return self._unavailable_mapping_verification_result()
-            logger.exception(
+            logger.error(
                 "[skills_pool.runtime] mapping verify HTTP failure bot_id=%s "
                 "status=%s",
                 bot_id,
                 error.status_code,
             )
             return self._unavailable_mapping_verification_result()
+        except DeviceOfflineError:
+            return self._offline_mapping_verification_result()
         except Exception:
             logger.exception(
                 "[skills_pool.runtime] mapping verify failed bot_id=%s",
@@ -700,6 +717,14 @@ class SkillsPoolRuntime:
                 sorted(response.keys()),
             )
         return result
+
+    @staticmethod
+    def _offline_mapping_verification_result() -> MappingVerificationResult:
+        return MappingVerificationResult(
+            valid=False,
+            status=MappingProjectionStatus.PENDING,
+            reason=MappingResultReason.DEVICE_OFFLINE,
+        )
 
     @staticmethod
     def _unsupported_mapping_verification_result() -> MappingVerificationResult:
@@ -827,6 +852,8 @@ class SkillsPoolRuntime:
                 path="/api/skills/center/ensure",
                 body={"items": items},
             )
+        except DeviceOfflineError:
+            raise
         except Exception:
             logger.exception(
                 "[skills_pool.runtime] center ensure failed bot_id=%s", bot_id
