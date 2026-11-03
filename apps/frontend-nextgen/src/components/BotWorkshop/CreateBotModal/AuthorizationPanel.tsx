@@ -1,15 +1,19 @@
 import { Spin } from '@/components/ui/Spin';
-import type { BotCreateAuthorization } from '@/services/botWorkshop';
 import { cn } from '@/utils/cn';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /** 老版 AgentPass 交互：保留列表背景，iframe 首屏就绪后再显示授权页面。 */
-export function AuthorizationPanel({
-  authorization,
-}: {
-  authorization: BotCreateAuthorization & { message?: string; error?: string };
-}) {
+export interface AuthorizationPanelProps {
+  /**
+   * 仅消费 iframeUrl/redirectUrl(message/error 可选用于状态文案)。create 与 copy 的
+   * 授权视图结构不同(create 携 request 走轮询,copy 不携带),故此处取结构最小集,
+   * 让两条流程共用此面板而不强行耦合它们的 result 形状。
+   */
+  authorization: { iframeUrl?: string; redirectUrl?: string; message?: string; error?: string };
+}
+
+export function AuthorizationPanel({ authorization }: AuthorizationPanelProps) {
   const authorizationUrl = authorization.iframeUrl || authorization.redirectUrl;
   const [loaded, setLoaded] = useState(false);
 

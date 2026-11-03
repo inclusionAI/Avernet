@@ -5,16 +5,21 @@ import { toast } from 'sonner';
 import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 
 interface BotWorkshopCopyFlowOptions {
-  /** 复制成功 / 授权走完后,刷新列表以让新 Bot 出现。 */
+  /** 复制成功 / 授权走通后,刷新列表以让新 Bot 出现。 */
   load: () => Promise<void>;
   /** 复制流程结束时(成功或终止)关闭源 Bot 引用。 */
   onClose: () => void;
 }
 
 /**
- * 编排 Bot 复制:调 `copyBot` → 需 AgentPass 授权时 `beginAuthorization`,
- * 复用 `useBotCreateAuthorization` 的 2s 轮询直到 ISSUED;
- * 成功后 toast + 刷新列表 + 关 Modal。结果结构与创建同构,授权 iframe 也共用。
+ * 编排 Bot 复制:调 `copyBot` →
+ * - `issued`(success):复制已提交,dst bot 由 create_job 异步创建。toast + 刷新列表 +
+ *   关 Modal,新 Bot 落入当前页并携带 copy_state 进度。
+ * - `authorization_required`(auth_required):**与创建 iframe url 完全同款处理** ——
+ *   复用 `useBotCreateAuthorization` 的 2s 轮询 dst bot 的 auth-status,ISSUED 后收敛。
+ *   dst bot 在 ac_bots 已注册(即便仍在复制中),auth-status 端点对 copy dst 同样适用。
+ *
+ * 源 Bot 的协作者/外部渠道/工具授权/密钥不继承。
  */
 export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOptions) {
   const [copying, setCopying] = useState(false);
@@ -43,11 +48,10 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
           authorization.beginAuthorization(result);
           return;
         }
-        if (result.type === 'created_with_pending_after_create') {
-          const actions = result.afterCreateFailures.map((failure) => failure.key).join('、');
-          toast.warning(`Bot 已复制,但后续配置未全部完成${actions ? `:${actions}` : ''}`);
-        }
-        await handleCopied(result.bot);
+        // issued:dst bot 异步创建中,无 BotDto;toast + 刷新列表 + 关 Modal。
+        toast.success('复制已提交,正在创建新 Bot');
+        onClose();
+        await load();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Bot 复制失败');
         throw error;
@@ -55,7 +59,7 @@ export function useBotWorkshopCopyFlow({ load, onClose }: BotWorkshopCopyFlowOpt
         setCopying(false);
       }
     },
-    [authorization.beginAuthorization, handleCopied],
+    [authorization.beginAuthorization, load, onClose],
   );
 
   return {

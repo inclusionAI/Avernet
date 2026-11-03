@@ -7,9 +7,12 @@ import BotStatusCell from '@/components/BotWorkshop/BotCard/BotStatusCell';
 import type { BotTableColumnOptions } from '@/components/BotWorkshop/BotCard/botTableTypes';
 import BotTagsCell from '@/components/BotWorkshop/BotCard/BotTagsCell';
 import BotVersionCell from '@/components/BotWorkshop/BotCard/BotVersionCell';
+import { Button } from '@/components/ui/Button';
 import { type DataTableColumn } from '@/components/ui/DataTable';
+import { BOT_COPY_FEATURE_ENABLED } from '@/hooks/useBotWorkshopCopyHost';
 import { botTableEngineVersionKey } from '@/hooks/useBotTableEngineVersions';
 import { getBotEntryAvailability, type BotDomain } from '@/services/botWorkshop';
+import { RotateCw } from 'lucide-react';
 import { useMemo } from 'react';
 
 export function useBotTableColumns(options: BotTableColumnOptions): DataTableColumn<BotDomain>[] {
@@ -46,6 +49,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onGeneralConfig,
     getCopyAvailability,
     onCopy,
+    onRetryCopy,
     onOpenEngineInfo,
     onUpdateEngineVersion,
   } = options;
@@ -139,6 +143,28 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
         headerClassName: 'sticky right-0 z-10 bg-muted/50',
         cell: (bot) => {
+          // 复制进行中(gated):copy_state 非空时,操作列折叠为仅「重试」按钮 ——
+          // view/edit/chat/logs/管理菜单等一律隐藏,避免用户对一个尚未收敛的 dst bot
+          // 触发与其复制态冲突的操作。重试安全:create_job 幂等,cas_retry 节流。
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
+          if (copyState && onRetryCopy) {
+            return (
+              <div className="flex items-center justify-end" onClick={(event) => event.stopPropagation()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1 text-xs text-muted-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRetryCopy(bot);
+                  }}
+                >
+                  <RotateCw aria-hidden className="size-3.5" />
+                  重试
+                </Button>
+              </div>
+            );
+          }
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
@@ -228,6 +254,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onGeneralConfig,
       getCopyAvailability,
       onCopy,
+      onRetryCopy,
       onOpenEngineInfo,
       onUpdateEngineVersion,
       engineVersionStates,

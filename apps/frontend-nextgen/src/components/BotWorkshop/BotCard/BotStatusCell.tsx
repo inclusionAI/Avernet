@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import type { BotDomain } from '@/services/botWorkshop';
+import type { BotCopyStatus, BotDomain } from '@/services/botWorkshop';
+import { BOT_COPY_FEATURE_ENABLED } from '@/hooks/useBotWorkshopCopyHost';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import React from 'react';
 import { BotStatusPublicationMenu } from './BotStatusPublicationMenu';
@@ -12,6 +13,19 @@ export interface BotStatusCellProps {
   onToggleProgress?: () => void;
   onManagePublication?: (bot: BotDomain) => void;
 }
+
+/** 复制状态 → 中文标签(CONVERGED 不会出现:后端收敛后 copy_state 已为 null)。 */
+const COPY_STATUS_LABEL: Record<BotCopyStatus, string> = {
+  INITIAL: '复制初始化',
+  CREATED: '复制中',
+  AUTH_PENDING: '等待授权',
+  CONFIG_COPIED: '配置已复制',
+  FILE_SYNCED: '文件已同步',
+  BOT_STARTED: 'Bot 启动中',
+  CAPSET_SYNCED: '能力集同步中',
+  CONVERGED: '已复制完成',
+  FAILED: '复制失败',
+};
 
 /**
  * 状态圆点配 dmore 稿（10/19 Bot管理首页）：8px 圆点 + 13px 文字，不再用彩色底 Badge。
@@ -41,6 +55,22 @@ const BotStatusCell: React.FC<BotStatusCellProps> = ({
   onToggleProgress,
   onManagePublication,
 }) => {
+  // 复制进行中(gated by 特性开关):copy_state 非空时,该 bot 仍是「复制中」态,
+  // 状态列直接展示复制进度文案替代生命周期状态(部署/发布菜单在此态无意义),
+  // 操作列则只保留「重试」按钮(见 useBotTableColumns 的 actions 列)。
+  const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
+  if (copyState) {
+    const failed = copyState.status === 'FAILED';
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span aria-hidden className={`size-2 shrink-0 rounded-full ${failed ? 'bg-destructive' : 'bg-info'}`} />
+        <span className="whitespace-nowrap text-[13px] text-muted-foreground">
+          {COPY_STATUS_LABEL[copyState.status]}
+        </span>
+      </span>
+    );
+  }
+
   const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
   const personalCloud = bot.serviceMode === 'non-service' && bot.deployment === 'cloud';
   const recoveryLabel = personalCloud
