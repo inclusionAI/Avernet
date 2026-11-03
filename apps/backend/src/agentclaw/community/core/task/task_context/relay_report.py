@@ -117,6 +117,10 @@ def _fingerprint(command: TaskReportCommand) -> str:
         ),
         "trace": asdict(command.trace) if command.trace is not None else None,
     }
+    # 终态最终产物参与 event fingerprint。仅在携带时加入键,保持旧无产物报文
+    # 的 fingerprint 兼容,避免发布后历史 event_id 重放被误判冲突。
+    if command.artifact_patch is not None:
+        canonical["artifacts"] = [asdict(item) for item in command.artifact_patch]
     raw = json.dumps(
         _json_value(canonical),
         sort_keys=True,
@@ -304,6 +308,13 @@ def apply_relay_report(
         else:
             if f"{command.node_id}:EXECUTION_RESULT:{attempt}" not in receipts:
                 raise TaskStateError("PLAN_RESULT requires accepted execution first")
+            if (
+                command.event is not None
+                and command.artifact_patch is not None
+            ):
+                raise TaskStateError(
+                    "successor PLAN_RESULT events must not carry artifacts"
+                )
             next_node = command.event
             acceptance = command.task_acceptance_result
             failure = str(command.failure_reason or "").strip()
@@ -333,7 +344,10 @@ def apply_relay_report(
                 # 产物发布点 ②(spec §5.1):completion 写点同闭包 capture,重复内容
                 # 由 select-first 查重吸收。
                 default_publish_service().capture_node(
-                    graph, node, artifact_patch=None, now_ms=now
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
                 )
                 record_action(
                     NodeAction.PLAN,
@@ -361,6 +375,12 @@ def apply_relay_report(
                 node.run_info.failure_reason = failure
                 graph.status = Status.HUNG
                 graph.extend_props["hung_reason"] = failure
+                default_publish_service().capture_node(
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
+                )
                 record_action(
                     NodeAction.PLAN,
                     {
