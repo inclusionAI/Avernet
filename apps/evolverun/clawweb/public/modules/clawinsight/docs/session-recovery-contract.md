@@ -151,12 +151,42 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 ## Owner notification switch and linked task visibility
 
 Owner DingTalk notifications use the independent `ce_app_config` key
-`session_recovery_owner_notifications`. Its existing `enabled` column controls
-sending; `config_json` is `{}`. Missing or disabled configuration skips Owner
-notifications without recording a successful send. Enable the row to resume
-notifications on subsequent notification events; skipped notifications are not
-replayed. This does not affect group webhooks (`session_recovery_notifications`),
-Agent execution, plan approval, or Owner feedback through the task page.
+`session_recovery_owner_notifications`. Its existing `enabled` column is the
+master switch: a missing row or any value other than `1` prevents sending.
+An enabled row additionally requires an explicit grant in `config_json`:
+
+```json
+{
+  "default_enabled": false,
+  "bot_overrides": [
+    { "bot_id": "example-bot", "entity_id": "example-owner", "env": "prod", "enabled": true }
+  ]
+}
+```
+
+Overrides match the exact `bot_id + entity_id + env` from the task's frozen
+target. `env` is the target Bot environment, not the ClawWeb control-plane
+environment. A matching override's boolean `enabled` takes precedence,
+including `false` when the default is on. Without a match, sending is allowed
+only when `default_enabled` is explicitly `true`. Missing defaults, `{}`, or
+an empty unmatched override list remain off. IDs remain strings, including
+leading zeros; different Owners' `default` Bots do not share overrides.
+
+Use `enabled = 1` with `{"default_enabled":true}` for all-on, `enabled = 0`
+for all-off, or `enabled = 1` with explicit positive overrides and an absent
+or false default for selected Bots. An existing enabled row with `{}` must
+be updated to an explicit grant before it can send; empty configuration no
+longer means all-on.
+
+Malformed JSON, invalid field types or environments, unknown fields and
+duplicate target overrides disable the whole notification attempt, even if
+another entry or the default grants sending. The existing recovery log records
+`session_recovery_notification / configuration_invalid` without the raw
+configuration. Each notification event reads current policy; disabled or
+filtered notifications are not recorded as successful sends and are not replayed
+when policy changes. This applies to both plan and result Owner notices, and
+does not affect group webhooks (`session_recovery_notifications`), Agent
+execution, plan approval, or Owner feedback through the task page.
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by

@@ -41,6 +41,22 @@ function setup(callbackFails = false) {
 }
 
 describe("self-healing task orchestration", () => {
+  it("passes the frozen Bot and target environment to Owner notification policy without recording a disabled send", async () => {
+    const { service, records, notifier } = setup();
+    notifier.notify.mockResolvedValue(false);
+    const ack = await service.create(request, actor); await flush();
+    const task = records.get(ack.task_id)!;
+    task.phase = "plan";
+    task.level = "approval";
+    await service.plan(task.taskId, task.version, { summary: "需要 Owner 开通权限", basis: "已核实权限受限", scope: "目标服务权限",
+      verification: "权限恢复后核查原任务", actions: [], owner_cooperation: [{ request: "申请服务权限", basis: "服务明确拒绝访问" }] });
+    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
+      taskId: task.taskId, kind: "plan", summary: "需要 Owner 开通权限" });
+    const saved = records.get(task.taskId)!;
+    expect(saved.status).toBe("waiting_owner");
+    expect(saved.timeline.some(event => event.kind === "notification")).toBe(false);
+  });
+
   it("counts a failed creation once without exposing diagnosis or credentials or replacing the error", async () => {
     const output = vi.mocked(logRepairEvent).mockClear();
     const { service, deps } = setup();
