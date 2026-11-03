@@ -332,3 +332,47 @@ def test_sync_symlinks_returns_failure_on_generic_exception():
 
     assert result["success"] is False
     assert "同步失败" in result["message"]
+
+
+# ── HttpxCallingException retry ──────────────────────────────────────────
+
+
+class _FakeHttpxCallingException(Exception):
+    """Simulates ant_baselib.tracer.patches.httpx_client.HttpxCallingException."""
+    pass
+
+
+def test_sync_symlinks_retries_when_transport_raises_httpx_calling_exception():
+    """transport 抛 HttpxCallingException → 触发重试逻辑（与 RequestError 同等）。"""
+    from agentclaw.community.core.devices.services import baas_device_sync as bds
+
+    transport = _make_transport()
+    transport.post.side_effect = [
+        _FakeHttpxCallingException("Error in httpx send hook"),
+        _ok_response(),
+    ]
+    plugin = bds.BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch.object(bds, "_TRANSPORT_WRAP_EXCS", (_FakeHttpxCallingException,)),          patch.object(bds.time, "sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is True
+    assert transport.post.call_count == 2
+    sleep.assert_called_once_with(1)
+
+
+def test_sync_symlinks_stops_after_bounded_httpx_calling_exception_retries():
+    """transport 持续抛 HttpxCallingException → 最多 3 次重试后退避耗尽。"""
+    from agentclaw.community.core.devices.services import baas_device_sync as bds
+
+    transport = _make_transport()
+    transport.post.side_effect = _FakeHttpxCallingException("Error in httpx send hook")
+    plugin = bds.BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch.object(bds, "_TRANSPORT_WRAP_EXCS", (_FakeHttpxCallingException,)),          patch.object(bds.time, "sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is False
+    assert "同步失败" in result["message"]
+    assert transport.post.call_count == 4
+    assert sleep.call_args_list == [call(1), call(2), call(4)]
