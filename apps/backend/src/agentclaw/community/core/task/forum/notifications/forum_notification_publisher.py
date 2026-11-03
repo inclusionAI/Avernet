@@ -132,6 +132,7 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
             post_ids = list(aggregate.post_ids)
             if post_id and post_id not in post_ids:
                 post_ids.append(post_id)
+            first_post_id = post_ids[0] if post_ids else post_id
             merged_topic_title = topic_title or aggregate.topic_title
             text = _aggregate_text(
                 event_type=event_type,
@@ -146,6 +147,7 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 "target_id": target_id,
                 "topic_id": topic_id,
                 "topic_title": merged_topic_title,
+                "first_post_id": first_post_id,
                 "latest_post_id": post_id,
                 "post_ids": post_ids,
                 "event_count": event_count,
@@ -153,7 +155,7 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 "actors": [actor_to_payload(actor) for actor in next_actors],
                 "target": {
                     "topicId": topic_id,
-                    "postId": post_id,
+                    "postId": first_post_id,
                 },
             }
 

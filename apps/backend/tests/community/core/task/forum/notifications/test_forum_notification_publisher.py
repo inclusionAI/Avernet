@@ -98,6 +98,12 @@ def test_five_replies_merge_into_one_unread_notice() -> None:
         "post-900004",
         "post-900005",
     ]
+    assert repository.content["first_post_id"] == "post-900001"
+    assert repository.content["latest_post_id"] == "post-900005"
+    assert repository.content["target"] == {
+        "topicId": "topic-1",
+        "postId": "post-900001",
+    }
 
 
 def test_self_action_is_not_notified() -> None:
