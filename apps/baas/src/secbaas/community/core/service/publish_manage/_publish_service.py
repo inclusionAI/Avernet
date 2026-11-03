@@ -1219,6 +1219,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             else:
                 eligible_statuses = {
                     DeviceStatus.ACTIVE.value,
+                    DeviceStatus.OFFLINE.value,
                     DeviceStatus.FAILED.value,
                     DeviceStatus.PENDING.value,
                     DeviceStatus.STOPPED.value,
