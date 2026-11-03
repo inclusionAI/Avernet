@@ -2,13 +2,18 @@ import type { BotEditorRoutineInput } from '@/domain/botEditor';
 export type RoutineStage = 'draft' | 'verify' | 'online';
 export const stageNames: Record<RoutineStage, string> = { draft: '草稿态', verify: '验证态', online: '生产态' };
 export interface RoutineTarget {
-  runtime_stage?: RoutineStage;
-  device_uuid?: string;
-  operator_id?: string;
+  runtime_stage?: RoutineStage | null;
+  device_uuid?: string | null;
+  operator_id?: string | null;
+}
+export interface RoutineScope {
+  botId: string;
+  userId: string;
+  entityId?: string;
 }
 export interface RoutineEnvironment {
   runtime_stage: RoutineStage;
-  available: boolean;
+  available?: boolean;
   reason?: string;
   requires_instance: boolean;
   instances: string[];
@@ -19,14 +24,17 @@ export interface RoutineContext {
   owner_id: string;
   bot_type: string;
   engine: string;
-  caller_mode: boolean;
+  caller_mode?: boolean;
   supported: boolean;
   can_manage: boolean;
   environments: RoutineEnvironment[];
+  warning?: string;
 }
 export interface ManagedRoutine extends RoutineTarget {
   id: string;
   key: string;
+  bot_id: string;
+  owner_id?: string;
   name: string;
   cron: string;
   command: string;
@@ -34,33 +42,135 @@ export interface ManagedRoutine extends RoutineTarget {
   timezone: string;
   model?: string;
   timeoutSecs: number;
+  createdAt?: string;
+  modifiedAt?: string;
   nextRunAt?: string;
   lastRunAt?: string;
 }
-export interface RoutineForm extends BotEditorRoutineInput, RoutineTarget {}
-export interface RoutineRun {
+export interface RoutineAddress extends RoutineTarget {
   id: string;
+  key: string;
+}
+export interface RoutineForm extends BotEditorRoutineInput, RoutineTarget {}
+export interface RoutineRun extends RoutineTarget {
+  id: string;
+  routineId: string;
   status: string;
   startedAt?: string;
   finishedAt?: string;
   duration?: string;
-  output?: string;
-  error?: string;
-  target: RoutineTarget;
 }
-export const targetKey = (target: RoutineTarget) =>
-  JSON.stringify([target.runtime_stage ?? '', target.device_uuid ?? '', target.operator_id ?? '']);
-export const routineKey = (routine: RoutineTarget & { id: string }) => JSON.stringify([routine.id, targetKey(routine)]);
-/** Target fields are routing identity, never silently replaced by the current viewer. */
-export function targetParams(context: RoutineContext, target: RoutineTarget, actorId: string): RoutineTarget {
+export interface FailedTarget extends RoutineTarget {
+  bot_id?: string | null;
+  owner_id?: string | null;
+  reason: string;
+}
+export interface RuntimePage<T> {
+  total: number;
+  items: T[];
+  failed_targets: FailedTarget[];
+}
+export interface RoutineDto extends RoutineTarget {
+  routine_id: string;
+  bot_id: string;
+  owner_id?: string | null;
+  bot_name?: string | null;
+  name: string;
+  trigger: { type: 'schedule'; cron: string };
+  command: string;
+  enabled: boolean;
+  timezone?: string | null;
+  model?: string | null;
+  timeout_secs?: number | null;
+  gmt_create?: string;
+  gmt_modified?: string;
+}
+export interface RoutineRunDto extends RoutineTarget {
+  run_id: string;
+  routine_id: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+export interface RoutineOperationBatch {
+  results: Array<
+    RoutineTarget & {
+      bot_id?: string | null;
+      owner_id?: string | null;
+      success: boolean;
+      routine: RoutineDto | null;
+      run: RoutineRunDto | null;
+      reason: string | null;
+    }
+  >;
+  succeeded: number;
+  failed: number;
+  failed_targets: FailedTarget[];
+}
+export interface OperationResult {
+  level: 'success' | 'warning' | 'error';
+  message: string;
+  batch?: RoutineOperationBatch;
+  routine?: ManagedRoutine;
+}
+export const isStage = (value: unknown): value is RoutineStage => ['draft', 'verify', 'online'].includes(String(value));
+/** Only reported nonempty fields are transmitted. An omitted field never becomes draft/current user. */
+export function targetParams(target: RoutineTarget): RoutineTarget {
+  return Object.fromEntries(
+    ['runtime_stage', 'device_uuid', 'operator_id'].flatMap((key) => {
+      const value = target[key as keyof RoutineTarget];
+      return value ? [[key, value]] : [];
+    }),
+  );
+}
+export const routineKey = (
+  row: RoutineTarget & { id: string; bot_id?: string; owner_id?: string },
+  scope: RoutineScope,
+) =>
+  JSON.stringify([
+    row.owner_id ?? scope.entityId ?? scope.userId,
+    row.bot_id || scope.botId,
+    row.runtime_stage ?? null,
+    row.device_uuid ?? null,
+    row.operator_id ?? null,
+    row.id,
+  ]);
+export function addressFromKey(key: string | null, scope: RoutineScope): RoutineAddress | undefined {
+  if (!key) return undefined;
+  try {
+    const [owner, bot, stage, device, operator, id] = JSON.parse(key);
+    if (bot !== scope.botId || owner !== (scope.entityId ?? scope.userId) || typeof id !== 'string' || !id)
+      return undefined;
+    if (stage != null && !isStage(stage)) return undefined;
+    if ((device != null && typeof device !== 'string') || (operator != null && typeof operator !== 'string'))
+      return undefined;
+    return {
+      id,
+      key,
+      ...targetParams({
+        runtime_stage: stage ?? undefined,
+        device_uuid: device ?? undefined,
+        operator_id: operator ?? undefined,
+      }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+export function preciseTarget(context: RoutineContext, target: RoutineTarget) {
+  if (context.bot_type !== 'service') return true;
+  return Boolean(target.runtime_stage && (target.device_uuid || target.operator_id));
+}
+export function validateCreateTarget(context: RoutineContext, form: RoutineTarget, actorId: string): RoutineTarget {
   if (context.bot_type !== 'service') return {};
-  if (!target.runtime_stage) throw new Error('请选择生效环境');
-  if (context.caller_mode && target.runtime_stage !== 'online') throw new Error('Caller 模式仅支持生产态');
-  const noInstance = context.engine.toLowerCase() === 'teclaw' && target.runtime_stage === 'online';
-  if (!noInstance && !target.device_uuid) throw new Error('请选择运行实例');
-  return {
-    runtime_stage: target.runtime_stage,
-    ...(!noInstance ? { device_uuid: target.device_uuid } : {}),
-    operator_id: target.operator_id || actorId,
-  };
+  if (context.caller_mode === undefined) throw new Error('尚未确认 Bot 的 Caller 配置，请刷新后重试');
+  if (!form.runtime_stage) throw new Error('请选择生效环境');
+  if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持生产态');
+  const noInstance = context.engine === 'teclaw' && form.runtime_stage === 'online';
+  if (!noInstance && !form.device_uuid) throw new Error('请选择已确认的运行实例');
+  return targetParams({
+    runtime_stage: form.runtime_stage,
+    device_uuid: noInstance ? undefined : form.device_uuid,
+    operator_id: context.caller_mode ? form.operator_id || actorId : undefined,
+  });
 }

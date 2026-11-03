@@ -12,7 +12,7 @@ import {
 } from '@/services/botWorkshop/routineSchedule';
 import {
   stageNames,
-  targetParams,
+  validateCreateTarget,
   type ManagedRoutine,
   type RoutineContext,
   type RoutineForm,
@@ -39,7 +39,7 @@ export function RoutineFormDialog({
 }) {
   const [form, setForm] = useState<RoutineForm>(() =>
     original
-      ? { ...original }
+      ? { ...original, timezone: original.timezone || 'Asia/Shanghai' }
       : {
           name: '',
           command: '',
@@ -76,7 +76,7 @@ export function RoutineFormDialog({
   const environment = context.environments.find((item) => item.runtime_stage === form.runtime_stage);
   let targetError = '';
   try {
-    targetParams(context, form, 'current-user');
+    original ? undefined : validateCreateTarget(context, form, 'current-user');
   } catch (reason) {
     targetError = (reason as Error).message;
   }
@@ -181,9 +181,9 @@ export function RoutineFormDialog({
               {context.caller_mode && (
                 <p className="text-xs text-muted-foreground sm:col-span-2">Caller 模式仅支持生产态。</p>
               )}
-              {environment && !environment.available && (
+              {environment && environment.requires_instance && environment.instances.length === 0 && (
                 <p className="text-xs text-destructive sm:col-span-2" role="status">
-                  {environment.reason || '运行环境暂不可用'}。当前接口尚不支持离线保存。
+                  {environment.reason || '尚未取得可信运行实例'}。请切换运行态并刷新；不会自动选择其他目标。
                 </p>
               )}
               {original && (
