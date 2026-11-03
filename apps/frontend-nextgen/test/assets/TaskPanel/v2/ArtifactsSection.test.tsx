@@ -33,6 +33,45 @@ describe('ArtifactsSection', () => {
   });
 });
 
+describe('ArtifactsSection 最终产物标识', () => {
+  const finalArtifact: TaskArtifactView = {
+    id: 'artifact-final',
+    name: '第一棒最终产物',
+    type: 'document',
+    kind: 'text',
+    stage: 1,
+    isFinalArtifact: true,
+    updatedAt: '2026-10-23T10:00:00.000Z',
+    fileRef: null,
+    nodeId: 'n-1',
+  };
+  const normalArtifact: TaskArtifactView = {
+    ...finalArtifact,
+    id: 'artifact-normal',
+    name: '第二棒普通产物',
+    stage: 2,
+    isFinalArtifact: false,
+  };
+
+  it('仅 is_final_artifact=true 的产物高亮,不按最后一棒推断', () => {
+    render(
+      <ArtifactsSection
+        artifacts={[finalArtifact, normalArtifact]}
+        apiBaseUrl=""
+        context={{ taskId: 'task-1', ownerBotId: 'bot-1', ownerUserId: 'user-1' }}
+      />,
+    );
+
+    const finalRow = screen.getByText('第一棒最终产物').closest('li')!;
+    const normalRow = screen.getByText('第二棒普通产物').closest('li')!;
+    expect(finalRow).toHaveTextContent('最终产物');
+    expect(finalRow).not.toHaveTextContent('第1棒产物');
+    expect(normalRow).toHaveTextContent('第2棒产物');
+    expect(finalRow.style.border).toBe('1px solid rgb(37, 99, 235)');
+    expect(normalRow.style.border).toBe('1px solid rgb(229, 230, 235)');
+  });
+});
+
 describe('ArtifactsSection 代码/链接产物操作', () => {
   const baseArtifact: TaskArtifactView = {
     id: 'artifact-external',

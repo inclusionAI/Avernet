@@ -115,6 +115,12 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
               const hasPreviewActions = isInlineArtifact || isFileArtifact || isDetailArtifact;
               const hasPreviewButton = hasPreviewActions && !isExternalOnlyArtifact;
               const hasDownloadAction = isFileArtifact;
+              const isFinalArtifact = a.isFinalArtifact === true;
+              const stageLabel = isFinalArtifact
+                ? '最终产物'
+                : a.stage
+                  ? `第${a.stage}棒产物`
+                  : null;
               return (
                 <li
                   key={a.id}
@@ -124,24 +130,53 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
                     gap: 8,
                     padding: '8px 10px',
                     borderRadius: 8,
-                    border: `1px solid ${C.border}`,
-                    background: C.surface,
+                    border: `1px solid ${isFinalArtifact ? C.primary : C.border}`,
+                    background: isFinalArtifact ? `${C.primary}0F` : C.surface,
                   }}
                 >
-                  <span
+                  <div
                     style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 4,
                       flexShrink: 0,
-                      fontSize: 11,
-                      color: C.textSecondary,
-                      background: C.surfaceAlt,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 4,
-                      padding: '1px 6px',
-                      lineHeight: '18px',
                     }}
                   >
-                    {badge}
-                  </span>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        fontSize: 11,
+                        color: C.textSecondary,
+                        background: C.surfaceAlt,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 4,
+                        padding: '1px 6px',
+                        lineHeight: '18px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {badge}
+                    </span>
+                    {stageLabel && (
+                      <span
+                        data-testid="artifact-stage"
+                        style={{
+                          fontSize: 11,
+                          color: isFinalArtifact ? C.primary : C.textSecondary,
+                          background: isFinalArtifact ? `${C.primary}12` : C.surfaceAlt,
+                          border: `1px solid ${isFinalArtifact ? `${C.primary}40` : C.border}`,
+                          borderRadius: 4,
+                          padding: '1px 6px',
+                          lineHeight: '18px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {stageLabel}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{

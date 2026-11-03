@@ -285,6 +285,7 @@ function mapArtifacts(list?: TaskDashboardResponse['artifacts']): TaskView['arti
     type: a.type,
     url: a.url ?? null,
     summary: a.summary ?? null,
+    nodeId: a.node_id ?? null,
     updatedAt: a.created_at,
   }));
 }
