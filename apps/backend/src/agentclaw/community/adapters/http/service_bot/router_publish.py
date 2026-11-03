@@ -720,6 +720,7 @@ async def sync_scale_progress(
     summary="更新发布单状态",
 )
 @with_interceptors(CollaboratorPermissionInterceptor(
+    allow_super_admin=True,
     params_extractor=extract_from_publish_id,
     extractor_params={"publish_id": "$publish_id"},
 ))
@@ -848,6 +849,7 @@ async def offline_publish(
     summary="服务 Bot 扩缩容",
 )
 @with_interceptors(CollaboratorPermissionInterceptor(
+    allow_super_admin=True,
     params_extractor=extract_from_publish_id,
     extractor_params={"publish_id": "$publish_id"},
 ))
