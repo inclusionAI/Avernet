@@ -197,7 +197,10 @@ def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
         assert client.get("/ready").status_code == 200
         result = client.get("/ready?include_counts=true")
         assert result.status_code == 503
-        assert result.json() == {"detail": "index count unavailable"}
+        body = result.json()
+        assert body["detail"] == "index count unavailable" and body["ready"] is False
+        assert body["instance_id"] == "local" and body["index_key"]
+        assert "index_counts" not in body
 
 
 def test_ready_counts_report_actual_mismatched_payloads_without_new_endpoint(tmp_path):

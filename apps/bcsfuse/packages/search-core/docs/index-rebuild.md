@@ -101,7 +101,10 @@ callers; explicit version paths never call it. TC's composition is unchanged.
 HTTP creation requires model and dimension; optional `filter_fields` selects the
 version's filtering rules. Omission uses application defaults for a new version,
 or saved filters for a retry. The application may add mandatory business fields.
-GET/PUT responses expose the resolved `conversion_version` and `filter_fields`.
+GET/PUT responses expose the version name once as `index_key`, plus resolved
+`conversion_version` and `filter_fields`. They do not repeat a `build_id` field.
+For `configured` records, no build has run, so `completed_count` and `total_count`
+are omitted; queued/running/finished tasks return their recorded counts.
 There is no builder registry or executable rule JSON: hosts bind their built-in
 converter, and the system records its version. New rules require matching code.
 Incremental processing uses the selected version's persisted model/filters and

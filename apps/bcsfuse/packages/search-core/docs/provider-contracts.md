@@ -105,6 +105,12 @@ and behavior are unchanged.
   separate optional operations settings. Business JSON is not normalized. Hosts
   with historical normalized records can subclass the snapshot and override the
   repository decoder; public storage/write semantics remain shared.
+- `CardRecord.preparation_key` carries the existing source-row error owner. Status
+  exposes a source preparation error only when it belongs to the responding
+  instance's index key; other generation failures are queried through build status.
+- HTTP Card writes accept only `card` and optional `resource_type`; reads return
+  the complete merged business object and system revision. Optional internal
+  operations settings are not accepted as an HTTP `search_config` field.
 - `CardRecord.prepared` is an optional host artifact-cache value, carried through
   internal writes for compatibility. Public CRUD does not read an artifact table.
 - Conformance: `tests/test_card_management.py` exercises the actual public router,

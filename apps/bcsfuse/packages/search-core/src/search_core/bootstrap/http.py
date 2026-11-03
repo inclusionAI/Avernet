@@ -29,6 +29,7 @@ def create_search_app(
     request_model=SearchBody,
     result_mapper=None,
     response_model=ResultBody,
+    operations=("search", "recommend"),
 ) -> FastAPI:
     """None lifespan is valid when all dependencies are externally managed."""
     if type(max_inflight_requests) is not int or max_inflight_requests < 0:
@@ -56,6 +57,7 @@ def create_search_app(
             request_model=request_model,
             result_mapper=result_mapper,
             response_model=response_model,
+            operations=operations,
         )
     )
 

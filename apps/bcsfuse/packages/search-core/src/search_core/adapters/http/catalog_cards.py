@@ -17,7 +17,7 @@ from search_core.adapters.http.cards import (
     create_card_router as create_shared_card_router,
 )
 from search_core.adapters.http.routes import Authenticator
-from search_core.api.cards import CardManagement, CatalogConflict
+from search_core.api.cards import CardManagement, CatalogConflict, IndexTargetMismatch
 from search_core.api.models import VerifiedIdentity
 
 
@@ -28,7 +28,7 @@ class CardStatus(SharedCardStatus):
 
 class CardRebuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    index_key: str = Field(min_length=1, max_length=128)
+    index_key: str = Field(min_length=1, max_length=64)
 
 
 class CardRebuildResult(BaseModel):
@@ -56,6 +56,10 @@ def create_card_router(service: CardManagement, authorize_operator: Authenticato
             return await asyncio.to_thread(service.rebuild, agent_id, body.index_key)
         except KeyError as error:
             raise HTTPException(404, "Card not found") from error
+        except IndexTargetMismatch as error:
+            raise HTTPException(
+                409, "requested index_key is not loaded on this instance"
+            ) from error
         except CatalogConflict as error:
             raise HTTPException(
                 409, "Card rebuild conflicted; reload status and retry"
