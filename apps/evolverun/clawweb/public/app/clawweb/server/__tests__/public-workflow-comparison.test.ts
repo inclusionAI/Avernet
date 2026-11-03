@@ -17,7 +17,7 @@ vi.mock('@avernet/clawevolve', async () => {
 });
 vi.mock('@avernet/clawinsight', async () => {
   const { Router } = await import('express');
-  return { createInsightRuntime: () => ({ service: {} }), createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router() };
+  return { createInsightRuntime: () => ({ service: {} }), createInsightManagementRuntime: () => ({ router: Router() }), createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router() };
 });
 vi.mock('../repair-ais-execution.js', () => ({ resolveRepairAisConfiguration: async () => null }));
 import { createClawWebBootstrap } from '../public-bootstrap.js';

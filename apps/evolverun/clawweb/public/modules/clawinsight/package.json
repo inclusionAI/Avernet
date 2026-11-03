@@ -25,7 +25,8 @@
     }
   },
   "files": [
-    "dist/"
+    "dist/",
+    "scripts/insight_manage.py"
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",

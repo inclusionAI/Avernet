@@ -18,3 +18,6 @@ export { createSessionRecoveryRouter } from "./routes/session-recovery.js";
 export type { SessionRecoveryRuntime } from "./services/repair/session-recovery/contracts.js";
 export type { SessionRecoveryRouterOptions } from "./routes/session-recovery.js";
 export { SessionRecoveryTaskService } from "./services/repair/session-recovery/task-service.js";
+
+export { createInsightManagementRuntime } from "./services/insight/management/runtime.js";
+export { createInsightManagementRouter } from "./routes/insight-management.js";
