@@ -5,6 +5,7 @@ import { ChevronUp, Square } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { buildBotActivityItems } from './congestionHelpers';
 import { resolveAbortableBotId } from './groupChatAbortHelpers';
+import { ManagerActivityBar } from './ManagerActivityBar';
 import { GroupChatActivityPanel } from './GroupChatActivityPanel';
 import { isBotReplying, type GroupChatActivityActions } from './GroupChatActivityParts';
 
@@ -46,6 +47,7 @@ export function collectActiveBotRuns(messages: ChatMessage[], participants: Part
 }
 
 interface GroupChatActiveRunsProps extends GroupChatActivityActions {
+  managerMode?: boolean;
   messages: ChatMessage[];
   participants: ParticipantView[];
   queuedDeliveries?: DeliveryStatusView[];
@@ -58,6 +60,7 @@ export function GroupChatActiveRuns({
   participants,
   queuedDeliveries = [],
   processingDeliveries = [],
+  managerMode = false,
   ...actions
 }: GroupChatActiveRunsProps) {
   const [open, setOpen] = useState(false);
@@ -75,15 +78,18 @@ export function GroupChatActiveRuns({
   }, [items, selectedBotId]);
   const selectedBot = items.find((bot) => bot.botId === selectedBotId) ?? items[0];
   if (!selectedBot) return null;
+  if (managerMode) return <ManagerActivityBar items={items} {...actions} />;
   const replyingCount = items.filter(isBotReplying).length;
   const queuedCount = items.reduce((count, bot) => count + bot.queued.length, 0);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-2" aria-label="群聊处理状态">
+        <div className="flex min-h-8 w-full min-w-0 flex-wrap items-center justify-between gap-2" aria-label="群聊处理状态">
           <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground" role="status">
-            <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden />
+            <span className="flex size-3.5 shrink-0 items-center justify-center" aria-hidden>
+              <span className="size-1.5 rounded-full bg-primary" />
+            </span>
             <span>
               {replyingCount > 0
                 ? `${replyingCount} 个 Bot 处理中 · ${queuedCount} 项待处理`
