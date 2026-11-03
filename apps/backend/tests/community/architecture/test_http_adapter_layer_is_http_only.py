@@ -276,6 +276,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "BindingNotFoundError", "BotPublishNotFoundError",
     "BotBuildServiceError", "BotBuildMigrationError",
     "BotPublishServiceError", "PublishFlowServiceError",
+    "EvalBindingNotFoundError",
     "BotAlreadyServiceTypeError", "BotTypeNotSupportedError",
     "PublishAlreadyExistsError", "PublishNotFoundError",
     "PublishStatusInvalidError", "InvalidTransitionError",
