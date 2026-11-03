@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Add the app allowlist config
+## Task 1: Add the app allowlist config [x]
 - **Goal:** The deployment can list which `app_name`s may call the access check. The list ships empty.
 - **Files:** `src/agentclaw/community/di/openapi_bot_access_check_config.py` (new),
   `src/agentclaw/community/di/modules/openapi_bot_access_check_config_module.py` (new),
@@ -11,11 +11,11 @@
   `src/agentclaw/community/configs/application.yaml`,
   `tests/community/di/test_openapi_bot_access_check_config.py` (new)
 - **Done when:**
-  - [ ] `OpenApiBotAccessCheckConfig.app_names` defaults to an empty set, and the shipped `application.yaml` resolves to empty.
-  - [ ] The provider rejects a non-list value, non-string or blank entries, and unknown keys under `bot_access_check`.
-  - [ ] The user-id bypass module still accepts the `openapi` block when it contains `bot_access_check`.
-  - [ ] The container registers the module and resolves it eagerly, so a malformed block fails startup.
-  - [ ] The new config tests pass, and so do the existing bypass-config tests.
+  - [x] `OpenApiBotAccessCheckConfig.app_names` defaults to an empty set, and the shipped `application.yaml` resolves to empty.
+  - [x] The provider rejects a non-list value, non-string or blank entries, and unknown keys under `bot_access_check`.
+  - [x] The user-id bypass module still accepts the `openapi` block when it contains `bot_access_check`.
+  - [x] The container registers the module and resolves it eagerly, so a malformed block fails startup.
+  - [x] The new config tests pass, and so do the existing bypass-config tests.
 - **Depends on:** —
 
 ## Task 2: Add the access-check route
