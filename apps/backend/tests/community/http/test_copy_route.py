@@ -1,10 +1,10 @@
-"""Handler-unit tests for POST /openapi/v1/bots/copy step1a (submit_copy).
+"""Handler-unit tests for POST /openapi/v1/bots/copy step1a (submit_copy, Route B).
 
-Passes deps by keyword (codebase convention for handler unit tests — the
-FastAPI wiring and injector never run). Asserts source validation, the
-ac_bot_copy ledger write, the create_job enqueue with state_ref=copy_state in
-payload.spec, and the success/auth_required response split. Teclaw + no-perm +
-not-found + non-copyable-lifecycle are refused before any side effect.
+Route B: capture source's script → serialize a manifest document → persist under
+dst key → apply Passport → hand off to create_job via manifest_seam.start_job.
+Passes deps by keyword. Asserts source validation, manifest persist + hand-off,
+the ledger write, and the success/auth_required split. Teclaw / no-perm /
+not-found / non-copyable-lifecycle refused before any side effect.
 """
 
 from __future__ import annotations
@@ -33,24 +33,27 @@ def _source_bot(**over):
         "owner_id": _OWNER,
         "actions": ["edit", "chat"],
         "bot_type": "personal",
+        "entity_id": _OWNER,
     }
     base.update(over)
     return base
 
 
-def _mocks():
+def _mocks(script_body="echo hello"):
     bot_repo = MagicMock()
     bot_copy_repo = MagicMock()
+    bot_script_service = MagicMock()
+    bot_script_service.get_body.return_value = script_body
     manifest_seam = MagicMock()
     passport = MagicMock()
     space_context = MagicMock()
     space_context.resolve_current.return_value = SimpleNamespace(numeric_id=100)
-    return bot_repo, bot_copy_repo, manifest_seam, passport, space_context
+    return bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, space_context
 
 
 def _call(body_over, source_over, mocks=None):
     mocks = mocks or _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, passport, space_context = mocks
+    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, space_context = mocks
     body_kwargs = {"source_bot_id": _SOURCE_BOT_ID, "bot_name": "copied"}
     body_kwargs.update(body_over)
     resp = submit_copy(
@@ -59,6 +62,7 @@ def _call(body_over, source_over, mocks=None):
         owner_name="owner",
         bot_repo=bot_repo,
         bot_copy_repo=bot_copy_repo,
+        bot_script_service=bot_script_service,
         manifest_seam=manifest_seam,
         passport_plugin=passport,
         space_context=space_context,
@@ -66,9 +70,9 @@ def _call(body_over, source_over, mocks=None):
     return resp, mocks
 
 
-def test_submit_copy_oss_noop_enqueues_create_job_with_copy_state():
-    mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, passport, _ = mocks
+def test_submit_copy_oss_noop_persists_manifest_and_hands_off():
+    mocks = _mocks(script_body="echo hello")
+    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
 
@@ -77,20 +81,33 @@ def test_submit_copy_oss_noop_enqueues_create_job_with_copy_state():
     assert resp.type == "success"
     assert resp.operation_id and resp.bot_id
 
+    # source's script read + manifest doc persisted under dst key
+    bot_script_service.get_body.assert_called_once_with(
+        entity_id=_OWNER, bot_id=_SOURCE_BOT_ID
+    )
+    persist_kwargs = manifest_seam.persist.call_args.kwargs
+    assert persist_kwargs["bot_id"] == resp.bot_id
+    assert persist_kwargs["modifier"] == _OWNER
+    assert "echo hello" in persist_kwargs["document"]
+    assert persist_kwargs["document"].startswith("schema_version: 1")  # manifest YAML
+
+    # ledger row written INITIAL
     inserted = bot_copy_repo.insert.call_args.args[0]
     assert inserted.status == BotCopyStatus.INITIAL
     assert inserted.source_bot_id == _SOURCE_BOT_ID
     assert inserted.dst_bot_id == resp.bot_id
 
+    # create_job handed off via start_job — payload spec carries source_bot_id,
+    # NO state_ref (Route B uses manifest doc, not copy state)
     start_kwargs = manifest_seam.start_job.call_args.kwargs
     assert start_kwargs["bot_id"] == resp.bot_id
-    assert start_kwargs["spec"]["state_ref"] == {"kind": "copy", "reference": resp.operation_id}
     assert start_kwargs["spec"]["source_bot_id"] == _SOURCE_BOT_ID
+    assert "state_ref" not in start_kwargs["spec"]
 
 
 def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
     mocks = _mocks()
-    bot_repo, _, _, passport, _ = mocks
+    bot_repo, _, _, _, passport, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"iframe_url": "https://auth/iframe", "redirect_url": ""}
 
@@ -102,31 +119,33 @@ def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
 
 def test_submit_copy_rejects_teclaw_source_before_side_effects():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, passport, _ = mocks
+    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(active_engine="teclaw")
 
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 409
     bot_copy_repo.insert.assert_not_called()
+    manifest_seam.persist.assert_not_called()
     manifest_seam.start_job.assert_not_called()
     passport.apply_agent_passport.assert_not_called()
+    bot_script_service.get_body.assert_not_called()
 
 
 def test_submit_copy_rejects_source_not_found():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _ = mocks
     bot_repo.get_by_id.return_value = None
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 409
     bot_copy_repo.insert.assert_not_called()
-    manifest_seam.start_job.assert_not_called()
+    manifest_seam.persist.assert_not_called()
 
 
 def test_submit_copy_rejects_non_copyable_lifecycle():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(status="FAILED")
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -136,7 +155,7 @@ def test_submit_copy_rejects_non_copyable_lifecycle():
 
 def test_submit_copy_rejects_no_edit_permission_non_owner():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(owner_id="other_owner", actions=["view"])
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -144,12 +163,12 @@ def test_submit_copy_rejects_no_edit_permission_non_owner():
     bot_copy_repo.insert.assert_not_called()
 
 
-def test_submit_copy_passport_no_token_no_url_is_500_after_ledger_write():
-    # Passport returning nothing usable is an internal error; the ledger row was
-    # already written (compensation is the operator-retry path's job, not the
-    # handler's), but no create_job enqueue happens.
+def test_submit_copy_passport_no_token_no_url_is_500_after_persist():
+    # Passport returning nothing usable is an internal error; the manifest doc +
+    # ledger row were already written (compensation is the retry path's job),
+    # but no create_job hand-off happens.
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, passport, _ = mocks
+    bot_repo, _, _, manifest_seam, passport, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {}
     with pytest.raises(HTTPException) as exc_info:
