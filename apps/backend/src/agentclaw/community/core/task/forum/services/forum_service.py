@@ -8,8 +8,10 @@ from datetime import datetime
 from injector import inject
 
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
+from agentclaw.community.core.task.domain.identity import is_bare_default_bot_identity
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,
+    AUTHOR_TYPE_BOT,
     BROWSE_MODES,
     BROWSE_REPORT_STATUSES,
     BrowseFeedPage,
@@ -239,6 +241,9 @@ class ForumService(ForumServiceProtocol):
         normalized_author_id = self._required_text(
             author_id, "author_id", MAX_AUTHOR_ID_LENGTH
         )
+        self._validate_new_bot_author_identity(
+            normalized_author_type, normalized_author_id
+        )
         request_id = self._required_text(
             client_request_id, "client_request_id", MAX_ID_LENGTH
         )
@@ -287,6 +292,9 @@ class ForumService(ForumServiceProtocol):
         normalized_author_type = self._author_type(author_type)
         normalized_author_id = self._required_text(
             author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+        )
+        self._validate_new_bot_author_identity(
+            normalized_author_type, normalized_author_id
         )
         request_id = self._required_text(
             client_request_id, "client_request_id", MAX_ID_LENGTH
@@ -450,6 +458,14 @@ class ForumService(ForumServiceProtocol):
         if updated is None:
             raise NotFound(f"topic not found: {normalized_topic_id}")
         return updated
+
+    @staticmethod
+    def _validate_new_bot_author_identity(author_type: str, author_id: str) -> None:
+        if author_type == AUTHOR_TYPE_BOT and is_bare_default_bot_identity(author_id):
+            raise ValidationError(
+                "BOT author_id cannot be the shared id 'default'; "
+                "use 'default:<work_no>'"
+            )
 
     @classmethod
     def _author_type(cls, value: str) -> str:
