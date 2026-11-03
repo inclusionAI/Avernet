@@ -1,0 +1,32 @@
+apps/bcsfuse/.env.example
+  h_5686002b4ce7b9 93-96,101-104,188-189
+apps/bcsfuse/README.md
+  h_5686002b4ce7b9 172,174-176
+apps/bcsfuse/docs/deploy/2026-08-21-bcsfuse-aliyun-ack-deployment.md
+  h_5686002b4ce7b9 169-170,172-174,252-253,255-257,328-330
+apps/bcsfuse/docs/deploy/macos_local.md
+  h_5686002b4ce7b9 133-134,142,458,467-469
+apps/bcsfuse/docs/deploy/macos_local_chinese.md
+  h_5686002b4ce7b9 133-134,142,458,467-469
+apps/bcsfuse/docs/deploy/open-source-deployment-guide-chinese.md
+  h_5686002b4ce7b9 64,108,110,349-351,357-358,372,376,404,698-700,767-768,1198,1207-1209,1273,1552-1553,1593,1601,1611
+apps/bcsfuse/docs/deploy/open-source-deployment-guide.md
+  h_5686002b4ce7b9 64,108,110,349-351,357-358,372,376,404,698-700,767-768,1190,1199-1201,1265,1548-1549,1589,1597,1607
+apps/bcsfuse/src/app/bootstrap/embedding_defaults.py
+  h_5686002b4ce7b9 1-109
+apps/bcsfuse/src/app/bootstrap/opensource.py
+  h_5686002b4ce7b9 14-15,158-161,446,459,470-471,544-545,577,600-601,636,814-815,843,859,885-886,908,916
+apps/bcsfuse/tests/contract/test_embedding_runtime_defaults_tdd.py
+  h_5686002b4ce7b9 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3cf8f9d029dd6aecd22be6affbd933218123d8b9",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}
