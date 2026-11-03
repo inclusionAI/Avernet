@@ -345,6 +345,42 @@ def _command_dto(event: dict, artifacts=None) -> TaskReportCommandDTO:
     )
 
 
+def _terminal_plan_dto(
+    *,
+    artifacts=None,
+    failure_reason=None,
+) -> TaskReportCommandDTO:
+    return TaskReportCommandDTO(
+        task_id="t-a1b2",
+        node_id="relay-ab12cd34",
+        event_id="plan-event-1",
+        relay_token="token-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
+        task_acceptance_result=(
+            None
+            if failure_reason is not None
+            else {"verdict": "DONE", "done_items": [], "gap_items": []}
+        ),
+        failure_reason=failure_reason,
+        artifacts=artifacts,
+    )
+
+
+def _successor_plan_event() -> dict:
+    return {
+        "task_id": "t-a1b2",
+        "node_id": None,
+        "status": None,
+        "task_spec": {
+            "context": {"title": "下一棒"},
+            "goal": {"objective": "执行剩余部分"},
+        },
+        "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
+        "node_run_graph": None,
+    }
+
+
 def _wire_item(**overrides) -> dict:
     """线上 item 形态:content 为 JSON **对象**(2026-10-22 用户定稿,非字符串)。"""
     raw = {
@@ -405,19 +441,45 @@ class TestRelayDtoContract:
         command = _command_dto(self._accepted_event(), artifacts=[]).to_domain()
         assert command.event.artifact_patch == []
 
-    def test_plan_result_event_with_artifacts_rejected(self):
-        """非 EXECUTION_RESULT 事件(PLAN_RESULT)夹带顶层产物 → TaskStateError。"""
+    def test_terminal_plan_result_artifacts_land_in_command_patch(self):
+        """终态 PLAN_RESULT(event=null) 的最终产物放命令级 artifact_patch。"""
 
-        dto = TaskReportCommandDTO(
-            task_id="t-a1b2",
-            node_id="relay-ab12cd34",
-            event_id="event-1",
-            relay_token="token-1",
-            event_type=TaskReportEventType.PLAN_RESULT,
-            artifacts=[_wire_item()],
+        text_final = _wire_item(
+            artifact_kind="text",
+            file_content=None,
+            text_content={
+                "text": "系统已完成全部任务",
+                "is_final_artifact": "true",
+            },
         )
+        file_final = _wire_item(
+            file_content={
+                **_wire_item()["file_content"],
+                "is_final_artifact": "true",
+            }
+        )
+        command = _terminal_plan_dto(
+            artifacts=[text_final, file_final],
+        ).to_domain()
+
+        assert command.artifact_patch is not None
+        assert len(command.artifact_patch) == 2
+        assert command.artifact_patch[0].content.is_final_artifact == "true"
+        assert command.artifact_patch[1].content.is_final_artifact == "true"
+
+    def test_successor_plan_result_with_artifacts_rejected(self):
+        """带后继计划的 PLAN_RESULT(event=下一棒)不得夹带产物。"""
+
         with pytest.raises(TaskStateError):
-            dto.to_domain()
+            TaskReportCommandDTO(
+                task_id="t-a1b2",
+                node_id="relay-ab12cd34",
+                event_id="plan-event-2",
+                relay_token="token-1",
+                event_type=TaskReportEventType.PLAN_RESULT,
+                event=_successor_plan_event(),
+                artifacts=[_wire_item()],
+            ).to_domain()
 
     def test_old_payload_stays_byte_compatible(self):
         """无 artifacts 字段的旧报文:validation 与 patch 形态不变(Review Focus #4)。"""

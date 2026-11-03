@@ -180,7 +180,10 @@ is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付�
 
 ## 4. 回调上报契约(产物怎么进来)
 
-产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`)。**(2026-10-22 用户定稿,推翻原 event 内方案):`artifacts` 位于报文顶层,与 `trace`/`task_acceptance_result` 平级**——产物是“一次执行的结果清单”而非事件内部细节;携带条件仍是仅 `event_type=EXECUTION_RESULT` 且 `execution_decision=ACCEPTED`(其余组合 to_domain 整体拒绝)。列表 item 为**扁平自描述结构**:每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自为对应分支的 **JSON 对象**(2026-10-22 用户定稿,不再收 JSON 字符串;核心解析对字符串仍容忍,为手动 API 兼容):
+产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`)。**(2026-11-03 定稿):`artifacts` 位于报文顶层,与 `trace`/`task_acceptance_result` 平级**——产物是“一次执行的结果清单”而非事件内部细节。携带条件只有两个:
+1. `event_type=EXECUTION_RESULT` 且 `event.execution_decision=ACCEPTED`:普通节点产物转 `TaskNodePatch.artifact_patch`;
+2. 终态 `event_type=PLAN_RESULT` 且 `event=null`(完成任务或不再派发):最后一棒最终产物转 `TaskReportCommand.artifact_patch`。
+带后继计划的 `PLAN_RESULT(event=TaskNode)`、DECLINED 执行结果,以及其它组合携带 `artifacts` 均整体拒绝。列表 item 为**扁平自描述结构**:每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自为对应分支的 **JSON 对象**(2026-10-22 用户定稿,不再收 JSON 字符串;核心解析对字符串仍容忍,为手动 API 兼容):
 
 ```json
 {
@@ -249,7 +252,7 @@ is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付�
 
 | 通道 | 行为 |
 |---|---|
-| **relay(/callback/report)** | `ExecutionEventDTO` 顶层新增 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验;`to_domain` 转 `TaskNodePatch.artifact_patch`;只有 `execution_decision=ACCEPTED` 的事件允许携带,**DECLINED 携带即非法**;产物与 `output_patch` 同批生效(写入同一原子变更,见 5.1 relay 发布点) |
+| **relay(/callback/report)** | 报文顶层 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验。`EXECUTION_RESULT+ACCEPTED` 转 `TaskNodePatch.artifact_patch`;终态 `PLAN_RESULT(event=null)` 转 `TaskReportCommand.artifact_patch` 并在任务收口或 HUNG 停止派发时capture。`PLAN_RESULT(event=TaskNode)` 与 DECLINED 携带即非法;产物与图状态变更同批生效(写入同一原子变更,见 5.1 relay 发布点) |
 | 集中 pull / 技能 HTTP push | **协议不动**:报文不加 artifacts 字段,`artifact_patch` 恒为 None;文本双轨产物照常经由 `update_task_node_info` fold 生效 |
 | BBS | 协议不动(其 output 为 BBS 编排文本),文本双轨照常生效 |
 
@@ -272,7 +275,7 @@ is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付�
 发布动作发生在**图变更闭包内部、fold 之后**,从提交前快照取值,保证版本重放安全:
 
 1. **集中通道**:`update_task_node_info` 中 `node.run_info.output.update(patch.output_patch)`(`task_graph_service.py:658`)及 graph 级 `update_task_graph_info`(`:814`)之后,基于 fold 后 output 快照构造 artifact 集(本期集中通道 `patch.artifact_patch` 恒 None——只有 relay 通道携带产物列表,见 §4;集中通道只发文本双轨产物);
-2. **relay 通道**:`apply_relay_report` 的两处写入(`relay_report.py:250` ACCEPTED EXECUTION_RESULT、`:308` completion)之后,在同一 `_mutate_with_version_retry` 闭包内构造;
+2. **relay 通道**:`apply_relay_report` 的三个产物写入点——`ACCEPTED EXECUTION_RESULT`(`TaskNodePatch.artifact_patch`)、终态完成 `PLAN_RESULT(event=null)`(`TaskReportCommand.artifact_patch`)、终态 HUNG/停止派发 `PLAN_RESULT(event=null)`(同一命令级 patch)——均折叠到图状态后在同一 `_mutate_with_version_retry` 闭包内构造;后继 `PLAN_RESULT(event=TaskNode)` 不得携带产物;
 3. 文本产物(双轨)在发布点由 fold 后 output 派生,归约器**独立新增**(capture 语义,不复用也不改动 `_relay_output_value`):
    - `_artifact_text_value(output)`:output 为**单键** `result` / `markdown` / `output` 且值为非空字符串 → 该字符串(必须含 `output` 键:集中 pull/push 与 BBS 三大主通道的文本都以 `{"output": <str>}` 落库,不纳入则双轨形同虚设);产出 `TEXT` 产物(内容原样入 `TextContent.text`,不标注 markdown/plain 格式),每 attempt 至多一条;
    - 与 relay 投影是**超集且互不影响**:relay 的 `graph.output` 聚合口径、`_relay_output_value`(`task_graph_support.py:184-207`)原地不动,可能出现"节点有文本产物、relay 聚合仍投影为 dict"的合法分叉,这是双轨设计的预期形态而非缺陷;
