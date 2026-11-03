@@ -110,6 +110,8 @@ def _runner(producer, *, ext=None):
         dict(ext or {}),
         dict(ext or {}),
     )
+    # Default: publish record is still BUILDING when _fetch_and_assert_building checks
+    ext_state.get_publish_by_id = Mock(return_value=_record())
     bot_service = Mock()
     bot_service.get_bot_by_address.return_value = {
         "bot_id": "b1",
