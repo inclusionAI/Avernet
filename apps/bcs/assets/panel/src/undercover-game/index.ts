@@ -1,4 +1,6 @@
 export { default as UndercoverGamePanel } from './UndercoverGamePanel';
+export { UndercoverGameOpsPanel, buildRunnerGraph, OPS_PALETTE } from './themes/ops';
+export type { RunnerGraphLayout, RunnerNode, RunnerColumn, RunnerNodeKind, FlavorName, FlavorPalette } from './themes/ops';
 export * from './actionContext';
 export * from './api';
 export * from './contracts';

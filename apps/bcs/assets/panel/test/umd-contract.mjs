@@ -53,8 +53,10 @@ vm.runInNewContext(code, browser, { timeout: 1000 });
 for (const name of [
   'StateMachineRunView',
   'UndercoverGamePanel',
+  'UndercoverGameOpsPanel',
   'CollaborationDefinitionCard',
   'CollaborationDefinitionPreview',
+  'buildRunnerGraph',
 ]) {
   for (const exports of [module.exports, packageExports, browser.bcsPanel]) {
     if (typeof exports?.[name] !== 'function') {

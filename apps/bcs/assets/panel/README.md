@@ -201,6 +201,8 @@ OIDC configuration, versioning, tag, verification, and troubleshooting steps.
 The same `bcsPanel` bundle also exports `UndercoverGamePanel`. The referee uses
 `--panel-component bcsPanel.UndercoverGamePanel` with the current game session
 and a stable, non-closable tab across speech, voting, retries and later rounds.
+An alternate ops/terminal skin, `bcsPanel.UndercoverGameOpsPanel`, shares the
+same data layer and adds a live workflow graph (see UNDERCOVER_GAME.md).
 The default `bcsPanel.StateMachineRunView` remains available. See
 [game parameters, interactions and preview](UNDERCOVER_GAME.md).
 
