@@ -185,12 +185,24 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             Err(_) => return Err(Error::NotSent),
         };
         let started = Instant::now();
+        // Align transport negotiation with the ordinary downlink path
+        // (lib.rs): protocol 2.0 with SSE-eligible provider sends
+        // `Accept: text/event-stream, application/json` plus
+        // `X-BCN-Transport: sse` so the provider gateway and bott
+        // harness route the response through the same SSE reception
+        // logic ordinary chat.send uses. The gateway defaults to
+        // non-streaming JSON when the transport header is absent.
+        let (accept, transport) = match protocol_version.as_str() {
+            "2" | "2.0" => ("text/event-stream, application/json", "sse"),
+            _ => ("application/json", "callback"),
+        };
         let request_fut = request_client
             .post(guarded_url.as_str())
             .bearer_auth(service_credential.expose_secret())
-            .header("Accept", "application/json")
+            .header("Accept", accept)
             .header("Content-Type", "application/json; charset=utf-8")
             .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
+            .header(bcs_protocol::http::BCN_TRANSPORT_HEADER, transport)
             .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
             .json(&body)
             .send();
