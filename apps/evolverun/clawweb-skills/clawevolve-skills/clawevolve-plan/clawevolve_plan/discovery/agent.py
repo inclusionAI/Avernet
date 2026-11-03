@@ -81,6 +81,8 @@ def run_openclaw_agent_message(
     prevents concurrent runs from deleting a shared task-scoped registration.
     """
 
+    from clawevolve_runtime.reference_materials import prompt as material_prompt
+    message += material_prompt()
     agent_id = os.environ.get("CLAWEVOLVE_PLAN_DISCOVERY_AGENT_ID") or _task_scoped_agent_id(task_id)
     session_id = f"{agent_id}_{int(time.time() * 1000)}"
     with _agent_lifecycle_lock(agent_id):

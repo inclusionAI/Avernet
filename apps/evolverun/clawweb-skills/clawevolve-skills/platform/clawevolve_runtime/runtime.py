@@ -20,6 +20,8 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from . import reference_materials
+
 MAX_HTTP_BYTES = 64 * 1024 * 1024
 MAX_FILES = 2_000
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
@@ -674,6 +676,13 @@ def _begin(args: argparse.Namespace, payload: dict[str, Any] | None = None) -> d
         raise RuntimeFailure("unsupported Stage execution contract")
     _ensure_test_skill_fixture(args, payload)
     business_input = _stage_business_input(payload.get("input") or {}, args.task_id)
+    reference_materials.clear_context()
+    material = business_input.get("reference_materials")
+    if getattr(args, "reference_materials_version", "") and not material:
+        raise RuntimeFailure("required reference material input is missing")
+    if material:
+        business_input = {**business_input, "reference_materials": reference_materials.prepare(
+            material, task_id=args.task_id, workspace=SOURCE_WORKSPACE, fetch=_http)}
     implementation = payload.get("implementation") or {}
     package = implementation.get("package") or {}
     package_bytes = _http(str(package.get("method") or "GET"), str(package.get("url") or ""))
@@ -704,6 +713,7 @@ def _begin(args: argparse.Namespace, payload: dict[str, Any] | None = None) -> d
         "implementationSkill": str(entrypoint),
         "inputFile": str(input_file),
         "resultFile": str(result_file),
+        **({"reference_materials": business_input["reference_materials"]} if material else {}),
         **({"executionContract": execution_contract} if execution_contract else {}),
     }
     _atomic_json(run_dir / "context.json", context)
@@ -718,6 +728,12 @@ def _begin_core(args: argparse.Namespace) -> dict[str, Any]:
     returns selected=false without reporting a failure or changing Step state.
     """
     payload = _step_input(args)
+    reference_materials.clear_context()
+    material = payload.get("reference_materials") or (payload.get("input") or {}).get("reference_materials")
+    if getattr(args, "reference_materials_version", "") and not material:
+        raise RuntimeFailure("required reference material input is missing")
+    local_materials = reference_materials.prepare(material, task_id=args.task_id,
+        workspace=SOURCE_WORKSPACE, fetch=_http) if material and payload.get("protocolVersion") != "clawevolve.stage-runtime/v1" else None
     from .stage_test import prepare_optimize_test
     try:
         prepare_optimize_test(args, payload)
@@ -730,8 +746,11 @@ def _begin_core(args: argparse.Namespace) -> dict[str, Any]:
     if payload.get("protocolVersion") != "clawevolve.stage-runtime/v1":
         if "businessInput" in payload:
             business_input = _stage_business_input(payload["businessInput"], args.task_id)
-            return {"selected": False, "businessInput": _materialize_loop_feedback(business_input, _run_dir(args))}
-        return {"selected": False}
+            business_input = _materialize_loop_feedback(business_input, _run_dir(args))
+            if local_materials:
+                business_input = {**business_input, "reference_materials": local_materials}
+            return {"selected": False, "businessInput": business_input}
+        return {"selected": False, **({"reference_materials": local_materials} if local_materials else {})}
     return {"selected": True, **_begin(args, payload)}
 
 
