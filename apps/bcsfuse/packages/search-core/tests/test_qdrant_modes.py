@@ -42,6 +42,7 @@ def index(request, tmp_path):
 
 
 def test_retrieval_filters_updates_and_deletes(index):
+    assert index.point_counts() == {"vector_points": 0, "keyword_points": 0}
     index.upsert(
         [
             VectorPoint(
@@ -56,6 +57,7 @@ def test_retrieval_filters_updates_and_deletes(index):
             ),
         ]
     )
+    assert index.point_counts() == {"vector_points": 2, "keyword_points": 2}
     for hits in [
         index.vector_search([1.0, 0.0], 1, {"team": ("b",)}, frozenset({"b"})),
         index.keyword_search("invoice", 1, {"team": ("b",)}, frozenset({"b"})),
@@ -71,6 +73,7 @@ def test_retrieval_filters_updates_and_deletes(index):
     assert index.keyword_search("invoice", 2, {}, frozenset({"b"})) == []
     assert [h.id for h in index.keyword_search("weather", 2, {}, None)] == ["b"]
     index.delete(["b"])
+    assert index.point_counts() == {"vector_points": 1, "keyword_points": 1}
     assert index.vector_search([0.0, 1.0], 2, {}, frozenset({"b"})) == []
     assert index.keyword_search("weather", 2, {}, None) == []
 
@@ -169,3 +172,20 @@ def test_keyword_field_indexes_are_created_for_both_server_collections(
             )
     finally:
         index.close()
+
+
+def test_counts_read_collections_independently_and_propagate_failure(
+    index, monkeypatch
+):
+    index.upsert(
+        [VectorPoint(id="a", vector=[1.0, 0.0], payload={"content": "invoice"})]
+    )
+    index._keyword.delete(["a"])
+    assert index.point_counts() == {"vector_points": 1, "keyword_points": 0}
+
+    def unavailable(*args, **kwargs):
+        raise OSError("count unavailable")
+
+    monkeypatch.setattr(index._keyword._client, "count", unavailable)
+    with pytest.raises(OSError, match="count unavailable"):
+        index.point_counts()

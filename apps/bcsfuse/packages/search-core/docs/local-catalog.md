@@ -57,6 +57,30 @@ curl -X DELETE http://127.0.0.1:8877/api/v1/agent-cards/demo
 删除同样由后台同步到索引；删除标记保留用于恢复和同步。详细语义见 [Card 接口](card-management-api.md)。
 保持 `--data-dir` 不变，停止后重新启动会恢复已保存的 Doc，无需重新调用模型。
 
+## 当前索引与数据数量
+
+`GET /ready` 返回响应实例的 `instance_id`、实际使用的 `index_key` 和
+`active_index`。`active_index` 为空表示使用默认配置；非空表示启动时选择的构建版本名。
+这些值只代表响应实例，不是所有实例的汇总。
+
+需要查询当前 Qdrant 集合的数据数量时使用 `GET /ready?include_counts=true`：
+
+```json
+{
+  "ready": true,
+  "instance_id": "catalog-local",
+  "index_key": "当前实例使用的索引标识",
+  "active_index": "",
+  "index_counts": {"vector_points": 50, "keyword_points": 50}
+}
+```
+
+两项分别是当前向量集合、关键词集合中的 point 数量；只统计当前绑定的集合，
+不包含旧版本集合，也不是所有实例之和。一张 Card 可生成多个 Doc，因此数量不一定等于 Card 数。
+它们是查询时的数量，不作为全体 Card 已同步完成的判断。
+普通 `/ready` 不执行计数，平台探活无需改动。计数失败时带参数的请求返回 503，
+不会把失败伪装成 0；不提供统计能力的其他索引实现返回 501。Qdrant Local 和 Server 均支持。
+
 ## 默认转换与业务替换
 
 默认只读取 `name`、`description`、技能的 `name/description/tags`，按固定顺序组成一条 `main` Doc。
