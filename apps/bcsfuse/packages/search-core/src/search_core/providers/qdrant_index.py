@@ -147,17 +147,35 @@ class QdrantRetrievalIndex:
                 **self._query_options,
             )
 
-    def point_counts(self) -> dict[str, int]:
-        """Count only this runtime's collections; never scan IDs or read vectors."""
+    def point_counts(self, index_key: str = "") -> dict[str, int]:
+        """Count actual payload versions in this runtime's two collections."""
+        counts = {}
         with self._lock.read(self.read_timeout_seconds):
-            return {
-                "vector_points": self._dense._client.count(
-                    self._dense.collection_name, exact=True, **self._query_options
-                ).count,
-                "keyword_points": self._keyword._client.count(
-                    self._keyword.collection_name, exact=True, **self._query_options
-                ).count,
-            }
+            for name, store in (("vector", self._dense), ("keyword", self._keyword)):
+                if not index_key:
+                    counts[f"{name}_points"] = store._client.count(
+                        store.collection_name, exact=True, **self._query_options
+                    ).count
+                    continue
+                condition = models.FieldCondition(
+                    key="index_key", match=models.MatchValue(value=index_key)
+                )
+                matching = store._client.count(
+                    store.collection_name,
+                    exact=True,
+                    count_filter=models.Filter(must=[condition]),
+                    **self._query_options,
+                ).count
+                mismatched = store._client.count(
+                    store.collection_name,
+                    exact=True,
+                    count_filter=models.Filter(must_not=[condition]),
+                    **self._query_options,
+                ).count
+                counts[f"{name}_points"] = matching + mismatched
+                counts[f"{name}_matching_points"] = matching
+                counts[f"{name}_mismatched_points"] = mismatched
+        return counts
 
     def get_vector_ids(self):
         """Snapshot IDs for recovery cleanup; never queried by online retrieval."""

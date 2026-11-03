@@ -18,7 +18,7 @@ from search_core.providers.sql_index_documents import (
     validate_environment,
 )
 
-_COLUMNS = "card_json, revision, prepared_revision, error_code, profile_json, config, resource_type"
+_COLUMNS = "card_json, revision, prepared_revision, error_code, profile_json, config, resource_type, is_deleted"
 
 
 class SqlCardRepository(CardWrites):
@@ -78,7 +78,7 @@ class SqlCardRepository(CardWrites):
         if isinstance(row, dict):
             row = tuple(row[k] for k in _COLUMNS.split(", "))
         return CardRecord(
-            cls._card(row[0], row[6]),
+            cls._card(row[0], row[6], bool(row[7])),
             row[1],
             row[2],
             None,
@@ -88,9 +88,10 @@ class SqlCardRepository(CardWrites):
         )
 
     @classmethod
-    def _card(cls, encoded, resource_type):
+    def _card(cls, encoded, resource_type, deleted):
         data = json.loads(encoded)
         data["resource_type"] = resource_type
+        data["deleted"] = deleted
         return cls.snapshot_type.model_validate(data)
 
     def read_card(self, agent_id):
@@ -118,7 +119,7 @@ class SqlCardRepository(CardWrites):
             marks = ",".join("?" for _ in ids)
             self._execute(
                 cur,
-                f"SELECT agent_id,card_json,resource_type FROM {self.table} WHERE environment=? AND agent_id IN ({marks})",
+                f"SELECT agent_id,card_json,resource_type,is_deleted FROM {self.table} WHERE environment=? AND agent_id IN ({marks})",
                 (self.environment, *ids),
             )
             rows = cur.fetchall()
@@ -126,6 +127,7 @@ class SqlCardRepository(CardWrites):
             (row["agent_id"] if isinstance(row, dict) else row[0]): self._card(
                 row["card_json"] if isinstance(row, dict) else row[1],
                 row["resource_type"] if isinstance(row, dict) else row[2],
+                bool(row["is_deleted"] if isinstance(row, dict) else row[3]),
             )
             for row in rows
         }
@@ -153,7 +155,7 @@ class SqlCardRepository(CardWrites):
             or len(card.source_version) > 128
         ):
             raise ValueError("invalid revision or Card identifier length")
-        encoded = card.model_dump_json()
+        encoded = card.model_dump_json(exclude={"deleted"})
         current = self.get(card.agent_id)
         if current is not None and current.card.resource_type != card.resource_type:
             raise CatalogConflict("resource type cannot change for an existing ID")
@@ -169,19 +171,31 @@ class SqlCardRepository(CardWrites):
             raise CatalogConflict("revision conflict")
         try:
             with self._cursor() as (conn, cur):
+                cur.execute(
+                    "BEGIN IMMEDIATE"
+                    if self.placeholder == "?"
+                    else "START TRANSACTION"
+                )
                 if current is None:
                     self._execute(
                         cur,
-                        f"INSERT INTO {self.table} (environment, agent_id, card_json, resource_type, revision, prepared_revision, error_code, gmt_create, gmt_modify) VALUES (?, ?, ?, ?, 1, 0, '', {self.now_expression}, {self.now_expression})",
-                        (self.environment, card.agent_id, encoded, card.resource_type),
+                        f"INSERT INTO {self.table} (environment, agent_id, card_json, resource_type, is_deleted, revision, prepared_revision, error_code, gmt_create, gmt_modify) VALUES (?, ?, ?, ?, ?, 1, 0, '', {self.now_expression}, {self.now_expression})",
+                        (
+                            self.environment,
+                            card.agent_id,
+                            encoded,
+                            card.resource_type,
+                            int(card.deleted),
+                        ),
                     )
                 else:
                     self._execute(
                         cur,
-                        f"UPDATE {self.table} SET card_json=?, resource_type=?, revision=revision+1, error_code='', preparation_token='', lease_until=0, gmt_modify={self._next_modified} WHERE environment=? AND agent_id=? AND revision=?",
+                        f"UPDATE {self.table} SET card_json=?, resource_type=?, is_deleted=?, revision=revision+1, error_code='', preparation_token='', lease_until=0, gmt_modify={self._next_modified} WHERE environment=? AND agent_id=? AND revision=?",
                         (
                             encoded,
                             card.resource_type,
+                            int(card.deleted),
                             self.environment,
                             card.agent_id,
                             expected_revision,
@@ -189,6 +203,8 @@ class SqlCardRepository(CardWrites):
                     )
                     if cur.rowcount != 1:
                         raise CatalogConflict("revision conflict")
+                if card.deleted:
+                    self._retire_documents(cur, card.agent_id, expected_revision + 1)
                 conn.commit()
         except Exception as error:
             if current is None:
@@ -228,14 +244,16 @@ class SqlCardRepository(CardWrites):
             raise CatalogConflict("revision conflict")
         deleted = current.card.model_copy(update={"deleted": True})
         with self._cursor() as (conn, cur):
+            cur.execute(
+                "BEGIN IMMEDIATE" if self.placeholder == "?" else "START TRANSACTION"
+            )
             self._execute(
                 cur,
-                f"UPDATE {self.table} SET card_json=?, revision=revision+1, "
+                f"UPDATE {self.table} SET is_deleted=1, revision=revision+1, "
                 "error_code='', preparation_token='', lease_until=0, "
                 f"gmt_modify={self._next_modified} "
                 "WHERE environment=? AND agent_id=? AND revision=?",
                 (
-                    deleted.model_dump_json(),
                     self.environment,
                     agent_id,
                     expected_revision,
@@ -243,10 +261,14 @@ class SqlCardRepository(CardWrites):
             )
             if cur.rowcount != 1:
                 raise CatalogConflict("revision conflict")
+            self._retire_documents(cur, agent_id, expected_revision + 1)
             conn.commit()
         return replace(
             current, card=deleted, revision=expected_revision + 1, error_code=""
         )
+
+    def _retire_documents(self, cursor, agent_id, revision):
+        """Source-only storage has no Docs; catalog composition overrides this hook."""
 
     def save_profile(self, agent_id, expected_revision, profile):
         """Store business processing output only for the source revision read.

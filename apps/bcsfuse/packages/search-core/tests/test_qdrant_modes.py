@@ -189,3 +189,25 @@ def test_counts_read_collections_independently_and_propagate_failure(
     monkeypatch.setattr(index._keyword._client, "count", unavailable)
     with pytest.raises(OSError, match="count unavailable"):
         index.point_counts()
+
+
+def test_version_counts_include_wrong_and_missing_keys_in_both_collections(index):
+    index.upsert(
+        [
+            VectorPoint(id="same", vector=[1.0, 0.0], payload={"index_key": "v2"}),
+            VectorPoint(id="old", vector=[1.0, 0.0], payload={"index_key": "v1"}),
+            VectorPoint(id="missing", vector=[1.0, 0.0], payload={}),
+        ]
+    )
+    assert index.point_counts("v2") == {
+        "vector_points": 3,
+        "vector_matching_points": 1,
+        "vector_mismatched_points": 2,
+        "keyword_points": 3,
+        "keyword_matching_points": 1,
+        "keyword_mismatched_points": 2,
+    }
+    index._keyword.delete(["old"])
+    counts = index.point_counts("v2")
+    assert counts["vector_mismatched_points"] == 2
+    assert counts["keyword_mismatched_points"] == 1
