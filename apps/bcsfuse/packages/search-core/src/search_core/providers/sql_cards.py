@@ -18,7 +18,7 @@ from search_core.providers.sql_index_documents import (
     validate_environment,
 )
 
-_COLUMNS = "card_json, revision, prepared_revision, error_code, profile_json, config, resource_type, is_deleted"
+_COLUMNS = "card_json, revision, prepared_revision, error_code, profile_json, config, resource_type, is_deleted, preparation_key"
 
 
 class SqlCardRepository(CardWrites):
@@ -85,6 +85,7 @@ class SqlCardRepository(CardWrites):
             row[3],
             json.loads(row[4]) if row[4] is not None else None,
             json.loads(row[5]) if row[5] is not None else None,
+            preparation_key=row[8],
         )
 
     @classmethod

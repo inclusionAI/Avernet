@@ -13,7 +13,7 @@ from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
-from search_core.api.cards import CatalogConflict
+from search_core.api.cards import CatalogConflict, IndexTargetMismatch
 from search_core.api.index_builds import IndexBuildConflict
 from search_core.catalog.cards import CardSnapshot
 from search_core.catalog.conversion import DefaultCardDocumentConverter
@@ -129,7 +129,7 @@ class CardUpdates(CardManagementService):
 
     def rebuild(self, agent_id, index_key):
         if index_key != self.index_key:
-            raise CatalogConflict("target index is not loaded on this instance")
+            raise IndexTargetMismatch("target index is not loaded on this instance")
 
         def prepare(row):
             documents = self._prepare_documents(replace(row, prepared=None), [])
@@ -205,7 +205,9 @@ class CardUpdates(CardManagementService):
             "saved_revision": row.revision,
             "deleted": row.card.deleted,
             "prepared": doc is not None and doc.source_revision == row.revision,
-            "preparation_error": row.error_code,
+            "preparation_error": (
+                row.error_code if row.preparation_key == self.index_key else ""
+            ),
             "instance_id": self.instance_id,
             "environment": self.repository.environment,
             "index_key": self.index_key,

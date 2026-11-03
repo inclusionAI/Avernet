@@ -21,29 +21,27 @@ class BuildRequest(BaseModel):
 
 
 class BuildStatus(BaseModel):
-    build_id: str
     index_key: str
     embedding_model: str
     embedding_dimension: int
     conversion_version: str
     filter_fields: tuple[str, ...]
     status: str
-    completed_count: int
-    total_count: int
+    completed_count: int | None = None
+    total_count: int | None = None
     error_code: str
 
 
 def response(row):
     return BuildStatus(
-        build_id=row.config.build_id,
         index_key=row.config.index_key,
         embedding_model=row.config.embedding_model,
         embedding_dimension=row.config.embedding_dimension,
         conversion_version=row.config.conversion_version,
         filter_fields=row.config.filter_fields,
         status=row.status,
-        completed_count=row.completed_count,
-        total_count=row.total_count,
+        completed_count=row.completed_count if row.status != "configured" else None,
+        total_count=row.total_count if row.status != "configured" else None,
         error_code=row.error_code,
     )
 
@@ -53,7 +51,12 @@ def create_index_build_router(
 ):
     router = APIRouter(prefix="/api/v1/index-builds", tags=["index-builds"])
 
-    @router.put("/{build_id}", status_code=202, response_model=BuildStatus)
+    @router.put(
+        "/{build_id}",
+        status_code=202,
+        response_model=BuildStatus,
+        response_model_exclude_none=True,
+    )
     async def create(
         build_id: BuildId,
         body: BuildRequest,
@@ -77,7 +80,9 @@ def create_index_build_router(
         except Exception as error:
             raise HTTPException(503, "index build store unavailable") from error
 
-    @router.get("/{build_id}", response_model=BuildStatus)
+    @router.get(
+        "/{build_id}", response_model=BuildStatus, response_model_exclude_none=True
+    )
     async def status(
         build_id: BuildId,
         identity: Annotated[VerifiedIdentity, Depends(authorize_operator)],

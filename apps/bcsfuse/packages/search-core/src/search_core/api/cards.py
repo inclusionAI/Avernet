@@ -15,6 +15,10 @@ class CatalogConflict(ValueError):
     """Resource identity or an internal compare-and-swap revision conflicts."""
 
 
+class IndexTargetMismatch(CatalogConflict):
+    """The requested repair generation is not loaded on the responding instance."""
+
+
 @dataclass(frozen=True)
 class CardRecord(Generic[PreparedT]):
     card: CardSnapshot
@@ -24,6 +28,7 @@ class CardRecord(Generic[PreparedT]):
     error_code: str
     profile: dict[str, Any] | None = None
     config: dict[str, Any] | None = None
+    preparation_key: str = ""
 
 
 class CardManagement(Protocol):

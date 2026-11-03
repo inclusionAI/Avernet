@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from search_core.adapters.http.routes import Authenticator
 from search_core.api.cards import CardManagement, CatalogConflict
 from search_core.api.models import VerifiedIdentity
-from search_core.catalog.cards import SearchConfig, business_card
+from search_core.catalog.cards import business_card
 
 CardId = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^\S+$")]
 
@@ -19,7 +19,6 @@ class CardWrite(BaseModel):
     card: dict[str, JsonValue] = Field(min_length=1)
     # Omission preserves an existing type; new resources default to agent.
     resource_type: Literal["agent", "group"] | None = None
-    search_config: SearchConfig = Field(default_factory=SearchConfig)
 
 
 class Saved(BaseModel):
@@ -34,7 +33,6 @@ class Deleted(BaseModel):
 class CardDetails(BaseModel):
     card: dict[str, JsonValue]
     resource_type: Literal["agent", "group"]
-    search_config: SearchConfig
     saved_revision: int
 
 
@@ -49,7 +47,6 @@ class CardStatus(BaseModel):
     index_key: str
     local_applied_revision: int
     local_error: str
-    operations_text_revision: int
 
 
 class ErrorBody(BaseModel):
@@ -85,7 +82,7 @@ def create_card_router(
                 agent_id,
                 body.card,
                 body.resource_type,
-                body.search_config.model_dump(mode="json", exclude_unset=True),
+                {},
             )
         except CatalogConflict as error:
             raise HTTPException(409, "Card resource type cannot change") from error
@@ -142,7 +139,6 @@ def create_card_router(
         return CardDetails(
             card=business_card(row.card),
             resource_type=row.card.resource_type,
-            search_config=row.card.search_config,
             saved_revision=row.revision,
         )
 
