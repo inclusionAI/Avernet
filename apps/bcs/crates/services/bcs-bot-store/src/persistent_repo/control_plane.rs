@@ -625,7 +625,21 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(name) = patch.name.as_deref() {
-            assignments.push("name = ?".to_string());
+            // Card writes maintain the indexed name in the same transaction. Read
+            // only that mirror, rather than loading the full Card configuration.
+            let rows = self.db_query(
+                "SELECT name FROM bcs_bots WHERE bot_uuid = ? AND env = ? AND agent_card IS NOT NULL",
+                vec![Value::from(bot_id), Value::from(env)],
+            ).await.map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            if let Some(row) = rows.first() {
+                let card_name: String = db_get_column(row, "name")
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                if card_name != name {
+                    return Err(ServiceError::Conflict("A2A Bot name must be updated through AgentCard".into()));
+                }
+            }
+            // A concurrent Card update must also retain ownership of the name.
+            assignments.push("name = CASE WHEN agent_card IS NULL THEN ? ELSE name END".to_string());
             params.push(Value::from(name));
         }
         if let Some(visibility) = patch.visibility.as_deref() {

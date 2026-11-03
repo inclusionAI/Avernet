@@ -102,7 +102,7 @@ async fn missing_and_invalid_slugs_have_distinct_errors() {
     let app = app();
     assert_eq!(request(&app, "GET", "/providers/by-slug/missing", None, Value::Null).await.0,
         StatusCode::NOT_FOUND);
-    for slug in ["Upper", "under_score", "-leading", "trailing-", "with%20space"] {
+    for slug in ["Upper", "_leading", "-leading", "with.dot", "with%20space"] {
         assert_eq!(request(&app, "GET", &format!("/providers/by-slug/{slug}"),
             None, Value::Null).await.0, StatusCode::BAD_REQUEST, "{slug}");
     }
@@ -111,7 +111,7 @@ async fn missing_and_invalid_slugs_have_distinct_errors() {
 #[tokio::test]
 async fn registration_rejects_invalid_and_duplicate_slugs() {
     let app = app();
-    for slug in ["".to_string(), "UPPER".into(), "a_b".into(), "-a".into(), "a-".into(),
+    for slug in ["".to_string(), "UPPER".into(), "_a".into(), "-a".into(), "a.b".into(),
         "a".repeat(65), "中文".into()]
     {
         assert_eq!(request(&app, "POST", "/providers", None,
@@ -220,4 +220,16 @@ async fn invalid_callback_patch_preserves_slug_and_all_metadata() {
         Value::Null).await.0, StatusCode::OK);
     assert_eq!(request(&app, "GET", "/providers/by-slug/callback-renamed", None,
         Value::Null).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn public_a2a_name_grammar_is_accepted_by_provider_registration_and_lookup() {
+    let app=app();
+    for slug in ["under_score", "trailing-", "trailing_"] {
+        assert_eq!(request(&app,"GET",&format!("/providers/by-slug/{slug}"),None,Value::Null).await.0,StatusCode::NOT_FOUND);
+        register(&app,json!(slug),"static_bearer","1.0").await;
+        let (status,provider)=request(&app,"GET",&format!("/providers/by-slug/{slug}"),None,Value::Null).await;
+        assert_eq!(status,StatusCode::OK);
+        assert_eq!(provider["slug"],slug);
+    }
 }

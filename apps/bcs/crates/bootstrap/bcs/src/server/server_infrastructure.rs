@@ -75,14 +75,8 @@ impl BcsServer {
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
-        let bot_core_arc = Arc::new(BotCore::with_provider_repos(
-            bot_repo,
-            provider_repos.provider_repo.clone(),
-            provider_repos.provider_credentials.clone(),
-            provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone())
-            .with_a2a_route_policy(outbound_url_guard.clone(),config.a2a_grpc.as_ref().map(|mesh|mesh.routes.iter().map(|route|route.interface_url.clone()).collect()).unwrap_or_default())
-            .with_a2a_cards(Arc::new(bcs_bot_store::a2a::DbA2aBotStore::new(db_plugin.clone(), crate::env::resolve_env(), db_flavor))));
+        let bot_core_arc=super::a2a_wiring::build_bot_core(
+            bot_repo,&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone());
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -154,6 +148,7 @@ impl BcsServer {
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_svc.clone(),

@@ -16,6 +16,7 @@ fn provider_error(error: ServiceError) -> Response {
     let (status, message) = match error {
         ServiceError::Unauthorized(message) => (StatusCode::UNAUTHORIZED, message),
         ServiceError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
+        ServiceError::A2aManagement(error) => (super::a2a_management::status(error.code),error.reason.into()),
         ServiceError::Conflict(message) => (StatusCode::CONFLICT, message),
         ServiceError::InvalidOperation { message, .. } => (StatusCode::BAD_REQUEST, message),
         ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_) => (StatusCode::NOT_FOUND, "Bot not found".into()),
@@ -29,7 +30,8 @@ fn provider_error(error: ServiceError) -> Response {
 pub struct ConfigureRequest {
     pub agent_card_url: Option<String>,
     pub agent_card: Option<serde_json::Value>,
-    pub expected_revision: u64,
+    /// Optional legacy compare-and-set; omission performs an atomic last-write-wins replacement.
+    pub expected_revision: Option<u64>,
 }
 
 fn now_ms() -> i64 {

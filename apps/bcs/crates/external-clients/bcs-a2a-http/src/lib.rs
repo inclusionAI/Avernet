@@ -1,6 +1,7 @@
 //! Outbound A2A adapter. SDK types stay at this delivery boundary.
 pub mod text;
 pub mod client;
+pub mod jsonrpc;
 pub mod grpc_client;
 pub mod grpc_mesh;
 mod binding_client;

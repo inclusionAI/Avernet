@@ -4,6 +4,8 @@ use strum::AsRefStr;
 #[derive(Debug, thiserror::Error, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ServiceError {
+    #[error(transparent)]
+    A2aManagement(#[from] bcs_domain::a2a_management::ManagementError),
     /// Transport proves the request was never submitted and no sender remains.
     /// Only the transport may classify this; timeouts are not such proof.
     #[error("delivery not sent: {code}")]
@@ -167,6 +169,7 @@ impl ServiceError {
     /// internal details must not be exposed (IoError, JsonError).
     pub fn error_params(&self) -> serde_json::Value {
         match self {
+            Self::A2aManagement(error)=>serde_json::json!({"code":error.code,"field":error.field,"reason":error.reason}),
             Self::DeliveryNotSent { code, retryable } => serde_json::json!({"code": code, "retryable": retryable}),
             Self::BotNotFound(id)
             | Self::BotNotRegistered(id)

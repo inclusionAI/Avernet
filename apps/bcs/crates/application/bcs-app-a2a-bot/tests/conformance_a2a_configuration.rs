@@ -60,13 +60,13 @@ async fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let providers = Arc::new(MemoryProviderStore::new());
     let registry = Arc::new(BotCore::with_provider_repos(Arc::new(MemoryBotRepo::with_base_dir(dir.path().into())), providers.clone(), providers.clone(), providers.clone()));
-    let provider_core = Arc::new(ProviderCore::new(providers.clone(), providers.clone(), providers.clone(), registry));
+    let provider_core = Arc::new(ProviderCore::new(providers.clone(), providers.clone(), providers.clone(), registry).with_a2a_anonymous(true));
     let registered = provider_core.register_provider("Provider".into(), Some("https://example.org/provider".into()), ProviderAuthMode::StaticBearer, "alice".into(), None, None).await.unwrap();
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     let env = bcs_config::resolve_env_str();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('bot', ?, ?, 'remote', 'gateway')", vec![env.clone().into(), registered.provider.provider_id.clone().into()])).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let cards = Arc::new(DbA2aBotStore::sqlite(db.clone(), env));
@@ -74,7 +74,7 @@ async fn fixture() -> Fixture {
     let fetcher = Arc::new(Fetcher { calls: AtomicUsize::new(0), fail: AtomicBool::new(false), change_route: AtomicBool::new(false),paused:AtomicBool::new(false),entered:Default::default(),release:Default::default() });
     let command = ConfigureA2aBotCommand { provider_id: registered.provider.provider_id,
         provider_admin_token: registered.provider_admin_token, bot_uuid: "bot".into(),
-        source: "https://example.org/card".into(), expected_revision: 0, now_ms: 1000 };
+        source: "https://example.org/card".into(), expected_revision: Some(0), now_ms: 1000 };
     Fixture { service: A2aBotManagement::new(provider_core, core.clone(), fetcher.clone()), core, cards, fetcher, providers, command, db, _dir: dir }
 }
 
@@ -162,7 +162,7 @@ async fn late_url_refresh_cannot_overwrite_a_new_inline_card() {
     let background=service.clone();
     let old=tokio::spawn(async move {background.refresh(&provider,&token,"bot",2000).await});
     tokio::time::timeout(std::time::Duration::from_secs(3),f.fetcher.entered.notified()).await.unwrap();
-    let mut command=f.command.clone();command.expected_revision=1;
+    let mut command=f.command.clone();command.expected_revision=None;
     command.source=bcs_service_api::types::a2a_bot::A2aCardSource::Inline(json!({"name":"New inline","supportedInterfaces":[{"url":"https://example.org/new","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}]}));
     let committed=service.configure(command).await.unwrap();
     f.fetcher.release.notify_one();assert!(matches!(old.await.unwrap(),Err(ServiceError::Conflict(_))));
@@ -209,7 +209,43 @@ async fn unchanged_manual_and_periodic_refreshes_do_not_write_or_invalidate_admi
     assert_eq!(f.service.refresh_due(301000).await.unwrap(),1);
     assert_eq!(f.cards.get("bot").await.unwrap(),Some(before.clone()));
     f.db.execute(DbStatement::new("DROP TRIGGER reject_unchanged_update")).await.unwrap();
-    let mut edit=f.command.clone();edit.expected_revision=before.revision;
+    let mut edit=f.command.clone();edit.expected_revision=Some(before.revision);
     f.fetcher.change_route.store(true,Ordering::SeqCst);
     assert_eq!(f.service.configure(edit).await.unwrap().revision,before.revision+1);
+}
+
+#[tokio::test]
+async fn explicit_updates_without_revision_replace_atomically_and_keep_refresh_fencing() {
+    let f=fixture().await;
+    let mut command=f.command.clone();command.expected_revision=None;
+    let first=f.service.configure(command.clone()).await.unwrap();
+    assert_eq!(first.revision,1);
+    f.fetcher.change_route.store(true,Ordering::SeqCst);
+    let second=f.service.configure(command.clone()).await.unwrap();
+    assert_eq!(second.revision,2);
+    assert_ne!(first.agent_card,second.agent_card);
+    let stale=bcs_service_api::port::repo::a2a_bot::A2aBotRecord {revision:2,..first};
+    assert!(!f.cards.compare_and_set(&stale,1).await.unwrap());
+    assert_eq!(f.cards.get("bot").await.unwrap(),Some(second.clone()));
+    f.fetcher.fail.store(true,Ordering::SeqCst);
+    assert!(f.service.configure(command).await.is_err());
+    assert_eq!(f.cards.get("bot").await.unwrap(),Some(second));
+}
+
+#[tokio::test]
+async fn named_target_pins_provider_only_after_card_and_binding_are_valid() {
+    let f=fixture().await;
+    f.providers.update_provider_metadata(&f.command.provider_id,None,None,Some("test-provider"),1000).await.unwrap();
+    let provider=f.providers.get_provider(&f.command.provider_id).await.unwrap().unwrap();
+    let slug=provider.slug.as_deref().unwrap();
+    assert!(matches!(f.service.resolve_named_target(slug,"missing").await,Err(ServiceError::BotNotFound(_))));
+    assert_eq!(f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config,provider.config);
+    f.service.configure(f.command.clone()).await.unwrap();
+    f.db.execute(DbStatement::new("UPDATE bcs_bots SET connection_mode='plugin' WHERE bot_uuid='bot'")).await.unwrap();
+    assert!(matches!(f.service.resolve_named_target(slug,"Card Agent").await,Err(ServiceError::Forbidden(_))));
+    assert_eq!(f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config,provider.config);
+    f.db.execute(DbStatement::new("UPDATE bcs_bots SET connection_mode='gateway' WHERE bot_uuid='bot'")).await.unwrap();
+    assert_eq!(f.service.resolve_named_target(slug,"Card Agent").await.unwrap(),"bot");
+    let config=f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&config).unwrap()["a2a_name_pinned"],true);
 }

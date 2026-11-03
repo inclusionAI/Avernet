@@ -1,7 +1,8 @@
 //! Bot-owned AgentCard snapshots. Routes and credentials are derived, not stored.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub use bcs_domain::a2a::{A2aBinding, A2aExtensionDeclaration, A2aInterface, A2aUpdateMode, select_a2a_interface};
+pub use bcs_domain::a2a_names::{card_bot_name,valid_provider_name};
+pub use bcs_domain::a2a::{A2aBinding, A2aExtensionDeclaration, A2aInterface, A2aUpdateMode, select_a2a_interface, http_interface_address_allowed};
 
 /// Exactly one explicit source. Inline content has no network refresh URL.
 #[derive(Clone, Debug)]
@@ -20,7 +21,7 @@ impl A2aCardSource {
 }
 /// Small availability projection. No Card or credential value.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct A2aBotAvailability { pub bot_uuid:String, pub provider_id:String, pub provider_bot_ref:String, pub ready:bool, pub interfaces:Value }
+pub struct A2aBotAvailability { pub bot_uuid:String, pub provider_id:String, pub provider_bot_ref:String, pub ready:bool, pub interfaces:Value, pub authentication:Value }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct A2aBotRecord {
     pub bot_uuid:String,
@@ -38,3 +39,5 @@ pub struct A2aRegistrationCard {
     pub interface:A2aInterface,
     pub registered_at_ms:i64,
 }
+
+pub use bcs_domain::a2a_management;

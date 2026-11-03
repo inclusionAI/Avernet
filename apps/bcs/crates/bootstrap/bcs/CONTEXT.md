@@ -264,3 +264,11 @@ application facade. Only exact verified user IDs are authorized for manual
 issuance, regardless of authentication source or the binding-gate switch.
 Configuration changes require restart; policy enforcement and creator audit
 metadata stay in application, not the router or authentication verifier.
+
+## A2A anonymous access policy
+
+`a2a_allow_anonymous` is a root boolean setting, false by default. Enabling it
+allows anonymous calls only for Cards that permit them. It is injected into
+Provider-admin registration, scoped registration and runtime target resolution.
+It does not disable Provider management authentication or satisfy a Card that
+requires Bearer, OAuth or another unsupported scheme.
