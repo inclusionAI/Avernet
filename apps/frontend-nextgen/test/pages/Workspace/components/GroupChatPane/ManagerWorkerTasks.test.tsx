@@ -256,7 +256,7 @@ it('keeps the Manager reply stop control beside tasks even when the control pane
     group={{ kind: 'task_master_slave' } as never} messages={messages as never}
     abortingBotIds={new Set()} abortBot={abortBot} />);
   expect(screen.getByRole('button', { name: /暂无任务，查看任务/ })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '选择要停止回复的 Bot' }));
+  expect(screen.queryByRole('button', { name: '查看处理列表' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '停止 Manager 的当前回复' }));
   await waitFor(() => expect(abortBot).toHaveBeenCalledWith('manager'));
   expect(screen.queryByRole('button', { name: '停止 Worker 的当前回复' })).not.toBeInTheDocument();
@@ -303,8 +303,8 @@ it('retains ordinary Manager queue controls and processing activity in task sess
     processingDeliveries: [processing], onCancelDelivery,
   };
   const view = render(<GroupChatCollabPanel {...props} />);
-  expect(screen.getByText('1 个 Bot 处理中 · 1 项待处理')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '查看处理列表' }));
+  expect(screen.getByText('Manager 处理中')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '待处理 1 条' }));
   const button = screen.getByRole('button', { name: /取消发往 Manager 的排队消息/ });
   fireEvent.click(button);
   await waitFor(() => expect(onCancelDelivery).toHaveBeenCalledWith(queued.message_id, queued.delivery_id));
