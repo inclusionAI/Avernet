@@ -24,7 +24,8 @@ export interface RecoveryAgentExecutor {
 }
 export interface RecoveryTaskNotifier {
   /** False means notification is disabled; do not record a delivery attempt. */
-  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
+  notify(input: { ownerId: string; botId: string; targetEnvironment: RecoveryRequest["target"]["env"];
+    taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -451,7 +452,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
-      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary,
+      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, botId: task.request.target.bot_id,
+        targetEnvironment: task.request.target.env, taskId: task.taskId, kind, summary,
         ...(kind === "result" ? { effect: task.judgment?.effect ?? "unknown" } : {}) });
       if (result === false) return;
       sent = true;
