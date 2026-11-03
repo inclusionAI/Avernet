@@ -17,6 +17,7 @@
 
 use std::collections::HashSet;
 use std::io::ErrorKind;
+use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -126,8 +127,9 @@ impl MemoryBotRepo {
         })
     }
 
-    /// Fallible record write (same file layout as the ordinary save path).
-    async fn write_stored_profile(
+    /// Atomically replace a complete record. Callers hold `record_write_lock`
+    /// from before reading their snapshot through memory publication.
+    pub(super) async fn write_stored_profile(
         &self,
         bot_id: &str,
         stored: &StoredBotProfile,
@@ -135,10 +137,23 @@ impl MemoryBotRepo {
         let path = self.bot_info_path(bot_id);
         let dir = path.parent().ok_or_else(|| {
             ServiceError::InternalError(format!("Invalid path for bot: {bot_id}"))
-        })?;
-        fs::create_dir_all(dir).await?;
-        let content = serde_json::to_string_pretty(stored)?;
-        fs::write(&path, content).await?;
+        })?.to_path_buf();
+        let content = serde_json::to_vec_pretty(stored)?;
+        // The worker prepares only a private file. If the caller is cancelled,
+        // dropping its result cleans up the temporary file without a late write
+        // to bot.json after the caller has released its serialization guard.
+        let pending = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
+            std::fs::create_dir_all(&dir)?;
+            let mut pending = tempfile::NamedTempFile::new_in(dir)?;
+            pending.write_all(&content)?;
+            pending.as_file().sync_all()?;
+            Ok(pending)
+        }).await.map_err(|_| ServiceError::InternalError(
+            "Bot profile persistence task failed".into(),
+        ))??;
+        // Publish synchronously while the calling future holds the guard;
+        // readers see either complete old JSON or complete new JSON.
+        pending.persist(&path).map_err(|error| error.error)?;
         info!(bot_id = %bot_id, path = ?path, "Saved bot profile to disk");
         Ok(())
     }
@@ -181,6 +196,7 @@ impl MemoryBotRepo {
         bot_id: &str,
         update: ExistingProfileUpdate,
     ) -> ServiceResult<ProfileWrite> {
+        let _write_guard = self.record_write_lock.lock().await;
         if self.deleted_bot_ids.read().await.contains(bot_id) {
             return Ok(ProfileWrite::Missing);
         }
@@ -245,6 +261,7 @@ impl MemoryBotRepo {
         bot_id: &str,
         avatar: AvatarChange,
     ) -> ServiceResult<ProfileWrite> {
+        let _write_guard = self.record_write_lock.lock().await;
         if self.deleted_bot_ids.read().await.contains(bot_id) {
             return Ok(ProfileWrite::Missing);
         }
@@ -340,4 +357,44 @@ pub(super) async fn stored_avatar_at(path: &Path) -> Option<String> {
     serde_json::from_str::<StoredBotProfile>(&content)
         .ok()
         .and_then(|stored| stored.avatar_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_preparation_never_publishes_a_late_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bot/bot.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = br#"{"bot_id":"bot","name":"Before","registered_at":1}"#;
+        std::fs::write(&path, original).unwrap();
+        let mut stored: StoredBotProfile = serde_json::from_slice(original).unwrap();
+        stored.avatar_url = Some("https://example.test/cancelled.png".into());
+        let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1).enable_all().build().unwrap();
+
+        runtime.block_on(async {
+            // Occupy the only blocking worker so preparation queues predictably.
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+            started_rx.recv().unwrap();
+            let _guard = repo.record_write_lock.lock().await;
+            let mut write = tokio_test::task::spawn(repo.write_stored_profile("bot", &stored));
+            tokio_test::assert_pending!(write.poll());
+            drop(write);
+            release_tx.send(()).unwrap();
+            blocker.await.unwrap();
+        });
+        // Runtime shutdown waits for any queued blocking preparation to finish.
+        drop(runtime);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    }
 }

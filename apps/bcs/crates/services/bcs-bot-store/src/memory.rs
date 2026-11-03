@@ -130,8 +130,9 @@ pub struct BotConnection {
 #[derive(Debug)]
 pub struct MemoryBotRepo {
     bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
-    /// Serializes control-plane snapshot merges through persistence and memory.
-    control_plane_patch_lock: Mutex<()>,
+    /// Serializes local record read-modify-write operations through persistence
+    /// and memory publication. Acquire before the authority/bot/token locks.
+    record_write_lock: Mutex<()>,
     /// Audit timestamps for the local control-plane projection.
     control_plane_audit: RwLock<HashMap<String, (u64, u64)>>,
     /// Token to bot_uuid mapping for authentication.
@@ -328,7 +329,7 @@ impl MemoryBotRepo {
     pub fn with_base_dir(bots_base_dir: PathBuf) -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
-            control_plane_patch_lock: Mutex::new(()),
+            record_write_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
@@ -423,7 +424,7 @@ impl Default for MemoryBotRepo {
     fn default() -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
-            control_plane_patch_lock: Mutex::new(()),
+            record_write_lock: Mutex::new(()),
             control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),

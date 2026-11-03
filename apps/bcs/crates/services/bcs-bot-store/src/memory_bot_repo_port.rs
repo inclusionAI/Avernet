@@ -97,6 +97,7 @@ impl BotRepoPort for MemoryBotRepo {
         bot_id: &str,
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.remove(bot_id);
         self.sync_binding_channel_index(bot_id, &capabilities)
             .await;
@@ -438,6 +439,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn soft_delete(&self, bot_id: &str) -> bool {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.insert(bot_id.to_string());
         let mut bots = self.bots.write().await;
         let memory_removed = bots.remove(bot_id).is_some();
@@ -471,6 +473,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         // Update binding channel index
         self.sync_binding_channel_index(bot_id, caps).await;
 
@@ -527,6 +530,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         let visibility_value = if visibility.is_empty() {
             "private"
         } else {
@@ -550,8 +554,7 @@ impl BotRepoPort for MemoryBotRepo {
                     serde_json::from_str::<super::profile::StoredBotProfile>(&content)
                 {
                     stored.record.visibility = Some(visibility_value.to_string());
-                    let updated = serde_json::to_string_pretty(&stored)?;
-                    fs::write(&path, updated).await?;
+                    self.write_stored_profile(bot_id, &stored).await?;
                     info!(bot_id = %bot_id, visibility = %visibility_value, "Updated visibility on disk");
                 }
             }
@@ -747,6 +750,7 @@ impl BotRepoPort for MemoryBotRepo {
         created_by: &str,
         overwrite: bool,
     ) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         // Update in-memory (respects overwrite flag; early return if not overwriting and already claimed)
         let already_claimed = {
             let mut bots = self.bots.write().await;
@@ -776,8 +780,7 @@ impl BotRepoPort for MemoryBotRepo {
                 {
                     if overwrite || stored.record.created_by.is_none() {
                         stored.record.created_by = Some(created_by.to_string());
-                        let updated = serde_json::to_string_pretty(&stored)?;
-                        fs::write(&path, updated).await?;
+                        self.write_stored_profile(bot_id, &stored).await?;
                         info!(bot_id = %bot_id, created_by = %created_by, overwrite = overwrite, "Updated created_by on disk");
                     }
                 }

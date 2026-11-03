@@ -11,7 +11,7 @@ use tokio::fs;
 use tracing::{debug, info};
 
 use bcs_service_api::{
-    BotCapabilities, FriendCheckInStrategy, ServiceError, ServiceResult, UserVisibility,
+    BotCapabilities, FriendCheckInStrategy, ServiceResult, UserVisibility,
 };
 
 use super::MemoryBotRepo;
@@ -19,6 +19,7 @@ use super::{PersistedCapabilities, RegisteredBotInner, resolve_env, unix_millis}
 
 impl MemoryBotRepo {
     pub(super) async fn register_impl(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.remove(&bot_id);
 
         // Update binding channel index
@@ -126,6 +127,7 @@ impl MemoryBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         self.deleted_bot_ids.write().await.remove(&bot_id);
 
         let now = std::time::SystemTime::now()
@@ -188,13 +190,7 @@ impl MemoryBotRepo {
             avatar_url: persisted_attributes.3,
         };
 
-        let path = self.bot_info_path(&bot_id);
-        let dir = path.parent().ok_or_else(|| {
-            ServiceError::InternalError(format!("Invalid path for bot: {}", bot_id))
-        })?;
-        fs::create_dir_all(dir).await?;
-        let content = serde_json::to_string_pretty(&stored)?;
-        fs::write(&path, content).await?;
+        self.write_stored_profile(&bot_id, &stored).await?;
 
         self.sync_binding_channel_index(&bot_id, &capabilities)
             .await;
@@ -273,6 +269,7 @@ impl MemoryBotRepo {
     }
 
     pub(super) async fn save_token_impl(&self, bot_id: &str, token: &str) -> ServiceResult<()> {
+        let _write_guard = self.record_write_lock.lock().await;
         // We need to save token separately since it's not in BotCapabilities
         // Read the persisted file directly, update token, and save back
         // (through the profile record so the avatar sibling field is kept —
@@ -360,14 +357,7 @@ impl MemoryBotRepo {
         // Update token
         stored.record.token = Some(token.to_string());
 
-        // Ensure directory exists
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).await?;
-        }
-
-        // Save
-        let content = serde_json::to_string_pretty(&stored)?;
-        fs::write(&path, content).await?;
+        self.write_stored_profile(bot_id, &stored).await?;
 
         let previous_token = {
             let mut bots = self.bots.write().await;

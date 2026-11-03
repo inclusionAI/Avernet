@@ -1,9 +1,9 @@
 //! Existing-only Bot profile writes and the participant-page avatar read
 //! for `BotCore` (bot-avatar plan Task 4).
 //!
-//! The core methods are thin orchestration over `BotRepoPort`: the two
-//! writes delegate the store's composite existing-only contracts unchanged,
-//! and `avatar_urls` accepts a whole participant result page — the core owns
+//! The profile write protects Provider parent identity before delegating to
+//! the store's composite existing-only contract. `avatar_urls` accepts a
+//! whole participant result page — the core owns
 //! deduplication, store-sized chunking and map merging, while visibility
 //! rules (environment isolation, Human exclusion, tombstone display) remain
 //! the repository read's contract. The query budget of one store batch read
@@ -17,13 +17,27 @@ use super::*;
 const AVATAR_QUERY_CHUNK: usize = 256;
 
 impl BotCore {
-    /// Existing-only profile write: delegate the composite store contract
-    /// (capabilities replacement + avatar transition, one write boundary).
+    /// Existing-only profile write: preserve Provider parent identity before
+    /// the composite store write (capabilities replacement + avatar transition).
     pub(super) async fn update_profile_existing_impl(
         &self,
         bot_id: &str,
-        update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
+        mut update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
     ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        update.capabilities = match self.protect_provider_identity(bot_id, update.capabilities).await {
+            Ok(capabilities) => capabilities,
+            Err(error @ ServiceError::Unauthorized(_)) => {
+                // The shared guard rejects unavailable affiliated Bots. This
+                // existing-only API classifies absent/deleted targets as Missing,
+                // including deletion during identity validation. Strict reads
+                // preserve storage failures; live targets retain the denial.
+                if self.repo.try_get(bot_id).await?.is_none() {
+                    return Ok(bcs_service_api::types::bot_profile::ProfileWrite::Missing);
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         self.repo.update_profile_existing(bot_id, update).await
     }
 

@@ -156,7 +156,7 @@ Backend 可按 §2 的请求依次验证（使用真实签名 principal 或内�
 
 ## 6. 已知限制
 
-1. A2A card 来源注册 leg 接受 `avatar_url` 但当前丢弃（reject-or-document 为后续项；Backend 不使用该 leg）。
+1. A2A card 来源注册丢弃 `avatar_url` 的问题已在 PR 3488 复审修复：URL/inline 两个入口均应用显式头像，并覆盖 Keep/Clear/Set、写入失败和 missing 场景（见 §9）。
 2. provider 注册已提交后头像读取失败的补救路径按构造 fail-closed，但未以确定性测试钉住（77 个方法 double 成本）。
 3. 变更响应可能因头像读取失败在提交后失败（§5.3 预告语义）：实体已持久，重读即可成功；Task 7 复审修复已让 participant 变更响应透传该失败。
 4. 内存 store 的 capabilities 保存对损坏/异身份 `bot.json` 记录现在 fail-closed（Task 3 收紧），表现为保存报错而非覆盖。
@@ -186,3 +186,41 @@ Backend 可按 §2 的请求依次验证（使用真实签名 principal 或内�
    - PR 描述补一节"影响的 consumer"传播分析（列出：BotRegistryCoreService/BotRepoPort 的实现方 bcs-bot、bcs-bot-store 与各 Noop；V1/legacy HTTP 适配层；WS connect 投影；含表格)。
 2. **waiver 到期处置**：见 §6.5（2026-11-10 前完成拆分或续期）。
 3. 既有失败治理均不属于本任务：conformance cases_2/cases_3、OpenAPI 三项措辞、admin_invocation_terminal 负载敏感超时——留待对应模块负责人；若对合并形成阻塞，按仓库既有流程另行记录。
+
+## 9. PR 3488 复审修复（2026-11-03）
+
+实施范围见 [review-fixes.md](review-fixes.md)。三个修复均先以真实服务/文件/SQLite 回归测试复现，再修改实现：
+
+- existing-only profile Core 恢复 Provider 父身份保护；AgentPass 与 AgentPassSubbots 的头像更新保留父身份，换绑拒绝且头像不变。身份校验期间删除的目标经严格读确认后仍返回 `Missing`，读取失败不吞掉。
+- memory/file 的完整记录改写共享原 control-plane 写锁，覆盖资料、头像、token、名称/内部属性、creator、visibility、创建和删除。临时文件准备与同步在 blocking worker 中完成，调用方持锁原子替换后发布内存；取消准备不会在锁释放后延迟覆盖正式文件。
+- A2A URL/inline Card 注册按原 ownership/Card 原子边界提交，再应用显式 Set/Clear，Keep 不新增写入。失败返回错误但保留已提交注册，不新增回滚或重试。Bootstrap 显式注入现有 registry core。
+
+新增 15 个测试函数（身份 3、A2A 5、文件并发/失败 6、取消 1）。身份测试覆盖两种 AgentPass 模式，A2A 测试覆盖两种 Card 来源。没有 schema、migration、wire 字段或 Service API trait 改动。
+
+本轮已执行的检查（命令在 `apps/bcs` 下运行）：
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo check --workspace --all-targets` | exit 0；保留既有 warning |
+| `cargo nextest run -p bcs-bot -p bcs-app-group -p bcs-app-session -p bcs-app-a2a-bot --no-fail-fast --retries 0 --test-threads 8` | 最终代码 725/725 passed，0 skipped、无重试 |
+| `cargo test -p bcs-bot --test provider_registration` | 32 passed，含已删除 Provider 目标的 `Missing` 回归 |
+| `cargo test -p bcs-bot --test bot_profile` | 54 passed |
+| `cargo test -p bcs --lib` | 365 passed、1 ignored |
+| `cargo test -p bcs-app-a2a-bot` | 27 passed |
+| `cargo test -p bcs-bot-store --test memory_profile_concurrency` | 6 passed |
+| `cargo test -p bcs-bot-store --lib cancelled_preparation_never_publishes_a_late_record` | 1 passed |
+| `cargo test -p bcs-bot-store --no-fail-fast` | 438 passed、2 failed、6 ignored；失败为 §6.7 已登记的同两例 |
+| `bash scripts/ci/check-store-boundaries.sh` | exit 0 |
+| `bash scripts/ci/check-forbidden-symbols.sh` | exit 0 |
+| `bash scripts/ci/check-import-rules.sh` | exit 1；156 处匹配均可在修复前 HEAD 找到，没有新增匹配代码 |
+| `bash scripts/ci/check-deps.sh` | exit 1；既有 `bcs-protocol → bcs-domain` 和 `bcs-service-api → bcs-config-api/bcs-storage-api` 与脚本允许表不符；本轮没有改 manifest，`cargo-machete` 未安装 |
+
+本轮所有 16 个修改/新增 Rust 源文件均检查行数，最大为 1,000 行；`git diff --check` 通过。
+独立复审已检查身份保护、A2A 编排、文件写锁顺序以及失败/取消处理，没有发现新的逻辑问题。
+
+存储全量失败用例为
+`cases_2::persistent_capability_save_preserves_patched_internal_attributes` 与
+`cases_3::memory_control_plane_list_by_task_modes_filters_visibility_status_user_visibility`，
+断言分别仍为 `Lifecycle Attributes`/`Lifecycle Attributes Saved` 与缺少 `pub-online row`。
+本轮没有为这些既有失败修改实现、测试或门禁。真实 MySQL、完整 Singlebox/E2E 未重跑；
+前文的对应结果属于原功能验证，不能视为本轮修复后的新结果。

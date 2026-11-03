@@ -124,6 +124,19 @@ role/fallback reads accept only physical Bot targets (scalar and batch).
 
 ## Bot profile existing-only writes and avatar reads
 
+Memory/file record rewrites share the existing repository write mutex, acquired
+before authority/bot/token guards and held from snapshot read through durable
+replacement and memory publication. Profile/avatar, capabilities, control-plane,
+token, creator and visibility writes therefore cannot replay stale file snapshots
+over each other. Creation and retirement use the same guard. This serializes local
+record writes within one repository instance; it is not cross-process coordination.
+Each rewrite prepares and syncs a private temporary file on a blocking worker,
+then atomically replaces `bot.json` in the guarded caller. Readers see complete
+records, and failed or cancelled preparation cannot truncate or later overwrite
+the live file. No extra DB queries, schema changes or avatar caches are introduced.
+`tests/memory_profile_concurrency.rs` exercises competing writes and concurrent
+readers against real files.
+
 `BotRepoPort::update_profile_existing` / `update_avatar_existing` /
 `read_avatar_batch` (bot-avatar plan) store the Bot display profile on the
 existing record only: one guarded `UPDATE bcs_bots ... WHERE bot_uuid = ?
