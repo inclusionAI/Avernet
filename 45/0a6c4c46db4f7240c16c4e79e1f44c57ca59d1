@@ -1,0 +1,23 @@
+apps/bcsfuse/tests/deployment/test_zbcsfuse_config.py
+  s_e604a7fd67b17c::t_43ee09f1d3efaf 281
+apps/bcsfuse/configs/zbcsfuse/application-prod.yaml
+  s_e604a7fd67b17c::t_43ee09f1d3efaf 19
+apps/bcsfuse/configs/zbcsfuse/application-prepub.yaml
+  s_e604a7fd67b17c::t_43ee09f1d3efaf 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "450a6c4c46db4f7240c16c4e79e1f44c57ca59d1",
+  "prompts": {},
+  "sessions": {
+    "s_e604a7fd67b17c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17b1c-91e3-7641-b378-6138442786ee",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
