@@ -9,8 +9,6 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { get, type Server } from 'node:http';
 import { SqliteDatabase, runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db';
-import { packOperationDdl } from '@avernet/clawweb-shared/server/schema-pack-operations';
-import { PackOperationRepository } from '@avernet/workflow/server/repositories/pack-operation-repository';
 import type { ClawWebLifecycle } from '../bootstrap.js';
 const state = vi.hoisted(() => ({ db: null as IDatabase | null }));
 vi.mock('@avernet/clawweb-shared/server/db', async original => ({
@@ -35,15 +33,13 @@ afterEach(async () => {
   if (gitDir) await rm(gitDir, { recursive: true, force: true }); gitDir = undefined;
   vi.restoreAllMocks(); vi.unstubAllEnvs();
 });
-it('limits Pack snapshots and journal recovery to the authorized loopback developer', async () => {
+it('authorizes Pack snapshots while refusing retired journal recovery', async () => {
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw); state.db = db;
   await runMigrations(db, 'sqlite');
-  for (const ddl of packOperationDdl) await db.exec(ddl);
   await db.exec(`INSERT INTO workflow_specs (workflow_id, pack_id, spec_json, title, owner_id, gmt_create, gmt_modified)
     VALUES ('wf', 'pack', '{}', 'wf', 'dev_local', 1, 1)`);
   await db.exec(`INSERT INTO bot_workflow_permissions (bot_owner_id, workflow_id, can_view, can_execute, can_edit, gmt_create, gmt_modified)
     VALUES ('dev_local', 'wf', 1, 1, 1, 1, 1)`);
-  await new PackOperationRepository(db).begin({ requestId: 'request-0001', workflowId: 'wf', actorId: 'dev_local', kind: 'save', inputHash: 'hash' });
   gitDir = await mkdtemp(path.join(tmpdir(), 'clawweb-public-pack-'));
   execFileSync('git', ['init', '--bare', gitDir], { stdio: 'ignore' });
   vi.stubEnv('AUTO_HEAL_CLAWFLOWS_REMOTE_URL', gitDir);
@@ -56,13 +52,13 @@ it('limits Pack snapshots and journal recovery to the authorized loopback develo
   const base = `http://127.0.0.1:${(server!.address() as { port: number }).port}`;
   const statusUrl = `${base}/api/workflows/wf/pack-operations/request-0001`;
   const read = await fetch(statusUrl);
-  expect(read.status).toBe(200); expect(await read.json()).toMatchObject({ kind: 'save', state: 'preparing' });
+  expect(read.status).toBe(503); expect(await read.json()).toMatchObject({ code: 'OPERATION_RECOVERY_UNAVAILABLE' });
   expect((await fetch(`${base}/api/workflows/wf/pack-version?version=draft`, { headers: { cookie: 'staff_id=another-user' } })).status).toBe(401);
   expect((await fetch(statusUrl, { headers: { cookie: 'staff_id=another-user' } })).status).toBe(401);
   expect((await fetch(`${statusUrl}/reconcile`, { method: 'POST' })).status).toBe(403);
   expect((await fetch(`${statusUrl}/reconcile`, { method: 'POST', headers: { 'X-Pack-Version-CSRF': '1', origin: 'https://evil.example' } })).status).toBe(403);
   const recover = await fetch(`${statusUrl}/reconcile`, { method: 'POST', headers: { 'X-Pack-Version-CSRF': '1', origin: base } });
-  expect(recover.status).toBe(200); expect(await recover.json()).toMatchObject({ state: 'failed' });
+  expect(recover.status).toBe(503); expect(await recover.json()).toMatchObject({ code: 'OPERATION_RECOVERY_UNAVAILABLE' });
   // The public runner's explicitly enabled loopback developer can still reach
   // the legacy spec-save path against an isolated local bare repository.
   const localSave = await fetch(`${base}/api/auto-heal/save`, { method: 'POST',

@@ -22,6 +22,8 @@ export function BotManagementConfirmDialog({ bot, action, onAction, onCancel }: 
       description={
         action === 'delete'
           ? `删除「${bot.name}」后无法恢复。`
+          : action === 'activate'
+          ? `将重新启动已回收的「${bot.name}」，激活完成后可继续使用。`
           : action === 'upgrade'
           ? '开启后不可逆，确认将此 Bot 转换为服务 Bot？'
           : action === 'engine_restart'

@@ -100,6 +100,7 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
+from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -3377,6 +3378,16 @@ async def get_engine_config(
             success=False,
             message=f"Bot不存在: {bot_id}",
             error_code=404,
+            data=None,
+        )
+    except DeviceNotBoundError:
+        logger.info(
+            f"[bot_router.get_engine_config] Bot has no active device: {bot_id}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot has no active device",
+            error_code=409,
             data=None,
         )
     except json.JSONDecodeError as e:

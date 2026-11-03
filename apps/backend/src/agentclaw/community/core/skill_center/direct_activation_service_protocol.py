@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
 
 @runtime_checkable
 class DirectActivationServiceProtocol(Protocol):
@@ -72,7 +74,7 @@ class DirectActivationServiceProtocol(Protocol):
 
     @abstractmethod
     async def claim_apply_mcp(
-        self, *, server_code: str, config: dict | None, bot_id: str,
+        self, *, server_code: str, config: McpConfigWriteIntent[dict[str, Any]], bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]: ...

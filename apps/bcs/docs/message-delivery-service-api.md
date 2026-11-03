@@ -395,6 +395,48 @@ ManagerWorker/StateMachine 查询不应用 Chat 加入窗口，仍逐条检查�
 服务故障；数据库详细错误不返回给客户端。不存在对应 delivery 时返回空集合，不伪造记录。
 多目标取消可能部分成功，应检查每个目标结果；后续存储失败不表示前面已提交的取消被回滚。
 
+### Client message correlation and cancelled history
+
+The WebSocket delivery adapter accepts optional `chat.send.params.client_message_id`
+(`clientMessageId` is also accepted). It supplies this value as the canonical
+message client key; requests without it keep using `idempotency_key`. The existing
+`bcs_messages.client_msg_id` column stores the key. No migration or new column is
+required. The assistant response/placeholder ID is a separate identity.
+
+Each successful cancellation result may additionally contain `client_message_id`.
+It is returned only when **all** deliveries of the canonical message are proven
+never sent and are in `cancelled`, `expired`, `rejected_capacity`, or
+`discarded_context`. A queued, active, uncertain, consumed, or potentially sent
+sibling prevents removal, even when cancellation of the selected target succeeds.
+Errors do not authorize frontend message removal. Older clients may ignore the
+additive field, and clients talking to older servers must not guess a match by
+content or timestamps. For a successful result carrying this correlation, clients
+may match optimistic user messages by their client key and history-loaded user
+messages by the **same result's** `delivery.message_id`. A canonical ID or a
+single target's cancelled status alone does not authorize removal.
+
+History queries omit a canonical message only if at least one delivery is
+`cancelled` and every delivery meets the unsent-terminal condition above.
+Filtering precedes pagination/limit in both the SQL and memory stores. Raw
+message lookup, delivery records, and `bcs_messages` retain the original record
+for authorization, idempotency, and auditing; this is not physical deletion.
+Legacy messages without managed deliveries remain visible.
+
+The SQL implementation uses one indexed aggregate on existing
+`(env, source_message_id)` rows in the original bounded history query, with
+Session and environment isolation and no per-message DB round trips. Memory
+history aggregates delivery states once per Session, rather than scanning all
+deliveries for each message. Cancellation reuses its existing message/delivery
+reads and CAS writes. After any successful transition, one additional source-message
+lookup confirms removability from persisted sibling states; it is not repeated per
+target. Confirmation-read failure returns a service error without authorizing
+message removal, and does not roll back already committed cancellations.
+Candidate-history and per-message target scans are data
+dependent in cancellation-dense ranges; LIMIT bounds returned rows, not all
+scanned rows. SQLite index selection is tested; remote MySQL/OceanBase plans
+require deployment verification. Publication of a correlation-capable SDK is independent:
+public frontend manifests keep their public SDK versions until that release.
+
 queued 取消直接进入 `cancelled`，不调用 `chat.abort`。bound inject 只在 carrier 尚未开始
 发送时允许撤回，并使旧准备结果失效。active WebSocket 请求先提交取消意图，再由有界
 Abort worker 使用原连接 identity、原 session key 和实际下游 run ID 发送 abort。

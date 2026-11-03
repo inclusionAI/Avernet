@@ -437,6 +437,8 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
   }, [task.task_id, target?.assetId, target?.candidate?.artifact?.ref, target?.candidate?.artifact?.sha256])
 
   const unifiedDiff = useMemo(() => createUnifiedDiff(diff?.files ?? []), [diff])
+  const canApply = task.canApplySkill === true
+  const applyRestriction = '仅源 Bot 的 Owner 或协作者可应用候选版本'
   if (!target) return null
   const decide = async (decision: 'accept' | 'reject') => {
     const message = decision === 'accept'
@@ -462,8 +464,9 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
       <p className="text-sm text-amber-900">待确认：接受后将应用到 Bot 中的原 Skill。</p>
       <div className="flex gap-2">
         <button disabled={Boolean(busy)} onClick={() => void decide('reject')} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 disabled:opacity-40">拒绝</button>
-        <button disabled={Boolean(busy)} onClick={() => void decide('accept')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">接受并应用</button>
+        <button disabled={Boolean(busy) || !canApply} title={canApply ? undefined : applyRestriction} onClick={() => void decide('accept')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500">接受并应用</button>
       </div>
+      {!canApply && <p className="w-full text-xs text-amber-900">{applyRestriction}</p>}
     </div>}
     {error && <p role="alert" className="mx-5 mb-4 text-xs text-red-600">{error}</p>}
     <details className="group border-t border-gray-100">

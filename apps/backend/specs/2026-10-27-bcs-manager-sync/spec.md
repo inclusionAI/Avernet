@@ -7,6 +7,13 @@
 - Design: `/home/admin/workspace/docs/avernet/superpowers/specs/2026-10-26-backend-bcs-manager-sync-design.md`
 - Operations: `apps/backend/docs/bot-manager-sync-operations.md`
 
+## Ownership extension (2026-11-01)
+
+The [ownership sync specification](../2026-11-01-bcs-ownership-sync/spec.md) and
+[operations guide](../../docs/bot-ownership-sync-operations.md) extend this
+managers-only baseline. Historical validation evidence below remains specific to
+its recorded build and commands; it is not ownership-delivery acceptance.
+
 ## Problem
 
 Backend owns Bot collaborators while BCS consumes a manager set. The projection must
@@ -41,9 +48,11 @@ failures. Normal admission emits `submit_admitted` with the finite trigger
 Diagnostics increments and snapshots are protected by the same thread lock.
 Closed admission takes precedence over environment-mismatch diagnostics.
 
-Owner handoff uses the same ordinary refresh path as every other roster-affecting
-change. It does not invoke BCS owner transfer, establish owner alignment, or create a
-persistent owner gate.
+The managers hint from Owner handoff remains an ordinary roster refresh and
+never changes BCS Owner. The 2026-11-01 extension additionally submits explicit
+ownership work after the full business operation commits. It uses the existing
+BCS trusted ownership-sync API, not transfer-request/accept workflows; it does
+not create a persistent Owner gate or make alignment part of handoff success.
 
 ### Runtime
 
@@ -112,10 +121,15 @@ read/clear, CAS, drain proof, or owner-alignment operation.
 
 ### Configuration and persistence
 
-The only keys are `enabled`, `env`, and `bcs_base_url`. Missing configuration is
-disabled. Enabled configuration requires `env` and an HTTP(S) BCS origin. Unknown
-keys fail validation. `ManagerSyncStack` contains only `bcs` and `reason`; it has no
-coordinator. Singlebox explicitly enables the same real direct-BCS path through the
+The original three keys are `enabled`, `env`, and `bcs_base_url`. The ownership
+extension adds strict boolean `ownership_enabled` (default false), while `enabled`
+remains the shared total switch. Both true enables explicit Owner and managers
+work; only `enabled` true preserves managers-only behavior; both false disables
+sync; Owner true with total false is invalid. Missing configuration is disabled.
+Enabled configuration requires `env` and an HTTP(S) BCS origin. Unknown keys fail
+validation. `ManagerSyncStack` now carries optional `ownership` alongside `bcs`
+and `reason`; it still has no distributed coordinator. Singlebox explicitly
+enables the same real direct-BCS path through the
 base `BotManagerSyncModule` provider; there is no `SingleboxBotManagerSyncModule`.
 The recording test module is installed for TEST/CORP_TEST, not singlebox.
 
@@ -143,7 +157,8 @@ per-tenant bearer credentials.
 9. Repository/integration tests prove real projection boundaries and that read or
    projection failure never emits an empty clear.
 10. Architecture/config tests prove the coordinator Protocol and implementations are
-    removed and the three-key configuration is the only accepted surface.
+    removed. The original three-key surface is extended only by the default-off
+    `ownership_enabled` boolean and its valid switch combinations.
 
 ### Singlebox CI readback
 
@@ -169,8 +184,9 @@ The final live suite contains four normal flows:
 4. Team Space removal and rejoin.
 
 Fault scenarios are explicit opt-in only: BCS 403 without business rollback, transient
-disconnect followed by retry, and reported-count drift. The simplified contract has no
-Owner, drain, marker-clear, CAS, or restart-barrier drill.
+disconnect followed by retry, and reported-count drift. This original managers-only
+acceptance matrix has no Owner, drain, marker-clear, CAS, or restart-barrier drill;
+Owner-delivery acceptance is separately specified by the linked extension.
 
 ## Validation status
 

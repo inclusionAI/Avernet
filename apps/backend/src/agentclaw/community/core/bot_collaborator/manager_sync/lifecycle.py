@@ -13,8 +13,8 @@ Startup/shutdown posture (each pinned by a test):
   booting. Structural config errors are a different failure: they raise
   at config resolution, per the repo's config policy.
 - **Shutdown stops admission first, drains bounded, then ends the loop.**
-  In-flight async rounds are cancelled and ``bcs.aclose()`` runs on the worker
-  loop. No shutdown path creates delayed retries or persistent sync state.
+  In-flight async rounds are cancelled and both delivery plugins close on the
+  worker loop. No shutdown path creates delayed retries or persistent sync state.
 - **The disabled posture holds zero resources.** The composition root
   binds :class:`DisabledBotManagerSyncLifecycle` whenever the feature is
   off or its stack is unavailable, so lifecycle discovery still resolves
@@ -33,6 +33,7 @@ from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bcs_managers import BcsManagersPlugin
+from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipPlugin
 
 logger = get_logger()
 
@@ -60,17 +61,20 @@ _SHUTDOWN_DRAIN_SECONDS = 10.0
 
 
 class BotManagerSyncLifecycle(LifecycleBase):
-    """Own the dispatcher's thread, loop and executor; close bcs there."""
+    """Own the shared dispatcher loop and executor; close both plugins there."""
 
     def __init__(
         self,
         dispatcher: BotManagerSyncDispatcher,
         bcs: BcsManagersPlugin,
+        *,
+        ownership: BcsOwnershipPlugin | None = None,
     ) -> None:
         if not isinstance(dispatcher, BotManagerSyncDispatcher):
             raise TypeError("manager-sync lifecycle requires the real dispatcher")
         self._dispatcher = dispatcher
         self._bcs = bcs
+        self._ownership = ownership
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._started_lock = threading.Lock()
@@ -137,7 +141,7 @@ class BotManagerSyncLifecycle(LifecycleBase):
             logger.info("[MANAGER-SYNC-LIFECYCLE] started")
 
     async def shutdown(self) -> None:
-        """Close admission, drain bounded, stop the loop, close bcs there.
+        """Close admission, drain bounded, stop the loop, close both plugins there.
 
         Cancellation propagates through running async rounds; no pool-close
         path reports a delivery result or schedules later work.
@@ -250,14 +254,24 @@ class BotManagerSyncLifecycle(LifecycleBase):
         fut.result(timeout=_ATTACH_TIMEOUT_SECONDS)
 
     def _stop_on_worker_loop(self) -> None:
-        """Cancel workers and close bcs on their loop, then stop it."""
+        """Cancel workers and close both plugins on their loop, then stop it."""
         loop = self._loop
         if loop is None:
             return
 
         async def _shutdown_on_loop() -> None:
-            await self._dispatcher.stop()
-            await self._bcs.aclose()
+            try:
+                await self._dispatcher.stop()
+            finally:
+                plugins = (
+                    (self._bcs,) if self._ownership is None
+                    else (self._bcs, self._ownership)
+                )
+                results = await asyncio.gather(
+                    *(plugin.aclose() for plugin in plugins), return_exceptions=True
+                )
+                if any(isinstance(result, BaseException) for result in results):
+                    raise RuntimeError("sync_plugin_close_failed")
 
         fut = asyncio.run_coroutine_threadsafe(_shutdown_on_loop(), loop)
         try:

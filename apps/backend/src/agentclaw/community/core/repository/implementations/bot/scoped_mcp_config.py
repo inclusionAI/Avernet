@@ -7,7 +7,11 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.models.mcp import BotMCPConfig, UserMCPConfig
+from agentclaw.community.core.models.mcp import UserMCPConfig
+from agentclaw.community.core.mcp.errors import McpConfigValueError
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.core.repository.implementations.bot import mcp_config_reads
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
     bot_mcp_configs,
 )
@@ -92,19 +96,27 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
             else:
                 user_row.extra_config = encoded_user
 
-            rows = (
-                session.query(BotMCPConfig)
-                .filter(
-                    BotMCPConfig.avernet_tenant == tenant,
-                    BotMCPConfig.env == env,
-                    BotMCPConfig.owner_id == user_id,
-                    BotMCPConfig.server_code == server_code,
-                    BotMCPConfig.bot_id.in_(owned_bot_ids),
+            # The caller's preflight can race handoff/deletion. Recheck and
+            # lock current ownership before selecting immutable resource keys.
+            bots = session.query(BotModel).filter(
+                BotModel.avernet_tenant == tenant, BotModel.env == env,
+                BotModel.is_delete == 0, BotModel.owner_id == user_id,
+                BotModel.bot_id.in_(owned_bot_ids),
+            ).with_for_update().all()
+            resources = {}
+            for bot in bots:
+                if bot.bot_id in resources:
+                    raise BotLookupAmbiguousError(f"Ambiguous scoped MCP Bot: {bot.bot_id}")
+                resources[str(bot.bot_id)] = str(bot.entity_id)
+            if resources.keys() != owned_bot_ids:
+                raise McpConfigValueError("Scoped MCP target is no longer owned by caller")
+            existing = {}
+            for bot_id in sorted(owned_bot_ids):
+                config = mcp_config_reads.get(
+                    session, bot_id=bot_id, owner_id=resources[bot_id], env=env, server_code=server_code,
                 )
-                .with_for_update()
-                .all()
-            )
-            existing = {str(row.bot_id): _json_object(row.config) for row in rows}
+                if config is not None:
+                    existing[bot_id] = config
             for bot_id in sorted(existing.keys() | bot_headers.keys() | (bot_urls or {}).keys()):
                 config = dict(existing.get(bot_id) or {})
                 if bot_headers.get(bot_id):
@@ -119,7 +131,7 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                 bot_mcp_configs.replace(
                     session,
                     bot_id=bot_id,
-                    owner_id=user_id,
+                    owner_id=resources[bot_id],
                     server_code=server_code,
                     config=config or None,
                     env=env,

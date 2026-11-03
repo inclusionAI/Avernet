@@ -1406,6 +1406,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
 
         if not eligible_devices:
+            if publish_type == PublishType.DESTROY and all(
+                device.status == DeviceStatus.RELEASED.value for device in all_devices
+            ):
+                logger.info(
+                    f"[create_device_records] DESTROY publish_id={publish_id} "
+                    "has no non-released devices; allowing an idempotent no-op"
+                )
+                return
+
             logger.warning(
                 f"[create_device_records] No eligible devices for "
                 f"publish_id={publish_id} type={publish_type.value}"

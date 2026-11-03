@@ -1,18 +1,20 @@
 import { assertDeploymentAvailable, clearConfirmedDeployment, markDeploymentPending } from '../editor/deploymentGuard'
 import { readWorkflowDocument } from '../api/workflowDocument'
+import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
+import { saveWorkflowCanvasDocument } from '../editor/workflowDocumentSave'
 import { useState, useCallback, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { stringify as stringifyYaml } from 'yaml'
 import { UNSAFE_LocationContext } from 'react-router-dom'
 import { useEditorWorkflowDocument, useAutoHealDeploy } from '../api/hooks'
 import { QueryClientContext } from '@tanstack/react-query'
 import { createWorkflowPack } from '../editor/newWorkflowSave'
-import { useEditorStore } from '../editor/store'
+import { useEditorStore, type EditorState } from '../editor/store'
 import WorkflowPackSidebar from '../components/WorkflowPackSidebar'
 import EditorCanvas from '../components/EditorCanvas'
 import NodePalette from '../components/NodePalette'
 import NodePropertyPanel from '../components/NodePropertyPanel'
 import WorkflowSettingsPanel from '../components/editor/WorkflowSettingsPanel'
-import { parseWorkflowYaml } from '../editor/yamlDraft'
+import { normalizationChanges, parseWorkflowYaml } from '../editor/yamlDraft'
 import { confirmDiscardEditor } from '../editor/navigation'
 import { beginWorkflowTransition, commitWorkflowTransition } from '../editor/workflowTransition'
 import YamlEditor from '../components/YamlEditor'
@@ -27,6 +29,7 @@ import { api, fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 
 type ViewMode = 'visual' | 'yaml' | 'split'
+type SaveMessage = { type: 'success' | 'error'; text: string } | null
 
 
 /** Extract a human-readable message from fetchJson ApiError strings ("API NNN: {json}"). */
@@ -71,15 +74,21 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [showNewDialog, setShowNewDialog] = useState(false)
   const [newId, setNewId] = useState('')
   const [newTitle, setNewTitle] = useState('')
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [showMore, setShowMore] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('visual')
   const [workspaceTab, setWorkspaceTab] = useState<'workflow' | 'scripts'>('workflow')
+  const [saveMessages, setSaveMessages] = useState<{ workflow: SaveMessage; scripts: SaveMessage }>({ workflow: null, scripts: null })
+  const saveMessage = saveMessages[workspaceTab]
+  const setSaveMessage = useCallback((message: SaveMessage) => {
+    setSaveMessages(previous => ({ ...previous, [workspaceTab]: message }))
+  }, [workspaceTab])
+  const [workflowSaving, setWorkflowSaving] = useState(false)
+  const workflowSaveInFlight = useRef(false)
   const [showHistory, setShowHistory] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
-  const [baselineIsActive, setBaselineIsActive] = useState(false)
+  const [deploymentBaselineStatus, setDeploymentBaselineStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
-  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; freshSavedBaseline: boolean } | null>(null)
+  const [deployCandidate, setDeployCandidate] = useState<{ workflowId: string; packId: string; commit: string; source: 'draft' | 'current'; sessionId: number; fileCount: number; packRevision: number; freshBaseline: boolean; positions: EditorState['positions'] } | null>(null)
   const candidateRequest = useRef(0)
   const switchRequest = useRef(0)
   // Invalidate before passive effects or pending promises can apply an obsolete
@@ -96,7 +105,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
 
   const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
-    pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
+    _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
   const creation = spec ? sessionFor(spec.id).state.creation : undefined
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
   useSyncExternalStore(subscribePackVersions, packVersionsRevision, packVersionsRevision)
@@ -106,9 +115,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const packUploading = hasPackVersionUpload(selectedWorkflowId)
   usePackNavigationGuard(!workspaceManagedPop)
 
-  const { data: workflowSpec, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '')
+  const { data: workflowSpec, databaseSpec: workflowDatabaseSpec, activeDeployNumber: workflowActiveDeployNumber, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '')
 
-  const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowSpec)
+  const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowDatabaseSpec, { enabled: workspaceTab === 'scripts' })
   const deployment = selectedWorkflowId ? sessionFor(selectedWorkflowId).state.deployment : null
   const queryClient = useContext(QueryClientContext)
   const deployMutation = useAutoHealDeploy()
@@ -120,19 +129,19 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     const approval = beginWorkflowTransition()
     if (!approval) return
     try {
-      const target = await readWorkflowDocument(workflowId)
+      const { spec: target, databaseSpec, activeDeployNumber } = await readEditorWorkflowSource(workflowId)
       if (request !== switchRequest.current) return
-      if (!commitWorkflowTransition(approval, target, workflowId)) {
+      if (!commitWorkflowTransition(approval, target, workflowId, false, databaseSpec, activeDeployNumber)) {
         setSaveMessage({ type: 'error', text: '工作流切换未完成：目标无效或确认后编辑内容已变化；原草稿仍保留。' })
         return
       }
       setShowWorkflowSettings(false)
       setSelectedWorkflowId(workflowId)
-      setSaveMessage(null)
+      setSaveMessages({ workflow: null, scripts: null })
     } catch (error) {
       if (request === switchRequest.current) setSaveMessage({ type: 'error', text: `工作流读取失败，原草稿仍保留：${extractApiErrorMessage(error)}` })
     }
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, setSaveMessage])
 
   // A controlled target is an intention until its source is read and committed.
   // Workspace may already have committed the same target as part of its transaction.
@@ -146,6 +155,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     // synchronizes the local selection.
     if (useEditorStore.getState().spec?.id === initialWorkflowId) {
       setSelectedWorkflowId(initialWorkflowId)
+      setSaveMessages({ workflow: null, scripts: null })
       setShowWorkflowSettings(false)
       return
     }
@@ -156,31 +166,31 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   // Only the committed selection may supply the initial loaded document.
   const currentSpecId = spec?.id
   useEffect(() => {
-    if (workflowSpec && workflowSpec.id === selectedWorkflowId && !currentSpecId) loadSpec(workflowSpec)
-  }, [workflowSpec, currentSpecId, selectedWorkflowId, loadSpec])
+    if (workflowSpec && workflowSpec.id === selectedWorkflowId && !currentSpecId && !useEditorStore.getState().spec) loadSpec(workflowSpec, workflowDatabaseSpec, workflowActiveDeployNumber)
+  }, [workflowSpec, workflowDatabaseSpec, workflowActiveDeployNumber, currentSpecId, selectedWorkflowId, loadSpec])
 
   // Fetch the latest deploy history row to show the current effective version.
   useEffect(() => {
     if (!selectedWorkflowId) {
       setLatestDeploy(null)
-      setBaselineIsActive(false)
+      setDeploymentBaselineStatus('ready')
       return
     }
     setLatestDeploy(null)
-    setBaselineIsActive(false)
+    setDeploymentBaselineStatus('loading')
     let cancelled = false
     api.workflows
       .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
         if (cancelled) return
         const active = r.active ?? null
-        setLatestDeploy(active ?? r.history?.find((item) => item.action !== 'edit') ?? null)
-        setBaselineIsActive(Boolean(active))
+        setLatestDeploy(active)
+        setDeploymentBaselineStatus('ready')
       })
       .catch(() => {
         if (!cancelled) {
           setLatestDeploy(null)
-          setBaselineIsActive(false)
+          setDeploymentBaselineStatus('error')
         }
       })
     return () => {
@@ -218,14 +228,17 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }, [selectedWorkflowId, latestDeploy])
 
   const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
-  const savedSpecText = workflowSpec ? formatCurrentSpecForDiff(workflowSpec) : ''
-  const hasUndeployedChanges = Boolean(activeSnapshot && workflowSpec && !specsEqual(deployedSpecText, savedSpecText))
-  const deploymentBaselineLabel = baselineIsActive ? '生效' : '最新发布'
+  const savedSpecText = databaseBaseline ? formatCurrentSpecForDiff(databaseBaseline) : ''
+  const hasUndeployedChanges = Boolean(activeSnapshot && databaseBaseline && !specsEqual(deployedSpecText, savedSpecText))
+  const deploymentBaselineLabel = '生效'
 
   const handleOpenSaveDialog = useCallback(async () => {
     if (!useEditorStore.getState().spec) return
     const sessionId = useEditorStore.getState().sessionId
     const workflowId = selectedWorkflowId
+    const databaseOnly = workspaceTab === 'workflow' && !!workflowId
+    if (databaseOnly && workflowSaveInFlight.current) return
+    if (databaseOnly) { workflowSaveInFlight.current = true; setWorkflowSaving(true) }
     setSaveMessage(null)
     try {
       if (!workflowId) {
@@ -248,8 +261,15 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         setSaveMessage({ type: 'success', text: `已创建并保存到 saved commit ${created.result.commit}，尚未部署。保存期间的后续修改仍保留。` })
         return
       }
-      const result = await packCanvas.save()
-      if (selectedWorkflowRef.current !== workflowId) return
+      const result = await (databaseOnly ? saveWorkflowCanvasDocument(workflowId) : packCanvas.save())
+      // Direct document save bypasses useAutoHealSave, so keep its cache
+      // contract: a persisted draft must invalidate editor/list sources.
+      if (result?.dbSaved) {
+        for (const key of [['editor-workflow-document', workflowId], ['db-workflows'], ['workflow-types']]) {
+          void queryClient?.invalidateQueries({ queryKey: key })
+        }
+      }
+      if (selectedWorkflowRef.current !== workflowId || useEditorStore.getState().sessionId !== sessionId) return
       if (result) setSaveMessage({ type: 'success', text: `${result.dbSaved ? '工作流已保存到数据库。' : ''}${result.commit ? `文件已保存到 saved commit ${result.commit}。` : ''}${!result.dbSaved && !result.commit ? '没有需要保存的更改。' : ''}尚未部署。节点位置仅在当前会话保留。` })
       else if (workflowId) {
         const state = sessionFor(workflowId).state
@@ -260,8 +280,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       if (!workflowId || (selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId)) {
         setSaveMessage({ type: 'error', text: cause instanceof Error ? cause.message : '保存未完成，本地草稿仍保留。' })
       }
+    } finally {
+      if (databaseOnly) { workflowSaveInFlight.current = false; setWorkflowSaving(false) }
     }
-  }, [selectedWorkflowId, packCanvas, queryClient])
+  }, [selectedWorkflowId, workspaceTab, packCanvas, queryClient, setSaveMessage])
 
   const applyYamlToEditor = useCallback((incoming: WorkflowSpec) => {
     const previousId = useEditorStore.getState().spec?.id
@@ -284,7 +306,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     } catch (err) {
       setSaveMessage({ type: 'error', text: `YAML parse error: ${err instanceof Error ? err.message : 'Invalid YAML'}` })
     }
-  }, [yamlInput, importYaml])
+  }, [yamlInput, importYaml, setSaveMessage])
 
   const handleImportFile = useCallback(() => {
     const input = document.createElement('input')
@@ -320,7 +342,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     URL.revokeObjectURL(url)
     setSaveMessage({ type: 'success', text: `已请求下载 ${filename}；请检查浏览器下载结果。该文件只包含已应用的画布工作流 spec，不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置。` })
     setTimeout(() => setSaveMessage(null), 2000)
-  }, [spec, hasPendingEdits])
+  }, [spec, hasPendingEdits, setSaveMessage])
 
   const handleCreateNew = useCallback(() => {
     const id = newId.trim(), title = newTitle.trim()
@@ -337,7 +359,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     setNewId('')
     setNewTitle('')
     setSelectedWorkflowId(null)
-  }, [newId, newTitle])
+    setSaveMessages({ workflow: null, scripts: null })
+  }, [newId, newTitle, setSaveMessage])
 
   // Deployment combines the DB draft with the independently saved Git files.
   const runDeploy = useCallback(async () => {
@@ -345,7 +368,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     const id = selectedWorkflowId, candidate = deployCandidate, session = sessionFor(id)
     const live = useEditorStore.getState()
     if (session.state.deployment || hasPackVersionEditRisk(id) || candidate.packRevision !== packVersionsRevision()
-      || candidate.workflowId !== id || live.sessionId !== candidate.sessionId || live.isDirty || (candidate.freshSavedBaseline && live.isLayoutDirty)
+      || candidate.workflowId !== id || live.sessionId !== candidate.sessionId || live.isDirty || (candidate.freshBaseline && normalizationChanges(candidate.positions, live.positions).length > 0)
       || Object.keys(live.pendingEdits ?? {}).length || live.validationErrors?.length || !live._savedSpec) {
       setSaveMessage({ type: 'error', text: '确认期间编辑内容已变化，请先保存并重新确认部署。' }); return
     }
@@ -353,7 +376,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     try {
       const db = await readWorkflowDocument(id)
       const now = useEditorStore.getState()
-      if (selectedWorkflowRef.current !== id || now.sessionId !== candidate.sessionId || now.isDirty || (candidate.freshSavedBaseline && now.isLayoutDirty)
+      if (selectedWorkflowRef.current !== id || now.sessionId !== candidate.sessionId || now.isDirty || (candidate.freshBaseline && normalizationChanges(candidate.positions, now.positions).length > 0)
         || Object.keys(now.pendingEdits ?? {}).length || hasPackVersionEditRisk(id)
         || candidate.packRevision !== packVersionsRevision() || !now._savedSpec || !sameExecutionSpec(db, now._savedSpec)) {
         throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
@@ -383,7 +406,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     } catch (err) {
       setSaveMessage({ type: 'error', text: `部署已阻止：${extractApiErrorMessage(err)}` })
     } finally { deployInFlight.current = false }
-  }, [selectedWorkflowId, deployCandidate, deployMutation])
+  }, [selectedWorkflowId, deployCandidate, deployMutation, setSaveMessage])
 
   const handleDeployClick = useCallback(async () => {
     if (!selectedWorkflowId || deployInFlight.current) return
@@ -394,8 +417,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     if (isDirty || hasPendingEdits) {
       setSaveMessage({ type: 'error', text: hasPendingEdits ? '存在未应用的配置草稿，无法部署；请先应用并保存。' : '画布有未保存改动，无法部署；请先保存。' }); return
     }
+    if (useEditorStore.getState()._databaseSpec === null) { setSaveMessage({ type: 'error', text: '尚无数据库暂存稿，请先保存当前编排，再确认部署。' }); return }
     const requestSequence = ++candidateRequest.current
-    const sessionId = useEditorStore.getState().sessionId
+    const { sessionId, positions: currentPositions } = useEditorStore.getState()
+    const positions = structuredClone(currentPositions)
     const candidatePackRevision = packVersionsRevision()
     setDeployCandidate(null); setSaveMessage(null)
     try {
@@ -427,27 +452,33 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       const baseline = candidates.find(item => item
         && (source !== 'current' || item.draftHead === null)
         && item.baseCommit === snapshot.baseCommit && item.packId === snapshot.packId && diff(item.versionFiles, snapshot.versionFiles).length === 0)
-      // A reopened saved-only workflow may have no current wf snapshot at all.
-      // Trust the freshly validated saved read only when no local baseline or
-      // orphaned files exist; the session and revision checks above and at
-      // confirmation still reject any concurrent edits or loads.
-      const freshSavedBaseline = source === 'draft' && !live.isLayoutDirty && !versions.current.snapshot && !versions.draft.snapshot
+      // Layout is session-only: existing moves do not invalidate a fresh Git
+      // baseline, but new moves during this deployment decision do.
+      if (!baseline && normalizationChanges(positions, live.positions).length > 0) {
+        throw new Error('读取期间画布布局已变化，请重新确认部署；当前布局仍保留。')
+      }
+      // First explicit deployment may be the first Git read (saved or current).
+      // A fresh read is safe only with no local baseline, orphaned files or load;
+      // revision/session checks still reject concurrent changes at confirmation.
+      const freshBaseline = !versions.current.loading && !versions.draft.loading && !versions.current.snapshot && !versions.draft.snapshot
         && versions.current.files.length === 0 && versions.draft.files.length === 0
-      if (!baseline && !freshSavedBaseline) throw new Error(`${source === 'current' ? '当前' : 'saved'}文件快照与已读取基线不一致；请先核对版本`)
+      if (!baseline && !freshBaseline) throw new Error(`${source === 'current' ? '当前' : 'saved'}文件快照与已读取基线不一致；请先核对版本`)
       packWorkflow(snapshot.versionFiles, selectedWorkflowId, snapshot.packId)
-      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, freshSavedBaseline: !baseline && freshSavedBaseline })
+      setDeployCandidate({ workflowId: selectedWorkflowId, packId: snapshot.packId, commit: snapshot.baseCommit, source, sessionId, fileCount: snapshot.versionFiles.length, packRevision: candidatePackRevision, freshBaseline: !baseline && freshBaseline, positions })
       setShowDeployConfirm(true)
     } catch (err) {
       if (requestSequence === candidateRequest.current && selectedWorkflowRef.current === selectedWorkflowId) setSaveMessage({ type: 'error', text: `无法确认数据库草稿和 saved 文件，已阻止部署：${extractApiErrorMessage(err)}。` })
     }
-  }, [selectedWorkflowId, isDirty, hasPendingEdits, validationErrors])
+  }, [selectedWorkflowId, isDirty, hasPendingEdits, validationErrors, setSaveMessage])
+
+  const saving = workflowSaving || packCanvas.saving
 
   // Keyboard shortcut: Ctrl/Cmd+S saves the current workflow.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (spec) handleOpenSaveDialog()
+        if (spec && !saving) handleOpenSaveDialog()
       }
       if (showDeployConfirm || showHistory || showNewDialog || showYamlImport) return
       const target = e.target as HTMLElement | null
@@ -459,7 +490,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [spec, handleOpenSaveDialog, undo, redo, showDeployConfirm, showHistory, showNewDialog, showYamlImport])
+  }, [spec, saving, handleOpenSaveDialog, undo, redo, showDeployConfirm, showHistory, showNewDialog, showYamlImport])
 
 
   const cycleError = validationErrors.find((e) => e.type === 'cycle')
@@ -483,7 +514,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           className={`border-b-2 px-1 py-2.5 text-xs font-medium ${workspaceTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'}`}
         >{label}</button>)}
       </div>
-      {packRisk && <p role="status" className="px-4 py-2 text-sm">版本文件有未保存更改或保存状态不确定；切换标签后仍保留在本页面会话中。请先处理，不能部署旧草稿。</p>}
+      {workspaceTab === 'scripts' && packRisk && <p role="status" className="px-4 py-2 text-sm">版本文件有未保存更改或保存状态不确定；切换标签后仍保留在本页面会话中。请先处理，不能部署旧草稿。</p>}
       {/* Toolbar */}
       <div className="flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-border bg-card px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -498,7 +529,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
                 {deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
               </span>
             ) : (
-              <span className="hidden text-[10px] text-slate-400 2xl:inline">仅本地草稿</span>
+              <span className="hidden text-[10px] text-slate-400 2xl:inline">{deploymentBaselineStatus === 'ready' ? '未发布 · 数据库暂存稿' : '生效状态未确认'}</span>
             ))}
           {hasUndeployedChanges && latestDeploy && (
             <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
@@ -552,10 +583,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           </div>}
           <button
             onClick={handleOpenSaveDialog}
-            disabled={!spec || packCanvas.saving || creation?.pending}
+            disabled={!spec || saving || creation?.pending}
             className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
           >
-            {packCanvas.saving || creation?.pending ? '正在保存…' : workspaceTab === 'scripts' ? '保存工作流' : '保存'}
+            {saving || creation?.pending ? '正在保存…' : workspaceTab === 'scripts' ? '保存工作流' : '保存'}
           </button>
           <button
             type="button"
@@ -575,17 +606,14 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         </div>
       )}
 
-      {spec && <div className="border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground">
-        <p>{packCanvas.loading ? '正在读取完整 Git 基线…' : packCanvas.canWrite ? '工作流保存到数据库；脚本和其他文件保存到 Git saved。部署时合成两者。' : '此宿主未确认文件写入能力；工作流仍可保存到数据库，文件草稿请备份。'}</p>
-        <p>画布及未应用内容仅在当前页面会话中保留，刷新、关闭或放弃更改可能丢失。请在原编辑区域复制未应用内容。导出仅包含已应用的画布工作流 spec，不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置。Pack 文本改动请在版本文件界面另行复制；节点位置无法通过此导出恢复，需手动重新排列。</p>
+      {spec && workspaceTab === 'workflow' && <div className="border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground">
+        <p>编排优先读取数据库暂存稿，无暂存稿时读取生效版本。应用仅更新编辑器；保存仅暂存到数据库，不改变生效版本。部署需另行确认。</p>
+        <p>未应用内容、未保存的编排及节点位置仅在当前页面会话中保留，刷新、关闭或放弃更改可能丢失。导出仅包含已应用的画布工作流 spec，不包含 Pack 版本文件（包括 YAML、脚本和资源）、未应用草稿或画布节点位置。未应用内容请在原编辑区域复制备份。</p>
         <button type="button" onClick={handleYamlExport} className="mt-1 rounded border border-input px-2 py-1 text-xs">导出工作流 YAML 备份</button>
       </div>}
-      {/* Save message */}
-      {workflowReadError && <p role="alert" className="px-4 py-2 text-sm text-destructive">工作流读取失败，草稿仍保留：{extractApiErrorMessage(workflowReadError)}</p>}
-      {packCanvas.error && <div role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">
-        {packCanvas.error}
-        {packCanvas.snapshot && <button type="button" onClick={packCanvas.adoptGit} className="ml-3 rounded border border-input px-2 py-1">以此 Git 基线加载画布</button>}
-      </div>}
+      {workspaceTab === 'workflow' && workflowReadError && <p role="alert" className="px-4 py-2 text-sm text-destructive">工作流读取失败，草稿仍保留：{extractApiErrorMessage(workflowReadError)}</p>}
+      {workspaceTab === 'workflow' && deploymentBaselineStatus === 'error' && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">生效版本状态读取失败，暂无法比较；当前编排草稿仍保留，可独立保存。</p>}
+      {workspaceTab === 'scripts' && packCanvas.error && <div role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{packCanvas.error}</div>}
       {deployment && <section aria-label="部署操作" className="border-b border-border bg-muted px-4 py-2 text-sm">
         <p>{deployment.pending ? '部署操作正在进行。' : deployment.error}</p>
         <p className="break-all">requestId：{deployment.input.requestId} · saved commit：{deployment.input.candidateCommit}</p>
@@ -637,7 +665,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       </div>
 
       <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
-        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} />}
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} />}
       </div>
 
       {/* YAML Import Modal */}

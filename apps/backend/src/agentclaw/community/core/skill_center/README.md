@@ -137,6 +137,7 @@ consumes:
   - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
+  - agentclaw.community.core.ports.mcp_config  # shared Direct MCP preserve / clear / replace command types
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type

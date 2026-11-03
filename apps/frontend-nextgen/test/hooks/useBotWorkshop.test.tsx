@@ -6,6 +6,7 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
+import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -27,6 +28,8 @@ jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
     list: jest.fn(),
   },
   supportsServiceBot: jest.fn(() => false),
+  getBcnCapability: jest.fn(),
+  getServiceBotCapability: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
@@ -73,6 +76,24 @@ const { agentCodingTemplateService } = jest.requireMock('@/services/botWorkshop/
 };
 let currentSpaceId: number | undefined;
 let spaceInitialized: boolean;
+
+it('激活中每五秒刷新库存，恢复运行后回到常规刷新间隔', async () => {
+  const timer = jest.spyOn(window, 'setInterval');
+  const bot = mapBotDto({ bot_id: 'recovering', engine: 'openclaw', status: 'REACTIVATING' }).item;
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [bot], page: 1, pageSize: 20, warnings: [] });
+  const { result, unmount } = renderHook(() => useBotWorkshop());
+  try {
+    await waitFor(() => expect(timer).toHaveBeenCalledWith(expect.any(Function), 5_000));
+    timer.mockClear();
+    mockedList.mockResolvedValue({ items: [{ ...bot, rawStatus: 'ACTIVE', lifecycle: 'running' }], page: 1, pageSize: 20, warnings: [] });
+    await act(async () => { await result.current.retry(); });
+    expect(timer).toHaveBeenCalledWith(expect.any(Function), 30_000);
+  } finally {
+    unmount();
+    timer.mockRestore();
+  }
+});
 
 beforeEach(() => {
   currentSpaceId = 10001;

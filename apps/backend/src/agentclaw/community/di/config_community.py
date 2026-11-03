@@ -67,7 +67,7 @@ class CommunityDatabaseConfig:
 
 #: Accepted ``database.backend`` values mapped to the SQLAlchemy URL scheme each
 #: one requires. Adding a backend means adding its engine setup to
-#: ``plugins/community/database.py`` at the same time.
+#: the community database composition root at the same time.
 DATABASE_BACKEND_SCHEMES: dict[str, str] = {
     "sqlite": "sqlite",
     "mysql": "mysql",

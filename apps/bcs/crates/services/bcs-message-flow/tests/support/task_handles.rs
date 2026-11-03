@@ -17,7 +17,7 @@ async fn query_admission_acceptance_result_and_restart() {
     let f = Fixture::new().await;
     assert_eq!(state(&f, "T-11111111").await, S::NotFound);
     let row = assign(&f, "11111111000000000000000000000000", None).await;
-    for reference in ["T-11111111", "11111111", "bcs_intent_11111111000000000000000000000000"] {
+    for reference in ["T-11111111", "11111111"] {
         assert_eq!(state(&f, reference).await, S::Queued);
     }
     let row = f.start(&row).await;
@@ -475,6 +475,11 @@ async fn native_task_uuid_suppresses_uncertainty_before_and_after_late_final() {
 async fn application_task_handles_translate_core_failures_and_preserve_results() {
     use bcs_service_api::application::{TaskHandleError, TaskHandleService};
     let f = Fixture::new().await;
+    let port = Arc::new(bcs_coordination_store::CoordinationCacheStore::new(
+        Arc::new(bcs_cache_local::InMemoryCachePlugin::new())));
+    let flow = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+        |flow| flow.with_coordination_intents(Some(port))).await;
+    let f = Fixture { flow, ..f };
     let application = bcs_message_flow::TaskHandleApplicationService::new(f.flow.clone());
     assert_eq!(application.task_status(vec![]).await.unwrap_err(), TaskHandleError::InvalidRequest);
     assert_eq!(application.cancel_task("not-a-reference".into(), "stop".into()).await.unwrap_err(), TaskHandleError::InvalidRequest);
@@ -486,4 +491,33 @@ async fn application_task_handles_translate_core_failures_and_preserve_results()
     let result = application.cancel_task(reference.into(), "stop".into()).await.unwrap();
     assert_eq!(result.task_ref, reference);
     assert_eq!(result.status, S::Cancelled);
+}
+
+#[tokio::test]
+async fn cached_intent_reads_authoritative_delivery_after_restart() {
+    let mut f = Fixture::new().await;
+    let cache = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
+    let port = Arc::new(bcs_coordination_store::CoordinationCacheStore::new(cache));
+    f.flow = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+        |flow| flow.with_coordination_intents(Some(port.clone()))).await;
+    let reference = "bcs_intent_11111111000000000000000000000000";
+    assert_eq!(state(&f, reference).await, S::Unknown);
+    let row = assign(&f, "11111111000000000000000000000000", None).await;
+    assert_eq!(state(&f, reference).await, S::Queued);
+    let row = f.start(&row).await;
+    let row = f.transition(&row, Event::Accepted).await;
+    assert_eq!(state(&f, reference).await, S::Running);
+    f.flow.handle_bot_event(final_event(&row)).await.unwrap();
+    let restarted = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+        |flow| flow.with_coordination_intents(Some(port))).await;
+    assert_eq!(restarted.task_status(vec![reference.into()]).await.unwrap()[0].status, S::Completed);
+}
+
+#[tokio::test]
+async fn full_intent_without_cache_returns_unknown_without_database_fallback() {
+    let f = Fixture::new().await;
+    let reference = "bcs_intent_11111111000000000000000000000000";
+    assign(&f, "11111111000000000000000000000000", None).await;
+    assert_eq!(state(&f, reference).await, S::Unknown);
+    assert_eq!(f.flow.cancel_task(reference.into(), "stop".into()).await.unwrap().status, S::Unknown);
 }

@@ -42,6 +42,13 @@ pub(super) const ACTION_TRANSFER_CANCEL: &str = "transfer_cancel";
 pub(super) const ACTION_TRANSFER_EXPIRE: &str = "transfer_expire";
 pub(super) const ACTION_TRANSFER_INVALIDATE: &str = "transfer_invalidate";
 
+/// Audit action for the trusted ownership sync swap
+/// (2026-10-29 design §5.1 step 8; frozen spelling).
+pub(super) const ACTION_OWNERSHIP_SYNC: &str = "ownership_sync";
+/// Fixed closure reason for pendings the sync invalidates
+/// (frozen spelling — also asserted by the contract harness).
+pub(super) const REASON_OWNERSHIP_SYNC: &str = "ownership_sync";
+
 /// Fixed system identity for in-transaction lazy
 /// closures of dead pendings (spec §4.4: 自动关闭的决议
 /// 使用固定 system 原因).

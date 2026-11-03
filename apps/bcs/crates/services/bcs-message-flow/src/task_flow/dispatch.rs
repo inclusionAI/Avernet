@@ -197,6 +197,15 @@ pub async fn handle_task_dispatch(
         }
         let real_run_id = admission.targets.first().and_then(|t| t.run_id.clone());
         let committed_row = output::admit_queued_dispatch(flow, &group, admission).await?;
+        if let (Some(port), Some(row), Some(intent_id)) = (
+            flow.coordination_intents.as_ref(), committed_row.as_ref(),
+            cmd.payload.get("assignment_intent_id").and_then(Value::as_str),
+        ) {
+            // Admission already committed. Cache failure must never trigger another dispatch.
+            if port.record_task_delivery(intent_id, &row.delivery_id).await.is_err() {
+                tracing::warn!("task delivery cache correlation unavailable");
+            }
+        }
         // Owner→caller identity relay (spec L62 direction): with the
         // deployment's allowlist naming this exact (middle, target) edge,
         // redeem the session's captured human ingress and park it on the

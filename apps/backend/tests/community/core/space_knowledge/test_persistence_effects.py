@@ -21,7 +21,7 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceModel,
     SpaceMemberModel,
 )
-from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 from tests.community.core.space_knowledge.capture_fixtures import enabled_capture
 
 
@@ -45,7 +45,7 @@ def test_default_capture_and_identity_effects_need_no_database_at_all():
 
 
 def test_enabled_effect_uses_source_transaction_and_rolls_back_with_it(tmp_path):
-    db = CommunityDatabase(f"sqlite:///{tmp_path / 'effects.db'}", create_schema=False)
+    db = CommunitySqliteDatabase(f"sqlite:///{tmp_path / 'effects.db'}", create_schema=False)
     for model in (SpaceModel, SpaceMemberModel, Snapshot):
         model.__table__.create(db._engine)
     try:

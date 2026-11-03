@@ -25,7 +25,7 @@ from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PAT
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
-    ("POST", "/openapi/v1/service-envs/{bot_uuid}/env-teardown"): NoCheck(
+    ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): NoCheck(
         "service environment teardown intentionally has no Bot collaborator-level requirement"
     ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
@@ -47,6 +47,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("POST", "/openapi/v1/bots/metadata/queries"): NoCheck(
         "tenant-wide display metadata for caller-supplied known bot ids"
+    ),
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): NoCheck(
+        "transitional; the handler checks the configured app_name allowlist"
     ),
     # ── Bot-scoped operations ─────────────────────────────────────────────
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
@@ -279,7 +282,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
-    ("GET", "/openapi/v1/service-envs/env-publish/{baas_publish_id}/progress"): NoCheck(
+    ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): NoCheck(
         "workflow-id-only progress query intentionally has no Bot authorization requirement"
     ),
     # Eval reuses a built artifact without editing the draft or its bindings.

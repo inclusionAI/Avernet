@@ -87,6 +87,10 @@ class Bot {
       method:'POST', headers:{'content-type':'application/json','X-Mock-User-Id':publicUser,'X-Mock-Nick-Name':'task-handle-e2e'}, body:'{}',
     });
     assert([200,201].includes(human.status), 'public task probe Human is initialized');
+    if (process.env.BCS_TASK_CACHE_FIXTURE) {
+      await require('./task_cache_scenarios.cjs')({api, publicTaskApi, until, worker, dispatch, policy, newSession});
+      return;
+    }
     // Exercise the real public adapter, including auth and application errors.
     const publicPath = '/openapi/v1/collaboration/worker-tasks/';
     for (const operation of ['status', 'cancel']) {

@@ -76,8 +76,9 @@ class BotRef:
     of that identity: it is the bot's owner as the bot record says
     (``ac_bots.owner_id``), carried here because the platform services
     capture and the spec checks read through (identity files, skills,
-    resources, MCP overrides) scope by the owner's user id, and because the
-    contract's ``revision.bot`` names the owner. The caller resolves both
+    resources, MCP permissions) scope by the owner's user id, and because the
+    contract's ``revision.bot`` names the owner. Persisted Bot MCP overrides
+    are read by the stable entity id. The caller resolves both
     from the bot record; the registry never derives one from the other.
     """
 

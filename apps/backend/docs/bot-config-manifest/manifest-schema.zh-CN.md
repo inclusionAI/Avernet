@@ -553,8 +553,14 @@ mcp:
   State 事务中写入 `ac_bot_mcp_installation` 和 `ac_bot_mcp_config`，随后按既有
   best-effort 语义投影到设备。
 - 配置逐字段优先级为 `Manifest Bot override > user config > Center/default`。
-  只有 Manifest 显式字段写入 Bot override；删除 MCP、`mcp: []` 或从条目移除
-  `config` 时，同步删除对应 override。省略整个 `mcp` 类别仍是 no-op。
+  父 MCP 条目仍在时，省略 `config` 保留当前 Bot override；显式 `config: {}`
+  清除完整 override；非空 `config` 完整替换 override，未声明的旧覆盖字段恢复继承。
+  删除管理范围内的 MCP 父条目或声明 `mcp: []`，同步删除对应 override；
+  省略整个 `mcp` 类别仍是 no-op。当前 Set 供应不在 Manifest 管理范围内：
+  active 普通集、扣除 exclusion 的 Default 和对应平台默认项被省略时不变；
+  显式声明这些项目会在任何类别写入前拒绝整个 Apply。
+- 兼容性修订：历史版本在条目省略 `config` 时也清除 override；需要重置的调用方
+  现在应显式发送 `config: {}`。不自动重写历史文档或恢复已经删除的配置。
 
 账号级 MCP 配置仍通过既有公开端点管理，并作为未被 Bot override 覆盖字段的默认值：
 

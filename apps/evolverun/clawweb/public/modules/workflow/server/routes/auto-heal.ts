@@ -57,9 +57,9 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     "/save",
     asyncHandler(async (req: Request, res: Response) => {
       try {
-        const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead, createOnly } = req.body as {
+        const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber } = req.body as {
           workflowId?: string;
-          createOnly?: boolean; requestId?: string; sourceCommit?: string; expectedSavedHead?: string | null;
+          createOnly?: boolean; expectedDraftAbsent?: true; expectedActiveDeployNumber?: number; requestId?: string; sourceCommit?: string; expectedSavedHead?: string | null;
           spec?: unknown;
           packId?: string | null;
           diagnosisId?: string | null;
@@ -67,6 +67,18 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
         };
         if (!workflowId || !spec) {
           res.status(400).json({ error: "Bad Request", message: "workflowId and spec are required" });
+          return;
+        }
+        if (expectedDraftAbsent !== undefined && (expectedDraftAbsent !== true || createOnly !== undefined)) {
+          res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "expectedDraftAbsent must be true and cannot be combined with createOnly" });
+          return;
+        }
+        if (expectedActiveDeployNumber !== undefined && (expectedDraftAbsent !== true || !Number.isSafeInteger(expectedActiveDeployNumber) || expectedActiveDeployNumber <= 0)) {
+          res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "expectedActiveDeployNumber requires a positive integer and expectedDraftAbsent=true" });
+          return;
+        }
+        if (expectedDraftAbsent === true && expectedActiveDeployNumber === undefined) {
+          res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "expectedActiveDeployNumber is required" });
           return;
         }
         const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
@@ -93,7 +105,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           packId: packId ?? null,
           diagnosisId: diagnosisId ?? null,
           note: note ?? null,
-          actorId: actor, requestId, sourceCommit, expectedSavedHead, createOnly,
+          actorId: actor, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber,
         });
         res.status(200).json(result);
       } catch (err) {

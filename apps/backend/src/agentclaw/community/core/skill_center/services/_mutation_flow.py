@@ -139,6 +139,12 @@ class MutationProjectionFlow:
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
+        Unchanged means no Desired State delta, not proven Runtime convergence.
+        Repeated Set commands may repair an earlier failed delivery, so only
+        callers with no reconciliation obligation opt out of projection. An
+        unchanged public Apply outcome may still require a configuration claim
+        to consume legacy aliases; this flag is evaluated after that commit.
+
         ``runtime_required=False`` skips projection entirely — an inactive-set
         membership change has no runtime projection to apply, preserving the
         legacy inactive draft contract. ``engine_type`` remains a compatibility

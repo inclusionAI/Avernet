@@ -588,6 +588,7 @@ pub async fn cancel(
         {
             results.push(CancelMessageDeliveryResult {
                 delivery: DeliveryStatusView::from(&row).with_content_preview(Some(&message.content)),
+                client_message_id: None,
                 error: Some("exact_abort_not_supported".into()),
             });
             continue;
@@ -597,12 +598,40 @@ pub async fn cancel(
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested, now_ms,
             request_id: None, actor_id: Some(actor.clone()), reply: None, transport_context_json: None,
             deadline_at_ms: Some(now_ms.saturating_add(30_000)), caller_cancel: None, caller_terminal: None }).await {
-            Ok(updated) => results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)), error: None }),
+            Ok(updated) => {
+                results.push(CancelMessageDeliveryResult {
+                    delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)),
+                    client_message_id: None,
+                    error: None,
+                });
+            }
             Err(error) => {
                 if matches!(error, ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_))) {
                     return Err(ServiceError::InternalError("delivery cancellation persistence failed".into()));
                 }
-                results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&row).with_content_preview(Some(&message.content)), error: Some("delivery_state_changed".into()) });
+                results.push(CancelMessageDeliveryResult {
+                    delivery: DeliveryStatusView::from(&row).with_content_preview(Some(&message.content)),
+                    client_message_id: None,
+                    error: Some("delivery_state_changed".into()),
+                });
+            }
+        }
+    }
+    if results.iter().any(|result| result.error.is_none()) {
+        // Another per-target cancellation may commit after our initial snapshot.
+        // Confirm once per request, not once per target, using persisted sibling states.
+        let current_rows = service
+            .lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone()))
+            .await
+            .map_err(|_| ServiceError::InternalError("delivery cancellation confirmation failed".into()))?
+            .into_iter().filter(|row| row.source_message_id == command.message_id).collect::<Vec<_>>();
+        let removable = !current_rows.is_empty()
+            && current_rows.iter().all(|row| row.state.is_unsent_terminal());
+        if removable {
+            for result in &mut results {
+                if result.error.is_none() {
+                    result.client_message_id = message.client_msg_id.clone();
+                }
             }
         }
     }

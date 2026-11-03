@@ -182,6 +182,9 @@
       }
     },
     "openapi": {
+      "bot_access_check": {
+        "allowed_app_names": []
+      },
       "user_id_bypass": []
     },
     "openapi_bot": {
@@ -271,6 +274,12 @@
       "langfuse_base_url": "",
       "langfuse_public_key": "",
       "langfuse_secret_key": ""
+    },
+    "bot_manager_sync": {
+      "bcs_base_url": "",
+      "enabled": false,
+      "env": "",
+      "ownership_enabled": false
     },
     "bot_oss": {
       "bucket_name": "agentclaw",

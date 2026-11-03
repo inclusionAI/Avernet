@@ -7,6 +7,8 @@ import { backendRequest } from '../httpClient';
  */
 export interface CancelDeliveryResult {
   delivery: DeliveryStatusView;
+  /** On success, a nonempty key authorizes matching this or the paired delivery.message_id. */
+  client_message_id?: string | null;
   error: string | null;
 }
 

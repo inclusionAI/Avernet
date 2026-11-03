@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 import { createWorkflowsRouter } from '../../../server/routes/workflows'
 import { readWorkflowDocument, normalizeWorkflowDocument } from '../workflowDocument'
+import type { EditorWorkflowSource } from '../editorWorkflowSource'
 import { useEditorWorkflowDocument, useDbWorkflow, useAutoHealSave } from '../hooks'
 import { usePackCanvasSession } from '../../editor/usePackCanvasSession'
 import { prepareWorkflowSession, useEditorStore } from '../../editor/store'
@@ -162,7 +163,7 @@ it('keeps shared RunDetail numeric-version cache isolated from the editor docume
   expect(result.current.editor.data!.version).toBe('2.7.0')
   expect(result.current.runtime.data!.version).toBe(19)
   const queryClient = clients.at(-1)!
-  expect(queryClient.getQueryData<WorkflowSpec>(['editor-workflow-document', doc.id])!.version).toBe('2.7.0')
+  expect(queryClient.getQueryData<EditorWorkflowSource>(['editor-workflow-document', doc.id])!.spec.version).toBe('2.7.0')
   expect(queryClient.getQueryData<WorkflowSpec>(['db-workflow', doc.id])!.version).toBe(19)
   await act(async () => { await queryClient.invalidateQueries({ queryKey: ['editor-workflow-document'] }) })
   expect(result.current.runtime.data!.version).toBe(19)

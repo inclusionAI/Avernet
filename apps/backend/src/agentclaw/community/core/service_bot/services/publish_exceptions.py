@@ -5,6 +5,11 @@ exceptions without importing ``bot_publish_service`` back and creating a
 circular reference for IDEs and static analyzers.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
+
 
 class BotPublishServiceError(Exception):
     """Bot publish service error."""
@@ -36,3 +41,11 @@ class BotAlreadyServiceTypeError(BotPublishServiceError):
 
 class BotTypeNotSupportedError(BotPublishServiceError):
     """Bot 类型不支持升级错误（如 aicoding 类型）。"""
+
+
+class UpgradeDraftRestartError(BotPublishServiceError):
+    """The successor draft exists, but its runtime restart was not submitted."""
+
+    def __init__(self, draft_record: "BotPublishRecord") -> None:
+        self.draft_record = draft_record
+        super().__init__("草稿已创建，重启触发失败，请通过草稿重启入口恢复")

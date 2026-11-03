@@ -5,7 +5,7 @@ query/cancel responses include an optional `task` on managed Task **dispatch** d
 Ordinary deliveries and result/context legs omit the field. Older consumers can ignore it;
 older servers omit it, and clients must not infer tasks from Worker identity or segment count.
 
-`task` allowlists `task_ref`, `summary`, `manager_id`, `worker_id`, `worker_name`,
+`task` allowlists `intent_id` (optional complete assignment identity), `task_ref`, `summary`, `manager_id`, `worker_id`, `worker_name`,
 `queued_at`, `started_at`, `last_activity_at`, `finished_at`, and `timed_out`.
 Times are server epoch milliseconds; nullable times remain unknown. The reference uses
 assignment intent's first eight hexadecimal characters, falling back to the legacy task UUID,
@@ -62,3 +62,10 @@ The browser adapter depends on the application-owned `TaskHandleService` and
 failures into `InvalidRequest` and all other core failures into `Unavailable` before
 returning to HTTP. Adapters map only those application categories to HTTP 400/503;
 core enum variants and diagnostics are not part of the public boundary.
+
+Task identity is the complete `intent_id`, normalized to lowercase from the admitted
+assignment. `task_ref` is only a display label and can collide. Clients must join
+receipts and deliveries only by complete identity; legacy deliveries without it
+remain keyed by `delivery_id` and must not inherit a cancellation identity from a
+matching short label. This additive projection uses the existing persisted row
+and adds no database columns or repository reads.
