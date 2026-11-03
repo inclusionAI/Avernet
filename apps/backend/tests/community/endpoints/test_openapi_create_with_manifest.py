@@ -50,6 +50,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.endpoints.manifest_device_seed import seed_empty_manifest_device
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -440,6 +441,7 @@ def _stand_in_for_provisioning(world, *, status: str = "ACTIVE") -> list[dict]:
     quota preflight, the Passport application, the manifest preflight, the
     storage write and the owner-relationship write all run.
     """
+    seed_empty_manifest_device(world)
     created: list[dict] = []
     bot_repo = world.get(BotRepository)
 
