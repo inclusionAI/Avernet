@@ -171,7 +171,7 @@ def test_resources_write_rows_under_the_workspace_namespace() -> None:
         {"path": "data/kb/faq.md", "content": "q&a"},
         {"path": "data/notes.txt", "content": "n"},
     ]))
-    assert {(e.identity, e.outcome.value) for e in written} == {
+    assert {(e.identity, e.outcome.value) for e in written.entries} == {
         ("data/kb/faq.md", "created"),
         ("data/notes.txt", "created"),
     }
@@ -180,7 +180,7 @@ def test_resources_write_rows_under_the_workspace_namespace() -> None:
     assert rows[0].ref_path == "staff_u_owner/b_1_manifest/teclaw/workspace/data/kb/faq.md"
     # A second apply classifies the present file as updated (v1 replaces).
     plan, written = _run(_apply(materialiser, _ctx(), [{"path": "data/kb/faq.md", "content": "q&a 2"}]))
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     assert oss.objects[rows[0].store_key] == b"q&a 2"
 
 

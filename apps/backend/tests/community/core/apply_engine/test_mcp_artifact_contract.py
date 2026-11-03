@@ -103,16 +103,16 @@ def _save_dormant(world):
         ))
 
 
-def _assert_servers(world, artifact, *, case, preserved):
+def _assert_servers(world, artifact, *, case):
     servers = {entry["server_code"]: entry for entry in artifact["mcp"]["servers"]}
     # These are the input policy and seeded domain facts, not the collector's
     # output: dropping any supplier in composition must fail this assertion.
     assert set(servers) == world.policy.server_codes_for(world.bot) | {"mcp.test", "mcp.set", "mcp.default", "mcp.dep"}
     target = servers["mcp.test"]
     assert target["endpoint"] == (
-        f"https://{preserved}.example/mcp" if case == "preserve" else "https://center.example/prod/mcp.test"
+        "https://center.example/prod/mcp.test"
     )
-    assert target["headers"].get("X-Bot") == (preserved if case == "preserve" else "new" if case == "replace" else None)
+    assert target["headers"].get("X-Bot") == ("new" if case == "replace" else None)
     assert target["headers"]["X-Inherited"] == "user"
     assert servers["mcp.set"]["endpoint"] == "https://center.example/pre/mcp.set"
     assert servers["mcp.default"]["endpoint"] == "https://center.example/pre/mcp.default"
@@ -121,8 +121,8 @@ def _assert_servers(world, artifact, *, case, preserved):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["preserve", "clear", "replace"])
-async def test_first_artifact_and_redeliver_use_preserved_cleared_and_replaced_configuration(case, tmp_path):
+@pytest.mark.parametrize("case", ["omitted", "clear", "replace"])
+async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configuration(case, tmp_path):
     world = McpWorld(platform=True)
     with world.db.transactional_orm_session() as session:
         session.add(UserMCPConfig(
@@ -132,7 +132,7 @@ async def test_first_artifact_and_redeliver_use_preserved_cleared_and_replaced_c
     _seed_other_supplies(world)
     _save_target(world, "saved")
     entry = {"server_code": "mcp.test"}
-    if case != "preserve":
+    if case != "omitted":
         entry["config"] = {} if case == "clear" else {"headers": {"X-Bot": "new"}}
     assert (await world.apply_manifest([entry])).status is ApplyStatus.SUCCEEDED
     _save_dormant(world)
@@ -153,7 +153,7 @@ async def test_first_artifact_and_redeliver_use_preserved_cleared_and_replaced_c
     )
     provisioner.provision(bot=world.bot, owner_id="owner")
     artifact = baas.create_teclaw_bot.call_args.kwargs["config_artifact"]
-    _assert_servers(world, artifact, case=case, preserved="saved")
+    _assert_servers(world, artifact, case=case)
 
     sync, io = _make_service(
         composer_provider=lambda: composer, bot_id="bot-1", owner_id="owner", user_id="owner", entity_id="entity-1",
@@ -167,4 +167,4 @@ async def test_first_artifact_and_redeliver_use_preserved_cleared_and_replaced_c
     _save_dormant(world)
     assert await closing.finish(world.context, None) is None
     delivered = io["http_client"].post.call_args.kwargs["json"]["bot_config"]
-    _assert_servers(world, delivered, case=case, preserved="edited")
+    _assert_servers(world, delivered, case=case)

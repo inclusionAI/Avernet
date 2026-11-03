@@ -8,7 +8,7 @@ nothing". Equal-looking output would prove neither.
 from __future__ import annotations
 
 from agentclaw.community.core.mcp.config_comparison import comparable_config
-from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig, McpConfigWriteIntent
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 import hashlib
 from dataclasses import dataclass, field
@@ -917,10 +917,9 @@ class FakeActivationService:
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_set_supplied(server_code)
-        self.installed.add(server_code)
-        if isinstance(config, PreserveMcpConfig):
+        if server_code not in self.installed:
             self.activated.append(server_code)
-            return {}
+        self.installed.add(server_code)
         if comparable_config(self.mcp_overrides.get(server_code)) == comparable_config(config):
             return {}
         self.configured.append((server_code, config))
@@ -1600,14 +1599,15 @@ def compiling_cli_tools(service, resolver, content, *, source_session=None):
 class EngineRig:
     """An orchestrator over a compiler: ``apply(ctx, parsed_document, …)`` the way the run service does it."""
 
-    def __init__(self, orchestrator, compiler) -> None:
+    def __init__(self, orchestrator, compiler, *, only=None) -> None:
         self.orchestrator = orchestrator
         self.compiler = compiler
+        self.only = only
 
     async def apply(self, ctx: ApplyContext, parsed, **kwargs):
         # A phase compiles only its own constructs, as the run service does it.
         phase = kwargs.get("phase")
-        only = None if phase is None else frozenset(step.construct for step in self.orchestrator._steps(phase))
+        only = self.only if phase is None else frozenset(step.construct for step in self.orchestrator._steps(phase))
         compiled = await self.compiler.compile_document(ctx, parsed, only=only)
         return await self.orchestrator.apply(ctx, compiled.state, sources=compiled.sources, **kwargs)
 

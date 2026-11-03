@@ -27,7 +27,7 @@ async def test_capture_reads_the_direct_override_from_the_bots_stable_resource_i
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("initial", [None, {"endpoint_env": "PRE"}])
-async def test_manifest_capture_drift_and_genome_restore_preserve_the_observed_result(tmp_path, initial):
+async def test_manifest_capture_drift_and_genome_restore_keep_the_cleared_override(tmp_path, initial):
     world = McpWorld()
     await world.apply_manifest([{"server_code": "mcp.test", "config": initial or {}}])
     report = await world.apply_manifest([{"server_code": "mcp.test"}])
@@ -39,7 +39,7 @@ async def test_manifest_capture_drift_and_genome_restore_preserve_the_observed_r
     recorded = await registry.capture(world.ref, created_by=actor)
     revision = recorded.revision.revision.id
     assert recorded.revision.spec.tools.mcp[0].to_json() == {
-        "server_code": "mcp.test", **({"config": initial} if initial else {}),
+        "server_code": "mcp.test",
     }
     registry.move_ref(world.ref, RefUpdate("active", revision, None), actor=actor, mover=RefMover.PROMOTION)
     assert await registry.drift(world.ref) is None
@@ -48,7 +48,7 @@ async def test_manifest_capture_drift_and_genome_restore_preserve_the_observed_r
     assert await registry.drift(world.ref) is not None
     report = await world.apply_state(registry.compile(world.ref, revision))
     assert report.status is ApplyStatus.SUCCEEDED
-    assert world.saved() == ({"mcp.test": initial} if initial else {})
+    assert world.saved() == {}
     assert await registry.drift(world.ref) is None
 
 

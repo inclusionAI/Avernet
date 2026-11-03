@@ -94,6 +94,14 @@ class ConfirmedPartialWriteError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class CategoryWriteResult:
+    """Entry results and confirmed removals from a writer that re-lists its area."""
+
+    entries: tuple[EntryResult, ...]
+    removals: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Intent:
     """One declared entry, resolved into something writable.
 
@@ -346,14 +354,14 @@ class Materialiser(Protocol[E]):
     @abstractmethod
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> Sequence[EntryResult] | CategoryWriteResult:
         """Execute the plan, and answer one :class:`~...outcomes.EntryResult`
         per planned entry.
 
         Removals are performed but produce **no** result rows: they are carried
-        on :attr:`CategoryPlan.removals` and reported through
-        ``CategoryResult.removals`` instead, because a removal has no declared
-        entry to attach an outcome to.
+        on :attr:`CategoryPlan.removals` unless the writer re-observes its area
+        and returns a :class:`CategoryWriteResult` with confirmed removals.
+        A removal has no declared entry to attach an outcome to.
 
         Reached only when ``resolve`` produced no failures. A plan that is
         ``is_noop`` must perform no write at all — that absence is what the
@@ -469,6 +477,7 @@ class ChecksSetSupply(Protocol):
 
 __all__ = [
     "CategoryPlan",
+    "CategoryWriteResult",
     "ChecksSetSupply",
     "ConfirmedPartialWriteError",
     "Intent",

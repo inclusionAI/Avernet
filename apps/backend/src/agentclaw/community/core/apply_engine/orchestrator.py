@@ -38,6 +38,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ChecksSetSupply,
     ConfirmedPartialWriteError,
     Materialiser,
@@ -260,10 +261,12 @@ class ApplyOrchestrator:
                 confirmed_partial=isinstance(exc, ConfirmedPartialWriteError),
             )
 
+        if not isinstance(written, CategoryWriteResult):
+            written = CategoryWriteResult(tuple(written), plan.removals)
         return CategoryResult(
             construct=construct,
-            entries=tuple(written),
-            removals=plan.removals,
+            entries=written.entries,
+            removals=written.removals,
             aborted=False,
         )
 

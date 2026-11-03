@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig, McpConfigWriteIntent
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import Skill
@@ -246,17 +246,14 @@ class ApplyClaimCommands:
                 env=get_current_env(),
                 server_code=server_code,
             )
-            override_changed = (
-                False if isinstance(config, PreserveMcpConfig) else
-                bot_mcp_configs.replace(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    env=get_current_env(),
-                    server_code=server_code,
-                    config=config,
-                    preserve_equivalent=True,
-                )
+            override_changed = bot_mcp_configs.replace(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=get_current_env(),
+                server_code=server_code,
+                config=config,
+                preserve_equivalent=True,
             )
             session.flush()
             return DesiredStateMutation(
