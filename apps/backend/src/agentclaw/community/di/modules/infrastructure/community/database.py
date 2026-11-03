@@ -78,6 +78,7 @@ class CommunityDatabaseModule(Module):
         from sqlalchemy.engine import make_url
 
         from agentclaw.community.plugins.community.database import CommunityDatabase
+        from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 
         # Mask any inline credentials — a MySQL/Postgres URL embeds the password
         # (mysql+pymysql://user:pass@host/db); never log it in the clear.
@@ -91,7 +92,8 @@ class CommunityDatabaseModule(Module):
             safe_url,
             config.create_schema,
         )
-        return CommunityDatabase(
+        plugin = CommunitySqliteDatabase if config.backend == "sqlite" else CommunityDatabase
+        return plugin(
             config.url,
             create_schema=config.create_schema,
             security_schema_required=security_config.enabled,

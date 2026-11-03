@@ -50,7 +50,12 @@ class UserMCPConfigRepository(Protocol):
 
 @runtime_checkable
 class BotMCPConfigRepositoryProtocol(Protocol):
-    """Read-side repository for Bot-scoped MCP overrides."""
+    """Read Bot overrides by stable entity_id in the legacy owner_id parameter.
+
+    Canonical rows, including an empty object, win in full. A missing canonical
+    row may read a uniquely attributable current-owner legacy row without writes.
+    The account-level list method separately selects the human user's owned Bots.
+    """
 
     @abstractmethod
     def get_by_bot_and_server_code(

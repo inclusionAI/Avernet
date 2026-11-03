@@ -7,6 +7,9 @@ nothing". Equal-looking output would prove neither.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.mcp.config_comparison import comparable_config
+from agentclaw.community.core.ports.mcp_config import PreserveMcpConfig, McpConfigWriteIntent
+
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -908,13 +911,18 @@ class FakeActivationService:
         return {"id": skill_id, "changed": True}
 
     async def claim_apply_mcp(
-        self, *, server_code: str, config: dict | None, bot_id: str,
+        self, *, server_code: str, config: McpConfigWriteIntent[dict[str, Any]], bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_set_supplied(server_code)
         self.installed.add(server_code)
+        if isinstance(config, PreserveMcpConfig):
+            self.activated.append(server_code)
+            return {}
+        if comparable_config(self.mcp_overrides.get(server_code)) == comparable_config(config):
+            return {}
         self.configured.append((server_code, config))
         if config:
             self.mcp_overrides[server_code] = dict(config)

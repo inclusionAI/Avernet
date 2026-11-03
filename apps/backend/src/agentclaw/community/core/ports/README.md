@@ -50,6 +50,8 @@ Here, both sides can import it and neither owns it.
 
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
+- `mcp_config.py` — `PreserveMcpConfig` and `McpConfigWriteIntent`: the shared
+  configuration actions a Direct MCP claim can preserve, clear or replace.
 - `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
   local skill package, without the directory-upload route's method.
 - `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
@@ -100,10 +102,24 @@ rather than binding the service raw:
 
 ## Context Boundary
 
+`McpConfigWriteIntent[T]` is the single in-process write-intent contract, not a
+persisted domain entity. `T` is a typed `McpOverride` in Desired State and a
+validated mapping at the persistence port; the configuration value never owns
+command behavior. The immutable `PreserveMcpConfig` marker remains meaningful
+after copying/deserialization, without a single-member action enum.
+An MCP configuration claim preserves the current Bot override with
+`PreserveMcpConfig()`, clears it with `None`, or replaces it with a
+mapping. Preserve performs no configuration write and never replays a value
+read before another edit. Manifest compiles an absent `config` to preserve;
+Genome compiles an absent snapshot configuration to clear. These shared
+in-process actions add no YAML or Genome fields and import no domain package.
+
 ```yaml
 purpose: Outbound ports — the narrow contracts core states for what it calls out to, owned by the caller and published where both caller and implementer can reach them.
 provides:
   - ActivationPort
+  - PreserveMcpConfig
+  - McpConfigWriteIntent
   - SkillPackageUploadPort
   - IdentityFilePort
   - ResourceFilePort

@@ -66,9 +66,26 @@ def _make_resolver_and_dispatcher(plugin=None, *, unavailable=False):
         resolver.resolve_for_bot.side_effect = DeviceNotBoundError("no binding")
     else:
         resolver.resolve_for_bot.return_value = _make_ctx()
+    resolver.resolve_for_binding.side_effect = lambda _binding_id, operator_id, *, bot_id: resolver.resolve_for_bot(bot_id, operator_id)
     actual_plugin = plugin or _make_plugin()
     dispatcher.dispatch.return_value = actual_plugin
     return resolver, dispatcher, actual_plugin
+
+
+def _configure_identity_defaults(repository):
+    """Transport-only unit worlds use personal Bots with equal owner/entity IDs."""
+    def record(bot_id, locator):
+        return {"id": 42, "bot_id": bot_id, "owner_id": locator, "entity_id": locator, "entity_type": "staff", "binding_id": 42}
+
+    exact = repository.get_by_id_and_entity
+    if exact.side_effect is None and isinstance(exact.return_value, MagicMock):
+        exact.side_effect = record
+    current_owner = repository.list_matches_by_current_owner
+    if current_owner.side_effect is None and isinstance(current_owner.return_value, MagicMock):
+        current_owner.side_effect = lambda bot_id, locator: [record(bot_id, locator)]
+    legacy = repository.list_matches_by_legacy_locator
+    if legacy.side_effect is None and isinstance(legacy.return_value, MagicMock):
+        legacy.side_effect = lambda bot_id, locator: [record(bot_id, locator)]
 
 
 def _make_sync_service(
@@ -114,6 +131,7 @@ def _make_sync_service(
             "error": None,
         }
     service.bot_repository = bot_repository or MagicMock()
+    _configure_identity_defaults(service.bot_repository)
     if bot_repository is None:
         service.bot_repository.get_by_id_and_owner.return_value = {"id": 42, "ext": {}}
     if caller_identity_repository is None:
@@ -127,6 +145,9 @@ def _make_sync_service(
     else:
         service._resolver_provider = lambda: resolver
         service._device_sync_dispatcher_provider = lambda: dispatcher
+    actual_resolver = service._resolver_provider()
+    if actual_resolver.resolve_for_binding.side_effect is None:
+        actual_resolver.resolve_for_binding.side_effect = lambda _binding_id, operator_id, *, bot_id: actual_resolver.resolve_for_bot(bot_id, operator_id)
     return service
 
 
@@ -1344,6 +1365,10 @@ class TestSyncMcpDetailToAllBots:
         plugin = _make_plugin(has_mcp=MagicMock(return_value=False))
         resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
         service = self._service_with_one_bot(resolver=resolver, dispatcher=dispatcher)
+        service.bot_repository.list_matches_by_current_owner.return_value = [{
+            "id": 42, "bot_id": "bot1", "owner_id": "team-owner", "entity_id": "100", "entity_type": "staff", "binding_id": 42,
+        }]
+        service.bot_repository.list_matches_by_current_owner.side_effect = None
         service.refresh_mcp_scope = AsyncMock(return_value={"success": True})
         service.sync_mcp_details = AsyncMock(return_value={"success": True})
 
@@ -1363,7 +1388,7 @@ class TestSyncMcpDetailToAllBots:
         )
 
     @pytest.mark.asyncio
-    async def test_targeted_team_bot_reads_its_owner_override(self):
+    async def test_targeted_team_bot_reads_its_stable_resource_override(self):
         plugin = _make_plugin()
         resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
         config = MagicMock()
@@ -1374,13 +1399,17 @@ class TestSyncMcpDetailToAllBots:
             bot_repository=MagicMock(),
         )
 
+        service.bot_repository.list_matches_by_current_owner.side_effect = None
+        service.bot_repository.list_matches_by_current_owner.return_value = [{
+            "id": 42, "bot_id": "bot1", "owner_id": "team-owner", "entity_id": "team-42", "entity_type": "team", "binding_id": 42,
+        }]
         await service.sync_mcp_detail_to_all_bots(
             user_id="caller", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
             entity_id="team-42", entity_type="team", target_bot_ids=["bot1"],
             target_bot_owners={"bot1": "team-owner"},
         )
 
-        assert config.get_bot_override.call_args.kwargs["owner_id"] == "team-owner"
+        assert config.get_bot_override.call_args.kwargs["owner_id"] == "team-42"
 
     @pytest.mark.asyncio
     async def test_bot_without_device_is_skipped(self):

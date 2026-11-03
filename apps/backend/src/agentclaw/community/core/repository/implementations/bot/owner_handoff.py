@@ -30,6 +30,9 @@ from agentclaw.community.core.work_orders.repository.models import (
 from agentclaw.community.core.repository.implementations.bot.owner_handoff_space import (
     handoff_space_id,
 )
+from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
+    CapabilityDesiredStateRepository,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
@@ -282,7 +285,7 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
             raise HandoffError("HANDOFF_LOCK_CONFLICT")
 
     def finish(self, operation_id, worker):
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             row = (
                 self._query(db)
                 .filter(OwnerHandoffModel.operation_id == operation_id)
@@ -317,6 +320,12 @@ class OwnerHandoffRepository(OwnerHandoffRepositoryProtocol):
                 binding.authorization_id = row.authorization_id
                 binding.agent_id = row.agent_id
                 binding.credential_status = "ISSUED"
+            # Preserve unvisited legacy owner-key overrides before responsibility
+            # changes; immutable entity identity and canonical values stay put.
+            CapabilityDesiredStateRepository.normalize_mcp_config_address(
+                db, bot_id=bot.bot_id, owner_id=bot.entity_id, env=bot.env,
+            )
+            db.flush()
             self._unfreeze(db, row, bot)
             bot.owner_id = row.new_owner_id
             bot.space_id = target_space_id

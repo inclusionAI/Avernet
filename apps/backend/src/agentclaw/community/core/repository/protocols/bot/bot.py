@@ -114,6 +114,17 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """List at most two live Bots by exact human owner in this tenant/env.
+
+        An entity identifier with the same spelling is not an owner match.
+        Callers must reject multiple matches rather than select arbitrarily.
+        """
+        ...
+
+    @abstractmethod
     def list_matches_by_legacy_locator(
         self, bot_id: str, locator: str
     ) -> List[Dict[str, Any]]:

@@ -4,6 +4,8 @@
 
 Status: accepted (2026-10-23; the refactor before RSI-04, decided with the issue owner on PR #3083). Owner: @totalfrank, signed off.
 
+MCP configuration equivalence is refined by [ADR 0023](0023-bot-mcp-config-lifecycle.md): Manifest omission preserves configuration, while Genome omission declares no override. Its MCP comparison is therefore result equivalence after apply/capture/restore; the other constructs keep their structural comparisons.
+
 ## Decision
 
 **One input.** The Backend's apply engine (`apps/backend/src/agentclaw/community/core/apply_engine/`)

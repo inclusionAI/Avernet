@@ -12,12 +12,14 @@ from sqlalchemy import or_, select, tuple_
 from sqlalchemy.orm import Session
 
 
-def resource_locator(session: Session, bot_id: str, locator: str, *, include_deleted: bool = False) -> str:
+def resource_locator(
+    session: Session, bot_id: str, locator: str, *, include_deleted: bool = False, env: str | None = None,
+) -> str:
     """Return the immutable entity for an existing Bot, or the offline locator."""
     conditions = [
         BotModel.bot_id == bot_id,
         or_(BotModel.entity_id == locator, BotModel.owner_id == locator),
-        BotModel.env == get_current_env(),
+        BotModel.env == (env or get_current_env()),
     ]
     if not include_deleted:
         conditions.append(BotModel.is_delete == 0)

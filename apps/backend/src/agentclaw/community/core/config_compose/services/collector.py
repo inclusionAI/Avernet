@@ -380,7 +380,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             server_code = md.get("server_code") or md.get("serverCode") or ""
             bot_override = self._mcp_config_service.get_bot_override(
                 bot_id=req.bot_id,
-                owner_id=req.user_id,
+                owner_id=req.entity_id,
                 server_code=server_code,
             )
             if bot_override:

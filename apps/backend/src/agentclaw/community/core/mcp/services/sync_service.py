@@ -21,8 +21,9 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
+from agentclaw.community.core.mcp.services.detail_delivery import deliver_mcp_detail, resolve_detail_bot, resolve_detail_device
 from agentclaw.community.core.mcp.services.detail_fanout import (
     fan_out_mcp_details,
     server_code_of,
@@ -219,21 +220,26 @@ class MCPSyncService(MCPSyncServiceProtocol):
             bot_id: 目标 bot ID。
             entity_id: bot 所属实体 ID。用于取 per-bot 投递插件与（teclaw）整产物
                 compose 的 entity 口径——与 ``_declare_mcp_scope`` / ``_sync_mcp_details``
-                一致。缺省回退到 ``user_id``（个人 bot 二者相等）。
+                一致。省略时先唯一解析历史 Owner/entity locator，配置读取仍使用稳定 entity。
             engine_type: 引擎类型，默认 ``openclaw``。
 
         Returns:
             ``{"success": bool, "error": str|None}`` 格式的结果字典。
         """
         _bot = bot_id or "unknown"
+        if not server_code_of(mcp_data):
+            return {"success": False, "error": f"向 bot={_bot} 推送 MCP 配置失败"}
+        resource_bot = await asyncio.to_thread(
+            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+            entity_id=entity_id, legacy_owner_id=user_id,
+        )
+        resource_owner_id = resource_bot.entity_id
         try:
             # resolve_for_bot 是同步的,且内部要打一次阻塞 ws-info HTTP + 若干 DB
             # 查询。直接在协程里调用会占住 event loop,把 caller 的并发投递重新
             # 串行化(caller 的 gather 只有等这里让出才能轮到下一个 MCP)。
             ctx = await asyncio.to_thread(
-                self._resolver_provider().resolve_for_bot,
-                bot_id,
-                entity_id or user_id,
+                resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
             )
         except (DeviceNotBoundError, UnknownProviderError):
             error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
@@ -247,6 +253,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         sync_success = await self._sync_mcp_detail(
             plugin=plugin,
             user_id=user_id,
+            resource_entity_id=resource_owner_id,
             bot_id=bot_id,
             mcp_data=mcp_data,
             engine_type=effective_engine_type,
@@ -284,7 +291,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             device_sync: 本次投影已解析的目标；提供时不再解析或切换设备。
                 省略时保持独立调用的原行为。禁止跨请求复用。
             bot_id: 目标 bot ID——列表内所有 MCP 共用。
-            entity_id: bot 所属实体 ID,缺省回退到 ``user_id``。
+            entity_id: Bot 稳定实体 ID；省略时先唯一解析历史 Owner/entity locator。
             engine_type: 引擎类型,默认 ``openclaw``。
 
         Returns:
@@ -296,13 +303,16 @@ class MCPSyncService(MCPSyncServiceProtocol):
             # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
             return {"success": True}
 
+        resource_bot = await asyncio.to_thread(
+            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+            entity_id=entity_id, legacy_owner_id=user_id,
+        )
+        resource_owner_id = resource_bot.entity_id
         effective_engine_type = engine_type
         if device_sync is None:
             try:
                 ctx = await asyncio.to_thread(
-                    self._resolver_provider().resolve_for_bot,
-                    bot_id,
-                    entity_id or user_id,
+                    resolve_detail_device, self._resolver_provider(), resource_bot, entity_id or user_id,
                 )
             except (DeviceNotBoundError, UnknownProviderError):
                 error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
@@ -319,6 +329,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             push_one=lambda mcp: self._sync_mcp_detail(
                 plugin=plugin,
                 user_id=user_id,
+                resource_entity_id=resource_owner_id,
                 bot_id=bot_id,
                 mcp_data=mcp,
                 engine_type=effective_engine_type,
@@ -584,8 +595,19 @@ class MCPSyncService(MCPSyncServiceProtocol):
             bot_owner_id = (target_bot_owners or {}).get(bot_id, user_id)
             async with semaphore:
                 try:
+                    if control_plane_selected:
+                        resource_bot = await asyncio.to_thread(
+                            BotAddressResolver(self.bot_repository).resolve_current_owner,
+                            bot_id=bot_id, owner_id=bot_owner_id,
+                        )
+                    else:
+                        resource_bot = await asyncio.to_thread(
+                            resolve_detail_bot, self.bot_repository, bot_id=bot_id,
+                            entity_id=entity_id, legacy_owner_id=bot_owner_id,
+                        )
+                    resource_owner_id = resource_bot.entity_id
                     ctx = await asyncio.to_thread(
-                        self._resolver_provider().resolve_for_bot, bot_id, entity_id
+                        resolve_detail_device, self._resolver_provider(), resource_bot, entity_id
                     )
                 except (DeviceNotBoundError, UnknownProviderError) as exc:
                     logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)
@@ -603,6 +625,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
                         "reason": "设备离线",
                         "error": str(exc),
                     }
+                except Exception as exc:
+                    return {"bot_id": bot_id, "synced": False, "error": str(exc)}
                 try:
                     plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
                     effective_engine_type = ctx.conn_info.get("engine_type")
@@ -612,19 +636,20 @@ class MCPSyncService(MCPSyncServiceProtocol):
                             "[MCPSyncService] bot=%s MCP=%s 运行态漂移，开始全量收敛",
                             bot_id, server_code,
                         )
+                        recovery_entity_type = str(resource_bot.bot["entity_type"])
                         scope = await self.refresh_mcp_scope(
-                            user_id=bot_owner_id, entity_id=entity_id, bot_id=bot_id,
-                            entity_type=entity_type, engine_type=effective_engine_type,
+                            user_id=bot_owner_id, entity_id=resource_owner_id, bot_id=bot_id,
+                            entity_type=recovery_entity_type, engine_type=effective_engine_type,
                         )
                         details = await self.sync_mcp_details(
-                            user_id=bot_owner_id, entity_id=entity_id, bot_id=bot_id,
-                            entity_type=entity_type, engine_type=effective_engine_type,
+                            user_id=bot_owner_id, entity_id=resource_owner_id, bot_id=bot_id,
+                            entity_type=recovery_entity_type, engine_type=effective_engine_type,
                             active_only=True,
                         ) if scope.get("success") else None
                         target_synced = await self._sync_mcp_detail(
                             plugin=plugin,
                             user_id=user_id,
-                            bot_owner_id=bot_owner_id,
+                            resource_entity_id=resource_owner_id,
                             bot_id=bot_id,
                             mcp_data=mcp_data,
                             api_key=api_key,
@@ -657,7 +682,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                     sync_success = await self._sync_mcp_detail(
                         plugin=plugin,
                         user_id=user_id,
-                        bot_owner_id=bot_owner_id,
+                        resource_entity_id=resource_owner_id,
                         bot_id=bot_id,
                         mcp_data=mcp_data,
                         api_key=api_key,
@@ -812,6 +837,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             push_one=lambda mcp: self._sync_mcp_detail(
                 plugin=plugin,
                 user_id=user_id,
+                resource_entity_id=entity_id,
                 bot_id=bot_id,
                 mcp_data=mcp,
                 engine_type=engine_type,
@@ -836,7 +862,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         *,
         plugin: DeviceSync,
         user_id: str,
-        bot_owner_id: Optional[str] = None,
+        resource_entity_id: str,
         bot_id: str,
         mcp_data: dict[str, Any],
         api_key: Optional[str] = None,
@@ -845,96 +871,12 @@ class MCPSyncService(MCPSyncServiceProtocol):
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
     ) -> bool:
-        """向单个 bot 的设备推送 MCP 配置。
-
-        由 ``sync_mcp_detail``、``sync_mcp_detail_to_all_bots`` 与 ``_sync_mcp_details``
-        复用：合并 payload 后经 per-bot 的 Core ``DeviceSync`` 服务投递。
-
-        Args:
-            plugin: 由 ``_device_sync_dispatcher_provider().dispatch(ctx)`` 取得的 per-bot ``DeviceSync`` 服务。
-            user_id: 用户 ID。
-            mcp_data: MCP 配置数据。
-            api_key: 可选的 API key，覆盖默认值。
-            custom_headers: 可选的自定义请求头。
-            endpoint_env: 可选的 endpoint 环境。
-            transport_protocol: 可选的传输协议。
-            engine_type: 引擎类型。
-
-        Returns:
-            同步是否成功。
-        """
-        # MCP Center 返回的字段是 camelCase 的 serverCode，
-        # 而内部流转时可能已转成 snake_case 的 server_code，需要兼容两种写法。
-        server_code = mcp_data.get("serverCode") or mcp_data.get("server_code", "")
-        if not server_code:
-            logger.warning("[MCPSyncService] MCP 数据缺少 server_code")
-            return False
-
-        bot_override = await asyncio.to_thread(
-            self.mcp_config_service.get_bot_override,
-            bot_id=bot_id,
-            owner_id=bot_owner_id or user_id,
-            server_code=server_code,
-        )
-        if bot_override:
-            verdict = await asyncio.to_thread(
-                self.mcp_config_service.validate_bot_override,
-                user_id=user_id,
-                server_code=server_code,
-                config=bot_override,
-                engine_type=engine_type,
-            )
-            if not verdict.get("valid"):
-                logger.warning(
-                    "[MCPSyncService] Bot MCP override 当前不可投影: "
-                    "bot_id=%s, server_code=%s, error=%s",
-                    bot_id,
-                    server_code,
-                    verdict.get("error"),
-                )
-                return False
-            current_detail = verdict.get("mcp_data")
-            if isinstance(current_detail, dict):
-                # Validate and compose from one Center snapshot. Otherwise a
-                # second, older detail carried by the caller could reintroduce
-                # the endpoint shape the validation just rejected/replaced.
-                mcp_data = current_detail
-
-        # 配置合并需读 DB；放入线程池，避免阻塞并发投递的 event loop。
-        user_config = await asyncio.to_thread(self.mcp_config_service.get_user_unified_config, user_id, server_code)
-        _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
-            self.mcp_config_service.build_mcp_sync_payload,
-            user_id=user_id,
-            bot_id=bot_id,
-            mcp_data=mcp_data,
-            api_key=api_key,
-            custom_headers=custom_headers,
-            endpoint_env=endpoint_env,
-            transport_protocol=transport_protocol,
-            engine_type=engine_type,
-            bot_override=bot_override,
-            user_config_snapshot=user_config or {},
-        )
-        url_override = effective_mcp_url_override(user_config, bot_override)
-        strict_transport_protocol = bool(
-            bot_override
-            and _transport_protocol
-            and (
-                "endpoint_env" in bot_override
-                or "transport_protocol" in bot_override
-            )
-        )
-
-        # 同步 HTTP 投递在线程池执行，避免阻塞事件循环；插件内部处理重试。
-        return await asyncio.to_thread(
-            plugin.sync_single_mcp,
-            mcp_data,
-            api_key=_api_key,
-            custom_headers=merged_headers,
-            endpoint_env=_endpoint_env,
-            transport_protocol=_transport_protocol,
-            url_override=url_override,
-            strict_transport_protocol=strict_transport_protocol,
+        """Delegate one payload to the shared delivery seam."""
+        return await deliver_mcp_detail(
+            config_service=self.mcp_config_service, plugin=plugin, user_id=user_id,
+            resource_entity_id=resource_entity_id, bot_id=bot_id, mcp_data=mcp_data, api_key=api_key,
+            custom_headers=custom_headers, endpoint_env=endpoint_env,
+            transport_protocol=transport_protocol, engine_type=engine_type,
         )
 
     def _enrich_from_mcp_center(self, mcps: list[dict[str, Any]]) -> None:
