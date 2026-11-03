@@ -26,7 +26,9 @@ type Reconciliation = {
 export type DeployAttempt = { input: AutoHealDeployRequest & { requestId: string; candidateCommit: string; packId: string }; pending: boolean; error: string | null }
 export type CreateInput = { workflowId: string; packId: string; spec: WorkflowSpec; createOnly: true; requestId: string; expectedSavedHead: null }
 export type CreateAttempt = { input: CreateInput; pending: boolean; phase: 'unknown' | 'failed' | 'conflict' | 'saved' | 'completed'; result?: SaveResult; error: string | null }
-type State = { creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
+// null means no unfinished Pack identity write is known in this page session.
+// A message survives snapshot reloads; clean Git files do not reconcile DB identity.
+type State = { uncertainRename: string | null; creation?: CreateAttempt; deployment?: DeployAttempt | null; version: Version; versions: Record<Version, VersionState>; saving: boolean; uploading: boolean; reconciliation: Reconciliation | null }
 export type Session = { state: State; listeners: Set<() => void>; requests: Partial<Record<Version, AbortController>>; saveRequest?: object; deployRequest?: object; createRequest?: object; canvasDirty?: boolean; canvasInitialized?: boolean; reconciliationRequest?: { controller: AbortController; timeout: ReturnType<typeof setTimeout> } }
 
 const sessions = new Map<string, Session>()
@@ -38,7 +40,7 @@ export const packVersionsRevision = () => revision
 function notify() { revision++; observers.forEach(listener => listener()) }
 export function hasPackVersionEditRisk(id: string | null): boolean {
   const session = id ? sessions.get(id) : undefined
-  return !!session && (session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
+  return !!session && (session.state.uncertainRename !== null || session.state.saving || session.state.uploading || session.state.reconciliation !== null || Object.values(session.state.versions).some(v => dirty(v) || v.blocked))
 }
 export function hasPackVersionRisk(id: string | null): boolean {
   const state = id ? sessions.get(id)?.state : undefined
@@ -72,6 +74,7 @@ function parseErrorBody(value: unknown): Record<string, unknown> | null {
 export function classifySaveFailure(error: unknown, id: string, requestId?: string): {
   conflict: boolean
   preOperationConflict: boolean
+  originRejected: boolean
   reason: Reconciliation['reason']
   identity: Reconciliation['identity']
 } {
@@ -81,14 +84,19 @@ export function classifySaveFailure(error: unknown, id: string, requestId?: stri
   // current operation. Never reconcile them: REQUEST_CONFLICT can reference a
   // different requestId, and WORKFLOW_BUSY has no current operation to observe.
   if (value?.status === 409 && (body?.code === 'WORKFLOW_BUSY' || body?.code === 'REQUEST_CONFLICT')) {
-    return { conflict: false, preOperationConflict: true, reason: 'server', identity: null }
+    return { conflict: false, preOperationConflict: true, originRejected: false, reason: 'server', identity: null }
   }
-  if (requestId && body?.requestId !== undefined && body.requestId !== requestId) return { conflict: false, preOperationConflict: false, reason: 'unverified', identity: null }
-  if (value?.status === 409 && body?.code === 'VERSION_CONFLICT') return { conflict: true, preOperationConflict: false, reason: 'server', identity: null }
+  if (requestId && body?.requestId !== undefined && body.requestId !== requestId) return { conflict: false, preOperationConflict: false, originRejected: false, reason: 'unverified', identity: null }
+  // Only this exact guard response proves this PUT was rejected before writes.
+  // A present, mismatched requestId above is still unverified.
+  if (value?.status === 403 && body?.code === 'ORIGIN_NOT_ALLOWED') {
+    return { conflict: false, preOperationConflict: false, originRejected: true, reason: 'server', identity: null }
+  }
+  if (value?.status === 409 && body?.code === 'VERSION_CONFLICT') return { conflict: true, preOperationConflict: false, originRejected: false, reason: 'server', identity: null }
   if (value?.status === 503 && body?.code === 'SAVE_OUTCOME_UNKNOWN' && body.branch === `saved/${id}` && typeof body.commit === 'string' && oid.test(body.commit)) {
-    return { conflict: false, preOperationConflict: false, reason: 'server', identity: { branch: body.branch, commit: body.commit } }
+    return { conflict: false, preOperationConflict: false, originRejected: false, reason: 'server', identity: { branch: body.branch, commit: body.commit } }
   }
-  return { conflict: false, preOperationConflict: false, reason: typeof value?.status === 'number' ? 'unverified' : 'no-response', identity: null }
+  return { conflict: false, preOperationConflict: false, originRejected: false, reason: typeof value?.status === 'number' ? 'unverified' : 'no-response', identity: null }
 }
 
 export const RECONCILIATION_HEAD_TIMEOUT_MS = 15_000
@@ -147,7 +155,7 @@ export function sessionFor(id: string): Session {
   }
   let session = sessions.get(id)
   if (!session) {
-    session = { state: { version: 'current', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
+    session = { state: { uncertainRename: null, version: 'current', versions: { current: empty(), draft: empty() }, saving: false, uploading: false, reconciliation: null }, listeners: new Set(), requests: {} }
     sessions.set(id, session)
   }
   return session

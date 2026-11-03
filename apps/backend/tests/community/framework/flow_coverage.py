@@ -227,6 +227,14 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "repository and architecture tests; drain when a real singlebox flow "
         "exercises the feedback submission end-to-end."
     ),
+    "bot_copy": (
+        "Bot-copy v1 module (Route B manifest-reuse: ac_bot_copy ledger + "
+        "POST /openapi/v1/bots/copy + retry + copy_state on Bot). Covered by "
+        "repository, derive, handler-unit, and architecture tests; routes "
+        "mounted + authorization wired. Drain when a real singlebox e2e copy "
+        "flow exercises POST /copy → manifest-creation → /bots/{dst}.copy_state "
+        "end-to-end (needs provision/DaaS stand-in)."
+    ),
     "approval": _EXEMPT_REASON,
     "apply_engine": (
         "The engine the Manifest's and the genome's compilers feed: the "

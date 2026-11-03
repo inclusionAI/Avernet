@@ -55,7 +55,7 @@ async def recover_decision(
     except ValueError:
         raise ExecutionError("format_repair_input_too_large") from None
     try:
-        async with asyncio.timeout(60):
+        async with asyncio.timeout(70):
             repaired = await repair.repair(isolated)
         decision = parse_decision(repaired, rule_version)
     except TimeoutError:

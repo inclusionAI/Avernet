@@ -16,7 +16,7 @@ vi.mock('@avernet/clawevolve', async () => {
 vi.mock('@avernet/clawinsight', async () => {
   const {Router} = await import('express');
   return {createInsightRuntime: () => ({service: {}, notificationSender: {sendNotification: state.send}}),
-    createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router()};
+    createInsightManagementRuntime: () => ({ router: Router() }), createInsightRouter: () => Router(), createSessionRecoveryRouter: () => Router()};
 });
 // No AIS, automatic-analysis starter or real notification transport is available.
 vi.mock('../repair-ais-execution.js', () => ({resolveRepairAisConfiguration: async()=>null}));

@@ -41,6 +41,7 @@ from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
+from agentclaw.community.di.modules.bot_copy_module import BotCopyModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
@@ -218,6 +219,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        BotCopyModule(),
         ExecutionIdentityModule(),
         OwnerHandoffModule(),
         DigitalEmployeeModule(),

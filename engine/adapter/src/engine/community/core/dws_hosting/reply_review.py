@@ -167,7 +167,7 @@ async def review_reply(
         raise ExecutionError("reply_review_input_invalid") from None
     stage = "engine"
     try:
-        async with asyncio.timeout(60):
+        async with asyncio.timeout(70):
             result = await engine.review_reply(isolated)
         stage = "result_parse"
         checked = parse_result_object(result)

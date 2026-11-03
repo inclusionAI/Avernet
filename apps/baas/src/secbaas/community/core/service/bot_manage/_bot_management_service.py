@@ -1405,9 +1405,39 @@ class DefaultBotManagementService(BotManageService):
             f"request_id={request_id}"
         )
 
+        # A completed stop is idempotent. Reuse the existing STOP workflow
+        # instead of creating another publish for a bot that is already stopped.
+        if bot.status == BotStatus.STOPPED.value:
+            publishes = await self._publish_service.list_publishes_by_bot_uuid(
+                tenant=tenant, bot_uuid=bot_uuid
+            )
+            stop_publish = next(
+                (
+                    publish
+                    for publish in publishes
+                    if publish.bot_id == bot.id
+                    and publish.publish_type == PublishType.STOP.value
+                    and publish.status == PublishStatus.SUCCESS.value
+                ),
+                None,
+            )
+            if stop_publish is None:
+                raise RuntimeError(
+                    f"STOPPED bot {bot_uuid} has no successful STOP publish"
+                )
+
+            logger.info(
+                f"[stop_bot] bot_uuid={bot_uuid} already STOPPED; "
+                f"reusing publish_id={stop_publish.id}"
+            )
+            return StopBotResponse(
+                **bot.model_dump(),
+                publish_id=stop_publish.id,
+                request_id=request_id,
+            )
+
         # Validate bot is in a stop-able state
         if bot.status in (
-            BotStatus.STOPPED.value,
             BotStatus.STOPPING.value,
             BotStatus.DESTROYING.value,
             BotStatus.RELEASED.value,

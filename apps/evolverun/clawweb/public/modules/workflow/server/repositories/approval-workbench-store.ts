@@ -32,8 +32,9 @@ export function createApprovalWorkbenchStore(db: IDatabase): ApprovalWorkbenchSt
     async scan(before, limit, candidate) {
       // INSTR is only a broad candidate filter; exact normalized membership is
       // verified by the service before pagination (e.g. 123 must not match 9123).
-      const clauses = ['a.delivery_mode = ?', 'INSTR(a.approver_ids, ?) > 0']
-      const params: unknown[] = ['card-web', candidate.empId]
+      const clauses = ['a.delivery_mode = ?']
+      const params: unknown[] = ['card-web']
+      if (candidate.empId) { clauses.push('INSTR(a.approver_ids, ?) > 0'); params.push(candidate.empId) }
       if (candidate.workflowId) { clauses.push('a.workflow_id = ?'); params.push(candidate.workflowId) }
       if (candidate.flowId) { clauses.push('a.flow_id = ?'); params.push(candidate.flowId) }
       if (candidate.status) { clauses.push('a.status = ?'); params.push(candidate.status) }

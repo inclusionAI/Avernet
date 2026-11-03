@@ -633,6 +633,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/with-manifest"): NoCheck(
         "a creation, not one addressed bot — as POST /openapi/v1/bots"
     ),
+    ("POST", "/openapi/v1/bots/copy"): NoCheck(
+        "a creation (copy source → new dst), not one addressed bot — as POST /openapi/v1/bots; an app-only caller is admitted on the user-level delegation and granted the dst bot it creates"
+    ),
+    ("POST", "/openapi/v1/bots/copy/{bot_id}/retry"): NoCheck(
+        "operator retry of the caller's own copy operation; the path's bot_id is the dst bot (whose copy_state FE is polling), not an addressed source — scoped by the caller's ownership of that dst, not a bot grant"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck(
         "the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. For an app-only caller require_user_id returns the user_id QUERY PARAMETER, so the entity_id is request-supplied — and what authorizes it is the own-bot grant dependency the route declares (admission.py GRANT_CHECKED_OWN_BOT): the creation granted the submitting application this bot at submission, so an application naming a user who never delegated to it, or a bot_id it did not create, holds no grant and is refused before this read runs"
     ),
