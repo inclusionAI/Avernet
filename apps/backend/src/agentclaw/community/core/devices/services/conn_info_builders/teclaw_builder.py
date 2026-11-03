@@ -55,4 +55,6 @@ class TeclawConnInfoBuilder:
             engine_type=TECLAW_DEVICE_PROVIDER,
             bot_type=getattr(binding, "bot_type", "") or "",
             device_provider=TECLAW_DEVICE_PROVIDER,
+            user_id=user_id,
+            device_uuid=device_uuid,
         )
