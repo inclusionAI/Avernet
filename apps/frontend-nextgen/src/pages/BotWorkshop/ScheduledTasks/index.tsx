@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { RoutineActions } from './RoutineActions';
 import { RoutineList } from './RoutineList';
-import { RoutineOperationResult } from './RoutineOperationResult';
+import { notifyRoutineResult } from './notifyRoutineResult';
 import { describeFailure } from '@/services/botScheduledTasks/results';
 import { RoutineDetail } from './RoutineDetail';
 import { RoutineFormDialog } from './RoutineFormDialog';
@@ -40,9 +40,7 @@ const ScheduledTasksPage = () => {
   async function operate(work: () => Promise<OperationResult>, _message: string) {
     try {
       const result = await work();
-      if (result.level === 'success') toast.success(result.message);
-      else if (result.level === 'warning') toast.warning(result.message);
-      else toast.error(result.message);
+      notifyRoutineResult(result);
       setRevision((value) => value + 1);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : '操作失败');
@@ -84,7 +82,6 @@ const ScheduledTasksPage = () => {
       }
     >
       <div className="space-y-5">
-        <RoutineOperationResult result={state.lastResult} />
         {context?.warning && (
           <p role="status" className="text-sm text-muted-foreground">
             {context.warning}
@@ -184,7 +181,7 @@ const ScheduledTasksPage = () => {
           onSave={async (form) => {
             const result = await state.save(form, editing || undefined);
             if (result.level !== 'success') throw new Error(result.message);
-            toast.success(result.message);
+            notifyRoutineResult(result);
             if (!editing && result.routine)
               navigate(
                 { task: result.routine.key, runtime_stage: result.routine.runtime_stage || undefined, page: '1' },
