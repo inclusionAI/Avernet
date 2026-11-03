@@ -1,0 +1,20 @@
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_628129dc42fa67 3,94
+  s_9e428ec8192673::t_28d4aa4b1acd49 15,19,21-24,26,28,30,44,50,54,58,60-66,68,70,74-77,79,81-83,85,88-89,91-92,96,144,146,148,150,152-156,158,160,164,166-171,173,175,181,185,187,189,191,193,203,215,217,243,245,247,249-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eed6060db0e7c200a6275f1e9580028f560c412e",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
