@@ -208,9 +208,10 @@ class TaskReportCommandDTO(BaseModel):
     relay_token: str = Field(min_length=1)
     event_type: TaskReportEventType
     event: dict[str, Any] | None = None
-    # 产物上报(2026-10-22 用户定稿):报文顶层可选列表,与 trace/task_acceptance_result
-    # 平级——产物是"一次执行的结果清单"而非事件内部细节。携带条件:仅
-    # EXECUTION_RESULT 且 execution_decision=ACCEPTED(to_domain 拒绝其余一切组合)。
+    # 产物上报(2026-11-03 定稿):报文顶层可选列表,与 trace/task_acceptance_result
+    # 平级——产物是"一次执行的结果清单"而非事件内部细节。携带条件:
+    # EXECUTION_RESULT+ACCEPTED(节点产物) 或终态 PLAN_RESULT(event=null)(任务最终产物)。
+    # 后继 PLAN_RESULT、DECLINED,以及其它组合携带均被 to_domain 拒绝。
     artifacts: list[ArtifactReportItemDTO] | None = None
     progress_reason: str = ""
     failure_reason: str | None = None
@@ -243,11 +244,28 @@ class TaskReportCommandDTO(BaseModel):
         return self
 
     def to_domain(self) -> TaskReportCommand:
-        # 产物携带条件(报文顶层 artifacts,2026-10-22 用户定稿):仅 EXECUTION_RESULT
-        # 事件允许携带;其余事件类型(如 PLANNED)夹带即整体拒绝。
-        if self.artifacts is not None and self.event_type != TaskReportEventType.EXECUTION_RESULT:
+        # 产物携带条件(2026-11-03 终稿):EXECUTION_RESULT+ACCEPTED 携带节点产物;
+        # 终态 PLAN_RESULT(event=null) 携带最后一棒最终产物。
+        # 带后继计划的 PLAN_RESULT(event=TaskNode)携带即整体拒绝。
+        terminal_plan = (
+            self.event_type == TaskReportEventType.PLAN_RESULT and self.event is None
+        )
+        if self.artifacts is not None and not (
+            self.event_type == TaskReportEventType.EXECUTION_RESULT or terminal_plan
+        ):
             raise TaskStateError(
                 f"{self.event_type.value} events must not carry artifacts"
+            )
+        terminal_artifact_patch = None
+        if terminal_plan:
+            terminal_artifact_patch = (
+                parse_artifact_report_items(
+                    [item.model_dump() for item in self.artifacts],
+                    report_task_id=self.task_id,
+                    report_node_id=self.node_id,
+                )
+                if self.artifacts is not None
+                else terminal_artifact_patch
             )
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
             if self.event is None:
@@ -343,6 +361,7 @@ class TaskReportCommandDTO(BaseModel):
             )
             if self.trace is not None
             else None,
+            artifact_patch=terminal_artifact_patch,
         )
 
 
