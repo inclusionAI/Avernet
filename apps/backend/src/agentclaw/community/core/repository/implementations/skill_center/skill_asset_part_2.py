@@ -327,72 +327,99 @@ class SkillAssetPart2:
             )
         return self.get_by_id(skill_id)
 
+    def _bot_skills(self, db, bot_id: str, owner_id: str, env: str):
+        return (
+            db.query(self.Skill)
+            .filter(
+                self.Skill.bolt_id == bot_id,
+                self.Skill.user_id == _normalize_user_id(owner_id),
+                self.Skill.env == env,
+            )
+            .order_by(self.Skill.id)
+            .with_for_update()
+            .all()
+        )
+
+    def _delete_one_bot_skill(
+        self, db, skill, bot_id: str, owner_id: str, env: str
+    ) -> None:
+        local = str(skill.git_path or "").startswith("local://")
+        if local:
+            # Unknown or foreign Set ownership must remain untouched.  This
+            # includes historic orphan associations, which are out of scope.
+            blockers = (
+                db.query(self.SkillSetSkill.id)
+                .outerjoin(
+                    self.SkillSet, self.SkillSet.id == self.SkillSetSkill.skill_set_id
+                )
+                .filter(
+                    self.SkillSetSkill.skill_id == skill.id,
+                    self.SkillSetSkill.env == env,
+                    or_(
+                        self.SkillSet.id.is_(None),
+                        self.SkillSet.bolt_id != bot_id,
+                        self.SkillSet.bolt_id.is_(None),
+                        self.SkillSet.user_id != _normalize_user_id(owner_id),
+                        self.SkillSet.user_id.is_(None),
+                        self.SkillSet.env != env,
+                        self.SkillSet.env.is_(None),
+                    ),
+                )
+                .count()
+            )
+            if blockers:
+                raise SkillAssetInUseError({"membership": blockers})
+            owned_sets = db.query(self.SkillSet.id).filter(
+                self.SkillSet.bolt_id == bot_id,
+                self.SkillSet.user_id == _normalize_user_id(owner_id),
+                self.SkillSet.env == env,
+            )
+            db.query(self.SkillSetSkill).filter(
+                self.SkillSetSkill.skill_id == skill.id,
+                self.SkillSetSkill.env == env,
+                self.SkillSetSkill.skill_set_id.in_(owned_sets),
+            ).delete(synchronize_session=False)
+        self._require_unreferenced_for_delete(
+            db, skill, env=env, ignore_membership=local
+        )
+        db.query(self.Skill).filter(
+            self.Skill.id == skill.id,
+            self.Skill.bolt_id == bot_id,
+            self.Skill.user_id == _normalize_user_id(owner_id),
+            self.Skill.env == env,
+        ).delete(synchronize_session=False)
+        db.flush()
+
     def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
-            skills = (
-                db.query(self.Skill)
-                .filter(
-                    self.Skill.bolt_id == bot_id,
-                    self.Skill.user_id == _normalize_user_id(owner_id),
-                    self.Skill.env == env,
-                )
-                .order_by(self.Skill.id)
-                .with_for_update()
-                .all()
-            )
+            skills = self._bot_skills(db, bot_id, owner_id, env)
             for skill in skills:
-                local = str(skill.git_path or "").startswith("local://")
-                if local:
-                    # Legacy writers did not enforce Bot ownership. Never
-                    # remove a surviving other Bot's configuration as a side
-                    # effect of this Bot's cleanup.
-                    foreign_refs = (
-                        db.query(self.SkillSetSkill.id)
-                        .join(
-                            self.SkillSet,
-                            self.SkillSet.id == self.SkillSetSkill.skill_set_id,
-                        )
-                        .filter(
-                            self.SkillSetSkill.skill_id == skill.id,
-                            self.SkillSetSkill.env == env,
-                            or_(
-                                self.SkillSet.bolt_id != bot_id,
-                                self.SkillSet.bolt_id.is_(None),
-                                self.SkillSet.user_id != _normalize_user_id(owner_id),
-                                self.SkillSet.user_id.is_(None),
-                                self.SkillSet.env != env,
-                                self.SkillSet.env.is_(None),
-                            ),
-                        )
-                        .count()
-                    )
-                    if foreign_refs:
-                        raise SkillAssetInUseError({"membership": foreign_refs})
-                    owned_sets = db.query(self.SkillSet.id).filter(
-                        self.SkillSet.bolt_id == bot_id,
-                        self.SkillSet.user_id == _normalize_user_id(owner_id),
-                        self.SkillSet.env == env,
-                    )
-                    db.query(self.SkillSetSkill).filter(
-                        self.SkillSetSkill.skill_id == skill.id,
-                        self.SkillSetSkill.env == env,
-                        self.SkillSetSkill.skill_set_id.in_(owned_sets),
-                    ).delete(synchronize_session=False)
-                self._require_unreferenced_for_delete(
-                    db, skill, env=env, ignore_membership=local
-                )
-            # Object deletion cascades to associations of unknown ownership;
-            # a scoped bulk delete preserves those historical orphan rows.
-            if skills:
-                db.query(self.Skill).filter(
-                    self.Skill.id.in_([skill.id for skill in skills]),
-                    self.Skill.bolt_id == bot_id,
-                    self.Skill.user_id == _normalize_user_id(owner_id),
-                    self.Skill.env == env,
-                ).delete(synchronize_session=False)
-            db.flush()
+                self._delete_one_bot_skill(db, skill, bot_id, owner_id, env)
             return len(skills)
+
+    def cleanup_by_bot_id(self, bot_id: str, owner_id: str) -> dict:
+        """Delete each unreferenced asset; retain and report independently blocked ones."""
+        env = get_current_env()
+        deleted = 0
+        retained = 0
+        blocker_counts: dict[str, int] = {}
+        with self._db.transactional_orm_session() as db:
+            skills = self._bot_skills(db, bot_id, owner_id, env)
+            for skill in skills:
+                try:
+                    with db.begin_nested():
+                        self._delete_one_bot_skill(db, skill, bot_id, owner_id, env)
+                    deleted += 1
+                except SkillAssetInUseError as exc:
+                    retained += 1
+                    for kind, count in exc.blocker_counts.items():
+                        blocker_counts[kind] = blocker_counts.get(kind, 0) + count
+        return {
+            "deleted": deleted,
+            "retained": retained,
+            "blocker_counts": blocker_counts,
+        }
 
     def list_skill_set_references(
         self,

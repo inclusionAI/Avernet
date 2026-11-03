@@ -129,7 +129,7 @@ def test_skillset_delete_rolls_back_members_when_parent_delete_fails(tmp_path):
         assert session.query(SkillSetSkill).filter_by(skill_set_id=set_id).count() == 1
 
 
-def test_bot_deletion_is_not_blocked_by_historical_orphan_membership(tmp_path):
+def test_bot_deletion_retains_skill_with_historical_orphan_membership(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'bot.db'}")
     for model in (
         Skill,
@@ -161,12 +161,57 @@ def test_bot_deletion_is_not_blocked_by_historical_orphan_membership(tmp_path):
         # A membership can remain even after its set was already deleted.
         session.add(SkillSetSkill(skill_set_id=42, skill_id=skill_id, env="dev"))
 
-    assert SkillRepository(db).delete_by_bot_id("bot", "owner") == 1
+    with pytest.raises(SkillAssetInUseError):
+        SkillRepository(db).delete_by_bot_id("bot", "owner")
     with db.orm_session() as session:
-        assert session.query(Skill).filter_by(id=skill_id).count() == 0
+        assert session.query(Skill).filter_by(id=skill_id).count() == 1
         # The orphan's Set cannot be scoped to a Bot and owner. Historical
         # membership cleanup is deliberately outside this operation.
         assert session.query(SkillSetSkill).filter_by(skill_id=skill_id).count() == 1
+
+
+def test_owned_bot_cleanup_with_sqlite_foreign_keys_enabled(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'fk.db'}")
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    for model in (
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        SkillSetMCPServer,
+        BotSkillInstallation,
+        SkillDraftEditLease,
+        SkillGrant,
+        SkillPublicationAttempt,
+        SkillSpaceBinding,
+        SkillVersion,
+        SkillDraftUpgradeRequest,
+        AcSkillMember,
+    ):
+        model.__table__.create(engine)
+    db = _Database(engine)
+    with db.orm_session() as session:
+        skill = Skill(
+            name="local",
+            git_path="local:///skill",
+            bolt_id="bot",
+            user_id="owner",
+            env="dev",
+        )
+        skill_set = SkillSet(name="own", bolt_id="bot", user_id="owner", env="dev")
+        session.add_all([skill, skill_set])
+        session.flush()
+        skill_id = skill.id
+        session.add(
+            SkillSetSkill(skill_set_id=skill_set.id, skill_id=skill_id, env="dev")
+        )
+    assert SkillSetRepository(db).delete_by_bot_id("bot", "owner") == 1
+    assert SkillRepository(db).delete_by_bot_id("bot", "owner") == 1
+    with db.orm_session() as session:
+        assert session.query(Skill).filter_by(id=skill_id).count() == 0
 
 
 @pytest.mark.parametrize(
@@ -204,17 +249,22 @@ def test_bot_deletion_does_not_remove_another_bots_membership(
         foreign = SkillSet(
             name="foreign", bolt_id=set_bot, user_id=set_owner, env="dev"
         )
-        session.add_all([skill, foreign])
+        free_skill = Skill(name="free", git_path="local:///free", bolt_id="bot-a", user_id="owner", env="dev")
+        session.add_all([skill, foreign, free_skill])
         session.flush()
         skill_id = skill.id
+        free_skill_id = free_skill.id
         session.add(
             SkillSetSkill(skill_set_id=foreign.id, skill_id=skill_id, env="dev")
         )
 
     with pytest.raises(SkillAssetInUseError):
         SkillRepository(db).delete_by_bot_id("bot-a", "owner")
+    result = SkillRepository(db).cleanup_by_bot_id("bot-a", "owner")
+    assert result == {"deleted": 1, "retained": 1, "blocker_counts": {"membership": 1}}
     with db.orm_session() as session:
         assert session.query(Skill).filter_by(id=skill_id).count() == 1
+        assert session.query(Skill).filter_by(id=free_skill_id).count() == 0
         assert session.query(SkillSetSkill).filter_by(skill_id=skill_id).count() == 1
 
 

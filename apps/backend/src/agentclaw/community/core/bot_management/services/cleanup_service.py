@@ -126,9 +126,19 @@ class BotCleanupService:
 
         # 3. Delete only assets owned by this exact owner + Bot scope.
         try:
-            result["skills_deleted"] = self._skill_repo.delete_by_bot_id(
-                bot_id, user_id
-            )
+            cleanup = self._skill_repo.cleanup_by_bot_id(bot_id, user_id)
+            result["skills_deleted"] = cleanup["deleted"]
+            if cleanup["retained"]:
+                result["skills_retained"] = True
+                result["skills_retained_reason"] = "SKILL_ASSET_IN_USE"
+                result["skills_retained_blocker_counts"] = cleanup["blocker_counts"]
+                result["skills_retained_bot_id"] = bot_id
+                logger.warning(
+                    "[BotCleanupService] Retained %s skill assets for bot %s: %s",
+                    cleanup["retained"],
+                    bot_id,
+                    cleanup["blocker_counts"],
+                )
         except SkillAssetInUseError as e:
             blocker_counts = dict(e.blocker_counts)
             result["skills_retained"] = True

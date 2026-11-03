@@ -22,7 +22,7 @@ from agentclaw.community.core.skill_center.errors import SkillAssetInUseError
 
 def _make_service() -> BotCleanupService:
     return BotCleanupService(
-        skill_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
+        skill_repo=MagicMock(cleanup_by_bot_id=MagicMock(return_value={"deleted": 0, "retained": 0, "blocker_counts": {}})),
         skill_set_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
         desired_state_repo=MagicMock(
             purge_bot_installations=MagicMock(return_value={"skills": 0, "mcps": 0})
@@ -81,8 +81,8 @@ def test_bot_cleanup_purges_installations_and_sets_before_owned_skill_assets():
     service._skill_set_repo.delete_by_bot_id.side_effect = lambda bot_id, owner_id: (
         events.append(("sets", bot_id, owner_id)) or 1
     )
-    service._skill_repo.delete_by_bot_id.side_effect = lambda bot_id, owner_id: (
-        events.append(("skills", bot_id, owner_id)) or 3
+    service._skill_repo.cleanup_by_bot_id.side_effect = lambda bot_id, owner_id: (
+        events.append(("skills", bot_id, owner_id)) or {"deleted": 3, "retained": 0, "blocker_counts": {}}
     )
 
     result = service.cleanup_single_bot_data("default", "owner")
@@ -111,12 +111,12 @@ def test_bot_cleanup_stops_when_installations_cannot_be_purged():
         "Cleanup installations error for bot default: db unavailable"
     ]
     service._skill_set_repo.delete_by_bot_id.assert_not_called()
-    service._skill_repo.delete_by_bot_id.assert_not_called()
+    service._skill_repo.cleanup_by_bot_id.assert_not_called()
 
 
 def test_bot_cleanup_reports_retained_skills_when_still_in_use(caplog):
     service = _make_service()
-    service._skill_repo.delete_by_bot_id.side_effect = SkillAssetInUseError(
+    service._skill_repo.cleanup_by_bot_id.side_effect = SkillAssetInUseError(
         {"installation": 1, "membership": 2, "empty": 0}
     )
 
@@ -143,12 +143,12 @@ def test_bot_cleanup_stops_before_skills_when_skill_set_cleanup_fails():
     result = service.cleanup_single_bot_data("bot1", "user1")
 
     assert result["errors"] == ["Cleanup skill_sets error for bot bot1: db down"]
-    service._skill_repo.delete_by_bot_id.assert_not_called()
+    service._skill_repo.cleanup_by_bot_id.assert_not_called()
 
 
 def test_bot_cleanup_keeps_non_in_use_skill_failures_as_errors():
     service = _make_service()
-    service._skill_repo.delete_by_bot_id.side_effect = RuntimeError("db down")
+    service._skill_repo.cleanup_by_bot_id.side_effect = RuntimeError("db down")
 
     result = service.cleanup_single_bot_data("bot1", "user1")
 

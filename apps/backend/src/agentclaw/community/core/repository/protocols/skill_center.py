@@ -512,6 +512,11 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
+    def cleanup_by_bot_id(self, bot_id: str, owner_id: str) -> dict:
+        """Delete unblocked Bot assets and return deleted, retained and blockers."""
+        ...
+
+    @abstractmethod
     def get_active_skills_by_bot(
         self,
         bot_id: str,
