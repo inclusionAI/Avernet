@@ -401,7 +401,15 @@ def _capture_node_calls(monkeypatch):
     calls = []
 
     class CaptureService:
-        def capture_node(self, graph, node, *, artifact_patch, now_ms):
+        def capture_node(
+            self,
+            graph,
+            node,
+            *,
+            artifact_patch,
+            now_ms,
+            derive_text_from_output=True,
+        ):
             calls.append((node.node_id, artifact_patch))
             return []
 

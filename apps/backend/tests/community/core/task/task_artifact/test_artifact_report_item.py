@@ -417,13 +417,26 @@ class TestRelayDtoContract:
         }
 
     def test_accepted_report_with_artifacts_lands_in_patch(self):
+        text_item = _wire_item(
+            artifact_kind="text",
+            file_content=None,
+            text_content={"text": "分析完成"},
+        )
         command = _command_dto(
-            self._accepted_event(), artifacts=[_wire_item()]
+            self._accepted_event(), artifacts=[text_item]
         ).to_domain()
         patch = command.event
         assert patch.artifact_patch is not None
         assert len(patch.artifact_patch) == 1
-        assert patch.artifact_patch[0].artifact_kind == "file"
+        assert patch.artifact_patch[0].artifact_kind == "text"
+
+    def test_relay_callback_rejects_file_artifact(self):
+        """文件产物必须走 object-file 上传登记,不得在回调 artifacts 二次上报。"""
+
+        with pytest.raises(ValueError, match="object-file"):
+            _command_dto(
+                self._accepted_event(), artifacts=[_wire_item()]
+            ).to_domain()
 
     def test_declined_event_with_artifacts_rejected_wholesale(self):
         """DECLINED 夹带产物:整体拒绝,走 to_domain 既有的 TaskStateError 契约信封。"""
@@ -452,20 +465,13 @@ class TestRelayDtoContract:
                 "is_final_artifact": "true",
             },
         )
-        file_final = _wire_item(
-            file_content={
-                **_wire_item()["file_content"],
-                "is_final_artifact": "true",
-            }
-        )
         command = _terminal_plan_dto(
-            artifacts=[text_final, file_final],
+            artifacts=[text_final],
         ).to_domain()
 
         assert command.artifact_patch is not None
-        assert len(command.artifact_patch) == 2
+        assert len(command.artifact_patch) == 1
         assert command.artifact_patch[0].content.is_final_artifact == "true"
-        assert command.artifact_patch[1].content.is_final_artifact == "true"
 
     def test_successor_plan_result_with_artifacts_rejected(self):
         """带后继计划的 PLAN_RESULT(event=下一棒)不得夹带产物。"""

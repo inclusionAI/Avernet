@@ -1,7 +1,9 @@
 """relay 回调上报产物 item 解析:扁平自描述结构(spec 2026-10-20-task-artifact-domain §4)。
 
 结构性校验全部收口在此(HTTP 层转既有 4xx 错误信封;写侧按既有报文异常出口处理):
-四个 content 字段**恰好一个**非空且与 ``artifact_kind`` 一致;content JSON **不含 kind tag**,
+relay 回调只承载 ``text|url_link|code`` 非文件交付产物;``file`` 交付产物必须走
+object-file 上传接口直接登记,不得在回调中二次冲账。四个 content 字段**恰好一个**
+非空且与 ``artifact_kind`` 一致;content JSON **不含 kind tag**,
 判别信息由字段名承载;``task_id``/``node_id`` 必须等于本报文级定位;``attempt`` 须为 ≥0 整数;
 列表上限 64,超限整批拒绝——产物记录宁可没有,不可有假。
 """
@@ -50,8 +52,9 @@ def parse_artifact_report_item(
     *,
     report_task_id: str,
     report_node_id: str,
+    allow_file: bool = True,
 ) -> ArtifactReportItem:
-    """解析并校验一条上报 item;任一规则失配 ``raise ValueError``,不猜分支。"""
+    """解析并校验一条上报 item;``allow_file=False`` 用于 relay 回调。"""
 
     if not isinstance(raw, dict):
         raise ValueError("artifact report item must be a JSON object")
@@ -70,6 +73,11 @@ def parse_artifact_report_item(
             f"得到: {non_empty_fields or '无'}"
         )
     expected_field = _KIND_TO_FIELD[kind]
+    if kind is ArtifactKind.FILE and not allow_file:
+        raise ValueError(
+            "relay callback artifacts do not accept file items; "
+            "upload file deliverables via /api/v1/collaboration/tasks/artifacts/object-file"
+        )
     if non_empty_fields[0] != expected_field:
         raise ValueError(
             f"artifact_kind {kind.value} 与非空 content 字段 {non_empty_fields[0]} 不一致"
@@ -135,6 +143,7 @@ def parse_artifact_report_items(
     *,
     report_task_id: str,
     report_node_id: str,
+    allow_file: bool = True,
 ) -> list[ArtifactReportItem]:
     """列表级包装:超 64 条整批拒绝;空列表=明确空(区别于未上报)。"""
 
@@ -146,7 +155,10 @@ def parse_artifact_report_items(
         )
     return [
         parse_artifact_report_item(
-            item, report_task_id=report_task_id, report_node_id=report_node_id
+            item,
+            report_task_id=report_task_id,
+            report_node_id=report_node_id,
+            allow_file=allow_file,
         )
         for item in items
     ]
