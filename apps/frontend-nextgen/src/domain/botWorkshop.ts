@@ -65,6 +65,35 @@ export interface BotDomain {
   warnings: string[];
   actions: string[];
   disabledActions: Record<string, string>;
+  /**
+   * 复制进度(derive-on-read);仅由复制流程创建的 dst bot 携带,后端按 apply+device
+   * 状态实时推导。CONVERGED 后后端返回 null,此字段亦为 null —— 一个复制完成后的
+   * bot 即普通 bot,不再展示复制进度/重试入口。未走复制流程的 bot 字段缺失(undefined)。
+   */
+  copyState?: BotCopyStateSummary | null;
+}
+
+/**
+ * 复制状态机(与后端 `BotCopyStatus` 9 值枚举一一对应,锁定线上契约)。
+ * INITIAL/CREATED/AUTH_PENDING/CONFIG_COPIED/FILE_SYNCED/BOT_STARTED/CAPSET_SYNCED
+ * 为进行中态;CONVERGED 终态(成功);FAILED 终态(可重试)。
+ */
+export type BotCopyStatus =
+  | 'INITIAL'
+  | 'CREATED'
+  | 'AUTH_PENDING'
+  | 'CONFIG_COPIED'
+  | 'FILE_SYNCED'
+  | 'BOT_STARTED'
+  | 'CAPSET_SYNCED'
+  | 'CONVERGED'
+  | 'FAILED';
+
+/** 后端 `BotCopyStateSummary` 的 FE 镜像 —— 与 `ac_bot_copy` 记录关联的操作 id + 当前推导状态。 */
+export interface BotCopyStateSummary {
+  operationId: string;
+  status: BotCopyStatus;
+  sourceBotId: string;
 }
 
 export interface BotListQuery {
@@ -198,9 +227,27 @@ export interface BotCopyInput {
   excludes: string[];
 }
 
-/** 复制结果与创建结果同构:AgentPass 授权流程一致,便于复用 AuthorizationPanel。 */
-export type BotCopyResult = BotCreateResult;
-export type BotCopyAuthorization = BotCreateAuthorization;
+/**
+ * 复制结果(后端 `BotCopyResponse` 镜像):
+ * - `issued` —— type=success:复制已提交,dst bot 由 create_job 异步创建,FE 刷新列表
+ *   即可见并跟随 copy_state 进度。
+ * - `authorization_required` —— type=auth_required:内网 AgentPass 授权闸 pending。
+ *   复制无 auth-status 轮询端点(授权完成后由回调 out-of-band 触发 create_job),
+ *   故此处不含 `request`/`agentCoding`,FE 仅展示 iframe,由用户关闭后刷新列表收敛。
+ */
+export type BotCopyResult =
+  | { type: 'issued'; botId: string; operationId: string }
+  | {
+      type: 'authorization_required';
+      botId: string;
+      operationId: string;
+      iframeUrl: string;
+      redirectUrl: string;
+      avatarUrl?: string;
+    };
+
+/** 复制授权面板视图(与 `BotCopyResult` 的 authorization_required 分支同构)。 */
+export type BotCopyAuthorization = Extract<BotCopyResult, { type: 'authorization_required' }>;
 
 /**
  * 复制入口可用性。默认仅 openclaw 引擎、且当前用户为 Owner 或协作者含 edit 权限时显示;
