@@ -18,7 +18,7 @@ import {
   type RoutineForm,
   type RoutineStage,
 } from '@/services/botScheduledTasks/types';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function RoutineFormDialog({
   context,
@@ -27,9 +27,7 @@ export function RoutineFormDialog({
   onClose,
   onSave,
   onLoadModels,
-  lockRecovery,
 }: {
-  lockRecovery?: ReactNode;
   context: RoutineContext;
   original?: ManagedRoutine;
   editable: boolean;
@@ -258,10 +256,9 @@ export function RoutineFormDialog({
         </fieldset>
         {!editable && !saving && (
           <p className="text-sm text-destructive" role="alert">
-            编辑锁不可用，请重新获取后保存。当前输入已保留。
+            当前无法编辑，请到 Bot 列表确认权限及编辑锁后再保存。当前输入已保留。
           </p>
         )}
-        {!editable && !saving && lockRecovery}
         {error && (
           <p className="text-sm text-destructive" role="alert">
             {error}

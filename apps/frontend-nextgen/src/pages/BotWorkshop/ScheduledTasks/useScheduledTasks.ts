@@ -11,7 +11,6 @@ import type {
   RoutineTarget,
 } from '@/services/botScheduledTasks/types';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
 export function useScheduledTasks(
   botId: string,
   ownerId: string | undefined,
@@ -137,20 +136,6 @@ export function useScheduledTasks(
     [identity.userId],
   );
   const editable = Boolean(context?.can_manage && ownsLock(lock));
-  const lockAction = async (action: 'acquire' | 'steal' | 'release') => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      await client.lockAction(action);
-      await refreshLock();
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : '编辑锁操作失败');
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
   async function mutate(work: (current: RoutineContext) => Promise<OperationResult>) {
     if (busyRef.current) throw new Error('操作处理中，请稍后');
     busyRef.current = true;
@@ -161,7 +146,7 @@ export function useScheduledTasks(
       if (currentClient.current !== client) throw new Error('Bot 或登录身份已切换，请重新操作');
       setContext(addReportedTargets(next, rowsRef.current, identity.userId));
       if (!next.can_manage) throw new Error('当前账号没有定时任务管理权限');
-      if (!ownsLock(currentLock)) throw new Error('编辑锁已失效，请重新获取后重试。输入已保留');
+      if (!ownsLock(currentLock)) throw new Error('当前未持有 Bot 编辑锁，请到 Bot 列表获取后重试。输入已保留');
       const result = await work(next);
       setLastResult(result);
       await load();
@@ -189,9 +174,12 @@ export function useScheduledTasks(
     busy,
     client,
     load: async () => {
-      await Promise.all([load(), refreshContext()]);
+      await Promise.all([
+        load(),
+        refreshContext(),
+        context?.can_manage ? refreshLock().catch(() => undefined) : Promise.resolve(),
+      ]);
     },
-    lockAction,
     loadModels,
     save: (form: RoutineForm, original?: ManagedRoutine) => mutate((current) => client.save(current, form, original)),
     toggle: (task: ManagedRoutine) => mutate((current) => client.toggle(current, task)),
