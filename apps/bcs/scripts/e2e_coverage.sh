@@ -355,6 +355,15 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
+    # The bot-avatar plan reorganized this store: T1 (4fb7a510cf) moved the
+    # memory identity/runtime operations out of memory_bot_repo_port.rs, and
+    # T3 (b5d99b3109) added memory_profile.rs (avatar persistence). The three
+    # split files showed 0 E2E hits in the 2026-11-03 singlebox measurement
+    # (337+296+219 instrumentable lines), same as their already-listed parent
+    # file: the SQLite E2E stack selects the persistent repo, never this one.
+    bcs-bot-store/src/memory_identity_ops.rs
+    bcs-bot-store/src/memory_runtime_ops.rs
+    bcs-bot-store/src/memory_profile.rs
     bcs-bot-store/src/memory_control_plane.rs
     bcs-bot-store/src/memory_controllable.rs
     bcs-bot-store/src/memory_permission_profile.rs

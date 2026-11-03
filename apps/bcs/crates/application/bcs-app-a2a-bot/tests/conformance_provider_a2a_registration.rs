@@ -44,7 +44,8 @@ fn command() -> RegisterProviderBotCommand {
     RegisterProviderBotCommand {provider_id:"provider-a".into(),provider_admin_token:"test-admin".into(),
         name:"A2A Provider Bot".into(),provider_bot_ref:"remote".into(),owners:vec!["delegated-owner".into()],
         webhook_url:None,summary:None,domains:vec![],skills:vec![],scopes:vec![],bot_uuid:None,
-        reject_existing_bot_uuid:false,connection_mode:ProviderBotConnectionMode::Gateway}
+        reject_existing_bot_uuid:false,connection_mode:ProviderBotConnectionMode::Gateway,
+        avatar:bcs_service_api::types::bot_profile::AvatarChange::Keep}
 }
 async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
     let chain=registration_chain().await;

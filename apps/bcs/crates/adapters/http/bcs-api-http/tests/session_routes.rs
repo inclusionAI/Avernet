@@ -511,6 +511,7 @@ impl SessionService for FakeSessionService {
             actor_id: command.bot_uuid,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -536,6 +537,7 @@ impl SessionService for FakeSessionService {
             actor_kind,
             actor_id: command.bot_uuid,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: command
@@ -648,6 +650,7 @@ fn session_summary() -> SessionSummary {
         created_at: 1,
         updated_at: 2,
         collected: None,
+        participants: Vec::new(),
     }
 }
 
@@ -656,6 +659,7 @@ fn session_participant() -> SessionParticipant {
         actor_id: "bot-1".into(),
         actor_kind: ActorKind::Bot,
         name: Some("Bot 1".into()),
+        avatar_url: None,
         role: ParticipantRole::Driver,
         tags: Vec::new(),
         mode: ParticipantMode::Auto,

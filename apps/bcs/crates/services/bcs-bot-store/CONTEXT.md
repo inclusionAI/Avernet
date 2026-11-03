@@ -122,6 +122,42 @@ Human lifecycle API, query, migration or owner scan is introduced. Authority
 role/fallback reads accept only physical Bot targets (scalar and batch).
 
 
+## Bot profile existing-only writes and avatar reads
+
+`BotRepoPort::update_profile_existing` / `update_avatar_existing` /
+`read_avatar_batch` (bot-avatar plan) store the Bot display profile on the
+existing record only: one guarded `UPDATE bcs_bots ... WHERE bot_uuid = ?
+AND env = ? AND COALESCE(is_deleted,0)=0` (plus the dedicated `avatar_url`
+column from SQLite/MySQL 040) — no INSERT and no upsert, so a missing or
+tombstoned identity is `ProfileWrite::Missing` with nothing written. The
+lifetime of one write is one short DB transaction that first confirms
+(and on MySQL locks with `SELECT ... FOR UPDATE`) the live row: MySQL
+reports zero changed rows for a value that already matches the request,
+so classification comes from the confirmed row, never from affected rows.
+Capabilities reuse the same column projection (`project_capabilities_columns`,
+`bot_info_json_set`) as the legacy save path; `AvatarChange::Keep` never
+appears in the SET clause, and token/owner/audit fields are never part of
+the statement. The committed profile write refreshes the process-local
+binding-channel reverse index through the same `sync_binding_channel_index`
+helper as the ordinary save path (a `Missing` target or failed write leaves
+it untouched); avatar-only writes never touch the index. The batched read is one parameterized `IN` query over ≤256
+deduplicated ids (more is `InvalidOperation`, empty input reads nothing),
+keeps environment isolation, retains terminal Bot rows for tombstone
+display and excludes Human actors. The Memory store keeps the same
+semantics on its persisted record file: the avatar is a sibling field of
+the record (`StoredBotProfile` flattening the legacy snapshot, compatible
+with old files that lack the field), ordinary record rewrites (capability
+save, token save, control-plane attributes) preserve it, the fallible file
+write happens before any registry publication, and the per-id read source
+is the same record (tombstoned records still display). Ordinary capability
+saves also re-read the record through the same profile path: an
+unreadable/malformed record file — or one carrying another identity —
+fails the save closed instead of overwriting it. Conformance:
+`tests/conformance_bot_profile.rs` (Memory + real SQLite over the full
+migration chain, plus failure/isolation/restart/race cases), the shared
+`tests/support/bot_profile_contract.rs` (also mounted by the bcs-admin
+full MySQL chain gate).
+
 ## Caller configuration storage seam
 
 `PersistentBotRepo` implements the P1.1 caller-configuration read/sync on the

@@ -10,6 +10,18 @@
   ownership yields nulls; a missing Human name preserves the owner ID. DM
   projections are unchanged. Shared projections also apply to create/update.
 
+- V1 summaries expose lightweight `participants` rows: identity plus the
+  Group-membership name snapshot verbatim (extracted before the driver/peer
+  name backfill mutates the member copies; null stays null) and `avatar_url`
+  from exactly ONE batched display-profile read per result page (`BotRegistryCoreService::avatar_urls`).
+  Detail and shared create/update/participant response models fill
+  `Participant.avatar_url` (and the DM `peer_actor` avatar) from one batched
+  read of the visible rows; Human participants resolve null without a read,
+  and avatar read failures surface as service errors, never null pages.
+  The DM summary projection carries the same exactly-2 member invariant as
+  the detail: a corrupted store row that does not hold exactly two members
+  fails the read loudly instead of returning a contract-violating page.
+
 - `GroupServiceImpl`, the transport-agnostic implementation of the BCN V1
   Group Service API.
 - Principal-aware authorization, V1 projections, and orchestration over the

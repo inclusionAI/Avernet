@@ -538,13 +538,23 @@ connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mod
 is an internal optional claim copied only from a verified Token, not an HTTP
 parameter. The core checks a present value against current Provider configuration
 before mutations; None preserves historical v2 compatibility. Consumers and test
-fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
+fakes must rebuild against 1.0.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
 binding fallback and then performs channel cleanup; it never accesses the metadata
 repository directly. A missing metadata identity returns None, but storage and
 authorization errors propagate and must not trigger the fallback.
+
+`BotRepoPort` adds the existing-only Bot profile contracts (bot-avatar
+plan, Task 3): `update_profile_existing`/`update_avatar_existing`
+(`ExistingProfileUpdate` over `AvatarChange` Keep/Clear/Set, classified as
+`ProfileWrite::Updated|Missing`) and the bounded `read_avatar_batch`
+(≤256 deduplicated ids, `BotAvatarMap`) for display-face reads. The
+compatibility defaults fail closed ("not configured"); the Memory and
+persistent bot stores implement them over the record's dedicated avatar
+field, with `AvatarChange::Keep` never reaching a storage SET clause and
+tombstoned identities refusing every write.
 
 BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
 for this flow. It is atomic, preserves existing active/deleted identities and

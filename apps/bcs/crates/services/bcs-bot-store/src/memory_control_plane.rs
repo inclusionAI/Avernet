@@ -484,7 +484,13 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
             ServiceError::InternalError(format!("Invalid path for bot: {bot_id}"))
         })?;
         fs::create_dir_all(directory).await?;
-        fs::write(&path, serde_json::to_string_pretty(&persisted)?).await?;
+        // 普通存储写入保留头像字段 (bot-avatar Task 3): the control-plane
+        // attribute rewrite keeps the record's stored avatar unchanged.
+        let stored = super::profile::StoredBotProfile {
+            record: persisted,
+            avatar_url: super::profile::stored_avatar_at(&path).await,
+        };
+        fs::write(&path, serde_json::to_string_pretty(&stored)?).await?;
 
         {
             let mut bots = self.bots.write().await;

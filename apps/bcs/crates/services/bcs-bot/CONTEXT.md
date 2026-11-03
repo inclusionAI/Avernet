@@ -17,6 +17,11 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
+- Admin onboard (`BotOnboarding`) applies an optional `AvatarChange`
+  together with the merged capabilities through the single existing-only
+  profile write (bot-avatar plan Task 5): a missing or soft-deleted target
+  — including one that slips away between the precheck and the write —
+  returns the legacy `onboarded=false` shape and persists no row.
 
 ## Consumes
 
