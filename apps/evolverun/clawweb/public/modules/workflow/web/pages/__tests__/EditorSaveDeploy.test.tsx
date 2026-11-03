@@ -131,6 +131,24 @@ describe('Editor DB workflow and saved Pack files', () => {
     await screen.findByText(/部署成功/)
     expect(mocks.deploy).toHaveBeenCalledWith(expect.objectContaining({ workflowId: mocks.db!.id, packId, candidateCommit: B }))
   })
+  it('retains the cross-store rename lock after an Origin refusal even without reconciliation', async () => {
+    await mount()
+    await editFile('workflow.pack.yaml', stringify({ id: 'renamed-pack', workflows: [{ id: mocks.db!.id, file: 'flows/custom.yaml' }] }))
+    const original = mocks.fetchJson.getMockImplementation()!
+    mocks.fetchJson.mockImplementation((url, init) => init?.method === 'PUT'
+      ? Promise.reject({ status: 403, body: '{"code":"ORIGIN_NOT_ALLOWED"}' }) : original(url, init))
+    click('保存到草稿')
+    await screen.findByText(/Pack 重命名 pack → renamed-pack 未完整完成/)
+    const session = sessionFor(mocks.db!.id)
+    expect(session.state.reconciliation).toBeNull()
+    expect(session.state.versions.current.blocked).toBe(true)
+    expect(session.state.versions.draft.blocked).toBe(true)
+    expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('数据库已确认 Pack ID renamed-pack')
+    expect((screen.getByLabelText('文件内容') as HTMLTextAreaElement).value).toContain('renamed-pack')
+    await act(async () => { click('保存工作流'); click('部署工作流') })
+    expect(putCalls()).toHaveLength(1); expect(mocks.deploy).not.toHaveBeenCalled()
+  })
   it('retains edits and blocks Git when a Pack rename is acknowledged with the wrong identity', async () => {
     await mount(); act(() => state().updateSpecField('title', 'Keep canvas'))
     await editFile('workflow.pack.yaml', stringify({ id: 'renamed-pack', workflows: [{ id: mocks.db!.id, file: 'flows/custom.yaml' }] }))
@@ -177,6 +195,58 @@ describe('Editor DB workflow and saved Pack files', () => {
     const version = sessionFor(mocks.db!.id).state.versions.current
     expect(version.snapshot?.baseCommit).toBe(A); expect(version.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('Keep local'))
     expect(putCalls()).toHaveLength(1); click('部署工作流'); expect(mocks.deploy).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['origin refusal', { status: 403, body: '{"code":"ORIGIN_NOT_ALLOWED"}' }],
+    ['unknown failure', { status: 500, body: '{"code":"REQUEST_FAILED"}' }],
+  ])('shows one primary file-save error for %s, retaining the local candidate', async (_name, failure) => {
+    await mount(); await editFile('scripts/run', 'Keep local')
+    const original = mocks.fetchJson.getMockImplementation()!
+    mocks.fetchJson.mockImplementation((url, init) => init?.method === 'PUT' ? Promise.reject(failure) : original(url, init))
+    click('保存到草稿')
+    await screen.findByText(/文件仍保留；请勿盲目重试/)
+    const version = sessionFor(mocks.db!.id).state.versions.current
+    expect(screen.getAllByText(version.error!, { exact: false })).toHaveLength(1)
+    expect(screen.getByText(version.error!, { exact: false })).toHaveAttribute('role', 'alert')
+    expect(version.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('Keep local'))
+    expect(putCalls()).toHaveLength(1)
+  })
+  it('keeps the DB partial-success message when Origin rejection leaves file edits retryable', async () => {
+    await mount(); act(() => state().updateSpecField('title', 'DB saved first'))
+    await editFile('scripts/run', 'File still local')
+    const original = mocks.fetchJson.getMockImplementation()!
+    mocks.fetchJson.mockImplementation((url, init) => init?.method === 'PUT'
+      ? Promise.reject({ status: 403, body: '{"code":"ORIGIN_NOT_ALLOWED"}' }) : original(url, init))
+    click('保存到草稿')
+    await screen.findByText(/部分成功：工作流已保存到数据库/)
+    const session = sessionFor(mocks.db!.id), version = session.state.versions.current
+    expect(screen.getAllByText(version.error!, { exact: false })).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('部分成功：工作流已保存到数据库')
+    expect(mocks.db!.title).toBe('DB saved first'); expect(state().isDirty).toBe(false)
+    expect(version.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('File still local'))
+    expect(version.blocked).toBe(false); expect(session.state.reconciliation).toBeNull()
+    expect(screen.getByRole('button', { name: '保存到草稿' })).toBeEnabled()
+    expect(putCalls()).toHaveLength(1)
+  })
+  it('clears an earlier Origin refusal after an explicit successful retry and switching to current', async () => {
+    await mount(); await editFile('scripts/run', 'Saved on retry')
+    mocks.fetchJson.mockRejectedValueOnce({ status: 403, body: '{"code":"ORIGIN_NOT_ALLOWED"}' })
+    click('保存到草稿'); await screen.findByText(/版本文件保存请求被来源校验拒绝/)
+    click('保存到草稿'); await screen.findByText(/文件已保存到 saved commit/)
+    click('当前版（wf）')
+    expect(screen.queryByText(/版本文件保存请求被来源校验拒绝/)).not.toBeInTheDocument()
+    expect(sessionFor(mocks.db!.id).state.versions.current.error).toBeNull()
+    expect(sessionFor(mocks.db!.id).state.versions.draft.files.find(f => f.path === 'scripts/run')?.contentBase64).toBe(btoa('Saved on retry'))
+    expect(putCalls()).toHaveLength(2)
+  })
+  it('does not hide a different read error after a prior file-save failure', async () => {
+    await mount(); await editFile('scripts/run', 'Keep local')
+    mocks.fetchJson.mockRejectedValueOnce({ status: 409, body: '{"code":"VERSION_CONFLICT"}' })
+    click('保存到草稿'); await screen.findByText(/文件仍保留；请勿盲目重试/)
+    const session = sessionFor(mocks.db!.id)
+    act(() => updateVersion(session, 'current', { error: '另一次版本读取失败' }))
+    expect(screen.getByText('另一次版本读取失败')).toBeVisible()
+    expect(screen.getByText(/文件仍保留；请勿盲目重试/)).toBeVisible()
   })
   it('retains both edits and makes no Git write when DB save fails', async () => {
     await mount(); act(() => state().updateSpecField('title', 'Keep canvas')); await editFile('scripts/run', 'Keep file')

@@ -1,16 +1,12 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { useEditorStore } from './store'
-import { sessionFor, load, releaseCleanSession, publish, dirty, diff, updateVersion, type Version, type Session } from './packVersionSession'
+import { sessionFor, load, releaseCleanSession, publish, dirty, diff, updateVersion, type Version } from './packVersionSession'
 import { packVersionWritesEnabled } from './packVersionWritePolicy'
 import { savePackVersion } from './packVersionSave'
 import { packWorkflow } from './packCanvas'
 import { normalizationChanges } from './yamlDraft'
 import { saveVerifiedWorkflowDocument } from './workflowDocumentSave'
-
-// A split identity write requires explicit manual reconciliation before another save.
-// This guard is deliberately session-local, not a durable recovery journal.
-const uncertainRenames = new WeakMap<Session, string>()
 
 /** DB owns the workflow document; Git owns the other Pack files. */
 export function usePackCanvasSession(id: string | null, _databaseSpec?: WorkflowSpec | null, { enabled = true }: { enabled?: boolean } = {}) {
@@ -40,7 +36,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   async function save() {
     const live = useEditorStore.getState()
     if (!id || !session) throw new Error('首次新建尚无法安全初始化 Git saved 分支；本地草稿仍保留，请先导出备份。')
-    const uncertainRename = uncertainRenames.get(session)
+    const uncertainRename = session.state.uncertainRename
     if (uncertainRename) throw new Error(uncertainRename)
     if (busy.current || session.state.saving || session.state.uploading || session.state.reconciliation || session.state.deployment) throw new Error('保存、上传或部署状态未完成；本地草稿仍保留。')
     if (Object.keys(live.pendingEdits ?? {}).length) throw new Error('存在未应用的配置草稿；请先应用或放弃，再保存。')
@@ -169,7 +165,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
         const detail = cause instanceof Error ? cause.message : '操作失败。'
         const gitState = gitStarted ? 'Git 保存已发起，结果未确认；请核对 saved 分支和完整候选' : 'Git 保存未发起'
         const message = `Pack 重命名 ${base.packId} → ${candidate.packId} 未完整完成：数据库${renameDbState}；${gitState}。${detail} 请先人工核对数据库和 Git，不能自动重试。本页会话已锁定；刷新会丢失本地草稿和此锁定状态。`
-        uncertainRenames.set(session, message)
+        publish(session, { ...session.state, uncertainRename: message })
         for (const key of ['current', 'draft'] as const) updateVersion(session, key, { blocked: true, error: message })
         throw new Error(message)
       }
@@ -180,6 +176,6 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     }
   }
 
-  return { save, error: current?.error ?? null, loading: !!current?.loading,
+  return { save, error: state?.uncertainRename ?? current?.error ?? null, versionError: current?.error ?? null, loading: !!current?.loading,
     canWrite: packVersionWritesEnabled(snapshot ?? null), saving: !!state?.saving, snapshot }
 }

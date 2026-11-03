@@ -118,6 +118,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const { data: workflowSpec, databaseSpec: workflowDatabaseSpec, activeDeployNumber: workflowActiveDeployNumber, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '')
 
   const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowDatabaseSpec, { enabled: workspaceTab === 'scripts' })
+  // The combined-save message may add DB partial-success context to the same
+  // Pack error. Show that richer message once, without hiding unrelated errors.
+  const packErrors = [...new Set([packCanvas.error, packCanvas.versionError])].filter((error): error is string =>
+    !!error && !(saveMessage?.type === 'error' && saveMessage.text.includes(error)))
   const deployment = selectedWorkflowId ? sessionFor(selectedWorkflowId).state.deployment : null
   const queryClient = useContext(QueryClientContext)
   const deployMutation = useAutoHealDeploy()
@@ -613,14 +617,14 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       </div>}
       {workspaceTab === 'workflow' && workflowReadError && <p role="alert" className="px-4 py-2 text-sm text-destructive">工作流读取失败，草稿仍保留：{extractApiErrorMessage(workflowReadError)}</p>}
       {workspaceTab === 'workflow' && deploymentBaselineStatus === 'error' && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">生效版本状态读取失败，暂无法比较；当前编排草稿仍保留，可独立保存。</p>}
-      {workspaceTab === 'scripts' && packCanvas.error && <div role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{packCanvas.error}</div>}
+      {workspaceTab === 'scripts' && packErrors.map(error => <div key={error} role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{error}</div>)}
       {deployment && <section aria-label="部署操作" className="border-b border-border bg-muted px-4 py-2 text-sm">
         <p>{deployment.pending ? '部署操作正在进行。' : deployment.error}</p>
         <p className="break-all">requestId：{deployment.input.requestId} · saved commit：{deployment.input.candidateCommit}</p>
       </section>}
 
       {saveMessage && (
-        <div className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div role={saveMessage.type === 'error' ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
           {saveMessage.text}
         </div>
       )}
@@ -665,7 +669,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       </div>
 
       <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
-        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} />}
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} showSaveError={false} />}
       </div>
 
       {/* YAML Import Modal */}
