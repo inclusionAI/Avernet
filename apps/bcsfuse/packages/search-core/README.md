@@ -12,8 +12,8 @@ Avernet revision as the public TC source, rather than fetching a floating branch
 
 ```yaml
 purpose: Shared search execution and optional Card management and delivery/provider adapters.
-provides: [SearchApplication, RetrievalService, HybridRetrievalService, reciprocal_rank_fusion, create_search_router, create_card_router, CardManagementService, SqlCardRepository]
-consumes: [RetrievalIndex, EmbeddingProvider, Reranker, CardStore, CardDocumentConverter]
+provides: [SearchApplication, RetrievalService, HybridRetrievalService, reciprocal_rank_fusion, create_search_router, create_card_router, CardManagementService, SqlCardRepository, IndexBuildService, rebuild_source]
+consumes: [RetrievalIndex, EmbeddingProvider, Reranker, CardStore, CardDocumentConverter, IndexBuildSource, IndexBuildRepository]
 internal_dependencies: []
 ```
 
@@ -23,6 +23,17 @@ internal_dependencies: []
 - `providers/`: Qdrant dense/sparse execution and HTTP Embedding/reranker clients.
 - `config/`: optional model configuration loader; execution receives explicit settings.
 - `adapters/http/`: common v2 endpoints with an injected application and authentication.
+
+`EmbeddingSettings.request_dimensions` defaults to `False` for existing providers.
+Hosts selecting a model with configurable output dimensions can set it to `True`;
+both sync preparation and async query clients then send the configured `dimensions`
+to the model API. The selected model must support this parameter.
+
+Index generation management, single-source repair and resumable build execution
+are shared capabilities. Business source adapters supply conversion and guarded
+publication; internal data-source clients and dynamic configuration stay in the
+host. See [the rebuild contract](docs/index-rebuild.md). Importing the package
+does not enable build jobs or change TC behavior.
 
 `HybridRetrievalService` accepts a `QdrantRetrievalIndex` or another `RetrievalIndex`,
 an Embedding provider, and an optional reranker. `RetrievalRequest.allowed_ids` is
