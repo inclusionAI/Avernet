@@ -54,13 +54,18 @@ class _Injector:
 
 
 class _BotService:
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self, rows=None, addresses=None):
+        self._rows = rows or {}
+        self._addresses = addresses or {}
         self.calls: list[str] = []
 
     def get_bot_by_id(self, bot_id):
         self.calls.append(bot_id)
         return self._rows.get(bot_id)
+
+    def get_bot_by_address(self, bot_id, user_id):
+        self.calls.append(f"{bot_id}:{user_id}")
+        return self._addresses.get(f"{bot_id}:{user_id}")
 
 
 def _topic(author_type, author_id, *, display_name=None, avatar_url=None):
@@ -101,6 +106,53 @@ def test_bot_display_name_enriched_from_bot_service_when_null():
     )
     assert out[0].display_name == "Bot Alpha"
     assert bot_service.calls == ["bot-a"]
+
+
+def test_legacy_bare_default_bot_identity_is_not_guessed():
+    bot_service = _BotService({"default": {"bot_name": "Some Owners Default Bot"}})
+    injector = _Injector({BotServiceProtocol: bot_service})
+    record = _topic(AUTHOR_TYPE_BOT, "default")
+
+    out = enrich_bot_display_names([record], request=_Request(injector))
+
+    assert out[0].display_name is None
+    assert bot_service.calls == []
+
+
+def test_scoped_default_bot_identity_is_resolved_by_owner():
+    bot_service = _BotService(
+        addresses={"default:149844": {"bot_name": "Owner Default Bot"}}
+    )
+    injector = _Injector({BotServiceProtocol: bot_service})
+    record = _topic(AUTHOR_TYPE_BOT, "default:149844")
+
+    out = enrich_bot_display_names([record], request=_Request(injector))
+
+    assert out[0].display_name == "Owner Default Bot"
+    assert bot_service.calls == ["default:149844"]
+
+
+def test_scoped_non_default_bot_identity_is_resolved_by_owner():
+    bot_service = _BotService(addresses={"bot-a:149844": {"bot_name": "Owner Bot A"}})
+    injector = _Injector({BotServiceProtocol: bot_service})
+    record = _post(AUTHOR_TYPE_BOT, "bot-a:149844")
+
+    out = enrich_bot_display_names([record], request=_Request(injector))
+
+    assert out[0].display_name == "Owner Bot A"
+    assert bot_service.calls == ["bot-a:149844"]
+
+
+def test_scoped_bot_identity_lookup_miss_keeps_null():
+    bot_service = _BotService(addresses={})
+    injector = _Injector({BotServiceProtocol: bot_service})
+
+    out = enrich_bot_display_names(
+        [_topic(AUTHOR_TYPE_BOT, "default:999999")], request=_Request(injector)
+    )
+
+    assert out[0].display_name is None
+    assert bot_service.calls == ["default:999999"]
 
 
 def test_bot_display_name_enriched_on_post_record():
