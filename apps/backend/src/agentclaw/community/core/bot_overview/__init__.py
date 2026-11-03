@@ -1,1 +1,1 @@
-"""Unauthenticated, non-user Bot overview: engine-neutral fields + engine payload."""
+"""Non-user Bot overview: engine-neutral fields + engine payload."""

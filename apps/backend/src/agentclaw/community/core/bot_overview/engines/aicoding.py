@@ -1,7 +1,7 @@
 """Bot overview provider for AICoding / Claude Code Bots.
 
 Draft: returns only the (empty) engine payload. The engine owner fills the
-neutral fields (``default_model``, ``skills``, ``mcps``, ``sessions``) and adds
+neutral fields (``default_model``, ``skills``, ``mcps``, ``daily_sessions``) and adds
 engine-specific fields to :class:`AICodingEnginePayload`.
 """
 

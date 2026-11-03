@@ -24,12 +24,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class AICodingEnginePayload(BaseModel):
-    """Engine-specific overview fields for AICoding / Claude Code Bots.
+    """Engine-specific overview fields for AICoding and Claude Code Bots."""
 
-    Intentionally empty: the engine owner adds fields here. ``claude_code``
-    Bots that run in an AICoding image share this type, so the discriminator
-    accepts both persisted engine names.
-    """
+    # Intentionally empty: the engine owner adds fields here. claude_code Bots
+    # that run in an AICoding image share this type, so the discriminator
+    # accepts both persisted engine names.
 
     model_config = ConfigDict(extra="forbid")
 

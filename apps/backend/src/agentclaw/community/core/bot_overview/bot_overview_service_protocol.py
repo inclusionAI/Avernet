@@ -1,4 +1,4 @@
-"""Service API Protocol for the unauthenticated Bot overview."""
+"""Service API Protocol for the non-user Bot overview."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Service API Protocol for the unauthenticated Bot overview.
+"""Service API Protocol for the non-user Bot overview.
 
 Re-export only. The Protocol is defined in its owning core module
 (``core/bot_overview/bot_overview_service_protocol.py``).

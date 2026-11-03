@@ -61,9 +61,11 @@ def test_engine_without_provider_reports_only_neutral_identity() -> None:
     assert overview.status == "ACTIVE"
     assert overview.observed_at == NOW
     assert overview.default_model is None
-    assert overview.skills is None
-    assert overview.mcps is None
-    assert overview.sessions is None
+    assert overview.skills == []
+    assert overview.mcps == []
+    assert overview.sessions == SessionActivity(
+        window_start=NOW - timedelta(days=14), daily=[]
+    )
     assert overview.payload is None
 
 
@@ -77,17 +79,21 @@ def test_missing_engine_falls_back_to_default_engine() -> None:
 def test_dispatches_to_the_bot_engines_provider_with_activity_window() -> None:
     contribution = EngineBotOverview(
         default_model="anthropic/model-x",
-        skills=[SkillSummary(name="review", version="3")],
-        mcps=[McpServerSummary(name="github", transport="stdio")],
-        sessions=SessionActivity(
-            window_start=NOW - timedelta(days=7),
-            last_activity_at=NOW - timedelta(days=2),
-            daily=[
-                DailySessionActivity(
-                    day=(NOW - timedelta(days=2)).date(), session_count=1, message_count=4
-                )
-            ],
-        ),
+        skills=[
+            SkillSummary(
+                skill_type="center",
+                skill_id="skill-uuid-1",
+                name="review",
+                version="3",
+            ),
+            SkillSummary(skill_type="local", skill_id="notes", name="notes"),
+        ],
+        mcps=[McpServerSummary(code="mcp.example.github", transport="stdio")],
+        daily_sessions=[
+            DailySessionActivity(
+                day=(NOW - timedelta(days=2)).date(), session_count=1, message_count=4
+            )
+        ],
         payload=AICodingEnginePayload(engine="claude_code"),
     )
     provider = MagicMock()
@@ -109,7 +115,9 @@ def test_dispatches_to_the_bot_engines_provider_with_activity_window() -> None:
     assert overview.default_model == "anthropic/model-x"
     assert overview.skills == contribution.skills
     assert overview.mcps == contribution.mcps
-    assert overview.sessions == contribution.sessions
+    assert overview.sessions == SessionActivity(
+        window_start=NOW - timedelta(days=7), daily=contribution.daily_sessions
+    )
     assert overview.payload == AICodingEnginePayload(engine="claude_code")
 
 
@@ -135,4 +143,5 @@ def test_composition_routes_aicoding_family_to_draft_provider(engine: str) -> No
 
     assert overview.payload == AICodingEnginePayload(engine=engine)
     assert overview.default_model is None
-    assert overview.sessions is None
+    assert overview.skills == [] and overview.mcps == []
+    assert overview.sessions.daily == []

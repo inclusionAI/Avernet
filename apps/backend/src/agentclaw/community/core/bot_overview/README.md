@@ -1,13 +1,13 @@
 # `agentclaw.community.core.bot_overview`
 
-Unauthenticated, non-user overview of a Bot: engine-neutral fields assembled
+Non-user overview of a Bot: engine-neutral fields assembled
 here, engine-specific fields dispatched to the provider registered for the
 Bot's engine.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Non-user Bot overview — engine-neutral status/model/skills/MCPs/session activity plus a discriminated per-engine payload, filled by per-engine providers."
+purpose: "Non-user Bot overview — engine-neutral status/model/skills (local/repo/center)/MCPs/daily session activity plus a discriminated per-engine payload, filled by per-engine providers."
 provides:
   - "BotOverviewService"
   - "BotOverview / EngineSpecificPayload models"
@@ -21,11 +21,14 @@ internal_dependencies:
 
 ### Change impact
 
-Served at `GET /api/public/bots/{bot_id}/overview` **without authentication**.
-Anything added to the models or an engine payload is readable by anyone who
-knows a Bot id, so it must be non-user data: no owner identity, conversation
+Served at `GET /openapi/v1/bots/{bot_id}/overview` through the gateway, which
+fronts it with an auth strategy that needs no user credential (the backend
+still verifies the gateway-signed principal; the operation is admission
+`OPEN`, authorization `NoCheck`, no `user_id`). Anything added to the models
+or an engine payload is readable by any caller in the tenant who knows a Bot
+id, so it must be non-user data: no owner identity, conversation
 content, credentials or device identifiers. Session data stays aggregated
-(`SessionActivity`) so clients apply their own policy, such as "any
+per day (`SessionActivity.daily`) so clients apply their own policy, such as "any
 conversation in the last two weeks".
 
 ### Adding an engine

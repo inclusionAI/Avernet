@@ -12,7 +12,7 @@ from .bot_overview_service_protocol import (
     BotOverviewNotFoundError,
     BotOverviewServiceProtocol,
 )
-from .models import BotOverview, EngineBotOverview
+from .models import BotOverview, EngineBotOverview, SessionActivity
 from .provider import BotOverviewProviderRegistry, BotOverviewQuery
 
 
@@ -41,6 +41,7 @@ class BotOverviewService(BotOverviewServiceProtocol):
 
         engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
         now = self._clock()
+        activity_since = now - timedelta(days=activity_days)
         provider = self._providers.resolve(engine)
         contribution = (
             provider.collect(
@@ -48,7 +49,7 @@ class BotOverviewService(BotOverviewServiceProtocol):
                     bot_id=bot_id,
                     engine=engine,
                     bot=bot,
-                    activity_since=now - timedelta(days=activity_days),
+                    activity_since=activity_since,
                 )
             )
             if provider is not None
@@ -62,7 +63,9 @@ class BotOverviewService(BotOverviewServiceProtocol):
             default_model=contribution.default_model,
             skills=contribution.skills,
             mcps=contribution.mcps,
-            sessions=contribution.sessions,
+            sessions=SessionActivity(
+                window_start=activity_since, daily=contribution.daily_sessions
+            ),
             payload=contribution.payload,
         )
 

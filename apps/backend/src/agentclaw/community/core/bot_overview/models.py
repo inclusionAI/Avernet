@@ -1,31 +1,48 @@
 """Engine-neutral Bot overview models.
 
-The overview is served **without authentication**, so every field here must be
-non-user data about the Bot: no owner identity, no conversation content, no
-credentials. Session information is deliberately reduced to activity
+The overview is served to callers that present **no user credential**, so
+every field here must be non-user data about the Bot: no owner identity, no
+conversation content, no credentials. Session information is deliberately reduced to activity
 aggregates so a client can apply its own policy (for example "was there any
 conversation in the last two weeks") without the API hard-coding one.
 
-``None`` on a neutral field means "the Bot's engine did not report it" — an
-engine without an overview provider, or one whose provider does not fill that
-field yet. An empty list means the engine reported that there are none.
+Collections default to empty: an engine without an overview provider, or one
+whose provider does not fill a field yet, reports no skills, MCP servers or
+session activity.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .payloads import EngineSpecificPayload
 
 
+# Skill Type as CONTEXT.md defines it: how a Skill's content is managed and
+# delivered. A Literal (not an Enum) so the published document lists the
+# members inline, with their meanings in the field description.
+SkillType = Literal["local", "repo", "center"]
+
+
 class SkillSummary(BaseModel):
-    """One Skill active on the Bot."""
+    """One Skill in the Bot's effective Skill set."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="Skill name as the engine exposes it.")
+    skill_type: SkillType = Field(
+        description="Skill type. 'local': uploaded directly to this Bot, "
+        "referencing no managed Skill. 'repo': from a Skill repository. "
+        "'center': governed, versioned Skill Center content."
+    )
+    skill_id: str = Field(
+        description="Stable identifier of the Skill within its type: the "
+        "Skill Center Skill identity for 'center', the repository Skill "
+        "identifier for 'repo', the Bot-local Skill name for 'local'."
+    )
+    name: str = Field(description="Skill display name.")
     version: str | None = Field(
         default=None,
         description="Active Skill version, or null when the engine does not "
@@ -38,7 +55,10 @@ class McpServerSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="MCP server name as the engine exposes it.")
+    code: str = Field(
+        description="MCP server code, e.g. 'mcp.example.weather' — the same "
+        "identifier the MCP catalogue uses."
+    )
     transport: str | None = Field(
         default=None,
         description="Transport such as 'stdio', 'sse' or 'streamable-http'; "
@@ -64,12 +84,7 @@ class SessionActivity(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     window_start: datetime = Field(
-        description="Inclusive UTC start of the window that ``daily`` covers."
-    )
-    last_activity_at: datetime | None = Field(
-        default=None,
-        description="Most recent message in any session, regardless of the "
-        "window; null when the Bot has never had a conversation.",
+        description="Inclusive UTC start of the window that daily covers."
     )
     daily: list[DailySessionActivity] = Field(
         default_factory=list,
@@ -81,16 +96,17 @@ class SessionActivity(BaseModel):
 class EngineBotOverview(BaseModel):
     """What an engine provider contributes to a Bot overview.
 
-    Every field defaults to "not reported", so a provider fills only what its
-    engine can answer.
+    Every field defaults to "nothing reported", so a provider fills only what
+    its engine can answer. The session window itself is set by the service;
+    a provider reports the days inside ``BotOverviewQuery.activity_since``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default_model: str | None = None
-    skills: list[SkillSummary] | None = None
-    mcps: list[McpServerSummary] | None = None
-    sessions: SessionActivity | None = None
+    skills: list[SkillSummary] = Field(default_factory=list)
+    mcps: list[McpServerSummary] = Field(default_factory=list)
+    daily_sessions: list[DailySessionActivity] = Field(default_factory=list)
     payload: EngineSpecificPayload | None = None
 
 
@@ -114,24 +130,20 @@ class BotOverview(BaseModel):
         description="Model the Bot uses when none is chosen per request; null "
         "when the engine did not report it.",
     )
-    skills: list[SkillSummary] | None = Field(
-        default=None,
-        description="Skills active on the Bot; null when the engine did not "
-        "report them.",
+    skills: list[SkillSummary] = Field(
+        default_factory=list,
+        description="Skills in the Bot's effective Skill set.",
     )
-    mcps: list[McpServerSummary] | None = Field(
-        default=None,
-        description="MCP servers configured on the Bot; null when the engine "
-        "did not report them.",
+    mcps: list[McpServerSummary] = Field(
+        default_factory=list,
+        description="MCP servers configured on the Bot.",
     )
-    sessions: SessionActivity | None = Field(
-        default=None,
-        description="Session activity aggregates; null when the engine did "
-        "not report them.",
+    sessions: SessionActivity = Field(
+        description="Per-day session activity over the requested window.",
     )
     payload: EngineSpecificPayload | None = Field(
         default=None,
-        description="Engine-specific fields, discriminated by ``engine``; null "
+        description="Engine-specific fields, discriminated by engine; null "
         "when the Bot's engine has no overview provider.",
     )
 
@@ -143,4 +155,5 @@ __all__ = [
     "McpServerSummary",
     "SessionActivity",
     "SkillSummary",
+    "SkillType",
 ]
