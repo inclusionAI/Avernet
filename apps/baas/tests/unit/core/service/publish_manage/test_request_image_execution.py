@@ -90,12 +90,25 @@ async def test_update_consumer_uses_publish_snapshot_not_old_bot_image(image):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("image", [None, "new:image"])
-async def test_update_config_write_failure_never_enters_provider_retry(image):
+@pytest.mark.parametrize("write_failure", ["exception", "zero-rows"])
+async def test_update_config_write_failure_never_enters_provider_retry(
+    image, write_failure, caplog
+):
     service, device, publish, batch = _service(
         snapshot={"deploy_config": {"docker_image": image}}
     )
-    service._device_repo.update_device.side_effect = RuntimeError("write unavailable")
-    result = await _execute(service, publish, batch, "update")
+    if write_failure == "exception":
+        service._device_repo.update_device.side_effect = RuntimeError(
+            "write unavailable"
+        )
+    else:
+        service._device_repo.update_device.return_value = 0
+
+    with caplog.at_level(logging.WARNING, logger="core-service"):
+        result = await _execute(service, publish, batch, "update")
+
+    if write_failure == "zero-rows":
+        assert "Device configuration update affected no rows" in caplog.text
     assert not result.success and result.failed_count == 1
     service._device_service.update_device.assert_not_awaited()
     service._device_service.restart_device.assert_not_awaited()
@@ -105,26 +118,6 @@ async def test_update_config_write_failure_never_enters_provider_retry(image):
         == "FAILED"
     )
     assert device.extra_config["deploy_config"]["docker_image"] == "old:image"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("image", [None, "new:image"])
-async def test_update_continues_when_config_update_affects_zero_rows(image, caplog):
-    service, _, publish, batch = _service(
-        snapshot={"deploy_config": {"docker_image": image}}
-    )
-    service._device_repo.update_device.return_value = 0
-
-    with caplog.at_level(logging.WARNING, logger="core-service"):
-        result = await _execute(service, publish, batch, "update")
-
-    assert result.success and result.processed_count == 1
-    assert "Device configuration update affected no rows" in caplog.text
-    service._device_service.update_device.assert_awaited_once()
-    assert [
-        call.kwargs["result_status"]
-        for call in service._publish_record_repo.update_result.call_args_list
-    ] == ["PROCESSING", "SUCCESS"]
 
 
 @pytest.mark.asyncio
