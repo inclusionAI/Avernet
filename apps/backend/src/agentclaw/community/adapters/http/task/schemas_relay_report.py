@@ -191,6 +191,9 @@ def _step_contains_relay_token(step: TaskReportTraceStepDTO, relay_token: str) -
     )
 
 
+_MAX_FINAL_CONCLUSION_CHARS = 300
+
+
 class TaskReportCommandDTO(BaseModel):
     """Two-event Relay report command; ``trace`` is optional on the wire.
 
@@ -212,6 +215,9 @@ class TaskReportCommandDTO(BaseModel):
     # EXECUTION_RESULT+ACCEPTED(节点产物) 或终态 PLAN_RESULT(event=null)(任务最终产物)。
     # 后继 PLAN_RESULT、DECLINED,以及其它组合携带均被 to_domain 拒绝。
     artifacts: list[ArtifactReportItemDTO] | None = None
+    # 终态 PLAN_RESULT(event=null) 的任务级结论文本;落 TaskExecutionGraph.output,
+    # 仅供轨迹归因与效果分析消费,不是产物。
+    final_conclusion: str | None = None
     progress_reason: str = ""
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResultDTO | None = None
@@ -255,8 +261,18 @@ class TaskReportCommandDTO(BaseModel):
             raise TaskStateError(
                 f"{self.event_type.value} events must not carry artifacts"
             )
+        final_conclusion = self.final_conclusion
         terminal_artifact_patch = None
         if terminal_plan:
+            if not isinstance(final_conclusion, str) or not final_conclusion.strip():
+                raise TaskStateError(
+                    "terminal PLAN_RESULT requires final_conclusion for trajectory analysis"
+                )
+            final_conclusion = final_conclusion.strip()
+            if len(final_conclusion) > _MAX_FINAL_CONCLUSION_CHARS:
+                raise TaskStateError(
+                    "terminal PLAN_RESULT final_conclusion exceeds 300 characters"
+                )
             terminal_artifact_patch = (
                 parse_artifact_report_items(
                     [item.model_dump() for item in self.artifacts],
@@ -266,6 +282,14 @@ class TaskReportCommandDTO(BaseModel):
                 )
                 if self.artifacts is not None
                 else terminal_artifact_patch
+            )
+            if any(item.artifact_kind == "text" for item in terminal_artifact_patch or []):
+                raise TaskStateError(
+                    "terminal PLAN_RESULT final conclusion must not be reported as a text artifact"
+                )
+        elif self.final_conclusion is not None:
+            raise TaskStateError(
+                "final_conclusion is only allowed on terminal PLAN_RESULT events"
             )
         if self.event_type == TaskReportEventType.EXECUTION_RESULT:
             if self.event is None:
@@ -363,6 +387,7 @@ class TaskReportCommandDTO(BaseModel):
             if self.trace is not None
             else None,
             artifact_patch=terminal_artifact_patch,
+            final_conclusion=final_conclusion,
         )
 
 

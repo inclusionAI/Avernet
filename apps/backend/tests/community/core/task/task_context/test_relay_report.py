@@ -24,7 +24,7 @@ from agentclaw.community.core.task.domain.models import (
     NodeAction,
 )
 from agentclaw.community.core.task.task_context import relay_report
-from agentclaw.community.core.task.task_context.task_artifact.models import TextContent
+from agentclaw.community.core.task.task_context.task_artifact.models import UrlLinkContent
 from agentclaw.community.core.task.task_context.task_artifact.report_item import (
     ArtifactReportItem,
 )
@@ -384,14 +384,15 @@ def test_declined_execution_recovery_projects_capability_failure_reason() -> Non
 
 def _final_artifact_item() -> ArtifactReportItem:
     return ArtifactReportItem(
-        artifact_name="最终文本结论",
-        artifact_kind="text",
+        artifact_name="最终报告链接",
+        artifact_kind="url_link",
         session_id=None,
         task_id="task-1",
         node_id="task-1",
         attempt=0,
-        content=TextContent(
-            text="任务已完成，主因…",
+        content=UrlLinkContent(
+            url="https://example.com/final-report",
+            type="最终报告链接",
             is_final_artifact="true",
         ),
     )
@@ -433,12 +434,16 @@ def test_terminal_completion_captures_final_artifacts(monkeypatch) -> None:
         event=None,
         task_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
         artifact_patch=[final_item],
+        final_conclusion="业务整体结论：主因已确认并完成处理",
     )
 
     result = service.apply_relay_report(command)
 
     assert result.task_completed
     assert captured[-1] == ("task-1", [final_item])
+    assert service.query_task_dashboard("task-1").output["final_conclusion"] == (
+        "业务整体结论：主因已确认并完成处理"
+    )
 
 def test_terminal_hung_captures_final_artifacts(monkeypatch) -> None:
     captured = _capture_node_calls(monkeypatch)
@@ -454,12 +459,16 @@ def test_terminal_hung_captures_final_artifacts(monkeypatch) -> None:
         event=None,
         failure_reason="relay_no_candidate",
         artifact_patch=[final_item],
+        final_conclusion="业务整体结论：已确认事实与下一步建议",
     )
 
     result = service.apply_relay_report(command)
 
     assert result.task_hung
     assert captured[-1] == ("task-1", [final_item])
+    assert service.query_task_dashboard("task-1").output["final_conclusion"] == (
+        "业务整体结论：已确认事实与下一步建议"
+    )
 
 def test_successor_plan_result_rejects_final_artifacts(monkeypatch) -> None:
     captured = _capture_node_calls(monkeypatch)
