@@ -36,6 +36,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     );
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'bot-main',
+      botUuid: 'bot-main',
       currentUserId: 'user-1',
     });
     expect(res).toEqual({ ok: true, data: true });
@@ -50,6 +51,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mocked.listBotSkillsByBot.mockResolvedValue(skillsEnvelope([]));
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'botA',
+      botUuid: 'botA:user-1',
       ownerId: 'user-1',
       currentUserId: 'user-1',
     });
@@ -61,13 +63,14 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mockedMatch.matchTaskConfig.mockResolvedValue(matchEnvelope(true));
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'botX',
+      botUuid: 'botX:other-user',
       ownerId: 'other-user',
       currentUserId: 'user-1',
     });
     expect(res).toEqual({ ok: true, data: true });
     expect(mockedMatch.matchTaskConfig).toHaveBeenCalledWith({
       config_name: TASK_INTENT_INSTALLED_BOTS_CONFIG,
-      value: 'botX',
+      value: 'botX:other-user',
     });
     expect(mocked.listBotSkillsByBot).not.toHaveBeenCalled();
   });
@@ -76,6 +79,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mockedMatch.matchTaskConfig.mockResolvedValue(matchEnvelope(false));
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'botX',
+      botUuid: 'botX:other-user',
       ownerId: 'other-user',
       currentUserId: 'user-1',
     });
@@ -86,6 +90,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mockedMatch.matchTaskConfig.mockResolvedValue({ code: 500000, message: 'boom', data: undefined });
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'botX',
+      botUuid: 'botX:other-user',
       ownerId: 'other-user',
       currentUserId: 'user-1',
     });
@@ -96,6 +101,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mocked.listBotSkillsByBot.mockRejectedValueOnce(new Error('Not Found'));
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'bot-main',
+      botUuid: 'bot-main',
       currentUserId: 'user-1',
     });
     expect(res).toEqual({
@@ -112,6 +118,7 @@ describe('botSkillService.hasTaskIntentSkillForBot', () => {
     mockedMatch.matchTaskConfig.mockRejectedValueOnce(new Error('Not Found'));
     const res = await botSkillService.hasTaskIntentSkillForBot({
       realBotId: 'botX',
+      botUuid: 'botX:other-user',
       ownerId: 'other-user',
       currentUserId: 'user-1',
     });

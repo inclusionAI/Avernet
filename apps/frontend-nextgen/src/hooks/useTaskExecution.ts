@@ -84,7 +84,12 @@ export function useTaskExecution({
     setDynamicTaskChecking(true);
     const { realBotId, ownerId } = splitBotId(context.ownerBotId);
     void botSkillService
-      .hasTaskIntentSkillForBot({ realBotId, ownerId, currentUserId: context.ownerUserId })
+      .hasTaskIntentSkillForBot({
+        realBotId,
+        botUuid: context.ownerBotId,
+        ownerId,
+        currentUserId: context.ownerUserId,
+      })
       .then((result) => {
         if (cancelled) return;
         setDynamicTaskEnabled(result.ok && result.data);

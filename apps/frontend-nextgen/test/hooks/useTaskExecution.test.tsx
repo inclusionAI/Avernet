@@ -80,8 +80,36 @@ describe('useTaskExecution relay bootstrap', () => {
     );
 
     await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(true));
+    expect(mockedHasTaskIntent).toHaveBeenCalledWith({
+      realBotId: 'bot-main',
+      botUuid: 'bot-main',
+      ownerId: undefined,
+      currentUserId: 'user-1',
+    });
     act(() => result.current.selectDynamic());
     expect(result.current.selections).toEqual([{ kind: 'dynamic' }]);
+  });
+
+  it('任务探针传入完整 bot_uuid,同时拆分 realBotId/ownerId', async () => {
+    const scopedContext: TaskComposerContext = {
+      ...context,
+      ownerBotId: 'bot-main:owner-user',
+    };
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context: scopedContext,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(mockedHasTaskIntent).toHaveBeenCalledWith({
+      realBotId: 'bot-main',
+      botUuid: 'bot-main:owner-user',
+      ownerId: 'owner-user',
+      currentUserId: 'user-1',
+    });
   });
 
   it('未安装 task-intent-recognition 时动态任务不可选', async () => {

@@ -18,7 +18,7 @@ export interface BotSkillView {
 export const TASK_INTENT_SKILL_NAME = 'task-intent-recognition';
 
 /**
- * task_config 中维护「装了 task-intent-recognition 的 bot_id 集合」的配置名（spec 2026-11-02）。
+ * task_config 中维护「装了 task-intent-recognition 的 bot_uuid 集合」的配置名（spec 2026-11-02）。
  * 维护方（属主/外部服务）通过 POST /collaboration/tasks/config/set 写入 set 类型配置；
  * 非属主调用方无权列他人 Bot 的技能列表，改走 match 探针只回 matched: bool。
  */
@@ -82,14 +82,15 @@ export const botSkillService = {
    *   （自有 bot，可列技能）。
    * - 否则（好友 / 协作群 Driver 等非属主 bot，当前用户无权列他人技能）→ 走 task_config
    *   `/collaboration/tasks/config/match` 探针：传 `config_name=task_skill_installed_bots`、
-   *   `value=realBotId`，按匹配结果取 `matched`（只回布尔，不回集合本身）。
+   *   `value=botUuid`（`bot_id:owner_id` 复合形态），按匹配结果取 `matched`（只回布尔，不回集合本身）。
    */
   async hasTaskIntentSkillForBot(query: {
     realBotId: string;
+    botUuid: string;
     ownerId?: string;
     currentUserId: string;
   }): Promise<DomainResult<boolean>> {
-    const { realBotId, ownerId, currentUserId } = query;
+    const { realBotId, botUuid, ownerId, currentUserId } = query;
     // DomainResult 是本方法的稳定边界：底层列表接口、match 探针、信封解析或防御性
     // 判断异常都必须收敛为可观测的 error，不向调用方抛出，也不触发全局错误 UI。
     try {
@@ -101,7 +102,7 @@ export const botSkillService = {
 
       const env = await matchTaskConfig({
         config_name: TASK_INTENT_INSTALLED_BOTS_CONFIG,
-        value: realBotId,
+        value: botUuid,
       });
       const matched = unwrapEnvelope(env);
       return { ok: true, data: Boolean(matched.matched) };
