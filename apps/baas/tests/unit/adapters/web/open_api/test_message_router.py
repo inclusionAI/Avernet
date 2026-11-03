@@ -907,6 +907,26 @@ class TestGetMessageResult:
             )
         assert result.data.session_id == "sess-from-extra"
 
+    @pytest.mark.asyncio
+    async def test_session_id_from_result_extra_when_metadata_session_id_none(self):
+        """A null metadata session ID falls back to a valid result_extra value."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(
+            metadata={"session_id": None},
+            result_extra={"session_id": "sess-from-extra", "usage": None},
+        )
+
+        with patch(
+            "secbaas.community.adapters.web.routers.open_api.message_router.validate_policy",
+            return_value="bot-1:entity-1",
+        ):
+            result = await get_message_result(
+                message_id="msg-001",
+                api_key_record=api_key,
+                bot_runner=self._make_runner(record),
+            )
+        assert result.data.session_id == "sess-from-extra"
+
     # ── session_id empty (neither metadata nor result_extra) ──
 
     @pytest.mark.asyncio
