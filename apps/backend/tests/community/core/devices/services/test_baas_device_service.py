@@ -158,7 +158,6 @@ class TestUpdateDeviceHeaders:
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
                 "device_uuid": "DEVICE-1",
-                "engine_type": "openclaw",
             },
         )
 
@@ -187,6 +186,7 @@ class TestUpdateDeviceHeaders:
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
                 "device_uuid": "DEVICE-1",
+                "engine_type": "openclaw",
             },
         )
 
