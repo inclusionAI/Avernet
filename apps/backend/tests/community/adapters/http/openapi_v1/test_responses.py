@@ -24,6 +24,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
@@ -110,6 +115,57 @@ async def test_envelope_errors_maps_domain_error():
     assert body["data"] is None
     assert body["message"] == "Not found"
     assert body["request_id"] == "trace-123"
+
+
+@pytest.mark.asyncio
+async def test_device_offline_error_returns_503():
+    """DeviceOfflineError → 503, distinct from generic ConnInfoBuildError 502."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise DeviceOfflineError("No active device for binding=1390508")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 503
+    body = json.loads(bytes(resp.body))
+    assert body["message"] == "Bot device is offline"
+    assert body["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_device_connection_unavailable_error_returns_502_distinct_message():
+    """DeviceConnectionUnavailableError → 502 with distinct message."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise DeviceConnectionUnavailableError("transient failure")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 502
+    body = json.loads(bytes(resp.body))
+    assert body["message"] == "Device connection temporarily unavailable"
+    assert body["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_conn_info_build_error_keeps_502():
+    """Generic ConnInfoBuildError still → 502 (subclass ordering does not break base)."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise ConnInfoBuildError("unknown baas failure")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 502
+    body = json.loads(bytes(resp.body))
+    assert body["message"] == "Device service error"
+    assert body["data"] is None
 
 
 @pytest.mark.asyncio
