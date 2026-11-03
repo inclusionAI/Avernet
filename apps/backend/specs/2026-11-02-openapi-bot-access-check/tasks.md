@@ -44,14 +44,25 @@
   - [x] `test_admission_inventory.py`, `test_authorization_inventory.py`, `test_path_convention.py`, `test_explicit_user_id.py`, `test_openapi_error_schema.py` and `test_schema_docs.py` pass.
 - **Depends on:** Task 2
 
-## Task 4: Tests & Verification
+## Task 4: Tests & Verification [x]
 - **Goal:** Confirm every spec acceptance criterion holds.
 - **Done when:**
-  - [ ] `DEPLOY_PROFILE=test uv run pytest tests/community/adapters/http/openapi_v1 tests/community/di -q` passes.
-  - [ ] `./scripts/ci_test.sh` passes, with changed-line coverage ≥ 80%.
-  - [ ] Every acceptance criterion in `spec.md` is checked off against a named test.
+  - [x] `DEPLOY_PROFILE=test uv run pytest tests/community/adapters/http/openapi_v1 tests/community/di -q` passes.
+  - [x] `./scripts/ci_test.sh` passes, with changed-line coverage ≥ 80%.
+  - [x] Every acceptance criterion in `spec.md` is checked off against a named test.
 - **Depends on:** Task 3
 
+- **Verified:** GitHub "Backend unit tests" (`scripts/ci_test.sh`, incl. the
+  changed-line coverage gate) is green on the PR head. Spec criteria → tests:
+  - allowlisted app asks about any user/Bot → `test_allowlisted_app_gets_owner_level_for_the_owner`, endpoint case `owner_has_owner_access`
+  - per-Bot, no stage input → `test_entity_id_and_user_id_are_required` (only `entity_id`/`user_id`/`required_level` exist)
+  - default member bar, higher bar on request → `test_explicit_admin_editor_passes_admin_bar`, `test_member_fails_admin_bar_but_reports_member_level`, `test_owner_only_bar_refuses_an_admin`
+  - same rules as opening the Bot → `test_space_member_gets_member_access`, `test_user_without_relation_or_revoked_editor_has_no_access`
+  - unknown Bot → 200 no access → `test_unknown_bot_is_200_without_access`, endpoint case `unknown_bot_has_no_access`
+  - non-allowlisted callers → identical 403 → `test_callers_other_than_allowlisted_apps_get_403_before_any_read`, `test_refusal_is_identical_for_existing_and_missing_bots`, endpoint case `human_caller_forbidden`
+  - allowlist ships empty → `test_every_deploy_profile_merges_to_an_empty_allowlist`
+  - lookup failure → error, not a fabricated answer → `test_collaborator_lookup_failure_is_500_not_false`
+  - not in the published description → `test_route_is_absent_from_the_openapi_document`
 ---
 
 ## Groups
