@@ -17,6 +17,8 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
+
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
 from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
@@ -505,6 +507,7 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         restart_backup_dependencies: RestartBackupDependencies,
+        scheduled_caller_refresh: ScheduledCallerRefreshProtocol,
         allocation_config: cfg.DeviceAllocationConfig,
         workspace_hosting_config: cfg.WorkspaceHostingConfig,
         device_binding_repo: DeviceBindingRepository,
@@ -553,6 +556,7 @@ class BotManagementModule(Module):
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
             restart_backup_dependencies=restart_backup_dependencies,
+            scheduled_caller_refresh=scheduled_caller_refresh,
             # Lazy for symmetry with the providers above, not for a cycle:
             # BotAppGrantService reaches only repositories. Resolved on demand
             # so bot deletion is the only thing that pays for it.
