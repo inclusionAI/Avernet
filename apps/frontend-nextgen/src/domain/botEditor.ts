@@ -55,6 +55,20 @@ export interface BotRenderScreenInput {
   cdnUrl: string;
 }
 
+export const getPublicationRetryTarget = (
+  items: readonly ServicePublication[],
+  targetCardId: string,
+): ServicePublication | undefined =>
+  items.find(
+    (item) =>
+      item.cardId === targetCardId &&
+      item.internalStatus.toLowerCase() === 'failed' &&
+      item.availableActions.includes('retry'),
+  );
+
+export const canRetryPublication = (item: ServicePublication): boolean =>
+  Boolean(getPublicationRetryTarget([item], item.cardId));
+
 export type ServicePublicationStatus = 'draft' | 'deploying' | 'prestable' | 'staging' | 'running' | 'offline';
 export type ServicePublicationAction =
   | 'publish_staging'
