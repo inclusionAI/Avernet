@@ -67,6 +67,31 @@ def test_literal_fallback_returns_stable_result_when_dense_and_keyword_are_down(
     assert diagnostics["keyword_unavailable"] is True
 
 
+def test_legacy_literal_fallback_reports_candidate_source(tmp_path):
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.side_effect = RuntimeError("qdrant unavailable")
+    vector_store.text_search.side_effect = RuntimeError("keyword unavailable")
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="legacy",
+        top_k=3,
+        vector_min_score=0.9,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["candidate_source"] == "literal_fallback"
+
+
 def test_auto_mode_degrades_to_keyword_when_dense_search_fails(tmp_path):
     from app.domain.models.vector_search_hit import VectorSearchHit
 
@@ -108,6 +133,7 @@ def test_auto_mode_degrades_to_keyword_when_dense_search_fails(tmp_path):
     assert [result.profile_key for result in results] == ["worker:default"]
     diagnostics = runtime_config["_retrieval"]
     assert diagnostics["score_source"] == "hybrid_rrf"
+    assert diagnostics["candidate_source"] == "keyword_fallback"
     assert diagnostics["keyword_search_used"] is True
     assert diagnostics["semantic_unavailable"] is True
     assert diagnostics["keyword_unavailable"] is False
@@ -675,6 +701,46 @@ def test_successful_semantic_query_skips_remote_keyword_when_local_snapshot_suff
     assert diagnostics["literal_fallback_used"] is False
 
 
+def test_empty_embedding_uses_sufficient_local_keyword_without_remote_qdrant(
+    tmp_path,
+):
+    vector_store = Mock()
+    vector_store.text_search.side_effect = AssertionError(
+        "dense-outage keyword search must use the local snapshot"
+    )
+    service = service_for(
+        vector_store,
+        RegexFallbackIndex(
+            [
+                fallback_point("worker:default", "星河 数据分析助手"),
+                fallback_point("second:default", "星河 数据分析平台"),
+            ]
+        ),
+        tmp_path,
+    )
+    service._fragment_config.expand_factor = 1
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=2,
+        runtime_config=runtime_config,
+        vector_min_score=0.0,
+    )
+
+    vector_store.text_search.assert_not_called()
+    assert {result.profile_key for result in results} == {
+        "worker:default",
+        "second:default",
+    }
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["keyword_source"] == "local_snapshot"
+    assert diagnostics["local_keyword_sufficient"] is True
+    assert diagnostics["keyword_unavailable"] is False
+
+
 def test_insufficient_local_keyword_still_uses_remote_keyword_candidates(tmp_path):
     from app.domain.models.vector_search_hit import VectorSearchHit
 
@@ -793,3 +859,30 @@ def test_local_keyword_path_uses_final_topk_not_expand_budget_for_sufficiency(
     diagnostics = runtime_config["_retrieval"]
     assert diagnostics["keyword_source"] == "local_snapshot"
     assert diagnostics["local_keyword_sufficient"] is True
+
+
+def test_fragment_regex_fallback_overwrites_precomputed_dense_provenance(tmp_path):
+    vector_store = Mock()
+    vector_store.size.return_value = 1
+    vector_store.search.return_value = []
+    vector_store.text_search.side_effect = RuntimeError("keyword unavailable")
+    service = service_for(
+        vector_store, RegexFallbackIndex([fallback_point()]), tmp_path
+    )
+    service._fragment_config.enable_fragment_embedding = True
+
+    runtime_config = {}
+    results = service.match(
+        query_embedding=[1.0],
+        query="星河 数据分析",
+        mode="fragment",
+        top_k=3,
+        vector_min_score=0.9,
+        runtime_config=runtime_config,
+    )
+
+    assert [result.profile_key for result in results] == ["worker:default"]
+    diagnostics = runtime_config["_retrieval"]
+    assert diagnostics["score_source"] == "regex_fallback"
+    assert diagnostics["literal_fallback_used"] is True
+    assert diagnostics["candidate_source"] == "literal_fallback"

@@ -33,6 +33,13 @@ export BCSFUSE_PROVIDER_MODE="runtime"
 export QDRANT_URL="http://127.0.0.1:6333"
 python main.py
 
+# Runtime with Qdrant Server defaults to 2 workers; each worker has a 256
+# active HTTP-task limit. The 2048 TCP backlog absorbs short bursts across both
+# workers. Local-mode Qdrant uses 1 worker because its storage path is
+# process-exclusive. Keep an explicit guard if starting uvicorn directly:
+
+uvicorn main:app --host 0.0.0.0 --port 8765 --workers 2 --backlog 2048 --limit-concurrency 256
+
 # Dev mode (SQLite + Qdrant Local)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="dev"
@@ -185,8 +192,9 @@ export EMBEDDING_RETRY_BUDGET_MS="2000"
 # model 429 when the provider does not return Retry-After. Runtime replicas share
 # the resulting exhausted state through MySQL bcsfuse_embedding_capacity_states.
 # EMBEDDING_QUOTA_MAX_CALLS_PER_MINUTE=30 is a proactive cluster-wide upstream
-# call limit. It counts provider calls, not unique queries, so batch=32 keeps its
-# capacity advantage. Set it from the actual model quota; 0 disables admission.
+# call limit. It counts provider calls, not unique queries. The capacity profile
+# uses batch=16 so cold bursts complete while bounded p95 stays low; set the
+# call quota from the actual model quota. 0 disables proactive admission.
 # EMBEDDING_QUOTA_PERIOD_SECONDS=60 defines the shared call window.
 
 Real-model validation requires search-visible workers. Workers created with

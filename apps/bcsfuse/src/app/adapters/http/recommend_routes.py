@@ -363,7 +363,12 @@ async def recommend_bots(
             retrieval_dependency_circuit=(
                 getattr(app_state, "retrieval_dependency_circuit", None)
             ),
-            offload=run_search_in_threadpool,
+            offload=(
+                getattr(
+                    app_state, "retrieval_dependency_offload", None
+                )
+                or run_search_in_threadpool
+            ),
         )
         outcome = await agent_search_service.recommend(command)
     except ValueError as error:
@@ -388,82 +393,83 @@ async def recommend_bots(
     try:
         candidate_response = outcome.response
         runtime_config = outcome.config_applied
-
-        # Phase D: 构建响应 metadata（在创建响应之前）
         metadata = candidate_response.metadata
         direct_keyword_route = metadata.get("query_route") == "direct_keyword"
         direct_snapshot_used = metadata.get("direct_snapshot_used") is True
         metadata.update({
-            # Phase B: Threshold 信息
             "vector_min_score": vector_min_score,
             "rerank_min_score": rerank_min_score,
             "enable_rerank": enable_rerank,
-            "reranker_model": metadata.get("reranker_model", runtime_config.get("reranker_model")) if enable_rerank else None,
+            "reranker_model": (
+                metadata.get("reranker_model", runtime_config.get("reranker_model"))
+                if enable_rerank
+                else None
+            ),
             "expand_factor": runtime_config.get("expand_factor", 2),
-
-            # Phase F: Backward Compatibility 信息
             "explicit_min_score_provided": explicit_min_score_provided,
             "min_score_source": min_score_source,
             "min_score_compat_mode": min_score_compat_mode,
             "min_score_stage": min_score_stage,
-
-            # 向量搜索信息
             "candidate_source": metadata.get(
                 "candidate_source",
                 "direct_snapshot" if direct_snapshot_used else "vector",
             ),
             "vector_search_used": metadata.get(
                 "vector_search_used",
-                not direct_keyword_route and metadata.get("semantic_unavailable") is not True,
+                not direct_keyword_route
+                and metadata.get("semantic_unavailable") is not True,
             ),
-            "keyword_search_used": metadata.get("keyword_search_used", False) is True,
-            "literal_fallback_used": metadata.get("literal_fallback_used", False) is True,
-            "literal_fallback_default_used": (
-                metadata.get("literal_fallback_default_used", False) is True
-            ),
-
-            # Fragment 和 Rerank 信息
+            "keyword_search_used": metadata.get(
+                "keyword_search_used", False
+            ) is True,
+            "literal_fallback_used": metadata.get(
+                "literal_fallback_used", False
+            ) is True,
+            "literal_fallback_default_used": metadata.get(
+                "literal_fallback_default_used", False
+            ) is True,
             "fragment_embedding_enabled": FeatureFlags.is_profile_embedding_index_enabled(),
-            "content_reload_enabled": True,  # Phase C: 已启用 content reload
-
-            # 统计信息（需要在创建 response 之后更新）
-            "recommendations_count": 0,  # 临时占位，稍后更新
+            "content_reload_enabled": True,
+            "recommendations_count": 0,
             "total_candidates": candidate_response.total_candidates,
             "selected_candidates": candidate_response.selected_candidates,
         })
 
-        # 转换为 BotRecommendationResponse
         response = build_v1_recommendation_response(
             candidate_response,
             driver_bot_id=request.driver_bot_id,
             trace_id=trace_id,
             query_type=request.type,
         )
-
-        # 更新 recommendations_count
         response.metadata["recommendations_count"] = len(response.recommendations)
 
-        # 从 Worker Registry 补充 trust_level
-        _enrich_trust_level(response)
+        # Registry reads may reach a synchronous durable store. Keep them off
+        # the request event loop while retaining the bounded search worker budget.
+        await run_search_in_threadpool(_enrich_trust_level, response)
 
         from app.adapters.http.recommend_response_cache import (
             store_v1_recommendation_response,
         )
-
         store_v1_recommendation_response(
             result_cache=result_cache,
             request=request,
             response=response,
         )
 
-        # Response metadata describes configuration, not proof a stage ran.
-        # Use the real stage counters for execution diagnostics.
         top_rec = response.recommendations[0] if response.recommendations else None
-        log_stage(logger, "response", recommendations_count=len(response.recommendations),
-                  duration_ms=round((perf_counter() - started) * 1000, 2),
-                  top_profile_key=top_rec.profile_key if top_rec else None,
-                  top_score=top_rec.score if top_rec else None)
-        log_candidates(logger, "response", ((r.profile_key, r.score) for r in response.recommendations))
+        log_stage(
+            logger,
+            "response",
+            recommendations_count=len(response.recommendations),
+            duration_ms=round((perf_counter() - started) * 1000, 2),
+            top_profile_key=top_rec.profile_key if top_rec else None,
+            top_score=top_rec.score if top_rec else None,
+        )
+        log_candidates(
+            logger,
+            "response",
+            ((r.profile_key, r.score) for r in response.recommendations),
+        )
 
         return response
     except Exception as error:

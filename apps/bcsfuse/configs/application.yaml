@@ -37,8 +37,15 @@ provider:
 server:
   host_env: BCSFUSE_SERVER_HOST
   port_env: BCSFUSE_SERVER_PORT
+  workers_env: BCSFUSE_SERVER_WORKERS
+  limit_concurrency_env: BCSFUSE_SERVER_LIMIT_CONCURRENCY
+  backlog_env: BCSFUSE_SERVER_BACKLOG
   default_host: 127.0.0.1
   default_port: 8765
+  # Server-mode Qdrant defaults to 2 processes; Local-mode Qdrant uses 1
+  # because a local storage path is process-exclusive.
+  runtime_default_workers: 2
+  local_default_workers: 1
 
 auth:
   provider: simple_token
@@ -129,11 +136,11 @@ embedding:
     enabled: true
     max_entries: 10000
     ttl_seconds: 300
-    max_query_batch_size: 32
+    max_query_batch_size: 16
     query_batch_wait_seconds: 0.05
     query_batch_peak_wait_seconds: 0.15
     query_batch_peak_threshold: 8
-    max_query_batch_workers: 2
+    max_query_batch_workers: 4
   request_dimensions: false
   # All embedding service credentials MUST come from env vars
 

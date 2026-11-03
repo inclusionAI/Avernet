@@ -125,13 +125,38 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         is_ready = False
         return is_ready, {"vector_store_error": type(error).__name__}
 
+    literal_fallback = getattr(vector_store, "literal_fallback_index", None)
+    literal_fallback_source = getattr(literal_fallback, "source", None)
+    literal_fallback_version = getattr(
+        literal_fallback,
+        "snapshot_index_version",
+        None,
+    )
+    literal_fallback_profiles = getattr(literal_fallback, "profile_count", None)
+    literal_fallback_publish_error = getattr(
+        vector_store,
+        "snapshot_publish_error_type",
+        None,
+    )
+    try:
+        literal_fallback_profile_count = int(literal_fallback_profiles or 0)
+    except (TypeError, ValueError):
+        literal_fallback_profile_count = 0
+    degraded_serving_ready = bool(
+        literal_fallback_source
+        and literal_fallback_version is not None
+        and literal_fallback_profile_count > 0
+        and not literal_fallback_publish_error
+    )
+
     if partial_readiness is not None:
         dense_ready = bool(partial_readiness.get("dense_qdrant_ready"))
         keyword_ready = bool(partial_readiness.get("keyword_qdrant_ready"))
         # An explicit false from the wrapper records durable index-state failure
         # even while a particular Qdrant replica answers a collection probe.
         index_state_ready = bool(partial_readiness.get("index_state_ready", True))
-        is_ready = is_ready and dense_ready and index_state_ready
+        is_ready = is_ready and (dense_ready or degraded_serving_ready)
+        is_ready = is_ready and index_state_ready
 
     connection = getattr(vector_store, "connection", None)
     index_stale = bool(getattr(vector_store, "index_stale", False))
@@ -156,8 +181,18 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         is_ready = False
     index_size: int | None = None
     index_size_unavailable = False
+    dense_probed_unavailable = bool(
+        (partial_readiness or {}).get("dense_qdrant_ready") is False
+    )
+    # The size probe is metadata, not a serving dependency. When dense probing
+    # already proved that the hard dependency is down, another Qdrant call can
+    # only delay the readiness result and the terminal fail-fast decision.
     size_probe = getattr(vector_store, "size", None)
-    if callable(size_probe):
+    if dense_probed_unavailable:
+        index_size_unavailable = True
+        if profile_embedding_index_enabled:
+            is_ready = False
+    elif callable(size_probe):
         try:
             index_size = int(await run_in_threadpool(size_probe))
             if index_size < 0:
@@ -172,19 +207,6 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
                 is_ready = False
     if startup_rebuild_failed:
         is_ready = False
-    literal_fallback = getattr(vector_store, "literal_fallback_index", None)
-    literal_fallback_source = getattr(literal_fallback, "source", None)
-    literal_fallback_version = getattr(
-        literal_fallback,
-        "snapshot_index_version",
-        None,
-    )
-    literal_fallback_profiles = getattr(literal_fallback, "profile_count", None)
-    literal_fallback_publish_error = getattr(
-        vector_store,
-        "snapshot_publish_error_type",
-        None,
-    )
     vector_store_info: dict = {
         "vector_store_available": True,
         "qdrant_mode": getattr(connection, "mode", None),
@@ -231,6 +253,7 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         "literal_fallback_index_version": literal_fallback_version,
         "literal_fallback_profiles": literal_fallback_profiles,
         "literal_fallback_publish_error_type": literal_fallback_publish_error,
+        "degraded_serving_ready": degraded_serving_ready,
         "embedding_model": getattr(vector_store, "embedding_model", None),
         "embedding_dimension": getattr(
             vector_store, "embedding_dimension", None
@@ -277,6 +300,12 @@ async def _index_readiness(context: ApplicationContext) -> tuple[bool, dict]:
         vector_store_info["degraded"] = True
     if backfill["running"] or backfill["failed"]:
         vector_store_info["degraded"] = True
+    # Readiness describes whether this replica can keep serving traffic, not
+    # whether the primary index reconciliation state is clean.  A non-empty
+    # durable local snapshot keeps the pod in the serving pool while remote
+    # dependencies or background reconciliation recover.
+    if degraded_serving_ready:
+        is_ready = True
     return is_ready, vector_store_info
 
 
@@ -526,16 +555,22 @@ def create_bcsfuse_app(
     )
     capacity_settings = SearchCapacitySettings.from_context(context)
     from app.adapters.http.search_threadpool import (
+        configure_local_fallback_thread_capacity,
         configure_search_thread_capacity,
+        route_search_offload,
     )
 
     configure_search_thread_capacity(capacity_settings.max_inflight)
+    configure_local_fallback_thread_capacity(capacity_settings.max_inflight)
     app.add_middleware(
         SearchCapacityMiddleware,
         settings=capacity_settings,
         retrieval_dependency_circuit=retrieval_dependency_circuit,
     )
     app.state.search_capacity_max_inflight = capacity_settings.max_inflight
+    app.state.retrieval_dependency_offload = route_search_offload(
+        retrieval_dependency_circuit
+    )
     app.state.local_fallback_capacity_max_inflight = (
         capacity_settings.local_fallback_max_inflight
     )

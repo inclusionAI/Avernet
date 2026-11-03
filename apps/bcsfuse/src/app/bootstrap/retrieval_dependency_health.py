@@ -43,7 +43,7 @@ class RetrievalDependencyHealthMonitor:
     async def observe_once(self) -> str:
         """Observe dependency readiness within the hard health budget."""
 
-        return await self.observe_once_with_timeout(timeout_seconds=1.0)
+        return await self.observe_once_with_timeout(timeout_seconds=3.0)
 
     async def observe_once_with_timeout(self, *, timeout_seconds: float) -> str:
         """Observe once and never allow startup to inherit a dependency hang."""
@@ -56,16 +56,25 @@ class RetrievalDependencyHealthMonitor:
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError:
-            # A hard health timeout is a serving-availability signal. Fail over
-            # to terminal local fallback immediately while a later bounded
-            # health sample can recover the semantic chain.
-            self.circuit.record_outage()
+            # A probing timeout does not prove that both retrieval
+            # dependencies are dead. Keep the serving circuit unchanged so a
+            # still-available keyword chain is not forced to terminal fallback.
             self._last_state = "probe_timeout"
             return self._last_state
-        dense_ready = bool(info.get("dense_qdrant_ready", False)) is True
-        keyword_ready = bool(info.get("keyword_qdrant_ready", False)) is True
-        dense_observed = "dense_qdrant_ready" in info
-        keyword_observed = "keyword_qdrant_ready" in info
+        dense_ready = bool(
+            info.get("dense_qdrant_ready", info.get("dense_qdrant_available"))
+        ) is True
+        keyword_ready = bool(
+            info.get("keyword_qdrant_ready", info.get("keyword_qdrant_available"))
+        ) is True
+        dense_observed = (
+            "dense_qdrant_ready" in info
+            or "dense_qdrant_available" in info
+        )
+        keyword_observed = (
+            "keyword_qdrant_ready" in info
+            or "keyword_qdrant_available" in info
+        )
 
         if (
             dense_observed
@@ -79,6 +88,15 @@ class RetrievalDependencyHealthMonitor:
         if dense_ready and keyword_ready:
             self.circuit.record_healthy()
             self._last_state = "healthy"
+            return self._last_state
+        if (
+            dense_observed
+            and keyword_observed
+            and dense_ready is False
+            and keyword_ready is True
+        ):
+            self.circuit.record_dense_outage()
+            self._last_state = "dense_outage"
             return self._last_state
         self._last_state = "unknown"
         return self._last_state

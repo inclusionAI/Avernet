@@ -51,6 +51,7 @@ class PartialVectorStore:
         index_stale: bool = False,
         index_state_unavailable: bool = False,
         startup_rebuild_failed: bool = False,
+        literal_fallback_profiles: int | None = None,
     ) -> None:
         self.startup_rebuild_failed = startup_rebuild_failed
         self.connection = type("Connection", (), {"mode": "server"})()
@@ -68,6 +69,11 @@ class PartialVectorStore:
             "dense_qdrant_ready": dense_ready,
             "keyword_qdrant_ready": keyword_ready,
         }
+        self.literal_fallback_index = (
+            ServingLiteralFallback(profiles=literal_fallback_profiles)
+            if literal_fallback_profiles is not None
+            else None
+        )
 
     def index_dependency_readiness(self) -> dict[str, bool]:
         return dict(self._index_dependency_readiness)
@@ -77,6 +83,18 @@ class PartialVectorStore:
         # It would otherwise turn a keyword-only outage into full unavailability.
         if not self._dense_ready:
             raise RuntimeError("dense qdrant probe failed")
+
+
+class ServingLiteralFallback:
+    source = "durable"
+    snapshot_index_version = 7
+
+    def __init__(self, *, profiles: int) -> None:
+        self._profiles = profiles
+
+    @property
+    def profile_count(self) -> int:
+        return self._profiles
 
 
 class LegacyVectorStore:
@@ -125,6 +143,57 @@ def test_keyword_qdrant_outage_is_degraded_but_ready() -> None:
     assert body["keyword_qdrant_available"] is False
     assert body["dense_qdrant_unavailable"] is False
     assert body["keyword_qdrant_unavailable"] is True
+
+
+def test_dense_qdrant_outage_with_serving_snapshot_stays_ready() -> None:
+    response = ready_response(
+        PartialVectorStore(
+            dense_ready=False,
+            keyword_ready=True,
+            literal_fallback_profiles=504,
+        )
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is True
+    assert body["degraded_serving_ready"] is True
+    assert body["dense_qdrant_available"] is False
+    assert body["keyword_qdrant_available"] is True
+
+
+def test_dual_qdrant_outage_with_serving_snapshot_stays_ready() -> None:
+    response = ready_response(
+        PartialVectorStore(
+            dense_ready=False,
+            keyword_ready=False,
+            literal_fallback_profiles=504,
+        )
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is True
+    assert body["degraded_serving_ready"] is True
+    assert body["dense_qdrant_available"] is False
+    assert body["keyword_qdrant_available"] is False
+
+
+def test_stale_index_with_serving_snapshot_stays_in_serving_pool() -> None:
+    response = ready_response(
+        PartialVectorStore(
+            dense_ready=False,
+            keyword_ready=False,
+            index_stale=True,
+            literal_fallback_profiles=504,
+        )
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is True
+    assert body["degraded_serving_ready"] is True
+    assert body["index_stale"] is True
 
 
 def test_dense_qdrant_outage_makes_pod_not_ready() -> None:
@@ -472,3 +541,21 @@ def test_partial_readiness_recovers_stale_read_only_replica() -> None:
     assert owner.index_revision_stale is False
     assert owner.index_stale is False
     assert result["index_state_ready"] is True
+
+
+def test_unavailable_dense_readiness_does_not_probe_index_size() -> None:
+    class DenseDownWithSize(PartialVectorStore):
+        def __init__(self) -> None:
+            super().__init__(dense_ready=False, keyword_ready=True)
+            self.size_called = False
+
+        def size(self) -> int:
+            self.size_called = True
+            return 1512
+
+    store = DenseDownWithSize()
+    response = ready_response(store)
+
+    assert response.status_code == 503
+    assert response.json()["dense_qdrant_available"] is False
+    assert store.size_called is False

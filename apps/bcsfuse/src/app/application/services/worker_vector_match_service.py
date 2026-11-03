@@ -660,6 +660,9 @@ class WorkerVectorMatchService(FragmentMatchingMixin, LiteralFallbackMixin):
 
         diagnostics = {
             "score_source": "hybrid_rrf" if keyword_outcome.available else "vector_weighted",
+            "candidate_source": (
+                "keyword_fallback" if keyword_outcome.available else "dense"
+            ),
             "keyword_search_used": bool(keyword_results),
             "rerank_degraded": False,
             "semantic_unavailable": True,
@@ -677,6 +680,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin, LiteralFallbackMixin):
             raise RuntimeError("dense and keyword retrieval unavailable")
 
         diagnostics["score_source"] = "regex_fallback"
+        diagnostics["candidate_source"] = "literal_fallback"
         diagnostics["literal_fallback_used"] = True
         return self._literal_fallback_matches(
             query=query,

@@ -228,11 +228,27 @@ def configure_logging(
         except Exception:
             pass  # 文件日志初始化失败，不影响控制台日志
 
-    # 6. 配置根 logger
+    # 6. 配置根 logger。进程内日志写入放到独立 worker，避免 stdout/console 的
+    # 同步 I/O 阻塞 Uvicorn accept loop。日志队列有界；溢出必须显式计数。
+    from app.infra.logging.nonblocking_logging import NonblockingLoggingHandler
+
+    queue_size = int(os.getenv("BCSFUSE_LOGGING_QUEUE_SIZE", "4096"))
+    if os.getenv("BCSFUSE_ASYNC_LOGGING", "true").strip().lower() not in {
+        "false", "0", "no", "off",
+    }:
+        destination_handlers = [
+            NonblockingLoggingHandler(
+                handlers=handlers,
+                queue_size=queue_size,
+            )
+        ]
+    else:
+        destination_handlers = handlers
+
     logging.basicConfig(
         level=numeric_level,
         format=DEFAULT_FORMAT if use_json_format else fmt,
-        handlers=handlers,
+        handlers=destination_handlers,
         force=True,  # 强制重新配置，即使已有配置
     )
 

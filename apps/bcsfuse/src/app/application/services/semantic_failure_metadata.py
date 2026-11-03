@@ -31,6 +31,17 @@ def _retry_after_seconds(error: BaseException) -> float | None:
         return None
 
 
+def annotate_semantic_failure(metadata: dict[str, Any]) -> None:
+    """Publish the stable semantic reason on the fallback envelope."""
+
+    if (
+        metadata.get("semantic_unavailable") is True
+        and metadata.get("semantic_status_code") == 429
+        and not metadata.get("semantic_reason_code")
+    ):
+        metadata["semantic_reason_code"] = "embedding_quota_exhausted"
+
+
 def semantic_failure_metadata(error: BaseException) -> dict[str, Any]:
     status_code = _provider_status_code(error)
     reason_code = getattr(error, "reason_code", None)
@@ -46,4 +57,7 @@ def semantic_failure_metadata(error: BaseException) -> dict[str, Any]:
     }
 
 
-__all__ = ["semantic_failure_metadata"]
+__all__ = [
+    "annotate_semantic_failure",
+    "semantic_failure_metadata",
+]

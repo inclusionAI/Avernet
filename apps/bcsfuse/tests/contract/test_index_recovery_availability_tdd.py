@@ -38,6 +38,25 @@ class NoopDelegate:
         return None
 
 
+class ReadOnlyStartupStore:
+    """An active durable owner exists; this replica must only synchronize."""
+
+    def __init__(self) -> None:
+        self.read_only = True
+        self.events: list[str] = []
+
+    def synchronize_read_view(self) -> dict[str, object]:
+        self.events.append("sync")
+        return {"read_only": True, "synchronized_version": 49}
+
+    def rebuild_from_backend(self) -> dict[str, int]:  # pragma: no cover
+        self.events.append("rebuild")
+        raise AssertionError("read-only startup must not rebuild")
+
+    def close(self) -> None:
+        self.events.append("close")
+
+
 class FailingThenRecoveredStore:
     def __init__(self) -> None:
         self.rebuild_count = 0
@@ -85,6 +104,23 @@ async def test_startup_rebuild_failure_is_cleared_by_retry() -> None:
     assert store.rebuild_count == 2
     assert store.startup_rebuild_failed is False
     assert store.startup_rebuild_error_type is None
+
+
+@pytest.mark.asyncio
+async def test_active_owner_replica_synchronizes_without_rebuild() -> None:
+    store = ReadOnlyStartupStore()
+    provider = VectorIndexStartupProvider(
+        NoopDelegate(), store, recovery_interval_seconds=0.01
+    )
+
+    await provider.initialize()
+
+    assert store.events == ["sync"]
+    assert getattr(store, "startup_rebuild_failed", False) is False
+
+    await provider.shutdown()
+
+    assert store.events == ["sync", "close"]
 
 
 def _recovery_context(store: Any) -> ApplicationContext:

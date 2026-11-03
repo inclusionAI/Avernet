@@ -78,6 +78,12 @@ def build_final_search_outcome(
                     )
                 )
                 metadata.pop("fallback_unavailable", None)
+                metadata["candidate_source"] = "local_snapshot"
+                metadata["score_source"] = "local_snapshot"
+                runtime_config["_retrieval"] = {
+                    "candidate_source": "local_snapshot",
+                    "score_source": "local_snapshot",
+                }
     except Exception:
         results = ()
     if not results:
@@ -134,6 +140,7 @@ def build_final_recommendation_outcome(
                     )
                 )
                 metadata["candidate_source"] = "local_snapshot"
+                metadata["score_source"] = "local_snapshot"
     except Exception:
         recommendations = []
     if not recommendations:
@@ -145,6 +152,7 @@ def build_final_recommendation_outcome(
         )
     else:
         metadata["candidate_source"] = "local_snapshot"
+        metadata["score_source"] = "local_snapshot"
     publish_status(metadata)
     response = response_type(
         question=command.question,

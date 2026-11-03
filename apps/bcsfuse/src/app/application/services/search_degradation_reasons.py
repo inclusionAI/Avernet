@@ -12,6 +12,8 @@ def degraded_reasons(metadata: Mapping[str, Any]) -> tuple[str, ...]:
     reasons: list[str] = []
     for reason in (
         "semantic_unavailable",
+        "dense_failfast",
+        "dense_unavailable",
         "keyword_bypassed",
         "keyword_unavailable",
         "literal_fallback_used",

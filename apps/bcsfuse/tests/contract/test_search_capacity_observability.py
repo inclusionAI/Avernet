@@ -183,7 +183,9 @@ def test_search_worker_capacity_is_isolated_from_default_threadpool(monkeypatch)
 
 def test_composition_configures_dedicated_search_workers_from_admission_capacity():
     from app.adapters.http.search_threadpool import (
+        configure_local_fallback_thread_capacity,
         configure_search_thread_capacity,
+        get_local_fallback_thread_capacity,
         get_search_thread_capacity,
     )
 
@@ -193,5 +195,7 @@ def test_composition_configures_dedicated_search_workers_from_admission_capacity
     try:
         assert app.state.search_capacity_max_inflight == 37
         assert get_search_thread_capacity() == 37
+        assert get_local_fallback_thread_capacity() == 37
     finally:
         configure_search_thread_capacity(64)
+        configure_local_fallback_thread_capacity(64)

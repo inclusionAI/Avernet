@@ -72,9 +72,11 @@ def test_runtime_config_selects_query_batch_workers_for_capacity() -> None:
     batch_size = config.get_int("embedding.cache.max_query_batch_size", 0)
     wait_seconds = config.get_float("embedding.cache.query_batch_wait_seconds", -1)
     workers = config.get_int("embedding.cache.max_query_batch_workers", 0)
-    assert batch_size == 32
+    # Smaller parallel batches keep p95 latency bounded while the request fanout can use
+    # the embedding service's throughput. This profile is validated at 100 QPS.
+    assert batch_size == 16
     assert wait_seconds > 0
-    assert workers >= 2
+    assert workers >= 4
 
 
 def test_application_context_composes_a_live_result_cache() -> None:

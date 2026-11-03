@@ -741,7 +741,12 @@ def include_oss_business_routes(app) -> None:
                 execution_budget=getattr(
                     app_state, "agent_search_execution_budget", None
                 ),
-                offload=run_search_in_threadpool,
+                offload=(
+                    getattr(
+                        app_state, "retrieval_dependency_offload", None
+                    )
+                    or run_search_in_threadpool
+                ),
                 index_state_provider=(
                     lambda: search_index_state_metadata(registry)
                     if registry is not None

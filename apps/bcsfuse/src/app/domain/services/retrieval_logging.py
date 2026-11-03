@@ -5,6 +5,18 @@ import logging
 from collections.abc import Iterable
 
 
+class _LazyJSON:
+    """Serialize metrics on the logging writer, not on the business caller."""
+
+    __slots__ = ("_metrics",)
+
+    def __init__(self, metrics: dict):
+        self._metrics = dict(metrics)
+
+    def __str__(self) -> str:
+        return json.dumps(self._metrics, ensure_ascii=False, default=str)
+
+
 def log_stage(logger: logging.Logger, stage: str, *, level: int = logging.INFO, **metrics) -> None:
     """Emit one stage summary for text and structured handlers."""
     if not logger.isEnabledFor(level):
@@ -12,7 +24,7 @@ def log_stage(logger: logging.Logger, stage: str, *, level: int = logging.INFO, 
     logger.log(
         level,
         "[RETRIEVAL] stage=%s %s", stage,
-        json.dumps(metrics, ensure_ascii=False, default=str),
+        _LazyJSON(metrics),
         extra={"retrieval_stage": stage, **metrics},
     )
 

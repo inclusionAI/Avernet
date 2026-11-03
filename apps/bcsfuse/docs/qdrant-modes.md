@@ -92,7 +92,8 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
   every query. Runtime composition probes dense and keyword readiness before
   accepting search traffic; an explicit dual outage preopens the terminal
   circuit so its admission slots cannot be consumed by dead or hanging Server
-  calls.
+  calls. Terminal snapshot lookup then executes through a dedicated candidate
+  worker pool instead of consuming the semantic worker budget.
   If both dense and lexical retrieval fail, the bounded literal path first serves
   token-overlap results; when none overlap, it returns a stable default profile
   set that still honors filters, exclusions, registry state and trusted allowed
@@ -128,7 +129,8 @@ a newer shared revision; it does not rebuild or mutate Qdrant. State-store
 failure is a 503 rather than a write success or empty 200; readiness exposes
 `index_state_unavailable: true`, and mutations fail closed with stable code
 `INDEX_STATE_UNAVAILABLE` rather than a misleading `INDEX_READ_ONLY`. Set `BCSFUSE_INDEX_OWNER_ID` to a
-stable pod/application identity, and configure
+stable pod/application identity; BCSFuse appends the uvicorn-worker process ID so two workers in one
+Pod can never co-own the lease. Configure
 `vector.index.stale_after_seconds` (default 20) and
 `vector.index.lease_seconds` (default 30). The default owner heartbeat runs
 every ten seconds, so a failed owner can be taken over after the bounded

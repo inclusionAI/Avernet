@@ -90,7 +90,7 @@ def test_unknown_or_partial_readiness_does_not_preopen_terminal_fallback() -> No
     assert target.outaged is False
 
 
-def test_bounded_health_probe_timeout_preopens_terminal_fallback() -> None:
+def test_health_probe_timeout_does_not_claim_a_terminal_dual_outage() -> None:
     from app.bootstrap.retrieval_dependency_health import (
         RetrievalDependencyHealthMonitor,
     )
@@ -111,4 +111,4 @@ def test_bounded_health_probe_timeout_preopens_terminal_fallback() -> None:
     state = asyncio.run(scenario())
 
     assert state == "probe_timeout"
-    assert monitor.circuit.outaged is True
+    assert monitor.circuit.outaged is False

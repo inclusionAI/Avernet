@@ -147,6 +147,7 @@ class FragmentMatchingMixin(FragmentKeywordRoutingMixin):
                 "keyword_search_used": False,
                 "rerank_degraded": False,
                 "score_source": "regex_fallback",
+                "candidate_source": "literal_fallback",
                 "semantic_unavailable": True,
                 "keyword_bypassed": True,
                 "keyword_unavailable": False,
@@ -314,9 +315,25 @@ class FragmentMatchingMixin(FragmentKeywordRoutingMixin):
             runtime_config is not None
             and runtime_config.get("query_route") == "direct_keyword"
         )
-        semantic_unavailable = not dense_available and not direct_keyword
+        dense_failfast = (
+            runtime_config is not None
+            and runtime_config.get("dense_failfast") is True
+        )
+        semantic_unavailable = (
+            not dense_available
+            and not direct_keyword
+            and not dense_failfast
+        )
+        candidate_source = (
+            "keyword_fallback"
+            if not dense_available and lexical
+            else "hybrid"
+            if lexical
+            else "dense"
+        )
         diagnostics = {
             "keyword_search_used": bool(lexical),
+            "candidate_source": candidate_source,
             "rerank_degraded": False,
             "score_source": (
                 "direct_keyword" if direct_keyword and lexical
@@ -324,6 +341,8 @@ class FragmentMatchingMixin(FragmentKeywordRoutingMixin):
                 else "vector_weighted"
             ),
             "semantic_unavailable": semantic_unavailable,
+            "dense_failfast": dense_failfast,
+            "dense_unavailable": not dense_available,
             "keyword_unavailable": not keyword_outcome.available,
             "keyword_source": keyword_outcome.source,
             "local_keyword_sufficient": keyword_outcome.local_keyword_sufficient,
@@ -355,6 +374,7 @@ class FragmentMatchingMixin(FragmentKeywordRoutingMixin):
                 "semantic degradation or retrieval outage; using literal fallback",
             )
             diagnostics["score_source"] = "regex_fallback"
+            diagnostics["candidate_source"] = "literal_fallback"
             diagnostics["literal_fallback_used"] = True
             results = self._literal_fallback_matches(
                 query=query,

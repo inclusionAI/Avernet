@@ -32,6 +32,9 @@ from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
+from app.application.services.candidate_source_policy import (
+    apply_recommendation_candidate_source,
+)
 from app.application.services.semantic_failure_metadata import semantic_failure_metadata
 from app.domain.models.domain_coverage import DomainCoverage
 from app.domain.models.retrieval_mode import RetrievalMode
@@ -325,19 +328,7 @@ class WorkerCandidateRecommendationImpl:
             }
             metadata.update(runtime_config.get("_retrieval", {}) if runtime_config else {})
             metadata.update(runtime_config.get("_semantic_failure", {}) if runtime_config else {})
-            if (
-                metadata.get("literal_fallback_used") is True
-                or metadata.get("literal_fallback_default_used") is True
-                or metadata.get("score_source") == "regex_fallback"
-            ):
-                metadata["candidate_source"] = "literal_fallback"
-            elif (
-                metadata.get("semantic_unavailable") is True
-                and metadata.get("keyword_search_used") is True
-            ):
-                metadata["candidate_source"] = "keyword_fallback"
-            elif metadata.get("keyword_search_used") is True:
-                metadata["candidate_source"] = "hybrid"
+            apply_recommendation_candidate_source(metadata)
 
             return CandidateRecommendationResponse(
                 recommendations=all_recommendations,
@@ -694,7 +685,10 @@ class WorkerCandidateRecommendationImpl:
             runtime_config is not None
             and runtime_config.get("query_route") == "direct_keyword"
         )
-        if direct_keyword:
+        dense_failfast = (
+            runtime_config is not None and runtime_config.get("dense_failfast") is True
+        )
+        if direct_keyword or dense_failfast:
             pass
         elif self._embedding_generator is None:
             logger.warning(

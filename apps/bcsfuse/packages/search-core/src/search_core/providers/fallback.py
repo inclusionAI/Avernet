@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import re
 import unicodedata
 
@@ -27,15 +28,33 @@ def _query_tokens(query: str) -> set[str]:
     return tokens
 
 
+def _normalised_filters(filters) -> dict[str, frozenset[str]]:
+    normalised: dict[str, frozenset[str]] = {}
+    for key, values in (filters or {}).items():
+        requested_values = (
+            values if isinstance(values, (list, tuple, set, frozenset)) else [values]
+        )
+        normalised[key] = frozenset(str(value) for value in requested_values)
+    return normalised
+
+
 def _payload_matches_filter(
-    payload: dict, key: str, requested: tuple[str, ...] | str
+    payload: dict, key: str, requested: tuple[str, ...] | str | frozenset[str]
 ) -> bool:
     actual = payload.get(key)
     actual_values = actual if isinstance(actual, list) else [actual]
-    requested_values = (
-        requested if isinstance(requested, (list, tuple, set, frozenset)) else [requested]
+    requested_scalars = (
+        requested
+        if isinstance(requested, frozenset)
+        else {
+            str(value)
+            for value in (
+                requested
+                if isinstance(requested, (list, tuple, set, frozenset))
+                else [requested]
+            )
+        }
     )
-    requested_scalars = {str(value) for value in requested_values}
     return any(str(value) in requested_scalars for value in actual_values)
 
 
@@ -51,6 +70,10 @@ class RegexFallbackIndex:
         self._prepared_points = tuple(
             (point, self._searchable_text(point)) for point in self._points
         )
+        self._token_index: dict[str, set[int]] = {}
+        for position, (_, text) in enumerate(self._prepared_points):
+            for token in _query_tokens(text):
+                self._token_index.setdefault(token, set()).add(position)
 
     def _eligible(self, point: VectorPoint, filters, allowed_ids) -> bool:
         if allowed_ids is not None and point.id not in allowed_ids:
@@ -84,23 +107,27 @@ class RegexFallbackIndex:
             ),
         ).casefold()
 
-    def keyword_search(self, query, limit, filters, allowed_ids):
-        if not query.strip() or limit <= 0:
-            return []
-        if allowed_ids == frozenset():
-            return []
-        tokens = _query_tokens(query)
-        if not tokens:
-            return []
-        matches: list[tuple[float, VectorPoint]] = []
-        for point, text in self._prepared_points:
-            if not self._eligible(point, filters, allowed_ids):
-                continue
-            overlap = sum(1 for token in tokens if token in text)
-            if overlap:
-                score = overlap / len(tokens)
-                matches.append((score, point))
-        matches.sort(key=lambda item: (-item[0], item[1].id))
+    def _positions_for_token(self, token: str) -> frozenset[int]:
+        """Return prepared positions matching one query token.
+
+        Exact-key lookup keeps the common path O(number of query tokens).
+        A rare substring query ("vector" matching "vectorization") scans the
+        bounded vocabulary; it must not force an O(token-length^2) startup
+        expansion for every indexed token.
+        """
+
+        exact = self._token_index.get(token)
+        if exact is not None:
+            return frozenset(exact)
+        return frozenset(
+            position
+            for indexed_token, positions in self._token_index.items()
+            if token in indexed_token
+            for position in positions
+        )
+
+    @staticmethod
+    def _hits(matches, limit):
         return [
             VectorSearchHit(
                 id=point.id,
@@ -109,6 +136,55 @@ class RegexFallbackIndex:
             )
             for score, point in matches[:limit]
         ]
+
+    def keyword_search(self, query, limit, filters, allowed_ids):
+        if not query.strip() or limit <= 0:
+            return []
+        if allowed_ids == frozenset():
+            return []
+        tokens = _query_tokens(query)
+        if not tokens:
+            return []
+        overlaps: dict[int, int] = {}
+        for token in tokens:
+            for position in self._positions_for_token(token):
+                overlaps[position] = overlaps.get(position, 0) + 1
+        token_count = len(tokens)
+        normalised_filters = _normalised_filters(filters)
+        ranked = heapq.nsmallest(
+            max(limit * 4, limit),
+            overlaps,
+            key=lambda position: (
+                -overlaps[position],
+                self._prepared_points[position][0].id,
+            ),
+        )
+        matches: list[tuple[float, VectorPoint]] = []
+        for position in ranked:
+            point = self._prepared_points[position][0]
+            if not self._eligible(point, normalised_filters, allowed_ids):
+                continue
+            matches.append((overlaps[position] / token_count, point))
+            if len(matches) >= limit:
+                return self._hits(matches, limit)
+        if len(matches) >= limit:
+            return self._hits(matches, limit)
+        ranked = sorted(
+            overlaps,
+            key=lambda position: (
+                -overlaps[position],
+                self._prepared_points[position][0].id,
+            ),
+        )
+        matches.clear()
+        for position in ranked:
+            point = self._prepared_points[position][0]
+            if not self._eligible(point, normalised_filters, allowed_ids):
+                continue
+            matches.append((overlaps[position] / token_count, point))
+            if len(matches) >= limit:
+                break
+        return self._hits(matches, limit)
 
     def default_search(self, limit, filters, allowed_ids=None):
         """Return deterministic configured defaults without query overlap.
@@ -122,9 +198,10 @@ class RegexFallbackIndex:
             return []
         if allowed_ids == frozenset():
             return []
+        normalised_filters = _normalised_filters(filters or {})
         matches = [
             point for point in self._points
-            if self._eligible(point, filters or {}, allowed_ids)
+            if self._eligible(point, normalised_filters, allowed_ids)
         ]
         matches.sort(key=lambda point: point.id)
         return [

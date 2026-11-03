@@ -55,3 +55,75 @@ def test_precomputed_text_preserves_keyword_and_default_results() -> None:
 
     defaults = index.default_search(limit=1, filters={"availability": "public"})
     assert [hit.id for hit in defaults] == ["worker:default"]
+
+
+def test_keyword_index_uses_a_precomputed_inverted_token_index() -> None:
+    point_a = VectorPoint(
+        id="a",
+        vector=[],
+        payload={"content": "python vectorization reliability"},
+    )
+    point_b = VectorPoint(
+        id="b",
+        vector=[],
+        payload={"content": "python vectorization"},
+    )
+    point_c = VectorPoint(
+        id="c",
+        vector=[],
+        payload={"content": "payment settlement"},
+    )
+    index = RegexFallbackIndex([point_a, point_b, point_c])
+
+    token_index = getattr(index, "_token_index", None)
+    assert token_index is not None
+    assert set(token_index["vectorization"]) == {0, 1}
+    assert set(token_index["reliability"]) == {0}
+
+    hits = index.keyword_search(
+        "python vector reliability",
+        limit=3,
+        filters={},
+        allowed_ids=None,
+    )
+    assert [hit.id for hit in hits] == ["a", "b"]
+    assert hits[0].score > hits[1].score
+
+
+
+def test_fallback_index_memory_is_bounded_by_unique_tokens() -> None:
+    point = VectorPoint(
+        id="worker:default",
+        vector=[],
+        payload={"content": "a" * 512},
+    )
+    index = RegexFallbackIndex([point])
+
+    token_index = getattr(index, "_token_index", None)
+    assert token_index is not None
+    assert len(token_index) == 1
+    assert set(token_index["a" * 512]) == {0}
+
+
+def test_keyword_results_beyond_the_top_prefix_survive_filters() -> None:
+    points = [
+        VectorPoint(
+            id=f"point-{position:02d}",
+            vector=[],
+            payload={
+                "content": "match",
+                "availability": "private" if position < 12 else "public",
+            },
+        )
+        for position in range(16)
+    ]
+    index = RegexFallbackIndex(points)
+
+    hits = index.keyword_search(
+        "match",
+        limit=3,
+        filters={"availability": "public"},
+        allowed_ids=None,
+    )
+
+    assert [hit.id for hit in hits] == ["point-12", "point-13", "point-14"]

@@ -20,6 +20,13 @@ from app.application.agent_search_resilience_cache import AgentSearchResilienceC
 from app.application.services.agent_search_execution_budget import (
     AgentSearchExecutionBudget,
 )
+from app.application.services.agent_search_resilience_policy import (
+    ensure_search_candidate_source,
+    has_degradation_markers,
+    outcome_is_empty,
+    preserve_dependency_state,
+    terminal_fallback,
+)
 from app.application.services.search_degradation_reasons import (
     degraded_reasons,
 )
@@ -50,6 +57,7 @@ from app.application.services.search_index_state import (
 )
 from app.application.services.worker_vector_match_types import MatchResult
 from app.application.services.semantic_failure_metadata import (
+    annotate_semantic_failure,
     semantic_failure_metadata,
 )
 from app.domain.models.retrieval_mode import RetrievalMode
@@ -92,23 +100,12 @@ class AgentSearchCommand:
 MAX_RECOMMEND_EXPAND_FACTOR = 3
 
 
-def _annotate_semantic_failure(metadata: dict[str, Any]) -> None:
-    """Publish the stable semantic reason independent of the fallback outcome."""
-
-    if (
-        metadata.get("semantic_unavailable") is True
-        and metadata.get("semantic_status_code") == 429
-        and not metadata.get("semantic_reason_code")
-    ):
-        metadata["semantic_reason_code"] = "embedding_quota_exhausted"
-
-
 def _mark_semantic_fallback(
     metadata: dict[str, Any], operation: str
 ) -> None:
     """Mark the terminal bounded-fallback state without inventing candidates."""
 
-    _annotate_semantic_failure(metadata)
+    annotate_semantic_failure(metadata)
     if metadata.get("semantic_unavailable") is not True:
         return
     if metadata.get("fallback_unavailable") is True:
@@ -372,12 +369,12 @@ class AgentSearchService:
             )
             if (
                 self._result_cache is not None
-                and not self._has_degradation_markers(outcome_metadata)
+                and not has_degradation_markers(outcome_metadata)
             ):
                 self._result_cache.store(key, outcome)
 
             if self._resilience_cache is not None:
-                if self._has_degradation_markers(outcome_metadata):
+                if has_degradation_markers(outcome_metadata):
                     known_good = self._resilience_cache.get_last_known_good(
                         key
                     )
@@ -389,7 +386,7 @@ class AgentSearchService:
                             else stale.metadata
                         )
                         self._apply_index_state(stale_metadata)
-                        self._preserve_dependency_state(
+                        preserve_dependency_state(
                             outcome_metadata, stale_metadata
                         )
                         stale_metadata["last_known_good_used"] = True
@@ -408,69 +405,14 @@ class AgentSearchService:
                 else:
                     self._resilience_cache.store_last_known_good(key, outcome)
 
-                if self._terminal_fallback(
+                if terminal_fallback(
                     outcome_metadata
-                ) and not self._outcome_is_empty(outcome):
+                ) and not outcome_is_empty(outcome):
                     self._resilience_cache.store_negative(key, outcome)
 
             outcome_metadata["cache_hit"] = False
             self._publish_status(outcome_metadata)
             return outcome
-
-    @staticmethod
-    def _has_degradation_markers(metadata: dict[str, Any]) -> bool:
-        if metadata.get("keyword_unavailable") is True:
-            return True
-        if metadata.get("semantic_unavailable") is True:
-            return True
-        if metadata.get("literal_fallback_used") is True:
-            return True
-        if metadata.get("score_source") == "regex_fallback":
-            return True
-        if metadata.get("retrieval_unavailable") is True:
-            return True
-        if metadata.get("candidate_unavailable") is True:
-            return True
-        if metadata.get("local_snapshot_used") is True:
-            return True
-        if metadata.get("last_known_good_used") is True:
-            return True
-        if metadata.get("index_complete") is False:
-            return True
-        return metadata.get("fallback_unavailable") is True
-
-    @staticmethod
-    def _outcome_is_empty(outcome: Any) -> bool:
-        if isinstance(outcome, AgentRecommendationOutcome):
-            return not outcome.response.recommendations
-        if isinstance(outcome, AgentSearchOutcome):
-            return not outcome.results
-        return True
-
-    @staticmethod
-    def _terminal_fallback(metadata: Mapping[str, Any]) -> bool:
-        return metadata.get("fallback_unavailable") is True
-
-    @staticmethod
-    def _preserve_dependency_state(
-        source: Mapping[str, Any], destination: dict[str, Any]
-    ) -> None:
-        for key in (
-            "semantic_unavailable",
-            "semantic_status_code",
-            "semantic_reason_code",
-            "semantic_retry_after_seconds",
-            "keyword_unavailable",
-            "keyword_search_used",
-            "retrieval_unavailable",
-            "retrieval_error",
-            "candidate_unavailable",
-            "candidate_error",
-        ):
-            if key in source:
-                destination[key] = source[key]
-        destination.pop("fallback_unavailable", None)
-        destination.pop("fallback_reason_code", None)
 
     @staticmethod
     def _publish_status(metadata: dict[str, Any]) -> None:
@@ -664,7 +606,12 @@ class AgentSearchService:
                 mark_dual_retrieval_dependency_outage(outcome.metadata)
                 self._publish_status(outcome.metadata)
                 return outcome
-            if query_intent.route == "direct_keyword":
+            dense_failfast = circuit is not None and circuit.dense_outaged is True
+            if dense_failfast:
+                query_embedding = []
+                runtime_config["dense_failfast"] = True
+                metadata.update({"dense_failfast": True, "dense_unavailable": True, "semantic_unavailable": False})
+            elif query_intent.route == "direct_keyword":
                 query_embedding = []
             else:
                 try:
@@ -681,7 +628,7 @@ class AgentSearchService:
                     metadata["semantic_unavailable"] = True
                     metadata.update(failure_metadata)
                     runtime_config["_semantic_failure"] = failure_metadata
-                    _annotate_semantic_failure(metadata)
+                    annotate_semantic_failure(metadata)
                     query_embedding = []
 
             try:
@@ -710,7 +657,13 @@ class AgentSearchService:
             # The delegate records retrieval degradation in runtime_config
             # because it is transport-independent. Publish it here as outcome
             # metadata so projection and cache policy can reject degraded data.
-            metadata.update(config_applied.get("_retrieval", {}))
+            retrieval_diagnostics = config_applied.get("_retrieval") or {}
+            metadata.update(retrieval_diagnostics)
+            if isinstance(retrieval_diagnostics, dict):
+                ensure_search_candidate_source(metadata)
+                retrieval_diagnostics.setdefault(
+                    "candidate_source", metadata.get("candidate_source")
+                )
             if self._retrieval_dependency_circuit is not None:
                 self._retrieval_dependency_circuit.observe_retrieval(
                     config_applied.get("_retrieval", {})
@@ -728,6 +681,18 @@ class AgentSearchService:
                 )
                 if results:
                     metadata.update(snapshot_diagnostic)
+                    metadata["candidate_source"] = "local_snapshot"
+                    metadata["score_source"] = "local_snapshot"
+                    retrieval_diagnostic = dict(
+                        config_applied.get("_retrieval") or {}
+                    )
+                    retrieval_diagnostic.update(
+                        {
+                            "candidate_source": "local_snapshot",
+                            "score_source": "local_snapshot",
+                        }
+                    )
+                    config_applied["_retrieval"] = retrieval_diagnostic
             if not results:
                 if metadata.get("retrieval_unavailable") is True:
                     _mark_terminal_search_fallback(metadata)
@@ -866,6 +831,9 @@ class AgentSearchService:
                         metadata=metadata,
                     )
             circuit = self._retrieval_dependency_circuit
+            if circuit is not None and circuit.dense_outaged is True:
+                runtime_config["dense_failfast"] = True
+                metadata.update({"dense_failfast": True, "dense_unavailable": True, "semantic_unavailable": False})
             if circuit is not None and circuit.should_fail_fast():
                 outcome = await agent_search_terminal_fallback.execute_final_outcome_offloaded(
                     final_outcome=self.final_recommendation_outcome,
@@ -919,7 +887,7 @@ class AgentSearchService:
                 self._retrieval_dependency_circuit.observe_retrieval(
                     response.metadata
                 )
-            _annotate_semantic_failure(response.metadata)
+            annotate_semantic_failure(response.metadata)
             if not response.recommendations:
                 # Healthy zero-candidate outcomes use the same explicit snapshot
                 # path as dependency failures. Recommendation clients therefore
@@ -939,6 +907,7 @@ class AgentSearchService:
                     response.selected_candidates = len(local_recommendations)
                     response.metadata.update(snapshot_diagnostic)
                     response.metadata["candidate_source"] = "local_snapshot"
+                    response.metadata["score_source"] = "local_snapshot"
 
             if not response.recommendations:
                 if response.metadata.get("semantic_unavailable") is True:

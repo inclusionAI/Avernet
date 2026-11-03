@@ -118,12 +118,21 @@ def _config_float(config: object, key: str, default: float) -> float:
 
 
 def _index_owner_id() -> str:
+    """Return an owner identity unique to the current *process*.
+
+    A production Pod may run multiple uvicorn workers. The configured
+    environment value remains the stable application/pod prefix, but the
+    process ID keeps workers from co-owning the durable-index lease. Only one
+    worker can therefore mutate a collection pair, while the other workers and
+    other Pods remain read-only.
+    """
     import socket
 
     owner_id = os.getenv("BCSFUSE_INDEX_OWNER_ID")
+    process_suffix = str(os.getpid())
     if owner_id:
-        return owner_id
-    return f"{socket.gethostname()}:{os.getpid()}"
+        return f"{owner_id}:{process_suffix}"
+    return f"{socket.gethostname()}:{process_suffix}"
 
 
 def register_runtime_service_providers(

@@ -179,6 +179,54 @@ def test_search_uses_local_snapshot_before_terminal_empty_fallback() -> None:
     assert "local_snapshot_used" in outcome.metadata["reasons"]
 
 
+def test_local_snapshot_fallback_publishes_explicit_source_metadata() -> None:
+    """Local-snapshot results must identify both candidate and score sources."""
+
+    search_outcome = AgentSearchService.final_search_outcome(
+        _search_command(),
+        error_type="RuntimeError",
+        local_snapshot=snapshot(),
+    )
+    recommend_outcome = AgentSearchService.final_recommendation_outcome(
+        _recommend_command(),
+        error_type="RuntimeError",
+        local_snapshot=snapshot(),
+    )
+
+    assert search_outcome.results
+    assert search_outcome.metadata["candidate_source"] == "local_snapshot"
+    assert search_outcome.metadata["score_source"] == "local_snapshot"
+    assert search_outcome.config_applied["_retrieval"]["candidate_source"] == "local_snapshot"
+    assert search_outcome.config_applied["_retrieval"]["score_source"] == "local_snapshot"
+    assert recommend_outcome.response.recommendations
+    assert recommend_outcome.response.metadata["candidate_source"] == "local_snapshot"
+    assert recommend_outcome.response.metadata["score_source"] == "local_snapshot"
+
+    search_service = AgentSearchService(
+        embedding_generator=HealthyEmbedding(),
+        vector_match_service=FailingMatch(),
+        local_snapshot=snapshot(),
+        execution_budget=budget(),
+        resilience_cache=None,
+    )
+    degraded_search = asyncio.run(search_service.search(_search_command()))
+    retrieval = degraded_search.config_applied["_retrieval"]
+    assert degraded_search.metadata["candidate_source"] == "local_snapshot"
+    assert degraded_search.metadata["score_source"] == "local_snapshot"
+    assert retrieval["candidate_source"] == "local_snapshot"
+    assert retrieval["score_source"] == "local_snapshot"
+
+    recommend_service = AgentSearchService(
+        candidate_recommendation_service=FailingRecommendation(),
+        local_snapshot=snapshot(),
+        execution_budget=budget(),
+        resilience_cache=None,
+    )
+    degraded_recommend = asyncio.run(recommend_service.recommend(_recommend_command()))
+    assert degraded_recommend.response.metadata["candidate_source"] == "local_snapshot"
+    assert degraded_recommend.response.metadata["score_source"] == "local_snapshot"
+
+
 def test_recommendation_uses_local_snapshot_before_terminal_empty_fallback() -> None:
     service = AgentSearchService(
         candidate_recommendation_service=FailingRecommendation(),

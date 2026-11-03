@@ -318,8 +318,10 @@ backends. Runtime composition also observes the same bounded readiness contract
 at startup and periodically; an explicit dual false observation, or a hard
 bounded health-probe timeout, preopens the circuit before the first search burst
 is admitted, while healthy and partial observations do not invent an outage. The terminal local snapshot lookup
-itself is executed through the bounded search worker pool, not directly in the
-serving event loop.
+itself is executed through a separate bounded worker pool dedicated to local
+fallback work, rather than consuming the semantic worker budget.
+When the circuit closes, the same shared route offload selects the semantic pool
+again.
 
 The process-local literal index normalizes each published profile's searchable
 text once when the snapshot is rebuilt. Search-time queries reuse that immutable
@@ -798,11 +800,11 @@ Runtime and configured dev compositions wrap real embedding with a
 process-local query cache. Configuration comes from composition:
 `embedding.cache.max_entries` (default 10000),
 `embedding.cache.ttl_seconds` (default 300),
-`embedding.cache.max_query_batch_size` (default 32), and adaptive query
+`embedding.cache.max_query_batch_size` (deployment default 16), and adaptive query
 coalescing controls: `embedding.cache.query_batch_wait_seconds` (default 0.05),
 `embedding.cache.query_batch_peak_wait_seconds` (default 0.15),
 `embedding.cache.query_batch_peak_threshold` (default 8), and
-`embedding.cache.max_query_batch_workers` (default 1).
+`embedding.cache.max_query_batch_workers` (deployment default 4).
 The cache key contains the exact model, dimension and a conservative normalized
 query: Unicode NFKC plus whitespace collapsing. Case folding and alias rewriting
 are not performed here. The backend receives the original text.

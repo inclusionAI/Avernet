@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, List, Optional
 
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
@@ -375,6 +376,26 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 self._keywords._ensure_client()
                 self._keywords._client.get_collection(self._keywords.collection_name)
 
+    def _probe_dense_readiness(self) -> tuple[bool, bool]:
+        """Probe one dense Server collection without leaking error details."""
+
+        try:
+            self._ensure_client()
+            self._qdrant._client.get_collection(self.collection_name)
+            return True, False
+        except Exception:
+            return False, True
+
+    def _probe_keyword_readiness(self) -> tuple[bool, bool]:
+        """Probe one keyword Server collection without leaking error details."""
+
+        try:
+            self._keywords._ensure_client()
+            self._keywords._client.get_collection(self._keywords.collection_name)
+            return True, False
+        except Exception:
+            return False, True
+
     def index_dependency_readiness(self) -> dict[str, bool]:
         """Report dense and keyword Qdrant readiness without leaking errors.
 
@@ -382,28 +403,37 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         outage is therefore observable degradation rather than process-wide
         unavailability. Exception details are intentionally reduced to booleans;
         transport callers only need which dependency class failed.
+
+        Both cluster probes run concurrently. A dual hang therefore reaches one
+        transport timeout rather than the sum of the dense and keyword timeouts.
         """
-        dense_ready = True
-        keyword_ready = self._keywords_ready
-        reset_dense = False
-        reset_keyword = False
+        should_probe_dense = self.connection.mode == "server"
+        should_probe_keyword = (
+            self.keyword_connection.mode == "server" and self._keywords_ready
+        )
+        dense_result: tuple[bool, bool] = (True, False)
+        keyword_result: tuple[bool, bool] = (self._keywords_ready, False)
+        active_probes = []
+        if should_probe_dense:
+            active_probes.append(self._probe_dense_readiness)
+        if should_probe_keyword:
+            active_probes.append(self._probe_keyword_readiness)
+
         with self._index_lock.read():
-            if self.connection.mode == "server":
-                try:
-                    self._ensure_client()
-                    self._qdrant._client.get_collection(self.collection_name)
-                except Exception:
-                    dense_ready = False
-                    reset_dense = True
-            if self.keyword_connection.mode == "server" and keyword_ready:
-                try:
-                    self._keywords._ensure_client()
-                    self._keywords._client.get_collection(
-                        self._keywords.collection_name
+            if len(active_probes) == 2:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    dense_result, keyword_result = list(
+                        executor.map(lambda probe: probe(), active_probes)
                     )
-                except Exception:
-                    keyword_ready = False
-                    reset_keyword = True
+            elif active_probes:
+                active_result = active_probes[0]()
+                if should_probe_dense:
+                    dense_result = active_result
+                else:
+                    keyword_result = active_result
+
+        dense_ready, reset_dense = dense_result
+        keyword_ready, reset_keyword = keyword_result
 
         # Leave the shared read lock before closing a failed transport. The
         # next readiness probe then connects afresh and cannot keep reporting

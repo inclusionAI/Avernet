@@ -110,7 +110,12 @@ class FragmentKeywordRoutingMixin:
 
         local_keyword = (
             run_local_keyword()
-            if query_embedding and dense_result.error is None and dense_result.value
+            if not query_embedding
+            or (
+                query_embedding
+                and dense_result.error is None
+                and dense_result.value
+            )
             else None
         )
         if local_keyword is not None and local_keyword.local_keyword_sufficient:

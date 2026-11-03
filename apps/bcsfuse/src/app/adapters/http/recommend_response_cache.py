@@ -8,6 +8,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from fastapi import HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -152,6 +153,25 @@ def _cacheable_response(response: BotRecommendationResponse) -> bool:
     return True
 
 
+def _parse_recommendation_preflight(body: bytes) -> BotRecommendationRequest | None:
+    try:
+        parsed = json.loads(body)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return BotRecommendationRequest.model_validate(parsed)
+
+
+def _publish_search_route(scope: Scope, question: str) -> None:
+    from app.application.services.query_intent_policy import resolve_query_intent
+    from app.application.services.query_normalizer import normalize_query_text
+
+    route = resolve_query_intent(normalize_query_text(question)).route
+    state = scope.setdefault("state", {})
+    state["bcsfuse_search_route"] = route
+
+
 class RecommendationResponseCacheMiddleware:
     """Answer warmed v1 recommendation projections before capacity admission."""
 
@@ -283,7 +303,7 @@ class RecommendationResponseCacheMiddleware:
         coalescing_key = (
             None
             if missed_request is None or self._result_cache is None
-            else self._coalescing_key(missed_request)
+            else await run_in_threadpool(self._coalescing_key, missed_request)
         )
         if coalescing_key is None:
             await self.app(scope, replay_receive, send)
@@ -316,16 +336,15 @@ class RecommendationResponseCacheMiddleware:
             return None, receive, None, started_at, None
 
         try:
-            parsed = json.loads(_join_messages(messages))
+            request = await run_in_threadpool(
+                _parse_recommendation_preflight,
+                _join_messages(messages),
+            )
         except (TypeError, ValueError):
             return None, replay_receive, None, started_at, None
-        if not isinstance(parsed, dict):
+        if request is None:
             return None, replay_receive, None, started_at, None
-
-        try:
-            request = BotRecommendationRequest.model_validate(parsed)
-        except ValueError:
-            return None, replay_receive, None, started_at, None
+        _publish_search_route(scope, request.question)
         if request.group_id:
             return None, replay_receive, None, started_at, None
 
@@ -344,8 +363,10 @@ class RecommendationResponseCacheMiddleware:
                 None,
             )
 
-        cached_response = self._cached_response(
-            request, record_failure=True
+        cached_response = await run_in_threadpool(
+            self._cached_response,
+            request,
+            record_failure=True,
         )
         if cached_response is not None:
             return cached_response, replay_receive, 200, started_at, None

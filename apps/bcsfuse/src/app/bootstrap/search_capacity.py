@@ -348,7 +348,17 @@ class SearchCapacityMiddleware:
             await response(scope, receive, send)
             return
         app_receive = _replayed_receive(messages)
-        request_route = _request_route(messages)
+        state = scope.get("state")
+        preflight_route = (
+            state.get("bcsfuse_search_route")
+            if isinstance(state, dict)
+            else None
+        )
+        request_route = (
+            preflight_route
+            if preflight_route in {"semantic", "direct_keyword"}
+            else _request_route(messages)
+        )
 
         execution_route = self._execution_route(request_route)
         pool = self._pools[execution_route]

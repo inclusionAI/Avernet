@@ -141,3 +141,51 @@ def test_readiness_reset_closes_an_unhealthy_client_before_the_next_probe() -> N
         }
     finally:
         vector_store.close()
+
+
+def test_dependency_readiness_probes_dense_and_keyword_clusters_in_parallel() -> None:
+    """Parallel probes keep a dual-start timeout below two client timeouts."""
+    from time import perf_counter, sleep
+
+    class SlowProbeClient:
+        def get_collection(self, collection_name: str) -> None:
+            sleep(0.12)
+
+    class SlowServerStore:
+        collection_name = "slow_readiness_collection"
+
+        def __init__(self) -> None:
+            self._client = SlowProbeClient()
+            self._collection_initialized = True
+
+        def _ensure_client(self) -> None:
+            return None
+
+        def _ensure_collection(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+        def reset_connection(self) -> None:
+            return None
+
+    vector_store, _, _ = store_with_recovering_transports()
+    vector_store._qdrant = SlowServerStore()
+    vector_store._keywords = SlowServerStore()
+
+    started = perf_counter()
+    try:
+        result = vector_store.index_dependency_readiness()
+    finally:
+        vector_store.close()
+    elapsed = perf_counter() - started
+
+    assert result == {
+        "dense_qdrant_ready": True,
+        "keyword_qdrant_ready": True,
+        "dense_qdrant_unavailable": False,
+        "keyword_qdrant_unavailable": False,
+    }
+    # Two sequential 120ms probes fail this with approximately 240ms.
+    assert elapsed < 0.20

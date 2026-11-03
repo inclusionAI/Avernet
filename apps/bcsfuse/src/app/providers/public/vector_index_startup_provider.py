@@ -35,19 +35,35 @@ class VectorIndexStartupProvider:
         await self._delegate.initialize()
         heartbeat_thread = self._start_owner_lease_heartbeat()
         try:
-            rebuild = getattr(self._vector_store, "rebuild_from_backend", None)
-            if rebuild is None:
-                rebuild = getattr(self._vector_store, "rebuild_from_mysql", None)
-            if rebuild is None:
-                raise TypeError("durable vector store does not support rebuild")
-            result = rebuild()
-            self._mark_startup_rebuild_recovered(self._vector_store)
-            logger.info("[VectorIndexStartup] Rebuild completed: %s", result)
+            if getattr(self._vector_store, "read_only", False):
+                synchronize = getattr(
+                    self._vector_store, "synchronize_read_view", None
+                )
+                if synchronize is None:
+                    raise TypeError(
+                        "read-only vector store does not support view synchronization"
+                    )
+                result = synchronize()
+                self._mark_startup_rebuild_recovered(self._vector_store)
+                logger.info(
+                    "[VectorIndexStartup] Read-only view synchronization completed: %s",
+                    result,
+                )
+            else:
+                rebuild = getattr(self._vector_store, "rebuild_from_backend", None)
+                if rebuild is None:
+                    rebuild = getattr(self._vector_store, "rebuild_from_mysql", None)
+                if rebuild is None:
+                    raise TypeError("durable vector store does not support rebuild")
+                result = rebuild()
+                self._mark_startup_rebuild_recovered(self._vector_store)
+                logger.info("[VectorIndexStartup] Rebuild completed: %s", result)
         except Exception as error:
             self._mark_startup_rebuild_failed(self._vector_store, error)
             self._start_rebuild_recovery()
             logger.exception(
-                "[VectorIndexStartup] Rebuild failed; starting degraded with local fallback"
+                "[VectorIndexStartup] Index startup operation failed; "
+                "starting degraded with local fallback"
             )
 
     @staticmethod
@@ -63,27 +79,33 @@ class VectorIndexStartupProvider:
         setattr(vector_store, "startup_rebuild_error_type", None)
 
     def _start_rebuild_recovery(self) -> None:
-        """Retry the durable rebuild without blocking the serving loop."""
+        """Retry the safe startup operation without blocking the serving loop."""
+
         if self._recovery_thread is not None:
             return
-        rebuild = getattr(self._vector_store, "rebuild_from_backend", None)
-        if rebuild is None:
-            rebuild = getattr(self._vector_store, "rebuild_from_mysql", None)
-        if rebuild is None:
+        if getattr(self._vector_store, "read_only", False):
+            operation = getattr(self._vector_store, "synchronize_read_view", None)
+            operation_name = "Read-only view synchronization"
+        else:
+            operation = getattr(self._vector_store, "rebuild_from_backend", None)
+            if operation is None:
+                operation = getattr(self._vector_store, "rebuild_from_mysql", None)
+            operation_name = "Rebuild"
+        if operation is None:
             return
         self._recovery_stop.clear()
         self._recovery_thread = threading.Thread(
             target=self._run_rebuild_recovery,
-            args=(rebuild,),
+            args=(operation, operation_name),
             daemon=True,
             name="index-startup-rebuild-recovery",
         )
         self._recovery_thread.start()
 
-    def _run_rebuild_recovery(self, rebuild: Any) -> None:
+    def _run_rebuild_recovery(self, operation: Any, operation_name: str) -> None:
         while not self._recovery_stop.wait(self._recovery_interval_seconds):
             try:
-                result = rebuild()
+                result = operation()
             except Exception as error:
                 logger.debug(
                     "[VectorIndexStartup] Rebuild recovery attempt failed: %s",
@@ -92,7 +114,8 @@ class VectorIndexStartupProvider:
                 continue
             self._mark_startup_rebuild_recovered(self._vector_store)
             logger.info(
-                "[VectorIndexStartup] Rebuild recovery completed: %s",
+                "[VectorIndexStartup] %s recovery completed: %s",
+                operation_name,
                 result,
             )
             return

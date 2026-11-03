@@ -32,11 +32,23 @@ class RetrievalDependencyCircuit:
         self._outaged = False
         self._outage_until = 0.0
         self._recovery_probe_running = False
+        self._dense_outaged = False
 
     @property
     def outaged(self) -> bool:
         with self._lock:
             return self._outaged
+
+    @property
+    def dense_outaged(self) -> bool:
+        """Return whether dense retrieval is known unavailable.
+
+        This state is independent of the terminal dual-outage circuit so a
+        dense-only failure can route directly to keyword retrieval.
+        """
+
+        with self._lock:
+            return self._dense_outaged
 
     def should_fail_fast(self) -> bool:
         """Return whether this caller must use local fallback.
@@ -64,11 +76,30 @@ class RetrievalDependencyCircuit:
             )
             self._recovery_probe_running = False
 
+    def record_dense_outage(self) -> None:
+        """Open dense-only bypass and release a stale terminal outage.
+
+        This method is only called with healthy keyword side information. A
+        transient dual observation must not keep keyword traffic in process
+        local fallback while dense remains unavailable.
+        """
+
+        with self._lock:
+            self._dense_outaged = True
+            self._outaged = False
+            self._outage_until = 0.0
+            self._recovery_probe_running = False
+
+    def record_dense_healthy(self) -> None:
+        with self._lock:
+            self._dense_outaged = False
+
     def record_healthy(self) -> None:
         with self._lock:
             self._outaged = False
             self._outage_until = 0.0
             self._recovery_probe_running = False
+            self._dense_outaged = False
 
     def observe_retrieval(self, diagnostics: Mapping[str, Any]) -> None:
         """Record a dual outage or release a successful recovery probe."""
@@ -88,6 +119,13 @@ class RetrievalDependencyCircuit:
             diagnostics.get("keyword_qdrant_available") is True
             or diagnostics.get("keyword_qdrant_ready") is True
         )
+        dense_unavailable = (
+            diagnostics.get("dense_qdrant_available") is False
+            or diagnostics.get("dense_qdrant_ready") is False
+        )
+        if dense_unavailable and keyword_healthy:
+            self.record_dense_outage()
+            return
         if dense_healthy and keyword_healthy:
             self.record_healthy()
 
