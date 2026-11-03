@@ -128,6 +128,9 @@ class ActiveSkillSetReferenceError(RuntimeError):
 class SkillRuntimeNameConflictError(Exception):
     """A Direct activation would create an ambiguous runtime entry name."""
 
+    def __init__(self) -> None:
+        super().__init__("SKILL_RUNTIME_NAME_CONFLICT")
+
 
 class SkillEngineNotSupportedError(Exception):
     """The addressed Bot type and logical Engine cannot consume this Skill."""
