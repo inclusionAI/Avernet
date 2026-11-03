@@ -1,0 +1,20 @@
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/routes.py
+  s_9e428ec8192673::t_d5d18c2416cc46 19
+  s_9e428ec8192673::t_db114038847d79 37-46,84-85,101,121-122,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1c677d43b80239280888860d7a2aa9edbcc52225",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
