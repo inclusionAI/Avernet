@@ -149,7 +149,7 @@ class BaasPublishPoller:
                 if status == "FAILED":
                     device_service._mark_service_start_failed(
                         binding_id=binding_id,
-                        error=f"BaaS publish FAILED: publish_id={publish_id}",
+                        error=f"BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id={publish_id}",
                     )
                     return
 
@@ -158,7 +158,7 @@ class BaasPublishPoller:
             # 循环退出 = 超时
             device_service._mark_service_start_failed(
                 binding_id=binding_id,
-                error=f"BaaS publish timeout after {self._poll_timeout}s: publish_id={publish_id}",
+                error=f"BaaS publish 超时，请刷新页面后重新创建 Bot。timeout after {self._poll_timeout}s: publish_id={publish_id}",
             )
         except Exception as e:
             logger.exception(
