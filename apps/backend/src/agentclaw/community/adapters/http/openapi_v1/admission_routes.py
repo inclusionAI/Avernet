@@ -744,6 +744,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/catalog/profile/{bot_uuid}"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
     # Read and self-service operations resolve an application-only caller to
     # its delegating user and continue enforcing live Space membership or
