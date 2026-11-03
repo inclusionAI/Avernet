@@ -15,7 +15,7 @@ export function CodingBotStageBoundary({
   human,
 }: {
   bot: ChatBotView;
-  session: BotChatSessionView;
+  session?: BotChatSessionView | null;
   human: HumanIdentity | null;
 }): JSX.Element {
   const host = getCapabilities().getCodingBotConversationHost();
@@ -51,7 +51,7 @@ export function CodingBotStageBoundary({
     <section className="flex min-h-0 min-w-0 flex-1" data-coding-bot-stage="true">
       <Stage
         botId={bot.realBotId}
-        sessionId={session.sessionId}
+        sessionId={session?.sessionId}
         ownerId={bot.ownerId}
         userId={human.userId}
         nickName={human.displayName}

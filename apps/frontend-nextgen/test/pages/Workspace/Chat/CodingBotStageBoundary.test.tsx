@@ -81,6 +81,24 @@ describe('CodingBotStageBoundary', () => {
     expect(Stage.mock.calls[0][0]).not.toHaveProperty('publishId');
   });
 
+  it('零会话时仍挂载 Embedded 宿主，并显式传递 undefined sessionId', () => {
+    const Stage = jest.fn(() => <div data-testid="injected-coding-stage" />);
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage },
+      }),
+    });
+
+    render(<CodingBotStageBoundary bot={bot} session={null} human={human} />);
+
+    expect(screen.getByTestId('injected-coding-stage')).toBeInTheDocument();
+    expect(Stage).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: 'coding-bot', sessionId: undefined }),
+      expect.anything(),
+    );
+  });
+
   it('Session 切换只更新 Stage props，不卸载重建宿主', () => {
     const Stage = jest.fn(() => <div data-testid="injected-coding-stage" />);
     extendCapabilities({
