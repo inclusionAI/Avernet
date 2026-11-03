@@ -160,11 +160,22 @@ pub async fn group_chat(
     };
     let caller_ingress = if human_is_effective_sender {
         match &state.caller_ingress_source {
-            Some(source) => source
-                .extract_caller_request(&headers, now_epoch_ms())
-                .await
-                .ok()
-                .map(|request| request.ingress),
+            Some(source) => match source.extract_caller_request(&headers, now_epoch_ms()).await {
+                Ok(request) => Some(request.ingress),
+                Err(error) => {
+                    // The ordinary chat path continues (the flow keeps the
+                    // fail-closed judgment), but a silent skip here also
+                    // starves the session relay capture — surface the
+                    // closed refusal kind so the gap is diagnosable.
+                    tracing::warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        group_id = %group_id,
+                        reason = ?error,
+                        "caller ingress extraction failed; the session relay capture stays closed for this message"
+                    );
+                    None
+                }
+            },
             None => None,
         }
     } else {
