@@ -141,24 +141,22 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       : !expertCreation.status
       ? expertCreation.accepted
       : undefined;
-  if (expertAuth && (expertAuth.iframe_url || expertAuth.redirect_url))
-    return (
-      <AuthorizationPanel
-        authorization={{
-          type: 'authorization_required',
-          botId: expertAuth.bot_id,
-          iframeUrl: expertAuth.iframe_url,
-          redirectUrl: expertAuth.redirect_url,
-          request: {
-            bot_name: values.name,
-            bot_desc: values.description,
-            engine: values.engine,
-            cluster_name: 'ACRA',
-            bot_type: values.serviceMode === 'service' ? 'service' : 'personal',
-          },
-        }}
-      />
-    );
+  if (expertAuth && (expertAuth.iframe_url || expertAuth.redirect_url)) {
+    const expertAuthorization: BotCreateAuthorization = {
+      type: 'authorization_required',
+      botId: expertAuth.bot_id,
+      iframeUrl: expertAuth.iframe_url,
+      redirectUrl: expertAuth.redirect_url,
+      request: {
+        bot_name: values.name,
+        bot_desc: values.description,
+        engine: values.engine,
+        cluster_name: 'ACRA',
+        bot_type: values.serviceMode === 'service' ? 'service' : 'personal',
+      },
+    };
+    return <AuthorizationPanel authorization={expertAuthorization} />;
+  }
   if (authorization) return <AuthorizationPanel authorization={authorization} />;
 
   return (

@@ -230,24 +230,18 @@ export interface BotCopyInput {
 /**
  * 复制结果(后端 `BotCopyResponse` 镜像):
  * - `issued` —— type=success:复制已提交,dst bot 由 create_job 异步创建,FE 刷新列表
- *   即可见并跟随 copy_state 进度。
- * - `authorization_required` —— type=auth_required:内网 AgentPass 授权闸 pending。
- *   复制无 auth-status 轮询端点(授权完成后由回调 out-of-band 触发 create_job),
- *   故此处不含 `request`/`agentCoding`,FE 仅展示 iframe,由用户关闭后刷新列表收敛。
+ *   即可见并跟随 copy_state 进度。响应只回 bot_id,**无 BotDto**。
+ * - `authorization_required` —— type=auth_required:内网 AgentPass 授权闸 pending,
+ *   回 iframe/redirect。**与创建同款处理**:携带 `request`(AvernetBotCreateRequest)
+ *   交由 `useBotCreateAuthorization` 轮询 dst bot 的 auth-status,ISSUED 后收敛 ——
+ *   dst bot 在 ac_bots 已注册(即便仍在复制中),auth-status 端点对 copy dst 同样适用。
  */
 export type BotCopyResult =
   | { type: 'issued'; botId: string; operationId: string }
-  | {
-      type: 'authorization_required';
-      botId: string;
-      operationId: string;
-      iframeUrl: string;
-      redirectUrl: string;
-      avatarUrl?: string;
-    };
+  | BotCreateAuthorization;
 
-/** 复制授权面板视图(与 `BotCopyResult` 的 authorization_required 分支同构)。 */
-export type BotCopyAuthorization = Extract<BotCopyResult, { type: 'authorization_required' }>;
+/** 复制授权视图 —— 与 `BotCreateAuthorization` 同构,复用 `AuthorizationPanel` + 轮询。 */
+export type BotCopyAuthorization = BotCreateAuthorization;
 
 /**
  * 复制入口可用性。默认仅 openclaw 引擎、且当前用户为 Owner 或协作者含 edit 权限时显示;
