@@ -28,6 +28,7 @@ def _refresh(service):
 
 
 def test_owner_installation_precedes_caller_refresh(caplog):
+    caplog.set_level("INFO")
     service = _service()
     calls = []
     service._hot_update_service_bot_passport_token.side_effect = lambda **kw: calls.append("owner") or []

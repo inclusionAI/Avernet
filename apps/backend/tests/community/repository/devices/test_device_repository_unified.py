@@ -2593,6 +2593,7 @@ def test_list_active_caller_refresh_bindings_isolates_scope(repo):
 
 
 def test_list_active_caller_refresh_bindings_propagates_database_failure(repo, caplog):
+    caplog.set_level("INFO")
     with patch.object(repo._db, "orm_session", side_effect=RuntimeError("database unavailable")):
         with pytest.raises(RuntimeError, match="database unavailable"):
             repo.list_active_caller_refresh_bindings(bot_id="b", entity_id="e", env="prod")

@@ -52,3 +52,14 @@ The ARCA query does not create missing Caller instances. The inspected current c
 ## Independent-review correction
 
 The actual product creates Caller bindings through BaaS even when the physical runtime is ARCA. A new real-SQLite regression reproduced the ARCA-only filter returning no product targets. The dedicated refresh query now includes BaaS and direct ARCA; TeClaw is excluded and the existing owner fanout query is unchanged. After rebasing onto dev a66ef97e65, the focused repository/callback/DI suites passed 95/95 (JUnit /tmp/asc-avernet-product-target.xml).
+
+## PR #3513 Backend CI fixture correction (2026-11-03)
+
+Remote head `450f86480a` reported **4 failed, 28,987 passed, 40 skipped**. The actual failure log is `/tmp/asc-avernet-backend-ci-failed.log`; these failures were test-fixture issues, not a coverage failure:
+
+- Two new log assertions expected INFO events without explicitly configuring `caplog`, so the full CI capture level omitted them.
+- The existing handoff lifecycle fixture used `BotService.__new__` and skipped constructor initialization of the optional scheduled refresh port. Its B/C parameter cases therefore raised `AttributeError`.
+
+The four failures were reproduced together locally with `--log-level=WARNING`: **4 failed**, 26 deselected. The minimal fix adds `caplog.set_level("INFO")` in the two tests and initializes `_scheduled_caller_refresh=None` in the legacy fixture. No production fallback or runtime code changed; no runtime logging was added for this test-only correction.
+
+Affected full callback, repository, handoff lifecycle, Passport and DI suites with `--log-level=WARNING`: **151 passed**, zero failed. JUnit: `/tmp/asc-avernet-ci-fixtures-fixed.xml`. Ruff F and `git diff --check` passed. This is local repair evidence; the parent agent must push and observe a new remote CI result before declaring the PR gate passed.

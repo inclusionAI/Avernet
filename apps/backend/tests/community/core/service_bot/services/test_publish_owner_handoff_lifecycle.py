@@ -42,6 +42,7 @@ def lifecycle(publication):
     purge = Mock()
     purge.delete.return_value = False
     bot_service = BotService.__new__(BotService)
+    bot_service._scheduled_caller_refresh = None
     bot_service._repository = repo
     bot_service._template_service = Mock()
     bot_service._template_service.get_template.return_value = None
