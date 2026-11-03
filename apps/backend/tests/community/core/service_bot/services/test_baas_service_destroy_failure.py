@@ -20,6 +20,7 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
     NoopStoragePolicy,
 )
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasPublishConflictError,
     BaasService,
     BaasServiceError,
 )
@@ -79,6 +80,38 @@ class TestDestroyBotFailure:
         service, http = _make_service()
         http.set_response("post", response)
         with pytest.raises(BaasServiceError, match="boom"):
+            service.destroy_bot("bot-1", operator="op", request_id="req-123456")
+
+    def test_publish_conflict_raises_typed_error(self):
+        err_response = MagicMock()
+        err_response.status_code = 409
+        err_response.text = '{"detail": {"error_code": "PUBLISH_CONFLICT", "message": "another publish is active"}}'
+        err_response.json.return_value = {
+            "detail": {"error_code": "PUBLISH_CONFLICT", "message": "another publish is active"}
+        }
+        response = MagicMock()
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "409", request=MagicMock(), response=err_response
+        )
+
+        service, http = _make_service()
+        http.set_response("post", response)
+        with pytest.raises(BaasPublishConflictError, match="another publish is active"):
+            service.destroy_bot("bot-1", operator="op", request_id="req-123456")
+
+    def test_publish_conflict_without_message_preserves_payload(self):
+        err_response = MagicMock()
+        err_response.status_code = 409
+        err_response.text = '{"detail": {"error_code": "PUBLISH_CONFLICT"}}'
+        err_response.json.return_value = {"detail": {"error_code": "PUBLISH_CONFLICT"}}
+        response = MagicMock()
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "409", request=MagicMock(), response=err_response
+        )
+
+        service, http = _make_service()
+        http.set_response("post", response)
+        with pytest.raises(BaasPublishConflictError, match="PUBLISH_CONFLICT"):
             service.destroy_bot("bot-1", operator="op", request_id="req-123456")
 
     def test_generic_exception_wrapped_as_baas_error(self):
