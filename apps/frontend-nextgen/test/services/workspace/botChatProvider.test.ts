@@ -28,7 +28,7 @@ jest.mock('@tc-chat/adapters', () => ({
   OpenClawProvider: jest.fn(() => mockSdk),
 }));
 
-import { createBotChatProvider } from '@/services/workspace/botChatProvider';
+import { createBotChatProvider, resolveFriendCodingBotChatSocketUrl } from '@/services/workspace/botChatProvider';
 import * as adapters from '@tc-chat/adapters';
 
 const mockedGetConnection = (ctrl as any).getBotConnection as jest.Mock<any>;
@@ -214,6 +214,68 @@ describe('botChatProvider', () => {
       f_user_id: '900003',
       session_id: 'sid-1',
     });
+  });
+
+  it('好友 Coding Bot 的 AICoding socket 对齐为 /api/claude_code/ws', async () => {
+    const legacyUrl =
+      'wss://gw/openapi/v1/bots/messages/ws/target%40host%3A20003/api/aicoding/ws?x-proxypass-token=abc';
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: {
+        engine: 'aicoding', expires_at: 'x',
+        sockets: [{ kind: 'chat', url: legacyUrl }],
+      },
+      message: 'OK', request_id: 'r',
+    });
+    // 好友目录 metadata 可能没有正确识别 Coding Bot；connection 的实际签发结果仍应生效。
+    const friendCodingBot = {
+      ...bot,
+      engine: undefined,
+      isFriendBot: true,
+      isAgentCodingBot: undefined,
+      botType: 'personal',
+    };
+    const provider = createBotChatProvider({
+      bot: friendCodingBot,
+      userId: 'human_900003',
+      sessionId: 'sid-1',
+    });
+    const runtimes: Array<{ resolved: boolean; engine: string | null }> = [];
+    provider.subscribeToConnectionRuntime((runtime) => runtimes.push(runtime));
+    await provider.connect();
+    const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as { url: string };
+    expect(cfg.url).toBe(
+      'wss://gw/openapi/v1/bots/messages/ws/target%40host%3A20003/api/claude_code/ws?x-proxypass-token=abc',
+    );
+    expect(runtimes).toEqual([
+      { resolved: false, engine: null },
+      { resolved: true, engine: 'aicoding' },
+    ]);
+  });
+
+  it('仅好友 Bot 的 AICoding connection 路径对齐到 Claude Code socket', () => {
+    const legacyUrl = 'wss://gw/openapi/v1/bots/messages/ws/target/api/aicoding/ws?x-proxypass-token=abc';
+    const codingBot = { ...bot, engine: 'aicoding', isAgentCodingBot: true };
+
+    expect(resolveFriendCodingBotChatSocketUrl(
+      { ...codingBot, isFriendBot: true, isAgentCodingBot: undefined }, 'aicoding', legacyUrl,
+    )).toBe('wss://gw/openapi/v1/bots/messages/ws/target/api/claude_code/ws?x-proxypass-token=abc');
+    expect(resolveFriendCodingBotChatSocketUrl(codingBot, 'aicoding', legacyUrl)).toBe(legacyUrl);
+    expect(resolveFriendCodingBotChatSocketUrl(
+      { ...codingBot, isFriendBot: true }, 'openclaw', legacyUrl,
+    )).toBe(legacyUrl);
+    const claudeCodeUrl =
+      'wss://gw/openapi/v1/bots/messages/ws/target/api/claude_code/ws?x-proxypass-token=cc';
+    expect(resolveFriendCodingBotChatSocketUrl(
+      { ...codingBot, isFriendBot: true },
+      'aicoding',
+      claudeCodeUrl,
+    )).toBe(claudeCodeUrl);
+    expect(resolveFriendCodingBotChatSocketUrl(
+      { ...bot, engine: 'claude_code', isFriendBot: true, isAgentCodingBot: false },
+      'claude_code',
+      claudeCodeUrl,
+    )).toBe(claudeCodeUrl);
   });
 
   it.each(['isTeamBot', 'isFriendBot'] as const)(

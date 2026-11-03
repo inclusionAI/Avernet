@@ -5,6 +5,7 @@
 import type { IdentityView } from '@/domain/collaboration/types';
 import type { ConversationOrigin } from '@/domain/conversation/types';
 import { ConversationInteractiveStage } from '@/pages/Workspace/Chat/ConversationInteractiveStage';
+import { resolveConversationPresentation } from '@/pages/Workspace/Chat/conversationPresentation';
 import type { UseConversationInteractiveChatOptions } from '@/pages/Workspace/Chat/hooks/useConversationInteractiveChat';
 import { useConversationInteractiveChat } from '@/pages/Workspace/Chat/hooks/useConversationInteractiveChat';
 import type { UseBotSessionFilesFeatureResult } from '@/pages/Workspace/hooks/useBotSessionFilesFeature';
@@ -43,6 +44,8 @@ interface StubBaseProps {
   onPanelAction?: (action: { type: string; content?: string }) => void;
   modelSelector?: React.ReactElement;
   taskComposer?: React.ReactElement;
+  composerPlaceholder?: string;
+  sidePaneEnabled?: boolean;
 }
 
 let mockChatPanelProps: StubBaseProps | null = null;
@@ -229,6 +232,7 @@ const buildOptions = (
       updateSessionModel: jest.fn(),
     },
     ...overrides,
+    presentation: overrides.presentation ?? resolveConversationPresentation(bot),
   };
 };
 
@@ -324,6 +328,32 @@ describe('交互式主舞台(mine / 好友 Bot 单聊)', () => {
       expect(options.sessions.clearContext).toHaveBeenCalledWith(options.chatBots[0], 'session-1');
       expect(options.botChat.reloadHistory).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('好友 Coding Bot 兼容模式只保留基础文本聊天能力', () => {
+    const bot = chatBotOf({ isFriendBot: true, engine: 'aicoding' });
+    const options = buildOptions({
+      chatBots: [bot],
+      presentation: resolveConversationPresentation(bot),
+    });
+    render(<InteractiveStageHarness options={options} />);
+
+    const executionOptions = mockUseTaskExecution.mock.calls.at(-1)?.[0] as { context: unknown };
+    expect(executionOptions.context).toBeNull();
+    const fromCardOptions = mockUseTaskExecuteFromCard.mock.calls.at(-1)?.[0] as { context: unknown };
+    expect(fromCardOptions.context).toBeNull();
+    expect(mockUseBotSessionFilesFeatureArgs.slice(0, 3)).toEqual([null, null, null]);
+
+    expect(screen.queryByTestId('composer-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-selector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('file-feature-node')).not.toBeInTheDocument();
+    expect(mockChatPanelProps?.taskComposer).toBeUndefined();
+    expect(mockChatPanelProps?.modelSelector).toBeUndefined();
+    expect(mockChatPanelProps?.fileChip).toBeUndefined();
+    expect(mockChatPanelProps?.command).toBeUndefined();
+    expect(mockChatPanelProps?.fileToolbar).toBeUndefined();
+    expect(mockChatPanelProps?.composerPlaceholder).toBe('请输入你的问题或任务');
+    expect(mockChatPanelProps?.sidePaneEnabled).toBe(false);
   });
 
   it('发送沿用既有链路:首条消息自动重命名 + 文件引用透传', async () => {

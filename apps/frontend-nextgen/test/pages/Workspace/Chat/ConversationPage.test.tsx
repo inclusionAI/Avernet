@@ -36,6 +36,16 @@ const agentCodingBot: ChatBotView = {
   spaceId: '73',
   spaceName: '测试空间',
 };
+const friendCodingBot: ChatBotView = {
+  botId: 'friend-coding:2',
+  realBotId: 'friend-coding',
+  ownerId: '2',
+  displayName: '好友 Coding Bot',
+  online: true,
+  chatable: true,
+  engine: 'aicoding',
+  isFriendBot: true,
+};
 const emptyList = {
   items: [],
   page: 1,
@@ -329,6 +339,57 @@ describe('ConversationPage(Task 8 组合页)', () => {
     // 固有宽度会把 ChatLayout 连同 420px TaskPanel 推出可视区，初次只剩窄条可见。
     expect(stage.parentElement).toHaveClass('min-w-0');
     expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
+  });
+
+  it('好友 Coding Bot 复用标准聊天舞台，但隐藏资源管理和副屏', async () => {
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [], friendBots: [friendCodingBot] },
+    });
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { 'friend-coding:2': true },
+      selectedBotId: 'friend-coding:2',
+      selectedSection: 'friend',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 'friend-s1',
+      friendBotSessionsByBotId: {
+        'friend-coding:2': {
+          ...emptyList,
+          items: [
+            {
+              sessionId: 'friend-s1',
+              botId: 'friend-coding:2',
+              title: '好友 Coding 会话',
+              messageCount: 1,
+              gmtModified: '',
+              gmtCreate: '',
+            },
+          ],
+        },
+      },
+    });
+
+    render(<ConversationPage />);
+
+    expect(await screen.findByTestId('interactive-stage')).toBeInTheDocument();
+    expect(screen.queryByTestId('coding-bot-stage')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收藏当前会话' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '会话管理' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '历史消息' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '资源管理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '副屏' })).not.toBeInTheDocument();
+    expect(mockUseBotChat).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: 'friend-coding:2' }),
+      expect.objectContaining({ sessionId: 'friend-s1' }),
+      expect.anything(),
+      undefined,
+      '101',
+    );
   });
 
   it('识别出 Coding Bot 后，目标 Session 未就绪也先触发 Embedded 宿主预载', async () => {
