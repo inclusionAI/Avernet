@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 
 import { collectTaskGroupIds, enrichTaskGroupDisplay } from '../groupDisplay';
+import { compareArtifactsByCreationOrder } from '../artifactDescriptor';
 import { useGroupMemberNames } from '../hooks/useGroupMemberNames';
 import type { TaskArtifactView, TaskView } from '../types';
 import { ArtifactsSection } from './ArtifactsSection';
@@ -36,7 +37,12 @@ export function collectTaskArtifacts(task: TaskView): TaskArtifactView[] {
     const nodeId = artifact.nodeId ?? task.nodes[0]?.id ?? null;
     if (!merged.has(artifact.id)) merged.set(artifact.id, withStage(artifact, nodeId));
   }
-  return [...merged.values()];
+  return [...merged.values()].sort((a, b) => {
+    const stageA = a.stage ?? Number.MAX_SAFE_INTEGER;
+    const stageB = b.stage ?? Number.MAX_SAFE_INTEGER;
+    if (stageA !== stageB) return stageA - stageB;
+    return compareArtifactsByCreationOrder(a, b);
+  });
 }
 
 export const TaskArtifactsList: React.FC<TaskArtifactsListProps> = ({

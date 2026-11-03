@@ -14,6 +14,7 @@ import {
   mergeArtifactLists,
   normalizeDescriptor,
 } from '@/assets/TaskPanel/artifactDescriptor';
+import type { TaskArtifactDescriptorDto } from '@/assets/TaskPanel/contract';
 
 describe('normalizeDescriptor', () => {
   it('url_link 分支:kind/url/creator/nodeId/时间戳 ISO 化', () => {
@@ -126,6 +127,52 @@ describe('mergeArtifactLists', () => {
   it('legacy 项 nodeId 缺省时回落入参 nodeId', () => {
     const merged = mergeArtifactLists(null, legacyArtifacts, 'n1');
     expect(merged.find((a) => a.id === 'legacy-only')?.nodeId).toBe('n1');
+  });
+});
+
+describe('mergeArtifactLists display order', () => {
+  it('按创建时间正序、同时间按产物 ID 正序，不按 attempt 逆转展示顺序', () => {
+    const sources: TaskArtifactDescriptorDto[] = [
+      {
+        artifact_id: 'newer',
+        artifact_name: '新产物',
+        kind: 'text',
+        content: { text: 'newer' },
+        attempt: 2,
+        created_at: 3000,
+      },
+      {
+        artifact_id: 'same-time-10',
+        artifact_name: '同时间产物 10',
+        kind: 'text',
+        content: { text: 'same-time-10' },
+        attempt: 2,
+        created_at: 2000,
+      },
+      {
+        artifact_id: 'same-time-2',
+        artifact_name: '同时间产物 2',
+        kind: 'text',
+        content: { text: 'same-time-2' },
+        attempt: 0,
+        created_at: 2000,
+      },
+      {
+        artifact_id: 'older',
+        artifact_name: '旧产物',
+        kind: 'text',
+        content: { text: 'older' },
+        attempt: 0,
+        created_at: 1000,
+      },
+    ];
+
+    expect(mergeArtifactLists(sources, undefined, 'n1').map((artifact) => artifact.id)).toEqual([
+      'older',
+      'same-time-2',
+      'same-time-10',
+      'newer',
+    ]);
   });
 });
 
