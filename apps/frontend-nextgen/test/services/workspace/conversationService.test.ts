@@ -262,6 +262,95 @@ describe('conversationService.listManagedSessions', () => {
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({ sessionId: 'session-1', favorite: true });
   });
+
+  describe('Coding Bot session ownership', () => {
+    const codingBot: ChatBotView = {
+      ...managedBot,
+      engine: 'claude_code',
+      isAgentCodingBot: true,
+    };
+    const sessionDto = (sessionId: string) => ({
+      ...sessionItem,
+      session_id: sessionId,
+      title: `历史会话_${sessionId}`,
+    });
+
+    it('continues scanning raw pages when the first page only contains sessions from another user', async () => {
+      const otherSessions = Array.from({ length: 100 }, (_, index) =>
+        sessionDto(`user:200:session:other-${index}:agent:bot-a`),
+      );
+      const mineSession = sessionDto('user:100:session:mine:agent:bot-a');
+      mocked.listBotSessions.mockImplementation((_botId: string, params: Parameters<typeof ctrl.listBotSessions>[1]) =>
+        Promise.resolve(
+          params.page === 1 ? sessionsEnvelope(otherSessions, 101) : sessionsEnvelope([mineSession], 101),
+        ),
+      );
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
+
+      expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
+        1,
+        'bot-a',
+        expect.objectContaining({ page: 1, page_size: 100 }),
+      );
+      expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
+        2,
+        'bot-a',
+        expect.objectContaining({ page: 2, page_size: 100 }),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:100:session:mine:agent:bot-a' }], total: 1 },
+      });
+    });
+
+    it('returns only sessions created by other users for origin=others', async () => {
+      mocked.listBotSessions.mockResolvedValue(
+        sessionsEnvelope([
+          sessionDto('user:100:session:mine:agent:bot-a'),
+          sessionDto('user:200:session:other:agent:bot-a'),
+        ]),
+      );
+
+      const result = await conversationService.listManagedSessions(
+        codingBot,
+        '100',
+        'all',
+        1,
+        10,
+        '',
+        undefined,
+        'others',
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:200:session:other:agent:bot-a' }], total: 1 },
+      });
+    });
+
+    it('treats numeric user ids with leading zeroes as the same creator', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('user:000100:session:mine:agent:bot-a')]));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:000100:session:mine:agent:bot-a' }] },
+      });
+    });
+
+    it('keeps unrecognized legacy session ids in mine for backward compatibility', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('legacy-session-id')]));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'legacy-session-id' }] },
+      });
+    });
+  });
 });
 
 describe('conversationService.listFriendBotSessions', () => {

@@ -63,6 +63,7 @@ export default function ConversationPage(): JSX.Element {
   const hydrated = !directory.managedLoading && !directory.teamLoading && !directory.friendLoading;
   const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession } =
     useConversationSelection({
+      userId,
       managedBots: managedAndTeamBots,
       friendBots: directory.friendBots,
       hydrated,
@@ -132,7 +133,7 @@ export default function ConversationPage(): JSX.Element {
   );
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
-  const selectionIsReadonly = origin === 'others' && store.selectedBotId !== null;
+  const selectionIsReadonly = origin === 'others' && selectedCodingBot === null && store.selectedBotId !== null;
   const readonlyHistory = useConversationHistory({
     bot: selectionIsReadonly ? readonly.bot : null,
     friendUserId: selectionIsReadonly ? store.selectedFriendUserId : null,
@@ -169,7 +170,7 @@ export default function ConversationPage(): JSX.Element {
   const handleStandardChatRequestingChange = useCallback((isRequesting: boolean) => {
     setStandardChatRequesting(isRequesting);
   }, []);
-  const replyingSessionId = standardChatRequesting ? (selectedSession?.sessionId ?? null) : null;
+  const replyingSessionId = standardChatRequesting ? selectedSession?.sessionId ?? null : null;
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
     teamBots: directory.teamBots,
