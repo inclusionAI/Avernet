@@ -23,17 +23,24 @@ from __future__ import annotations
 import random
 import string
 from datetime import datetime
-from enum import StrEnum
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Path, Request
 from fastapi_injector import Injected
 from pydantic import BaseModel, Field
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    ERROR_RESPONSES,
+    USER_SCOPED_403,
+    Envelope,
+    ErrorEnvelope,
+    error_example,
+)
+from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    DelegatedUserDep,
     OwnerNameDep,
     UserIdDep,
 )
@@ -97,8 +104,36 @@ class BotCopyResponse(BaseModel):
     )
     operation_id: str = Field(..., description="copy 操作幂等 id + FE correlation id")
     bot_id: str = Field(..., description="新建 dst bot 的 bot_id")
-    iframe_url: Optional[str] = Field(default=None)
-    redirect_url: Optional[str] = Field(default=None)
+    iframe_url: Optional[str] = Field(
+        default=None,
+        description="AgentPass authorisation iframe URL (only on auth_required).",
+    )
+    redirect_url: Optional[str] = Field(
+        default=None,
+        description="AgentPass authorisation redirect URL (only on auth_required).",
+    )
+
+
+# The copy route's failure table. 403 is the user_id owner-mismatch the surface
+# carries everywhere; 409 is the source-not-copyable refusal (engine / lifecycle
+# / not found / no edit permission). 202 is a success (auth_required), not an
+# error, so it carries the response model rather than ErrorEnvelope.
+BOT_COPY_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    409: {
+        "model": ErrorEnvelope,
+        "description": "Source bot is not copyable — wrong engine, lifecycle "
+        "blocks copy, not found, or the caller lacks edit permission.",
+        **error_example(409, "Source bot not copyable"),
+    },
+}
+
+# The retry route's failure table. 403 is the owner-mismatch; 404 is a bot with
+# no copy operation ledger row backing it.
+RETRY_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    404: ERROR_RESPONSES[404],
+}
 
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
@@ -276,12 +311,18 @@ def submit_copy(
     )
 
 
-class RetryResult(StrEnum):
+class RetryResult(_DocumentedEnum):
     """The retry endpoint's outcome."""
 
     RE_ENQUEUED = "re_enqueued"
     STILL_RUNNING = "still_running"
     TERMINAL = "terminal"
+
+    __descriptions__ = {
+        "re_enqueued": "Copy re-handed off to create_job; FE should refresh and follow copy_state.",
+        "still_running": "Within the 60s retry throttle; the caller should wait and retry.",
+        "terminal": "The copy has converged; no retry is needed.",
+    }
 
 
 class RetryResponse(BaseModel):
@@ -370,8 +411,7 @@ def retry_copy(
     response_model=Envelope[BotCopyResponse],
     responses={
         202: {"description": "Needs user authorization (internal license gate)"},
-        403: {"description": "No edit permission on source"},
-        409: {"description": "Source not copyable (engine / lifecycle / not found)"},
+        **BOT_COPY_RESPONSES,
     },
 )
 @envelope_errors
@@ -380,6 +420,7 @@ async def copy_bot(
     request: Request,
     owner_id: UserIdDep,
     owner_name: OwnerNameDep,
+    caller: DelegatedUserDep,
     bot_repo: BotRepository = Injected(BotRepository),
     bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
     bot_script_service: BotStartupScriptServiceProtocol = Injected(
@@ -390,7 +431,7 @@ async def copy_bot(
     space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
-    del request
+    del request, caller
     result = submit_copy(
         body=body,
         owner_id=owner_id,
@@ -409,13 +450,17 @@ async def copy_bot(
     "/copy/{bot_id}/retry",
     status_code=200,
     response_model=Envelope[RetryResponse],
-    responses={404: {"description": "No copy operation for this bot"}},
+    responses=RETRY_RESPONSES,
 )
 @envelope_errors
 async def retry_copy_bot(
-    bot_id: str,
+    bot_id: Annotated[str, Path(
+        description="The dst bot whose copy_state FE is polling; the backend "
+        "resolves it to the operation ledger row.",
+    )],
     request: Request,
     owner_id: UserIdDep,
+    caller: DelegatedUserDep,
     bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
     apply_repo: BotConfigManifestApplyRepositoryProtocol = Injected(
         BotConfigManifestApplyRepositoryProtocol
@@ -425,10 +470,10 @@ async def retry_copy_bot(
 ) -> Envelope[RetryResponse]:
     """Re-hand-off a copy operation to create_job (operator-triggered retry).
 
-    ``bot_id`` is the dst bot (the one FE is polling ``copy_state`` on); the
+    The path's bot_id is the dst bot (the one FE is polling copy_state on); the
     backend resolves it to the operation ledger row.
     """
-    del request
+    del request, caller
     result = retry_copy(
         bot_id=bot_id,
         operator_id=owner_id,

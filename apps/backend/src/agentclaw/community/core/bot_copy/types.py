@@ -30,6 +30,31 @@ class BotCopyStatus(StrEnum):
     CONVERGED = "CONVERGED"
     FAILED = "FAILED"
 
+    # Caller-facing per-member docs, published as x-enum-descriptions so a
+    # generated client carries the meanings. Inlined rather than subclassing the
+    # openapi_v1 _DocumentedEnum base so core stays free of the adapter layer.
+    __descriptions__: dict[str, str] = {
+        "INITIAL": "Operation row written; create_job not yet handed off.",
+        "CREATED": "Pre-container apply running; dst bot record materialising.",
+        "AUTH_PENDING": "AgentPass authorisation gate pending for the dst bot.",
+        "CONFIG_COPIED": "Pre-container apply finished; config persisted.",
+        "FILE_SYNCED": "Config applied; device not yet provisioned.",
+        "BOT_STARTED": "Device up; on-container apply running or imminent.",
+        "CAPSET_SYNCED": "Capability set sync in progress (deferred stage).",
+        "CONVERGED": "Copy complete; the dst is an ordinary bot (copy_state null).",
+        "FAILED": "An apply failed; operator retry is offered.",
+    }
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema: Any, handler: Any) -> Any:
+        schema = handler(core_schema)
+        values = list(schema.get("enum", []))
+        schema["x-enum-descriptions"] = [cls.__descriptions__.get(v, "") for v in values]
+        names = {m.value: m.name for m in cls}
+        schema["x-enum-varnames"] = [names.get(v, str(v)) for v in values]
+        schema["x-enumNames"] = list(schema["x-enum-varnames"])
+        return schema
+
     @classmethod
     def terminal(cls) -> frozenset["BotCopyStatus"]:
         """Statuses that operator retry must not touch."""
