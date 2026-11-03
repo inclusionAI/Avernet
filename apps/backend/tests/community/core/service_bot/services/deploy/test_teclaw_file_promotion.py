@@ -36,7 +36,7 @@ class _FakeDeviceFs:
     async def list_dir(self, dir_path, *, recursive=False):
         return self._listings.get(dir_path, [])
 
-    async def read_file(self, file_path):
+    async def read_file(self, file_path, **kwargs):
         self.read_calls.append(file_path)
         return self._contents.get(file_path)
 
