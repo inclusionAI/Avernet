@@ -127,6 +127,10 @@ def build_copy_state_summary(
         dst_apply_records=applies,
         dst_bot_status=bot_status,
     )
+    # Once the copy has converged the dst is an ordinary bot — drop the
+    # copy_state so FE stops showing copy progress / the retry button.
+    if status is BotCopyStatus.CONVERGED:
+        return None
     return BotCopyStateSummary(
         operation_id=copy_row.operation_id,
         status=status,
