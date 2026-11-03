@@ -1,0 +1,29 @@
+engine/bootloader/bootstrapping/start_service.sh
+  s_bb98e2f10840b6::t_b6019cb502a717 593,1350-1373
+engine/bootloader/tests/test_start_service_model_policy_integration.py
+  s_3e40e68ab806a7::t_10b867527bc355 91,112,166-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8921053c73e2c41b21e47459de51433c968df8bb",
+  "prompts": {},
+  "sessions": {
+    "s_3e40e68ab806a7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ec-f31e-77d3-beaf-69fa1009b899",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    },
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
