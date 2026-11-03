@@ -10,13 +10,12 @@ import { logRepairEvent, repairLogError } from "../common/logging.js";
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
 
-function ownerNotificationEnabled(raw: string, input: Parameters<RecoveryTaskNotifier["notify"]>[0]): boolean {
+function ownerNotificationEnabled(raw: string, enabled: number, input: Parameters<RecoveryTaskNotifier["notify"]>[0]): boolean {
   let value;
   try { value = JSON.parse(raw); }
   catch { throw new Error("Invalid recovery owner notification JSON"); }
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some(key => !["default_enabled", "bot_overrides"].includes(key))
-    || value.default_enabled !== undefined && typeof value.default_enabled !== "boolean"
+    || Object.keys(value).some(key => key !== "bot_overrides")
     || value.bot_overrides !== undefined && !Array.isArray(value.bot_overrides)) {
     throw new Error("Invalid recovery owner notification configuration");
   }
@@ -35,7 +34,7 @@ function ownerNotificationEnabled(raw: string, input: Parameters<RecoveryTaskNot
     targets.add(key);
     if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
   }
-  return matched ?? (value.default_enabled === true);
+  return matched ?? (enabled === 1);
 }
 
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
@@ -44,10 +43,10 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
 
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
     const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-    if (!row || row.enabled === 0) return false;
+    if (!row) return false;
     try {
-      if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
-      if (!ownerNotificationEnabled(row.config_json, input)) return false;
+      if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+      if (!ownerNotificationEnabled(row.config_json, row.enabled, input)) return false;
     } catch (error) {
       logRepairEvent("session-recovery", "session_recovery_notification", "configuration_invalid", {
         taskId: input.taskId, botId: input.botId, targetEnvironment: input.targetEnvironment, operation: input.kind, ...repairLogError(error),

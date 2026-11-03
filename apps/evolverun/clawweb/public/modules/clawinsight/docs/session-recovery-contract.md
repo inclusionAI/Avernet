@@ -152,12 +152,11 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 
 Owner DingTalk notifications use the independent `ce_app_config` key
 `session_recovery_owner_notifications`. Its existing `enabled` column is the
-master switch: a missing row or any value other than `1` prevents sending.
-An enabled row additionally requires an explicit grant in `config_json`:
+default for Bots without an override: `0` means off and `1` means on.
+`config_json` contains only optional Bot overrides:
 
 ```json
 {
-  "default_enabled": false,
   "bot_overrides": [
     { "bot_id": "example-bot", "entity_id": "example-owner", "env": "prod", "enabled": true }
   ]
@@ -166,21 +165,22 @@ An enabled row additionally requires an explicit grant in `config_json`:
 
 Overrides match the exact `bot_id + entity_id + env` from the task's frozen
 target. `env` is the target Bot environment, not the ClawWeb control-plane
-environment. A matching override's boolean `enabled` takes precedence,
-including `false` when the default is on. Without a match, sending is allowed
-only when `default_enabled` is explicitly `true`. Missing defaults, `{}`, or
-an empty unmatched override list remain off. IDs remain strings, including
-leading zeros; different Owners' `default` Bots do not share overrides.
+environment. A matching override's boolean `enabled` takes precedence over
+the row's default: a positive override can send with `enabled = 0`, and a
+negative override prevents sending with `enabled = 1`. Without a match,
+the row's `enabled` value applies. IDs remain strings, including leading
+zeros; different Owners' `default` Bots do not share overrides.
 
-Use `enabled = 1` with `{"default_enabled":true}` for all-on, `enabled = 0`
-for all-off, or `enabled = 1` with explicit positive overrides and an absent
-or false default for selected Bots. An existing enabled row with `{}` must
-be updated to an explicit grant before it can send; empty configuration no
-longer means all-on.
+Use `enabled = 0` with `{}` for all-off, `enabled = 1` with `{}` for all-on,
+`enabled = 0` with positive overrides for selected Bots, or `enabled = 1`
+with negative overrides for exceptions. The existing empty configurations
+retain their previous behavior. To turn off every Bot, set `enabled = 0`
+and clear the overrides; there is no separate master switch.
 
-Malformed JSON, invalid field types or environments, unknown fields and
-duplicate target overrides disable the whole notification attempt, even if
-another entry or the default grants sending. The existing recovery log records
+Missing rows skip sending. Invalid `enabled` values, malformed JSON, invalid
+field types or environments, unknown fields and duplicate target overrides
+disable the whole notification attempt, even if another entry or the default
+grants sending. The existing recovery log records
 `session_recovery_notification / configuration_invalid` without the raw
 configuration. Each notification event reads current policy; disabled or
 filtered notifications are not recorded as successful sends and are not replayed
