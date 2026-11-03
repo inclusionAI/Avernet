@@ -47,6 +47,7 @@ from agentclaw.community.di.modules.bot_management_module import BotManagementMo
 from agentclaw.community.di.modules.bot_message_feedback_module import (
     BotMessageFeedbackModule,
 )
+from agentclaw.community.di.modules.bot_overview_module import BotOverviewModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
@@ -232,6 +233,7 @@ def build_injector(
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        BotOverviewModule(),
         BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),

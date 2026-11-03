@@ -288,6 +288,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
+    # The Bot overview carries only non-user data, identical for every caller.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/overview"),
     # The minimal classification is tenant-wide, not owner-scoped.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
@@ -621,7 +623,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
-_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 139}
+# The non-user Bot overview adds one Bot-path operation with no user_id.
+_BOT_ID_PLACEMENT = {"path": 218, "query": 1, "none": 139}
 
 
 def _schema() -> dict:
