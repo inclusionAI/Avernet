@@ -1,0 +1,45 @@
+# avernet-common — Python code shared by the Avernet services.
+#
+# Not deployed on its own. Each consuming app (apps/backend today) declares it as
+# a uv path dependency, so it is installed into that app's own venv and locked in
+# that app's own uv.lock:
+#
+#   [tool.uv.sources]
+#   avernet-common = { path = "../../middleware/python/avernet-common", editable = true }
+#
+# Keep the dependency list minimal and the version floors loose: every consumer
+# has to resolve these against its own pins.
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avernet_common"]
+
+[project]
+name = "avernet-common"
+version = "0.1.0"
+description = "Code shared across Avernet services (principal token envelope, ...)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  # PyJWT signs and verifies the X-Avernet-Principal token. 2.9 added
+  # multi-issuer validation, which the verifier's issuer allow-list relies on.
+  "pyjwt>=2.9.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+]
+
+# Same mirror as every app in this repo. As a path dependency this table is
+# ignored — the consuming app's own index applies; it governs this package's own
+# lock and test environment only.
+[[tool.uv.index]]
+default = true
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

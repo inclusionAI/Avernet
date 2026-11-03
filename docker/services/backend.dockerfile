@@ -16,6 +16,11 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 # Install dependencies first (without the project) for better layer caching.
 # The default uv index is the Aliyun PyPI mirror (see apps/backend/pyproject.toml).
+# avernet-common is a path dependency at ../../middleware/python/avernet-common
+# relative to the project, which from WORKDIR /app is /middleware/python/... —
+# so it is copied to exactly that path, here and in the runtime stage (the
+# editable install points the venv at its src/).
+COPY middleware/python/avernet-common /middleware/python/avernet-common
 COPY apps/backend/pyproject.toml apps/backend/uv.lock apps/backend/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
@@ -88,6 +93,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 COPY --from=builder /app/.venv /app/.venv
 COPY apps/backend/src /app/src
+COPY middleware/python/avernet-common/src /middleware/python/avernet-common/src
 
 # YamlConfigProvider searches ${PWD}/configs before the packaged
 # agentclaw/community/configs, so this copy is the one an operator overrides:

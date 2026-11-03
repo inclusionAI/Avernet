@@ -9,11 +9,16 @@ token to fix next, so the distinction lives in the log, not in the envelope.
 
 from __future__ import annotations
 
+from avernet_common.principal_token import PrincipalTokenError
 
-class PrincipalVerificationError(Exception):
+
+class PrincipalVerificationError(PrincipalTokenError):
     """Raised when a forwarded principal token cannot be trusted (→ 401).
 
     The message is internal-facing (it names the specific failure for the log);
     ``ENVELOPE_ERRORS`` maps this type to a fixed public message, so it is never
     rendered with ``str(exc)``.
+
+    A subclass of the shared ``PrincipalTokenError``: this package re-raises the
+    shared envelope's failures as this type, so callers catch one type here.
     """
