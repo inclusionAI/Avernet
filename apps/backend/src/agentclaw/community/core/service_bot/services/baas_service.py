@@ -2094,6 +2094,27 @@ class BaasService:  # pragma: no cover
                     status_code=e.response.status_code
                 ) from e
 
+            # BaaS ws-info may return 404 with BOT_NOT_FOUND when the bot
+            # has been released/expired on the BaaS side — a legitimate
+            # business state, not a server fault.
+            if e.response.status_code == 404:
+                try:
+                    payload = e.response.json()
+                except (ValueError, TypeError):
+                    payload = None
+                if isinstance(payload, dict):
+                    detail = payload.get("detail")
+                    if isinstance(detail, dict) and detail.get("error") == "BOT_NOT_FOUND":
+                        logger.info(
+                            "[BaasService.get_ws_info_by_bot_uuid] bot not found: "
+                            "bot_uuid=%s tenant=%s",
+                            bot_uuid,
+                            effective_tenant,
+                        )
+                        raise BaasBotNotFoundError(
+                            f"BaaS bot not found: bot_uuid={bot_uuid}"
+                        ) from e
+
             location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "

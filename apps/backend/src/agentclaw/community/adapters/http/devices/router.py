@@ -409,6 +409,7 @@ async def get_device_connection(
             DeviceServiceError,
             InvalidDeviceStatusError,
         )
+        from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
 
         operator = get_operator_context(user)
         result = service.get_device_connection(
@@ -445,6 +446,13 @@ async def get_device_connection(
             success=False,
             message=str(e),
             error_code=40001,
+            data=None,
+        )
+    except BaasBotNotFoundError as e:
+        return ApiResponse(
+            success=False,
+            message="设备绑定已失效，请重新创建连接",
+            error_code=40403,
             data=None,
         )
     except DeviceServiceError as e:
@@ -509,6 +517,7 @@ async def get_device_connection_by_bot(
             DeviceServiceError,
             InvalidDeviceStatusError,
         )
+        from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
 
         operator = get_operator_context(user)
         result = service.get_device_connection_by_bot(
@@ -553,6 +562,13 @@ async def get_device_connection_by_bot(
             success=False,
             message=str(e),
             error_code=40001,
+            data=None,
+        )
+    except BaasBotNotFoundError as e:
+        return ApiResponse(
+            success=False,
+            message="设备绑定已失效，请重新创建连接",
+            error_code=40403,
             data=None,
         )
     except DeviceServiceError as e:

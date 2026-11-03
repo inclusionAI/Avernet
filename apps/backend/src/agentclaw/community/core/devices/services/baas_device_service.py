@@ -849,6 +849,10 @@ class BaasDeviceService(DeviceService):
 
         # 延迟导入避免循环依赖
         from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+        from agentclaw.community.core.service_bot.baas_service_errors import (
+            BaasBotNotFoundError,
+            BaasNoActiveDevicesError,
+        )
 
         record = self._repo.get_by_id(binding_id)
         if record is not None and record.status == DeviceBindingStatus.RELEASED.value:
@@ -868,6 +872,16 @@ class BaasDeviceService(DeviceService):
                 # Only override when asked; None would blank get_ws_info's default.
                 **({"path": path} if path else {}),
             )
+        except BaasBotNotFoundError as e:
+            logger.warning(
+                f"[BaasDeviceService.get_device_connection] BaaS bot not found: {e}"
+            )
+            raise BaasDeviceServiceError(str(e)) from e
+        except BaasNoActiveDevicesError as e:
+            logger.info(
+                f"[BaasDeviceService.get_device_connection] no active devices: {e}"
+            )
+            raise BaasDeviceServiceError(str(e)) from e
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")
             raise BaasDeviceServiceError(f"Failed to get device connection: {e}") from e
