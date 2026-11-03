@@ -58,7 +58,14 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         assert counted.status_code == 200, counted.text
         assert counted.json() == {
             **ready.json(),
-            "index_counts": {"vector_points": 1, "keyword_points": 1},
+            "index_counts": {
+                "vector_points": 1,
+                "keyword_points": 1,
+                "vector_matching_points": 1,
+                "keyword_matching_points": 1,
+                "vector_mismatched_points": 0,
+                "keyword_mismatched_points": 0,
+            },
         }
         assert search(client, "nutrition")["items"][0]["id"] == "demo"
         assert search(client, "nutrition")["items"][0]["summary"] == ""
@@ -85,6 +92,10 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         assert client.get("/ready?include_counts=true").json()["index_counts"] == {
             "vector_points": 0,
             "keyword_points": 0,
+            "vector_matching_points": 0,
+            "keyword_matching_points": 0,
+            "vector_mismatched_points": 0,
+            "keyword_mismatched_points": 0,
         }
 
 
@@ -170,7 +181,7 @@ def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path
 def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
     from search_core.providers.qdrant_index import QdrantRetrievalIndex
 
-    def unavailable(self):
+    def unavailable(self, index_key=""):
         raise OSError("count unavailable")
 
     monkeypatch.setattr(QdrantRetrievalIndex, "point_counts", unavailable)
@@ -187,3 +198,37 @@ def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
         result = client.get("/ready?include_counts=true")
         assert result.status_code == 503
         assert result.json() == {"detail": "index count unavailable"}
+
+
+def test_ready_counts_report_actual_mismatched_payloads_without_new_endpoint(tmp_path):
+    from search_core.plugin_api.vector_point import VectorPoint
+
+    app = local_factory()(tmp_path, poll_seconds=0.05)
+    with TestClient(
+        app, client=("127.0.0.1", 50000), base_url="http://127.0.0.1"
+    ) as client:
+        saved = client.put(
+            "/api/v1/agent-cards/demo", json={"card": {"name": "invoice"}}
+        )
+        applied(client, saved.json()["saved_revision"])
+        index = app.state.catalog_updates.index
+        index.upsert(
+            [
+                VectorPoint(
+                    id="wrong-version",
+                    vector=[1.0] + [0.0] * 255,
+                    payload={"index_key": "other"},
+                ),
+                VectorPoint(
+                    id="missing-version", vector=[1.0] + [0.0] * 255, payload={}
+                ),
+            ]
+        )
+        result = client.get("/ready?include_counts=true")
+        assert result.status_code == 200, result.text
+        assert result.json()["index_key"] == app.state.index_key
+        for kind in ("vector", "keyword"):
+            assert result.json()["index_counts"][f"{kind}_points"] == 3
+            assert result.json()["index_counts"][f"{kind}_matching_points"] == 1
+            assert result.json()["index_counts"][f"{kind}_mismatched_points"] == 2
+        assert "index_counts" not in client.get("/ready").json()

@@ -8,7 +8,6 @@ import sys
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-
 from search_core.adapters.http.cards import create_card_router
 from search_core.api.cards import CatalogConflict
 from search_core.api.models import VerifiedIdentity
@@ -65,7 +64,7 @@ def test_roundtrip_merge_delete_and_recreate(setup):
         stored = json.loads(
             conn.execute("SELECT card_json FROM bcsfuse_agent_cards").fetchone()[0]
         )
-    assert stored["source_card"] == card and stored["deleted"] is False
+    assert stored["source_card"] == card and "deleted" not in stored
     updated = client.put(PATH, json={"card": {"custom": {"b": None}, "values": []}})
     assert updated.status_code == 202
     details = client.get(PATH).json()

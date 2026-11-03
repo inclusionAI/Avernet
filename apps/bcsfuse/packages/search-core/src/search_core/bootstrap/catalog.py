@@ -282,7 +282,9 @@ def create_catalog_search_app(
             if not isinstance(index, IndexStatistics):
                 raise HTTPException(501, "index statistics unsupported")
             try:
-                result["index_counts"] = await calls["probe"].call(index.point_counts)
+                result["index_counts"] = await calls["probe"].call(
+                    index.point_counts, updates.index_key
+                )
             except Exception as error:
                 raise HTTPException(503, "index count unavailable") from error
         return result

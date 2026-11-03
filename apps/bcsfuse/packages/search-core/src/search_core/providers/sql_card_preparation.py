@@ -7,6 +7,15 @@ from search_core.providers.sql_index_documents import TABLE
 class CardPreparation:
     """Methods mixed into the environment-bound SQL Card repository."""
 
+    def _retire_documents(self, cursor, agent_id, revision):
+        """Publish removal to all generations in the source deletion transaction."""
+        self._execute(
+            cursor,
+            f"UPDATE {TABLE} SET is_deleted=1, source_revision=?, version=version+1, "
+            f"gmt_modify={self._next_modified} WHERE environment=? AND source_id=?",
+            (revision, self.environment, agent_id),
+        )
+
     def index_documents(self, index_key):
         from search_core.providers.sql_index_documents import SqlIndexDocuments
 

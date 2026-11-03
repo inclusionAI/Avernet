@@ -86,6 +86,11 @@ and behavior are unchanged.
   `search_core.core.card_management.CardManagementService`. `read_card` must not
   load vectors; `upsert` merges provided fields and commits before returning;
   `remove` is idempotent. Failures propagate. Versions remain internal.
+  SQL source deletion uses a dedicated `is_deleted` column and never rewrites
+  `card_json`. Catalog composition tombstones all Docs for the source across
+  index keys in the same source transaction, bumping artifact versions/timestamps.
+  Source-only composition has no Doc table to update. Leases and source revisions
+  fence in-flight producers; a failed Doc update rolls back source deletion.
 - Builder Plugin API: `search_core.plugin_api.card_documents.CardDocumentConverter`
   consumes an opaque source `CardSnapshot` and returns `CardProjection` (documents
   plus filter labels). Composition owns converter choice and version. Management
@@ -141,14 +146,17 @@ remain the host's responsibility. Install the `scheduler` extra for the latter.
 ## Optional index statistics
 
 `IndexStatistics.point_counts()` is a Plugin API capability implemented by
-`QdrantRetrievalIndex` for Local and Server. It returns exactly `vector_points`
-and `keyword_points`, using exact point counts of the two currently bound
-collections. It does not enumerate IDs or fetch vectors, and does not sum old
+`QdrantRetrievalIndex` for Local and Server. Without an argument it returns
+`vector_points` and `keyword_points`. With `point_counts(index_key)` it additionally
+returns `vector_matching_points`, `vector_mismatched_points`,
+`keyword_matching_points` and `keyword_mismatched_points`. The provider counts
+payload matches and their complement using Qdrant exact filtered counts; totals
+are their sums. Missing or different `index_key` values count as mismatched. It does not enumerate IDs or fetch vectors, and does not sum old
 versions or other replicas. Errors propagate; unavailable storage is never zero.
 The counts are observations, not a distributed snapshot or source Card count.
 Existing `RetrievalIndex` implementations do not have to provide this capability.
 
 The catalog HTTP composition requests it only for `/ready?include_counts=true`,
-using its bounded probe executor. Default readiness checks remain unchanged.
+passing the effective instance index key through its bounded probe executor. Default readiness checks remain unchanged.
 Provider conformance is exercised by `tests/test_qdrant_modes.py`; HTTP behavior
 and normal readiness under count failures by `tests/test_public_catalog.py`.

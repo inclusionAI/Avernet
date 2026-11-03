@@ -71,11 +71,22 @@ curl -X DELETE http://127.0.0.1:8877/api/v1/agent-cards/demo
   "instance_id": "catalog-local",
   "index_key": "当前实例使用的索引标识",
   "active_index": "",
-  "index_counts": {"vector_points": 50, "keyword_points": 50}
+  "index_counts": {
+    "vector_points": 50,
+    "vector_matching_points": 50,
+    "vector_mismatched_points": 0,
+    "keyword_points": 50,
+    "keyword_matching_points": 50,
+    "keyword_mismatched_points": 0
+  }
 }
 ```
 
-两项分别是当前向量集合、关键词集合中的 point 数量；只统计当前绑定的集合，
+`*_points` 是向量/关键词集合的总条数，`*_matching_points` 是 payload.index_key
+等于响应中 index_key 的条数，`*_mismatched_points` 是不同或缺少该字段的条数。
+这些是从 Qdrant 实际读取的统计，不从 OB 或实例缓存推算。两路 mismatch 均为 0
+表示本次未发现版本不符，但空集合也会是 0，不表示 Card 已全部入索引。
+出现 mismatch 时仍返回诊断数据，不改变普通 `/ready` 的判断。只统计当前绑定的集合，
 不包含旧版本集合，也不是所有实例之和。一张 Card 可生成多个 Doc，因此数量不一定等于 Card 数。
 它们是查询时的数量，不作为全体 Card 已同步完成的判断。
 普通 `/ready` 不执行计数，平台探活无需改动。计数失败时带参数的请求返回 503，
