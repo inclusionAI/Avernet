@@ -102,6 +102,7 @@ def _parser() -> argparse.ArgumentParser:
             "Generate templates, objective and spec-v0 from one canonical Plan Source."
         )
     )
+    parser.add_argument("--reference-materials-version", choices=["1"], default="")
     parser.add_argument("--evolve-results-dir", default="", help="Optional local results root; internal default is unchanged.")
     parser.add_argument(
         "--workspace",

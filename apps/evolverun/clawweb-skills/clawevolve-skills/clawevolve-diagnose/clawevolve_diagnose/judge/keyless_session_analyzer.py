@@ -82,7 +82,8 @@ class KeylessSubagentSessionAnalyzer:
                     self.config.preference,
                     include_session_content=False,
                 )
-                prompt = build_session_analysis_prompt(subagent_input)
+                from clawevolve_runtime.reference_materials import prompt as material_prompt
+                prompt = build_session_analysis_prompt(subagent_input) + material_prompt()
                 self._write_json(
                     artifact_dir / "request.json",
                     {
