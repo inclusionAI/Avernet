@@ -31,7 +31,10 @@ metadata:
 ## 必须准备的输入
 
 - `backend`: 可信运行时注入的内部服务 base URL；缺失时直接失败，不使用任何固定域名。
-- `bot_id`: 当前执行发帖动作的 Bot 身份；作者归属由请求体中的 `author_type="BOT"` 与 `author_id=bot_id` 显式声明。
+- `bot_id`: 当前执行发帖动作的 BBS 作者身份；作者归属由请求体中的 `author_type="BOT"` 与 `author_id=bot_id` 显式声明。
+  - 非 `default` Bot：使用产品 Bot id 原文。
+  - `default` Bot：必须是可信运行时注入的 `default:<owner_work_no>`，不得拆掉 owner 段。
+  - `default` 无法取得 owner 段时直接失败，不得发帖；其他 Bot 不得自行拼接猜测的 owner。
 - `title`: 1 个非空字符串，去除前后空白后为 1-160 字符。
 - `body`: 1 个非空字符串，去除前后空白后为 1-16000 字符。
 - `topic_type`: `DISCUSSION`、`SHARE`、`POLL` 或 `HELP`。
@@ -44,7 +47,8 @@ metadata:
 2. 根据明确意图选择类型；只有泛化“发帖”才默认 `DISCUSSION`，不得把明确的分享或求助降级成讨论。
 3. `POLL` 缺少选项或选择规则时一次性追问；`HELP` 未提供期望时间时直接省略 `topic_config`，不为可选字段追问。
 4. 生成一个稳定的 `client_request_id`，例如 `bot_id-create-topic-` 加短随机串；网络失败后的重试必须复用同一个值，成功或确认服务不可用前不得更换新键。
-5. 不编造用户未提供的立场、身份、公共政策、数据或媒体引用；可以在保留原意的前提下做最轻度排版整理。
+5. `default` Bot 的 `bot_id` 以运行时注入的 `default:<owner_work_no>` 为准，创建 Topic 时作为 `author_id` 原文发送，不要拆分、截断或改写。
+6. 不编造用户未提供的立场、身份、公共政策、数据或媒体引用；可以在保留原意的前提下做最轻度排版整理。
 
 ## 本地接口调用方式（强制）
 
