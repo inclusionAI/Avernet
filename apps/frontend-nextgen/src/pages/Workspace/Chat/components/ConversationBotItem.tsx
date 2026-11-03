@@ -5,6 +5,7 @@
 // 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
 import { Button } from '@/components/ui';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
+import { formatCodingOtherSessionTitle } from '@/domain/conversation/codingSessionOwnership';
 import type {
   ConversationBotSection,
   ConversationOrigin,
@@ -47,6 +48,8 @@ export interface ConversationBotItemProps {
   sessions?: ConversationSessionListState;
   /** 仅 managed 传入:others 好友分组区数据。 */
   others?: ConversationBotItemOthers;
+  /** Coding Bot 的 others 直接使用按 sessionId 分流后的扁平会话列表。 */
+  flatCodingOthers?: boolean;
   onToggle(): void;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
@@ -77,6 +80,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   sessionKey,
   sessions,
   others,
+  flatCodingOthers = false,
   onToggle,
   onOriginChange,
   onScopeChange,
@@ -115,6 +119,16 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
+  const visibleSessions = React.useMemo(() => {
+    if (!flatCodingOthers || !sessions) return sessions;
+    return {
+      ...sessions,
+      items: sessions.items.map((session) => ({
+        ...session,
+        title: formatCodingOtherSessionTitle(session.sessionId, session.title),
+      })),
+    };
+  }, [flatCodingOthers, sessions]);
   // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
   const { scope: instanceScope, row: instanceRow, inputDisabled: instanceInputDisabled, marked: searchMarked } =
     useConversationInstanceRow(bot, searchActive);
@@ -245,7 +259,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             showFilter={showFilter}
             supportsOrigin={isManaged}
             supportsFavorites={canFavorite}
-            othersDisabled={section === 'team'}
+            othersDisabled={section === 'team' && !bot.isAgentCodingBot}
             origin={origin}
             scope={scope}
             onOriginChange={onOriginChange}
@@ -278,18 +292,20 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               />
             </>
           )}
-          {isOthers ? (
+          {isOthers && !flatCodingOthers ? (
             <OthersArea others={others} />
           ) : (
             <ConversationSessionList
-              actions={sessionActions}
-              sessions={sessions}
+              actions={isOthers ? undefined : sessionActions}
+              sessions={visibleSessions}
               selectedSessionId={selectedSessionId}
               onSelectSession={onSelectSession}
               onLoadMore={onLoadMore}
-              onToggleFavorite={canFavorite ? onToggleFavorite : undefined}
+              onToggleFavorite={!isOthers && canFavorite ? onToggleFavorite : undefined}
               isFavoritePending={isFavoritePending}
               replyingSessionId={replyingSessionId ?? null}
+              emptyTitle={isOthers ? '暂无他人发起的会话' : undefined}
+              showCreateHint={!isOthers}
             />
           )}
         </div>
