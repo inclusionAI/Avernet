@@ -1,0 +1,152 @@
+apps/bcsfuse/docs/architecture/alipay-resource-card-api.md
+  s_9e428ec8192673::t_ccd2aa558b6325 5-104
+  s_9e428ec8192673::t_8b40043441f4ed 1-4,105-114
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_catalog.py
+  s_9e428ec8192673::t_01285c87325ffd 9,32-36
+  s_9e428ec8192673::t_2662ff5f61ced2 161-164,219-224,229-252,265
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/materialization.py
+  s_9e428ec8192673::t_3acf0880788f7f 28-29,31
+apps/bcsfuse/docs/architecture/examples/discovery/search-tr-request.json
+  s_9e428ec8192673::t_b66bd31f062231 1-14
+apps/bcsfuse/tests/alipay/test_http_retrieval_options.py
+  s_9e428ec8192673::t_4c208415a8f236 37-39,42-44,60-62,66,68-70
+  s_9e428ec8192673::t_2662ff5f61ced2 18-20,58-59,63-65,67,76-87,89-91
+  s_9e428ec8192673::t_01285c87325ffd 3-5,10-11,13-14,92-134
+  s_9e428ec8192673::t_d36b378a12db73 1-2,6-9,12,15-17,21-36,40-41,45-57,71-75,88
+apps/bcsfuse/docs/architecture/examples/discovery/search-group-request.json
+  s_9e428ec8192673::t_b66bd31f062231 1-11
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/operations_preview.py
+  s_9e428ec8192673::t_d0dd985f1a451a 18,35
+  s_9e428ec8192673::t_2662ff5f61ced2 15,39
+  s_9e428ec8192673::t_3acf0880788f7f 19-20,32,52
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_request.py
+  s_9e428ec8192673::t_2662ff5f61ced2 3,6-15,21-29
+  s_9e428ec8192673::t_d0dd985f1a451a 2,4-5,16-17,19-20
+  s_9e428ec8192673::t_01285c87325ffd 1,18
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_ccd2aa558b6325 8-15
+  s_9e428ec8192673::t_d0dd985f1a451a 33-34,50-52,123-125,127-128,130
+apps/bcsfuse/tests/alipay/test_search_cache.py
+  s_9e428ec8192673::t_3acf0880788f7f 157
+apps/bcsfuse/internal/zbcsfuse_internal/application/card_metadata.py
+  s_9e428ec8192673::t_3acf0880788f7f 7-10,40,44-53,61-72
+  s_9e428ec8192673::t_490c013b378171 5-6,77-79
+apps/bcsfuse/docs/architecture/bcn-discovery-card-alignment.md
+  s_9e428ec8192673::t_ccd2aa558b6325 23
+  s_9e428ec8192673::t_77509224d47f80 2,4,8,12,14,16,18,20
+  s_9e428ec8192673::t_7a3fd6f2172c6b 1,3,5,7,9-11,13,15,17,19,21
+  s_9e428ec8192673::t_91fa402145396d 6
+  s_9e428ec8192673::t_1060e70ecd9d80 22
+apps/bcsfuse/docs/architecture/alipay-discovery-interface-design.md
+  s_9e428ec8192673::t_7a3fd6f2172c6b 1,5,9,11,15,17-19,23-27,69,71,73,75-80,82,84,86,88,90-92,94,96,98-100
+  s_9e428ec8192673::t_4c208415a8f236 7,28-67
+  s_9e428ec8192673::t_07c02938803418 2,4,6,8,10,12-14,16,20-22,68,70,72,74,81,83,85,87,89,93,95,97,101
+  s_9e428ec8192673::t_ccd2aa558b6325 3,102
+apps/bcsfuse/docs/architecture/examples/discovery/search-agent-request.json
+  s_9e428ec8192673::t_b66bd31f062231 1-9
+apps/bcsfuse/docs/architecture/examples/discovery/search-tr-mixed-response.json
+  s_9e428ec8192673::t_3f02b66f92f0c9 1-181
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_9e428ec8192673::t_b045443c000bd7 1-5,8-14,48-52,54-70,86,97-103,113-123
+  s_9e428ec8192673::t_c602e93f30f116 126-173,183-192
+  s_9e428ec8192673::t_3acf0880788f7f 6-7,29,43-44,53,71,85,104-112
+  s_9e428ec8192673::t_ccd2aa558b6325 174-182,227-239,246,253,257,264,268
+  s_9e428ec8192673::t_aec0e8f8a2b114 15-28,30-42,45-47,72-84,87-96,124-125,193-226,240-245,247-252,254-256,258-263,265-267
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_ccd2aa558b6325 46-47,172-173
+  s_9e428ec8192673::t_3f02b66f92f0c9 1,3,5,7-13,15,17-23,25,27,29,31,33,35-43,45,48-171,174,176,178,180-184,186,188-194,196,198-200,202,204-213,215-219,221
+apps/bcsfuse/tests/alipay/test_document_search.py
+  s_9e428ec8192673::t_3acf0880788f7f 132,205
+apps/bcsfuse/internal/zbcsfuse_internal/application/emergency.py
+  s_9e428ec8192673::t_2662ff5f61ced2 8,12,81-83,89-95,97,107-109,111,114-131
+  s_9e428ec8192673::t_0199fdaa6fb49d 132
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_9e428ec8192673::t_3acf0880788f7f 139,179
+apps/bcsfuse/internal/zbcsfuse_internal/application/search.py
+  s_9e428ec8192673::t_2662ff5f61ced2 6,23-27,49-52
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_9e428ec8192673::t_ccd2aa558b6325 78-86
+  s_9e428ec8192673::t_9ac33695ae6055 15-16,18,49-55,105-106
+apps/bcsfuse/tests/alipay/test_result_limit.py
+  s_9e428ec8192673::t_3acf0880788f7f 220
+apps/bcsfuse/tests/alipay/test_card_mapping.py
+  s_9e428ec8192673::t_3acf0880788f7f 157,167-168
+apps/bcsfuse/tests/alipay/test_operations_http.py
+  s_9e428ec8192673::t_3acf0880788f7f 70-71
+apps/bcsfuse/internal/zbcsfuse_internal/application/cache.py
+  s_9e428ec8192673::t_2662ff5f61ced2 136,138,149
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay.py
+  s_9e428ec8192673::t_3acf0880788f7f 12,54-55
+  s_9e428ec8192673::t_d0dd985f1a451a 11,53
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_9e428ec8192673::t_96871cab2b0f1e 1-15,31-32,42-56,65-67,76-82,89-107,140-141,151-158,164-177
+  s_9e428ec8192673::t_ccd2aa558b6325 33-41,57-64,68-75,83-88,108-139,142-150,159-163
+  s_9e428ec8192673::t_a116ada61ccff0 16-21,29-30
+  s_9e428ec8192673::t_f616b06f7c44eb 22-28
+apps/bcsfuse/docs/architecture/examples/discovery/search-keyword-request.json
+  s_9e428ec8192673::t_4c208415a8f236 1-9
+apps/bcsfuse/docs/architecture/examples/discovery/search-group-response.json
+  s_9e428ec8192673::t_7a3fd6f2172c6b 2,4-10,12-14,16-55,58-65,67-72
+  s_9e428ec8192673::t_b66bd31f062231 1,3,11,15,56-57,66,73-108
+apps/bcsfuse/internal/zbcsfuse_internal/application/resource_result.py
+  s_9e428ec8192673::t_3acf0880788f7f 1-26
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/search_response.py
+  s_9e428ec8192673::t_3acf0880788f7f 1-56
+apps/bcsfuse/tests/alipay/test_cache_drm.py
+  s_9e428ec8192673::t_3acf0880788f7f 92,113-115
+  s_9e428ec8192673::t_2d83269fa664bd 91
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/cards.py
+  s_9e428ec8192673::t_d0dd985f1a451a 122-137,145-147
+  s_9e428ec8192673::t_3acf0880788f7f 23-24,98,100-117,148-166,234-239,248-249
+  s_9e428ec8192673::t_ccd2aa558b6325 138-144
+  s_9e428ec8192673::t_cf3275cd56f082 16-17,99
+apps/bcsfuse/internal/zbcsfuse_internal/catalog/resource_cards.py
+  s_9e428ec8192673::t_d0dd985f1a451a 3,61-63
+  s_9e428ec8192673::t_3acf0880788f7f 1-2,4-60,64-101
+apps/bcsfuse/tests/alipay/test_application.py
+  s_9e428ec8192673::t_77509224d47f80 9-10,19
+  s_9e428ec8192673::t_3acf0880788f7f 155
+apps/bcsfuse/docs/architecture/examples/discovery/search-agent-response.json
+  s_9e428ec8192673::t_b66bd31f062231 1,3,11,32,49-84
+  s_9e428ec8192673::t_7a3fd6f2172c6b 2,4-10,12-31,33-48
+apps/bcsfuse/tr/rpc.proto
+  s_9e428ec8192673::t_a116ada61ccff0 19-21
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_9e428ec8192673::t_3acf0880788f7f 309
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_3acf0880788f7f 93-94,156-157
+apps/bcsfuse/docs/integrations/alipay-discover-java.md
+  s_9e428ec8192673::t_ccd2aa558b6325 3,131-134,299,308-312,315
+  s_9e428ec8192673::t_3f02b66f92f0c9 46,143-288,379
+  s_9e428ec8192673::t_34dba624cb6fd1 140,289,316-319
+.aci/zbcsfuse/zbcsfuse-dev-ci.aci.yml
+  s_9e428ec8192673::t_076963acfbb7ca 11
+.aci/zbcsfuse/zbcsfuse-pre-deploy.aci.yml
+  s_9e428ec8192673::t_ce8031aa00b764 10
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_9e428ec8192673::t_fe75f33a12a620 66
+apps/bcsfuse/internal/zbcsfuse_internal/generated/AgentDiscoverFacade.py
+  s_9e428ec8192673::t_bebfc5814234f9 102-103,113-114,116-117,125-126,180-181,188-189,197-198,207-208
+apps/bcsfuse/scripts/verify_alipay_card_lifecycle.py
+  s_9e428ec8192673::t_cc78607362019e 252
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/AgentItem.java
+  s_9e428ec8192673::t_ca55fecdd09b0d 18,20,36-37,40-41,44-45,48-49
+apps/bcsfuse/tr/java/src/main/java/com/alipay/layotto/zbcsfuse/DiscoverRequest.java
+  s_9e428ec8192673::t_bd71bf1f678918 22-29,53-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c5fd9580155330092c2351fa3249e72b8a0e976",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
