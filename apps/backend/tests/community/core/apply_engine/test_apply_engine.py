@@ -355,7 +355,7 @@ manifest:
 
 
 @pytest.mark.asyncio
-async def test_bare_mcp_entry_clears_an_existing_bot_override():
+async def test_bare_mcp_entry_preserves_an_existing_bot_override():
     activations = FakeActivationService(installed={"gh"})
     activations.mcp_overrides["gh"] = {"url": "https://old.example/mcp"}
 
@@ -364,12 +364,13 @@ async def test_bare_mcp_entry_clears_an_existing_bot_override():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
     )
 
-    assert _outcomes(report) == {"gh": EntryOutcome.UPDATED}
-    assert activations.configured == [("gh", None)]
+    assert _outcomes(report) == {"gh": EntryOutcome.UNCHANGED}
+    assert activations.mcp_overrides["gh"] == {"url": "https://old.example/mcp"}
+    assert activations.configured == []
 
 
 @pytest.mark.asyncio
-async def test_new_bare_mcp_entry_also_clears_an_orphan_override():
+async def test_new_bare_mcp_entry_uses_a_saved_override_without_installation():
     activations = FakeActivationService()
     activations.mcp_overrides["gh"] = {"url": "https://orphan.example/mcp"}
 
@@ -380,8 +381,8 @@ async def test_new_bare_mcp_entry_also_clears_an_orphan_override():
 
     assert _outcomes(report) == {"gh": EntryOutcome.CREATED}
     assert activations.installed == {"gh"}
-    assert activations.configured == [("gh", None)]
-    assert activations.mcp_overrides == {}
+    assert activations.configured == []
+    assert activations.mcp_overrides == {"gh": {"url": "https://orphan.example/mcp"}}
 
 
 @pytest.mark.asyncio
@@ -884,7 +885,7 @@ async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
     )
 
     assert activations.installed == {"ordinary"}
-    assert activations.configured == [("ordinary", None)]
+    assert activations.configured == []
     assert report.categories[0].aborted is False
 
 

@@ -88,6 +88,9 @@ from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import (
     McpRuntimeCredentialsConfigModule,
 )
+from agentclaw.community.di.modules.openapi_bot_access_check_config_module import (
+    OpenApiBotAccessCheckConfigModule,
+)
 from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
     OpenApiUserIdBypassConfigModule,
 )
@@ -130,6 +133,9 @@ from agentclaw.community.di.modules.tc_file_upload_integration_module import (
 )
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
+from agentclaw.community.di.openapi_bot_access_check_config import (
+    OpenApiBotAccessCheckConfig,
+)
 from agentclaw.community.di.openapi_user_id_bypass_config import (
     OpenApiUserIdBypassConfig,
 )
@@ -198,6 +204,9 @@ def build_injector(
         # malformed block anywhere and a non-empty list in pre/prod, and is
         # resolved unconditionally below so that refusal fails the boot.
         OpenApiUserIdBypassConfigModule(),
+        # Transitional Bot access check allowlist (``openapi.bot_access_check``);
+        # resolved eagerly below so a malformed block fails the boot.
+        OpenApiBotAccessCheckConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -319,6 +328,7 @@ def build_injector(
     # read a raising provider as "no bypass"). Resolving it here makes the
     # refusal a failed boot on every profile, pre/prod included.
     _app_injector.get(OpenApiUserIdBypassConfig)
+    _app_injector.get(OpenApiBotAccessCheckConfig)
     # Manager-sync config: the strict parser refuses an unknown key, a
     # mistyped value, or an enabled block with missing fields — and that
     # refusal must be a failed boot on every profile (a disabled block is

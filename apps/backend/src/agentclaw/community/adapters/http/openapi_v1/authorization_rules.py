@@ -48,6 +48,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/metadata/queries"): NoCheck(
         "tenant-wide display metadata for caller-supplied known bot ids"
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): NoCheck(
+        "transitional; the handler checks the configured app_name allowlist"
+    ),
     # ── Bot-scoped operations ─────────────────────────────────────────────
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     # The read moves off OWNER_SCOPED alone: a collaborator who may read a

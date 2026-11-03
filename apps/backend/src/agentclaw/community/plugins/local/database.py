@@ -170,6 +170,9 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
             finally:
                 db.close()
 
+    @contextmanager
     def transactional_orm_session(self):
-        """Reuse the existing local commit/rollback transaction."""
-        return self.orm_session()
+        """Keep SQLite SAVEPOINTs and guarded reads inside the write UoW."""
+        with self.orm_session() as db:
+            db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            yield db

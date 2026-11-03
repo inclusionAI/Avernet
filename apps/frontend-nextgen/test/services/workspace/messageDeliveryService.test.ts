@@ -1,8 +1,10 @@
 import { cancelDelivery } from '@/services/backendApi/collaboration/deliveryController';
-import { cancelQueuedDelivery } from '@/services/workspace/messageDeliveryService';
+import { queryWorkerTaskStatuses } from '@/services/backendApi/collaboration/workerTaskController';
+import { cancelQueuedDelivery, queryWorkerTasks } from '@/services/workspace/messageDeliveryService';
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/collaboration/deliveryController');
+jest.mock('@/services/backendApi/collaboration/workerTaskController');
 
 const mockedCancel = cancelDelivery as jest.MockedFunction<typeof cancelDelivery>;
 
@@ -51,4 +53,14 @@ describe('messageDeliveryService.cancelQueuedDelivery', () => {
     expect(outcome.firstError).toBe('delivery_state_changed');
   });
 
+});
+
+
+it('batches complete task identities in groups of 20 and deduplicates selectors', async () => {
+  const query = jest.mocked(queryWorkerTaskStatuses);
+  query.mockImplementation(async (refs: string[]) => ({ tasks: refs.map((ref: string) => ({ ref, status: 'completed' as const })) }));
+  const refs = Array.from({ length: 41 }, (_, i) => `bcs_intent_${i.toString(16).padStart(32, '0')}`);
+  const result = await queryWorkerTasks([...refs, refs[0]]);
+  expect(query.mock.calls.map(([batch]: [string[]]) => batch.length)).toEqual([20, 20, 1]);
+  expect(result.map((row) => row.ref)).toEqual(refs);
 });

@@ -16,11 +16,13 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StatusRequest {
+    #[serde(rename = "intent_ids", alias = "task_refs")]
     task_refs: Vec<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CancelRequest {
+    #[serde(rename = "intent_id", alias = "task_ref")]
     task_ref: String,
     reason: String,
 }

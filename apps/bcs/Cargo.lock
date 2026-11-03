@@ -1938,6 +1938,7 @@ dependencies = [
  "bcs-chat-run-store",
  "bcs-config",
  "bcs-config-api",
+ "bcs-coordination-store",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",

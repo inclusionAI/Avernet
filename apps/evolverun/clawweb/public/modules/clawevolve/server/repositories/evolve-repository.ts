@@ -186,6 +186,7 @@ export type EvolveTaskLogArchiveRow = {
 };
 
 export type EvolveTaskPageQuery = {
+  skillTeamSpaceIds?: string[];
   authorizedBots?: SpaceBot[];
   createdBy: string | null;
   ownerUserId?: string | null;
@@ -1574,7 +1575,23 @@ export class EvolveRepository {
       const filter = spaceBotPredicate(input.authorizedBots, "", this.db.dbType === "sqlite");
       clauses.push(filter.sql); params.push(...filter.values);
     }
-    if (input.createdBy) { clauses.push("created_by = ?"); params.push(input.createdBy); }
+    if (input.createdBy) {
+      const spaces = [...new Set(input.skillTeamSpaceIds ?? [])];
+      if (spaces.length) {
+        const config = "CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END";
+        const field = (name: string) => this.db.dbType === "sqlite"
+          ? `JSON_EXTRACT(${config}, '$.targetSkill.${name}')`
+          : `JSON_UNQUOTE(JSON_EXTRACT(${config}, '$.targetSkill.${name}'))`;
+        const stringField = (name: string) => this.db.dbType === "sqlite"
+          ? `JSON_TYPE(${config}, '$.targetSkill.${name}') = 'text'`
+          : `JSON_TYPE(JSON_EXTRACT(${config}, '$.targetSkill.${name}')) = 'STRING'`;
+        clauses.push(`(created_by = ? OR (${field("spaceType")} = 'TEAM'
+          AND ${stringField("assetId")} AND ${stringField("spaceId")}
+          AND COALESCE(${field("assetId")}, '') != ''
+          AND ${field("spaceId")} IN (${spaces.map(() => "?").join(",")})))`);
+        params.push(input.createdBy, ...spaces);
+      } else { clauses.push("created_by = ?"); params.push(input.createdBy); }
+    }
     if (input.ownerUserId) { clauses.push("user_id = ?"); params.push(input.ownerUserId); }
     if (input.taskTypes && input.taskTypes.length === 0) return { rows: [], total: 0 };
     if (input.targetType === "bot") {
@@ -1896,6 +1913,29 @@ export class EvolveRepository {
       activeEngine: row.active_engine, botType: row.bot_type,
       ownerId: row.owner_id, accessType: "collaborator" as const,
     }))];
+  }
+
+  /** Applying executable Skill content requires source Bot ownership or an
+   * explicit collaborator row; task/Space administration does not grant it. */
+  async canApplySkillToBot(actorId: string, sourceUserId: string, botId: string, env: string): Promise<boolean> {
+    const owner = "COALESCE(NULLIF(b.owner_id, ''), b.entity_id)";
+    const rows = await this.botDb.query<{ can_apply: number | string }>(
+      `SELECT CASE WHEN ${owner} = ? OR EXISTS (
+         SELECT 1 FROM ac_bot_collaborator c
+         WHERE c.bot_pk = b.id AND c.env = b.env AND c.user_id = ?
+           AND c.role IN ('admin', 'member')
+       ) THEN 1 ELSE 0 END AS can_apply
+       FROM ac_bots b
+       WHERE b.bot_id = ? AND b.is_delete = 0 AND (? = '' OR b.env = ?)
+         AND (${owner} = ? OR EXISTS (
+           SELECT 1 FROM ac_bot_collaborator source
+           WHERE source.bot_pk = b.id AND source.env = b.env AND source.user_id = ?
+             AND source.role IN ('admin', 'member')
+         ))`,
+      [actorId, actorId, botId, env, env, sourceUserId, sourceUserId],
+    );
+    // Missing or ambiguous legacy targets never authorize a different Bot.
+    return rows.length === 1 && Number(rows[0].can_apply) === 1;
   }
 
   async resolveAccessibleEvolveBotRuntime(

@@ -15,7 +15,7 @@ class MCPConfigServiceProtocol(Protocol):
     def get_bot_override(
         self, *, bot_id: str, owner_id: str, server_code: str
     ) -> dict[str, Any] | None:
-        """Return only fields explicitly declared for this owner-qualified Bot."""
+        """Read explicit Bot fields by stable entity_id (legacy parameter owner_id)."""
         ...
 
     def validate_headers_for_mcp(

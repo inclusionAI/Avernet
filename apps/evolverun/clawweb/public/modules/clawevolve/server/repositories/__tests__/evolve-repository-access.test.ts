@@ -27,6 +27,33 @@ class RecordingDb implements IDatabase {
 }
 
 describe("EvolveRepository collaborative Bot access", () => {
+  it("checks Skill application against the exact Bot and environment without a task-admin bypass", async () => {
+    const db = new RecordingDb(() => [{ can_apply: "1" }]);
+    expect(await new EvolveRepository(db).canApplySkillToBot("actor", "source", "bot", "pre")).toBe(true);
+    expect(db.calls[0].params).toEqual(["actor", "actor", "bot", "pre", "pre", "source", "source"]);
+    expect(db.calls[0].sql).toContain("c.bot_pk = b.id AND c.env = b.env");
+    expect(db.calls[0].sql).toContain("c.role IN ('admin', 'member')");
+  });
+
+  it.each([{ rows: [] }, { rows: [{ can_apply: 0 }] }, { rows: [{ can_apply: 1 }, { can_apply: 1 }] }])(
+    "rejects missing, unauthorized or ambiguous application targets: %j", async ({ rows }) => {
+      expect(await new EvolveRepository(new RecordingDb(() => rows)).canApplySkillToBot("actor", "source", "bot", ""))
+        .toBe(false);
+    });
+
+  it("binds team Skill task visibility and filters identically for the MySQL count and page", async () => {
+    const db = new RecordingDb(sql => sql.includes("COUNT(*) AS total") ? [{ total: 0 }] : []);
+    await new EvolveRepository(db).listTasksPage({ createdBy: "member", skillTeamSpaceIds: ["235", "235"],
+      page: 2, pageSize: 10, statuses: ["waiting_acceptance"] });
+    const [count, page] = db.calls;
+    expect(count.params).toEqual(["member", "235", "waiting_acceptance"]);
+    expect(page.params).toEqual([...count.params, 10, 10]);
+    expect(count.sql.slice(count.sql.indexOf("WHERE"))).toBe(page.sql.slice(page.sql.indexOf("WHERE"), page.sql.indexOf(" ORDER BY")));
+    expect(count.sql).toContain("JSON_TYPE(JSON_EXTRACT(");
+    expect(count.sql).toContain("= 'STRING'");
+    expect(count.sql).toContain("JSON_UNQUOTE(JSON_EXTRACT(");
+  });
+
   it("writes task log BIGINT timestamps as unix seconds on MySQL/ZDAS", async () => {
     const row = {
       id: 1, archive_id: "LOG-1", task_id: "EV-1", active_key: "EV-1", status: "dispatching",

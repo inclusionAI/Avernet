@@ -35,6 +35,8 @@ hand that choice back to the callers it was built to keep it from.
 from __future__ import annotations
 
 import inspect
+import ast
+from pathlib import Path
 
 import pytest
 
@@ -89,6 +91,25 @@ _PORTS = [
     ResourceFilePort,
     ResourceRowsPort,
 ]
+
+
+def test_port_contracts_do_not_import_domain_packages() -> None:
+    """The shared contracts stay reachable without depending on either domain."""
+    root = Path(inspect.getfile(ActivationPort)).parent
+    forbidden = []
+    for path in root.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            modules = (
+                [node.module] if isinstance(node, ast.ImportFrom)
+                else [alias.name for alias in node.names] if isinstance(node, ast.Import)
+                else []
+            )
+            for module in modules:
+                if module and module.startswith("agentclaw.") and not module.startswith(
+                    "agentclaw.community.core.ports"
+                ):
+                    forbidden.append(f"{path.name}:{node.lineno}: {module}")
+    assert forbidden == [], "Ports must import only shared port contracts: " + ", ".join(forbidden)
 
 
 @pytest.mark.parametrize(

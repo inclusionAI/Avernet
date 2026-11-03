@@ -242,10 +242,10 @@ class BotRepository(Protocol):
     def complete_destroy(
         self, *, bot_id: int, tenant: str, env: str, modifier: str
     ) -> None:
-        """Atomically set bot to RELEASED and soft-delete.
+        """Atomically retire the bot and its device relationships.
 
-        Both operations execute in a single transaction so partial failure
-        cannot leave the bot in an inconsistent state.
+        The bot is set to RELEASED and soft-deleted, and all live
+        bot-device relationships are soft-deleted in the same transaction.
         """
         ...
 

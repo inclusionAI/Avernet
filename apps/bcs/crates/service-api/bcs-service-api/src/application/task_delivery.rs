@@ -5,6 +5,8 @@ use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TaskDeliveryView {
     pub task_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent_id: Option<String>,
     pub summary: String,
     pub manager_id: String,
     pub worker_id: String,
@@ -30,6 +32,7 @@ impl TaskDeliveryView {
         let short: String = intent.unwrap_or(task_id).chars().filter(|c| *c != '-').take(8).collect();
         Some(Self {
             task_ref: format!("T-{}", short.to_ascii_lowercase()),
+            intent_id: intent.map(|id| format!("bcs_intent_{}", id.to_ascii_lowercase())),
             summary: task.get("summary").and_then(|v| v.as_str()).unwrap_or("").into(),
             manager_id: task.get("manager")?.as_str()?.into(),
             worker_id: worker_id.into(),
@@ -65,11 +68,25 @@ mod tests {
         let view = super::super::message_delivery::DeliveryStatusView::from(&row());
         let value = serde_json::to_value(view).unwrap();
         assert_eq!(value["task"]["task_ref"], "T-3fa9c1d2");
+        assert_eq!(value["task"]["intent_id"], "bcs_intent_3fa9c1d2000000000000000000000000");
         assert_eq!(value["task"]["queued_at"], 1000);
         assert_eq!(value["task"]["started_at"], 2000);
         assert_eq!(value["task"]["last_activity_at"], 3000);
         assert_eq!(value["task"]["timed_out"], true);
         assert!(!value.to_string().contains("must-not-leak"));
+    }
+    #[test]
+    fn colliding_display_refs_preserve_complete_assignment_identity() {
+        let first = TaskDeliveryView::from_delivery(&row()).unwrap();
+        let mut other = row();
+        other.semantic_projection_json["task"]["assignment_intent_id"] =
+            serde_json::json!("bcs_intent_3fa9c1d2FFFFFFFFFFFFFFFFFFFFFFFF");
+        let second = TaskDeliveryView::from_delivery(&other).unwrap();
+        assert_eq!(first.task_ref, second.task_ref);
+        assert_ne!(first.intent_id, second.intent_id);
+        assert_eq!(second.intent_id.as_deref(), Some("bcs_intent_3fa9c1d2ffffffffffffffffffffffff"));
+        other.semantic_projection_json["task"]["assignment_intent_id"] = serde_json::json!("invalid");
+        assert!(TaskDeliveryView::from_delivery(&other).unwrap().intent_id.is_none());
     }
     #[test]
     fn ordinary_and_result_deliveries_do_not_create_tasks() {
@@ -88,6 +105,8 @@ mod tests {
     fn legacy_task_uuid_fallback_matches_bot_task_reference() {
         let mut delivery = row();
         delivery.semantic_projection_json["task"]["assignment_intent_id"] = serde_json::Value::Null;
-        assert_eq!(TaskDeliveryView::from_delivery(&delivery).unwrap().task_ref, "T-12345678");
+        let view = TaskDeliveryView::from_delivery(&delivery).unwrap();
+        assert_eq!(view.task_ref, "T-12345678");
+        assert!(serde_json::to_value(view).unwrap().get("intent_id").is_none());
     }
 }

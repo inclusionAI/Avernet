@@ -10,7 +10,6 @@ import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSk
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
@@ -90,7 +89,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     props.identityLocked,
   );
-
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
   // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
@@ -102,7 +100,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     messages,
     isRequesting,
   });
-  const mentionConfig: MentionConfig | undefined = useMemo(
+  const mentionConfig = useMemo(
     () =>
       activeIdentity?.kind === 'user'
         ? buildGroupMentionConfig(session?.participants ?? [], {
@@ -152,9 +150,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
       userIdentityId,
       userIdentityName,
     });
-  if (!group) {
-    return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
-  }
+  if (!group) return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
 
   const showError = supportState.phase === 'error';
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
@@ -216,6 +212,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onInsertDraft={composerVisible ? insertDraft : undefined}
         />
         <GroupChatCollabPanel
+          connected={connectionStatus === 'connected'}
+          group={group}
           panel={collabPanel}
           session={session}
           messages={messages}

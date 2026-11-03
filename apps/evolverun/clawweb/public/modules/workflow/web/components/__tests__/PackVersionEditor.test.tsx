@@ -26,6 +26,27 @@ describe('PackVersionEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith([{ ...initial[0], contentBase64: '5L2g5aW9Cg==' }, initial[1], initial[2]])
     expect(screen.getByText(/不会自动保存或部署/)).toBeInTheDocument()
   })
+  it('filters the grouped file tree by search while keeping selection', () => {
+    const onChange = vi.fn()
+    render(<Harness onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText('搜索 Pack 文件'), { target: { value: 'run' } })
+    expect(screen.getByRole('button', { name: 'scripts/run.sh' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'workflow.yaml' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('搜索 Pack 文件'), { target: { value: '' } })
+    expect(screen.getByRole('button', { name: 'workflow.yaml' })).toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+  it('shows selected file details, version source, and parent save state', () => {
+    render(<PackVersionEditor files={initial} onUploadStateChange={() => {}} onChange={() => {}} versionSource={{ version: 'draft', packId: 'pack-1', baseRef: 'saved/pack-1', baseCommit: 'commit-1' }} saveStatus="dirty" />)
+    select('images/logo.bin')
+    const info = screen.getByRole('complementary', { name: '文件信息' })
+    expect(info).toHaveTextContent('images/logo.bin')
+    expect(info).toHaveTextContent('100644')
+    expect(info).toHaveTextContent('草稿版（saved）')
+    expect(info).toHaveTextContent('saved/pack-1')
+    expect(info).toHaveTextContent('有未保存更改')
+  })
+
   it('supports binary replacement while retaining executable mode', async () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)

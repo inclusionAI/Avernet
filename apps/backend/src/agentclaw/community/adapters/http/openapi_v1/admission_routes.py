@@ -58,6 +58,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     # Tenant-wide lookup returns display fields, never ownership or runtime internals.
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
+    # Transitional app-only lookup; its handler enforces the configured app allowlist.
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
