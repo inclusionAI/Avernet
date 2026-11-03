@@ -135,9 +135,13 @@ Group 创建示例：`PUT /api/v1/agent-cards/bcs_grp_example`
 | local_applied_revision | 本实例已经应用的版本；等于 saved_revision 表示本实例已跟上 |
 | local_error | 本实例应用索引时的错误码 |
 | instance_id | 响应请求的实例 |
-| environment / index_key / operations_text_revision | 环境、索引配置标识及内部规则观察版本，用于诊断 |
+| environment / index_key / operations_text_revision | 环境、索引版本及内部规则观察版本，用于诊断；接入版本管理的宿主直接使用版本名作为 index_key |
 
 经负载均衡查询可能落到不同实例，不能用一次响应证明所有实例已完成。资料尚未创建过返回 404。
+
+构建、切换和向量复用见 [索引版本管理](index-rebuild.md)。Qdrant 的向量和关键词
+point payload 都保存所属 `index_key`，由系统在写入和恢复时补充，不属于业务 Card，
+不参与正文或向量计算。它不表示所有实例都已经启用该版本。
 
 ## 错误与启用方式
 

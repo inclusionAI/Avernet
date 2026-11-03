@@ -23,5 +23,17 @@ class IndexBuildRecord:
 
 
 class IndexBuildManagement(Protocol):
-    def create(self, build_id: str, model: str, dimension: int) -> IndexBuildRecord: ...
+    def create(
+        self,
+        build_id: str,
+        model: str,
+        dimension: int,
+        *,
+        filter_fields: tuple[str, ...] | None = None,
+    ) -> IndexBuildRecord:
+        """Freeze code-selected conversion and filters. None means stored defaults
+        for retries, or the application's defaults for a new version.
+        """
+        ...
+
     def status(self, build_id: str) -> IndexBuildRecord: ...

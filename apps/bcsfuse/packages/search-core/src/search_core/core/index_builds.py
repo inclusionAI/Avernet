@@ -37,14 +37,20 @@ class IndexBuildService:
         self.lease_seconds = lease_seconds
         self.conversion_version = conversion_version
 
-    def create(self, build_id, model, dimension):
+    def create(self, build_id, model, dimension, *, filter_fields=None):
+        # Retrying an existing version must not pick up changed deployment defaults.
+        if filter_fields is None:
+            previous = self.builds.get(build_id)
+            filter_fields = (
+                previous.config.filter_fields if previous else self.filter_fields
+            )
         return self.builds.create(
             IndexBuildConfig(
                 build_id=build_id,
                 embedding_model=model,
                 embedding_dimension=dimension,
                 conversion_version=self.conversion_version,
-                filter_fields=tuple(sorted(self.filter_fields)),
+                filter_fields=tuple(filter_fields),
             )
         )
 
@@ -58,9 +64,25 @@ class IndexBuildService:
         row = self.builds.get(build_id)
         if row is None or row.status != "completed":
             raise ValueError("selected index build does not exist or is incomplete")
-        if row.config.conversion_version != self.conversion_version:
-            raise ValueError("selected build requires a different source converter")
+        self._check_converter(row.config)
         return row.config
+
+    def _check_converter(self, config):
+        if config.conversion_version != self.conversion_version:
+            raise ValueError("selected build requires a different source converter")
+
+    def default(self, model, dimension):
+        """Freeze defaults once; normal source sync can populate this initial index.
+
+        Existing configuration wins over later deployment defaults. Unlike an
+        explicitly selected build, the initial default need not be completed:
+        the serving host must gate readiness on restoring/preparing its sources.
+        """
+        row = self.builds.get("default")
+        if row is None:
+            row = self.create("default", model, dimension)
+        self._check_converter(row.config)
+        return self.builds.create(row.config).config
 
     def _sources(self, check=lambda: None):
         after = ""

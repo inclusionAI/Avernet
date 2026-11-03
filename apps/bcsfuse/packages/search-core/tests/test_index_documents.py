@@ -152,3 +152,32 @@ def test_local_migration_failure_rolls_back_schema_for_safe_retry(tmp_path):
         conn.execute("UPDATE search_index_documents SET payload='{}'")
     store = sqlite_index_documents(path, environment="local", index_key="one")
     assert store.load_by_source("doc")[0].id == "doc"
+
+
+def test_vector_candidates_are_environment_source_and_model_scoped(tmp_path):
+    path = str(tmp_path / "reuse.db")
+    for env, generation, model, deleted, source in (
+        ("pre", "old", "model/2", False, "card"),
+        ("pre", "new-model", "other/2", False, "card"),
+        ("prod", "prod", "model/2", False, "card"),
+        ("pre", "deleted", "model/2", True, "card"),
+        ("pre", "other-source", "model/2", False, "other-card"),
+    ):
+        store = sqlite_index_documents(path, environment=env, index_key=generation)
+        with sqlite3.connect(path) as conn:
+            store.save_in_transaction(
+                conn.cursor(),
+                IndexDocument(
+                    VectorPoint(
+                        id="doc", vector=[1.0, 0.0], payload={"source_id": source}
+                    ),
+                    1,
+                    {"embedding_key": model, "text_hash": "hash", "origin": generation},
+                    is_deleted=deleted,
+                ),
+            )
+    store = sqlite_index_documents(path, environment="pre", index_key="target")
+    result = store.load_vector_candidates("card", "model/2")
+    assert len(result) == 1 and result[0].metadata["origin"] == "old"
+    assert store.load_vector_candidates("missing", "model/2") == []
+    assert store.load_by_source("card") == []  # Serving stays generation-scoped.
