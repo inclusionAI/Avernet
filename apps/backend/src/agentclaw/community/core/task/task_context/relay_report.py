@@ -265,6 +265,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=getattr(patch, "artifact_patch", None),
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
             elif (
                 patch.actual_goal is not None
@@ -337,6 +338,8 @@ def apply_relay_report(
                 graph.status = Status.DONE
                 graph.extend_props.pop("hung_reason", None)
                 graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
                 graph.extend_props["gaps"] = []
                 graph.extend_props["task_acceptance_result"] = _json_value(
                     asdict(acceptance)
@@ -348,11 +351,13 @@ def apply_relay_report(
                     node,
                     artifact_patch=command.artifact_patch,
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": True,
+                        "final_conclusion": command.final_conclusion,
                         "task_acceptance_result": asdict(acceptance),
                         "progress_reason": command.progress_reason,
                     },
@@ -375,16 +380,21 @@ def apply_relay_report(
                 node.run_info.failure_reason = failure
                 graph.status = Status.HUNG
                 graph.extend_props["hung_reason"] = failure
+                graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
                 default_publish_service().capture_node(
                     graph,
                     node,
                     artifact_patch=command.artifact_patch,
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": False,
+                        "final_conclusion": command.final_conclusion,
                         "failure_reason": failure,
                         "progress_reason": command.progress_reason,
                     },

@@ -206,8 +206,9 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.getByText('需求说明书')).toBeTruthy();
     expect(screen.getByText('任务根产物')).toBeTruthy();
     // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
+    // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
     const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
-    expect(stageLabels).toEqual(['最终产物', '第2棒产物', '第2棒产物', '第1棒产物']);
+    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
     const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
     expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
     expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
