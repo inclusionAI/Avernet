@@ -127,6 +127,19 @@ class FakeRepository(ForumInteractionRepositoryProtocol):
         return {pair: ForumStatsRecord(like_count=7) for pair in pairs}
 
 
+def test_record_interaction_rejects_bare_default_bot_actor():
+    service = ForumInteractionService(FakeRepository(), FakeVerifier(), FakeAuthorStatsService())
+    with pytest.raises(ValidationError, match="default:<work_no>"):
+        service.record_interaction(
+            actor_type="BOT",
+            actor_id="default",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id="default:149844",
+            active=1,
+        )
+
+
 class FakeVerifier(ForumInteractionTargetVerifierProtocol):
     def __init__(
         self,
