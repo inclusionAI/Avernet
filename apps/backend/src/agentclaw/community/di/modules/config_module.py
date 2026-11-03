@@ -677,6 +677,9 @@ class ConfigModule(Module):
             git_download_dir=block.get(
                 "git_download_dir", defaults.git_download_dir
             ),
+            git_private_token=block.get(
+                "git_private_token", defaults.git_private_token
+            ),
         )
 
     @singleton

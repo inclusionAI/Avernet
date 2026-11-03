@@ -661,6 +661,9 @@ class SkillScanConfig:
     mist_mode: str = "dev"
     env: str = "prod"
     git_download_dir: str = "/home/admin/logs/tmp/sec/code"
+    # Neutral default; corp env overlays supply the real GitLab private token via the
+    # ``skill_scan`` yaml block. Empty => scanner SDK resolves token internally.
+    git_private_token: str = ""
 
 
 # ── Workspace ────────────────────────────────────────────────────────────
