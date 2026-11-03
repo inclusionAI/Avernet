@@ -167,23 +167,24 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           </span>
           <div
             className={cn(
-              // 名称与引擎徽章同行跟随(2026-10-20 设计稿还原,#2990 紧凑单行)。
-              'flex min-w-0 flex-1 items-center gap-1.5',
-              // 文字让位与操作区实际覆盖等宽:悬停/键盘聚焦弹出操作区,或任一筛选(归属/范围/检索)钉住可见。
-              // 无「更多操作」入口时 3 按钮 96px(pr-24);有入口时 4 按钮 122px(pr-[122px])
-              // (#2990 还原,菜单打开期间 data-state=open 同样让位、鼠标离行不塌缩)。
-              // 不可用 Bot 仅剩常驻「…」(20 渐隐区+单按钮+右内边距)让位恒定 52px;
+              // 名称与引擎徽章同行跟随(2026-10-20 设计稿还原,#2990 紧凑单行);
+              // 间距紧凑化(2026-11-03 用户反馈):名称/徽章/角标统一 gap-1。
+              'flex min-w-0 flex-1 items-center gap-1',
+              // 文字让位与操作区实际覆盖等宽(2026-11-03 紧凑化重算):渐隐区 10px(pl-2.5)+按钮行右距 right-2,
+              // 无「更多操作」入口时 3 按钮 86px(pr-[86px]);有入口时 4 按钮 112px(pr-[112px])
+              // (菜单打开期间 data-state=open 同样让位、鼠标离行不塌缩)。
+              // 不可用 Bot 仅剩常驻「…」(10 渐隐区+单按钮+右内边距)让位恒定 36px;
               // 非钉住时仅悬停/键盘聚焦临时让位。
               stripVisible
                 ? unavailable
-                  ? 'pr-[52px]'
+                  ? 'pr-9'
                   : actionsPinned
                     ? showMenu
-                      ? 'pr-[122px]'
-                      : 'pr-24'
+                      ? 'pr-[112px]'
+                      : 'pr-[86px]'
                     : showMenu
-                      ? 'group-hover:pr-[122px] group-focus-within:pr-[122px] group-has-[[data-state=open]]:pr-[122px]'
-                      : 'group-hover:pr-24 group-focus-within:pr-24'
+                      ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px]'
+                      : 'group-hover:pr-[86px] group-focus-within:pr-[86px]'
                 : false,
             )}
           >
@@ -202,10 +203,22 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             >
               {bot.displayName}
             </span>
-            <ConversationBotRuntimeBadge bot={bot} />
+            {/* 引擎徽章让位优先于名称(2026-11-03 紧凑化):让位态操作区钉着 + 角标随行,
+                此时若徽章仍 shrink-0 占位,名称会被压缩到近零(用户反馈「名称都快被隐藏了」)。
+                改为操作区可见(悬停/键盘聚焦/菜单开/触屏)或钉住/不可用常驻时整徽章隐藏,
+                把右缘空间优先留给名称;无操作区(chatable=false 无菜单)时不注入任何显隐类。 */}
+            <ConversationBotRuntimeBadge
+              bot={bot}
+              className={cn(
+                stripVisible &&
+                  'group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden [@media(hover:none)]:hidden',
+                stripVisible && (actionsPinned || unavailable) && 'hidden',
+              )}
+            />
             {/* 展开折叠角标(2026-10-20 设计稿还原):仅展开的 Bot 显示收起角标,默认紧跟
                 引擎徽章右侧;收起态不渲染(展开由主按钮承载)。角标为纯鼠标入口:span 不进
-                Tab 序、对读屏隐藏,点击先截断冒泡再转发同一 toggle(避免与主按钮双触发)。 */}
+                Tab 序、对读屏隐藏,点击先截断冒泡再转发同一 toggle(避免与主按钮双触发)。
+                2026-11-03 紧凑化:角标槽位 24px→20px(h-5 w-5),不给名称再让 30px。 */}
             {hasSessionControls && !unavailable && expanded && (
               <span
                 role="presentation"
@@ -214,7 +227,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                   event.stopPropagation();
                   handleToggle();
                 }}
-                className="inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
