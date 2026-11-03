@@ -36,7 +36,7 @@ class BotCopyStatus(StrEnum):
     __descriptions__: dict[str, str] = {
         "INITIAL": "Operation row written; create_job not yet handed off.",
         "CREATED": "Pre-container apply running; dst bot record materialising.",
-        "AUTH_PENDING": "AgentPass authorisation gate pending for the dst bot.",
+        "AUTH_PENDING": "Passport service authorisation gate pending for the dst bot.",
         "CONFIG_COPIED": "Pre-container apply finished; config persisted.",
         "FILE_SYNCED": "Config applied; device not yet provisioned.",
         "BOT_STARTED": "Device up; on-container apply running or imminent.",
