@@ -83,6 +83,7 @@ def create_search_router(
     request_model: type[SearchBody] = BoundedSearchBody,
     result_mapper: Callable[[SearchResult], BaseModel] | None = None,
     response_model: type[BaseModel] = ResultBody,
+    operations: tuple[Literal["search", "recommend"], ...] = ("search", "recommend"),
 ) -> APIRouter:
     """The host owns provider lifecycle; no permissive auth default exists.
 
@@ -140,7 +141,7 @@ def create_search_router(
 
         return execute
 
-    for operation in ("search", "recommend"):
+    for operation in operations:
         router.add_api_route(
             f"/{operation}",
             endpoint(operation),

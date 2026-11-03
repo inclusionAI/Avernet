@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from itertools import product
 
-from fastapi import HTTPException
+from fastapi import Response
+from pydantic import BaseModel
 
 from search_core.adapters.http.catalog_cards import create_card_router
 from search_core.adapters.http.index_builds import create_index_build_router
@@ -36,6 +37,24 @@ from search_core.plugin_api.card_documents import CardDocumentConverter
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
 from search_core.plugin_api.reranker import AsyncReranker, Reranker
 from search_core.plugin_api.retrieval import IndexStatistics
+
+
+class IndexCounts(BaseModel):
+    vector_points: int
+    vector_matching_points: int
+    vector_mismatched_points: int
+    keyword_points: int
+    keyword_matching_points: int
+    keyword_mismatched_points: int
+
+
+class ReadyStatus(BaseModel):
+    ready: bool
+    instance_id: str
+    index_key: str
+    active_index: str
+    index_counts: IndexCounts | None = None
+    detail: str | None = None
 
 
 def create_catalog_search_app(
@@ -245,6 +264,7 @@ def create_catalog_search_app(
         timeout_seconds=settings.request_timeout,
         max_inflight_requests=settings.max_inflight_requests,
         emergency=emergency,
+        operations=("search",),
     )
     app.state.catalog_updates = updates
     app.state.search_emergency = emergency
@@ -264,29 +284,57 @@ def create_catalog_search_app(
         if not switches.keyword_enabled and not switches.vector_enabled:
             repository.page("", 1)  # Default candidates require the source DB.
 
-    @app.get("/ready")
-    async def ready(include_counts: bool = False):
+    @app.get(
+        "/ready",
+        response_model=ReadyStatus,
+        response_model_exclude_none=True,
+        responses={503: {"model": ReadyStatus}, 501: {"model": ReadyStatus}},
+    )
+    async def ready(response: Response, include_counts: bool = False):
+        result = ReadyStatus(
+            ready=updates.ready,
+            instance_id=instance_id,
+            index_key=updates.index_key,
+            active_index=active_index,
+        )
         if not updates.ready:
-            raise HTTPException(503, "catalog initial load or poll unavailable")
-        try:
-            await calls["probe"].call(check_index, emergency.current.policy.retrieval)
-        except Exception as error:
-            raise HTTPException(503, "catalog index unavailable") from error
-        result = {
-            "ready": True,
-            "instance_id": instance_id,
-            "index_key": updates.index_key,
-            "active_index": active_index,
-        }
+            result.detail = "catalog initial load or poll unavailable"
+        else:
+            try:
+                await calls["probe"].call(
+                    check_index, emergency.current.policy.retrieval
+                )
+            except Exception as error:  # noqa: BLE001 - report provider failures as readiness diagnostics
+                events.record(
+                    "search_readiness",
+                    "index",
+                    "unavailable",
+                    error_type=type(error).__name__,
+                )
+                result.ready = False
+                result.detail = "catalog index unavailable"
         if include_counts:
             if not isinstance(index, IndexStatistics):
-                raise HTTPException(501, "index statistics unsupported")
-            try:
-                result["index_counts"] = await calls["probe"].call(
-                    index.point_counts, updates.index_key
-                )
-            except Exception as error:
-                raise HTTPException(503, "index count unavailable") from error
+                response.status_code = 501
+                result.ready = False
+                result.detail = "index statistics unsupported"
+            else:
+                try:
+                    counts = await calls["probe"].call(
+                        index.point_counts, updates.index_key
+                    )
+                    result.index_counts = IndexCounts(**counts)
+                except Exception as error:  # noqa: BLE001 - preserve identity on optional count failures
+                    events.record(
+                        "search_readiness",
+                        "counts",
+                        "unavailable",
+                        error_type=type(error).__name__,
+                    )
+                    result.ready = False
+                    result.detail = "index count unavailable"
+        if not result.ready and response.status_code != 501:
+            response.status_code = 503
         return result
 
     return app

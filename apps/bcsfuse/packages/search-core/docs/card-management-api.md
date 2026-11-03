@@ -6,6 +6,7 @@
 Card 是完整业务 JSON。下列字段只是示例，不是白名单；新增字段、嵌套对象和数组
 都会保存，并通过读取接口返回。索引正文和前置标签由各业务构建器决定。
 修改业务 `status`、`deleted`、`version` 不等于删除 Card。
+`providerName`、显式 null 和未知字段也保留在 Card 内，不提升为运维字段。
 
 | 用途 | 方法与路径 |
 | --- | --- |
@@ -13,6 +14,7 @@ Card 是完整业务 JSON。下列字段只是示例，不是白名单；新增�
 | 删除 | DELETE `/api/v1/agent-cards/{id}` |
 | 读取完整 Card | GET `/api/v1/agent-cards/{id}` |
 | 查询索引加工状态 | GET `/api/v1/agent-cards/{id}/index-status` |
+| 修复当前版本的一张 Card | POST `/api/v1/agent-cards/{id}/rebuild` |
 
 Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空白字符。
 调用方不传保存版本。202 只确认数据已提交，索引由应用的后台任务处理。
@@ -41,9 +43,8 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 | --- | --- | --- |
 | card | 是 | 非空 JSON 对象；创建时提供业务资料，更新时只放要修改的字段 |
 | resource_type | 否 | agent/group；新建省略时为 agent，更新省略时保留原类型；已有 ID 不能改成另一种类型 |
-| search_config | 否 | 独立运维配置，普通 BCN 资料提交无需填写；省略不改变已有配置，详见文末 |
 
-不接收外层 source_version、expected_revision。`card.version` 若存在，仍只是业务自己的字段，服务不要求修改它才能更新资料。
+不接收外层 source_version、expected_revision 或 search_config。card.search_config 若由业务传入，仍原样保存，不控制运维行为。`card.version` 若存在，仍只是业务自己的字段，服务不要求修改它才能更新资料。
 
 只改描述：
 
@@ -113,18 +114,11 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 {
   "resource_type": "agent",
   "card": {"name": "账单助手", "description": "查询消费账单"},
-  "search_config": {
-    "enabled": true,
-    "match_modes": ["exact", "keyword", "semantic"],
-    "keyword_operator": "any",
-    "action": "prefer",
-    "priority": 0
-  },
   "saved_revision": 1
 }
 ```
 
-读取 Card 只查询 Card 表；即使索引产物表暂时不可用，仍能读到已保存的业务资料。card 返回保存后的完整业务对象，包括未被此次更新修改的字段。search_config 和 saved_revision 位于 Card 外，不是业务字段，也不需要整体复制回更新请求。不存在或已删除返回 **404**。
+读取 Card 只查询 Card 表；即使索引产物表暂时不可用，仍能读到已保存的业务资料。card 返回保存后的完整业务对象，包括未被此次更新修改的字段。resource_type 和 saved_revision 位于 Card 外，不是业务字段，也不需要整体复制回更新请求。不存在或已删除返回 **404**。
 
 ## 4. 查看索引加工状态
 
@@ -138,17 +132,28 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 | saved_revision | 已保存到数据库的版本，由系统生成 |
 | deleted | 是否由 DELETE 删除，与 card.deleted 业务字段无关 |
 | prepared | 当前保存版本的索引产物是否已生成 |
-| preparation_error | 加工错误码，空字符串表示无记录的加工错误 |
+| preparation_error | 本 index_key 最近记录的加工错误；其他版本的构建失败不显示在这里，错误归属不符时为空。完整版本任务错误查询 index-builds |
 | local_applied_revision | 本实例已经应用的版本；等于 saved_revision 表示本实例已跟上 |
 | local_error | 本实例应用索引时的错误码 |
 | instance_id | 响应请求的实例 |
-| environment / index_key / operations_text_revision | 环境、索引版本及内部规则观察版本，用于诊断；接入版本管理的宿主直接使用版本名作为 index_key |
+| environment / index_key | 环境及本实例索引版本；接入版本管理的宿主直接使用版本名作为 index_key |
+| document_version / local_applied_document_version | 中心主 Doc 版本与本实例已应用版本；修复后结合 local_error 核对是否已同步 |
 
 经负载均衡查询可能落到不同实例，不能用一次响应证明所有实例已完成。资料尚未创建过返回 404。
 
 构建、切换和向量复用见 [索引版本管理](index-rebuild.md)。Qdrant 的向量和关键词
 point payload 都保存所属 `index_key`，由系统在写入和恢复时补充，不属于业务 Card，
 不参与正文或向量计算。它不表示所有实例都已经启用该版本。
+
+## 5. 修复当前版本的一张 Card
+
+`POST /api/v1/agent-cards/test:billing/rebuild`，请求体 `{"index_key":"default"}`。
+先从本实例状态取得 index_key；接口只修复响应实例当前加载的版本，不能用它选择或切换版本。
+成功返回 200：`{"published":true,"index_key":"default","saved_revision":1}`。
+这表示中心产物已提交，Qdrant 随后台同步生效；原始业务 Card 不改写。
+目标版本与响应实例不符返回 409，说明为 `requested index_key is not loaded on this instance`；
+并发加工或资料变化也返回 409；模型或存储失败返回 503，原有完整产物保留。
+该操作会调用模型，详见 [索引版本管理](index-rebuild.md)。
 
 ## 错误与启用方式
 
