@@ -280,7 +280,11 @@ def _staged_service(*, bot_type="service", online_binding=41, read_return=b"{}")
     bot_repo = MagicMock()
     bot_repo.get_by_id_and_owner.return_value = {
         "id": 100, "bot_id": "default", "bot_type": bot_type, "owner_id": "100018",
+        "entity_id": "100018",
     }
+    bot_repo.list_matches_by_legacy_locator.return_value = [
+        bot_repo.get_by_id_and_owner.return_value
+    ]
     publish_repo = MagicMock()
     publish_repo.list_by_source_bot.return_value = [
         SimpleNamespace(

@@ -17,13 +17,15 @@ provides:
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
   - "DesktopConnectionServiceProtocol — owner-affined desktop WebSocket discovery"
 consumes:
-  - "BotService — owner-scoped bot lookup; the isolation seam"
+  - "BotService — scoped legacy/entity address resolution followed by operator authorization"
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
   - "DeviceAdapterTransport — the one system boundary (HTTP to the bot's engine adapter)"
   - "DeviceService — connection info for the socket-composing endpoint"
   - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published stage bindings (ext.binding.{verify,online})"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.addressing
+  - agentclaw.community.core.bot_management.errors
   - agentclaw.community.core.service_bot.services.baas_service
   - agentclaw.community.core.service_bot.baas_service_errors
   - agentclaw.community.core.bot_management.engines    # engine-type spelling normalisation
@@ -52,7 +54,7 @@ internal_dependencies:
 This module is the only place Track C crosses into the device. Two properties
 are load-bearing and must survive any refactor:
 
-1. **Bot resolution is owner-scoped and happens before the forward.** The
+1. **Unique scoped Bot resolution and current-Owner authorization happen before forwarding.** The
    engine has no tenant axis — once a request lands on a device, nothing
    constrains it — so the relay is the last point at which isolation can be
    enforced. A handler that forwards before resolving, or that passes a

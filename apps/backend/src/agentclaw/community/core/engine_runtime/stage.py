@@ -30,6 +30,8 @@ from __future__ import annotations
 import json
 from typing import Any, TYPE_CHECKING, Callable, Sequence
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import (
@@ -334,14 +336,12 @@ def resolve_stage_device_context(
     itself, to fill ``ctx.bot_type``; the point is that this function adds
     nothing.)
 
-    **A published stage costs one owner-scoped row read here**, for the primary
-    key and the bot type. An adapter that already fetched the row for its own
-    ownership guard — engine config does — pays for it twice on that request;
-    that is the accepted cost of resolving the facts in one place instead of
-    threading them through every caller (spec D8). ``get_by_id_and_owner`` and not ``get_by_id``: ``bot_id``
-    carries no unique constraint and every user's first bot is called
-    ``default``, so a wider query can return another owner's row — and
-    ``bot_pk`` is what the publish lookup trusts to stay on the addressed bot.
+    A published stage resolves a unique Bot through ``BotAddressResolver``
+    within repository tenant/environment scope. The legacy locator may name the
+    permanent entity or current Owner; ambiguity is refused. The resolved row's
+    primary key selects publication history, and its current Owner is passed to
+    device resolution. A bot-id-only lookup cannot safely identify ``default``.
+    Callers must authorize the actor before reaching this resource resolver.
 
     A row that is not there yields empty facts rather than an exception, and
     :func:`require_stage_addressable` then refuses the published stage as having
@@ -388,7 +388,13 @@ def resolve_stage_device_context(
     if stage == STAGE_DRAFT:
         return resolver.resolve_for_bot(bot_id, owner_id, **selection)
 
-    record = bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
+    try:
+        record = dict(BotAddressResolver(bot_repo).resolve(
+            bot_id=bot_id, legacy_owner_id=owner_id,
+        ).bot)
+    except BotAddressNotFoundError:
+        record = {}  # Preserve the missing-stage refusal below.
+
     facts = BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
     require_stage_addressable(facts.bot_type, stage)
     bind_id = resolve_stage_bind_id(
