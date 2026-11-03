@@ -66,6 +66,10 @@ class EmbeddingSettings(BaseModel):
         description="请求超时（毫秒）",
     )
 
+    # Hosts opt in for models supporting explicit output dimensions. Legacy
+    # clients retain the wire format required by fixed-dimension providers.
+    request_dimensions: bool = False
+
     def __init__(self, **data):
         """
         初始化配置
