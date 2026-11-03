@@ -283,7 +283,7 @@ struct HangingGateway;
 #[async_trait]
 impl CallerContainerGatewayPort for HangingGateway {
     async fn ensure_container(
-        &self, _target: &BotDeliveryTarget, _credential: &RedactedToken,
+        &self, _target: &BotDeliveryTarget, _cred: &RedactedToken,
         _request: EnsureCallerContainer,
     ) -> Result<bcs_service_api::port::CallerContainerDescriptor, CallerContainerError> {
         std::future::pending().await
@@ -312,7 +312,7 @@ struct HangingSender;
 #[async_trait]
 impl CallerExecutionSendPort for HangingSender {
     async fn send_caller_execution(
-        &self, _target: &BotDeliveryTarget, _credential: &RedactedToken,
+        &self, _target: &BotDeliveryTarget, _cred: &RedactedToken,
         _command: SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
         std::future::pending().await
@@ -649,7 +649,7 @@ impl Drop for DropProbe {
 #[async_trait]
 impl CallerExecutionSendPort for HangingDelegateSender {
     async fn send_caller_execution(
-        &self, _target: &BotDeliveryTarget, _credential: &RedactedToken,
+        &self, _target: &BotDeliveryTarget, _cred: &RedactedToken,
         _command: SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
         let _guard = DropProbe(self.dropped.clone());
