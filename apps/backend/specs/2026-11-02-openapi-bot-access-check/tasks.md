@@ -18,22 +18,22 @@
   - [x] The new config tests pass, and so do the existing bypass-config tests.
 - **Depends on:** —
 
-## Task 2: Add the access-check route
+## Task 2: Add the access-check route [x]
 - **Goal:** `GET /openapi/v1/bots/{bot_id}/access?entity_id=&user_id=` answers whether a user has access to a Bot, for allowlisted apps only, and stays out of the published schema.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/{__init__,router,schemas}.py` (new),
   `.../openapi_v1/errors.py`, `.../openapi_v1/responses.py`,
   `.../openapi_v1/admission_routes.py`, `.../openapi_v1/authorization_rules.py`,
   `.../openapi_v1/__init__.py`
 - **Done when:**
-  - [ ] The route is mounted in `_OPEN_SUBGROUPS`, ahead of the `{bot_id}` wildcard, with `include_in_schema=False`. The module is marked transitional.
-  - [ ] It has an `AdmissionMode.OPEN` row and a `NoCheck(...)` row with a reason.
-  - [ ] `entity_id` and `user_id` are required, and there is no stage input.
-  - [ ] A caller whose `app_name` is not on the allowlist, or who has no app on the credential, gets 403 "Forbidden". The refusal happens before any Bot lookup.
-  - [ ] The level comes from `resolve_operable_permission_level`. `has_access` is `level >= required_level`, and `required_level` defaults to `member`.
-  - [ ] No Bot at `(bot_id, entity_id)` returns 200 with `has_access=false` and `level="none"`.
-  - [ ] A collaborator lookup exception is not caught and becomes a 500.
-  - [ ] Blocking reads run off the event loop (`asyncio.to_thread`).
-  - [ ] `responses.py` and `authorization_rules.py` stay under 1000 lines.
+  - [x] The route is mounted in `_OPEN_SUBGROUPS`, ahead of the `{bot_id}` wildcard, with `include_in_schema=False`. The module is marked transitional.
+  - [x] It has an `AdmissionMode.OPEN` row and a `NoCheck(...)` row with a reason.
+  - [x] `entity_id` and `user_id` are required, and there is no stage input.
+  - [x] A caller whose `app_name` is not on the allowlist, or who has no app on the credential, gets 403 "Forbidden". The refusal happens before any Bot lookup.
+  - [x] The level comes from `resolve_operable_permission_level`. `has_access` is `level >= required_level`, and `required_level` defaults to `member`.
+  - [x] No Bot at `(bot_id, entity_id)` returns 200 with `has_access=false` and `level="none"`.
+  - [x] A collaborator lookup exception is not caught and becomes a 500.
+  - [x] Blocking reads run off the event loop (`asyncio.to_thread`).
+  - [x] `responses.py` and `authorization_rules.py` stay under 1000 lines.
 - **Depends on:** Task 1
 
 ## Task 3: Route tests
