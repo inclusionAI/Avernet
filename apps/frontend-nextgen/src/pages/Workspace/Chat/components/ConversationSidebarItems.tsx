@@ -17,8 +17,7 @@ const EMPTY_SESSION_LIST: ConversationSessionListState = {
 const CODING_BOT_SESSION_TITLE_MAX_LENGTH = 32;
 
 function codingBotSessionFeatures(bot: ConversationBotView['bot']) {
-  return bot.isAgentCodingBot &&
-    getCapabilities().getCodingBotConversationHost().value?.runSessionAction
+  return bot.isAgentCodingBot && getCapabilities().getCodingBotConversationHost().value?.runSessionAction
     ? {
         share: true as const,
         logs: true as const,
@@ -35,7 +34,11 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
   const origin = store.originByManagedBotId[botId] ?? 'mine';
   const scope = store.effectiveScopeByManagedBotId[botId] ?? 'all';
   const cache = store.sessionsByBotId[botId];
-  const mineSessions = cache && cache.origin === 'mine' && cache.scope === scope ? cache.sessions : undefined;
+  const flatCodingOthers = view.bot.isAgentCodingBot === true && origin === 'others';
+  const visibleSessions =
+    cache && cache.origin === origin && cache.scope === scope && (origin === 'mine' || flatCodingOthers)
+      ? cache.sessions
+      : undefined;
   const selectedBot = store.selectedBotId === botId && store.selectedSection === view.section;
   const othersArea =
     cache && cache.origin === 'others'
@@ -78,8 +81,9 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       origin={origin}
       scope={scope}
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
-      sessions={mineSessions}
+      sessions={visibleSessions}
       others={othersArea}
+      flatCodingOthers={flatCodingOthers}
       onToggle={() => sessions.toggleBot(botId, view.section)}
       onOriginChange={(next) => store.setManagedBotOrigin(botId, next)}
       onScopeChange={(next) => store.setManagedBotScope(botId, next)}

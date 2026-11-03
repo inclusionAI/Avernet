@@ -57,7 +57,6 @@ const emptyList = {
   loadMoreError: null,
 };
 
-
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({
     identity: { userId: '101', displayName: '张三', online: true },
@@ -102,9 +101,7 @@ jest.mock('@/services/workspace/managedBotConversationService', () => ({
 jest.mock('@/services/workspace/botSessionService', () => ({
   splitBotId: (id: string) => {
     const index = id.indexOf(':');
-    return index < 0
-      ? { realBotId: id }
-      : { realBotId: id.slice(0, index), ownerId: id.slice(index + 1) };
+    return index < 0 ? { realBotId: id } : { realBotId: id.slice(0, index), ownerId: id.slice(index + 1) };
   },
   botSessionService: {
     updateSessionTitle: jest.fn().mockResolvedValue({ ok: true, data: { sessionId: 's1', title: 't' } }),
@@ -515,6 +512,61 @@ describe('ConversationPage(Task 8 组合页)', () => {
     expect(mockUseBotChat).not.toHaveBeenCalled();
     expect(mockBotChat.chat.onRequest).not.toHaveBeenCalled();
     expect(mockBotChat.send).not.toHaveBeenCalled();
+  });
+
+  it('团队 Coding Bot 的他人会话进入 Embedded 舞台，而不是普通只读面板', async () => {
+    const sessionId = 'user:202:session:shared:agent:coding-bot';
+    require('@/services/workspace/conversationService').conversationService.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [], friendBots: [] },
+    });
+    require('@/services/workspace/teamBotConversationService').teamBotConversationService.listBots.mockResolvedValueOnce(
+      {
+        ok: true,
+        data: [agentCodingBot],
+      },
+    );
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { [agentCodingBot.botId]: true },
+      originByManagedBotId: { [agentCodingBot.botId]: 'others' },
+      selectedBotId: agentCodingBot.botId,
+      selectedSection: 'team',
+      selectedOrigin: 'others',
+      selectedScope: 'all',
+      selectedFriendUserId: '202',
+      selectedSessionId: sessionId,
+      sessionsByBotId: {
+        [agentCodingBot.botId]: {
+          botId: agentCodingBot.botId,
+          origin: 'others',
+          scope: 'all',
+          sessions: {
+            ...emptyList,
+            items: [
+              {
+                sessionId,
+                botId: agentCodingBot.botId,
+                title: '他人发起的 Coding 会话',
+                messageCount: 1,
+                gmtModified: '',
+                gmtCreate: '',
+              },
+            ],
+          },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+
+    render(<ConversationPage />);
+
+    const stage = await screen.findByTestId('coding-bot-stage');
+    expect(stage).toHaveAttribute('data-session-id', sessionId);
+    expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
+    expect(mockUseBotChat).not.toHaveBeenCalled();
   });
 
   it('对当前在线 managed 单聊读取版本，关闭提示后切换会话重新检查', async () => {
