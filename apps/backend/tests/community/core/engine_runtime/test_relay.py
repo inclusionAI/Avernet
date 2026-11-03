@@ -460,13 +460,47 @@ async def test_other_statuses_become_upstream_errors(status):
 
 
 @pytest.mark.asyncio
-async def test_timeout_propagates_unwrapped():
-    """504 is already the right public answer; wrapping would lose it."""
+async def test_missing_timeout_uses_default_transport_budget():
+    """A caller that omits timeout gets the adapter's long runtime budget."""
+    transport = _Transport()
+    await _relay(transport=transport).call(
+        bot_id=BOT,
+        owner_id=OWNER,
+        stage="draft",
+        method="POST",
+        path="/api/sessions",
+    )
+    assert transport.invocations[0]["timeout"] == 120.0
+
+
+@pytest.mark.asyncio
+async def test_timeout_error_stays_unwrapped():
+    """Timeout errors keep their dedicated 504 public meaning."""
     transport = _Transport(raises=DeviceAdapterTimeoutError("too slow"))
     with pytest.raises(DeviceAdapterTimeoutError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
+            bot_id=BOT,
+            owner_id=OWNER,
+            stage="draft",
+            method="POST",
+            path="/api/sessions",
         )
+
+
+@pytest.mark.asyncio
+async def test_zero_timeout_is_rejected_before_transport():
+    """A non-positive timeout is malformed; it must not spend its timeout."""
+    transport = _Transport()
+    with pytest.raises(DeviceAdapterTimeoutError, match="timeout must be positive"):
+        await _relay(transport=transport).call(
+            bot_id=BOT,
+            owner_id=OWNER,
+            stage="draft",
+            method="GET",
+            path="/api/sessions",
+            timeout=0.0,
+        )
+    assert transport.invocations == []
 
 
 @pytest.mark.asyncio
