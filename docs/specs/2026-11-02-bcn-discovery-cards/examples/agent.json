@@ -13,16 +13,12 @@
     "streaming": true,
     "extensions": [
       {
-        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
-        "description": "BCN discovery identity and composition",
+        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+        "description": "来源平台标识",
         "required": false,
         "params": {
-          "resourceId": "bcn://demo/agents/bot-analyst-001",
-          "resourceKind": "agent",
-          "execution": {
-            "mode": "remote"
-          },
-          "revision": "sha256:6c855201bfe931d53d53df4cdf085757c825dadd454d341116801853e409c80e"
+          "agentId": "third-party-agent-analyst-001",
+          "party": "third_party"
         }
       }
     ]

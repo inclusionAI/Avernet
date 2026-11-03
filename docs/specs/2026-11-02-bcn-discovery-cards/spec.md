@@ -2,37 +2,39 @@
 
 - 状态：**Proposed / 待实现与联调**；日期：2026-11-02；更新：2026-11-03。
 - 基线：仓库 `24c41c89f2bc31ba8f98a28bfe35abe9cb3eb51d`，不是仅以 PR #3196 为准。
-- 所有者：BCS/BCN 负责群、成员、协作定义及持久化读契约；Discovery 服务负责检索、公开导出策略、Card 投影和搜索 HTTP/TR API；上游负责 local 编排。
+- 所有者：BCS/BCN 负责群、成员、协作定义及持久化读契约；Discovery 服务负责检索、公开群筛选、Card 投影和搜索 HTTP/TR API；上游负责 local 编排。
 - 实现语言：Python / Java 均可；本文的 SQL、JSON、YAML 和行为约束是契约，不依赖 Rust 类型、SDK 或运行时。
 - 本次交付只有设计与示例，不新增数据库表、迁移、服务或可调用群端点。
 
 ## 1. 目标与边界
 
-Discovery 接收上游 `query`，返回统一的推荐列表 `items[]`，Agent 与群混合排序、共用 `limit`。每项通过 `resourceType=agent/group` 标识业务类型，`card` 复用 **A2A 1.0 AgentCard 的字段结构**；群定义、bindings 和成员 Card map 放在 extension 的 `params.composition` 中。依赖成员不因被群引用而成为顶层推荐项。
+Discovery 接收上游 `query`，返回统一的推荐列表 `items[]`，Agent 与群混合排序、共用 `limit`。每项通过 `resourceType=agent/group` 标识业务类型，`card` 复用 **A2A 1.0 AgentCard 的字段结构**；群定义、bindings 和成员依赖 map 放在 extension 的 `params.composition` 中。依赖成员不因被群引用而成为顶层推荐项。
 
 本期只发现 `visibility = 'public'` 的普通群中的 `manager_worker`、`state_machine`；不实现私有群 ACL、普通 chat 群、DM 群、写操作、运行态查询或 BCN 中转执行。数据库使用 MySQL 或 OceanBase **MySQL 模式**，由独立 Python/Java 服务只读访问。
 
+**本期采用“读取已有配置并渲染”的职责边界：** 群为 public 即按公开群处理，不再检查成员公开性或 Provider 策略；manager、成员 Card、bindings 和定义版本按已有数据读取，不新增存在性、引用完整性或执行能力校验。本文假定渲染所需数据已具备；Agent 下线前归档关联群、依赖变化联动等保障机制留到后续，本期不实现，也不作为上线前置条件。Discovery 不增加 owner 审批或其他发布治理。
+
 ### 1.1 本期消费边界
 
-| 对象 | `execution.mode` | interface | 消费方式 |
-| --- | --- | --- | --- |
-| Agent | `remote` | Bot 已登记的真实 A2A interface | 上游直接调用 |
-| Manager–Worker 群 | `local` | `local://` + `protocolBinding=LOCAL` | 上游读取定义和群内成员 Cards 编排 |
-| State Machine 群 | `local` | `local://` + `protocolBinding=LOCAL` | 上游读取 YAML、bindings 和群内成员 Cards 执行 |
+| 对象 | interface | 消费方式 |
+| --- | --- | --- |
+| Agent | Bot 已登记的真实 A2A interface | 上游直接调用 |
+| Manager–Worker 群 | `local://` + `protocolBinding=LOCAL` | 上游读取定义和群内成员 Cards 编排 |
+| State Machine 群 | `local://` + `protocolBinding=LOCAL` | 上游读取 YAML、bindings 和群内成员 Cards 执行 |
 
 **兼容性边界：LOCAL 是受控上游使用的临时占位约定，不是标准 A2A binding，也不是可调用的 A2A 服务。** 所有候选可以在 `items[]` 中混排，但 local 群必须在交给通用 A2A SDK 前分流，不能仅凭字段形状或 schema 校验结果调用。后续全部收敛为真实 A2A interface，迁移见附录 A。
 
 - 不新增 `cardType` 或 `bcn_composition` 类型；上游不通过实现方名称选择执行方式。
-- `execution`、`mode`、`resourceKind`、`groupKind`、`composition` **都不是 A2A 标准字段**。
-- `remote/local` 以消费者为参照：`local` 表示消费者编排，不表示成员模型运行在消费者机器上。
-- 不增加 `direct_a2a/bcn_a2a` 枚举；真实访问地址及绑定协议由 `supportedInterfaces` 决定。
-- 两种群都填 `resourceKind=group`，用 `groupKind` 区分；`resourceType` 只用于分类/检索，不是执行方式。
+- `groupKind`、`composition` 和 `revision` 是本扩展定义的业务字段，不是 A2A 标准字段。
+- 短期不增加 `mode`、`direct_a2a/bcn_a2a` 等执行模式枚举；短期/长期由 `supportedInterfaces` 的 URL 与 `protocolBinding` 区分。
+- 两种群都使用顶层 item 的 `resourceType=group`，用扩展中的 `groupKind` 区分；`resourceType` 只用于分类/检索，不是执行方式。
+- `local` 以消费者为参照：表示消费者读取 composition 并编排成员，不表示成员模型运行在消费者机器上。
 
 ### 1.2 架构约束
 
-HTTP 层 → Discovery 查询用例 → 只读 SQL adapter → MySQL/OB；渲染器只接受查询快照，不持有数据库连接、HTTP client 或驱动类型。数据源、namespace 等由启动配置注入。
+HTTP 层 → Discovery 查询用例 → 只读 SQL adapter → MySQL/OB；渲染器只接受读取结果，不持有数据库连接、HTTP client 或驱动类型。数据源及 env 等由启动配置注入。
 
-直接读表是**需双方确认的版本化读契约**，不是把 BCS 所有内部表永久开放为公共 API。实施前由 BCS 与 Discovery owner 确认本文的列、语义、兼容测试和 schema readiness；不得由 Discovery 修改 BCS 数据。若实际部署边界禁止跨服务读表，应先走架构批准/限期 waiver，而不是用本文绕过架构规则。替代方案是 BCS 提供等价只读视图或服务 API。
+本文约定 BCS 与 Discovery 之间的只读数据映射；表/列变更需同步维护查询方，Discovery 不修改 BCS 数据。数据读取与 Card 渲染分层，不引入第二套群管理或执行逻辑。
 
 遵循 [架构规则](../../arch/arch.rules.md)、[CI 约束](../../arch/ci.enforce.md)、[上下文边界](../../arch/context-boundary-format.md)、[协议测试规则](../../arch/protocol-contract-tests.md)。已核对 [ADR 目录](../../adr/)；未发现直接规定本 Discovery 导出格式的已接受 ADR，本文不修改已有 ADR。
 
@@ -47,10 +49,21 @@ HTTP 层 → Discovery 查询用例 → 只读 SQL adapter → MySQL/OB；渲染
   "query": "数据库诊断",
   "limit": 5,
   "filters": [{"key": "resource_type", "values": ["agent", "group"]}],
-  "goal": {},
-  "task": {}
+  "context": {
+    "goal": {
+      "description": "改善数据库性能",
+      "constraints": {"maxCost": 100}
+    },
+    "task": {
+      "id": "task-001",
+      "description": "定位慢查询原因",
+      "dependencies": ["task-000"]
+    }
+  }
 }
 ```
+
+`context.goal` / `context.task` 是开放的业务 JSON 对象，不是仅包含 `id/description` 的专用 ContextEntry 类型；上例中的 `constraints/dependencies` 仅演示业务可自定义字段。旧顶层 `goal/task` 仅作为既有调用方兼容入口。
 
 | 输入 | 类型 / 默认值 | 规则 |
 | --- | --- | --- |
@@ -58,9 +71,9 @@ HTTP 层 → Discovery 查询用例 → 只读 SQL adapter → MySQL/OB；渲染
 | `limit` | integer，缺省/null 为 5 | 正整数，超过服务端上限取上限；默认上限 20；Agent 和群共用 |
 | `filters` | AgentFilter[]，缺省/null 为 [] | 最多 64 项、key 不重复；不同 key 为 AND，同 key 的 values 为 OR；空 values 无匹配 |
 | `filters.resource_type` | `agent` / `group` | 不指定时混合搜索；只限制顶层推荐类型，不裁剪群依赖 |
-| `goal/task` | object | 必填性沿用既有 Facade 契约，不由本 spec 重定义；本期不参与搜索或缓存键 |
+| `context` | SearchContext，可选 | 新调用统一使用 `context`；其中 `goal/task` 均为可选开放业务 JSON 对象/`Map<String,Object>`，不限制为 `id/description`。对象内字段由业务方定义，可包含嵌套对象、数组、数字、布尔值和 null；字段缺失、null 或空对象不构成请求错误。本期 `context` 内容暂不参与搜索、模型输入或缓存键。旧顶层 `goal/task` 兼容接收，仅供既有调用方使用 |
 
-其他 filters 仅在服务端配置支持时使用。HTTP 对应示例为 `{"resource_type":["group"]}`。服务端从认证上下文/部署配置确定 `env` 和资源 `namespace`，不能接受调用者任意传入数据库 env。公开是**目录可见性**，不等于匿名访问 Discovery 或成员调用免鉴权。
+其他 filters 仅在服务端配置支持时使用。HTTP 对应示例为 `{"resource_type":["group"]}`。服务端从认证上下文/部署配置确定 `env`，不能接受调用者任意传入数据库 env。公开是**目录可见性**，不等于匿名访问 Discovery 或成员调用免鉴权。
 
 无匹配时的成功响应示意：
 
@@ -83,9 +96,10 @@ HTTP 层 → Discovery 查询用例 → 只读 SQL adapter → MySQL/OB；渲染
 
 | 字段 | 类型 | 语义 |
 | --- | --- | --- |
-| `id` | string | 原始 bot_uuid 或 group_id；跨类型去重用 resourceId 或 `(resourceType,id)`，不能只看 id |
-| `resourceType` | enum | `agent` / `group`；与 card 扩展的 resourceKind 一致 |
-| `card` | object | 完整 Agent/群 Card，Java 可用 `Map<String,Object>`；未知合法扩展保留 |
+| `id` | string | Agent 为 `bot_uuid`，Group 为 `group_id`；跨类型去重使用 `(resourceType,id)`，不能只看 id |
+| `resourceType` | enum | `agent` / `group`；仅表示推荐对象类型，不是执行方式 |
+| `providerName` | string | `resourceType=agent` 时输出，来自 `bcs_providers.name`；Group 不输出该字段 |
+| `card` | ResourceCard | Agent/群使用同一公共 Card DTO；HTTP 为 JSON object，Java Facade 1.0.2+ 使用 `ResourceCard`；未知合法扩展保留，`extensions[].params` 仍为 `Map<String,Object>` |
 | `score/scoreSource` | number/string 或 null | 既有搜索最终评分及来源，不是成功概率；默认 TopK 无评分时为 null |
 | `scoreDetails` | object 或 null | keyword/vector/rrf/reranker 各阶段的 value/rank；沿用搜索契约，不由 SQL renderer 生成 |
 
@@ -94,22 +108,22 @@ HTTP 省略为空的评分字段，TR 用 null。`effective.retrieval` 的 HTTP 
 ### 2.1 推荐与依赖隔离
 
 - `items[]` **只包含独立推荐结果**，统一排序后最多返回 effective.limit 项；不再返回顶层 agents/groups、matchedAgentResourceIds 或两套 cursor。
-- local 群的 `composition.agents` 为 `resourceId → 完整 AgentCard` map（见 3.5）；成员没有 item 包装、评分或推荐位次，不占用 limit。
+- local 群的 `composition.agents` 为 `uuid → AgentDependency` map（见 3.5）；成员没有 item 包装、评分或推荐位次，不占用 limit。
 - 同一 Agent 若独立被推荐，可同时出现在顶层和群内；群内副本不能因为顶层已有同一资源而省略。不同群也各自携带完整依赖。
-- `resource_type=group` 时仍返回每群完整成员 map；同理，query 不匹配的成员也必须补齐。依赖只做作用域、公开性和可导出性校验，不做推荐筛选。
+- `resource_type=group` 时仍返回每群完整成员 map；同理，query 不匹配的成员也必须带上。依赖按当前 env 内的 UUID 读取，不做成员公开性、Provider 策略或推荐条件的二次筛选。
 - 每个群作为一个自包含推荐项原子返回；不允许截断 bindings、YAML 或成员 map，不用其他 item 为它补缺。
 
 ### 2.2 检索与失败边界
 
-关键词、向量、融合和重排由既有搜索链路负责；本文 SQL 是公开候选/元数据的读取方式，不定义新的跨类型评分算法。Agent 元数据沿用[既有 Card 注册/检索字段](../a2a/minimal-card-registration-v1.md)。SQL 群 label 匹配仅用于约定的关键词候选源，不得替代完整搜索链路或二次过滤向量召回结果。
+关键词、向量、融合和重排由既有搜索链路负责；本文 SQL 是公开候选/元数据的读取方式，不定义新的跨类型评分算法。Agent 元数据沿用[既有 Card 注册/检索字段](../a2a/minimal-card-registration-v1.md)。renderer 按已召回 ID 读取元数据，不另做 label 匹配或二次过滤向量召回结果。
 
-无匹配返回 `success=true,status=ok,items=[]`。候选损坏、依赖不完整或超过导出预算时整项省略，在预算内可用后续合格候选补足；无法补足允许少于 limit。只要发生这种省略，即使最终补足 limit，也以 `status=degraded,reasons` 中的 `card_metadata_unavailable` 表达元数据降级。不另增 `page.partial/omittedGroupCount`；具体原因、计数和内部扫描进度只进入受控诊断。只有因元数据丢失而变空的结果不能标成正常无匹配。
+无匹配返回 `success=true,status=ok,items=[]`。本期不增加“完整性检查 → 省略群 → 补扫凑满 limit”的处理链；既有搜索链路的 `status/reasons` 语义保持不变。
 
-数据库不可用或一致性快照失败使请求失败，不得返回成功空列表。公共错误码沿用 `INVALID_ARGUMENT/OVERLOADED/DEADLINE_EXCEEDED/UNAVAILABLE/INTERNAL`，业务失败为 `success=false,status=error`；网络/RPC 异常另按实际传输契约处理。
+数据库读取、JSON 解码或 Card 渲染实际发生异常时，沿用服务现有错误处理，不伪造成成功空列表，也不捏造 Card 或替换定义。公共错误码沿用 `INVALID_ARGUMENT/OVERLOADED/DEADLINE_EXCEEDED/UNAVAILABLE/INTERNAL`；业务失败为 `success=false,status=error`，网络/RPC 异常按实际传输契约处理。这不是新增业务完整性预检。
 
 ## 3. Card 公共字段
 
-以下示例使用占位 namespace `demo` 和 extension URI `https://schemas.example.com/bcn/discovery-card/v1`。后者是**拟议标识**，上线前需冻结为项目控制的统一 URI；不能每次请求生成或由不同服务随意命名。
+以下示例使用拟议 extension URI `https://schemas.example.com/bcn/discovery-card/v1`。该 URI 是稳定的逻辑标识，不要求作为网络文档地址被访问；上线前需冻结为项目控制的统一 URI，不能每次请求生成或由不同服务随意命名。
 
 ### 3.1 标准 AgentCard 部分
 
@@ -119,13 +133,13 @@ HTTP 省略为空的评分字段，TR 用 null。`effective.retrieval` 的 HTTP 
 | `description` | 保存的 description | `Manager–Worker 群：<name>` | `State Machine 群：<name>` |
 | `version` | 保存的 AgentCard.version | `str(bcs_groups.version)` | 同左 |
 | `supportedInterfaces` | 原有真实接口，保留偏好顺序 | 本期单个 LOCAL 占位接口 | 同左 |
-| `capabilities` | 保留原能力，合并 BCN extension | 仅声明 BCN extension，不宣称可 streaming | 同左 |
+| `capabilities` | 原样保留，包括第三方 extensions | 仅声明 BCN extension，不宣称可 streaming | 同左 |
 | `defaultInputModes` | 保存的值 | `["text/plain"]` | `["text/plain"]` |
 | `defaultOutputModes` | 保存的值 | `["text/plain"]` | `["text/plain"]` |
 | `skills` | 保存的技能，不从群成员能力猜测 | 一项目录技能 `group.execute`，tag=`manager_worker` | 同左，tag=`state_machine` |
-| `securitySchemes/securityRequirements` | 保留声明，不含凭证值 | 本期不伪造调用鉴权配置 | 同左 |
+| `securitySchemes/securityRequirements` | 保留声明；scheme 支持 type/scheme/description/bearerFormat，requirements 为方案名到 scope 数组的映射，不含凭证值 | 本期不伪造调用鉴权配置 | 同左 |
 
-群的 input/output/skill 描述的是 **local runtime 的目录契约**，不承诺占位 URL 提供对应 A2A 方法。本期只承诺文本输入/最终文本输出；需要其他模态的群应报不支持，不静默转换。
+群的 input/output/skill 是目录描述，默认以文本输入/输出展示，不承诺 LOCAL 地址提供 A2A 方法。Discovery 不据此筛除其他模态的群；具体执行能力由上游决定。
 
 本期群固定为一个占位接口；group_id 编码为单个 path segment。该标记不是资源身份，也不是可解析的网络地址：
 
@@ -137,108 +151,119 @@ HTTP 省略为空的评分字段，TR 用 null。`effective.retrieval` 的 HTTP 
 }
 ```
 
-`LOCAL` 大小写固定；URL scheme 为 `local`。`protocolVersion=1.0` 仅沿用本 Card 形状，不声明该地址提供 A2A 1.0 服务；实际编排规则由 runtimeProfile 指定。不能使用假的 HTTPS URL 或继续标为 JSONRPC。
+CardInterface 使用 `url/protocolBinding/protocolVersion`，可带 `tenant`；透传的 `tenant` 不改变数据库 env。群占位接口固定使用 `local://` + `LOCAL`，不能标为真实 A2A binding。这里的 `protocolVersion=1.0` 不表示 LOCAL 地址提供 A2A 服务。
 
-**消费侧必须在 A2A SDK 初始化/接口选择/探活之前分流：**
-
-1. `mode=local`、单个 `LOCAL` binding、`local://` URL 必须同时成立，且 resourceKind=group；校验 profile 和群内依赖闭包后才可进入编排器。
-2. local 群入口禁止网络连接、DNS/健康探测、重试、附加凭证；不把 local 地址改写为 HTTP、localhost 或默认 endpoint。成员 Agent 的真实 A2A 调用不受此禁止影响。
-3. `mode=remote` 必须提供真实 A2A interface，不得混入任何 LOCAL/local 地址；按客户端支持的协议和鉴权策略选择接口。
-4. mode 缺失/未知、标记冲突、local/remote interfaces 混用或 runtimeProfile 不支持时拒绝执行；不能猜测、忽略标记或回退到网络调用。
-
-LOCAL 只作为临时受控消费者契约，不要求通用 A2A SDK 接受该 URL。自定义扩展仍须理解并遵守，`required=true` 不能替代调用入口的前置检查。
+**LOCAL 是编排标记，不交给 A2A 网络客户端。** 上游读取 composition 并调用其中成员的真实接口；Agent 和长期群使用真实 A2A interface。Discovery 不检查上游是否支持该编排，也不对 LOCAL 入口做网络请求。
 
 ### 3.2 扩展容器
 
+Agent 和群都通过 A2A extension 机制携带额外信息，但两者使用不同的 params 集合。
+
+Agent 的来源 extension 携带第三方平台内 ID 与来源性质。资源主键位于 `items[].id`；`agentId/party` 仅放在来源 extension 的 params 中，不放在 item 或 Card 根部：
+
 ```json
 {
-  "capabilities": {
-    "extensions": [{
-      "uri": "https://schemas.example.com/bcn/discovery-card/v1",
-      "description": "BCN discovery identity and composition",
-      "required": true,
-      "params": {
-        "resourceId": "bcn://demo/groups/group-mw-001",
-        "resourceKind": "group",
-        "groupKind": "manager_worker",
-        "revision": "sha256:<digest>",
-        "execution": {
-          "mode": "local",
-          "runtimeProfile": "bcn.manager-worker.a2a/v1"
-        },
-        "composition": {
-          "definition": {},
-          "bindings": {},
-          "agents": {}
-        }
-      }
-    }]
+  "uri": "https://example.org/a2a/extensions/source-agent/v1",
+  "description": "来源平台标识",
+  "required": false,
+  "params": {
+    "agentId": "third-party-agent-analyst-001",
+    "party": "third_party"
   }
 }
 ```
 
-此块只展示字段结构，`<digest>` 和空 definition/bindings/agents 不是可通过验证的完整示例。完整样例见第 10 节。
+Local 群的 BCN extension 携带群分类、composition 和本次渲染 revision：
 
-`capabilities.extensions`、extension 的 `uri/description/required/params` 属于 A2A 扩展机制；**params 内的全部业务字段属于本 spec**。同一 Card 中 BCN URI 最多出现一次。local 群 `required=true`；remote Agent 的身份注解不改变原调用协议，使用 `required=false`。
+```json
+{
+  "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+  "description": "BCN discovery composition",
+  "required": true,
+  "params": {
+    "groupKind": "manager_worker",
+    "composition": {
+      "definition": {},
+      "bindings": {},
+      "agents": {}
+    },
+    "revision": "sha256:<digest>"
+  }
+}
+```
+
+此块只展示字段结构，`<digest>` 和空 definition/bindings/agents 是占位内容；完整样例见第 10 节。
+
+`capabilities.extensions` 及 extension 的 `uri/description/required/params` 使用 A2A 扩展机制；params 内业务字段由各扩展自身定义。同一 Card 中 BCN URI 最多出现一次，来源扩展 URI 的最终值需与 TR 联调冻结。Local 群 `required=true`；Agent 来源标识不改变原 A2A 调用协议，使用 `required=false`。
 
 ### 3.3 params 定义
 
 | 路径 | 类型 | 必填条件 | 语义 |
 | --- | --- | --- | --- |
-| `resourceId` | string URI | 全部 | 稳定身份；不是调用 URL |
-| `resourceKind` | enum | 全部 | `agent` / `group` |
-| `groupKind` | enum | group | `manager_worker` / `state_machine`；agent 不出现 |
-| `revision` | string | 全部 | `sha256:` + 64 位小写十六进制；本次渲染快照标识 |
-| `execution.mode` | enum | 全部 | `remote` / `local`；未知值拒绝 |
-| `execution.runtimeProfile` | string | local | 编排解释规则的版本标识；不是 A2A protocolVersion |
-| `composition.definition` | object | local group | 根据 groupKind 选择定义结构 |
-| `composition.bindings` | object | local group | slot → 非空 AgentReference 数组 |
-| `composition.agents` | map<string, AgentCard> | local group | resourceId → 完整成员 Card；只含本群 bindings 引用的 Agent |
+| `agentId` | string | Agent 可选 | 来源平台内的 Agent ID，由提供方随 Card 注册；不是 `bot_uuid`、调用 URL 或跨平台 ID |
+| `party` | string | Agent 可选 | 来源性质描述；本期按原样字符串透传，不强制枚举，例如 `first_party` / `third_party` |
+| `groupKind` | enum | group | `manager_worker` / `state_machine`；Agent 不出现 |
+| `composition` | object | local group | 包含 `definition`、`bindings`、`agents` 三个必填字段 |
+| `composition.definition` | object | local group | 根据 `groupKind` 选择定义结构 |
+| `composition.bindings` | object | local group | slot → AgentReference 数组，保留已存 bot_ids 的内容与基数 |
+| `composition.agents` | `Map<string, AgentDependency>` | local group | key 为 `uuid`，value 见 3.5 |
+| `revision` | string | local group | `sha256:` + 64 位小写十六进制；最终渲染群 Card 的内容摘要 |
 
-remote Agent 不输出 composition；长期 remote group 可不输出。字段缺省不能解释成 local；缺少执行模式的 BCN Card 是无效 Card。
+Agent 不输出 composition；长期真实 A2A 群可整体省略 composition。本期不定义执行模式枚举，也不通过 mode 判断执行方式。Local 群渲染时填入 groupKind、composition 和 revision；真实 A2A 群不依赖这些字段进行调用。
 
-版本区分：真实 interface 的 `protocolVersion` 是 A2A 版本，LOCAL 例外见 3.1；extension URI `/v1` 是本契约版本；AgentCard `version` 是被描述资源的版本；`revision` 覆盖**最终导出内容**，避免仅看 group.version 而漏掉成员 Card 更新。
+版本区分：interface 的 `protocolVersion` 是 A2A 传输协议版本，LOCAL 例外见 3.1；extension URI `/v1` 是本契约版本；AgentCard `version` 是被描述资源的版本；群 `revision` 覆盖最终导出内容，避免仅看 group.version 而漏掉成员 Card 更新。
 
 ### 3.4 身份与 bindings
 
-- Agent：`bcn://<namespace>/agents/<encoded-bot_uuid>`。
-- Group：`bcn://<namespace>/groups/<encoded-group_id>`。
-- namespace 由配置映射到唯一数据库作用域，至少隔离部署/环境；若有多租户还必须隔离租户，不能假定数据库已有 tenant 列。
-- ID 作为单个 URI path segment 百分号编码；解码后查询条件仍必须携带受信 env，不允许 URI 跨作用域选库。
-- 对上游 resourceId 是不透明 key，只用于精确匹配，不解析 `bcn` 前缀或据此拼接调用地址。
-- **底层引用就是已有 `bot_uuid`**，不创建第二套 Bot ID；不是 provider_bot_ref、agent_code、driver_bot 的别名，也不是数据库自增 id。
+- Agent item 的 `id` 是已有 bot_uuid；Group item 的 `id` 是已有 group_id。binding.uuid 只是群内引用名，取值也是 bot_uuid。
+- 这些 ID 是当前 BCS/env 作用域内的不透明字符串，不保证是 UUID，也不是 A2A URL 或跨环境全局 ID。上游只做精确匹配，不解析前缀或据此拼接调用地址。
+- `providerName` 是注册来源平台名称，不是 A2A AgentCard 根字段。注册侧可在 Card 输入元数据中附带 providerName 并由 Facade 提升到 `items[].providerName`；BCN 输出路径仍以 `bcs_providers.name` 为权威投影来源，且不输出 `provider_id`、完整 Provider config 或凭证。独立 Agent item 与群内 AgentDependency 都携带该字段。
+- `agentId` 与 `party` 是来源平台提供的扩展语义，存放在来源 extension 的 `params` 中，不是 item 或 Card 的顶层字段。它们描述来源侧身份/性质，不能替代 `bot_uuid`，也不参与群绑定或检索排序。
+- **底层绑定引用就是已有 `bot_uuid`**，不创建第二套 Bot ID；不是 provider_bot_ref、agent_code、driver_bot 的别名，也不是数据库自增 id。
 
 ```json
 {
   "analyst": [{
-    "resourceId": "bcn://demo/agents/bot-analyst-001",
-    "revision": "sha256:<member-card-digest>"
+    "uuid": "bot-analyst-001"
   }]
 }
 ```
 
-AgentReference 只有 `resourceId`、`revision` 两个必填字段，不再冗余放 `url/botUuid`。数组保留现有 `bot_ids` 的基数：不能把多值绑定悄悄取第一项。相同 Bot 可被多个 slot 引用，在当前群的 composition.agents map 中只保存一份 Card。
+AgentReference 仅包含必填字段 `uuid`，不重复携带成员 revision、`url` 或其他资源标识。数组保留现有 `bot_ids` 的基数：不能把多值绑定悄悄取第一项。相同 Bot 可被多个 slot 引用，在当前群的 composition.agents map 中只保存一份依赖。
 
-当前 state-machine runtime 要求**被节点 assignee 引用的 slot 恰好一个 Bot**；非节点引用的 slot 可有多个。v1 遵守该限制，不将数组自动解释成 fan-out。未绑定、非 required 且未被引用的 slot 可以省略；其他缺失绑定使整组无效。成员匹配到的 revision 必须与引用完全一致。
+bindings 按已保存的 slot 与 `bot_ids` 映射，保留数组顺序、基数和 UUID 原值，不 trim、不按节点引用限制为单 Bot，也不根据 YAML participants/required 做检查。空数组按原值输出。成员内容摘要只保存在 `agents[uuid].revision`，不做版本匹配校验。
 
-存储绑定中的 trim/唯一性检查完成后保留数组顺序；不得按 display name 查找替代 Bot。对暂时无法解析的引用，也不能在执行时用另一个同名 Agent 自动补位。
+Discovery 不检查 manager 数量、slot 声明、成员归属、引用存在性或依赖是否齐全；这些不属于本期读取/渲染职责。不按同名 Agent 搜索替代引用。
 
 ### 3.5 群内依赖 agents map
 
-选择 **`composition.agents: Map<resourceId, AgentCard>`**，而不是数组或 slot→Card：bindings 已用 resourceId 引用，map 可直接索引、群内按身份去重，也不会把角色绑定和成员元数据混在一起。执行顺序来自 definition，不来自 map 的键顺序；不另增 `agentCardsById` 字段。
+选择 **`composition.agents: Map<uuid, AgentDependency>`**，而不是数组或 slot→Card：bindings 已用 `uuid` 引用，map 可直接索引、群内按身份去重，也不会把角色绑定和成员元数据混在一起。执行顺序来自 definition，不来自 map 的键顺序；不另增 `agentCardsById` 字段。
 
-- key 为 binding 中的完整 resourceId，value 为与独立 Agent 相同格式的完整 AgentCard，不是 URL、引用或搜索 item；不附 score/scoreSource。
-- key 必须等于 value 的身份扩展 params.resourceId；binding.revision 必须等于该成员 params.revision。同一 resourceId 在一个群中只能对应一个 revision。
-- map 的 key 集合必须**恰好等于所有 bindings 引用 resourceId 的并集**。不依赖顶层 items、不跨群补齐、不额外导出观察者或未引用成员；只支持 remote Agent，不嵌套群/递归 composition。
-- JSON 解析拒绝重复 key，不允许 last-write-wins 隐藏两个版本。Python 用字典、Java 用 Map；调用方通过 `agents[reference.resourceId]` 查找，不使用 JSONPath 拼接、不解码/规范化 key 后猜测匹配。
-- 所有成员都必须通过第 6、9 节导出策略。缺成员、key/身份不一致、版本冲突或数据损坏时整组不可执行，不能临时重新搜索一个同名 Agent 顶替。
-- 群内按身份去重；群间、群与独立推荐之间保留必要副本。同一响应内同一资源应来自同一读取快照；内部可共享只读对象，但序列化必须完整内联，不能发外部引用。
+`AgentDependency` 结构为：
 
-因此一个 LOCAL 群的 definition、bindings、agents 和 revision 构成一个原子快照；单独保存这张群 Card 仍包含全部成员调用信息。成员 Card 自身的鉴权要求仍需上游独立满足。
+```json
+{
+  "providerName": "platform_x",
+  "revision": "sha256:<member-card-digest>",
+  "card": {
+    "name": "...",
+    "supportedInterfaces": []
+  }
+}
+```
+
+- key 为 binding 的 uuid，即 BCN 内的 bot_uuid；`card` 是与独立 Agent 相同格式的完整 AgentCard，不是 URL、引用或搜索 item；不附 score/scoreSource。
+- `providerName` 描述成员来源平台；第三方 `agentId` 仍然从 `card` 的来源 extension params.agentId 读取，并可将 party 专属字段随来源扩展原样透传。
+- `AgentDependency.revision` 是该成员 Card 的内容摘要；同一 uuid 在一个群中只保存一份依赖及其摘要。
+- 按 bindings 中的 uuid 收集并去重依赖，构造 map；不再额外比较 key 集合或检查引用闭包。不依赖顶层 items、不跨群补齐，不加入未引用成员；本期只读取 Bot Card，不扩展递归群依赖。
+- Python 用字典、Java 用 Map；调用方通过 `agents[reference.uuid]` 查找。Discovery 不新增重复 key 审查或逐成员可导出性判断。
+- 群内按 uuid 去重；群间、群与独立推荐之间保留必要副本。单次批量读取的成员数据可在内存中复用，序列化时完整内联。
+
+因此单张 LOCAL 群 Card 携带定义、绑定和成员调用信息；这是输出结构，不代表 Discovery 已验证该群可执行。成员调用沿用已有鉴权要求。
 
 ## 4. Manager–Worker 群
 
-`resourceKind=group`，`groupKind=manager_worker`，本期 `mode=local`，runtimeProfile 为 `bcn.manager-worker.a2a/v1`。
+顶层 item 使用 `resourceType=group`，扩展 `groupKind=manager_worker`；本期 interface 为 `local://` + `LOCAL`。
 
 ### 4.1 definition
 
@@ -252,32 +277,23 @@ AgentReference 只有 `resourceId`、`revision` 两个必填字段，不再冗�
 
 | 字段 | 类型 | 规则 / 来源 |
 | --- | --- | --- |
-| `managerSlot` | string，必填 | 固定 `manager`；对应 role=`manager` 的成员；必须恰好一个 |
+| `managerSlot` | string，必填 | 固定 `manager`；按已存 role=`manager` 的成员生成绑定，不重复检查数量 |
 | `workerSlots` | string[]，必填 | 每个 role=`worker` 的成员一个 slot，命名 `worker:<bot_uuid>`；按原始 ID 的 UTF-8 字节序排序 |
 | `instruction` | string，可选 | 非空 `bcs_groups.context`；不从聊天记录、opening message 或 service_spec 拼接 |
 
-`workerSlots` 可以为空，表示 manager 自行完成，不能凭空补 worker。每个 manager/worker slot 的 binding 数组恰好一个元素。`driver_bot` 不一定等于 manager，禁止用 driver 替代 role 判断。observer、driver、consultant 角色不自动转成 worker。
+`workerSlots` 可以为空，不补默认 worker。按已有 role 映射 manager/worker，不用 `driver_bot` 替代角色，也不把 observer、driver、consultant 自动转为 worker。本期不增加 actor_kind/mode 或角色完整性检查。
 
-本期执行参与者必须为 `actor_kind=bot` 且 `mode=auto`。执行角色为 Human、muted Bot 或未知模式的群不符合本期导出 profile，整组省略并诊断；不是删除这些成员后另造一个群。非执行观察者不导出身份，也不承诺复制 BCN 的观察者消息投影。
+非空 `context` 原样作为 instruction，不需要 owner 批准或内容审批。
 
-`context` 是执行提示而不是天然安全的公开简介。本 spec 的发布前提是 owner 确认公开群的 context 可外发；未确认时不能悄悄去掉有语义的 instruction 后宣称等价。
+### 4.2 上游消费说明
 
-### 4.2 上游执行语义与限制
+上游读取 instruction、manager/worker slots 及依赖 Cards，自行实现任务分配、成员调用和结果汇总。BCN 的 `bcs_assign_task` / `bcs_task_complete` 及 Session 上下文不会因返回 Card 自动迁移；如何适配由上游决定，不作为 Discovery 返回群的前置条件。
 
-1. 上游把用户输入、instruction、可用 worker slot 交给 manager。
-2. manager 决定分配任务；上游只允许引用当前 bindings 中的 worker，负责调用其真实 Agent interface。
-3. worker 的终态结果/失败返回 manager；manager 决定继续分配或给出最终结果。
-4. 调用者负责超时、取消、预算、并发和失败上限；不把任意一次 manager 文本回复误判成群完成。
-
-**A2A 本身不定义 manager 的任务分配协议。** 当前 BCN 的 `bcs_assign_task` / `bcs_task_complete` 工具和 Session 语义不能仅靠复制 Card 获得。该 runtimeProfile 是拟议的上游兼容性契约：上线前必须证明 manager 的任务分配与完成信号能被上游适配器接收、转换，且不会仍然向旧 BCN Session 派发任务。
-
-本 spec 定义发现/导出的字段，不新增一套 manager 控制消息协议，也不声称所有现有 manager Bot 已具备可移植执行能力。无兼容适配器的上游只能展示群，执行必须报 `UNSUPPORTED_RUNTIME_PROFILE`。发布 local 可执行功能的验收必须包括一次真实 manager → worker → manager 闭环。
-
-不输出没有可靠来源的 `maxRounds/maxParallelWorkers/workerFailurePolicy/completionPolicy`。这些若以后成为跨端协议，需补来源、默认值和版本契约；不能从已退役的 `service_spec` 推导。
+本 spec 不规定新的 manager 控制消息、调度/重试策略或适配器认证流程，也不输出没有来源的 `maxRounds/maxParallelWorkers/workerFailurePolicy/completionPolicy`。
 
 ## 5. State Machine 群
 
-`resourceKind=group`，`groupKind=state_machine`，本期 `mode=local`，runtimeProfile 为 `bcn.state-machine.a2a/v1`。
+顶层 item 使用 `resourceType=group`，扩展 `groupKind=state_machine`；本期 interface 为 `local://` + `LOCAL`。
 
 ### 5.1 definition
 
@@ -288,15 +304,14 @@ AgentReference 只有 `resourceId`、`revision` 两个必填字段，不再冗�
 | `mediaType` | string，必填 | 固定 `application/yaml` |
 | `content` | string，必填 | 定义表的原始 authoring `yaml_text`，保持内容，不重新序列化 |
 | `sha256` | string，必填 | `SHA-256(UTF-8(content))`，64 位小写十六进制，不带前缀 |
-| `sourceContentHash` | string，可选 | 定义表 content_hash，仅供存储来源核对；不是 content 的校验和 |
 
-本期 **内联 YAML**，不输出额外 definition URL，不访问 `external_uri`。大小上限 256 KiB UTF-8；只允许一个文档、拒绝重复键和自定义 tag，使用安全解析器并限制嵌套/alias 展开。
+本期 **内联 YAML**：读取原始 `yaml_text` 字符串，不解析 YAML、不重新序列化、不访问 `external_uri`。Discovery 不检查语法、节点类型、运行时版本、图结构或上游执行支持范围。
 
-数据库 content_hash 按 normalized JSON 计算，**不能直接复制为 YAML 的 sha256**。缺失 yaml_text、只有 normalized_json/blob 的历史数据本期报 `DEFINITION_SOURCE_UNAVAILABLE`。未来可增加经兼容测试的 normalized→authoring 导出器，但不能直接把内部 JSON dump 成 YAML，或隐式读取执行快照代替群默认定义。
+数据库 `content_hash` 来源于 normalized JSON，不能作为 YAML 的 `sha256`；后者按实际输出字符串计算。本期读取路径假定原始 YAML 已保存，不增加 normalized/blob 转译、运行快照回退或缺失数据修复逻辑。
 
-### 5.2 YAML 与执行 profile
+### 5.2 YAML 透传与执行边界
 
-采用[现有 authoring YAML](../../../apps/bcs/crates/tools/bcs-cli/bcs-coordination/references/custom-collaboration-schema.md)，不是新造一套 `states/on/guards` 格式。顶层只允许 `name/metadata/participants/runtime`；真实 Bot ID 只存在外部 bindings，不嵌入 YAML。
+定义来源沿用[现有 authoring YAML](../../../apps/bcs/crates/tools/bcs-cli/bcs-coordination/references/custom-collaboration-schema.md)，Discovery 不另造格式或限定字段。下面只是一个示例，不是支持范围的白名单：
 
 ```yaml
 name: 数据库诊断与复核
@@ -324,9 +339,7 @@ runtime:
         final_output: true
 ```
 
-v1 最小 local profile 支持 `version=1`、acyclic、bot_task、complete 转移、分叉/汇合和唯一 final_output；节点接收原始输入及直接父节点的 artifacts。并行汇合等待全部直接父节点成功；节点失败/超时使本次执行失败，不偷偷跳过依赖。节点重试/超时遵循 YAML 的相应设置；对有副作用调用，自动重试必须有幂等保障，否则失败退出。
-
-上游未实现的字段/行为不能被忽略。HumanInput、judge、loop/v2、runtime actor、BCN 特有 projection/扩展行为若影响执行，则本期不作为可执行 local 群发布，报 `UNSUPPORTED_DEFINITION_FEATURE`；需要它们时升级 profile 并增加 conformance。语法有效不等于上游能执行。
+**BCN 的配置或运行时支持范围不等于上游支持范围。** loop/v2、HumanInput、judge、自定义节点和未知字段均随原始 YAML 透传，不据此过滤群或报“不支持”。由上游决定如何解释与执行。
 
 ### 5.3 bindings 渲染
 
@@ -339,81 +352,69 @@ v1 最小 local profile 支持 `version=1`、acyclic、bot_task、complete 转�
 }
 ```
 
-校验：source 必须 `manual`；slot 必须在 YAML participants 声明；ID trim 后非空、无重复，并属于同 env 的当前群成员；执行引用必须是 auto Bot；required 或被节点引用的 slot 不得缺失。引用 slot 基数限制见 3.4。
+逐个读取保存的 slot 与 `bot_ids`，映射为 `{uuid}` 数组；引用的 Bot Card 放进 agents map。保留 slot 名、UUID 原值和数组顺序/基数，不检查 source、extensions、slot 声明、required、成员归属或 auto 模式。
 
-不从 participant role 顺序推断 slot，不用 driver_bot 补缺失绑定。不支持 legacy YAML `bot_id` 回退；发现该形态应要求修复定义/绑定。未知非空 binding extensions 不丢弃后继续执行：除非已证明纯展示属性，否则视为 profile 不支持。
+本 DTO 的绑定投影只使用 slot 与 `bot_ids`，不以 source/extensions 的内容作为拒绝返回条件。不从 participant role 顺序或 driver_bot 推断绑定，也不解析 YAML 中的历史 `bot_id` 来补写绑定。
 
 ## 6. 数据来源与映射
 
-| Card / 判定 | 表与列 | 说明 |
+| Card / 筛选 | 表与列 | 说明 |
 | --- | --- | --- |
-| 群公开性 | bcs_groups.visibility | 必须 public；NULL/未知值拒绝 |
-| 有效群记录 | bcs_groups.record_status | 必须 active |
-| 群类别范围 | bcs_groups.group_kind | 必须 normal；**不是 Card.groupKind** |
+| 群公开性 | bcs_groups.visibility | 仅选择 public |
+| 有效群记录 | bcs_groups.record_status | 选择 active |
+| 群类别范围 | bcs_groups.group_kind | 选择 normal；不是 Card.groupKind |
 | Card.groupKind | bcs_groups.group_strategy | manager_worker / state_machine |
-| 群 ID / 名称 / 版本 | group_id / label / version | id 自增列只用于内部 keyset |
-| manager 提示 | bcs_groups.context | 只作为已批准公开的执行 instruction |
-| 真实成员 / 角色 | bcs_group_participants | 不读 bcs_groups.participants 旧 JSON |
+| 群 ID / 名称 / 版本 | group_id / label / version | 直接映射资源标识与展示字段 |
+| manager 提示 | bcs_groups.context | 非空时原样映射为 instruction |
+| 成员 / 角色 | bcs_group_participants | 使用独立成员表，不读旧 participants JSON |
 | 当前状态机配置 | bcs_group_runtime_bindings | active + current sentinel，见 7.3 |
-| YAML / 精确版本 | bcs_collaboration_definitions | env + definition_id + version + active |
-| AgentCard | bcs_bots.agent_card | 完整保存的 Card；不是 agent_card_url |
-| Bot 作用域/公开性 | bcs_bots.env/visibility/actor_kind/is_deleted | 不允许 Human ID 当 Bot 卡导出 |
-| Bot 归属 | bcs_bots.provider_id | 采用 migration 029 后经确认的 Bot-owned projection |
-| Provider 可用性/边界 | bcs_providers.disabled/config.collaboration_scope | 只读取必要策略投影，不读取或导出完整 config |
+| YAML / 绑定版本 | bcs_collaboration_definitions | 按已存 definition_id + version 读取 yaml_text |
+| AgentCard | bcs_bots.agent_card | 原样使用已保存的完整 Card，不重新获取或验证 |
+| Bot 归属 | bcs_bots.provider_id | 使用现有 Bot-owned Provider 关联 |
+| providerName | bcs_providers.name | 仅取名称，不读取 config/disabled/collaboration_scope |
 
-这里的“只筛选公开群”不需要 friend、owner、组织、邀请等私有 ACL 查询。但公开候选仍需通过记录完整性和导出 profile 校验。
+所有读取都限定当前 env。公开群直接使用已存成员和绑定，不再检查成员 public、删除/在线状态、Provider 策略或 manager/依赖完整性；独立推荐 Agent 沿用既有 Agent 搜索规则，不把群依赖当作独立推荐重新筛选。
 
-`status`、`lifecycle_status`、`record_status` 不是同一个概念。本期是**可复用群定义目录**，沿用公开目录的 active record 边界，不按最近会话的完成/关闭状态筛掉定义，也不新增 `lifecycle_status='active'` 假定。如产品以后只发布“当前可接受 BCN 调用”的群，应单独定义该资格，不能把 Session 状态冒充访问控制。
-
-数据库可读不等于可以外发。所有实际导出的 Bot 必须 public、非 deleted、actor_kind=bot，拥有有效已保存 A2A Card；绑定 Provider 必须存在、未 disabled、collaboration_scope 为 standard。缺省 scope 只在 config 是有效对象且字段真正缺失时视为 standard；显式 null、未知类型或未知值失败关闭。成员 Bot 离线不自动删 Card，在线状态不是接口可达性保证。
-
-这一条复核现有公开群/Provider 边界，防止历史数据或策略变更绕过写入期约束；不另外设计私有授权系统。如果已保存 Card 含不允许外发的私有 interface/凭证，整张 Card 不可导出；不能为了凑齐群依赖而捏造替代 URL。公开性也不能给上游转授 BCN 持有的 Provider 凭证。需要由 BCN 代持凭证才能调用的成员，应等待长期代理方案，或先有合法的上游独立授权。
+本期是可复用群定义目录，沿用 active record 条件，不按最近 Session 的完成/关闭状态过滤，也不新增生命周期判断。Agent 下线或数据变更后的关联群处理不在本期实现。
 
 ## 7. 只读查询流程
 
-### 7.1 部署前检查与一致性
+### 7.1 读取约定
 
-1. 使用 MySQL-compatible driver / JDBC 数据源、utf8mb4、只读账户；每条关联都带 env。
-2. 启动时核验所需表/列与读语义。`001_init_schema.sql` 不是现状全量 schema，至少需要包含 `029_bot_provider_storage` 和 `039_bot_a2a` 的完整迁移链及相关绑定列。
-3. migration 029 的列存在不等于数据已切换：确认 provider affiliation backfill 和 writer fence 已完成。未完成就停止启用该读路径，不同时猜测新旧 Provider 表。
-4. 每次 Card 批量投影在**同一个 pinned connection 的只读一致性快照**中取得群、成员、绑定、定义及 Bot/Provider 数据；由驱动/部署适配 MySQL 与实际 OB 版本的事务配置，并通过并发更新测试证明无混读。无法提供一致性则不以 autocommit 多次 SELECT 冒充快照。
-5. 取完有界数据后提交/结束读取，再解析、哈希、渲染；事务内禁止 HTTP 获取 Card/YAML、A2A 探活或模型调用。需要补扫时在预算内继续同一快照；若已结束事务，重新开始整次 Card 投影，不拼接不同快照。搜索评分可先完成，但陈旧索引不能代替投影阶段的公开性复核。
-6. DB/连接/超时错误使整个请求失败；不能把异常转成空结果。复制库可用，但可见性撤销时效须满足部署约束；本期不引入跨请求 Card 缓存。
+- 使用 MySQL-compatible driver / JDBC 和只读访问，每条关联带 env。
+- 数据源按已完成现有迁移的 schema 使用，包括 Bot-owned Provider 与 agent_card 列；不新增 schema 扫描、迁移审批或新旧表双读逻辑。
+- 群、绑定、定义和成员 Card 使用普通只读事务批量读取，读取后结束事务再渲染；不新增跨请求快照、CAS 或刷新状态机。Discovery 不访问 Card/YAML URL，不探活或调用 Agent。
+- DB/连接/超时异常正常向上返回，不转成成功空列表。
 
-以下 `?` 是逻辑绑定参数，Python/Java adapter 可转换为本驱动占位方式；只能动态生成 **placeholder 数量**，不能拼接 ID、query、env 或内部扫描位置。
+以下 `?` 是逻辑绑定参数，Python/Java adapter 转换为驱动占位方式；动态 IN/OR 只生成 placeholder，值通过参数绑定。
 
-### 7.2 第一步：公开群候选
+### 7.2 第一步：读取已召回的公开群
+
+检索和排序由既有搜索链路提供；renderer 只批量读取召回的 group_id，不再实现一套 label LIKE 检索或 keyset 补扫：
 
 ```sql
-SELECT id, group_id, label, version, group_strategy, context
+SELECT group_id, label, version, group_strategy, context
 FROM bcs_groups
 WHERE env = ?
   AND visibility = 'public'
   AND record_status = 'active'
   AND group_kind = 'normal'
   AND group_strategy IN ('manager_worker', 'state_machine')
-  AND id > ?
-  AND LOWER(COALESCE(label, '')) LIKE LOWER(?) ESCAPE '!'
-ORDER BY id ASC
-LIMIT ?;
+  AND group_id IN (?, ?, ...);
 ```
 
-该 SQL 用于公开目录内部 keyset 扫描或已约定的关键词候选源，不是对外分页 API。参数依次为 env、after_id（首批 0）、escaped_pattern、scan_batch。query 将 `!`→`!!`、`%`→`!%`、`_`→`!_`，再包成 `%query%`；无 query 的内部目录扫描可省略 LIKE 谓词；对外空 query 仍为非法输入。大小写/Unicode 行为以部署数据库 LOWER 与 collation 为准，MySQL/OB 必须通过同组样例验证。
-
-对既有搜索链路已召回的 group_id，应使用同样的 env/public/active/normal/strategy 条件加 `group_id IN (?,...)` 批量复核和取元数据，不再加 label LIKE；读取结果按原推荐次序组装，不能按数据库行序重排。内部扫描的 after_id 只记录已处理候选，不向上游暴露 cursor。
-
-先选定候选群，再读取成员。禁止直接 JOIN participants 后 LIMIT，避免一个群占多行、截断成员并挤占推荐名额。
+按上述条件取得群元数据后，再读取相关成员与定义。返回顺序沿用搜索结果；不把 participants JOIN 到候选查询后再 LIMIT，以免截断成员或挤占推荐名额。
 
 ### 7.3 第二步：批量成员与当前状态机绑定
 
 ```sql
-SELECT group_id, bot_uuid, role, actor_kind, mode
+SELECT group_id, bot_uuid, role
 FROM bcs_group_participants
 WHERE env = ? AND group_id IN (?, ?, ...)
 ORDER BY group_id, bot_uuid;
 ```
 
-不要加 `actor_kind='bot'` 后就当作完整成员集；必须看到 Human/muted/未知角色并按导出 profile 判断。
+成员表仅对候选 manager-worker 群读取，用于角色映射；不为导出资格检查额外读取 actor_kind/mode。状态机依赖直接来自下述绑定。
 
 只对候选 state_machine 群读取：
 
@@ -428,7 +429,7 @@ WHERE env = ?
 ORDER BY group_id, group_version DESC;
 ```
 
-采用当前 store 的 sentinel 语义，不假定 `group_version == bcs_groups.version`；普通群资料更新不一定新建 runtime binding。每群取最高 group_version 的 current 行；出现多条 current 行时发完整性告警并省略该群，不猜哪条是真正现状。无绑定、定义 ID/version 不完整时省略该群。
+沿用当前 store 的 sentinel 语义，每群按 group_version DESC 取首条 current 行。不比较 `group_version` 与 `bcs_groups.version`，也不另加重复 current、绑定缺失或版本完整性检查。
 
 不读 runtime sessions、runs、run snapshots；`auto_start_on_service_invocation` 是 BCN 内部启动策略，不影响 local 用户显式执行，不直接转成上游自动执行开关。
 
@@ -437,183 +438,147 @@ ORDER BY group_id, group_version DESC;
 去重 `(definition_id, definition_version)`，分块查询：
 
 ```sql
-SELECT definition_id, version, name, source_format,
-       yaml_text, content_hash
+SELECT definition_id, version, yaml_text
 FROM bcs_collaboration_definitions
 WHERE env = ? AND record_status = 'active'
   AND ((definition_id = ? AND version = ?)
     OR (definition_id = ? AND version = ?));
 ```
 
-OR 项由批量大小生成。禁止 `MAX(version)`、只按 definition_id JOIN、读取最新 run 定义。缺失或重复精确键均视为数据问题。normalized_json/blob fallback 不在本期读取路径中。
+OR 项由批量大小生成。使用已保存的 definition_id/version 作为查询键，不改查 latest，也不另做定义版本正确性或缺失/重复检查。本期没有 normalized_json/blob fallback。
 
 ### 7.5 第四步：批量成员 Bot 和 Provider
 
 从 manager/worker 角色、状态机绑定及独立 Agent 检索结果收集 Bot UUID，按当前 env 去重、分块：
 
 ```sql
-SELECT bot_uuid, name, visibility, actor_kind, is_deleted,
-       provider_id, agent_card, agent_card_revision
+SELECT bot_uuid, provider_id, agent_card
 FROM bcs_bots
 WHERE env = ? AND bot_uuid IN (?, ?, ...);
 ```
 
-不要 SELECT *，不查询 session_token，不把 webhook_url 当 A2A URL。Card 不存在/无效即不满足本期直接调用条件；agent_card_url 是 Card 文档地址，不是任务调用入口，Discovery 请求中也不再次获取它。
+按已保存 Card 直接组装，不再校验成员可见性、删除状态、Card 有效性或接口可达性。`agent_card_url` 是 Card 文档地址，不是调用入口，本请求不访问该地址。
 
-Provider 查询只投影策略，不把可能含凭证的 config 带到应用：
+Provider 仅用于获取名称：
 
 ```sql
-SELECT provider_id, disabled,
-       CASE WHEN JSON_VALID(config) = 1
-            THEN JSON_TYPE(config) ELSE NULL END AS config_type,
-       CASE WHEN JSON_VALID(config) = 1
-            THEN JSON_TYPE(JSON_EXTRACT(config, '$.collaboration_scope'))
-            ELSE NULL END AS scope_type,
-       CASE WHEN JSON_VALID(config) = 1
-            THEN JSON_UNQUOTE(JSON_EXTRACT(config, '$.collaboration_scope'))
-            ELSE NULL END AS collaboration_scope
+SELECT provider_id, name
 FROM bcs_providers
 WHERE env = ? AND provider_id IN (?, ?, ...);
 ```
 
-应用按第 6 节校验类型与区分大小写的精确值；SQL NULL（缺失）和 JSON null（显式 null）不得混为一谈。此 JSON 投影必须在实际 OB 版本验证，不能仅凭 MySQL 单测声称兼容。
+不读取 disabled/config/collaboration_scope，也不增加 Provider 可用性或授权复核。
 
-### 7.6 第五步：渲染与引用闭包
+### 7.6 第五步：渲染
 
 ```text
-ranked_candidates = search_candidates(query, filters, search_budgets)
-snapshot = read_public_candidates_and_dependencies(trusted_scope, ranked_candidates, budgets)
+ranked_candidates = search_candidates(query, filters)
+rows = read_public_candidates_and_dependencies(env, ranked_candidates)
 end_read_transaction()
 
-member_cards = validate_and_render_agent_cards(snapshot.bots, snapshot.providers)
+# 原样使用保存的 Card，并为群依赖计算内容 revision。
+member_cards = wrap_saved_agent_cards(rows.bots, rows.providers)
+# rendered_cards 以 (resourceType, id) 为 key，避免跨类型 ID 冲突。
 rendered_cards = render_independently_recommended_agents(ranked_candidates, member_cards)
-for group in snapshot.groups:
+for group in rows.groups:
     if group.strategy == manager_worker:
-        definition, slots = render_manager_worker(group, snapshot.participants)
+        definition, slots = map_manager_worker_roles(group, rows.participants)
     else:
-        binding = select_current_binding(group)
-        source = exact_definition(binding.definition_id, binding.definition_version)
-        definition, slots = validate_and_render_state_machine(source, binding)
-    assert_all_references_are_public_members_with_valid_cards(slots, member_cards)
-    bindings = bind_to_member_revisions(slots, member_cards)
-    agents = select_exact_dependency_map(bindings, member_cards)
-    card = render_group_card(group, definition, bindings, agents)
-    validate_bcn_card_contract(card)
-    rendered_cards[group.resource_id] = card
+        binding = rows.current_bindings[group.group_id]
+        source = rows.definitions[(binding.definition_id, binding.definition_version)]
+        definition = wrap_raw_yaml(source)
+        slots = map_saved_bot_ids(binding)
+    bindings = render_uuid_references(slots)
+    agents = inline_dependencies(slots, member_cards)
+    rendered_cards[("group", group.group_id)] = render_group_card(group, definition, bindings, agents)
 
-items = assemble_complete_items_in_search_order(
-    ranked_candidates, rendered_cards, effective_limit, response_byte_budget)
-return search_response(items, metadata_diagnostics)
+items = assemble_items_in_search_order(ranked_candidates, rendered_cards, effective_limit)
+return search_response(items)
 ```
 
-这是行为分层示意，查询计划需先解析受限 bindings 以收集 ID；这种纯内存解析可以在快照读取期间完成，不得执行 YAML 中的工具或代码。渲染报单组数据错误可以省略并继续；不支持 profile 的群不能只去掉不认识的字段后发布。
+这是数据读取/映射示意，不包含成员公开性检查、角色/引用完整性检查、YAML 解析、执行能力校验或 Card 二次验证。bindings 的 JSON 解码只是为了读取 slot 与 bot_ids；不存在额外的业务预检步骤。
 
-内部读取/渲染 Bot 可以批量去重，但不得把 member_cards 全量追加到 items。每个群从内部 map 选出自己 bindings 的完整闭包内联；Agent 只有独立出现在 ranked_candidates 中才可生成顶层 item。混合排序、评分元数据由搜索链路提供，SQL renderer 不伪造评分。
+内部按 UUID 批量去重读取，再将每群依赖内联到自己的 agents map；不把 member_cards 追加到顶层 items。混合排序及评分元数据沿用搜索链路，renderer 不伪造评分，也不增加坏数据补扫。
 
-### 7.7 revision、签名与确定性
+### 7.7 内容 revision 与原样透传
 
-1. Agent：以保存的完整 Card 为源，保留未知扩展、skills、真实 interfaces；移除源 `signatures` 和同 URI 的旧 BCN 注解，再注入本服务身份扩展。原始数据库 Card 不修改。
+1. Agent：原样使用完整第三方 Card，保留未知字段、扩展、skills、interfaces、agentId/party 和源 signatures；不注入 BCN extension 或修改签名内容。独立 Agent item 不输出 revision；providerName 放在 Card 外层，来自 Provider 表。
 2. 群：固定标准字段与 extension，workerSlots 和无语义的集合排序，YAML content 保持原始字符串；bindings 数组顺序保留，agents map 键顺序无语义。
-3. 对待发布 Card **只去掉当前 Card 顶层 signatures 和当前 Card 本扩展 params.revision 字段**，按 RFC 8785 JCS 规范生成 UTF-8 字节，计算 SHA-256，再填 `revision="sha256:"+hex`。先计算成员 revision，再把完整成员 Card 写入 agents map、对应 revision 写入 bindings，最后计算群 revision。**不得递归删除内嵌成员的 revision**；群 hash 覆盖完整 map、bindings、定义和接口。
-4. 不把当前时间、请求 ID、数据库读取顺序写入 Card；相同导出内容必须得到相同 revision。原始 agent_card_revision 可作内部诊断，不代替导出 revision。
-5. 修改带签名 Card 后不能保留失效的原签名。此 API 默认返回**Discovery 派生的未签名 Card**，由认证传输承载信任；不是提供者的原文签名分发接口。未来可由 Discovery 重新签名；不能冒用提供者身份。
+3. 先对每个成员的最终 AgentCard 按 RFC 8785 JCS 规范生成 UTF-8 字节并计算 SHA-256，得到 AgentDependency.revision，并将它与完整成员 Card 一起内联到 agents map；bindings 仅保存 uuid 引用。最后对整张群 Card 只去掉顶层 signatures 和当前群扩展 params.revision，按同样规范计算并填入 `revision="sha256:"+hex`。**不得递归删除内嵌成员的 revision**；群 hash 覆盖完整 map、bindings、定义和接口。
+4. 不把当前时间、请求 ID、数据库读取顺序写入 Card；相同内容得到相同 revision。revision 仅标识内容变化，不是授权或签名。
+5. 不新增验签、重签或签名信任体系。不改变源 Card 内容时保留签名；若其他功能修改被签内容，不能继续宣称原签名有效。
 6. 源字段若不能用约定的 JSON/JCS 表达，返回明确数据错误；Python/Java 不能各自用不同浮点/排序规则近似计算。
 
-## 8. 资源上限、内部扫描与失败
+## 8. 查询成本与异常处理
 
-以下是首版安全预算，可由部署调低；提高必须补负载证据：
+使用服务现有的请求 limit、批量查询大小、超时和响应大小配置；不在本协议增加多层固定“安全预算”或调整配额的审批要求。按候选批次读取相关数据，避免逐群、逐成员查询的 N+1；不为填满 limit 新增补扫循环。查询性能与部署容量在实现时验证，不作为群的发布资格。
 
-| 预算 | 首版上限 |
-| --- | --- |
-| 每批候选群 | 20 |
-| 每请求扫描群候选 | 100，不是全目录永久截断 |
-| 每群 participants | 256；超过则整组错误，不截断角色 |
-| 单请求内部去重后的 Agent Cards | 256，含独立候选和群依赖；不是推荐 limit |
-| 每批完整 AgentCard 读取 | 16 个；单卡 1 MiB |
-| 单份 YAML / 单群 context | 256 KiB / 64 KiB UTF-8 |
-| 单请求读取的 Card/YAML/context 文本总量 | 16 MiB，解析前检查字节数 |
-| 响应体 | 4 MiB UTF-8 JSON；按最终序列化计费，群间及顶层重复内嵌的 Card 都计入 |
-
-文本长度先用 OCTET_LENGTH/有界投影检查，超长值不完整传输或解析；第 7 节 SQL 展示业务列，生产 adapter 需加入此保护。关系行读取也必须有界：候选批次最多 20×256 合法成员，超量通过计数/limit+1 检测而不是无界读取后截断。
-
-- 用批量查询，不做“每群各查成员、每 slot 各查 Bot”。若需补扫，先判断预算，不能无限循环填满 limit。
-- 一个典型批次的业务 SELECT 数上界是 `3 + ceil(D/64) + ceil(B/16) + ceil(P/64)`：群候选、participants、runtime bindings，外加定义、Bot、Provider 批次；没有某类数据可省略对应查询。D/B/P 是去重定义键/Bot/Provider 数；字节预检另计。
-- 例如 20 群、20 定义、100 Bot、10 Provider：上述读取 12 条业务 SELECT，另有预检/独立 Agent 搜索/事务初始化。**不是网络往返数、延迟实测或完整请求固定查询数**。
-- 整请求需累加每批读取字节、关系行和 SELECT 次数；错误持续出现也必须受限。触及预算停止补扫并标记元数据降级；内部 keyset 不能重复回到坏数据起点，不向上游虚构下一页承诺。
-- 单群连同成员即超过响应/成员上限：省略并记 `GROUP_EXPORT_TOO_LARGE`；剩余响应容量不足时整项省略、记录元数据降级，不截断 map，不以顶层已有同一 Agent 为由少发依赖。允许返回少于 limit；合格项保留原搜索相对顺序。
-- Query 的 `%...%` 搜索可能扫描大量行。现有 visibility/label/唯一键索引不保证覆盖 env+公开性+strategy+id；上线必须做真实 EXPLAIN 与基数压测。该 spec 不擅自修改已提交 migration；如需索引另提增量迁移。
+群内 YAML、bindings、agents 作为完整字段输出，不为满足响应大小而截断其中内容。读取或序列化实际触及服务资源上限时，沿用服务的资源超限错误处理，不为此新增群可导出性状态。
 
 | 情况 | 外部行为 |
 | --- | --- |
-| 非法 query/limit/filters | INVALID_ARGUMENT；不访问其他作用域 |
-| 未认证/不允许目录访问 | HTTP 401/403；TR 按既有认证/授权契约拒绝，不伪造成成功空列表 |
-| 无匹配合格推荐项 | success=true，items=[]，status=ok，非错误 |
-| 单组缺 manager/定义/成员 Card，绑定损坏，profile 不支持 | 省略整组；success=true、status=degraded、reason=card_metadata_unavailable；详细原因仅内部诊断 |
-| 相应 Card 有效但成员调用未授权 | 不提供 BCN 凭证；上游须取得独立授权，不能认为发现即授权 |
-| DB 不可用/读事务失败 | UNAVAILABLE 或 DEADLINE_EXCEEDED，整请求失败，不返回成功空列表 |
-| 必需 schema 或 Provider read-source 尚未就绪 | readiness 失败、UNAVAILABLE；不静默回退旧表 |
+| 非法 query/limit/filters | 沿用 INVALID_ARGUMENT |
+| 无匹配推荐项 | success=true，items=[]，status=ok |
+| DB 不可用/读取超时 | 沿用 UNAVAILABLE / DEADLINE_EXCEEDED，不能返回成功空列表 |
+| 实际解码或渲染异常 | 沿用现有 INTERNAL 等错误处理，不增设业务完整性预检或自动修复 |
+| 服务资源超限 | 沿用现有 OVERLOADED 等错误处理，不返回被截断的群定义或依赖 |
 
-内部原因至少区分 `INVALID_MANAGER_ROLES`、`INVALID_BINDINGS`、`MEMBER_NOT_EXPORTABLE`、`MISSING_CURRENT_BINDING`、`DEFINITION_NOT_FOUND`、`DEFINITION_SOURCE_UNAVAILABLE`、`UNSUPPORTED_DEFINITION_FEATURE`、`GROUP_EXPORT_TOO_LARGE`。日志禁止记录完整 YAML、context、Card URL query 或凭证。
+不增加导出专用业务判断和错误分类，既有搜索的降级 envelope 不变。
 
-## 9. 公开导出与安全
+## 9. 公开范围与调用边界
 
-- 现有 `visibility=public` 是候选条件，不自动证明 YAML/context/所有 extension 都无敏感信息。首发需对既有公开群进行内容外发确认；这是启用该导出服务的前置治理，不在本期添加一套私有群 ACL。
-- 白名单输出仅为本 spec 字段与批准的 AgentCard 声明；不导出 owners、created_by、Human ID、Provider config、运行日志、群消息、session_token、私有 endpoint 或签名 URL 中的凭证。
-- A2A Card 中 URL/security 声明是待使用的数据，不是执行指令；上游仍须按自身网络/SSRF/鉴权策略选择 interface。不能把数据库中任意 URL 自动加入可信域。
-- 不得通过“删掉敏感 YAML 节点”偷偷改变群逻辑。发现不宜公开的定义应整组拒绝并修复来源。
-- local 模式没有 BCN 身份/凭证代理、Session 上下文、工具权限和事件投影的自动继承。真实运行必须重新建立这些边界。
-- 本期默认不缓存；上游如缓存，运行前重新发现/核对绑定 revision，不允许按陈旧 Card 绕过已撤回的公开性。
+- public 群按本 spec 输出 context、YAML、bindings 和依赖 Cards；不增加 owner 确认、内容审批、敏感信息扫描或扩展白名单。
+- 不额外拼入 Provider config、session_token、群消息等内部字段；第三方 Card 原样透传，不因接口为内网地址而拒绝返回。
+- Discovery 不增加 URL 审批、接口探活、签名或二次鉴权；实际调用继续遵循既有鉴权和网络策略。LOCAL 编排不会自动获得 BCN 的凭证、Session 或工具上下文。
+- 不要求上游每次执行前重新发现，不以 revision 承诺即时撤销调用权限；缓存或后续持久化 Card 的更新机制另按实际需求定义。
 
 ## 10. 完整示例与验证边界
 
-- [Agent 示例](examples/agent.json)：保存的远端 Card 经 BCN 身份投影。
+- [Agent 示例](examples/agent.json)：原样保存的远端 Card，providerName 放在外层。
 - [Manager–Worker 群](examples/manager-worker.json)：一个 manager、一个 worker，完整内嵌 agents map。
 - [State Machine 群](examples/state-machine.json)：analyst → reviewer，完整内嵌 agents map。
 - [原始 YAML](examples/state-machine.yaml)：与 State Machine Card.content 完全相同。
-- [完整 Discovery 响应](examples/discovery-response.json)：统一 items 含一个独立推荐 Agent 和两种群；群依赖只内嵌，revision 互相对应。对应 query=`数据库诊断`、limit=5；被推荐的 analyst 也作为状态机依赖保留完整副本。评分仅为示意。
+- [完整 Discovery 响应](examples/discovery-response.json)：统一 items 含一个独立推荐 Agent 和两种群；群依赖只内嵌，bindings 仅引用 uuid，内容摘要保留在依赖与群级别。对应 query=`数据库诊断`、limit=5；被推荐的 analyst 也作为状态机依赖保留完整副本。评分仅为示意。
 - [来源核对与本次验证](research.md)：仓库事实、设计选择、未验证边界。
 
-示例使用保留示例域名/虚构 ID，不是线上地址或实际注册快照。实际的 A2A 声明校验还需固定 A2A 1.0 validator；JSON 语法通过不代表协议 conformance，更不代表占位群可调用。
+示例使用保留示例域名/虚构 ID，不是线上地址或实际注册快照。静态示例检查不代表 SDK conformance 或上游可执行性；Discovery 不因此新增请求期 Card validator 或执行能力探测。
 
 ## 11. 实施验收
 
+验收验证读取与字段映射，不把静态样例断言变成请求期业务校验。
+
 | 层次 | 必须覆盖 |
 | --- | --- |
-| 字段/序列化 | 统一 items 包装和 resourceType 一致性；独立推荐/依赖隔离；扩展唯一；Card 顶层不加自定义字段；同组 kind、正确 groupKind |
-| A2A 边界 | remote 固定 1.0 schema；LOCAL 单独约定校验；SDK 前分流、三标记一致、未知/混合标记拒绝；local 入口零网络；保留 Agent unknown fields/签名派生规则 |
-| 筛选 | public/private、active record、normal/DM、chat/两种策略、不同 env；与最近 Session 状态无误耦合 |
-| 查询 | query trim/空值拒绝/中文/大小写/`%_!`/注入；统一 limit/filters；内部 keyset、坏数据推进、预算降级、无无限重试 |
-| manager | 0/1/2 manager；driver≠manager；零/多 worker；Human/muted 执行成员；不虚构 policy 默认值 |
-| state machine | current sentinel；绑定版本≠群版本；重复 current；精确定义版本；YAML 缺失；非法 YAML；hash 区分 |
-| bindings | 成员缺失、跨 env、私有/删除成员；slot 未声明/required 缺失；多值不取首项；被引用 slot 必须单值 |
-| Profile | DAG 顺序/并行/汇合/失败；不能忽略 loop/judge/HumanInput；不支持适配器必须明确拒绝 |
-| 权限 | Provider disabled/非 standard/无效 config；缺失 scope 与 JSON null 区分；不导出凭证与 Human 身份 |
-| 确定性 | 不同 DB 行序结果一致；同内容 revision 一致；成员 Card/群定义变化带动群 revision；不递归排除内嵌 revision；map 键顺序不影响 hash；YAML sha256 匹配 |
-| 依赖 map/限额 | 非 query 命中成员仍内嵌；group-only filter 保留依赖；key/身份一致、重复 key 拒绝、revision 一致；同成员多 slot 去重；顶层/跨群副本保留；成员不占 limit；超限整项省略不死循环 |
-| 数据库 | Python/Java 实际 driver × 目标 MySQL/OB：完整迁移后运行 SQL、参数化/Unicode/JSON/NULL/快照隔离测试 |
-| 故障/成本 | 断连/超时不返回空成功；无 N+1；预检/分块/扫描预算；真实 EXPLAIN、最大页与持续损坏数据压测 |
-| local 执行 | 与上游联调 manager→worker→manager 和 YAML DAG；验证远端 Bot 不再错误调用旧 BCN 工具上下文 |
+| 字段/序列化 | items/resourceType/providerName；agentId/party 及未知字段保留；群 groupKind/composition/revision 输出 |
+| LOCAL 分流 | local:// + LOCAL 交给上游编排器，不向群占位地址发送网络请求 |
+| 筛选边界 | 群按 env/public/active/normal/两种 strategy 读取；不二次检查成员公开性、删除/在线状态或 Provider 策略 |
+| manager 映射 | 按保存的 manager/worker 角色生成 slots；不以 driver 替代角色；context 原样输出；不新增角色数量/模式预检 |
+| state machine 映射 | 沿用 current sentinel 取首条；按已存 definition_id/version 读取；yaml_text 原样输出，不与群版本比较、不解析或校验执行支持范围 |
+| YAML 透传 | 含 loop/v2、HumanInput、judge、自定义/未知字段的已存 YAML 仍原样输出；不新增内容审批或语法审核 |
+| bindings/依赖 | 每条引用仅含 uuid；UUID 原值、顺序和基数保留，包括多值/空数组；按 UUID 组装 map；不做 slot/required/引用闭包预检；不因 query/filter 裁剪成员 |
+| revision | 成员 revision 仅保存在 agents map 的依赖对象；群 hash 覆盖内嵌内容；YAML sha256 来自输出字符串；不同无语义行序结果一致 |
+| 推荐隔离 | 同成员多 slot 在群内去重；顶层与跨群保留副本；依赖不占推荐 limit、不成为额外推荐 |
+| 查询与异常 | 参数化 SQL、批量读取、limit 与排序；异常不伪装成功空列表；沿用服务超时/大小限制，不新增补扫或专项错误分类 |
+| 数据库适配 | Python/Java 对目标 MySQL/OB 验证查询、Unicode 和 JSON 读取，确认同一输入的渲染结果一致 |
 
-实现时将以上作为语言无关 golden fixtures 和 conformance cases，Python/Java 分别跑相同输入/期望输出；数据库适配测试与 HTTP API 测试分开。新增服务需有对应 context boundary 文档与契约版本声明。
+Python/Java 可使用同一组语言无关 fixtures 验证字段映射。上游执行器适配与端到端运行由对应调用方验证，不作为 Discovery 公开返回群的额外门槛。
 
-本次仅完成文档/静态示例检查；**未运行真实 MySQL/OB SQL、A2A SDK validator、上游编排或生产集成测试**。这些是实现上线前置条件，不能由本 spec 的完成替代。
+本次仅修改设计文档并检查静态示例；**未运行真实 MySQL/OB SQL、A2A SDK validator、上游编排或生产集成测试**。本期不新增服务实现，也不把文档检查当作线上验证。
 
 ## 附录 A：后续演进与兼容性
 
 | 字段/行为 | 短期 | 长期 |
 | --- | --- | --- |
-| item.id/resourceType、resourceId/resourceKind/groupKind | 稳定身份与类型 | 保持稳定；resourceType=group 不意味着 local |
-| execution.mode | 群 local，Agent remote | 全部 remote |
+| item.id/resourceType、groupKind | Agent/Group 的身份与类型 | 保持稳定；resourceType=group 不意味着 local |
 | supportedInterfaces | Agent 真实；群 local:// + LOCAL | 全部使用真实 A2A 地址和 binding |
 | composition（含 agents map） | local 群必填，自包含 | 可整体省略；普通调用不依赖定义或成员 |
-| runtimeProfile | local 必填 | remote 无需上游理解 |
 | 调用、状态、取消、凭证 | 上游管理成员调用 | BCN + Group-as-a-Bot 对外承担 |
 
 长期 remote 群只用本扩展携带身份/分类、无需上游参与编排时，extension `required=false`，使普通 A2A 客户端无需理解群内部结构即可调用。
 
-切换 URL/mode 必须产生新 revision。已开始的 local 执行固定其旧定义/成员快照，不在中途自动迁移；新调用使用新 Card。remote 调用失败时不能自动回退 local，避免重复任务与权限绕过。
+切换 URL 或 protocolBinding 必须产生新 revision。已开始的 local 执行固定其旧定义/成员快照，不在中途自动迁移；新调用使用新 Card。真实 A2A 调用失败时不自动回退 local，避免重复任务。
 
-长期上游统一按 A2A 处理，不需要感知 BCN、中转路径或群内部结构。resourceId 保持不透明，不能根据 `bcn://` 前缀拼接地址。普通 Agent 直连改为 BCN 代理仍是 remote；群由 Group-as-a-Bot 暴露同样的 A2A 接口。
+长期上游统一按 A2A 处理，不需要感知 BCN、中转路径或群内部结构。`bot_uuid` / `group_id` 保持不透明，不能据此拼接调用地址。普通 Agent 从直连 URL 改为 BCN 代理 URL 仍是真实 A2A 调用；群由 Group-as-a-Bot 暴露同样的 A2A 接口。
 
 真实 interface 示意（地址由部署配置/登记信息提供，不是硬编码路由要求）：
 
@@ -625,6 +590,6 @@ return search_response(items, metadata_diagnostics)
 }
 ```
 
-这是**执行契约变化**，不只是改 URL：同步替换 LOCAL binding、将 mode 改为 remote、移除 local runtimeProfile/非必需 composition，并发布新 revision。先上线真实 A2A 执行能力，再切换 Card；不能用只返回“不支持”的假服务冒充完成迁移。旧 local 执行完成且旧缓存失效后可删除上游 LOCAL 兼容分支。
+这是**执行契约变化**，不只是改 URL：同步替换 LOCAL binding 为真实 A2A binding、省略不再需要的 composition，并发布新 revision。先上线真实 A2A 执行能力，再切换 Card；不能用只返回“不支持”的假服务冒充完成迁移。旧 local 执行完成且旧缓存失效后可删除上游 LOCAL 兼容分支。
 
 本次从原提案的 agents/groups、双游标和假 HTTPS interface 切换为 items、群内依赖 map、LOCAL，属于待实现契约修订，不宣称已部署兼容。Discovery 投影方、搜索 HTTP/TR DTO 文档和上游执行入口需同步升级；不新增 cardType，不修改数据库 schema，也不在同一新响应中保留两套返回结构。
