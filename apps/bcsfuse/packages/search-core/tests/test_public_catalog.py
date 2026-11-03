@@ -51,7 +51,15 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         )
         assert saved.status_code == 202, saved.text
         applied(client, saved.json()["saved_revision"])
-        assert client.get("/ready").status_code == 200
+        ready = client.get("/ready")
+        assert ready.status_code == 200
+        assert "index_counts" not in ready.json()
+        counted = client.get("/ready?include_counts=true")
+        assert counted.status_code == 200, counted.text
+        assert counted.json() == {
+            **ready.json(),
+            "index_counts": {"vector_points": 1, "keyword_points": 1},
+        }
         assert search(client, "nutrition")["items"][0]["id"] == "demo"
         assert search(client, "nutrition")["items"][0]["summary"] == ""
         changed = client.put(
@@ -74,6 +82,10 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         state = client.get("/api/v1/agent-cards/demo/index-status").json()
         applied(client, state["saved_revision"], deleted=True)
         assert search(client, "railway")["items"] == []
+        assert client.get("/ready?include_counts=true").json()["index_counts"] == {
+            "vector_points": 0,
+            "keyword_points": 0,
+        }
 
 
 def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path):
@@ -153,3 +165,25 @@ def test_business_converter_multi_doc_update_and_restore_without_models(tmp_path
                 assert model.calls == 3
         finally:
             index.close()
+
+
+def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
+    from search_core.providers.qdrant_index import QdrantRetrievalIndex
+
+    def unavailable(self):
+        raise OSError("count unavailable")
+
+    monkeypatch.setattr(QdrantRetrievalIndex, "point_counts", unavailable)
+    with TestClient(
+        local_factory()(tmp_path, poll_seconds=0.05),
+        client=("127.0.0.1", 50000),
+        base_url="http://127.0.0.1",
+    ) as client:
+        saved = client.put(
+            "/api/v1/agent-cards/demo", json={"card": {"name": "invoice"}}
+        )
+        applied(client, saved.json()["saved_revision"])
+        assert client.get("/ready").status_code == 200
+        result = client.get("/ready?include_counts=true")
+        assert result.status_code == 503
+        assert result.json() == {"detail": "index count unavailable"}

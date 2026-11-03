@@ -35,6 +35,7 @@ from search_core.core.retrieval import HybridRetrievalService
 from search_core.plugin_api.card_documents import CardDocumentConverter
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
 from search_core.plugin_api.reranker import AsyncReranker, Reranker
+from search_core.plugin_api.retrieval import IndexStatistics
 
 
 def create_catalog_search_app(
@@ -264,18 +265,26 @@ def create_catalog_search_app(
             repository.page("", 1)  # Default candidates require the source DB.
 
     @app.get("/ready")
-    async def ready():
+    async def ready(include_counts: bool = False):
         if not updates.ready:
             raise HTTPException(503, "catalog initial load or poll unavailable")
         try:
             await calls["probe"].call(check_index, emergency.current.policy.retrieval)
         except Exception as error:
             raise HTTPException(503, "catalog index unavailable") from error
-        return {
+        result = {
             "ready": True,
             "instance_id": instance_id,
             "index_key": updates.index_key,
             "active_index": active_index,
         }
+        if include_counts:
+            if not isinstance(index, IndexStatistics):
+                raise HTTPException(501, "index statistics unsupported")
+            try:
+                result["index_counts"] = await calls["probe"].call(index.point_counts)
+            except Exception as error:
+                raise HTTPException(503, "index count unavailable") from error
+        return result
 
     return app
