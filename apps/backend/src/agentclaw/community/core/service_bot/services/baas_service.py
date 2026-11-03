@@ -818,6 +818,7 @@ class BaasService:  # pragma: no cover
             bot_id,
             owner_id,
             agent_pass_token,
+            engine_type=engine,
             extra_properties=extra_properties,
         )
 
@@ -2642,6 +2643,7 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        engine_type: str = "",
         *,
         extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
@@ -2658,6 +2660,7 @@ class BaasService:  # pragma: no cover
             owner_id=owner_id,
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
+            engine_type=engine_type,
             bot_type_resolver=self._resolve_bot_type,
             extra_properties=extra_properties,
         )
