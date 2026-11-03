@@ -163,13 +163,13 @@ def test_get_http_info_business_code_nonzero_raises(baas_service, http):
 
 
 def test_get_http_info_network_error_raises(baas_service, http):
-    """Transport error -> wrapped as BaasServiceError."""
+    """Transport error -> wrapped as BaasServiceError with retry-exhausted chain."""
     def _boom(*a, **kw):
         raise httpx.ConnectError("connection refused")
 
     http.set_override("get", _boom)
 
-    with pytest.raises(BaasServiceError, match="Failed to get http info"):
+    with pytest.raises(BaasServiceError, match="Failed after 4 attempts"):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 
