@@ -1,16 +1,21 @@
-"""POST /openapi/v1/bots/copy — copy an openclaw bot to a new dst bot.
+"""POST /openapi/v1/bots/copy — copy an openclaw bot to a new dst bot (Route B).
 
-Step1a: validate source (engine=openclaw + copyable lifecycle + edit perm),
-write the `ac_bot_copy{INITIAL}` operation ledger row, apply for Passport, and
-hand off to create_job with `state_ref=copy_state(operation_id)` in the payload
-spec. create_job runs the reused manifest-creation flow (apply_pre_container →
-provision → apply_on_container); CopyCompiler (Stage B Task 6) consumes
-`state_ref` at apply time to capture source's live config + screens + NAS files.
+Route B (manifest-reuse): capture source's live config, **serialize it into a
+manifest config document**, persist it under the dst bot's key, and hand off to
+the **reused manifest-creation** flow (``manifest_seam`` → ``create_job`` →
+ManifestCompiler → apply engine). No ``CopyCompiler``, no ``state_ref`` — the
+dst becomes a manifest-managed bot, and ``create_job`` / ``creation.py`` /
+``apply_engine`` core are untouched (zero regression risk).
 
-**Route mounting deferred to Stage B Task 7** (DI wiring): the router + handler
-are defined here but not yet included in `openapi_v1/__init__.py`, so the app
-does not boot with unbound `BotCopyRepositoryProtocol` in the interim. The
-handler-unit tests exercise `submit_copy` directly by passing deps by keyword.
+**v1 scope (script only).** ``identity`` / ``resources`` are file-based and
+deferred to a later **sync** stage (``BotFileSyncPort``); ``skills`` / ``mcp``
+are deferred to a later **能力集** stage. So the serialized manifest carries
+only ``script`` (read from source via ``BotStartupScriptServiceProtocol``).
+When sync + 能力集 stages land, the serializer emits the extra sections.
+
+**Route mounting deferred to Task 7** (DI wiring): the router + handler are
+defined here but not yet included in ``openapi_v1/__init__.py``. Handler-unit
+tests pass deps by keyword.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Optional
 
+import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi_injector import Injected
 from pydantic import BaseModel, Field
@@ -35,13 +41,15 @@ from agentclaw.community.core.bot_config_manifest.creation import ManifestCreati
 from agentclaw.community.core.bot_copy.repository.protocol import (
     BotCopyRepositoryProtocol,
 )
-from agentclaw.community.core.bot_copy.state_ref import copy_state
 from agentclaw.community.core.bot_copy.status_derive import compute_copy_status
 from agentclaw.community.core.bot_copy.types import BotCopyRow, BotCopyStatus
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
 from agentclaw.community.core.bot_management.services.bot_service import generate_bot_id
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyRepositoryProtocol,
@@ -51,7 +59,8 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 #: Copy supports openclaw bots only (PRD v1); teclaw's container is composed by
-#: the artifact at provision, a different mechanism from copy's pre/post delivery.
+#: the artifact at provision, a different mechanism from manifest-creation's
+#: pre/post-container delivery.
 _COPYABLE_ENGINES = {"openclaw"}
 
 #: Source lifecycle states that block copy (PRD precondition: deploying /
@@ -60,8 +69,8 @@ _NON_COPYABLE_LIFECYCLE = {"DEPLOYING", "FAILED", "UNKNOWN"}
 
 #: Operator retry cas_retry throttle window (seconds). FE shows the retry
 #: button for every copy_state except CONVERGED and may click freely; this CAS
-#: is the spam guard. create_job's UNIQUE active_idempotency_key handles dedup
-#: if a task is still live, so retry is safe to fire at any non-throttled time.
+#: is the spam guard. create_job's UNIQUE active_idempotency_key dedupes if a
+#: task is still live.
 _RETRY_THROTTLE_SECONDS = 60
 
 
@@ -83,7 +92,8 @@ class BotCopyResponse(BaseModel):
     """POST /copy response — success (OSS sync ISSUED) or auth_required (internal)."""
 
     type: str = Field(
-        ..., description='"success" (OSS NoOp sync ISSUED) | "auth_required" (internal license PENDING)'
+        ...,
+        description='"success" (OSS NoOp sync ISSUED) | "auth_required" (internal license PENDING)',
     )
     operation_id: str = Field(..., description="copy 操作幂等 id + FE correlation id")
     bot_id: str = Field(..., description="新建 dst bot 的 bot_id")
@@ -101,6 +111,21 @@ def _generate_operation_id() -> str:
     return f"copy_{date_part}_{random_part}"
 
 
+def _build_manifest_document(script_body: str) -> str:
+    """Serialize source's script into a manifest config document (v1: script only).
+
+    The document is what ``manifest_seam.persist`` stores under the dst bot's key
+    and what ManifestCompiler compiles. ``identity`` / ``resources`` / ``skills``
+    / ``mcp`` are deferred (sync + 能力集 stages); when they land this function
+    emits the extra sections.
+    """
+    return yaml.safe_dump(
+        {"schema_version": 1, "script": {"body": script_body}},
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
 def submit_copy(
     *,
     body: BotCopyRequest,
@@ -108,18 +133,19 @@ def submit_copy(
     owner_name: str,
     bot_repo: BotRepository,
     bot_copy_repo: BotCopyRepositoryProtocol,
+    bot_script_service: BotStartupScriptServiceProtocol,
     manifest_seam: ManifestCreationSeam,
     passport_plugin: PassportPlugin,
     space_context: BusinessSpaceContextProtocol,
 ) -> BotCopyResponse:
-    """Validate source + write ledger + apply Passport + hand off to create_job.
+    """Validate source + serialize manifest + persist + apply Passport + hand off.
 
-    Raises ``HTTPException`` (409 / 403 / 500) for validation/license failures;
-    on any failure before ``start_job`` the ledger write (if it landed) is left
-    for the operator-retry path to reconcile — the handler does not compensate,
-    matching the inline `create_bot` surface.
+    Route B: the manifest document is built from source's live config (v1:
+    script only), persisted under the dst bot's key, and the reused
+    manifest-creation flow (``manifest_seam.start_job`` → ``create_job``) drives
+    apply + provision. ``creation.py`` / ``create_job`` are untouched.
     """
-    del owner_name  # retained for the route handler's signature symmetry
+    del owner_name
     source = bot_repo.get_by_id(body.source_bot_id)
     if source is None:
         raise HTTPException(
@@ -138,9 +164,7 @@ def submit_copy(
         )
     actions = source.get("actions") or []
     if source.get("owner_id") != owner_id and "edit" not in actions:
-        raise HTTPException(
-            status_code=403, detail="no edit permission on source bot"
-        )
+        raise HTTPException(status_code=403, detail="no edit permission on source bot")
 
     operation_id = _generate_operation_id()
     dst_bot_id = generate_bot_id(owner_id, bot_repo)
@@ -148,11 +172,38 @@ def submit_copy(
     current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=None)
     space_id = getattr(current_space, "numeric_id", None)
 
+    # Route B: serialize source's config into a manifest document (v1: script only).
+    source_owner_id = source.get("owner_id") or owner_id
+    source_entity_id = source.get("entity_id") or source_owner_id
+    script_body = bot_script_service.get_body(
+        entity_id=source_entity_id, bot_id=source["bot_id"]
+    )
+    manifest_document = _build_manifest_document(script_body)
+
+    # Validate the document before anything is spent (manifest-creation's rule:
+    # an invalid doc never reaches Passport). Raises ManifestValidationError.
+    manifest_seam.preflight(
+        document=manifest_document,
+        engine_type="openclaw",
+        bot_type=source.get("bot_type") or "personal",
+    )
+    # Persist under the dst bot's key — ManifestCompiler reads this at apply time.
+    manifest_seam.persist(
+        spec_entity_id=owner_id,
+        bot_id=dst_bot_id,
+        document=manifest_document,
+        modifier=owner_id,
+        engine_type="openclaw",
+        bot_type=source.get("bot_type") or "personal",
+    )
+
+    # Operation ledger: FE correlation id + source/dst link + excludes. Written
+    # after the manifest is stored so a persist failure leaves no orphan row.
     bot_copy_repo.insert(
         BotCopyRow(
             operation_id=operation_id,
             source_bot_id=source["bot_id"],
-            source_owner_id=source.get("owner_id") or "",
+            source_owner_id=source_owner_id,
             dst_bot_id=dst_bot_id,
             dst_owner_id=owner_id,
             operator_id=owner_id,
@@ -163,9 +214,6 @@ def submit_copy(
         )
     )
 
-    # The payload spec create_job freezes into its task payload. `state_ref`
-    # routes the apply to CopyCompiler (Stage B); `source_bot_id` +
-    # `request_detail.excludes` are what CopyCompiler reads at compile time.
     payload_spec: dict[str, Any] = {
         "entity_id": owner_id,
         "entity_type": "staff",
@@ -174,7 +222,6 @@ def submit_copy(
         "bot_name": body.bot_name,
         "bot_desc": body.bot_desc,
         "space_id": space_id,
-        "state_ref": copy_state(operation_id).to_payload(),
         "request_detail": body.request_detail,
         "source_bot_id": source["bot_id"],
     }
@@ -219,62 +266,6 @@ def submit_copy(
     )
 
 
-@router.post(
-    "/copy",
-    status_code=200,
-    response_model=Envelope[BotCopyResponse],
-    responses={
-        202: {
-            "description": "Needs user authorization (internal license gate)",
-        },
-        403: {"description": "No edit permission on source"},
-        409: {"description": "Source not copyable (engine / lifecycle / not found)"},
-    },
-)
-@envelope_errors
-async def copy_bot(
-    body: BotCopyRequest,
-    request: Request,
-    owner_id: UserIdDep,
-    owner_name: OwnerNameDep,
-    bot_repo: BotRepository = Injected(BotRepository),
-    bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
-    manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
-    passport_plugin: PassportPlugin = Injected(PassportPlugin),
-    space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
-) -> Envelope[BotCopyResponse]:
-    """Copy an openclaw bot to a new dst bot (v1).
-
-    200 `{type:"success", operation_id, bot_id}` on OSS sync ISSUED; 202-style
-    `{type:"auth_required", iframe_url, operation_id, bot_id}` on internal license
-    PENDING (have the user authorize at `iframe_url`, then poll
-    `/openapi/v1/bots/{dst_bot_id}` `copy_state`). 409 for teclaw source or
-    non-copyable lifecycle; 403 without edit permission.
-    """
-    result = submit_copy(
-        body=body,
-        owner_id=owner_id,
-        owner_name=owner_name,
-        bot_repo=bot_repo,
-        bot_copy_repo=bot_copy_repo,
-        manifest_seam=manifest_seam,
-        passport_plugin=passport_plugin,
-        space_context=space_context,
-    )
-    return Envelope(data=result)
-
-
-__all__ = [
-    "BotCopyRequest",
-    "BotCopyResponse",
-    "RetryResponse",
-    "RetryResult",
-    "retry_copy",
-    "router",
-    "submit_copy",
-]
-
-
 class RetryResult(StrEnum):
     """The retry endpoint's outcome."""
 
@@ -300,26 +291,16 @@ def retry_copy(
     manifest_seam: ManifestCreationSeam,
     now: datetime,
 ) -> RetryResult:
-    """Operator-triggered retry of one copy operation.
+    """Operator-triggered retry of one copy operation (Route B re-hand-off).
 
-    FE shows the retry button for every ``copy_state`` except ``CONVERGED`` and
-    may click freely. Three guards make that safe:
-
-    1. ``CONVERGED`` → ``TERMINAL`` (no-op).
-    2. ``cas_retry`` CAS (60s) → ``STILL_RUNNING`` on a repeat click inside the
-       window (the spam guard).
-    3. ``create_job``'s ``active_idempotency_key`` UNIQUE → a re-handoff while a
-       task is still live dedupes at the queue, so a non-throttled retry that
-       lands during an active task is a no-op rather than a second task.
-
-    Re-handoff goes through ``manifest_seam.start_job`` (the same seam first
-    submission used), with the same ``state_ref=copy_state(op_id)`` so CopyCompiler
-    (Stage B) re-captures source's live config. No authorization window: the bot
-    was authorized at first submission (license already ISSUED), and retry is
-    FE-manual — ``start_job``'s configured window is moot because the create_job
-    task's first Passport poll sees ISSUED and proceeds.
+    The manifest document was persisted at first submission under the dst bot's
+    key; retry re-hands-off to ``create_job`` via ``manifest_seam.start_job``
+    with the same payload spec. ``create_job`` is idempotent on ``bot_id``
+    (``complete_bot_authorization`` returns the existing row; ``apply_pre_container``
+    checks existing apply records; ``active_idempotency_key`` UNIQUE dedupes the
+    task). FE shows retry for every ``copy_state`` except CONVERGED.
     """
-    del operator_id  # retained for audit/route signature; not yet written to ledger
+    del operator_id
     row = bot_copy_repo.get_by_operation_id(
         env=get_current_env(), operation_id=operation_id
     )
@@ -327,10 +308,9 @@ def retry_copy(
         raise HTTPException(
             status_code=404, detail=f"copy operation {operation_id} not found"
         )
-    env = row.env
 
     applies = apply_repo.recent(
-        env=env, entity_id=row.dst_owner_id, bot_id=row.dst_bot_id, limit=10
+        env=row.env, entity_id=row.dst_owner_id, bot_id=row.dst_bot_id, limit=10
     )
     bot = bot_repo.get_by_id(row.dst_bot_id)
     bot_status = (bot or {}).get("status")
@@ -341,7 +321,10 @@ def retry_copy(
         return RetryResult.TERMINAL
 
     if not bot_copy_repo.cas_retry(
-        env=env, operation_id=operation_id, now=now, throttle_seconds=_RETRY_THROTTLE_SECONDS
+        env=row.env,
+        operation_id=operation_id,
+        now=now,
+        throttle_seconds=_RETRY_THROTTLE_SECONDS,
     ):
         return RetryResult.STILL_RUNNING
 
@@ -353,7 +336,6 @@ def retry_copy(
         "bot_name": None,
         "bot_desc": None,
         "space_id": None,
-        "state_ref": copy_state(operation_id).to_payload(),
         "request_detail": row.request_detail,
         "source_bot_id": row.source_bot_id,
     }
@@ -370,12 +352,51 @@ def retry_copy(
 
 
 @router.post(
+    "/copy",
+    status_code=200,
+    response_model=Envelope[BotCopyResponse],
+    responses={
+        202: {"description": "Needs user authorization (internal license gate)"},
+        403: {"description": "No edit permission on source"},
+        409: {"description": "Source not copyable (engine / lifecycle / not found)"},
+    },
+)
+@envelope_errors
+async def copy_bot(
+    body: BotCopyRequest,
+    request: Request,
+    owner_id: UserIdDep,
+    owner_name: OwnerNameDep,
+    bot_repo: BotRepository = Injected(BotRepository),
+    bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
+    bot_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+    manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    space_context: BusinessSpaceContextProtocol = Injected(BusinessSpaceContextProtocol),
+) -> Envelope[BotCopyResponse]:
+    """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
+    del request
+    result = submit_copy(
+        body=body,
+        owner_id=owner_id,
+        owner_name=owner_name,
+        bot_repo=bot_repo,
+        bot_copy_repo=bot_copy_repo,
+        bot_script_service=bot_script_service,
+        manifest_seam=manifest_seam,
+        passport_plugin=passport_plugin,
+        space_context=space_context,
+    )
+    return Envelope(data=result)
+
+
+@router.post(
     "/copy/{operation_id}/retry",
     status_code=200,
     response_model=Envelope[RetryResponse],
-    responses={
-        404: {"description": "Unknown operation_id"},
-    },
+    responses={404: {"description": "Unknown operation_id"}},
 )
 @envelope_errors
 async def retry_copy_bot(
@@ -389,13 +410,8 @@ async def retry_copy_bot(
     bot_repo: BotRepository = Injected(BotRepository),
     manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
 ) -> Envelope[RetryResponse]:
-    """Re-hand-off a copy operation to create_job (operator-triggered retry).
-
-    FE shows this for every ``copy_state`` except ``CONVERGED``. Three guards
-    (CONVERGED terminal / 60s CAS throttle / create_job idempotency UNIQUE) make
-    it safe to click freely. Returns the outcome + the operation_id.
-    """
-    del request  # envelope_errors requires a Request param; unused on the success path
+    """Re-hand-off a copy operation to create_job (operator-triggered retry)."""
+    del request
     result = retry_copy(
         operation_id=operation_id,
         operator_id=owner_id,
@@ -406,3 +422,14 @@ async def retry_copy_bot(
         now=datetime.now(),
     )
     return Envelope(data=RetryResponse(operation_id=operation_id, result=result))
+
+
+__all__ = [
+    "BotCopyRequest",
+    "BotCopyResponse",
+    "RetryResponse",
+    "RetryResult",
+    "retry_copy",
+    "router",
+    "submit_copy",
+]

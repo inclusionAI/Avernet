@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_copy.repository.models import (  # noqa: F401
 from agentclaw.community.core.bot_copy.repository.sqlalchemy_impl import (
     BotCopyRepositoryImpl,
 )
-from agentclaw.community.core.bot_copy.state_ref import COPY_STATE_KIND, copy_state
 from agentclaw.community.core.bot_copy.types import BotCopyRow, BotCopyStatus
 
 pytestmark = pytest.mark.integration
@@ -132,18 +131,3 @@ def test_update_progress_ext_persists_json(copy_repo):
     )
     refreshed = copy_repo.get_by_operation_id(env=ENV, operation_id="op_1")
     assert refreshed.progress_ext == {"screen_copied": True}
-
-
-def test_copy_state_helper_returns_copy_kind_state_ref():
-    from agentclaw.community.core.apply_engine.compiler import StateRef
-
-    assert COPY_STATE_KIND == "copy"
-    ref = copy_state("op_1")
-    assert ref == StateRef("copy", "op_1")
-    assert ref.kind == "copy"
-    assert ref.reference == "op_1"
-
-
-def test_copy_state_refuses_empty_operation_id():
-    with pytest.raises(ValueError):
-        copy_state("")

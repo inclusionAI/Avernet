@@ -81,7 +81,7 @@ def _retry(mocks, now=datetime(2026, 11, 2, 10, 0, 0), operation_id="op_1"):
     )
 
 
-def test_retry_first_call_re_enqueues_with_state_ref():
+def test_retry_first_call_re_hands_off_to_create_job():
     mocks = _mocks()
     _, _, _, manifest_seam = mocks
     result = _retry(mocks)
@@ -89,8 +89,8 @@ def test_retry_first_call_re_enqueues_with_state_ref():
     mocks[0].cas_retry.assert_called_once()
     start_kwargs = manifest_seam.start_job.call_args.kwargs
     assert start_kwargs["bot_id"] == "dst_1"
-    assert start_kwargs["spec"]["state_ref"] == {"kind": "copy", "reference": "op_1"}
     assert start_kwargs["spec"]["source_bot_id"] == "src_1"
+    assert "state_ref" not in start_kwargs["spec"]  # Route B: manifest doc, not state_ref
     assert start_kwargs["iframe_url"] is None
     assert start_kwargs["redirect_url"] is None
 
