@@ -1,0 +1,39 @@
+apps/backend/src/agentclaw/community/adapters/http/skill_center/skillsets_common.py
+  s_a9973d16634159::t_f199c377363012 20,46-48,55
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_ca7af9dfba2884::t_cd87f3946b3ae0 131-133
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_management_service.py
+  s_d3bf53bf336fe9::t_c352cbf294708e 29,514-518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a7241eb1b2be09afd7aa7b3c8d583b3acc414d5",
+  "prompts": {},
+  "sessions": {
+    "s_a9973d16634159": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-1f98-7510-9813-d58fd147f9a6",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_ca7af9dfba2884": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-cba6-7be2-89be-5ef06d15a772",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_d3bf53bf336fe9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-dcfe-7db2-a361-fd24189dac7c",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
