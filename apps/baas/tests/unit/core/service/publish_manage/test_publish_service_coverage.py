@@ -659,6 +659,38 @@ class TestCreatePublishRestartNoEligible:
                     ),
                 )
 
+    @pytest.mark.asyncio
+    async def test_restart_offline_device_is_eligible(self):
+        """OFFLINE devices should be eligible for RESTART scope=ALL."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._bot_service.get_bot = AsyncMock(return_value=bot)
+        svc._publish_repo.get_active_by_bot_id.return_value = None
+        svc._publish_repo.now.return_value = datetime.now()
+        svc._publish_repo.create.return_value = _make_publish_record(
+            publish_type="RESTART", status="PENDING"
+        )
+
+        # OFFLINE device — should be eligible for RESTART scope=ALL
+        mock_device = _make_device(status="OFFLINE")
+        svc._device_repo.list_by_bot_id.return_value = [mock_device]
+        svc._bot_repo.list_by_bot_uuid.return_value = [bot]
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc.create_publish(
+                tenant="test_tenant",
+                bot_id=1,
+                publish_type=PublishType.RESTART,
+                operator="user1",
+                request_id="req-id-12345678901234567890",
+            )
+            # Should succeed — OFFLINE is eligible
+            assert result is not None
+            assert result.publish_type == "RESTART"
+
 
 # ====================================================================
 # _generate_batches — STOP, UPDATE_DEVICE, DESTROY
