@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_runner.py
+  s_cecdc98e721f4b::t_c16ab1afda01ea 18-21,395-397,402-406
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_runner.py
+  s_cecdc98e721f4b::t_1924f75221c8dd 14-17,171-173,177-180
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_cli.py
+  s_cecdc98e721f4b::t_260154ea5e15d6 35-65
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_runner.py
+  s_cecdc98e721f4b::t_13749fc46aec38 32,524-526
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team.py
+  s_cecdc98e721f4b::t_bb3897ed9fd0b3 28-31,114-146
+apps/bcs/scripts/e2e-runner/tests/test_friend_cli_runner.py
+  s_cecdc98e721f4b::t_e47c1e98c40c12 162-194
+apps/bcs/scripts/e2e-runner/tests/test_local_cli.py
+  s_cecdc98e721f4b::t_de6e3dae16db66 18,21,32-63
+apps/bcs/scripts/e2e-runner/tests/test_operator_cli_runner.py
+  s_cecdc98e721f4b::t_e250d6fa00e989 713,715-716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c941d5e385c205f8ac025c2f0740e77c2e246387",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

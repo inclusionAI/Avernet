@@ -1,0 +1,45 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/README.md
+  s_cecdc98e721f4b::t_eff295f3d32ed7 1-78
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/__init__.py
+  s_cecdc98e721f4b::t_f2679aac1edf6b 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/build_contract.py
+  s_cecdc98e721f4b::t_b0558367f753eb 1-124
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/checks.py
+  s_cecdc98e721f4b::t_cb8820f4d9cd3d 1-59
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/contract.py
+  s_cecdc98e721f4b::t_3c4fa4be40bb8f 1-69
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/dual_case_run.py
+  s_cecdc98e721f4b::t_610d7f3572fc84 1-157
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/run.py
+  s_cecdc98e721f4b::t_2f34f69302023a 1-38
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/seam-demand.json
+  s_cecdc98e721f4b::t_4a14f1dfa78a87 1-188
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/story.py
+  s_cecdc98e721f4b::t_8ef306726b5f50 1-212
+apps/bcs/scripts/e2e-runner/provider-publishes-migration-contract.json
+  s_cecdc98e721f4b::t_020bc5f6c31aeb 1-1872
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_contract.py
+  s_cecdc98e721f4b::t_1de90ed743bfa9 1-88
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_dual_case_run.py
+  s_cecdc98e721f4b::t_f4c28312e5eb88 1-136
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_live.py
+  s_cecdc98e721f4b::t_cde850495c0cdc 1-32
+apps/bcs/scripts/e2e-runner/tests/test_provider_publishes_mutations.py
+  s_cecdc98e721f4b::t_32e7aab362d043 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "96bb3ab9e41cd14a0d5756754baaf74ab5c80ba3",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

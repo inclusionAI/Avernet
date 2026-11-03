@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_group_lifecycle_contract.py
+  s_cecdc98e721f4b::t_a7e148e7a253e6 55-57,165-176,215-221,346,357,456-466,469-539
+apps/bcs/scripts/e2e-runner/tests/test_workspace_group_lifecycle.py
+  s_cecdc98e721f4b::t_7b60f282644664 11,203,206-207,224-252,272-279,340-405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac74253af07692ecb6d024eb8ab6555a99a90d46",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

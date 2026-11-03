@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/__tests__/reference-materials.test.ts
+  s_413b6633e8b715::t_4c30cb78f922b5 51-59
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/reference-materials.ts
+  s_413b6633e8b715::t_4c30cb78f922b5 61-63,84-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "01e713504cc2ba6424910bccd667836b725b8b6b",
+  "prompts": {},
+  "sessions": {
+    "s_413b6633e8b715": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c2b-9482-7110-82bf-7c8dff86cc5c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
