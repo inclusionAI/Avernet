@@ -75,7 +75,7 @@ const decisionLabels: Record<string, string> = {
 
 const simulationDecisionLabels: Record<string, string> = {
   observe: '无需干预', message: '提出消息干预建议', environment: '制定拟议修复方案',
-  insufficient_evidence: '历史证据不足', user_continued: '历史用户续聊，建议让路',
+  insufficient_evidence: '历史证据不足', user_continued: '历史用户续聊，建议让路', owner_handoff: '建议直接转交 Owner（未通知）',
 };
 
 function record(value: unknown): Record<string, unknown> {

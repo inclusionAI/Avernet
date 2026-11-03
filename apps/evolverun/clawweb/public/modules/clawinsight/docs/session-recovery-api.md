@@ -31,6 +31,8 @@ HTTP `202` 返回 `{ "batch_id": "…", "items": [{ "event_id": "…", "delivery
 
 以下在线自愈接口同步确认受理，效果等待超时和任务结束时通过异步结果接口回报。消息投递成功与原故障恢复分别表达；离线仿真不触发该回报。
 
+仿真在 `assess` 和 `plan` 均可提交 `assessment.decision=owner_handoff`，保存拟直接转交 Owner 的说明和读取证据后结束，不强制生成方案。它仍为 `effect=not_intervened`，不设置真实转交的 `completion_reason`、不通知 Owner、不等待反馈。已有仿真决策保持兼容；接收此决策的后端需先部署，再更新会产出该决策的自愈包。
+
 ## 实时诊断自动触发（内测）
 
 ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` 完成身份校验和诊断落库后，调用已装配的自愈任务服务。诊断发送端不增加自愈请求，也不修改上报 DTO。

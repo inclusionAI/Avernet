@@ -490,16 +490,18 @@ it('labels the diagnosis task link as a normal handoff', async () => {
   expect(screen.getByText('已让路')).toBeVisible();
 });
 
-it('shows simulation decisions and the complete proposed message with only assess/plan stages', async () => {
+it.each(['message', 'owner_handoff'])('shows simulation decision %s with only assess/plan stages and no live controls', async decision => {
   vi.mocked(sessionRecoveryApi.detail).mockResolvedValue({ ...task, status: 'completed', phase: 'assess', plan: null,
     simulation: { batchId: 'fixture', cutoffAtMs: 10000, cutoffNode: { messageId: 'M100' }, inputDigest: 'digest' },
     timeline: [{ event_id: 'decision', at_ms: 1, kind: 'assessment', actor: 'agent', summary: '原任务可从失败步骤继续',
-      payload: { phase: 'assess', decision: 'message', message: '请核对原调用参数并继续原任务，避免重复已完成操作。' } }] } as never);
+      payload: { phase: 'assess', decision, ...(decision === 'message' ? { message: '请核对原调用参数并继续原任务，避免重复已完成操作。' } : {}) } }] } as never);
   render(<SessionRecoveryDetail taskId="task" onBack={() => {}} />);
   await screen.findByRole('heading', { name: '自愈离线仿真详情' });
   expect(screen.getAllByRole('tab')).toHaveLength(2);
-  expect(screen.getByText('拟发送的干预消息（未发送）')).toBeVisible();
-  expect(screen.getByText('请核对原调用参数并继续原任务，避免重复已完成操作。')).toBeVisible();
+  if (decision === 'message') {
+    expect(screen.getByText('拟发送的干预消息（未发送）')).toBeVisible();
+    expect(screen.getByText('请核对原调用参数并继续原任务，避免重复已完成操作。')).toBeVisible();
+  } else expect(screen.getAllByText('建议直接转交 Owner（未通知）').length).toBeGreaterThan(0);
   expect(screen.queryByRole('button', { name: /确认完整方案|拒绝方案|保存标注|创建仿真/ })).toBeNull();
 });
 
