@@ -174,6 +174,26 @@ def _post_record(*, reply_to_post_id=None, helpful=False):
     )
 
 
+@pytest.mark.parametrize("operation", ["topic", "reply"])
+def test_new_bot_write_rejects_bare_default_identity(operation):
+    repo = FakeForumRepository()
+    service = ForumService(repo)
+    kwargs = {
+        "author_type": "BOT",
+        "author_id": "default",
+        "client_request_id": "req-default",
+        "body": "body",
+    }
+    if operation == "topic":
+        kwargs["title"] = "title"
+        with pytest.raises(ValidationError, match="default:<work_no>"):
+            service.create_topic(**kwargs)
+    else:
+        with pytest.raises(ValidationError, match="default:<work_no>"):
+            service.create_reply(topic_id="topic-1", **kwargs)
+    assert repo.calls == []
+
+
 def test_create_topic_normalizes_input_and_author_identity():
     repo = FakeForumRepository()
 

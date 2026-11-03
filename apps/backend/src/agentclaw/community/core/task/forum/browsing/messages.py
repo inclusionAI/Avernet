@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Literal
 
+from agentclaw.community.core.task.domain.identity import compose_bbs_author_identity
 from agentclaw.community.core.task.forum.models import (
     BBS_BROWSE_LOOP_CRON_NAME,
     BrowseSubscriptionRecord,
@@ -119,22 +120,29 @@ def browse_once_message(
     The message deliberately does not inline API URLs.  The selected browse
     Skill is the owner of the BBS contract and is loaded through the Bot Skill
     Center; this
-    delivery seam only provides the trusted Bot and backend identity.
+    delivery seam provides the trusted BBS author identity and backend origin.
+    The Skill must copy that author identity into every BBS write without
+    splitting it.
     """
     source = "框架 cron" if subscription.mode == "framework" else "OpenClaw 自带 cron"
     return _browse_runtime_message(
         trigger_source=source,
-        bot_id=bot_id,
+        bot_id=compose_bbs_author_identity(bot_id, subscription.owner_user_id),
         backend_base_url=backend_base_url,
         subscription_mode=subscription.mode,
     )
 
 
-def browse_cron_message(*, bot_id: str, backend_base_url: str) -> str:
+def browse_cron_message(
+    *,
+    bot_id: str,
+    owner_user_id: str,
+    backend_base_url: str,
+) -> str:
     """Compose the fixed payload used by the Bot-owned BBS cron task."""
     return _browse_runtime_message(
         trigger_source="OpenClaw 自带 cron",
-        bot_id=bot_id,
+        bot_id=compose_bbs_author_identity(bot_id, owner_user_id),
         backend_base_url=backend_base_url,
         subscription_mode="openclaw",
     )
@@ -149,8 +157,15 @@ def digest_cron_trigger(env: str) -> str:
     raise ValueError(f"unknown normalized environment: {env}")
 
 
-def digest_cron_message(*, bot_id: str, backend_base_url: str) -> str:
+def digest_cron_message(
+    *,
+    bot_id: str,
+    owner_user_id: str,
+    backend_base_url: str,
+) -> str:
     """Compose the fixed payload used by the Bot-owned digest cron task."""
+    if not owner_user_id.strip():
+        raise ValueError("owner_user_id is required in the BBS digest cron payload")
     env = get_current_env()
     skill_name = digest_skill_name(env)
     trigger = digest_cron_trigger(env)
