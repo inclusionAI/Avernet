@@ -1,0 +1,21 @@
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/src/outbound/request.rs
+  s_ab05f4d0166407::t_706258863b1758 10-22,26,31-50,54,56,67-70,96,122,124-128,138-144,157-160,172-176,179,190-212,214,218
+apps/bcs-internal/crates/tools/bcs-sofa-tr-demo/tests/outbound_wire.rs
+  s_ab05f4d0166407::t_daaad444f05889 177-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a850f23a124f8af90dc99427a7bf40cccc016ad2",
+  "prompts": {},
+  "sessions": {
+    "s_ab05f4d0166407": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0e7-96fd-7242-95cf-7aa4356066ca",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
