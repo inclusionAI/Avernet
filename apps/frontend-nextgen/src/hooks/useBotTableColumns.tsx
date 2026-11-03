@@ -134,13 +134,10 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       {
         id: 'actions',
         header: '操作',
-        width: 'w-[284px]',
+        // 240px：最宽按钮行（对话/查看/编辑/日志 + 管理菜单）实测内容约 224px，留 16px 余量。
+        width: 'w-[240px]',
         align: 'end',
-        // 恒定不透明底(bg-card)挡住横向滚动到其下方的列内容;hover 蒙层走 before
-        // 叠加而非替换背景色,避免半透明 hover 底露出被本列遮挡的 Bot 标签等内容。
-        className:
-          "sticky right-0 z-10 bg-card before:pointer-events-none before:absolute before:inset-0 before:content-[''] before:-z-10 group-hover:before:bg-muted/40",
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (bot) => {
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
