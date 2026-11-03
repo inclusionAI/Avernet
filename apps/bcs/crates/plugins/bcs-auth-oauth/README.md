@@ -46,3 +46,22 @@ never resolved by writing unconditionally. The browser-bound pending-login
 store is likewise consumed atomically: the first consume of any provider
 state invalidates the whole batch, and a cross-browser consume never burns
 the initiating browser's record.
+
+### Pending-login resource bounds
+
+The memory store holds at most 4,096 provider states (including all states of
+multi-provider batches). Issue and consume reclaim up to 64 expired batches
+per call using an expiry-ordered index, rather than scanning all records.
+Whole-batch deletion also removes its expiry entry, including on successful
+login, so the index cannot accumulate consumed batches. Idle stores retain at
+most the same fixed capacity until their next operation; no cleanup task or
+external dependency is required.
+
+Issuance that cannot fit the complete batch returns `LoginStateError::Unavailable`
+without evicting live logins or partially inserting states. The application
+bridge maps that existing failure to 503 `auth_dependency_unavailable` and
+returns no login challenge. The capacity bounds both retained state count and
+work under the mutex; there is no DB access. Each cleanup examines at most 64
+batch entries and deletes at most the 4,096 retained states. Live matching and
+whole-batch invalidation remain atomic, and wrong-browser callbacks never
+consume a live batch.

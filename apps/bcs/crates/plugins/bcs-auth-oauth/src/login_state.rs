@@ -21,7 +21,7 @@
 //!   consumes NOTHING — a wrong-browser callback never burns the
 //!   initiating browser's batch.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -30,6 +30,16 @@ use bcs_auth_api::login_state::{
 };
 use bcs_jwt::token_hash;
 use subtle::ConstantTimeEq;
+
+// Bound retained states across all batches, not just the number of browsers.
+const MAX_PENDING_STATES: usize = 4096;
+// Bound expiry-index work per operation; no whole-store scan under the mutex.
+const EXPIRED_BATCH_CLEANUP_LIMIT: usize = 64;
+
+struct PendingBatch {
+    states: Vec<String>,
+    expires_at: u64,
+}
 
 /// Internal pending record. Deliberately has no `Debug`: it holds the
 /// nonce hash, and a derived impl would invite future field leaks.
@@ -44,21 +54,14 @@ struct PendingRecord {
     expires_at: u64,
 }
 
-/// Per-consume decision, computed under the shared borrow before any
-/// mutation: reject (mismatch, nothing consumed), drop (expired —
-/// fail-closed cleanup), or consume the whole batch (full match).
-enum ConsumeAction {
-    Reject,
-    Drop,
-    Consume,
-}
-
 #[derive(Default)]
 struct PendingInner {
     /// state -> record.
     records: HashMap<String, PendingRecord>,
     /// batch id -> every state of that batch (for whole-batch removal).
-    batches: HashMap<String, Vec<String>>,
+    batches: HashMap<String, PendingBatch>,
+    /// One entry per live batch; removed on expiry AND successful consume.
+    expirations: BTreeSet<(u64, String)>,
 }
 
 /// Single-process pending-login store over one mutex.
@@ -84,10 +87,26 @@ impl MemoryPendingOAuthLoginStore {
     /// death (no other provider state of the same batch can complete);
     /// it is also the fail-closed cleanup for expired batches.
     fn consume_batch(inner: &mut PendingInner, batch_id: &str) {
-        if let Some(states) = inner.batches.remove(batch_id) {
-            for state in states {
+        if let Some(batch) = inner.batches.remove(batch_id) {
+            inner.expirations.remove(&(batch.expires_at, batch_id.to_string()));
+            for state in batch.states {
                 inner.records.remove(&state);
             }
+        }
+    }
+
+    /// Reclaim only expired batches, in expiry order (also correct if the
+    /// injected clock moves backwards). Live batches are never evicted.
+    fn purge_expired(inner: &mut PendingInner, now: u64) {
+        for _ in 0..EXPIRED_BATCH_CLEANUP_LIMIT {
+            let Some((expires_at, batch_id)) = inner.expirations.first() else {
+                break;
+            };
+            if *expires_at > now {
+                break;
+            }
+            let batch_id = batch_id.clone();
+            Self::consume_batch(inner, &batch_id);
         }
     }
 }
@@ -109,10 +128,18 @@ impl PendingOAuthLoginStore for MemoryPendingOAuthLoginStore {
         let expires_at = now
             .checked_add(PENDING_LOGIN_TTL_SECS)
             .ok_or(LoginStateError::Unavailable)?;
-        let batch_id = new_batch_id();
-        let nonce = new_browser_nonce();
-
         let mut inner = lock_unpoisoned(&self.inner);
+        Self::purge_expired(&mut inner, now);
+        if providers.len() > MAX_PENDING_STATES - inner.records.len() {
+            // Reject the entire batch before allocating or inserting any
+            // credentials. Existing live logins retain their binding.
+            return Err(LoginStateError::Unavailable);
+        }
+        let mut batch_id = new_batch_id();
+        while inner.batches.contains_key(&batch_id) {
+            batch_id = new_batch_id();
+        }
+        let nonce = new_browser_nonce();
         // Defensive CS-space guard: regenerate any state that collides
         // with an outstanding record (probability ~0 for OS-CSPRNG hex,
         // but a collision must never silently alias another batch).
@@ -136,9 +163,14 @@ impl PendingOAuthLoginStore for MemoryPendingOAuthLoginStore {
             );
             provider_states.push((provider.clone(), state));
         }
-        inner
-            .batches
-            .insert(batch_id, provider_states.iter().map(|(_, s)| s.clone()).collect());
+        inner.expirations.insert((expires_at, batch_id.clone()));
+        inner.batches.insert(
+            batch_id,
+            PendingBatch {
+                states: provider_states.iter().map(|(_, state)| state.clone()).collect(),
+                expires_at,
+            },
+        );
         drop(inner);
 
         Ok(LoginBatch {
@@ -161,40 +193,28 @@ impl PendingOAuthLoginStore for MemoryPendingOAuthLoginStore {
         // comparison below runs over equal-length digests only.
         let presented_hash = token_hash(browser_nonce);
         let mut inner = lock_unpoisoned(&self.inner);
+        Self::purge_expired(&mut inner, now);
 
         // Decide under the shared borrow first, mutate second: matching
         // and whole-batch invalidation still complete within this single
         // lock hold (there is no await between them).
-        let Some((action, batch_id)) = inner.records.get(state).map(|record| {
-            let expired = now >= record.expires_at;
-            let matched = !expired
+        let Some((matched, batch_id)) = inner.records.get(state).map(|record| {
+            let matched = now < record.expires_at
                 && record.flow == flow
                 && record.provider == provider
                 && record.callback == exact_callback
                 && constant_time_eq(record.nonce_hash.as_bytes(), presented_hash.as_bytes());
-            let action = if expired {
-                ConsumeAction::Drop
-            } else if matched {
-                ConsumeAction::Consume
-            } else {
-                ConsumeAction::Reject
-            };
-            (action, record.batch_id.clone())
+            (matched, record.batch_id.clone())
         }) else {
             return Err(LoginStateError::Invalid);
         };
-        match action {
-            // A wrong browser, provider, callback, or flow must NOT
-            // consume the initiating browser's pending state.
-            ConsumeAction::Reject => return Err(LoginStateError::Invalid),
-            // The expired batch fails closed AND is cleaned up on first
-            // touch (plan §8.4 TTL cleanup).
-            ConsumeAction::Drop => {
-                Self::consume_batch(&mut inner, &batch_id);
-                return Err(LoginStateError::Invalid);
-            }
-            ConsumeAction::Consume => Self::consume_batch(&mut inner, &batch_id),
+        if !matched {
+            // Expired records beyond this call's cleanup budget remain in
+            // the expiry index for the next sweep; they never authenticate.
+            // A wrong browser/provider/callback/flow leaves live state intact.
+            return Err(LoginStateError::Invalid);
         }
+        Self::consume_batch(&mut inner, &batch_id);
         Ok(())
     }
 }
@@ -312,3 +332,7 @@ mod tests {
             .expect("exact callback must match");
     }
 }
+
+#[cfg(test)]
+#[path = "login_state/cleanup_tests.rs"]
+mod cleanup_tests;

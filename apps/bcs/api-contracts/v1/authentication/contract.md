@@ -137,6 +137,11 @@ Cookies:
   never installs a session cookie.
 - The nonce never appears in URLs, JSON, query parameters, or logs; login
   responses (and every auth-flow response) carry `Cache-Control: no-store`.
+- The in-memory pending-login store is bounded to 4,096 provider states.
+  Each issue/consume reclaims up to 64 expired batches; consumed batches also
+  leave the expiry index immediately. A full store rejects issuance with
+  503 `auth_dependency_unavailable`, no new challenge cookie and no eviction
+  of other live logins.
 - One outstanding batch per browser: re-issuing the URL list rotates the
   nonce and invalidates the earlier batch in that browser; a callback from
   another browser is rejected WITHOUT consuming the initiating browser's
@@ -168,7 +173,13 @@ Cookies:
 
 `[api.auth]` is the V1 chain. Absent `[api.auth]` = compatibility assembly
 (current Gateway-protected surface; legacy login entry choices unchanged —
-but on the SAME hardened lifecycles). Present `[api.auth]` fully defines
+but on the SAME hardened lifecycles). In this compatibility mode, V1 OAuth
+refresh/logout use the finite exact `cors.allowed_origins` subset, just like
+the legacy entry: wildcard/null entries grant no trust, and no exact origins
+means cookie writes are denied. Malformed exact origins fail validation before
+routes are published. Explicit `[api.auth]` continues to use only
+its own `trusted_browser_origins`, never the CORS fallback. Present `[api.auth]`
+fully defines
 the chain: `chain` (required, ordered, unique, non-empty), plus
 `public_base_url` and `session_signing_key_secret` (required with any OAuth
 source), `session_idle_timeout_minutes` (default 30, positive, expanded once

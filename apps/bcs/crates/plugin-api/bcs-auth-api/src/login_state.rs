@@ -57,8 +57,9 @@ impl std::fmt::Debug for LoginBatch {
 ///
 /// `Invalid` is every rejected match (unknown/expired/rebound state,
 /// wrong browser/provider/callback/flow); `Unavailable` is a store
-/// failure — an issue failure surfacing `Unavailable` means NO usable
-/// login URLs were produced. Neither variant ever carries credentials.
+/// failure (including exhausted bounded storage capacity). An issue failure
+/// surfacing `Unavailable` means NO usable login URLs were produced. Neither
+/// variant ever carries credentials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LoginStateError {
     #[error("pending login state rejected")]
@@ -86,6 +87,8 @@ pub trait PendingOAuthLoginStore: Send + Sync {
     /// Issue a fresh batch for the given providers under one flow
     /// namespace. `callback_base` is the public base callback path; the
     /// exact per-provider callback is `{callback_base}/{provider}`.
+    /// A capacity failure returns `Unavailable` without a partial batch or
+    /// eviction of other unexpired batches.
     async fn issue_batch(
         &self,
         providers: &[String],

@@ -49,13 +49,7 @@ jobs:
       # reads from these variables: > 60% once a change has >= 20
       # instrumentable lines in the e2e scope.
       BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
-      # PR #3489 named waiver: the new OAuth login/session surface cannot
-      # execute in the singlebox e2e stack (providers bind compile-time
-      # third-party endpoints; no injection seam this round), so the
-      # changed-line gate is report-only on this branch only. The number is
-      # still computed and printed; every other branch and dev after merge
-      # keep the >60 requirement.
-      BCS_E2E_CHANGED_LINE_MIN: ${{ github.event_name == 'pull_request' && contains(github.head_ref, 'bcs-v1-api-auth-chain') && '0' || '60' }}
+      BCS_E2E_CHANGED_LINE_MIN: "60"
 
     defaults:
       run:

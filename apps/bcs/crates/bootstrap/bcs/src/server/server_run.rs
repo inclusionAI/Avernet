@@ -287,6 +287,16 @@ impl BcsServer {
             (oauth_v1_service, oauth_v1_base_url)
         {
             openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
+            if self.state.config.api.auth.is_none() {
+                // The compat V1 facade uses the same exact CORS trust as
+                // legacy OAuth. Explicit chains retain their own origins.
+                let origins = Self::exact_cors_origins(&self.config);
+                if !origins.is_empty() {
+                    let origins = bcs_api_http::TrustedBrowserOrigins::new(origins)
+                        .map_err(crate::BcsError::InvalidConfig)?;
+                    openapi_v1 = openapi_v1.with_trusted_browser_origins(origins);
+                }
+            }
         }
 
         let mut router = Router::new()

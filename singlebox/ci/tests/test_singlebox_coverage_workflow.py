@@ -15,3 +15,21 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert 'SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"' in workflow
     assert "--bcs-router-min 100" in workflow
     assert "--bcs-cli-min 100" in workflow
+
+
+def test_bcs_changed_line_threshold_has_no_branch_waiver():
+    import yaml
+
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    thresholds = [
+        job["env"]["BCS_E2E_CHANGED_LINE_MIN"]
+        for job in workflow["jobs"].values()
+        if "BCS_E2E_CHANGED_LINE_MIN" in job.get("env", {})
+    ]
+    assert thresholds == ["60"]
+
+
+def test_oauth_production_paths_are_not_excluded_from_changed_line_coverage():
+    runner = (REPO_ROOT / "apps/bcs/scripts/e2e_coverage.sh").read_text(encoding="utf-8")
+    assert "e2e_unreachable_oauth" not in runner
+    assert "oauth_skip_regex" not in runner
