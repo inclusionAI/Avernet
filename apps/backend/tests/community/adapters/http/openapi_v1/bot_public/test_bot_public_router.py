@@ -16,6 +16,7 @@ from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProto
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogCaller,
+    BotCatalogProfileNotFoundError,
     BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
@@ -30,6 +31,7 @@ from tests.community.adapters.http.openapi_v1.conftest import mount_public_error
 
 _SEARCH_PATH = "/openapi/v1/bots/catalog/search"
 _DISCOVER_PATH = "/openapi/v1/bots/catalog/discover"
+_PROFILE_PATH = "/openapi/v1/bots/catalog/profile/"
 
 
 def _bot() -> dict[str, Any]:
@@ -56,16 +58,44 @@ def _bot() -> dict[str, Any]:
     }
 
 
+def _profile() -> dict[str, Any]:
+    return {
+        "bot_id": "catalog-bot",
+        "bot_uuid": "catalog-bot:owner-1",
+        "bot_name": "Catalog Bot",
+        "owner_name": "Owner",
+        "description": "A public catalog entry",
+        "engine_name": "openclaw",
+        "capabilities": [
+            {"capability_id": "antv", "display_name": "AntV 可视化图表"},
+            {"capability_id": "dima", "display_name": "Dima MCP"},
+            {"capability_id": "", "display_name": "  "},
+            "not-a-mapping",
+        ],
+    }
+
+
 @dataclass
 class _PublicService:
     result: dict[str, Any] = field(
         default_factory=lambda: {"total": 1, "items": [_bot()]}
     )
     calls: list[dict[str, Any]] = field(default_factory=list)
+    profile_result: dict[str, Any] = field(default_factory=_profile)
+    profile_error: Exception | None = None
+    profile_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def search_catalog_public_bots_by_keyword(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(kwargs)
         return self.result
+
+    def get_catalog_public_bot_profile(
+        self, bot_uuid: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        self.profile_calls.append({"bot_uuid": bot_uuid, **kwargs})
+        if self.profile_error is not None:
+            raise self.profile_error
+        return self.profile_result
 
 
 @dataclass
@@ -671,3 +701,80 @@ def test_search_returns_fixed_502_when_bcs_catalog_is_unavailable(
     assert response.status_code == 502, response.text
     assert response.json()["code"] == 502000
     assert response.json()["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# GET /openapi/v1/bots/catalog/profile/{bot_uuid}
+# ---------------------------------------------------------------------------
+
+def test_profile_projects_only_public_fields_and_drops_invalid_capabilities(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    response = client.get(_PROFILE_PATH + "catalog-bot:owner-1")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "bot_id": "catalog-bot",
+        "bot_uuid": "catalog-bot:owner-1",
+        "bot_name": "Catalog Bot",
+        "owner_name": "Owner",
+        "description": "A public catalog entry",
+        "engine_name": "openclaw",
+        "capabilities": [
+            {"capability_id": "antv", "display_name": "AntV 可视化图表"},
+            {"capability_id": "dima", "display_name": "Dima MCP"},
+        ],
+    }
+    assert services[0].profile_calls == [
+        {
+            "bot_uuid": "catalog-bot:owner-1",
+            "caller": BotCatalogCaller(
+                tenant_id="teamclaw", user_id="caller-1", app_id=None
+            ),
+            "request_id": "",
+        }
+    ]
+
+
+def test_profile_maps_catalog_not_found_to_enveloped_404(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[0].profile_error = BotCatalogProfileNotFoundError("missing:owner-1")
+
+    response = client.get(_PROFILE_PATH + "missing:owner-1")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["code"] == 404000
+    assert response.json()["data"] is None
+    assert services[0].profile_calls[0]["bot_uuid"] == "missing:owner-1"
+
+
+def test_profile_maps_bcs_unavailable_to_fixed_502(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[0].profile_error = BotCatalogSearchUnavailableError("upstream down")
+
+    response = client.get(_PROFILE_PATH + "catalog-bot:owner-1")
+
+    assert response.status_code == 502, response.text
+    assert response.json()["code"] == 502000
+
+
+def test_profile_maps_invalid_service_result_to_fixed_500(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[0].profile_result = "not-a-mapping"
+
+    response = client.get(_PROFILE_PATH + "catalog-bot:owner-1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["code"] == 500000
+
+
+def test_profile_requires_an_identifier(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    response = client.get(_PROFILE_PATH)
+
+    assert response.status_code == 404, response.text
+    assert services[0].profile_calls == []
