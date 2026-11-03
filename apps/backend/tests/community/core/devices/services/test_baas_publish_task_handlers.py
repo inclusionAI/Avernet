@@ -810,14 +810,14 @@ def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
         "template_type": "applicationCoding",
         "ext": {
             "start_status": "FAILED",
-            "start_message": "BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=999",
+            "start_message": "BaaS publish FAILED: publish_id=999",
             "keep": "value",
         },
     }
     bot_repository.get_by_id_and_owner.return_value = {
         "ext": {
             "start_status": "FAILED",
-            "start_message": "BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=999",
+            "start_message": "BaaS publish FAILED: publish_id=999",
             "keep": "value",
         },
     }
@@ -853,7 +853,7 @@ def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
         status=DeviceBindingStatus.ACTIVE.value,
         expected_bot_ext={
             "start_status": "FAILED",
-            "start_message": "BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=999",
+            "start_message": "BaaS publish FAILED: publish_id=999",
             "keep": "value",
         },
         bot_ext={"keep": "value", "restart_publish_id": "1001"},
@@ -907,7 +907,7 @@ def test_restart_poll_marks_failed_with_current_publish_id_on_failure():
         bot_ext={
             "keep": "value",
             "start_status": "FAILED",
-            "start_message": "BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=1001",
+            "start_message": "BaaS publish FAILED: publish_id=1001",
             "restart_publish_id": "1001",
         },
     )
@@ -2382,7 +2382,7 @@ def test_restart_codefuse_failure_clears_recovery_intent():
         expected_bot_ext={},
         bot_ext={
             "start_status": "FAILED",
-            "start_message": "BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id=1002",
+            "start_message": "BaaS publish FAILED: publish_id=1002",
             "restart_publish_id": "1002",
         },
     )
