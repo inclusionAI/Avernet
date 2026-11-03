@@ -229,10 +229,19 @@ async fn prepare_session_capture_fallback(
     invocation: &str,
     now: i64,
 ) -> ServiceResult<Option<CallerDelegationAssignment>> {
-    // Gate 1: relay assembly must exist in this composition.
+    // Gate 1: relay assembly AND caller admission deps must both be wired.
+    // The identity inheritance is end-to-end only when the composition can
+    // actually park the redeemed capture on the worker's handoff scope
+    // (the dispatch relay block requires caller_admission to redeem); a
+    // relay-only wiring (e.g. the chat-final contract harness) would mint
+    // delegation material the dispatch cannot make good on, silently
+    // diverging task delivery.
     let Some(relay) = flow.caller_relay.as_ref() else {
         return Ok(None);
     };
+    if flow.caller_admission.is_none() {
+        return Ok(None);
+    }
     // Gate 2: the session must have a live owner identity capture (the
     // human spoke in this session — the identity is theirs, not the
     // master's; `has_live_capture` is non-consuming).
