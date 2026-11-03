@@ -108,6 +108,35 @@ def test_timeout_has_container_elapsed_time_and_last_helper_status(caplog):
     assert 'helper_status=running' in line
 
 
+
+
+def test_precondition_alarm_uses_resolved_physical_target(caplog):
+    from unittest.mock import Mock
+
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
+    from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
+
+    physical = 'ARCA-SANDBOX-published@8'
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [
+        {'provider_device_id': physical, 'status': 'ACTIVE'},
+    ]
+    runtime.post_bots_api.side_effect = lambda **kw: executor([response('failed')])(kw['payload']['cmd'])
+    ctx = BotProvisioningContext(bot_id='b', owner_id='owner', bot_type='personal', active_engine='aicoding')
+    with pytest.raises(backup.RestartBackupBlocked):
+        strict_strategy('aicoding')._prepare_restart(
+            ctx, device_id='BOT-logical', operation_id=OPERATION,
+            restart_dependencies=RestartBackupDependencies.for_instance(runtime),
+            blocking_enabled=lambda: True,
+        )
+    precondition_line = next(
+        r.getMessage() for r in caplog.records
+        if 'phase=precondition status=blocked' in r.getMessage()
+    )
+    assert f'operation_id={OPERATION}' in precondition_line
+    assert f'target_id={physical}' in precondition_line
+
+
 @pytest.mark.parametrize('replicas', [1, 2])
 @pytest.mark.parametrize('inventory_failure', [True, False])
 def test_inventory_verification_failure_retains_resolved_arca_owner_and_env(caplog, monkeypatch, replicas, inventory_failure):

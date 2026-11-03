@@ -762,6 +762,9 @@ class AicodingRestartBackupMixin:
                 if confirmed and blocking_enabled() and not confirmed.issubset(targets or {}):
                     raise RestartBackupBlocked('target_changed')
                 log_targets = tuple(targets or confirmed)
+                if log_targets:
+                    # A logical Bot ID cannot stand in for a resolved physical target.
+                    log_target = log_targets[0]
                 if targets == {}:
                     logger.info(
                         "event=aicoding_restart_backup phase=resolve status=skipped "
@@ -901,8 +904,9 @@ class AicodingRestartBackupMixin:
                                 sandbox_id=log_sandbox, operation_id=operation_id,
                                 binding_id=binding_id, phase="precondition")
             logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
-                         "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
-                         ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))
+                         "bot_id=%s binding_id=%s target_id=%s operation_id=%s error_type=%s reason=%s",
+                         ctx.bot_id, binding_id, log_target, operation_id,
+                         type(error).__name__, error_reason(error))
             raise
 
 
