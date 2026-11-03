@@ -156,6 +156,35 @@ of an uncertain Pack-file save or deployment and asks for manual investigation.
 Its deploy confirmation identifies the selected Git file baseline separately
 from the database workflow draft; unsaved editor changes are not deployed.
 
+### Pack-file origin rejection
+
+For the current Pack-file `PUT`, an HTTP **403** with a parsed JSON object whose
+`code` is exactly **`ORIGIN_NOT_ALLOWED`** is a known pre-write rejection by the
+host's origin guard, not an unknown save outcome. If the body includes a
+`requestId`, it must match this attempt; a mismatched or invalid ID remains
+unverified. The existing bounded error-body parser still applies.
+
+The editor ends only that attempt's pending-save state, does not create a
+reconciliation or block the candidate, and reports:
+“版本文件保存请求被来源校验拒绝，本地修改保留。请检查访问入口或代理配置后，再主动保存。”
+Candidate file bytes, modes, additions/deletions, selected source version,
+`sourceCommit`, and `expectedSavedHead` are retained. There is no automatic
+resubmission, status lookup, or reconciliation; another explicit user save
+allocates a new `requestId` and retains the same source/CAS baseline.
+
+This exception never clears an existing unknown outcome or another version's
+block. It does not apply to a status/reconcile/head lookup, nor to a late response
+after the original PUT timed out. Generic 403s, other status/code combinations,
+invalid JSON, network errors, timeouts, unknown 5xx responses, and
+`SAVE_OUTCOME_UNKNOWN` retain their existing protection. It is not a general
+4xx exception and does not relax the server's security guard.
+
+The rejection concerns only the Pack-file write. The separate workflow-document
+DB save may already have succeeded; the message does not imply that the entire
+Editor save performed no database writes. Other guards, including the partial
+Pack-ID rename guard described below, remain in force. Local candidates are still
+page-session state, not durable recovery data.
+
 ### Browser-local deployment marker
 
 The Editor and AutoHeal panel share a workflow-scoped, non-sensitive marker in
@@ -220,8 +249,27 @@ automatic retry. A preflight failure before the DB request does not take this
 rename guard. A path-only move does not use this specific rename guard; an
 uncertain Git save follows the normal Pack-file save handling.
 
+The rename guard has one source of truth: `Session.state.uncertainRename`.
+`null` means no unfinished identity write is known in that page session; a
+non-null message records a rename that requires manual DB/Git inspection. It is
+independent of per-version `blocked`, dirty files, and Git-save reconciliation.
+Both edit risk and overall Pack risk include it, so a successful `current` or
+`draft` reload may replace files and clear that version's transient flags but
+cannot settle the rename. Switching versions, a clean canvas, and component
+unmount/remount do not clear it or allow `releaseCleanSession` to discard the
+session. The combined-save guard and its message survive those actions; the
+Editor continues to reject deployment before confirmation or transport.
+
+This includes a confirmed DB rename followed by exact 403
+`ORIGIN_NOT_ALLOWED`: the Pack PUT remains a known rejection with no unknown Git
+outcome, but the independently unfinished DB/Git rename still carries risk.
+An ordinary non-rename origin rejection and a fully confirmed DB/Git rename do
+not acquire this guard. Reloading snapshots is not an acknowledgement or a
+repair mechanism, and no new guard-clearing or automatic recovery action is
+introduced.
+
 The rename guard and local drafts are **session-local**: refreshing or closing
-the page loses them. It is not a server lock, durable receipt, rollback, or
+the browser page loses them (unmounting a component does not). It is not a server lock, durable receipt, rollback, or
 automated recovery; another client or direct API caller is not fenced by it.
 Inspect the actual database and Git state before deciding what to do, and do not
 assume a refresh resolves a partial rename. Local Editor tests use mocked

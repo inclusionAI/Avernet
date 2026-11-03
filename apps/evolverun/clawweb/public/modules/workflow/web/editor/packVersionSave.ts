@@ -46,6 +46,15 @@ async function submit(session: Session, id: string, attempt: SaveAttempt): Promi
     if (session.saveRequest !== token) return null
     const failure = classifySaveFailure(error, id, attempt.requestId)
     const version = attempt.input.sourceVersion
+    if (failure.originRejected) {
+      // End only this PUT's pending state; never clear an existing block or
+      // unknown outcome. The separate workflow DB save may already have run.
+      publish(session, { ...session.state, saving: false,
+        versions: { ...session.state.versions, [version]: { ...session.state.versions[version],
+          error: '版本文件保存请求被来源校验拒绝，本地修改保留。请检查访问入口或代理配置后，再主动保存。' } },
+      })
+      return null
+    }
     const errorMessage = failure.preOperationConflict ? '保存未开始：服务端检测到并发请求。当前候选仍保留，请修改后使用新的 requestId 重试。'
       : failure.conflict ? '保存冲突：远端版本已变化。更改仍在本地，请重新读取后处理。'
       : failure.reason === 'no-response' ? '保存结果无法确认：未收到可用响应。请先人工核对 Git 的 saved 分支，不要盲目重试。'
@@ -77,7 +86,7 @@ async function submit(session: Session, id: string, attempt: SaveAttempt): Promi
 export async function savePackVersion(session: Session, id: string, version: Version,
   files = session.state.versions[version].files, onSaved?: (result: SaveResult) => void): Promise<SaveResult | null> {
   const current = session.state.versions[version], snapshot = current.snapshot
-  if (!snapshot || !packVersionWritesEnabled(snapshot) || current.loading || current.blocked
+  if (!snapshot || !packVersionWritesEnabled(snapshot) || current.loading || current.blocked || session.state.uncertainRename !== null
     || session.state.saving || session.state.uploading || session.state.reconciliation || session.state.deployment) return null
   const changes = diff(snapshot.versionFiles, files)
   const stateAtConfirmation = session.state
@@ -105,7 +114,9 @@ export async function savePackVersion(session: Session, id: string, version: Ver
   // Preserve the merged canvas YAML locally even if the request conflicts or is unknown.
   const candidate = files.map(file => ({ ...file }))
   const requestId = crypto.randomUUID()
-  updateVersion(session, version, { files: candidate })
+  // A new explicit attempt supersedes the previous source error. Clear it
+  // before sending, not on completion, so a later independent error survives.
+  updateVersion(session, version, { files: candidate, error: null })
   return submit(session, id, { requestId, expectedPackId, snapshot, files: candidate, onSaved,
     input: { sourceVersion: version, sourceCommit: snapshot.baseCommit, expectedSavedHead: snapshot.draftHead, changes, requestId } })
 }
