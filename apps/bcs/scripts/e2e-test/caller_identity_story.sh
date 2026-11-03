@@ -26,3 +26,16 @@ story_chat_final_coordination_claim() {
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_chat_final_coordination_claim")
 fi
+
+story_owner_mode_master_relay() {
+    info "Story: owner-mode master delegates through the session relay capture"
+    local result=0
+    python3 "$SCRIPT_DIR/caller_owner_mode_relay_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Owner-mode master mints the session-capture delegation toward a caller worker" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_owner_mode_master_relay")
+fi
