@@ -11,6 +11,7 @@ from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.desktop_bot_service import DesktopBotServiceProtocol
 from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
+from agentclaw.community.core.desktop_bot.errors import MachineNotConnectedError
 from agentclaw.community.core.errors import DomainError, NotFound
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
@@ -75,6 +76,16 @@ def list_device_files(
             machine_id=machine_id,
             dir=dir,
         )
+    except MachineNotConnectedError as e:
+        logger.info(
+            "[desktop.list_files] machine not connected: machine_id=%s error_code=%s",
+            machine_id, e.baas_error_code,
+        )
+        return {
+            "success": False,
+            "message": "机器未连接，请连接后重试",
+            "error_code": 503,
+        }
     except DesktopBotServiceError as e:
         logger.error("[desktop.list_files] Desktop bot service error: %s", e)
         return {"success": False, "message": f"查询目录失败: {e}", "error_code": 500}

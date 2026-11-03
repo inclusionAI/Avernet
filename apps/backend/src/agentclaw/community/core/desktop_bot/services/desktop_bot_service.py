@@ -19,6 +19,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.desktop_bot.errors import (
     DesktopBotOrphanError,
     DesktopBotServiceError,
+    MachineNotConnectedError,
 )
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -79,6 +80,16 @@ if TYPE_CHECKING:
     from agentclaw.community.di import config as cfg
 
 logger = get_logger()
+
+# BaaS maps predictable machine-state failures to 503. These are expected
+# client states rather than server faults, and callers can retry after the
+# machine becomes available.
+_MACHINE_CONNECTIVITY_ERROR_CODES = {
+    "MACHINE_OFFLINE",
+    "MACHINE_NOT_CONNECTED",
+    "INSTANCE_NOT_ASSIGNED",
+    "WORKER_OFFLINE",
+}
 
 def _to_device_display_status(status: str) -> str:
     """将 BaaS 机器状态映射为设备展示状态."""
@@ -507,6 +518,18 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 return data
 
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 503 and self._baas_error_code(e) in _MACHINE_CONNECTIVITY_ERROR_CODES:
+                logger.info(
+                    "[DesktopBotService.list_directory] machine not connected: "
+                    "machine_id=%s error_code=%s",
+                    machine_id,
+                    self._baas_error_code(e),
+                )
+                raise MachineNotConnectedError(
+                    "机器未连接，请连接后重试",
+                    baas_error_code=self._baas_error_code(e),
+                ) from e
+
             logger.error(
                 "[DesktopBotService.list_directory] HTTP error: %s - %s",
                 e.response.status_code, e.response.text,
@@ -521,6 +544,18 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "[DesktopBotService.list_directory] Failed: %s", e,
             )
             raise DesktopBotServiceError(f"Failed to list directory: {e}")
+
+    @staticmethod
+    def _baas_error_code(error: httpx.HTTPStatusError) -> str | None:
+        """Return the machine-state code from the BaaS error detail."""
+        try:
+            detail = error.response.json().get("detail")
+        except (ValueError, AttributeError):
+            return None
+        if not isinstance(detail, dict):
+            return None
+        value = detail.get("error_code")
+        return value if isinstance(value, str) else None
 
     # ── open_folder ────────────────────────────────────────────────────
 
