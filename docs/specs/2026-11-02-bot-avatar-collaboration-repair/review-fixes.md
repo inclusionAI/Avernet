@@ -49,6 +49,50 @@ checks. The existing feature worktree is the implementation workspace.
   committed Bot/Card intact and adds no rollback or automatic retry.
 - Run `cargo test -p bcs-app-a2a-bot`.
 
+## Runtime identity preservation on profile writes — implemented
+
+Round 2 (PR-3488 comment by @carolynli): an ordinary online WebSocket Bot
+(no Provider affiliation) lost its AgentPass identity on an admin profile
+update. The onboarding merge builds capabilities without credentials, the
+core Provider guard restores them only for affiliated Bots, and both store
+implementations then published the identity-less snapshot wholesale —
+leaving the live entry with `(agent_code, agent_token) = (None, None)`,
+which makes `group_flow/interceptors.rs` skip the whole outbound
+interceptor chain. The persistent store additionally nulled the
+`agent_code` column and the bot_info identity keys. Legacy
+`save_to_storage` preserved both fields when the incoming capabilities
+omitted them.
+
+- Reproduced before implementation via the shared profile contract
+  (`tests/support/bot_profile_contract.rs`, 身份保留 section): WS-online
+  posture (`register` with the AgentPass code, `add_bot_info` runtime
+  token), then an identity-less profile write — both Memory and real
+  SQLite roots returned `(None, None)` from `get_agent_credentials` on the
+  pre-fix stores.
+- `bcs-bot-store` (`persistent_repo/profile.rs`,
+  `persistent_repo/registry_storage.rs`): the profile UPDATE now uses a
+  profile-only column projection — the `agent_code` column and the
+  `$.agent_code`/`$.agent_token` bot_info keys never appear in the
+  statement; cache publication is field-wise, preserving the live entry's
+  identity. The registration/save path keeps the full projection.
+- `bcs-bot-store` (`memory_profile.rs`): the stored record preserved the
+  current identity (live entry wins, stored record fallback), and the
+  in-memory publication is field-wise over profile fields only.
+- `bcs-service-api` (`types::bot_profile`, `port::repo::bot`): contract
+  documentation states that a profile write never writes the runtime
+  registry identity and implementations preserve it. Doc-only; no API
+  change beyond the already-bumped 2.0.0.
+- Intentionally not done, per the review guidance and the sanitized-read
+  contract: no identity backfill from `RegisteredBot` (it never carries
+  the token), and no runtime token written to the shared database.
+- Run `cargo test -p bcs-bot-store` (all profile/avatar/token suites pass;
+  the two pre-existing control-plane failures stay as recorded),
+  `cargo test -p bcs-bot`, `cargo test -p bcs-service-api`,
+  `cargo test -p bcs-http --test avatar_write_contract`,
+  `cargo test -p bcs-app-group --test v1_group_service`,
+  `cargo test -p bcs-app-session --test v1_session_service`, and
+  `cargo check --workspace --all-targets`.
+
 ## Integration — verified
 
 - Update affected context and validation documents with behavior and evidence.

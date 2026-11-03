@@ -16,10 +16,9 @@ use crate::{BotInfo, bot_info_json_set};
 /// SQL parameter chunk bound for batched registry loads.
 const REGISTRY_LOAD_CHUNK: usize = 100;
 
-/// Capabilities → `bcs_bots` column projection shared by the registration
-/// save path ([`PersistentBotRepo::save_to_db`]) and the existing-only
-/// profile update (`profile.rs`): one capabilities-to-columns mapping, no
-/// drift (bot-avatar plan Task 3).
+/// Capabilities → `bcs_bots` column projection for the registration
+/// save path ([`PersistentBotRepo::save_to_db`]), including the
+/// registry-owned identity column (bot-avatar plan Task 3).
 pub(super) struct CapabilitiesColumns {
     /// `name` column value (falls back to the bot id, like the save path).
     pub(super) name: String,
@@ -36,8 +35,9 @@ pub(super) struct CapabilitiesColumns {
 }
 
 /// Project capabilities onto the `bcs_bots` storage columns. This is the
-/// single mapping both the legacy save path and the existing-only profile
-/// write consume; never duplicate the column derivation again.
+/// single mapping the legacy save path consumes; the existing-only profile
+/// write uses the profile-only [`project_profile_columns`] sibling so a
+/// profile write can never touch the registry-owned identity fields.
 pub(super) fn project_capabilities_columns(
     bot_uuid: &str,
     caps: &BotCapabilities,
@@ -80,6 +80,53 @@ pub(super) fn project_capabilities_columns(
             None => Value::Null,
         },
         bot_info_json,
+        bot_info_assignment,
+        bot_info_params,
+    })
+}
+
+/// Profile-only `bcs_bots` projection for the existing-only profile write
+/// (`profile.rs`): the same name/visibility/JSON-key derivation as
+/// [`project_capabilities_columns`], minus the registry-owned runtime
+/// identity — a profile write never touches the `agent_code` column nor the
+/// `$.agent_code`/`$.agent_token` bot_info keys, so a capabilities save
+/// that carries no identity cannot wipe an online Bot's AgentPass
+/// credentials (and silently disable its outbound interceptor chain).
+pub(super) struct ProfileColumns {
+    /// `name` column value (falls back to the bot id, like the save path).
+    pub(super) name: String,
+    /// Normalized `visibility` column value (empty capabilities → private).
+    pub(super) visibility: String,
+    /// Profile-only UPDATE-row `bot_info` assignment (no identity keys).
+    pub(super) bot_info_assignment: String,
+    /// Parameters of [`Self::bot_info_assignment`].
+    pub(super) bot_info_params: Vec<Value>,
+}
+
+/// Derive the profile-only column projection; identity derivation stays in
+/// [`project_capabilities_columns`] where the registration/save paths need
+/// it, so the two mappings cannot drift on the shared profile keys.
+pub(super) fn project_profile_columns(
+    bot_uuid: &str,
+    caps: &BotCapabilities,
+) -> ServiceResult<ProfileColumns> {
+    let (bot_info_assignment, bot_info_params) = bot_info_json_set(vec![
+        ("$.summary", serde_json::to_value(&caps.summary)?),
+        ("$.domains", serde_json::to_value(&caps.domains)?),
+        ("$.skills", serde_json::to_value(&caps.skills)?),
+        ("$.scopes", serde_json::to_value(&caps.scopes)?),
+        (
+            "$.binding_channels",
+            serde_json::to_value(&caps.binding_channels)?,
+        ),
+    ])?;
+    Ok(ProfileColumns {
+        name: caps.name.as_deref().unwrap_or(bot_uuid).to_string(),
+        visibility: if caps.visibility.is_empty() {
+            "private".to_string()
+        } else {
+            caps.visibility.clone()
+        },
         bot_info_assignment,
         bot_info_params,
     })

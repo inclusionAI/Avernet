@@ -33,34 +33,33 @@ use bcs_service_api::types::bot_profile::{
 use bcs_service_api::{BotCapabilities, ServiceError, ServiceResult};
 use tracing::warn;
 
-use super::registry_storage::project_capabilities_columns;
+use super::registry_storage::project_profile_columns;
 use super::PersistentBotRepo;
 
 /// Maximum number of distinct ids one batched avatar read accepts.
 const AVATAR_BATCH_LIMIT: usize = 256;
 
 impl PersistentBotRepo {
-    /// Existing-only profile write: replace the live row's capabilities and
-    /// apply the avatar transition in the same statement/transaction.
+    /// Existing-only profile write: replace the live row's profile fields
+    /// and apply the avatar transition in the same statement/transaction.
+    /// The registry-owned runtime identity (`agent_code` column and the
+    /// bot_info identity keys) never appears in the statement, so a
+    /// capabilities save that carries no identity preserves the row's
+    /// current AgentPass credentials.
     pub(super) async fn update_profile_existing_impl(
         &self,
         bot_id: &str,
         update: ExistingProfileUpdate,
     ) -> ServiceResult<ProfileWrite> {
-        let hidden = {
-            let bots = self.bots.read().await;
-            bots.get(bot_id).map(|b| b.hidden).unwrap_or(false)
-        };
-        let columns = project_capabilities_columns(bot_id, &update.capabilities, hidden)?;
+        let columns = project_profile_columns(bot_id, &update.capabilities)?;
         let mut sql = format!(
             "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, \
-             visibility = ?, agent_code = ?",
+             visibility = ?",
             bot_info_assignment = columns.bot_info_assignment
         );
         let mut params = vec![Value::from(columns.name.as_str())];
         params.extend(columns.bot_info_params);
         params.push(Value::from(columns.visibility.as_str()));
-        params.push(columns.agent_code.clone());
         if let Some(assignment) = avatar_assignment(&update.avatar) {
             sql.push_str(", ");
             sql.push_str(assignment);
@@ -245,7 +244,11 @@ impl PersistentBotRepo {
 
     /// Sync the committed capabilities into an already-loaded registry
     /// entry (cache publication after the durable write; an unloaded entry
-    /// is intentionally not hydrated, matching the strict registration path).
+    /// is intentionally not hydrated, matching the strict registration
+    /// path). Profile fields publish wholesale like the durable write; the
+    /// registry-owned runtime identity (`agent_code`/`agent_token`) keeps
+    /// its current values — publishing an empty identity would silently
+    /// skip the Bot's outbound interceptor chain (PR-3488 review).
     async fn publish_profile_capabilities(
         &self,
         bot_id: &str,
@@ -256,7 +259,14 @@ impl PersistentBotRepo {
         let mut bots = self.bots.write().await;
         if let Some(existing) = bots.get_mut(bot_id) {
             existing.last_heartbeat = Instant::now();
-            existing.capabilities = capabilities.clone();
+            existing.capabilities.name = capabilities.name.clone();
+            existing.capabilities.summary = capabilities.summary.clone();
+            existing.capabilities.domains = capabilities.domains.clone();
+            existing.capabilities.skills = capabilities.skills.clone();
+            existing.capabilities.scopes = capabilities.scopes.clone();
+            existing.capabilities.binding_channels =
+                capabilities.binding_channels.clone();
+            existing.capabilities.visibility = capabilities.visibility.clone();
         }
     }
 }

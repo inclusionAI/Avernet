@@ -360,7 +360,10 @@ pub trait BotRepoPort: Send + Sync {
     /// The write targets an already-existing live record only — no INSERT
     /// and no upsert: a missing or soft-deleted target returns
     /// [`ProfileWrite::Missing`] and leaves storage untouched, and existing
-    /// owner/token fields are never part of the statement. `AvatarChange::Keep`
+    /// owner/token fields are never part of the statement. The runtime
+    /// registry identity (`agent_code`/`agent_token`) is never part of the
+    /// statement either and keeps its current stored and published values.
+    /// `AvatarChange::Keep`
     /// must not appear in the storage `SET` clause, so a capabilities
     /// replacement cannot clear the stored avatar. Backends where an
     /// unchanged value reports zero affected rows (MySQL without

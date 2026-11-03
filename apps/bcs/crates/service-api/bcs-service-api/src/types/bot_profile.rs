@@ -29,13 +29,18 @@ pub enum AvatarChange {
 
 /// One existing-only Bot profile write.
 ///
-/// `capabilities` is the complete storage projection and is written
-/// wholesale (empty fields clear, unlike the legacy registration merge);
-/// `avatar` applies to the record's dedicated avatar field in the same
-/// write. The write targets an already-existing live record: a missing or
-/// soft-deleted target is classified as [`ProfileWrite::Missing`] and never
-/// creates or resurrects a row. Existing owner and token fields are never
-/// part of this write.
+/// `capabilities` is the complete storage projection and its profile fields
+/// (name/summary/domains/skills/scopes/binding_channels/visibility) are
+/// written wholesale (empty fields clear, unlike the legacy registration
+/// merge); `avatar` applies to the record's dedicated avatar field in the
+/// same write. The write targets an already-existing live record: a missing
+/// or soft-deleted target is classified as [`ProfileWrite::Missing`] and
+/// never creates or resurrects a row. Existing owner and token fields are
+/// never part of this write. The runtime registry identity
+/// (`agent_code`/`agent_token`) is never written by a profile write either:
+/// implementations preserve the live record's current identity, because an
+/// empty-identity publication would silently disable the outbound security
+/// interceptor chain for that Bot.
 #[derive(Debug, Clone)]
 pub struct ExistingProfileUpdate {
     pub capabilities: BotCapabilities,

@@ -148,6 +148,87 @@ pub async fn avatar_contract(repo: &dyn BotRepoPort) {
         Some("https://example.com/avatar-b.png"),
     );
 
+    // 身份保留 (PR-3488 review): an existing-only profile write never wipes
+    // the Bot's runtime AgentPass identity — a receiver without an
+    // `agent_code` is silently skipped by the outbound interceptor chain.
+    // Identity arrives through the ordinary registration paths, exactly like
+    // AgentPass delivery (WS registration caps carry the code; the token is
+    // delivered to the live entry only, never round-tripped through a
+    // sanitized read).
+    assert!(
+        repo.create_registration_if_absent(
+            "avatar-identity".into(),
+            BotCapabilities::default(),
+            "owner",
+            "test-identity-session-token",
+        )
+        .await
+        .unwrap()
+    );
+    // Same posture as an online WebSocket Bot: `register` refreshes the
+    // live registry entry with the AgentPass code the session carries.
+    repo.register(
+        "avatar-identity".into(),
+        BotCapabilities {
+            agent_code: Some("agent-identity-code".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    repo.add_bot_info("avatar-identity", "agent_token", "agent-identity-token".into())
+        .await;
+    assert_eq!(
+        repo.update_profile_existing(
+            "avatar-identity",
+            profile_update(
+                "avatar-identity-updated",
+                "profile-only write",
+                "identity-domain",
+                AvatarChange::Keep,
+            ),
+        )
+        .await
+        .unwrap(),
+        ProfileWrite::Updated,
+    );
+    // `get_agent_credentials` is the interceptor chain's own read path.
+    let credentials = repo
+        .get_agent_credentials("avatar-identity")
+        .await
+        .expect("the profile-written Bot stays registered");
+    assert_eq!(
+        credentials.agent_code.as_deref(),
+        Some("agent-identity-code")
+    );
+    assert_eq!(
+        credentials.agent_token.as_deref(),
+        Some("agent-identity-token")
+    );
+    // The sanitized registry read never carries the runtime token; it does
+    // carry the code and the wholesale-updated profile fields.
+    let identity_bot = repo.try_get("avatar-identity").await.unwrap().unwrap();
+    assert_eq!(
+        identity_bot.capabilities.agent_code.as_deref(),
+        Some("agent-identity-code")
+    );
+    assert_eq!(
+        identity_bot.capabilities.name.as_deref(),
+        Some("avatar-identity-updated")
+    );
+    // Durable parity: a reloaded record keeps the AgentPass code on both
+    // backends (the persistent row's dedicated column, the Memory record
+    // file). The runtime token stays memory-only and is never written to
+    // the shared database by this contract.
+    let reloaded = repo
+        .load_from_storage("avatar-identity")
+        .await
+        .expect("identity record reloads");
+    assert_eq!(
+        reloaded.agent_code.as_deref(),
+        Some("agent-identity-code")
+    );
+
     // 重复写: replaying the identical profile write stays `Updated` even when
     // the row already carries every value (MySQL then reports 0 changed rows).
     assert_eq!(

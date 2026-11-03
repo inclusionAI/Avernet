@@ -257,3 +257,29 @@ Human 缺陷修复前：`memory_avatar_contract`、重启/删除读、损坏 Hum
 | `check-store-boundaries.sh` / `check-forbidden-symbols.sh` | exit 0 |
 
 独立复审未发现新增逻辑问题；10 个修改的 Rust 源文件均不超过 1,000 行（最大 795），`git diff --check` 通过。本轮未修改或弱化 CI gate，未重跑真实 MySQL 或完整 Singlebox 栈。
+
+## 11. PR 3488 行级评论修复：资料写保留运行时身份（2026-11-03）
+
+评审人 @carolynli 的 P1 评论（`persistent_repo/profile.rs` 行级，提交 `e930d2fbc8`）经代码链逐项核实**属实**：admin 资料更新的合并 capabilities 不带身份（`application/onboarding.rs` 以 `..Default::default()` 构造），Core 的 Provider 保护只回填 Provider 关联 Bot 的 `agent_code`（不含普通 WS Bot，且不含 `agent_token`），两种存储随后整体发布这份无身份快照——memory `existing.capabilities = update.capabilities.clone()`、persistent `publish_profile_capabilities` 同样的整体替换，且持久层 UPDATE 还把 `agent_code` 列与 bot_info 的 `$.agent_code`/`$.agent_token` 键写成 NULL/JSON null。普通在线 WS Bot 在一次 admin 改名（即使不带头像）后读到 `(None, None)`；`get_agent_credentials` 读的就是这份内存值，`group_flow/interceptors.rs` 对无 `agent_code` 的一方直接跳过整条出站拦截器链（只记 warn），出站安全策略被静默绕过，直到该 Bot 下次携带身份重注册。旧 `save_to_storage` 两种存储均在传入为 `None` 时保留内存既有身份，确属本 PR 引入的回归。
+
+复现先于实现：在共享契约 `tests/support/bot_profile_contract.rs` 新增"身份保留"用例，按评审场景构造真实 WS 在线姿态（`register` 携带 agent_code 注水活 entry，再 `add_bot_info` 投递运行时 token），然后发起无身份的资料写——修复前 Memory 与真实 SQLite 两个挂载点的 `get_agent_credentials` 均返回 `(None, None)`（断言失败），修复后同一用例全绿。该契约同时由 Memory、真实 SQLite 迁移链挂载点执行，也被 bcs-admin 真实 MySQL 链路门禁挂载（本轮本机无 MySQL 实例，门禁用例标 `#[ignore]`，未跑）。
+
+修复（按评论建议落在存储层，不从脱敏 `RegisteredBot` 回填 token，不把运行时 token 写入数据库）：
+
+- persistent：资料 UPDATE 改用 profile-only 列投影 `project_profile_columns`（`agent_code` 列与两个身份 JSON 键不再出现在 SET 子句，注册/保存路径保留完整投影不动）；`publish_profile_capabilities` 改为逐字段发布资料字段、保留活 entry 的 `agent_code`/`agent_token`。
+- memory：`update_profile_existing_impl` 的记录构造保留当前身份（活 entry 优先、文件兜底，与 owner 保留同优先级），内存发布同样逐字段保留身份。
+- service-api：`ExistingProfileUpdate` 与 `BotRepoPort::update_profile_existing` 契约文档明确"资料写永不写运行时注册身份，实现必须保留"（纯文档，API 面已被前一轮 2.0.0 覆盖，无新变更）。
+
+本轮验证（命令在 `apps/bcs` 下运行）：
+
+| 检查 | 结果 |
+| --- | --- |
+| 修复前复现：`cargo test -p bcs-bot-store --test conformance_bot_profile`（暂存存储实现改动） | `memory_avatar_contract` 与 `sqlite_avatar_contract` 均失败于身份断言（`left: None`），复现评论描述 |
+| 修复后同一测试 | 56 passed |
+| `cargo test -p bcs-bot-store` | 全部 profile/avatar/token 套件通过；仅剩 §6.7/§9 登记的两例 control-plane 既有失败（已在未修改 HEAD 上复跑确认同样失败） |
+| `cargo test -p bcs-bot`、`cargo test -p bcs-service-api` | 全部通过 |
+| `cargo test -p bcs-http --test avatar_write_contract` | 8 passed |
+| `cargo test -p bcs-app-group --test v1_group_service`、`cargo test -p bcs-app-session --test v1_session_service` | 102 / 88 passed |
+| `cargo check --workspace --all-targets` | exit 0；仅保留无关 crate 的既有 warning |
+
+改动文件均不超过 1,000 行（最大 470）。真实 MySQL 与完整 Singlebox 栈未重跑；新增断言位于共享契约，MySQL 链路门禁跑通时会自动覆盖同一语义。本轮未修改 CI gate。

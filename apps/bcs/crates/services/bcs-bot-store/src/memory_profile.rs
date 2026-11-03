@@ -189,8 +189,13 @@ impl MemoryBotRepo {
 
     /// Existing-only profile write. Tombstoned or unknown targets are
     /// `Missing`; otherwise the record is written with the wholesale
-    /// capabilities and the avatar transition, and only THEN does the live
-    /// registry value (capabilities, binding index, audit) publish.
+    /// profile fields and the avatar transition, and only THEN does the
+    /// live registry value (capabilities, binding index, audit) publish.
+    /// The runtime registry identity (`agent_code`/`agent_token`) is
+    /// registry-owned, never part of a profile write: the stored record and
+    /// the in-memory publication both keep its current values — replacing
+    /// them with an identity-less capabilities snapshot would silently skip
+    /// the Bot's outbound interceptor chain (PR-3488 review).
     pub(super) async fn update_profile_existing_impl(
         &self,
         bot_id: &str,
@@ -216,6 +221,25 @@ impl MemoryBotRepo {
                     .as_ref()
                     .and_then(|stored| stored.record.created_by.clone())
             });
+        // Identity preservation: same precedence as the owner — the live
+        // registry value wins, the stored record is the fallback for a
+        // file-backed identity without a live entry.
+        let agent_code = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.capabilities.agent_code.clone())
+            .or_else(|| {
+                stored_existing
+                    .as_ref()
+                    .and_then(|stored| stored.record.agent_code.clone())
+            });
+        let agent_token = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.capabilities.agent_token.clone())
+            .or_else(|| {
+                stored_existing
+                    .as_ref()
+                    .and_then(|stored| stored.record.agent_token.clone())
+            });
         // `Keep` resolves against the current record, so a capabilities
         // replacement never clears the stored avatar.
         let avatar_url = match &update.avatar {
@@ -225,12 +249,12 @@ impl MemoryBotRepo {
             AvatarChange::Clear => None,
             AvatarChange::Set(url) => Some(url.clone()),
         };
-        let stored = StoredBotProfile {
-            record: self
-                .capabilities_record(bot_id, &update.capabilities, created_by)
-                .await?,
-            avatar_url,
-        };
+        let mut record = self
+            .capabilities_record(bot_id, &update.capabilities, created_by)
+            .await?;
+        record.agent_code = agent_code;
+        record.agent_token = agent_token;
+        let stored = StoredBotProfile { record, avatar_url };
 
         // 先完成可失败的文件写入，再发布内存值。
         self.write_stored_profile(bot_id, &stored).await?;
@@ -241,7 +265,16 @@ impl MemoryBotRepo {
             let mut bots = self.bots.write().await;
             if let Some(existing) = bots.get_mut(bot_id) {
                 existing.last_heartbeat = Instant::now();
-                existing.capabilities = update.capabilities.clone();
+                // Profile fields publish wholesale like the durable record;
+                // the runtime identity keeps its current values.
+                existing.capabilities.name = update.capabilities.name.clone();
+                existing.capabilities.summary = update.capabilities.summary.clone();
+                existing.capabilities.domains = update.capabilities.domains.clone();
+                existing.capabilities.skills = update.capabilities.skills.clone();
+                existing.capabilities.scopes = update.capabilities.scopes.clone();
+                existing.capabilities.binding_channels =
+                    update.capabilities.binding_channels.clone();
+                existing.capabilities.visibility = update.capabilities.visibility.clone();
             }
         }
         let now = unix_millis();

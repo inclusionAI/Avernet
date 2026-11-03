@@ -26,7 +26,13 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
   unavailable Bot, a strict repository read confirms absence before classifying
   it as `Missing`; read failures propagate. A missing or soft-deleted target
   — including one that slips away between the precheck and the write —
-  returns the legacy `onboarded=false` shape and persists no row.
+  returns the legacy `onboarded=false` shape and persists no row. Independently
+  of that application-layer guard, the store implementations treat the runtime
+  AgentPass identity (`agent_code`/`agent_token`) as registry-owned: the
+  profile write covers profile fields only and preserves the live identity in
+  both the durable record and the in-memory publication (PR-3488 review — the
+  merged profile snapshot carries no credentials, and publishing it wholesale
+  would silently disable the Bot's outbound interceptor chain).
 
 ## Consumes
 

@@ -153,8 +153,17 @@ lifetime of one write is one short DB transaction that first confirms
 (and on MySQL locks with `SELECT ... FOR UPDATE`) the live row: MySQL
 reports zero changed rows for a value that already matches the request,
 so classification comes from the confirmed row, never from affected rows.
-Capabilities reuse the same column projection (`project_capabilities_columns`,
-`bot_info_json_set`) as the legacy save path; `AvatarChange::Keep` never
+Profile fields reuse the same JSON-key derivation (`bot_info_json_set`)
+through a profile-only projection (`project_profile_columns`); the
+`agent_code` column and the `$.agent_code`/`$.agent_token` bot_info keys
+never appear in the statement, because the runtime AgentPass identity is
+registry-owned — a profile write that wrote an identity-less capabilities
+snapshot would wipe an online Bot's credentials and silently skip its
+outbound security interceptor chain. Cache publication is field-wise for
+the same reason: profile fields publish wholesale after the durable write
+like the legacy save path, while the live entry's current
+`agent_code`/`agent_token` are preserved (Memory: the record file keeps
+them with live-entry precedence, file fallback). `AvatarChange::Keep` never
 appears in the SET clause, and token/owner/audit fields are never part of
 the statement. The committed profile write refreshes the process-local
 binding-channel reverse index through the same `sync_binding_channel_index`
