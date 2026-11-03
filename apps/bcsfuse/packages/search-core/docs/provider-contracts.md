@@ -70,3 +70,38 @@ tables must receive the nullable `filters JSON` column before deploying the adap
 Existing rows need no bulk rewrite. Applications must supply their legacy filter
 field names when projecting explicitly cleared labels. TC's legacy provider, schema
 and behavior are unchanged.
+
+## Card management
+
+- Service API: `search_core.api.cards.CardManagement`, consumed by
+  `search_core.adapters.http.cards.create_card_router`.
+- Storage Plugin API: `search_core.plugin_api.card_store.CardStore`, consumed by
+  `search_core.core.card_management.CardManagementService`. `read_card` must not
+  load vectors; `upsert` merges provided fields and commits before returning;
+  `remove` is idempotent. Failures propagate. Versions remain internal.
+- Builder Plugin API: `search_core.plugin_api.card_documents.CardDocumentConverter`
+  consumes an opaque source `CardSnapshot` and returns `CardProjection` (documents
+  plus filter labels). Composition owns converter choice and version. Management
+  never invokes the converter to decide whether a Card should exist.
+- Public adapter: `search_core.providers.sql_cards.SqlCardRepository` accepts a
+  DB-API connection factory; SQLite and MySQL placeholders are supported. It
+  does not obtain secrets or initialize production schema on startup. The host
+  owns connection and background-task lifecycle. `sqlite_card_repository(path)`
+  initializes local source tables transactionally, without external services.
+- Internal storage envelope: `search_core.catalog.cards.CardSnapshot` contains
+  identity, opaque `source_card`, internal revision token, deletion marker and
+  separate optional operations settings. Business JSON is not normalized. Hosts
+  with historical normalized records can subclass the snapshot and override the
+  repository decoder; public storage/write semantics remain shared.
+- `CardRecord.prepared` is an optional host artifact-cache value, carried through
+  internal writes for compatibility. Public CRUD does not read an artifact table.
+- Conformance: `tests/test_card_management.py` exercises the actual public router,
+  service and SQLite adapter (including failures), with no OCB imports. The import
+  boundary suite prevents public dependencies on either application. OCB runs its
+  existing builder/index integration tests against the same contracts.
+
+Affected consumer: OCB's Card management. No new routes or storage are selected
+for TC; its existing startup remains unchanged. The wire paths, status codes,
+partial-update behavior and SQL table layout are preserved. Public and host
+packages must be released together at compatible revisions; extraction alone
+is not deployment evidence.

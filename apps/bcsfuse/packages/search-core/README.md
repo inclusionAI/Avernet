@@ -11,9 +11,9 @@ Avernet revision as the public TC source, rather than fetching a floating branch
 ## Context Boundary
 
 ```yaml
-purpose: Shared search execution and optional delivery/provider adapters.
-provides: [SearchApplication, RetrievalService, HybridRetrievalService, reciprocal_rank_fusion, create_search_router]
-consumes: [RetrievalIndex, EmbeddingProvider, Reranker]
+purpose: Shared search execution and optional Card management and delivery/provider adapters.
+provides: [SearchApplication, RetrievalService, HybridRetrievalService, reciprocal_rank_fusion, create_search_router, create_card_router, CardManagementService, SqlCardRepository]
+consumes: [RetrievalIndex, EmbeddingProvider, Reranker, CardStore, CardDocumentConverter]
 internal_dependencies: []
 ```
 
@@ -42,3 +42,25 @@ Applications own startup, shutdown, admission limits, model quotas and update jo
 Async orchestration keeps blocking providers off the event loop, but cancellation
 cannot kill an already running sync model request; transport timeouts still apply.
 See `docs/provider-contracts.md` and `docs/search-api.md` for the two API boundaries.
+
+## Shared Card management (opt-in)
+
+Avernet owns the v1 Card HTTP router, source envelope, partial-field merge,
+server-side revisions, durable SQL writes and idempotent deletion. See the
+[Card management API](docs/card-management-api.md) for the wire contract and
+[provider contracts](docs/provider-contracts.md#card-management) for composition.
+Install the `cards` extra for storage/domain models, and `http` for the router.
+
+The application supplies authentication, database connections, index status and
+its `CardDocumentConverter`. The converter selects text and labels from the
+opaque business Card; the shared management code never interprets business
+`status`, `deleted` or `version`. `catalog/` contains source domain schemas;
+`core/card_management.py` contains the transport-independent service and merge;
+`providers/sql_cards.py` owns public DB-API persistence.
+
+OCB consumes this implementation and retains its Alipay projection, legacy
+snapshot compatibility, index runtime and internal platform providers. TC's
+existing application is unchanged: importing/installing search-core does not
+mount Card routes or switch TC's existing sync/Worker/Profile flows. TC may opt
+in explicitly during a later migration. No OCB dependency is required by the
+public package.
