@@ -1,14 +1,17 @@
+import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
 import { enrichOwnership } from '@/domain/community/ownership';
 import { buildTopicSummaryQueries } from '@/domain/community/interactionQueries';
 import type {
+  CommunityPostLocation,
   CommunityTopic,
+  CommunityTopicOpenTarget,
   ForumActorRef,
   ForumTargetRef,
 } from '@/domain/community/types';
 import { communityService } from '@/services/community';
 import { useCommunityStore } from '@/stores/communityStore';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type {
   UseCommunityInteractionsResult,
 } from './useCommunityInteractions';
@@ -39,11 +42,13 @@ export function useCommunityTopicDetail({
   });
   const {
     resetReplies,
-    openFirstReplyPage,
+    openReplyPage,
     goToReplyPage: baseGoToReplyPage,
     replyPage,
     replyTotal,
   } = replies;
+  const [pendingPostLocation, setPendingPostLocation] =
+    useState<CommunityPostLocation | null>(null);
 
   const fetchTopicWithViewer = useCallback(async (topicId: string) => {
     const options = currentUserId
@@ -56,28 +61,42 @@ export function useCommunityTopicDetail({
     return topic;
   }, [currentUserId, enrichTopicBotAuthor, store.setSelectedTopic]);
 
-  const loadTopicAndReplies = useCallback(async (topicId: string) => {
-    const loadedTopic = await fetchTopicWithViewer(topicId);
-    const replyPage = await openFirstReplyPage(topicId);
-    const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
-    if (currentUserId) {
-      await interactions.recordInteraction('VIEW', target, { refresh: false });
-    }
-    await interactions.refreshSummaries(
-      buildTopicSummaryQueries({
-        topic: loadedTopic,
-        replies: replyPage.items,
-        viewer,
-      }),
-      { force: true },
-    );
-  }, [
-    currentUserId,
-    fetchTopicWithViewer,
-    interactions,
-    openFirstReplyPage,
-    viewer,
-  ]);
+  const loadTopicAndReplies = useCallback(
+    async (topicId: string, postId?: string) => {
+      const loadedTopic = await fetchTopicWithViewer(topicId);
+      let page = 1;
+      let location: CommunityPostLocation | null = null;
+      if (postId) {
+        location = await communityService.getPostLocation(
+          topicId,
+          postId,
+          COMMUNITY_REPLY_PAGE_SIZE,
+        );
+        page = location.page;
+      }
+      const replyPage = await openReplyPage(topicId, page);
+      setPendingPostLocation(location);
+      const target: ForumTargetRef = { targetType: 'TOPIC', id: topicId };
+      if (currentUserId) {
+        await interactions.recordInteraction('VIEW', target, { refresh: false });
+      }
+      await interactions.refreshSummaries(
+        buildTopicSummaryQueries({
+          topic: loadedTopic,
+          replies: replyPage.items,
+          viewer,
+        }),
+        { force: true },
+      );
+    },
+    [
+      currentUserId,
+      fetchTopicWithViewer,
+      interactions,
+      openReplyPage,
+      viewer,
+    ],
+  );
 
   const openTopic = useCallback(
     async (topic: CommunityTopic) => {
@@ -86,6 +105,7 @@ export function useCommunityTopicDetail({
       store.setDetailLoading(true);
       store.setDetailError(null);
       resetReplies();
+      setPendingPostLocation(null);
       try {
         await loadTopicAndReplies(topic.id);
       } catch (error) {
@@ -104,23 +124,33 @@ export function useCommunityTopicDetail({
     ],
   );
 
-  const openTopicById = useCallback(async (topicId: string) => {
-    store.setDetailLoading(true);
-    store.setDetailError(null);
-    resetReplies();
-    try {
-      await loadTopicAndReplies(topicId);
-    } catch (error) {
-      store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
-    } finally {
-      store.setDetailLoading(false);
-    }
-  }, [
-    loadTopicAndReplies,
-    resetReplies,
-    store.setDetailError,
-    store.setDetailLoading,
-  ]);
+  const openTopicById = useCallback(
+    async (target: string | CommunityTopicOpenTarget) => {
+      const nextTarget =
+        typeof target === 'string' ? { topicId: target } : target;
+      store.setDetailLoading(true);
+      store.setDetailError(null);
+      resetReplies();
+      setPendingPostLocation(null);
+      try {
+        await loadTopicAndReplies(nextTarget.topicId, nextTarget.postId);
+      } catch (error) {
+        store.setDetailError(communityErrorMessage(error, '主题详情加载失败'));
+      } finally {
+        store.setDetailLoading(false);
+      }
+    },
+    [
+      loadTopicAndReplies,
+      resetReplies,
+      store.setDetailError,
+      store.setDetailLoading,
+    ],
+  );
+
+  const clearPendingPostLocation = useCallback(() => {
+    setPendingPostLocation(null);
+  }, []);
 
   const goToReplyPage = useCallback(
     async (page: number) => {
@@ -159,6 +189,8 @@ export function useCommunityTopicDetail({
     ...replies,
     openTopic,
     openTopicById,
+    pendingPostLocation,
+    clearPendingPostLocation,
     ...actions,
     closeDetail,
     goToReplyPage,

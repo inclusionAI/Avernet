@@ -96,7 +96,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.getByText('最新回复：2 小时前')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('PRD 风格主题卡片'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-1');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-1' });
   });
 
   it('个人中心帖子作者与社区列表一致，支持悬浮查看资料和关注', async () => {
@@ -349,7 +349,7 @@ describe('CommunityPersonalCenter', () => {
       { target: { targetType: 'TOPIC', id: 'topic-2' } },
     ]);
     fireEvent.click(screen.getByText('张三的主题'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
     fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
     expect(onUnfollow).toHaveBeenCalledTimes(1);
   });
@@ -444,6 +444,18 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
 
     fireEvent.click(screen.getByText('误报率怎么压下来'));
-    expect(onOpenTopic).toHaveBeenCalledWith('topic-2');
+    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2' });
+
+    fireEvent.click(screen.getByText('我直接回复帖子本身的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-direct',
+    });
+
+    fireEvent.click(screen.getByText('我回复另一个回复的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-child',
+    });
   });
 });

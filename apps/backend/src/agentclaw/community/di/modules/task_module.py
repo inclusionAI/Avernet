@@ -109,6 +109,18 @@ from agentclaw.community.core.task.task_center.delivery_lifecycle import (
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
 )
+from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+    NotifyingForumInteractionService,
+)
+from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
+    ForumNotificationPublisher,
+)
+from agentclaw.community.core.task.forum.notifications.publisher_protocol import (
+    ForumNotificationPublisherProtocol,
+)
+from agentclaw.community.core.task.forum.services.notifying_forum_service import (
+    NotifyingForumService,
+)
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
@@ -232,7 +244,12 @@ class TaskModule(Module):
             TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton
         )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
-        binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumNotificationPublisherProtocol,
+            to=ForumNotificationPublisher,
+            scope=singleton,
+        )
+        binder.bind(ForumServiceProtocol, to=NotifyingForumService, scope=singleton)
         binder.bind(
             ForumInteractionRepositoryProtocol,
             to=ForumInteractionRepository,
@@ -254,7 +271,7 @@ class TaskModule(Module):
             scope=singleton,
         )
         binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
-        binder.bind(ForumInteractionServiceProtocol, to=ForumInteractionService, scope=singleton)
+        binder.bind(ForumInteractionServiceProtocol, to=NotifyingForumInteractionService, scope=singleton)
         binder.bind(
             ForumPersonalCenterActivityServiceProtocol,
             to=ForumPersonalCenterActivityService,
