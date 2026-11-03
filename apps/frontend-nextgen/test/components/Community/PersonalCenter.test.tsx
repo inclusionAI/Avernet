@@ -209,6 +209,7 @@ describe('CommunityPersonalCenter', () => {
   });
 
   it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+    const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'LIKED';
     mockedCenter.activityPage = {
       items: [
@@ -239,7 +240,13 @@ describe('CommunityPersonalCenter', () => {
       total: 2,
     };
 
-    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
+    render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
+
+    fireEvent.click(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容'));
+    expect(onOpenTopic).toHaveBeenCalledWith({
+      topicId: 'topic-1',
+      postId: 'post-1',
+    });
 
     expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
