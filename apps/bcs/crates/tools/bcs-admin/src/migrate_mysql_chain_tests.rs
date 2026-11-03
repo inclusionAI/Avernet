@@ -189,7 +189,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=19\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=20\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);
