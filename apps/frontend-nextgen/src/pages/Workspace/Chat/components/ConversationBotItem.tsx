@@ -2,7 +2,6 @@
 // 展开区按 section/origin 分流:
 // - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
 // - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
-// 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
 import { Button } from '@/components/ui';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import { formatCodingOtherSessionTitle } from '@/domain/conversation/codingSessionOwnership';
