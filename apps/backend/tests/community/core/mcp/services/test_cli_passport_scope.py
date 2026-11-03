@@ -11,6 +11,7 @@ from agentclaw.community.core.mcp.services.cli_passport_scope import (
     build_passport_resource_scope,
 )
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
+from agentclaw.community.plugin_api.passport import PassportError
 
 
 class _Passport:
@@ -225,6 +226,32 @@ def test_reconcile_update_failure_logs_scope_event_without_passport_details() ->
     assert "cli_passport_reconcile_failed" in logged
     assert "duration_ms" in logged
     assert "passport-token-secret" not in logged
+
+
+def test_reconcile_update_failure_returns_queried_snapshot() -> None:
+    """Bootstrap keeps the last valid snapshot when a write request fails."""
+    class _FailingPassport(_Passport):
+        def update_passport(self, **kwargs: object) -> None:
+            raise PassportError
+
+    passport = _FailingPassport()
+    reconciler = CliPassportScopeReconciler(
+        passport_plugin=passport,  # type: ignore[arg-type]
+        identity_repository=_IdentityRepository(),  # type: ignore[arg-type]
+    )
+
+    with patch(
+        "agentclaw.community.core.mcp.services.cli_passport_scope.logger"
+    ) as logger:
+        result = reconciler.reconcile(bot=_BOT)
+
+    assert result.updated is False
+    assert result.cli_codes == ("dataphin", "deepinsight-cli")
+    assert passport.updated is None
+    assert reconciler._identity_repository.list_draft_call_types is not None
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_passport_reconcile_failed" not in logged
+    assert "cli_passport_reconcile_degraded" in logged
 
 
 def test_reconcile_update_success_logs_status_and_duration_without_scope_contents() -> None:
