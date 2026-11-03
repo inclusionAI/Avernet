@@ -85,6 +85,7 @@ export interface ActorSearchResponse {
  */
 export async function getActorList(
   params: ActorListParams,
+  options?: { [key: string]: any },
 ): Promise<ActorListResponse> {
   const res = await request<ActorListResponse>('/bcnproxy/actors/list', {
     method: 'GET',
@@ -95,6 +96,7 @@ export async function getActorList(
       page_size: params.page_size ?? 20,
       ...(params.name ? { name: params.name } : {}),
     },
+    ...(options || {}),
   });
   return res;
 }

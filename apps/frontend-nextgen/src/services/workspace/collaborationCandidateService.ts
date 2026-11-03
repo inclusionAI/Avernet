@@ -30,6 +30,8 @@ export interface CollaborationBotView {
   isFriend?: boolean;
   engine?: string;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
   templateType?: string;
   templateName?: string;
   detailsResolved?: boolean;
@@ -91,6 +93,7 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
     isFriend: true,
     engine: dto.engine,
     botType: dto.bot_type,
+    onlineAvailable: dto.online_available,
     templateType: dto.template_type,
     templateName: dto.template_name,
   };

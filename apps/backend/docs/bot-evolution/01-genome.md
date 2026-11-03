@@ -61,8 +61,8 @@ It explicitly does **not** own:
 
 **Placement.** Backend, as a new core package `core/bot_genome/` next to
 `core/bot_config_manifest/`, because Backend owns desired state and the
-Manifest already lives there. Content reuses the manifest content store
-(`core/bot_config_manifest/content/service.py`). Promotion sits beside it in
+Manifest already lives there. Content reuses the content store
+(`core/content_store/`, its own component since #3064). Promotion sits beside it in
 Backend because promotion must sit beside apply.
 
 **Layering.** The genome sits on top of the Manifest. The Manifest is not
@@ -86,17 +86,17 @@ How the types relate:
   platform writes.
 - Every revision except the bot's first has exactly one **parent**. A
   **patch**, a list of ops, is what turns the parent into the new revision.
-  An owner can also record a revision from a whole Manifest document, with
+  An owner can also **capture** the bot's current state as a revision, with
   no patch.
 - **Refs** are names (`active`, `draft`, …) that point at revisions.
-- **Compiling** a revision gives the `CompiledManifest` that apply and eval
-  bots consume.
+- **Compiling** a revision gives the apply engine's typed desired state
+  (`DesiredState`) that apply and eval bots consume.
 - File content is never stored inline: every file in `spec` is a **digest**,
   the address of its bytes in the content store.
 
 | Type | What it is | Owned by | Lifecycle |
 | --- | --- | --- | --- |
-| `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or a Manifest document), never edited; only its `status`, annotations and the append-only `evaluations` list change; never deleted |
+| `GenomeRevision` | One immutable version of a bot's definition: `spec` + `policy`, plus platform-written metadata (`revision`) | Genome Registry | Recorded once (from a patch or by capture), never edited; only its `status`, annotations and the append-only `evaluations` list change; never deleted |
 | `GenomeSpec` | The evolvable content of a revision: persona, skills, memory, resources, tools, engine config, script | Genome Registry (authored by owners, proposed by strategies) | Part of a revision; hashed |
 | `GenomePolicy` | The non-evolvable section: mutable genes, pins, risk overrides | Bot owner / tenant admin | Part of a revision; hashed; copied forward verbatim by the platform; no patch may touch it |
 | `RevisionMetadata` | Id, per-bot `seq`, parent, provenance, status, evidence and evaluation ids, annotations | Genome Registry (platform-written) | Written at record time; status/annotations updated later, evaluation ids appended by Verification; not hashed |
@@ -105,7 +105,7 @@ How the types relate:
 | `GenomePatch` | A typed, itemized change against a named base revision; the only thing a strategy may submit | Submitted by strategies (via [Evolution Run](06-evolution-run.md)) or humans; checked by the Registry | Stored content-addressed; its digest is the candidate id |
 | `PatchOp` | One item of a patch (`file.edit`, `skill.add`, `memory.add`, …) | Part of a patch | Each op maps to a risk tier |
 | `MemoryItem` | One curated memory fact/rule/lesson, keyed | Genome (curated memory) | Added, updated, and retired by patch ops |
-| `CompiledManifest` | A revision rendered as a plain Manifest document (pinned, every category present), plus the revision id and the document's digest for bookkeeping | Genome Registry (derived, not stored as truth) | Produced on demand for apply and eval bots |
+| `DesiredState` | A revision rendered as the apply engine's typed desired state: every category it covers declared (an empty list declares "none"), `cli_tools` and `engine_config` undeclared; a Manifest document compiles into the same state | Apply engine (`core/apply_engine/desired_state.py`); derived by the Genome Registry, not stored as truth | Produced on demand for apply and eval bots |
 
 ### 2.1 Genes
 
@@ -178,7 +178,7 @@ class PersonaFile:
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
 class SkillOrigin(StrEnum):
-    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    CENTER = "center"                # a governed skill from Skill Center, by name: not copied, not version-pinned
     LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
                                      # by a patch); where they were fetched from is not part of the revision (§4.2)
 
@@ -187,7 +187,9 @@ class SkillEntry:
     name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
     digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
-    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
+    repo_path: str | None = None     # REPO only: the path after git:// on the skill row, e.g. "team/weather"
+    # A CENTER entry is its name alone: the bot runs whatever version the Center publishes (ADR 0002),
+    # so a newer Center version is not drift; apply finds the Center asset by this name.
 ```
 
 Curated memory:
@@ -314,7 +316,7 @@ replaces them before the revision feature goes live.
   ],
   "skills": [                                     // sorted by name
     {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
-    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
+    {"name": "refund-policy", "origin": "center"}     // a Center skill, by name: not copied, no version
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
@@ -393,8 +395,8 @@ How the policy is used:
 
 This is where "tool and permission changes are human-only" is enforced
 **structurally** rather than by convention: no patch op exists for tools or
-the script, so they change only when an owner records a whole Manifest
-document, and the policy itself is outside what a patch can reach.
+the script, so they change only when an owner edits the bot and captures
+it, and the policy itself is outside what a patch can reach.
 Changing the policy is an owner action that records a new revision (§4.4).
 
 ### 2.4 GenomeRevision
@@ -433,14 +435,15 @@ class RevisionMetadata:
                                      # 42nd is 42 ("r42"). UIs show it, and paths accept it
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
-    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
-                                     # when a whole document was recorded; None only for the bot's first revision
+    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or `active` when the
+                                     # bot was captured or its policy changed (the bot's latest revision while it has
+                                     # no `active` yet); None only for the bot's first revision
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
     patch_digest: Digest | None      # digest of the stored GenomePatch that turned `parent` into this revision
-                                     # (= the candidate id, §6.5); None when the revision was recorded from a whole
-                                     # Manifest document instead of a patch (§4.1)
+                                     # (= the candidate id, §6.5); None when the revision was captured or is a
+                                     # policy change instead of a patch (§4.1)
     evidence: list[EvidenceRef]      # the Experience records that motivated the change, e.g.
                                      # ["episode:ep_91", "feedback:fb_311"]; [] for most manual edits
     evaluations: list[EvaluationId]  # the Verification evaluations run on this revision, e.g. ["ev_301", "ev_302"];
@@ -631,7 +634,7 @@ class MemorySetMode:
     mode: MemoryMode
 
 # No op reaches tools, script, engine_config or the policy: MCP servers and the script change only when
-# an owner records a whole Manifest document; engine_config waits for #2858.
+# an owner edits the bot and captures it; the policy has its own operation; engine_config waits for #2858.
 PatchOp = (FileEdit | PersonaAdd | PersonaRemove | SkillAdd | SkillUpdate | SkillRemove | ResourceAdd
            | ResourceRemove | MemoryAdd | MemoryUpdate | MemoryRetire | MemorySetMode)
 
@@ -697,48 +700,54 @@ Always apologise first.                                                         
 standard text diff format that `git diff` and `diff -u` print, with `@@`
 hunk headers, `-` for removed lines and `+` for added lines.
 
-### 2.7 CompiledManifest
+### 2.7 The compiled desired state
 
 ```python
+# core/apply_engine/desired_state.py — the apply engine's only input, shared with the Manifest compiler
 @dataclass(frozen=True)
-class CompiledManifest:
-    revision_id: RevisionId          # bookkeeping: which revision this was compiled from (not inside the document)
-    document: dict                   # a plain Manifest document, exactly what apply consumes (shape below)
-    document_digest: Digest          # digest of that document; apply reports record it (§8 item 5), and the
-                                     # Registry maps it back to `revision_id`
+class DesiredState:
+    script: Declaration[DesiredScript] | None            # None = undeclared: apply leaves the bot's script alone
+    identity: Declaration[DesiredIdentityFile] | None    # Declaration(()) = declared empty: apply removes what is there
+    resources: Declaration[DesiredResource] | None
+    skills: Declaration[DesiredSkill] | None
+    mcp: Declaration[DesiredMcpServer] | None
+    engine_config: Declaration[DesiredEngineConfig] | None
+    cli_tools: Declaration[DesiredCliTool] | None
 ```
 
-`document` is just a Manifest document. Compiling adds nothing to the
-Manifest format beyond the Manifest changes listed in §8: every category is
-present, file entries point at the content store by digest (§8 item 1), and
-curated memory is the Manifest's new `memory` category (§8 item 3). The two
-other fields are bookkeeping kept next to the document, not sent to apply.
-When Promotion applies the document, the apply report records its digest
-(§8 item 5), and the Registry records that this revision compiled to it, so
-the digest maps back to the revision (§5.5).
+Compiling a revision (`core/bot_genome/compile.py`, `compile_spec`) gives
+this typed state, not a Manifest document: every category the revision
+covers is declared — `identity`, `resources`, `skills`, `mcp` and `script`,
+an empty list declaring "none", which the engine converges to by removing
+what is there — and the two a revision never covers (`cli_tools`,
+`engine_config`) stay undeclared. Each entry names its bytes in the content
+store by digest (`ContentRef`), a Skill Center skill by its pinned
+version and a shared-repository skill by its path; curated memory is not
+delivered until the engine memory projection lands (§7, RSI-05). A Bot
+Config Manifest document compiles into the same state through its own
+compiler, so the two are never translated into one another: the contract
+tests compile every example case both ways and compare
+(`api-contracts/genome/v1/manifest-v1-compatibility.md`).
 
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:f27a…",
-  "document": {
-    "schema_version": 1,
-    "manifest": {
-      "identity": [{"type": "SOUL.md", "source": {"protocol": "content_store", "digest": "sha256:3f9a…"}}],
-      "skills": [{"name": "quality-check", "source": {"protocol": "content_store", "digest": "sha256:0c55…"}},
-                 {"name": "refund-policy", "source": {"protocol": "center", "version": "v7"}}],   // §8 item 6
-      "resources": [{"path": "data/kb/", "source": {"protocol": "content_store", "digest": "sha256:d4a7…"}}],
-      "mcp": [],
-      "memory": {"mode": "seed", "items": {"source": {"protocol": "content_store", "digest": "sha256:9e20…"}}}   // §8 item 3
-    }
-  }
-}
+```python
+# Illustrative: what r42 compiles to
+DesiredState(
+    script=Declaration(()),                                             # the revision has no script: remove one
+    identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef("sha256:3f9a…")),)),
+    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(ContentRef("sha256:0c55…"))),
+                        DesiredSkill("refund-policy", CenterSkillVersion("v7")))),                # §8 item 6
+    resources=Declaration((DesiredResourceTree("data/kb/", ContentRef("sha256:d4a7…")),)),
+    mcp=Declaration(()),
+    engine_config=None, cli_tools=None,                                 # never in a revision: left as they are
+)
 ```
 
-The exact Manifest field names in `document` follow Manifest schema v1 and
-the content-store and Center sources added in §8; the source spellings above
-are proposed and fixed by RSI-04. The mapping of every Manifest v1 field is in
+The state carries no digest of itself and nothing is recorded about it:
+which revision a bot runs is observed by reading the bot (§5.5), not
+tracked through a document digest. Older text in this document and its
+neighbours that speaks of a "compiled document" means this state.
+Every Manifest v1 field's place in the revision, and the revision's in the
+state, is in
 [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md).
 
 ## 3. Why the Manifest is not enough
@@ -765,7 +774,7 @@ rejected, `schema/validator.py:58`; service-bot rollback one step back only,
 | One mutable row per bot, no revision history, no content hash | Lineage, archive, reproducibility, going back to any point | Revisions (§4) |
 | No parent pointer | Lineage tree; descendant-aware selection | `parent` |
 | No optimistic concurrency control. HTTP offers it through an `ETag` (a version tag the server returns with a document) and an `If-Match` request header (the client sends back the tag it read; the server rejects the write with `412 Precondition Failed` if the document changed since). `PUT /config-manifest` has neither | A strategy and a human editing at the same time silently overwrite each other; whoever writes last wins without knowing | Compare-and-swap on refs (§5) |
-| Apply re-reads the current document; the report does not say which bytes were applied | Cannot attribute behaviour or experience to a version | Apply reports record the applied document digest; the Registry maps it to a revision (§8) |
+| Apply re-reads the current document; the report does not say which bytes were applied | Cannot attribute behaviour or experience to a version | A revision compiles to a typed desired state the apply engine takes directly (§2.7); whether the bot still holds its `active` revision is observed by reading it (§5.5) |
 | Sources are moving refs (git branch, OSS key) re-resolved on each apply | A genome must be immutable: every source pinned to commit SHA / digest | Pinned content (§4.2) |
 | Whole-document PUT, category-atomic replace | Strategies must submit small, reviewable, itemized patches | Genome Patch (§6) |
 | `MEMORY.md` / `IDENTITY.md` reserved and rejected | Learned memory is half of what self-improvement produces | Curated memory (§7) |
@@ -780,11 +789,11 @@ Rejected alternatives (from DR-1):
   own path.** Rejected: two sources of truth, and Packs are OpenClaw-specific
   workspace snapshots that cannot reach teclaw.
 - **Version outside the Manifest and leave the Manifest entirely
-  unchanged.** Rejected: without a content-store source and the applied
-  document digest on the apply report, apply would still re-fetch moving
-  sources and could not say which document it applied, so behaviour could
-  not be attributed to a version. The genome does sit on top of the
-  Manifest, but the Manifest gains those format features (§8).
+  unchanged.** Rejected: without stored content addressed by digest, apply
+  would still re-fetch moving sources and could not say which bytes it
+  applied, so behaviour could not be attributed to a version. The genome
+  does sit on top of the Manifest, but both now compile into the apply
+  engine's one typed desired state (§2.7, §8).
 - **Git repository per bot as source of truth.** Deferred; see §9.2.
 
 ## 4. Revisions
@@ -803,12 +812,13 @@ Concretely, a revision adds exactly these things on top of the Manifest:
    digest, so the same revision always yields the same bytes (§4.2).
 4. **Totality**: every category is present in every revision (§4.3).
 5. **Patch-only change for automated actors**: strategies submit typed,
-   itemized patches against a named base revision (§6). Humans can still
-   record a revision from a whole **Manifest document** (the full YAML
-   document the Bot Config Manifest API accepts) instead of a patch, through
-   the genome API (`POST …/genome/revisions` with `{manifest}`, §12). Such a
-   revision has no `patch_digest`. A document sent directly to
-   `PUT /config-manifest` records no revision (§5.5).
+   itemized patches against the patch's own base revision (§6). Humans can
+   still edit the bot any way they like (the console, `PUT /config-manifest`)
+   and then **capture** its current state as a revision, through the genome
+   API (`POST …/genome/revisions:capture`, §12); the owner's policy changes
+   through its own operation (`PUT …/genome/policy`). Such revisions have no
+   `patch_digest` and `active` as their parent. A document sent to
+   `PUT /config-manifest` records no revision by itself (§5.5).
 6. **One new content category, curated memory** (§7), which needs a new
    engine contract.
 
@@ -829,14 +839,15 @@ Deliberately **not** added:
   manifest content store and fetched by digest when needed (§9.1). Two
   revisions that share a file share its bytes, so storage is deduplicated
   and diffs are cheap.
-- **Pinned, not floating.** When a revision is recorded from a Manifest that
-  uses `sources` with moving refs, the platform resolves them and stores the
-  bytes. A floating Manifest is an *input*; a revision is a *fact*.
+- **Pinned, not floating.** When a Manifest with `sources` on moving refs
+  is applied and the bot captured, the revision holds the bytes apply
+  fetched, by digest. A floating Manifest is an *input*; a revision is a
+  *fact*.
 - **Addresses are not hashed.** Where the bytes were fetched from (git
   `url`, `ref`, `subpath`; OSS `bucket`, `key`; the `auth` credential name)
   is not part of `spec`, so the same bytes from a moved repository give the
-  same revision. The recorded Manifest document keeps them as provenance.
-  `${BOT_*}` placeholders are resolved once, with the recording bot's values.
+  same revision. The Manifest's own apply report keeps them as provenance.
+  `${BOT_*}` placeholders were resolved by apply with the bot's values.
 - **Directories are one tree.** A skill or a directory resource is stored
   and hashed as the `acm-tree-v1` encoding of its files (§9.1), so its digest
   never depends on how an archive was compressed.
@@ -848,12 +859,12 @@ Deliberately **not** added:
 
 ### 4.3 Totality
 
-Recording a revision from a partial Manifest document fills every omitted
-category from the parent revision (or from the bot's current state for the
-bot's first revision), so the stored revision is complete. Compiling a
-revision for apply always emits every category. `[]` means "none". Unlike a
-Manifest document, a revision never leaves a category to prior state, so
-two applies of the same revision always produce the same bot.
+Capture records every category of the bot's current state, and a patch
+starts from a total base, so a stored revision is always complete.
+Compiling a revision for delivery always emits every category. `[]` means
+"none". Unlike a Manifest document, a revision never leaves a category to
+prior state, so two deliveries of the same revision always produce the same
+bot.
 
 ### 4.4 Identity, sequence numbers, and status
 
@@ -861,6 +872,15 @@ two applies of the same revision always produce the same bot.
   `revision` metadata is excluded, so identical content always has the same
   id, whoever produced it. Recording content that already exists returns the
   existing revision; no duplicate is created and no new `seq` is assigned.
+  A run's candidate is the one exception: its candidate id is its patch
+  digest and names its revision's patch, so a candidate patch whose result
+  is a revision recorded from another patch (or a capture) is refused
+  (`already_recorded`) rather than handed that revision, and so is a
+  candidate whose result another run or an owner already recorded from the
+  same patch; promote the existing revision instead. Only the run that
+  first recorded a candidate, resubmitting the same patch, gets its
+  revision back (another patch of the same run producing the same content
+  is refused too: the revision's `patch_digest` names the first).
 - **`seq`.** A per-bot counter assigned when a new id is first recorded, for
   humans: the bot's first recorded revision is `r1`, the next new one `r2`,
   and so on. Example: a strategy submits a candidate whose content is new,
@@ -872,7 +892,7 @@ two applies of the same revision always produce the same bot.
   started from `r39` while it was `active`), while `r41`'s parent is `r38`.
 - **Parent.** Every revision except the bot's first has exactly one
   `parent`: the base the patch was written against, or the `base` given
-  when a whole document was recorded. Following `parent` links gives a bot's
+  when the bot was captured or its policy changed. Following `parent` links gives a bot's
   history as a tree (two candidates made from `r41` are siblings).
 - **Status** is platform-written metadata, outside the hash:
 
@@ -898,7 +918,7 @@ candidate.
 - **`script` is not evolvable.** Imperative startup scripts are the most
   dangerous surface and are already rejected on teclaw. They remain part of
   the genome so a revision is complete, but no patch op reaches them: the
-  script changes only when an owner records a whole Manifest document.
+  script changes only when an owner edits the bot and captures it.
 - **`engine_config`** is always `{}` in v1, because nothing applies it yet
   (the Manifest refuses the category on every bot). Its keys and value types
   are decided with the Manifest in
@@ -1007,23 +1027,25 @@ move and the compile step it uses.
 The Manifest is not revision-aware, and the existing `/config-manifest`
 endpoints keep working exactly as today. A direct `PUT /config-manifest`
 bypasses the genome: it records no revision and moves no ref. Owners who
-want history edit through the genome API instead: record a revision (which
-moves `draft`) and promote it. The genome API can also record a revision
-from a whole Manifest document (`POST …/genome/revisions` with `{manifest}`,
-§12); that is a genome operation, not a Manifest one.
+want history record a revision through the genome API and promote it: a
+patch (`POST …/genome/revisions`), or an edit made any way at all followed
+by a capture of the bot (`POST …/genome/revisions:capture`, §12). Capture
+is a genome operation, not a Manifest one.
 
-**How the Registry knows what a bot runs.** Every apply report (personal
-bot) and every publish record (service bot) records the digest of the
-Manifest document it applied (§8 item 5). When Promotion applies a compiled
-revision, the Registry records that the revision compiled to that digest
-(`CompiledManifest.document_digest`, §2.7). Given a bot's last applied
-digest, the Registry knows which revision the bot runs.
+**How the Registry knows what a bot runs.** It reads the bot. Nothing is
+recorded at promotion or apply time about which revision a bot holds — no
+document digest on the apply report, no apply id on the promotion row.
+`GenomeRegistry.drift(bot)` captures the bot's current state exactly as
+`capture` would (nothing is recorded; the captured bytes are dropped),
+computes the revision id that state would record under `active`'s policy,
+and compares it with `active`. Equal means the bot holds its active
+revision; different means it holds something else, and the id says what.
 
-**Drift.** A bot has *drifted* when its last applied document digest (from
-the latest apply report, or the publish record of the version that is
-serving) differs from the digest `active` compiles to. It usually follows a
-direct Manifest edit. Drift is detected, not prevented. The Registry checks
-for it at run start and at promotion:
+**Drift.** A bot has *drifted* when the revision id its current state
+records as differs from `active`. It usually follows a direct Manifest edit
+or a hand edit on the device. Drift is detected, not prevented, and never
+tracked: it is observed whenever a caller asks. The Registry checks for it
+at run start and at promotion:
 
 - **Run start.** A run does not start on a drifted bot: Evolution Run ends
   it with end reason `out_of_band_change`
@@ -1053,7 +1075,7 @@ unattributed ([02-experience.md](02-experience.md) §3).
    drift, so `run_8a1` is ended with `out_of_band_change` before any
    budget is reserved.
 3. The owner records the current Manifest as a revision
-   (`POST …/genome/revisions` with `{manifest}`, base `r42`), which becomes
+   (`POST …/genome/revisions:capture`; its parent is `active`, `r42`), which becomes
    `r46`, and promotes `r46`. Its apply report records the digest `r46`
    compiles to, which is what `active` now compiles to. The next nightly run
    starts from `r46`.
@@ -1066,7 +1088,7 @@ A Genome Patch is the only thing a strategy may submit. It is itemized and
 typed, following ACE's finding that delta updates avoid context collapse
 (whole rewrites gradually erase accumulated detail). Whole-document
 replacement by automated actors is not supported. Humans can submit a patch
-too (through `POST …/genome/revisions`, §12), or record a whole document.
+too (through `POST …/genome/revisions`, §12), or edit the bot and capture it.
 
 The op set (open decisions G-2 and G-10, closed; normative:
 [contract README §6](../../api-contracts/genome/v1/README.md#6-patches)):
@@ -1159,8 +1181,8 @@ one patch for review, while the archive keeps each step.
 ### 6.5 Patch identity and candidates
 
 The stored patch is content-addressed. Its digest is the **candidate id**
-used by strategies and by Promotion (`sha256:c41e…`): a retried submission of
-the same patch returns the same id and creates nothing new. The resulting
+used by strategies and by Promotion (`sha256:c41e…`): the same run
+resubmitting the same patch gets the same id and creates nothing new. The resulting
 revision has its own id (hash of `{spec, policy}`) and records the patch in
 `patch_digest`. Keeping both identities is open decision G-9. See [03-strategy.md](03-strategy.md) for the
 strategy-side `ctx.candidates.submit`.
@@ -1228,15 +1250,24 @@ class EngineMemoryProjection(Protocol):
 
 ## 8. Manifest changes
 
-The Manifest stays revision-unaware (§1, §5.5). It gains format features and
-one fact of its own, all backward compatible with schema v1 documents. This
-is the complete list:
+The Manifest stays revision-unaware (§1, §5.5), and its grammar gains **no
+new source kinds**: a compiled revision is delivered **directly** into the
+apply engine's materialisers (RSI-04), with no Manifest document in between:
+the Registry's `RevisionApplier` seam is bound to `DirectApplier`, which
+starts an apply run whose state reference names the promotion (08-promotion.md
+§7.1). What the Manifest side still gains, all backward compatible with schema
+v1 documents:
 
-1. **Content-store source.** An entry may point at a digest in the
-   platform's own manifest content store instead of an external source.
-   Apply reads the bytes from the store and skips the fetch. A compiled
-   revision always uses it, so a compiled document is fully reproducible
-   (P1).
+1. **Direct delivery of a compiled revision.** The apply engine takes one
+   typed desired state (§2.7) from either of two compilers — the Manifest's
+   or the genome's — and the run service looks the compiler up by the
+   state reference an apply carries (`StateRef("manifest")`, or a
+   `StateRef("genome", promotion_id)` naming a promotion). The materialisers read bytes from
+   the content store and resolve Center and repo skills from the typed
+   entries (a Center skill by name, a repo skill by path, through the Skill
+   Center's own visibility rule); a compiled revision is reproducible up to
+   the Center version and repo commit, which bots track (ADR 0002). Done
+   (RSI-04).
 2. **`engine_config` applies.** The category already exists in the
    Manifest schema (`schema/validator.py` validates an
    `engine_config.config` mapping), but nothing applies it today: it was
@@ -1250,22 +1281,19 @@ is the complete list:
 4. **Produced-content write path.** The manifest content store accepts
    **produced** (non-fetched) content, such as content created by a patch,
    with patch provenance (§9.1; P2).
-5. **Applied-document digest on the apply report.** When apply finishes,
-   the apply report records the hash of the exact Manifest document it
-   applied (for example `sha256:f27a…`). For service bots, the publish
-   record records the digest of the published document. This is a Manifest
-   fact with no revision concept; the Genome Registry maps digests to
-   revisions (§5.5) (P1).
-6. **Center-skill source.** An entry may name a pinned Skill Center version
-   (proposed spelling `source: {protocol: center, version: "v7"}`). Manifest
-   v1 cannot declare a Center skill, and apply removes every skill a `skills`
-   section omits, so without this a compiled revision would remove the bot's
-   Center skills (P1).
+5. **No digest on the apply report.** Dropped: the apply report records
+   which state reference it applied (the Manifest, or a promotion) and the
+   per-entry outcomes; which revision a bot runs is observed by reading it
+   (§5.5), so no apply fact needs to carry a document digest.
 
-Two Manifest bugs also break totality and must be fixed before compiled
-revisions are applied: removing a resource from a document does not remove it
-from the bot ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)),
-and `script: null` is read as "absent", so a document cannot remove a script
+Two Manifest gaps that broke totality are closed: the apply engine owns the
+resources root whole — the workspace root, minus the protected entries of
+`core/workspace/protected_entries` — clearing it and writing the declaration
+each apply, so a resource left out of a document — or written there by the
+bot itself — is removed
+([#2162](https://github.com/inclusionAI/Avernet/issues/2162)); and
+`script: null` declares no script, so a document (or a revision) removes a
+script the bot has, while an absent `script` still leaves it alone
 ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
 
 Revisions, refs, compare-and-swap, pinning, provenance, and annotations need
@@ -1274,10 +1302,11 @@ Manifest.
 
 ## 9. Storage
 
-### 9.1 Content: reuse the manifest content store
+### 9.1 Content: reuse the content store
 
 The manifest apply pipeline already keeps the platform's own durable copy of
-everything it fetches (`core/bot_config_manifest/content/service.py`):
+everything it fetches (`core/content_store/`, built as the Manifest's W11 and
+moved out as its own component in #3064):
 
 - **Bytes** live in a content-addressed blob directory,
   `<root>/blobs/<hex[:2]>/<hex64>`, written once and atomically and
@@ -1299,7 +1328,7 @@ second copy.
 
 How content is fetched from a digest:
 
-- **Inside Backend,** `ManifestContentService.read(digest)` returns the bytes
+- **Inside Backend,** `ContentStoreService.read(digest)` returns the bytes
   and re-verifies the hash on read.
 - **Outside Backend** (UI, pipelines, strategies, evaluators), the Registry API
   serves `GET /bots/{bot_id}/genome/content/{digest}`. It is access-checked
@@ -1313,10 +1342,13 @@ How content is fetched from a digest:
 
 Three extensions are needed:
 
-1. **A write path for produced content.** Today every store event is a
-   *fetch* (`source_url` is required). Content created by a strategy, such as
-   an edited `SKILL.md` or a new memory item, was never fetched. It needs a
-   store call whose provenance is the producing patch and run.
+1. **A write path for produced content** (shipped in RSI-03,
+   `ContentStoreService.store_produced`). Before it every store event was
+   a *fetch* (`source_url` required). Content created by a strategy, such as
+   an edited `SKILL.md` or a new memory item, captured from the bot, or
+   uploaded, is stored with its origin (`capture`, `patch`, `upload`) and
+   the recording actor as provenance, one row per bot and digest; a digest
+   is readable for a bot only through such a row.
 2. **Retention for the archive.** The archive keeps every candidate. Most
    blobs are small text and deduplicate, but manifest resources may be
    100–200 MiB each. Unconditional retention is acceptable for v1. Any later
@@ -1326,24 +1358,25 @@ Three extensions are needed:
    `apps/evolution` read content through the Registry API (or a materialised
    sandbox), never from the blob directory directly.
 
-### 9.2 Revisions: database, not git (open decision D-6)
+### 9.2 Revisions: database, not git (decision D-6, closed)
 
 | Option | For | Against |
 | --- | --- | --- |
 | **DB revisions + existing content-addressed store** (recommended) | Tenancy, ACL, queries over lineage and status, reuses the manifest content store, fits Backend patterns | Need our own diff/merge tooling |
 | Git repository per bot | Free history, diff, blame; coding agents already speak git | Multi-tenant hosting, ACL, querying across bots, GC: a new infrastructure dependency |
 
-Recommendation: DB-native, plus a **git export** of the revision history (proposed; not
-yet an endpoint in §12) so humans and coding-agent strategies can work on a familiar
-filesystem history (the Meta-Harness lesson) without git being the source
-of truth.
+Decision (RSI-03): DB-native. A **git export** of the revision history
+(proposed; not yet an endpoint in §12) can follow so humans and coding-agent
+strategies can work on a familiar filesystem history (the Meta-Harness
+lesson) without git being the source of truth.
 
-Proposed tables (names illustrative, fixed by RSI-03): `ac_genome_revision`
-(id, owner_id, bot_id, seq, parent, provenance, status, canonical
-JSON of `{spec, policy}`), `ac_genome_ref` (owner_id, bot_id, name,
-revision, version for CAS),
-`ac_genome_ref_event` (append-only ref log), `ac_genome_patch` (digest,
-base, canonical JSON).
+Tables (`core/bot_genome/sql/2026_10_19_bot_genome.sql`):
+`ac_genome_revision` (id, env, entity, bot, seq, parent, provenance, status,
+the canonical JSON of `{spec, policy}`, annotations), `ac_genome_ref` (one
+row per name, the revision and a version for CAS), `ac_genome_ref_event`
+(append-only ref log), `ac_genome_patch` (digest, base, canonical JSON) and
+`ac_genome_promotion` (the moved refs and the delivery seam's answer; the row
+carries nothing of the state it delivered).
 
 ### 9.3 Serialization: canonical JSON
 
@@ -1367,10 +1400,9 @@ outputs, verdicts, and Experiment Ledger entries.
   and [`genome-patch.schema.json`](../../api-contracts/genome/v1/genome-patch.schema.json).
 - **JSON only for everything new**, both when authored and when stored.
 - **The Bot Config Manifest stays YAML.** It is an existing contract and is
-  not changed. When a revision is recorded from a Manifest document, the YAML
-  is parsed once, omitted categories are filled, sources are pinned, and
-  canonical JSON is stored. The original YAML is kept as a provenance record,
-  so its comments are not lost, but it is never the hashed or exchanged form.
+  not changed. The Registry never parses a Manifest document: the document is
+  applied as today, and capture records the bot's resulting state as
+  canonical JSON. The YAML is never the hashed or exchanged form.
 
 Why not YAML as the stored form: it has no canonical serialization (the same
 data can be written many ways, so it cannot be hashed directly); its implicit
@@ -1396,7 +1428,7 @@ RFC 7396) is also defined over JSON.
 ## 11. Service interface
 
 The Genome Registry is a Backend core service, transport-agnostic, with a
-`GenomeRegistry` Protocol. Callers in Backend (Promotion) use it in
+`GenomeRegistryProtocol`. Callers in Backend (Promotion) use it in
 process; callers in
 `apps/evolution` (Evolution Run, Verification) use it through the API in §12.
 
@@ -1424,68 +1456,107 @@ class GenomeDiff:
 
 # Page[T] {total, items}: the shared pagination shape, 09-evolution-api.md.
 
-class GenomeRegistry(Protocol):
+@dataclass(frozen=True)
+class RecordedRevision:
+    revision: GenomeRevision
+    created: bool                    # False when the content already existed (same id, seq and parent)
+    risk_tier: RiskTier | None = None   # a patch's tier; None for a capture or a policy change
+    flags: list[str] = ()            # gene paths of files the patch rewrote (§6.2)
+    ref: str | None = None           # the candidate ref a run's candidate was named
+
+@dataclass(frozen=True)
+class RunScope:
+    run_id: str                      # names candidate/<run_id>/<n>
+    strategy: str                    # "<id>@<version>": recorded as the candidate's actor
+    allowed_genes: list[str]         # what the run's binding lets it change
+    step: str | None = None          # the strategy's own label for the step
+
+class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
-    def get_revision(self, bot: BotRef, rev: RevisionId | str) -> GenomeRevision:
-        """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
+    def get_revision(self, bot: BotRef, rev: str) -> GenomeRevision:
+        """Accepts a revision id, "r<seq>", or a ref name. Raises RevisionNotFound."""
 
     def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
                        parent: RevisionId | None = None,
-                       page: int = 1, page_size: int = 20) -> Page[RevisionMetadata]:
+                       page: int = 1, page_size: int = 20) -> RevisionPage:
         """Metadata only, newest seq first."""
 
-    def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
-                     status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
-                     allowed_genes: list[str] | None = None) -> GenomeRevision:
-        """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
-        and record the resulting revision. Idempotent: the same patch returns the same
-        revision. `allowed_genes` is None for owner patches (policy only), a list for runs.
-        Raises BaseMismatch, PatchRejected(reasons), LimitExceeded."""
+    async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
+        """Record the bot's current state; parent `active` (the latest revision until there is one; none for the first); policy copied from `active`.
+        Idempotent: unchanged state returns the existing revision with created=False.
+        Raises CaptureRefused naming what cannot be recorded."""
 
-    def record_manifest(self, bot: BotRef, manifest_yaml: str, *, created_by: Provenance,
-                        base: RevisionId | None) -> GenomeRevision:
-        """Parse a Manifest document, fill omitted categories from `base` (or current state),
-        pin every source, store canonical JSON, keep the YAML as provenance. Status `draft`."""
+    async def commit_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
+                           status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
+                           run: RunScope | None = None) -> RecordedRevision:
+        """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).
+        A CANDIDATE needs `run`, whose allowed_genes bound the ops and whose run_id names
+        candidate/<run>/<n>. Idempotent for the recorder: the same run retrying the same patch gets its
+        revision; a candidate whose result another run, a draft or a capture recorded is refused.
+        Raises RevisionNotFound (the base), PatchRejected(reasons), LimitExceeded, ContentNotReachable."""
 
-    def set_status(self, bot: BotRef, rev: RevisionId, status: RevisionStatus,
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
+        """Record a revision with `active`'s spec and the new policy. Raises PolicyRejected(reasons)."""
+
+    def set_status(self, bot: BotRef, revision_id: RevisionId, status: RevisionStatus,
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> GenomeDiff:
+    def diff(self, bot: BotRef, rev: str, against: str) -> GenomeDiff:
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
     def list_refs(self, bot: BotRef) -> list[GenomeRef]: ...
 
-    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance) -> GenomeRef:
-        """Compare-and-swap. Raises RefConflict(current) if the ref moved.
-        Only the designated mover may move each ref kind (§5.1); `active`, `previous`,
-        `canary` are moved only by Promotion."""
+    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance, mover: RefMover) -> GenomeRef:
+        """Compare-and-swap. Raises RefConflict(current) if the ref moved, MoverNotAllowed when
+        `mover` is not the ref kind's designated mover (§5.1): `active` and `previous` move only
+        through Promotion, `draft` through the owner, candidate refs through the registry itself."""
 
     # --- content ---------------------------------------------------------
     def read_content(self, bot: BotRef, digest: Digest) -> bytes:
-        """Access-checked against the bot; the digest must be reachable from one of its revisions
-        or uploads. Hash re-verified on read."""
+        """Access-checked against the bot: the digest must have been stored for it (captured, written
+        by a patch or uploaded). Hash re-verified on read. Raises ContentNotReachable."""
 
-    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> Digest:
-        """Produced content (§9.1 extension 1). Idempotent by digest."""
+    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> ContentReceipt:
+        """Produced content (§9.1 extension 1). Idempotent by digest; the receipt says whether it was new."""
 
-    # --- apply / materialisation -----------------------------------------
-    def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
-        """Pinned, total Manifest document (curated memory in its `memory` category). Used by Promotion (apply,
-        service-bot publish) and Verification (eval bot materialisation)."""
+    # --- delivery --------------------------------------------------------
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
+        """The revision as the apply engine's typed desired state (§2.7): every category it covers
+        declared, cli_tools and engine_config undeclared. Used by Promotion and Verification (eval
+        bot materialisation). Raises NotAppliable for a revision the state model refuses as recorded."""
 
-    def applied_revision(self, bot: BotRef) -> RevisionId | None:
-        """The revision the bot runs: its last applied document digest (Manifest apply report or service-bot
-        publish record) mapped back through the digests recorded at promotion. None when that digest maps to
-        no revision. The bot is drifted when this differs from `active` (§5.5); Evolution Run checks it at run
-        start and Promotion before promoting."""
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than `active`, found by reading the bot: capture its
+        state as `capture` would, compute the revision id it would record under `active`'s policy,
+        compare with `active`. None without an `active` or while they agree; else Drift(active,
+        observed). Nothing is recorded; CaptureRefused propagates. Evolution Run asks at run start,
+        Promotion before an automated promotion (§5.5)."""
+
+class GenomePromotionServiceProtocol(Protocol):   # core/bot_genome/promotion/promotion_service_protocol.py
+    async def promote(self, bot: BotRef, *, revision: str, ref: str, expected_revision: RevisionId | None,
+                      actor: Provenance, reason: str) -> Promotion:
+        """File the promotion `pending` and start the apply run that delivers the revision (the
+        RevisionApplier seam; `applying` with its apply id). `ref` (`active`) moves by compare-and-swap
+        only when that apply ends: `applied`, `applied_partial` (active labelled `partial`), or
+        `apply_failed` (nothing moves). The seam's preflight runs before anything is written.
+        Raises RevisionNotFound, NotPromotable, Drifted (automated actors only), NotAppliable,
+        PromotionUnsupported, RefConflict, ApplyBusy (another apply holds the bot's lock)."""
+
+    def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion: ...
+    def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
 ```
 
+The in-process callers reach both through the Service API re-exports
+(`api/bot_genome_registry_service.py`, `api/bot_genome_promotion_service.py`).
 
-Errors are typed and map onto HTTP statuses in §12: `NotFound` → 404,
-`RefConflict` / `BaseMismatch` → 409, `PatchRejected` → 422,
-`LimitExceeded` → 413, `MoverNotAllowed` → 403.
+Errors are typed and map onto HTTP statuses in §12: `RevisionNotFound` /
+`RefNotFound` / `ContentNotReachable` → 404, `RefConflict` / `Drifted` →
+409, `PatchRejected` (and `PolicyRejected`) / `CaptureRefused` /
+`NotPromotable` / `NotAppliable` / `PromotionUnsupported` → 422,
+`LimitExceeded` → 413, `MoverNotAllowed` → 403. A base that is not a
+revision of the bot is a `RevisionNotFound`, not a separate conflict.
 
 ## 12. API
 
@@ -1524,19 +1595,23 @@ Errors: 404 unknown bot; 400 invalid filter.
 
 ### POST /bots/{bot_id}/genome/revisions
 
-Record a revision from a patch (`{base, patch}`) or from a Manifest document
-(`{manifest}`). Called by Evolution Run (when a strategy calls
-`ctx.candidates.submit`; strategies never call this directly), and by owners
-through the UI or the API. Returns the revision; recording
-content that already exists returns the existing one with `200`.
+Record a revision by applying a Genome Patch to its own `patch.base`. There
+is no request-level `base`: the patch names it. Called by Evolution Run
+(when a strategy calls `ctx.candidates.submit`; strategies never call this
+directly), and by owners through the UI or the API. Returns the revision;
+recording content that already exists returns the existing one with `200`
+and `created: false`. Who recorded it is the audit identity: a user record
+names the caller (an admitted application as `app:<id>:on-behalf-of:<user>`);
+a run's candidate names the strategy (`id@version`) and its run id, and the
+application that submitted it on the run's behalf is kept by the run record
+([06-evolution-run.md](06-evolution-run.md)), not by every revision.
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a patch, recorded as a run candidate (internal caller: Evolution Run)
+// Request: a patch recorded as a run candidate (internal caller: Evolution Run)
 {
-  "base": "sha256:a90b…",
   "status": "candidate",
-  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
+  "run": {"run_id": "run_7f3", "strategy": "clawevolve/bot-evolution@2.0.0", "step": "propose", "allowed_genes": ["persona", "skills"]},
   "patch": {
     "patch_schema": 1,
     "base": "sha256:a90b…",
@@ -1545,16 +1620,6 @@ content that already exists returns the existing one with `200`.
     "rationale": "Partial-refund requests were escalated too late.",
     "evidence": ["episode:ep_91"]
   }
-}
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a Manifest document (owner edit); YAML carried as a string, stored as provenance
-{
-  "base": "sha256:a90b…",
-  "status": "draft",
-  "manifest": {"format": "yaml", "document": "schema_version: 1\nmanifest:\n  identity:\n    - type: SOUL.md\n      source: {git: support-bot, path: SOUL.md, ref: main}\n"}
 }
 ```
 
@@ -1569,14 +1634,61 @@ content that already exists returns the existing one with `200`.
   "patch_digest": "sha256:c41e…",
   "risk_tier": "T2",
   "flags": [],
-  "ref": "candidate/run_7f3/1"
+  "ref": "candidate/run_7f3/1",
+  "created": true
 }
 ```
 
-Errors: 409 `base_mismatch` (base is not the current parent, or ops do not
-apply cleanly); 422 `patch_rejected` with reasons (`gene_not_mutable`,
-`pinned_item`, `gene_not_allowed`, `missing_rationale`, `schema`); 413
-`limit_exceeded`.
+Errors: 404 the patch's `base` is not a revision of this bot; 422
+`patch_rejected` with every reason (`does_not_apply`, `gene_not_mutable`,
+`pinned_item`, `gene_not_allowed`, `missing_rationale`, `missing_evidence`,
+`schema`, `not_canonical`, `already_recorded` for a candidate whose result is
+an existing revision, and the apply predicates of contract §6.4); 413
+`limit_exceeded`. A body outside the canonical JSON subset (a duplicate member
+name, a float, a lone surrogate) is refused before it is parsed (contract
+§3.1). An audit identity longer than 1024 characters (the width of the content
+store's `modifier` column; an application's is `app:<id>:on-behalf-of:<user>`)
+is refused as 413 `limit_exceeded` before anything is written.
+
+### POST /bots/{bot_id}/genome/revisions:capture
+
+Record the bot's current state as a revision: parent `active` (the bot's
+latest revision until it has an `active`; none for the bot's first), policy
+copied from `active`, status `draft`. No body. This is
+how an edit made outside the genome (the console, `PUT /config-manifest`)
+becomes a revision, and how a bot gets its first one. Called by owners
+through the UI or the API, and by pipelines after a Manifest apply.
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Response 201 Created (200 with `created: false` when nothing changed since the last record)
+{"id": "sha256:7c1e…", "seq": 42, "status": "draft", "parent": "sha256:a90b…",
+ "patch_digest": null, "risk_tier": null, "flags": [], "ref": null, "created": true}
+```
+
+Errors: 422 `capture_refused` naming what cannot be recorded (a resource
+path outside the Manifest's path rule, contract §7; a platform-managed
+bot).
+
+### PUT /bots/{bot_id}/genome/policy
+
+Record a revision with `active`'s content and this policy (§2.3, §4.4).
+The policy is not bot state, so it has its own operation rather than a
+patch op. Called by owners through the UI or the API.
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Request
+{"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
+```
+
+Answers like a capture (`201`, or `200` when `active` already has this
+policy). Errors: 422 `policy_rejected` with the policy's reasons (`schema`,
+`not_canonical`, `order`) or, since the record carries `active`'s spec, the
+spec's apply-time reasons when that content no longer applies (contract
+§7): a tightening is refused too, and the reasons say what to fix first. An
+override below an op's own tier is not an error; it has no effect, since
+overrides only raise (§6.3).
 
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 
@@ -1629,7 +1741,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
 }
 ```
 
-Errors: 404 either revision; 422 revisions of different bots.
+Errors: 404 either revision (a revision of another bot is not found here).
 
 ### GET /bots/{bot_id}/genome/refs
 
@@ -1656,10 +1768,11 @@ GET /openapi/v1/bots/bot_123/genome/refs
 
 ### PUT /bots/{bot_id}/genome/refs/draft
 
-Move the owner's `draft` ref, with compare-and-swap. Called by the owner via
-the UI or the API. (`active`, `previous`, `canary` are not movable here; they move only
-through `POST /bots/{bot_id}/genome/promotions` in
-[08-promotion.md](08-promotion.md).)
+Move the owner's `draft` ref, with compare-and-swap. Recording does not
+move it: the owner points it at the revision they are working on. Called by
+the owner via the UI or the API. (`active`, `previous`, `canary` are not
+movable here; `active` and `previous` move only through
+`POST /bots/{bot_id}/genome/promotions` in [08-promotion.md](08-promotion.md).)
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -1701,7 +1814,8 @@ Content-Type: application/octet-stream
 You are the support agent for …
 ```
 
-Errors: 404 unknown digest or digest not reachable from this bot.
+Errors: 404 unknown digest, or a digest never stored for this bot (captured,
+written by a patch or uploaded for it).
 
 ### PUT /bots/{bot_id}/genome/content
 
@@ -1719,21 +1833,24 @@ def lookup(order_id): ...
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Response 201 (200 if the bytes already exist)
-{"digest": "sha256:6b1d…", "size": 1834}
+// Response 201 (200 with `created: false` if this bot already held the bytes)
+{"digest": "sha256:6b1d…", "size": 1834, "created": true}
 ```
 
 Errors: 413 over the Manifest file size limit.
 
-### Related endpoint owned elsewhere
+### Related endpoints owned elsewhere
 
 `POST /bots/{bot_id}/genome/promotions` moves `active` (including going back to
-an earlier revision). It lives under the genome path but is specified in
-[08-promotion.md](08-promotion.md).
+an earlier revision), `GET …/genome/promotions` and
+`GET …/genome/promotions/{promotion_id}` read the promotion records. They
+live under the genome path but are specified in
+[08-promotion.md](08-promotion.md). A promotion answers `applying`; `active`
+moves once the apply that delivers the revision ends (RSI-04).
 
 ### Internal
 
-- In-process `GenomeRegistry` (§11) for Promotion in Backend.
+- In-process `GenomeRegistryProtocol` (§11) for Promotion in Backend.
 - Engine memory projection contract (§7), a Plugin API implemented by engine
   adapters (RSI-05).
 
@@ -1764,7 +1881,6 @@ The owner (or a pipeline acting for the owner) uses the public endpoints of
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Request body of step 2
 {
-  "base": "sha256:a90b…",
   "status": "draft",
   "patch": {
     "patch_schema": 1,
@@ -1785,8 +1901,8 @@ The owner (or a pipeline acting for the owner) uses the public endpoints of
 async def submit_candidate(run: Run, candidate: Candidate) -> str:
     rev = await genome_api.record_revision(
         bot_id=run.bot.bot_id, entity_id=run.bot.owner_id,   # the run's bot: id in the path, owner as entity_id
-        base=candidate.patch["base"], status="candidate",
-        run={"run_id": run.id, "binding_id": run.binding_id, "allowed_genes": run.allowed_genes},
+        status="candidate",
+        run={"run_id": run.id, "strategy": run.strategy, "step": candidate.step, "allowed_genes": run.allowed_genes},
         patch=candidate.patch,
         idempotency_key=f"{run.id}/candidate/{candidate.patch_digest}",
     )
@@ -1802,34 +1918,39 @@ and gets the candidate id back ([03-strategy.md](03-strategy.md)).
 
 ```python
 # Illustrative only: inside Backend promotion, after the gate accepted r42
-bot = BotRef(owner_id="user_owner_5", bot_id="bot_123")
-compiled = registry.compile(bot, "sha256:7c1e…")
-registry.move_ref(bot, RefUpdate(name="previous", revision=current_active,
-                  expected_revision=current_previous, reason=reason), actor=actor)
-registry.move_ref(bot, RefUpdate(name="active", revision=compiled.revision_id,
-                  expected_revision=current_active, reason=reason), actor=actor)
-apply_service.apply(bot=bot, document=compiled.document)
-# The apply report records the digest of the applied document (compiled.document_digest, §8 item 5);
-# the Manifest knows nothing about r42. Promotion keeps the revision <-> digest mapping on its own
-# record and in the Registry (§5.5).
+bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5", engine_type="openclaw", bot_type="personal")
+state = registry.compile(bot, "sha256:7c1e…")          # the typed desired state (§2.7)
+if actor.kind is not ProvenanceKind.USER and await registry.drift(bot):   # automated actors may not promote
+    raise Drifted(...)                                 # over a bot that has moved by hand; an owner may
+applier.preflight(bot, state)                          # the delivery seam refuses here, before anything is written
+row = promotions.insert(pending_row)                   # filed `pending`; no ref has moved
+apply_id = applier.start(bot, promotion_id=row.promotion_id, principal_id=..., audit_actor=...)
+                                                       # DirectApplier: an apply run whose state reference is
+                                                       # StateRef("genome", promotion_id), under the apply lock
+promotions.mark_applying(..., apply_id=apply_id)
+# ... the apply worker compiles the promotion back to r42 and applies it; when it ends the apply engine
+# publishes the outcome and PromotionSettler, in one transaction, moves active <- r42 (CAS against the
+# promotion's from_revision) and previous, marks r42 promoted and settles the row.
+# The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```
 
-The ordering, failure handling, and service-bot publish path are owned by
-[08-promotion.md](08-promotion.md).
+The ordering and failure handling are owned by [08-promotion.md](08-promotion.md);
+promoting a service bot's verify or online stage through the publish pipeline
+is [#3212](https://github.com/inclusionAI/Avernet/issues/3212).
 
 ## 14. Interactions
 
 | Other component / service | Direction | What flows |
 | --- | --- | --- |
-| Bot Config Manifest (existing) | Genome → Manifest | Revisions recorded from Manifest documents through the genome API; compiled revisions applied through Manifest apply; apply reports carry the applied document digest, which the Registry maps to revisions; direct Manifest edits bypass the genome and are detected as drift (§5.5) |
+| Bot Config Manifest (existing) | Genome → Manifest | The genome never reads a Manifest document: a document is applied as today and the bot captured; a revision compiles into the same typed desired state the Manifest compiles to and is delivered directly into the apply engine (RSI-04); direct Manifest edits bypass the genome and are detected as drift by reading the bot (§5.5) |
 | Manifest content store (existing) | Genome → store | Bytes by digest; new write path for produced content |
 | Skill Center (existing) | Genome → Center | Pinned Center versions resolved at compile/apply |
-| [Experience](02-experience.md) | Experience → Genome (by id) | Every episode and feedback record carries the revision id that produced it, attributed through the Registry's digest → revision mapping; `null` while the bot is drifted |
+| [Experience](02-experience.md) | Experience → Genome (by id) | Every episode and feedback record carries the revision id that produced it, `active` at the time unless the bot is drifted (§5.5), then `null` |
 | [Strategy](03-strategy.md) | via Evolution Run | Strategies read the parent revision (`ctx.parent`), materialise and diff workspaces, submit patches as candidates |
 | [Experiment Ledger](05-experiment-ledger.md) | Genome → Ledger | Revision records, ref-move events, lineage for the archive view of the ledger and audit |
 | [Evolution Run](06-evolution-run.md) | Run → Genome | Drift check at run start (§5.5); resolve binding `parent`; record candidates with `allowed_genes`; upload produced content; binding checks against `policy` |
 | [Verification](07-verification.md) | Verification → Genome | Compile/materialise parent and candidate into eval bots; link evaluations to revisions |
-| [Promotion](08-promotion.md) | Promotion → Genome | Move `active`/`previous`/`canary` by CAS; set status; compile and apply; record which document digest the applied revision compiled to; refuse on drift (§5.5) |
+| [Promotion](08-promotion.md) | Promotion → Genome | Move `active`/`previous`/`canary` by CAS; set status; compile and apply; ask for drift before an automated promotion (§5.5) |
 | [Evolution API](09-evolution-api.md) | callers → Genome | Public genome endpoints |
 | [Meta-evolution](10-meta-evolution.md) | later | Same revision/ref/patch machinery for mechanism revisions |
 | Engine adapter | Genome → Engine | Memory projection (`project_memory`, `export_memory`); physical layout |
@@ -1839,7 +1960,7 @@ The ordering, failure handling, and service-bot publish path are owned by
 
 | ID | Decision | Notes |
 | --- | --- | --- |
-| D-6 | Genome storage: DB revisions + content store (recommended) vs git repository per bot | §9.2; RSI-03 |
+| D-6 | Genome storage: DB revisions + content store vs git repository per bot | **Closed (RSI-03):** DB revisions (`ac_genome_revision`, `ac_genome_ref`, `ac_genome_ref_event`, `ac_genome_patch`, `ac_genome_promotion`) plus the manifest content store for bytes (§9.2); a git export can follow |
 | G-1 | How a directory is stored | **Closed (RSI-02):** one `acm-tree-v1` blob per directory; per-file blobs are the follow-up if editing large trees becomes common (§9.1) |
 | G-2 | Full patch op set and whether ops map onto JSON Patch (RFC 6902) | **Closed (RSI-02):** the op set in §6.1; no JSON Patch |
 | G-3 | Policy defaults | **Closed (RSI-02):** `mutable_genes` = persona, skills, memory, resources; `pins` = `persona/SAFETY.md`; no `locked_genes` list (§2.3) |
@@ -1852,5 +1973,5 @@ The ordering, failure handling, and service-bot publish path are owned by
 | G-10 | `memory.update` op | **Closed (RSI-02):** kept, tier T1 |
 
 Related: DR-1 was accepted in RSI-01 ([ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)), unblocking RSI-02 (schema and patch
-format), RSI-03 (Registry in Backend), and RSI-04 (Manifest changes for the
-genome); see [work-items.md](work-items.md).
+format), RSI-03 (Registry in Backend), and RSI-04 (direct delivery of a
+compiled revision); see [work-items.md](work-items.md).

@@ -65,7 +65,7 @@ def test_engine_ext_fetched_via_plugin_and_frozen_verbatim() -> None:
     assert frozen["engine_ext"] == {
         **opaque,
         "bot_id": "b",
-        "owner_id": "u1",
+        "owner_id": "u",
         "bot_name": "Support Bot",
         "stage": "draft",
     }

@@ -5,7 +5,7 @@ use axum::{
 };
 use bcs_app_collaboration_draft::CollaborationDraftApplication;
 use bcs_bot::BotCore;
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::{MemoryCollaborationStore, draft::DbCollaborationDraftStore};
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -15,11 +15,22 @@ use bcs_service_api::{
     ServiceResult,
 };
 use bcs_services_container::Services;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 const ID: &str = "750c52c6-60e2-4249-8ee5-1fb8cb9402ab";
+
+// Keep the deployed CLI's strict four-field decoder and base64 checks as a wire contract.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PreviousCliReference {
+    schema_version: u8,
+    draft_id: String,
+    revision: u64,
+    read_token: String,
+}
 
 #[test]
 fn published_draft_contract_resolves_schemas_and_declares_all_operations() {
@@ -98,13 +109,7 @@ async fn app() -> (Router, tempfile::TempDir) {
         Arc::new(UnusedJudge),
     ));
     let core = Arc::new(CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, "test".into())),
-        DraftSigningKeys::new(
-            "test".into(),
-            "test-key".into(),
-            BTreeMap::from([("test-key".into(), vec![7; 32])]),
-        )
-        .unwrap(),
+        Arc::new(DbCollaborationDraftStore::new(db)),
     ));
     services.collaboration_drafts = Some(Arc::new(CollaborationDraftApplication::new(
         core, validator, true,
@@ -117,7 +122,6 @@ async fn call(
     method: &str,
     suffix: &str,
     bot: Option<&str>,
-    grant: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut request = Request::builder()
@@ -125,9 +129,6 @@ async fn call(
         .uri(format!("/collaboration/drafts/{ID}{suffix}"));
     if let Some(bot) = bot {
         request = request.header("authorization", format!("Bearer {bot}"));
-    }
-    if let Some(grant) = grant {
-        request = request.header("x-bcs-draft-read-token", grant);
     }
     let body = match body {
         Some(v) => {
@@ -153,7 +154,17 @@ async fn call(
 }
 
 #[tokio::test]
-async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
+async fn disabled_draft_service_reports_unavailable_without_affecting_router() {
+    let app = build_router(HttpAppState::new(Services::builder().build_for_test()));
+    for (method, suffix) in [("GET", "/revisions/1"), ("POST", "/revisions/1/validate")] {
+        let (status, body) = call(&app, method, suffix, None, None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"], "DRAFT_SERVICE_UNAVAILABLE");
+    }
+}
+
+#[tokio::test]
+async fn complete_fixed_version_http_contract_without_read_credentials() {
     let (app, _dir) = app().await;
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/collaboration-definition-draft/indentation-regression.json"
@@ -161,7 +172,7 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
     .unwrap();
     let body = json!({"definition_yaml":fixture["revision"]["definition_yaml"],"title":"现场回归"});
     assert_eq!(
-        call(&app, "PUT", "", None, None, Some(body.clone()))
+        call(&app, "PUT", "", None, Some(body.clone()))
             .await
             .0,
         StatusCode::UNAUTHORIZED
@@ -171,7 +182,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         "PUT",
         "",
         Some("owner-token"),
-        None,
         Some(body.clone()),
     )
     .await;
@@ -184,7 +194,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "PUT",
             "",
             Some("owner-token"),
-            None,
             Some(body.clone())
         )
         .await
@@ -197,7 +206,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "PUT",
             "",
             Some("other-token"),
-            None,
             Some(body.clone())
         )
         .await
@@ -210,22 +218,25 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         "/revisions/1/reference",
         Some("owner-token"),
         None,
-        None,
     )
     .await;
-    assert_eq!(reference.as_object().unwrap().len(), 4);
-    let token = reference["readToken"].as_str().unwrap();
-    assert_eq!(token.len(), 43);
-    let (status, read) = call(&app, "GET", "/revisions/1", None, Some(token), None).await;
+    let previous: PreviousCliReference = serde_json::from_value(reference.clone()).unwrap();
+    assert_eq!((previous.schema_version, previous.draft_id.as_str(), previous.revision), (2, ID, 1));
+    let decoded = URL_SAFE_NO_PAD.decode(&previous.read_token).unwrap();
+    assert_eq!(decoded, [0; 32]);
+    assert_eq!(URL_SAFE_NO_PAD.encode(decoded), previous.read_token);
+    let (normalized, message) = bcs_cli::collaboration_draft::reference_message(reference, ID, 1).unwrap();
+    assert_eq!(serde_json::to_value(normalized).unwrap(), json!({"schemaVersion":2,"draftId":ID,"revision":1}));
+    assert!(!message.contains("readToken"));
+    let (status, read) = call(&app, "GET", "/revisions/1", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read, saved);
-    assert!(read.get("share_nonce").is_none());
+    assert!(read.get("read_token").is_none());
     let (status, validation) = call(
         &app,
         "POST",
         "/revisions/1/validate",
         None,
-        Some(token),
         None,
     )
     .await;
@@ -238,26 +249,11 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "POST",
             "/revisions/1/validate",
             None,
-            Some(token),
             Some(json!({"definition_yaml":"substitute"}))
         )
         .await
         .0,
         StatusCode::BAD_REQUEST
-    );
-    // Bad read token cannot fall back to a valid owner credential.
-    assert_eq!(
-        call(
-            &app,
-            "GET",
-            "/revisions/1",
-            Some("owner-token"),
-            Some("bad"),
-            None
-        )
-        .await
-        .0,
-        StatusCode::NOT_FOUND
     );
     for (method, suffix) in [
         ("GET", ""),
@@ -266,7 +262,11 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         ("DELETE", "/revisions/1/share"),
     ] {
         assert_eq!(
-            call(&app, method, suffix, Some("owner-token"), Some(token), None)
+            call(&app, method, suffix, None, None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            call(&app, method, suffix, Some("other-token"), None)
                 .await
                 .0,
             StatusCode::FORBIDDEN
@@ -274,7 +274,7 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
     }
     let mut forged = body.clone();
     forged["owner_bot_id"] = json!("credential-that-must-not-be-echoed");
-    let (status, error) = call(&app, "PUT", "", Some("owner-token"), None, Some(forged)).await;
+    let (status, error) = call(&app, "PUT", "", Some("owner-token"), Some(forged)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(error, json!({"error":"DRAFT_INPUT"}));
     let update = json!({"definition_yaml":"invalid: [","expected_revision":1});
@@ -284,7 +284,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "POST",
             "/revisions",
             Some("owner-token"),
-            None,
             Some(update.clone())
         )
         .await
@@ -297,7 +296,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "POST",
             "/revisions",
             Some("owner-token"),
-            None,
             Some(update)
         )
         .await
@@ -305,18 +303,18 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         StatusCode::CONFLICT
     );
     assert_eq!(
-        call(&app, "GET", "/revisions/2", None, Some(token), None)
-            .await
-            .0,
-        StatusCode::NOT_FOUND
+        call(&app, "GET", "/revisions/2", None, None).await.1["definition_yaml"],
+        "invalid: ["
     );
+    // Updating the head never replaces the original version.
+    assert_eq!(call(&app, "GET", "/revisions/1", None, None).await.1, saved);
+    assert_eq!(call(&app, "GET", "/revisions/3", None, None).await.0, StatusCode::NOT_FOUND);
     assert_eq!(
         call(
             &app,
             "DELETE",
             "/revisions/1/share",
             Some("owner-token"),
-            None,
             None
         )
         .await
@@ -329,7 +327,6 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
             "DELETE",
             "/revisions/1/share",
             Some("owner-token"),
-            None,
             None
         )
         .await
@@ -337,24 +334,27 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        call(&app, "GET", "/revisions/1", None, Some(token), None)
+        call(&app, "GET", "/revisions/1", None, None)
             .await
             .0,
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        call(&app, "GET", "/revisions/1", Some("owner-token"), None, None)
+        call(&app, "GET", "/revisions/1", Some("owner-token"), None)
             .await
             .0,
-        StatusCode::OK
+        StatusCode::NOT_FOUND
     );
+    for bot in [None, Some("owner-token")] {
+        assert_eq!(call(&app, "POST", "/revisions/1/validate", bot, None).await.0, StatusCode::NOT_FOUND);
+    }
+    assert_eq!(call(&app, "GET", "/revisions/2", None, None).await.0, StatusCode::OK);
     assert_eq!(
         call(
             &app,
             "GET",
             "/revisions/1/reference",
             Some("owner-token"),
-            None,
             None
         )
         .await
@@ -362,13 +362,14 @@ async fn complete_fixed_version_http_contract_and_read_capability_precedence() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        call(&app, "DELETE", "", Some("owner-token"), None, None)
+        call(&app, "DELETE", "", Some("owner-token"), None)
             .await
             .0,
         StatusCode::NO_CONTENT
     );
+    assert_eq!(call(&app, "GET", "/revisions/2", None, None).await.0, StatusCode::NOT_FOUND);
     assert_eq!(
-        call(&app, "PUT", "", Some("owner-token"), None, Some(body))
+        call(&app, "PUT", "", Some("owner-token"), Some(body))
             .await
             .0,
         StatusCode::NOT_FOUND

@@ -102,6 +102,11 @@ def deps():
         has_collaborators=False,
         is_owner=False,
     )
+    def matches(bot_id, locator):
+        bot = values.bot_repo.get_by_id_and_owner(bot_id, locator)
+        return [{"entity_id": "owner", "env": "dev", **bot}] if bot else []
+
+    values.bot_repo.list_matches_by_legacy_locator.side_effect = matches
     values.facade = ServicePublicationFacade(
         bot_repo=values.bot_repo,
         publish_repo=values.publish_repo,
@@ -1130,3 +1135,19 @@ def test_lock_can_be_acquired_without_an_editable_draft(deps):
 
     assert result.holder_user_id == "member"
     deps.lock_service.acquire_lock.assert_called_once_with("bot-1", "owner", "member")
+
+
+def test_upgrade_publication_maps_retained_draft_failure_to_upstream(deps, monkeypatch):
+    from agentclaw.community.core.service_bot.services.publish_exceptions import UpgradeDraftRestartError
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    online = record(1, PublishStatus.SUCCESS, version=1)
+    draft = record(2, PublishStatus.DRAFT, version=2)
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.ADMIN
+    deps.publish_repo.get_by_id.return_value = online
+    deps.publish_service.upgrade_publish.side_effect = UpgradeDraftRestartError(draft)
+    with pytest.raises(ServiceContainerUpstreamError, match="draft"):
+        deps.facade.upgrade_publication("bot-1", 1, actor_id="admin", owner_id="owner")

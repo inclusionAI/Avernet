@@ -14,7 +14,7 @@ export function DimensionTabs({ activeKey, dimensions, onChange }: DimensionTabs
 
   return (
     <div
-      className="flex flex-wrap gap-2 border-b border-[var(--color-border)] px-6 py-3"
+      className="flex flex-wrap gap-2 border-b border-divider px-6 py-3"
       role="tablist"
       aria-label="体检维度"
     >

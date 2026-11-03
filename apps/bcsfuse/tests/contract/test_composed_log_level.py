@@ -77,8 +77,8 @@ def make_app():
 @pytest.mark.parametrize(
     "environment,override,expected_debug",
     [
-        ("prepub", None, True),
-        ("pre", None, True),
+        ("prepub", None, False),
+        ("pre", None, False),
         ("prod", None, False),
         ("", None, False),
         ("prepub", "INFO", False),
@@ -115,10 +115,10 @@ def test_composed_runtime_level_and_trace_preserve_host_output(
 
 
 @pytest.mark.parametrize("fallback", ["REAL_SERVER_ENV", "ALIPAY_APP_ENV"])
-def test_prepub_environment_fallback_enables_debug(monkeypatch, fallback):
+def test_prepub_environment_fallback_keeps_info(monkeypatch, fallback):
     monkeypatch.setenv(fallback, "prepub")
     with TestClient(make_app()):
-        assert logging.getLogger("src.application.services.new_logger").isEnabledFor(logging.DEBUG)
+        assert not logging.getLogger("src.application.services.new_logger").isEnabledFor(logging.DEBUG)
 
 
 def test_server_environment_wins_over_fallback(monkeypatch):
@@ -142,4 +142,5 @@ def test_public_startup_without_host_handlers_emits_trace(monkeypatch, capsys):
         client.get("/log-probe", headers={"X-Trace-ID": "public-probe"})
     captured = capsys.readouterr()
     assert "[public-probe]" in captured.err
-    assert "candidate-detail" in captured.err
+    assert "pipeline-summary" in captured.err
+    assert "candidate-detail" not in captured.err

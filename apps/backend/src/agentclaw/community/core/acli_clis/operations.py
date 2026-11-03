@@ -97,6 +97,8 @@ class AcliRuntime:
     #: The bot's owner; with ``bot_id`` it locates the bot row.
     owner_id: str
     stage: PublishStage
+    #: The bot's ``active_engine``; it picks the engine's acli endpoint prefix.
+    engine: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +173,9 @@ class OperationPayload:
     cli_desc: str | None = None
     #: The operation a cancel targets; cancel only.
     target_operation_id: str | None = None
+    #: The bot's ``active_engine`` (``AcliRuntime.engine``); empty in a payload
+    #: enqueued before it was recorded, which only an adapter engine could take.
+    engine: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -180,7 +185,7 @@ class OperationPayload:
             "stage": self.stage.value,
             "actor_id": self.actor_id, "enqueued_at": self.enqueued_at,
             "identity_mode": self.identity_mode, "cli_desc": self.cli_desc,
-            "target_operation_id": self.target_operation_id,
+            "target_operation_id": self.target_operation_id, "engine": self.engine,
         }
 
     @classmethod
@@ -194,11 +199,14 @@ class OperationPayload:
             enqueued_at=float(data.get("enqueued_at") or 0),
             identity_mode=data.get("identity_mode"), cli_desc=data.get("cli_desc"),
             target_operation_id=data.get("target_operation_id"),
+            engine=str(data.get("engine") or ""),
         )
 
     @property
     def runtime(self) -> AcliRuntime:
-        return AcliRuntime(bot_id=self.bot_id, owner_id=self.owner_id, stage=self.stage)
+        return AcliRuntime(
+            bot_id=self.bot_id, owner_id=self.owner_id, stage=self.stage, engine=self.engine
+        )
 
 
 def task_error(code: str, message: str) -> str:

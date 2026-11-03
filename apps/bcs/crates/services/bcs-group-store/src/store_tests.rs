@@ -542,27 +542,6 @@ async fn dm_insert_persists_the_requested_context() {
 }
 
 #[tokio::test]
-async fn workspace_update_is_visible_until_restart() {
-    let db = Arc::new(RecordingDbPlugin::default());
-    let repo = MySqlGroupStore::new(db, "local".to_string());
-    let group = Group::new("group-1", "driver", Vec::new());
-    repo.cache.write().await.insert(group.id.clone(), group);
-    let workspace = Workspace {
-        decisions: vec!["ship the hotfix".to_string()],
-        notes: vec!["customer impact contained".to_string()],
-        ..Workspace::default()
-    };
-
-    repo.update_workspace("group-1", workspace.clone())
-        .await
-        .expect("update workspace");
-
-    let stored = repo.get("group-1").await.expect("group exists");
-    assert_eq!(stored.workspace.decisions, workspace.decisions);
-    assert_eq!(stored.workspace.notes, workspace.notes);
-}
-
-#[tokio::test]
 async fn mutable_patch_serializes_routing_policy_before_sql() {
     let mut policy = RoutingPolicy {
         mode: bcs_service_api::RoutingMode::Mention,

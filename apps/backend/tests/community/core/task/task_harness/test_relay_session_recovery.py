@@ -4,9 +4,10 @@ import unittest
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
-    RELAY_HARNESS_RESUME_PROMPT,
+    RelaySessionPreconditionError,
     RelaySessionRecovery,
-    RelaySessionRecoveryError,
+    RELAY_HARNESS_RESUME_PROMPT,
+    relay_harness_resume_prompt,
 )
 from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
 
@@ -93,16 +94,14 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.channel, "openapi_bot_session")
         self.assertEqual(result.session_id, "engine-session")
-        self.assertEqual(
-            RELAY_HARNESS_RESUME_PROMPT,
-            "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。",
-        )
+        self.assertEqual(relay_harness_resume_prompt(), RELAY_HARNESS_RESUME_PROMPT)
+
         self.assertEqual(
             bot.calls,
             [
                 {
                     "bot_id": compose_bot_identity("bot1", "146836"),
-                    "message": RELAY_HARNESS_RESUME_PROMPT,
+                    "message": relay_harness_resume_prompt(),
                     "metadata": {"session_id": "engine-session"},
                 }
             ],
@@ -142,16 +141,49 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             [
                 {
                     "session_id": "group-session",
-                    "message": RELAY_HARNESS_RESUME_PROMPT,
+                    "message": relay_harness_resume_prompt(),
                     "caller_bearer": "bearer-token",
                 }
             ],
         )
 
-    async def test_missing_session_fails_closed_without_dispatch(self):
+    async def test_all_resume_steps_use_the_same_continuation_prompt(self):
+        bot = _FakeOpenApiBot()
+        recovery = RelaySessionRecovery(bot=bot)
+        node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
+
+        for resume_step in (None, "S1-S4a", "S5", "S6"):
+            with self.subTest(resume_step=resume_step):
+                await recovery.resume(node, resume_step=resume_step)
+
+        self.assertEqual(
+            [call["message"] for call in bot.calls],
+            [RELAY_HARNESS_RESUME_PROMPT] * 4,
+        )
+        self.assertIn("从当前会话历史中获取 S1 到断点前已形成的上下文和结果", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("不要重做已完成步骤", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("从第一个未完成步骤继续执行，直到流程执行完为止", RELAY_HARNESS_RESUME_PROMPT)
+
+    async def test_missing_session_is_a_precondition_error(self):
         recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
-        with self.assertRaisesRegex(RelaySessionRecoveryError, "no existing session_id"):
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no existing session_id"):
             await recovery.resume(_Node(assignee="bot1"))
+
+    async def test_placeholder_assignee_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no valid assignee"):
+            await recovery.resume(
+                _Node(assignee="NOT_DECIDED", session_id="engine-session")
+            )
+
+    async def test_group_without_session_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(
+            bot=object(), bcs=_FakeBcs(), bot_tokens=_FakeTokens()
+        )
+        with self.assertRaisesRegex(
+            RelaySessionPreconditionError, "group node has no existing session_id"
+        ):
+            await recovery.resume(_Node(assignee="g1", group_id="g1"))
 
 
 class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):

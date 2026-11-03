@@ -8,6 +8,8 @@ import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /**
  * InviteAcceptPanel —— 邀请接受落地页（纯 view）。
@@ -124,6 +126,7 @@ export function InviteAcceptPanel() {
       <Button
         size="lg"
         onClick={() => {
+          Tracert.click(Points.invite.accept);
           void accept(viewScope);
         }}
       >

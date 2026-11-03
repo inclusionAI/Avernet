@@ -5,9 +5,9 @@ set +x
 profile="web"
 endpoint=""
 bot_name="DeepSeek Harness Bot"
-package_spec="@avernet-plugin/deepseek-harness-channel-bcn@0.2.0"
+package_spec="@avernet-plugin/deepseek-harness-channel-bcn@0.2.4"
 start_dsh=true
-dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.2.1-alpha.2}"
+dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.2.1-rc.2}"
 
 usage() {
   echo "Usage: install-dsh.sh --endpoint <url> [--profile <name>] [--bot-name <name>] [--package <npm-spec-or-path>] [--no-start]"

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from injector import inject
-
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -14,6 +12,7 @@ from agentclaw.community.core.execution_identity.contracts import (
     ExecutionIdentityNotFoundError,
     ExecutionIdentityOperationNotAllowedError,
     ExecutionIdentityType,
+    OwnerHandoffExecutionPlan,
 )
 from agentclaw.community.core.execution_identity.protocols import (
     ExecutionIdentityServiceProtocol,
@@ -24,6 +23,7 @@ from agentclaw.community.core.repository.protocols.identity import (
     ExecutionIdentityRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from injector import inject
 
 
 def _public(binding: ExecutionIdentityBinding) -> dict[str, Any]:
@@ -59,6 +59,37 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
         active = self._bindings.get_active(bot_pk=bot_pk)
         return active.execution_workno if active is not None else owner_id
 
+    def plan_owner_handoff(
+        self, *, bot_pk: int, new_owner_id: str
+    ) -> OwnerHandoffExecutionPlan:
+        bot = self._bots.get_by_pk(bot_pk)
+        if bot is None:
+            raise BotNotFoundError(f"Bot not found: {bot_pk}")
+        if bot.get("bot_type") != "service" or bot["bot_id"] == "default":
+            raise ExecutionIdentityOperationNotAllowedError(
+                "Only non-default service Bots support handoff"
+            )
+        if not new_owner_id.strip() or not str(bot.get("entity_id") or "").strip():
+            raise ExecutionIdentityOperationNotAllowedError(
+                "Owner and stable entity are required"
+            )
+        if self._bindings.get_pending(bot_pk=bot_pk) is not None:
+            raise ExecutionIdentityOperationNotAllowedError(
+                "Execution identity change is pending"
+            )
+        active = self._bindings.get_active(bot_pk=bot_pk)
+        return OwnerHandoffExecutionPlan(
+            bot_pk=bot_pk,
+            bot_id=str(bot["bot_id"]),
+            entity_id=str(bot["entity_id"]),
+            current_owner_id=str(bot["owner_id"]),
+            new_owner_id=new_owner_id,
+            execution_workno=active.execution_workno
+            if active is not None
+            else new_owner_id,
+            requires_reissue=active is None and str(bot["owner_id"]) != new_owner_id,
+        )
+
     def change_execution_identity(
         self,
         *,
@@ -81,6 +112,11 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
             raise ExecutionIdentityOperationNotAllowedError(
                 "Bot entity_id is required for passport addressing"
             )
+        from agentclaw.community.core.bot_management.owner_handoff.guard import (
+            assert_bot_mutable,
+        )
+
+        assert_bot_mutable(bot)
         bot_pk = int(bot["id"])
 
         if action == "reissue":
@@ -182,11 +218,12 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
         pending = self._bindings.get_pending(bot_pk=bot_pk)
         if pending is None:
             raise ExecutionIdentityNotFoundError("No pending execution identity change")
-        auth = self._passport.query_auth_status(
-            bot_id, owner_id, entity_id=entity_id
-        ) or {}
+        auth = (
+            self._passport.query_auth_status(bot_id, owner_id, entity_id=entity_id)
+            or {}
+        )
         token = auth.get("token")
-        if not token:
+        if auth.get("status") != "ISSUED" or not token:
             response = _public(pending)
             response.update(
                 {
@@ -197,12 +234,20 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
                 }
             )
             return response
-        passport = self._passport.query_agent_passport(
-            bot_id, owner_id, entity_id=entity_id
-        ) or {}
+        passport = (
+            self._passport.query_agent_passport(bot_id, owner_id, entity_id=entity_id)
+            or {}
+        )
         if passport.get("execution_workno") != pending.execution_workno:
             raise ExecutionIdentityOperationNotAllowedError(
                 "Latest passport execution_workno does not match pending binding"
+            )
+        if (
+            pending.credential_id
+            and passport.get("credential_id") != pending.credential_id
+        ):
+            raise ExecutionIdentityOperationNotAllowedError(
+                "Latest passport credential does not match pending binding"
             )
         runtime_result = self._runtime.hot_update_passport_token_to_device(
             bot_id=bot_id, user_id=owner_id, token=str(token)

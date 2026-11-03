@@ -263,6 +263,86 @@ async fn connect_bot_ws_with_retry(
     }
 }
 
+/// TRUSTED registration (bot-authority plan Task 6,
+/// ruling T6d-1): the harness seeds each fixture
+/// Bot's authority ownership through the local
+/// trusted register surface —
+/// `GET /register/token` (mock HUMAN principal) →
+/// `POST /register?token&bot-name` (the
+/// `register_with_ownership` composite commits the
+/// authority owner edge). The mock-user header
+/// NEVER reaches authority writes through
+/// onboard-side flows.
+async fn register_trusted_bot(
+    client: &reqwest::Client,
+    bcs_url: &str,
+    name: &str,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let resp = client
+        .get(&format!("{}/register/token", bcs_url))
+        .header("X-Mock-User-Id", WORKBENCH_STAFF_NO)
+        .header("X-Mock-Nick-Name", WORKBENCH_NICK_NAME)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "register token mint failed: {} - {}",
+            status, body
+        )
+        .into());
+    }
+    let body: serde_json::Value = resp.json().await?;
+    let register_token = body["token"]
+        .as_str()
+        .ok_or("register token response missing 'token'")?
+        .to_string();
+
+    let resp = client
+        .post(&format!(
+            "{}/register?token={}&bot-name={}",
+            bcs_url,
+            urlencode(&register_token),
+            urlencode(name)
+        ))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "trusted registration failed: {} - {}",
+            status, text
+        )
+        .into());
+    }
+    let body: serde_json::Value = serde_json::from_str(&text)?;
+    let bot_uuid = body["bot_uuid"]
+        .as_str()
+        .ok_or("registration response missing bot_uuid")?
+        .to_string();
+    let bot_token = body["bot_token"]
+        .as_str()
+        .ok_or("registration response missing bot_token")?
+        .to_string();
+    Ok((bot_uuid, bot_token))
+}
+
+fn urlencode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
+            | b'.' | b'~' => encoded.push(byte as char),
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
+}
+
 async fn bind_bot_to_workbench_user(
     client: &reqwest::Client,
     bcs_url: &str,
@@ -538,13 +618,30 @@ async fn e2e_workbench_protocol_connect_and_send() {
     let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
     println!("[Step 1] BCS started on port {}", bcs_port);
 
-    // Connect a real bot via WebSocket (required for onboard and group creation)
-    println!("\n[Step 2] Connecting bot via WebSocket...");
+    // TRUSTED authorization seeding (ruling T6d-1):
+    // the fixture Bot's ownership is established
+    // through the local trusted register surface
+    // (`register_with_ownership` commits the
+    // authority owner edge); the WS connect then
+    // RESUMES that registered bot.
+    let client = reqwest::Client::new();
+    println!("\n[Step 2] Registering the trusted fixture bot...");
+    let (future_bot_uuid, bot_token) =
+        register_trusted_bot(&client, &bcs_url, "Protocol Test Bot")
+            .await
+            .expect("trusted fixture registration");
+    println!(
+        "[Step 2] Trusted bot registered: uuid={}",
+        future_bot_uuid
+    );
+
+    println!("\n[Step 3] Connecting the registered bot via WebSocket...");
     let ws = connect_bot_ws_with_retry(bcs_port).await;
     let (mut bot_sink, mut bot_stream) = ws.split();
 
     let connect_frame = serde_json::json!({
-        "type": "req", "id": "bot_connect_1", "method": "bot.connect", "params": {}
+        "type": "req", "id": "bot_connect_1", "method": "bot.connect",
+        "params": { "token": bot_token }
     });
     bot_sink.send(Message::Text(serde_json::to_string(&connect_frame).unwrap().into())).await.unwrap();
 
@@ -565,19 +662,18 @@ async fn e2e_workbench_protocol_connect_and_send() {
         }
     };
     let bot_uuid = connect_resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
-    let bot_token = connect_resp["payload"]["token"].as_str().unwrap_or("").to_string();
-    assert!(!bot_uuid.is_empty(), "bot_uuid should not be empty");
-    assert!(!bot_token.is_empty(), "bot_token should not be empty");
-    println!("[Step 2] Bot connected: uuid={}", bot_uuid);
+    assert_eq!(bot_uuid, future_bot_uuid, "the WS resume must return the REGISTERED bot");
+    println!("[Step 3] Bot connected: uuid={}", bot_uuid);
 
-    // Onboard the bot via HTTP API
-    let client = reqwest::Client::new();
+    // Runtime onboarding (mock user header) keeps its
+    // old semantics but must never touch the authority
+    // owner edge seeded by the trusted registration.
     if let Err(e) =
         bind_bot_to_workbench_user(&client, &bcs_url, &bot_token, "Protocol Test Bot").await
     {
-        panic!("[Step 2] Failed to onboard bot: {}", e);
+        panic!("[Step 3] Failed to onboard the registered bot: {}", e);
     }
-    println!("[Step 2] Bot onboarded");
+    println!("[Step 3] Runtime onboard kept the authority owner intact");
 
     // Drain onboarding instruction
     loop {
@@ -692,6 +788,149 @@ async fn e2e_workbench_protocol_connect_and_send() {
 }
 
 // ============================================================================
+// Test: RAW onboarding (no trusted seed) is DENIED
+// ============================================================================
+
+/// v0 polarity (bot-authority ruling T6d-1.2): a
+/// raw WS connect + mock-user onboard flow never
+/// mints authority ownership (A01: runtime self-
+/// declared identity cannot mint authority), so
+/// the workbench group gate DENIES exactly the
+/// flow that the seeded harness above allows.
+#[tokio::test]
+async fn e2e_workbench_raw_onboarding_denies_group_access() {
+    init_logging();
+    println!("\n========== E2E Raw Onboarding Polarity Test ==========\n");
+
+    let (_temp_dir, data_dir) = create_temp_dir();
+    let mut pm = ProcessManager::new();
+
+    // v0 deny polarity is the POST-migration posture: pin it with
+    // the migration-window legacy fallback explicitly OFF. With the
+    // shim ON (default) a self-declared runtime header legitimately
+    // echoes legacy created_by ownership during the window; that
+    // posture has its own store-level coverage
+    // (`legacy_created_by_fallback_resolves_only_the_legacy_creator`
+    // on both drivers).
+    let bcs_port = match pm
+        .start_bcs_with_extra_config(
+            &data_dir,
+            Some(serde_json::json!({
+                "bot_authority": { "legacy_created_by_fallback": false }
+            })),
+        )
+        .await
+    {
+        Ok(port) => port,
+        Err(e) => {
+            eprintln!("Failed to start BCS: {}. Skipping test.", e);
+            return;
+        }
+    };
+    let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
+
+    // RAW connect: anonymous WS connect mints an
+    // UNOWNED bot; the mock-user onboard never
+    // touches authority (a runtime self-declared
+    // user header must not mint authority
+    // ownership).
+    println!("\n[Step 1] Raw WS connect (no trusted registration)...");
+    let ws = connect_bot_ws_with_retry(bcs_port).await;
+    let (mut bot_sink, mut bot_stream) = ws.split();
+    let connect_frame = serde_json::json!({
+        "type": "req", "id": "bot_connect_1", "method": "bot.connect", "params": {}
+    });
+    bot_sink
+        .send(Message::Text(
+            serde_json::to_string(&connect_frame).unwrap().into(),
+        ))
+        .await
+        .unwrap();
+    let connect_resp = loop {
+        match tokio::time::timeout(Duration::from_secs(5), bot_stream.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if v["type"] == "res" && v["id"] == "bot_connect_1" {
+                        break v;
+                    }
+                }
+            }
+            Ok(Some(Ok(Message::Ping(data)))) => {
+                let _ = bot_sink.send(Message::Pong(data)).await;
+                continue;
+            }
+            _ => panic!("No response to bot.connect"),
+        }
+    };
+    let bot_uuid = connect_resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
+    let bot_token = connect_resp["payload"]["token"].as_str().unwrap_or("").to_string();
+    println!("[Step 1] Raw bot connected: uuid={}", bot_uuid);
+
+    // RAW onboard with the mock user header — succeeds as
+    // a runtime onboarding, but stays authority-inert.
+    let client = reqwest::Client::new();
+    bind_bot_to_workbench_user(&client, &bcs_url, &bot_token, "Raw Onboard Bot")
+        .await
+        .expect("raw onboard succeeds over HTTP");
+    println!("[Step 1] Raw onboard done (authority untouched)");
+
+    // Drain the onboarding instruction.
+    loop {
+        match tokio::time::timeout(Duration::from_millis(200), bot_stream.next()).await {
+            Ok(Some(Ok(Message::Text(_)))) => continue,
+            Ok(Some(Ok(Message::Ping(data)))) => {
+                let _ = bot_sink.send(Message::Pong(data)).await;
+                continue;
+            }
+            _ => break,
+        }
+    }
+
+    // The Bot (its own identity) can still create its
+    // group.
+    println!("\n[Step 2] Creating group as the raw bot...");
+    let create_resp = client
+        .post(&format!("{}/groups", bcs_url))
+        .header("Authorization", format!("Bearer {}", bot_token))
+        .json(&serde_json::json!({
+            "driver_bot": bot_uuid,
+            "participants": [
+                { "bot_uuid": bot_uuid, "role": "driver" }
+            ],
+            "label": "Raw Onboard Group"
+        }))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("group create request");
+    assert!(
+        create_resp.status().is_success(),
+        "the bot-self group creation stays allowed: {}",
+        create_resp.status()
+    );
+    let group_id = create_resp.json::<serde_json::Value>().await
+        .expect("group create body")["id"]
+        .as_str()
+        .expect("group id")
+        .to_string();
+    println!("[Step 2] Group created: {}", group_id);
+
+    // The workbench gate DENIES: no authority edge was
+    // ever minted by the raw onboard.
+    println!("\n[Step 3] Workbench subscribe (must be DENIED)...");
+    let mut wb_client = WorkbenchClient::connect(bcs_port).await
+        .expect("workbench client");
+    let resp = wb_client.subscribe_group(&group_id).await.expect("subscribe response");
+    assert!(
+        !resp["ok"].as_bool().unwrap_or(true),
+        "the raw-onboard bot must NOT be workbench-accessible: {resp}"
+    );
+    println!("[Step 3] DENIED as expected — v0 deny polarity pinned");
+
+    println!("\n========== E2E Raw Onboarding Polarity Test PASSED ==========\n");
+}
+
+// ============================================================================
 // Test: Multiple Frontends Receive Same Events
 // ============================================================================
 
@@ -718,13 +957,27 @@ async fn e2e_workbench_multi_frontend_broadcast() {
     let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
     println!("[Step 1] BCS started on port {}", bcs_port);
 
-    // Connect a real bot via WebSocket (required for group creation)
-    println!("\n[Step 2] Connecting test bot via WebSocket...");
+    // TRUSTED authorization seeding (ruling T6d-1):
+    // the fixture Bot's ownership is established
+    // through the local trusted register surface.
+    let client = reqwest::Client::new();
+    println!("\n[Step 2] Registering the trusted fixture bot...");
+    let (future_bot_uuid, bot_token) =
+        register_trusted_bot(&client, &bcs_url, "Multi Test Bot")
+            .await
+            .expect("trusted fixture registration");
+    println!(
+        "[Step 2] Trusted bot registered: uuid={}",
+        future_bot_uuid
+    );
+
+    println!("\n[Step 3] Connecting the registered bot via WebSocket...");
     let ws = connect_bot_ws_with_retry(bcs_port).await;
     let (mut bot_sink, mut bot_stream) = ws.split();
 
     let connect_frame = serde_json::json!({
-        "type": "req", "id": "bot_connect_1", "method": "bot.connect", "params": {}
+        "type": "req", "id": "bot_connect_1", "method": "bot.connect",
+        "params": { "token": bot_token }
     });
     bot_sink.send(Message::Text(serde_json::to_string(&connect_frame).unwrap().into())).await.unwrap();
 
@@ -745,18 +998,17 @@ async fn e2e_workbench_multi_frontend_broadcast() {
         }
     };
     let bot_uuid = connect_resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
-    let bot_token = connect_resp["payload"]["token"].as_str().unwrap_or("").to_string();
-    assert!(!bot_uuid.is_empty(), "bot_uuid should not be empty");
-    println!("[Step 2] Bot connected: uuid={}", bot_uuid);
+    assert_eq!(bot_uuid, future_bot_uuid, "the WS resume must return the REGISTERED bot");
+    println!("[Step 3] Bot connected: uuid={}", bot_uuid);
 
-    // Onboard the bot via HTTP API
-    let client = reqwest::Client::new();
+    // Runtime onboarding (mock user header) must
+    // keep the trusted owner edge intact.
     if let Err(e) =
         bind_bot_to_workbench_user(&client, &bcs_url, &bot_token, "Multi Test Bot").await
     {
-        panic!("[Step 2] Failed to onboard bot: {}", e);
+        panic!("[Step 3] Failed to onboard the registered bot: {}", e);
     }
-    println!("[Step 2] Bot onboarded: {}", bot_uuid);
+    println!("[Step 3] Runtime onboard kept the authority owner intact: {}", bot_uuid);
 
     // Drain onboarding instruction
     loop {

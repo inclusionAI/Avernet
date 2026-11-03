@@ -57,11 +57,13 @@ class AcliBotNotRunningError(AcliContainerError):
 
 
 class AcliEngineOutdatedError(AcliContainerError):
-    """The bot's engine type supports acli, but its running build predates it.
+    """The bot's engine type supports acli, but its engine lacks the endpoints.
 
-    The engine answered its framework's own "no such route" 404, so nothing ran
-    in the container. Updating or restarting the bot fixes it, so this is a
-    state of the bot, not ``AcliEngineUnsupportedError``.
+    An install, uninstall, cancel or listing got a 404: a build that predates
+    the endpoints, or an engine serving its own API that does not implement
+    them. Nothing ran in the container, and a retry gets the same answer.
+    Updating the engine fixes it, so this is a state of the bot's engine, not
+    ``AcliEngineUnsupportedError`` (an engine type with no acli at all).
     """
 
 

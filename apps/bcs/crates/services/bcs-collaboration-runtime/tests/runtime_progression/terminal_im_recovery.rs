@@ -84,7 +84,6 @@ async fn terminal_im_concurrent_recovery_and_new_activation_reject_old_ack() {
     let foreground = terminal(&h, 0, &run, "result"); tokio::pin!(foreground);
     tokio::select! { r = &mut foreground => panic!("unexpected completion: {r:?}"), () = channel.entered.notified() => {} }
     recover_im(&h).await; assert_eq!(channel.calls.lock().await.len(), 1);
-    h.sessions.update_callback_status(&run.session_id, "not_applicable").await.unwrap();
     h.sessions.create_or_reactivate(CreateOrReactivateCommand { group_id: run.group_id.clone(), session_id: Some(run.session_id.clone()),
         params: NewSessionParams { session_kind: SessionKind::ServiceInvocation, ..Default::default() } }).await.unwrap();
     channel.resume.notify_one(); foreground.await.unwrap();

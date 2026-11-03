@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
 
 import pytest
 
@@ -138,7 +137,6 @@ async def test_mapping_message_exposes_complete_user_action(
         projection=RuntimeProjectionResolver().resolve_skills((asset,)),
     )
     delivery = SkillRuntimeDelivery(
-        guard=PassThroughSkillProjectionGuard(),
         pool_runtime=_MappingResultRuntime(code),
         pool_layouts=_MissingLayouts(),
         device_contexts=_Contexts(),

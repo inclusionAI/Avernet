@@ -6,6 +6,35 @@
 
 下文 `community/` 指 `apps/backend/src/agentclaw/community/`；简称 `services/` 指本目录的 `services/`。仓库根 `AGENTS.md` 和 `docs/arch/` 仍规定通用架构约束。本目录 `README.md` 的 Context Boundary 继续承担机器可检验的依赖声明。
 
+## B4 Bot 资源寻址兼容（2026-10-22）
+
+Bot-bound Local Skill 查询、内容、参数、安全观察、上传和删除先通过
+`BotAddressResolver` 解析请求的兼容 locator。权限使用解析结果的当前 Owner 和真实
+actor；资源使用不可变 entity。上传/删除在编辑 guard 内复核原始 locator 的权限。
+`ac_skill.user_id` 对 Bot-local 资产表示稳定 entity；共享 Repo/Center/Space 资产的
+人员、空间和授权语义保持不变。旧 API 按 skill_id 查询时，从持久资产反查 Bot 后
+仍执行相同权限检查，不能用资源 locator 判定当前调用者是 Owner。
+
+B6 继续保持转交入口关闭。Legacy BFF Router 已按职责拆分，原 skills.py /
+skillsets.py 保留 Router 和历史导入接口；共享请求解析先解析 Bot，将稳定 entity
+用于资源路径，当前 Owner 仅用于元数据和权限。上传与基于持久 Skill 的删除也使用
+同一身份边界。SkillSetService 按职责拆分为行为模块，Default 模板查询使用 entity。
+Factory 的显式 entity 优先于历史 user_id 路由别名；无状态 MCP 集合读取按方法参数 entity 定位默认模板，不能使用服务实例的旧 entity。Pool 路径不再使用当前 Owner。
+真实 actor 仍由每个命令显式传入，不能由上述路径参数获得人员授权。
+共享/离线/无 Bot 的历史目录流保留显式地址，不因此授予活跃 Bot 的访问权限。
+DB 失败或歧义不能当作 Bot 不存在后猜测资源地址。路由顺序及响应合同由 Legacy
+route snapshot 和 endpoint 测试固定。此变更不宣称真实转交事务、凭证及所有消费者
+已完成验收；后续 B7 单独实现和联合验证。
+
+交接后的 Legacy `my-skills` 经 `SkillQueryService.list_uploaded_skills` 先解析
+Bot、校验当前 Owner/协作者权限，再按 entity 读取原资产，不触发 Installation
+flush。无 Bot 的历史目录仅允许本人读取。仅传 Set ID 时从持久 Set 反查 Bot；
+历史 user/owner locator 必须解析到同一 Bot，显式 entity 优先于 user 路由别名。
+Default MCP/Set、排除项、能力快照及 AgentPass 范围使用稳定 entity；设备解析
+使用 Factory 已解析的当前 Owner (`_device_owner_id`)。人员 actor、执行身份和
+协作审计不因资源地址规范化而替换。MCP 投影仍遵循先提交 DB、尽力同步 Runtime
+的合同，真实设备文件是否收敛需要部署验收。
+
 ## 1. 从 OpenAPI 进入
 
 `community/adapters/http/openapi_v1/__init__.py` 是 Router 装配入口。所有下列路径均位于 `/openapi/v1/bots`；Space-owned 资源只是使用这个命名空间，不因此归属于某个 Bot。
@@ -62,7 +91,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | Local Skill 安全观察身份与上传历史 | 单表 `ac_local_skill_security_observation` 保存 `tc:<uuid>`、上传顺序、快照、扫描和同步状态；Local 上传不读写 `ac_skill.skill_uuid`，扫描表中的删除墓碑区分后续新身份，协作日志不承担上传审计 |
 | 异步市场引用 | `community/core/models/skill_center_reference.py` 的 batch/item 两张表 |
 | Bot 生效身份 | `ac_bot_skill_installation`、`ac_bot_mcp_installation`；行存在表示 active，不能当作“安装过但停用”的历史记录 |
-| Bot MCP 显式覆盖 | `ac_bot_mcp_config`；仅保存 Manifest 显式字段，缺失字段继续继承 user config / Center default |
+| Bot MCP 显式覆盖 | `ac_bot_mcp_config`；按 Bot/MCP 独立保存显式连接配置，缺失字段继续继承 user config / Center default；配置存在不表示有效供应 |
 | Set、成员和 Default exclusion | 组织/规则事实，由 UoW 物化到 Installation；不是第二套有效态读取算法 |
 | Runtime 文件、软链、MCP 配置 | 设备投影结果，不是 DB Desired State；存储内容存在也不等于 Skill 已激活 |
 
@@ -74,11 +103,14 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 - `CapabilityDesiredStateRepository` 是 Set state、membership、Default exclusion 与 Skill/MCP Installation 的事务写入入口；表级 SQL owner 使用同一个事务 Session。
 - 普通 Set 新建默认 `is_active=True`。active Set 增删成员同步维护 Installation；inactive Set 编辑不要求 Runtime 投影。
+- Bot MCP 配置按稳定 entity 寻址；旧 scoped owner-key 只在当前 Bot 可唯一归属时兼容读取，canonical 整值（含空对象）优先，读不迁移。replace/clear/卸载/父级清理/删除同事务消费安全别名，防止复活；未来 owner handoff 在切换前归并，未知过去 owner 孤立行不猜恢复。
+- Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。
 - `policies/capability_ownership.py` 统一判定：Set 成员（含 inactive Set 和 excluded Default member）由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个 reaching Set（含 Default）。已排除的 Default Skill/MCP 可转入同一 Bot 的普通 Set；此例外只适用于加入普通 Set，不放宽 Direct 控制。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
 - Default member 被 exclusion 后仍属于 Default；普通操作重新启用走 un-exclude。Manifest Apply 的显式声明是唯一例外：exclusion + Installation 表达 Direct claim，Reader/flush 必须保留；该状态移除 Installation 时保留 exclusion，不能恢复历史来源。
+- Apply 的 Direct claim 命令（`claim_apply_skill` / `remove_apply_skill` / `claim_apply_mcp` / `remove_apply_mcp`，实现于 `repository/implementations/skill_center/apply_claim_commands.py`）属于 apply 引擎，服务所有编译器产出的期望态（Bot Config Manifest 与 Genome 修订），不再以 Manifest 命名；审计 action 字符串（`skill_manifest_direct_claim` 等）为保持历史可查而不改。`claim_apply_skill` 的目标可以是本 Bot 的 `local://` 包，也可以是共享的 `center://` 或 `git://` 资产（Genome 修订按名称引用 Center Skill、按路径引用 Repo Skill）；共享资产的使用权限由调用方 `DirectActivationService._resolve_skill` 先行校验，资产本身被直接认领，绝不复制为 Bot 自有内容。按名称/路径查找可用资产由 `SkillQueryService` 实现的 `core/ports/shared_skill_port.py::SharedSkillPort` 回答（沿用 `resolve_skill` 的可见性规则；无匹配或同名多个 Center 资产时拒绝，不猜测，也不触发市场导入）。apply 只管理 Bot 的 Direct Skill/MCP：Skill Set 供给的内容（活动的普通 Set、扣除排除项的 Default Set、平台默认 MCP，见 `set_supplied_capabilities`）不计入当前状态、也不会被移除；这些 claim 命令不再拆除 Set 成员关系或写 Default 排除项，而是在事务内拒绝 Set 供给的条目（`SkillSetControlPlaneConflictError`，`APPLY_SET_SUPPLIED`），apply 编排器也会在写入任何内容前先检查并整体拒绝。
 - Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。普通激活仍拒绝 Platform Default MCP；Manifest 可先 exclusion 再建立 Direct Installation，已存在的特殊 Direct 可由普通更新/删除操作管理。
 - `SkillSetManagementService.list_resources()` 对 Default Set 只以当前 AgentPassport 的同一次快照补全已有 MCP 投影的 `name`/`description`，并同时读取 CLI；它不得以 Passport 增删成员、绕过 exclusion，或覆盖普通 Set 写入时固化的 MCP Center 展示快照。Passport 查询失败时保留 MCP 投影并返回空 CLI。
 - 普通技能集添加 MCP 时，Service 严格解析 Engine/template 默认 codes；UoW 在事务内核对同一 owner、Bot、Default Set、MCP code 的排除记录。代码型默认项或 Default 显式成员已被排除时允许加入普通 Set，并保留排除；未排除的代码型默认项仍返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`，未排除的显式成员仍按 Set 占用拒绝。Direct 安装/停用限制不变。取消排除时若普通 Set 已持有该 MCP，返回 `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`；重复排除不得清除 active 普通 Set 的 Installation 或 Bot MCP 配置。添加与取消排除按精确排除记录先锁后核对，避免并发恢复两种来源。
@@ -92,10 +124,16 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 一次 MCP 投影通过 Reader `active_capabilities` 同步一次 Installation，返回精确 Skill 与 installed MCP 的 `BotCapabilitySnapshot`，供 Skill Plan 和唯一 Effective MCP collector 共用。快照不包括 Policy MCP、不保证跨表事务快照隔离，不能跨变更、重试或请求缓存；Skill-only 仍使用独立 Skill 读取。Default/exclusion 与完整回刷模式均保留。MCP 配置、移除和完整白名单下发在同一次 `project_mcps` 内复用一个解析后的 `DeviceSync`；不改变下发顺序、失败处理、POST-conflict-update 或 Passport 语义。
 
+Manifest MCP 条目省略 `config` 编译为显式 preserve 指令，事务 claim 只维护供应、
+不重写配置；`config: {}` 清除 override，非空对象完整替换。resolve 校验实际保留值。
+Genome 无 override 的完整快照仍编译为明确清除。父 Replace 沿既有 Direct-only 范围
+清理 Installation 与 override（含非 Set 的暂存配置），继续保留全 Apply 冲突预检及
+仓储持锁供应复核。配置表读取用 stable entity，权限和用户默认配置仍用真实 Owner。
+
 ## 4. Local、Repo、Center 的内容身份
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。
-- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；仅 AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location，记录的 `git_path` 不改写。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
+- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location；OpenClaw Legacy 也接受固定的 `/home/admin/.openclaw/workspace/skills/skills-local/<skill_name>` 历史 Engine-view locator，并将其映射到已授权 Bot 的当前 canonical Local 包地址。两者均只兼容读取记录中的旧 locator，`git_path` 不改写；设备操作仍绑定当前 Bot。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
 - Local 上传或替换的四条成功路径统一在 `LocalSkillUploadService` 持有 edit guard 时，把本次校验的 canonical ZIP 交给 `LocalSkillSecurityUploadHook`。公共部署默认 Noop；仅显式启用的企业装配使用真实观察服务，先保存不可变快照，再绑定 `tc:<uuid>` 身份、冻结本次名称与描述、登记独立观察记录，并为扫描和资产同步分别入队。该后置链路故障需记录可定位证据和可补报状态，不能把已成功的同步上传改判为失败；后台任务不得从可变 Runtime 目录重建旧包。当前观察结果不拦截 Skill 使用。
 - 观察交接有期限；超时后释放 edit guard、记录上传 ID/摘要/精确快照 locator 和 handoff-failure 事实。晚返线程受取消栅栏约束，不能把旧包选为当前。补报必须先读回原快照并核对摘要；数据库不可用时至少输出含阶段与归属的结构化日志。完整原包不可得时不能冒称可补扫。
 - `HANDOFF_TIMEOUT` 中已有完整冻结元数据和持久上传顺序的记录也可恢复：慢写入的快照暂未出现时继续等待，出现后才读回核对摘要并补建观察；若观察记录已写入、只是超时清除了当前与同步目标指针，补报要在同一上传顺序栅栏下恢复这些指针和 handoff 阶段。旧上传仍不能覆盖更新包，不能仅凭超时后的短暂 `NOT_FOUND` 把它判为永久缺包。
@@ -274,6 +312,10 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 Local 保留现有显式 `retired_mappings` 卸载；真实目录、外部链接和结构目录保留。
 内容准备失败的 Center 声明仍保护其链接；只有成功解析的完整快照（包括合法空列表）
 允许自动清理。删除失败必须报告未收敛。发布 Service Bot 继续消费冻结 Artifact。
+
+普通文件系统投影直接将已解析计划下发 Engine，不再获取 Backend 缓存租约或二次重读快照。
+Engine 保留运行目录级进程内串行化；并发请求不保证按期望状态版本排序。设备失败仍返回
+实际 PENDING/DEGRADED，既有 Desktop 恢复语义继续适用。
 
 ## 11. 修改后的验证与文档维护
 

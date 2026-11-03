@@ -7,6 +7,8 @@ error → HTTP/envelope mapping lives in ``responses.py``.
 
 from __future__ import annotations
 
+from agentclaw.community.plugin_api.staff_dept import DeptLookupError as DeptLookupError
+
 
 class ClusterMismatchError(Exception):
     """Raised when a request's ``engine`` and ``cluster_name`` violate the rule.
@@ -148,19 +150,6 @@ class StartupScriptUnsupportedError(Exception):
     """
 
 
-class DeptLookupError(Exception):
-    """The staff directory could not answer a department lookup (→ 502).
-
-    Distinct from "no dept" (a 200 with null ``dept_*``): this is infrastructure
-    failure — the backing master-data service was unreachable, errored, or a
-    needed secret could not be resolved. ``StaffDeptPlugin.get_dept_by_work_no``
-    raises it on those, and the ``org/user`` whoami surfaces it as a 5xx so an
-    operator can tell "directory down" from "person has no dept" from "not
-    authenticated" (401). Fixed message: the specific cause is logged, never
-    returned, mirroring how ``MissingPrincipalError`` keeps its reason off the wire.
-    """
-
-
 class BotAccessRefusedError(Exception):
     """Raised when a caller is below an operation's collaborator level (→ 404).
 
@@ -175,6 +164,14 @@ class BotAccessRefusedError(Exception):
     who may not reach a bot must not be able to tell it from one that is not
     there, or the surface becomes an enumeration oracle over other people's
     bots.
+    """
+
+
+class BotAccessCheckForbiddenError(Exception):
+    """The caller is not an allowlisted application (→ 403, Bot-independent).
+
+    Raised by the transitional Bot access check before any Bot is read, so the
+    refusal carries nothing about the Bot or user that was asked about.
     """
 
 

@@ -10,19 +10,25 @@ from agentclaw.community.adapters.http.task.bbs.router import (
     close_topic_internal,
     create_reply_internal,
     create_topic_internal,
+    delete_topic_internal,
     get_topic_internal,
     list_posts_internal,
     list_topics_internal,
     read_router,
     router,
+    set_post_helpful_internal,
+    update_topic_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
+    DeleteTopicRequestUnified,
     PollSelectionRequest,
     CreateTopicRequestUnified,
     PollConfigRequest,
+    SetPostHelpfulRequest,
     TopicConfigRequest,
+    UpdateTopicRequestUnified,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
@@ -90,6 +96,12 @@ def test_internal_router_mirrors_all_bbs_operations():
         # Content surface — unified writes (author declared in the body).
         ("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
+        ("PUT", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
+        ("DELETE", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
+        (
+            "PUT",
+            "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
+        ),
         ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/close"),
         # BBS Browse Loop — subscription (per Bot) + actor-aware feed.
         ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
@@ -97,6 +109,16 @@ def test_internal_router_mirrors_all_bbs_operations():
         ("DELETE", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
         ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"),
         ("GET", "/api/v1/collaboration/tasks/bbs/browse-subscriptions"),
+        # BBS interaction events and personal-center activity projections.
+        ("POST", "/api/v1/collaboration/tasks/bbs/interactions"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/interactions/summary"),
+        ("POST", "/api/v1/collaboration/tasks/bbs/interactions/summary/batch"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/personal-center/activities"),
+        # BBS Browse Loop — manual skill-install repair trigger.
+        (
+            "POST",
+            "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install",
+        ),
         # BBS Browse Loop — manual triggers (A=framework / B=openclaw).
         ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework"),
         ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"),
@@ -116,6 +138,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
                 "status": "open",
                 "topic_type": None,
                 "author_id": None,
+                "following_owner_id": None,
                 "page": 2,
                 "page_size": 10,
             }
@@ -141,6 +164,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
         status="open",
         topic_type=None,
         author_id=None,
+        following=False,
         service=service,
     )
     topic = await get_topic_internal(
@@ -163,6 +187,48 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert posts.data.items[0].reply_to_post_id == "post_0"
     assert posts.data.items[0].reply_to_floor_no == 1
     assert posts.data.items[0].children == []
+
+
+@pytest.mark.asyncio
+async def test_internal_following_topics_use_explicit_follow_owner():
+    class Service:
+        def list_topics(self, **kwargs):
+            assert kwargs["following_owner_id"] == "900003"
+            return ForumTopicPage(total=0, items=())
+
+    payload = await list_topics_internal(
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics"),
+        page_params=PageParams(page=1, page_size=10),
+        keyword=None,
+        status=None,
+        topic_type=None,
+        author_id=None,
+        following=True,
+        following_owner_id=" 900003 ",
+        service=Service(),
+    )
+
+    assert payload.data is not None and payload.data.total == 0
+
+
+@pytest.mark.asyncio
+async def test_internal_following_topics_refuse_missing_follow_owner():
+    class Service:
+        def list_topics(self, **kwargs):
+            raise AssertionError("the following feed must not be persisted")
+
+    with pytest.raises(Forbidden):
+        await list_topics_internal(
+            request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics"),
+            page_params=PageParams(page=1, page_size=10),
+            keyword=None,
+            status=None,
+            topic_type=None,
+            author_id=None,
+            following=True,
+            following_owner_id=" ",
+            service=Service(),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +529,116 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
         "reply_to_post_id": " post_1 ",
         "poll_selection": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_set_post_helpful_internal_delegates_declared_author_and_state():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def set_post_helpful(self, **kwargs):
+            self.calls.append(kwargs)
+            return dataclasses.replace(_post(), helpful=False)
+
+    service = Service()
+    payload = await set_post_helpful_internal(
+        body=SetPostHelpfulRequest(
+            author_type="BOT", author_id="bot-a", helpful=False
+        ),
+        topic_id="topic_1",
+        post_id="post_1",
+        request=_request(
+            "PUT",
+            "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts/post_1/helpful",
+        ),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "topic_id": "topic_1",
+            "post_id": "post_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "helpful": False,
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.model_dump() == {"post_id": "post_1", "helpful": False}
+
+
+# ---------------------------------------------------------------------------
+# BBS Topic edit/delete — internal /api/v1/collaboration/tasks/bbs mirror tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_internal_update_topic_delegates_to_shared_forum_service():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def update_topic(self, **kwargs):
+            self.calls.append({"op": "update_topic", **kwargs})
+            return dataclasses.replace(_topic(), title="Edited", body="New body")
+
+    service = Service()
+    payload = await update_topic_internal(
+        body=UpdateTopicRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            title="Edited",
+            body="New body",
+        ),
+        topic_id="topic_1",
+        request=_request("PUT", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "update_topic",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+            "title": "Edited",
+            "body": "New body",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.title == "Edited"
+    assert payload.data.body == "New body"
+
+
+@pytest.mark.asyncio
+async def test_internal_delete_topic_delegates_to_shared_forum_service():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def delete_topic(self, **kwargs):
+            self.calls.append({"op": "delete_topic", **kwargs})
+            return True
+
+    service = Service()
+    payload = await delete_topic_internal(
+        body=DeleteTopicRequestUnified(author_type="BOT", author_id="bot-a"),
+        topic_id="topic_1",
+        request=_request("DELETE", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "delete_topic",
+            "topic_id": "topic_1",
+            "author_type": "BOT",
+            "author_id": "bot-a",
+        }
+    ]
+    assert payload.data is not None
+    assert payload.data.model_dump() == {"topic_id": "topic_1", "deleted": True}
 
 
 # ---------------------------------------------------------------------------

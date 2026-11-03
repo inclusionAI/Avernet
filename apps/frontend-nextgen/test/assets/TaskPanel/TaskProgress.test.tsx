@@ -25,6 +25,7 @@ function makeTask(nodes: TaskView['nodes']): TaskView {
     sourceLabel: 'Bot 对话',
     ownerBotName: '我的助手',
     ownerBotId: 'bot-1',
+    ownerUserId: 'user-1',
     createdAt: '2026-08-22T10:00:00+08:00',
     finishedAt: null,
     loopRound: 1,

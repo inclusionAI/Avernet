@@ -21,10 +21,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
+from agentclaw.community.core.apply_engine.capabilities import (
+    Category,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     MATRIX,
     SourceKind,
     refusal_for,
@@ -112,21 +112,21 @@ def _seed(world) -> None:
 #: read, so a document trying to give them one is refused earlier and would
 #: never carry the cell's message.
 _FETCHING = (
-    ManifestCategory.IDENTITY,
-    ManifestCategory.RESOURCES,
-    ManifestCategory.SKILLS,
-    ManifestCategory.CLI_TOOLS,
+    Category.IDENTITY,
+    Category.RESOURCES,
+    Category.SKILLS,
+    Category.CLI_TOOLS,
 )
 
 _ENTITY_FIELDS = {
-    ManifestCategory.IDENTITY: "      type: SOUL.md\n",
-    ManifestCategory.RESOURCES: "      path: data/a.md\n",
-    ManifestCategory.SKILLS: "      name: qc\n",
-    ManifestCategory.CLI_TOOLS: "      name: rg\n",
+    Category.IDENTITY: "      type: SOUL.md\n",
+    Category.RESOURCES: "      path: data/a.md\n",
+    Category.SKILLS: "      name: qc\n",
+    Category.CLI_TOOLS: "      name: rg\n",
 }
 
 
-def _document(category: ManifestCategory, kind: SourceKind) -> str:
+def _document(category: Category, kind: SourceKind) -> str:
     """A minimal, otherwise-valid document exercising exactly one cell."""
     entry = _ENTITY_FIELDS[category]
     if kind is SourceKind.CONTENT:
@@ -157,9 +157,9 @@ def _document(category: ManifestCategory, kind: SourceKind) -> str:
     # are the cell's own neighbouring rules, not its verdict — supplying them
     # is what keeps this test about the cell.
     if kind is SourceKind.OSS:
-        if category in (ManifestCategory.SKILLS, ManifestCategory.CLI_TOOLS):
+        if category in (Category.SKILLS, Category.CLI_TOOLS):
             entry += f'      digest: "{_DIGEST}"\n'
-        if category is ManifestCategory.SKILLS:
+        if category is Category.SKILLS:
             entry += "      unpack: zip\n"
     return (
         f"schema_version: 1\n{source}manifest:\n  {category.value}:\n"
@@ -201,7 +201,7 @@ def test_the_put_surface_matches_the_matrix_cell(
 
 
 @pytest.mark.parametrize(
-    "category", [ManifestCategory.MCP, ManifestCategory.ENGINE_CONFIG]
+    "category", [Category.MCP, Category.ENGINE_CONFIG]
 )
 def test_the_categories_with_no_source_axis_are_closed_in_every_cell(category):
     """Both are closed for all three protocols, and the table says why.

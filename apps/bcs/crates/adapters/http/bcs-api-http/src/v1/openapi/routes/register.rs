@@ -35,6 +35,16 @@ pub struct RegisterQuery {
     pub mode: Option<ProviderRegistrationMode>,
     pub provider_bot_ref: Option<String>,
     pub webhook_url: Option<String>,
+    pub agent_card_url: Option<String>,
+}
+
+#[derive(Default,Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegisterBody {
+    agent_card:Option<serde_json::Value>,
+    agent_card_url:Option<String>,
+    #[serde(alias="bot-name")]
+    bot_name:Option<String>,
 }
 
 async fn get_register_token(
@@ -61,6 +71,7 @@ async fn register_bot(
     State(state): State<ApiState>,
     headers: HeaderMap,
     query: Result<Query<RegisterQuery>, QueryRejection>,
+    body:axum::body::Bytes,
 ) -> Result<Response, ErrorResponse> {
     let request_id = RequestId::from_headers(&headers);
     let Query(query) = query.map_err(|_| invalid_request(&request_id, "invalid registration query"))?;
@@ -68,22 +79,26 @@ async fn register_bot(
         .token
         .filter(|token| !token.is_empty())
         .ok_or_else(|| invalid_request(&request_id, "missing required parameter: token"))?;
-    let bot_name = query
-        .bot_name
-        .map(|name| name.trim().to_string())
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| invalid_request(&request_id, "missing required parameter: bot-name"))?;
-    let result = state
-        .register_service
-        .register_bot(RegisterBot {
-            token,
-            bot_name,
-            mode: query.mode,
-            provider_bot_ref: query.provider_bot_ref,
-            webhook_url: query.webhook_url,
-        })
-        .await
-        .map_err(|error| application_error_response(&request_id, error))?;
+    let body:RegisterBody=if body.is_empty() {RegisterBody::default()} else {
+        serde_json::from_slice(&body).map_err(|_|invalid_request(&request_id,"invalid registration JSON body"))?
+    };
+    if (query.agent_card_url.is_some() && body.agent_card_url.is_some()) || (query.bot_name.is_some() && body.bot_name.is_some()) {
+        return Err(invalid_request(&request_id,"duplicate registration source or name"));
+    }
+    let source=bcs_service_api::types::a2a_bot::A2aCardSource::from_parts(query.agent_card_url.or(body.agent_card_url),body.agent_card)
+        .map_err(|_|invalid_request(&request_id,"provide exactly one Card URL or Card object"))?;
+    let name=query.bot_name.or(body.bot_name);
+    let bot_name=match name {
+        None if source.is_some()=>String::new(),
+        Some(name) if !name.trim().is_empty()=>name.trim().to_owned(),
+        _=>return Err(invalid_request(&request_id,"missing required parameter: bot-name")),
+    };
+    let command = RegisterBot {token,bot_name,mode:query.mode,
+        provider_bot_ref:query.provider_bot_ref,webhook_url:query.webhook_url};
+    let result = if let Some(source) = source {
+        state.register_service.register_a2a_card(command,source).await
+    } else { state.register_service.register_bot(command).await }
+        .map_err(|error|application_error_response(&request_id,error))?;
     Ok((
         StatusCode::CREATED,
         [(header::CACHE_CONTROL, "no-store")],

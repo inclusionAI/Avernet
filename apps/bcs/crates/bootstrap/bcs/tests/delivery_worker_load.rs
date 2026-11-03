@@ -106,6 +106,9 @@ impl BotDeliveryPort for MockIo {
             for _ in 0..16 {
                 let row = service.lookup(DeliveryLookup::Request(request.clone())).await.unwrap().remove(0);
                 let result = service.transition(DeliveryTransitionCommand {
+                    caller_dispatch_commit: None,
+                    caller_cancel: None,
+                    caller_terminal: None,
                     delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
                     event: DeliveryLifecycleEvent::Completed, now_ms: chrono::Utc::now().timestamp_millis(),
                     request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -155,7 +158,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
                     message_id: id.clone(), flow_kind: DeliveryFlowKind::Group, now_ms: now,
                     expire_at_ms: None, event: None,
                     message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group".into(), session_id: sid.clone(), sender_id: "human".into(), sender_type: SenderType::Human, message_type: "chat".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id), owner_bot_id: None, created_at: now as u64, run_id: String::new() },
-                    targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: format!("bot{bot:03}"), kind: DeliveryType::Send, max_queued: 10000, semantic_projection_json: serde_json::json!({"version":1}) }],
+                    targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: format!("bot{bot:03}"), kind: DeliveryType::Send, max_queued: 10000, semantic_projection_json: serde_json::json!({"version":1}), run_id: None }],
                 }).await?;
             }
         }
@@ -167,7 +170,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
         max_safe_retries: 0, pause_dispatch: false,
         bots: (0..bots).map(|b| (format!("bot{b:03}"), DeliveryRuntimePolicy { max_running: cap, min_send_interval_ms: 0 })).collect(),
         tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), startup_recovery_grace: Duration::ZERO, max_tasks: 32, max_abort_tasks: 2,
-    }};
+    }, caller_dispatch: None };
     let expected = (bots - usize::from(offline)) * sessions * 10;
     let start = Instant::now();
     let (stop, shutdown) = tokio::sync::watch::channel(false);

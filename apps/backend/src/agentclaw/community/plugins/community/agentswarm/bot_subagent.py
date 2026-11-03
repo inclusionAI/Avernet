@@ -33,9 +33,22 @@ from agentclaw.community.core.agentswarm.domain.models import (
     SubagentResult, TaskEnvelope, NonRetryableProvisioningError, spawn_digest,
 )
 from agentclaw.community.plugin_api.agentswarm.bot import BotPlatform
+from agentclaw.community.plugin_api.agentswarm.subagent import (
+    ParkedAwaitingAuthorization,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger("agentswarm")
+
+# Terminal authorization answers: a human rejection or an elapsed authorization window is the
+# authorization's own verdict — retrying would re-enter a fresh gate, so
+# they fail the attempt through the non-retryable marker, unlike the
+# platform-side terminal failures (CREATE_FAILED/APPLY_FAILED) which keep
+# their retryable classification below.
+_AUTHORIZATION_TERMINAL = frozenset({
+    BotState.AUTHORIZATION_REJECTED.value,
+    BotState.AUTHORIZATION_EXPIRED.value,
+})
 
 _TERMINAL_FAILURE = frozenset({
     BotState.AUTHORIZATION_REJECTED.value,
@@ -63,6 +76,8 @@ class AvernetSubagent:
                  create_call_timeout: float = _CREATE_CALL_TIMEOUT_SECONDS,
                  status_call_timeout: float = _STATUS_CALL_TIMEOUT_SECONDS,
                  delete_call_timeout: float = _DELETE_CALL_TIMEOUT_SECONDS,
+                 ready_poll_timeout: float = 300.0,
+                 setup_delay_seconds: float = 0.0,
                  ) -> None:
         self._spec = spec
         self._run = run
@@ -80,59 +95,82 @@ class AvernetSubagent:
         self._create_call_timeout = create_call_timeout
         self._status_call_timeout = status_call_timeout
         self._delete_call_timeout = delete_call_timeout
+        self._ready_poll_timeout = ready_poll_timeout
+        self._setup_delay_seconds = setup_delay_seconds
+        self._prov_delay_fired = False
         # Per-chat cancel registry: the in-flight chat's cooperative-unwind
         # event, reachable by ``halt()`` from off the awaiting coroutine.
         self._chat_registry_lock = threading.Lock()
         self._active_chat_cancel: threading.Event | None = None
 
     async def setup(self) -> None:
-        # Per-attempt persona (D-J): the idempotency key carries the in-slice
-        # retry index, so a torn-down attempt's row (live or soft-deleted)
-        # can never collide with the retry's create; a cross-slice replay of
-        # the same attempt number re-derives the crashed slice's key and the
-        # host's adopt leg resolves the live row. One persona per attempt,
-        # fresh context per attempt (D23).
-        self._bot_id = await asyncio.wait_for(
-            asyncio.to_thread(
-                self._platform.create_bot,
-                spec=BotCreateSpec(
-                    name=self._spec.name,
-                    description=self._spec.role,
-                    instructions=self._spec.instructions,
-                    model=self._spec.model,
-                    engine=self._spec.engine,
-                    bot_type=self._spec.bot_type,
-                    identity_file=self._spec.identity_file,
-                    metadata=dict(self._spec.metadata),
-                    config_manifest=self._spec.config_manifest,
+        # Park continuation: a re-invoked setup after a park
+        # resumes the SAME persona's provisioning — the identity leg ran
+        # before the park and its bot row is the one the authorization is
+        # pending for, so re-creating it would mint a duplicate application
+        # (or trip the host's duplicate-name refusal). Create runs at most
+        # once per bound identity; every park recheck from here is a cheap
+        # status poll.
+        if self._bot_id is None:
+            # Per-attempt persona (D-J): the idempotency key carries the in-slice
+            # retry index, so a torn-down attempt's row (live or soft-deleted)
+            # can never collide with the retry's create; a cross-slice replay of
+            # the same attempt number re-derives the crashed slice's key and the
+            # host's adopt leg resolves the live row. One persona per attempt,
+            # fresh context per attempt (D23).
+            self._bot_id = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._platform.create_bot,
+                    spec=BotCreateSpec(
+                        name=self._spec.name,
+                        description=self._spec.role,
+                        instructions=self._spec.instructions,
+                        model=self._spec.model,
+                        engine=self._spec.engine,
+                        bot_type=self._spec.bot_type,
+                        identity_file=self._spec.identity_file,
+                        metadata=dict(self._spec.metadata),
+                        config_manifest=self._spec.config_manifest,
+                    ),
+                    # Platform identity follows the spawn's durable identity and
+                    # the attempt: agent_id is stable across D16 respawns (rebind
+                    # via adopt, not duplicate) and unique between two same-named
+                    # spawns; attempt fresh-mints retries. spec.name would collide
+                    # same-named spawns, so there is no name fallback.
+                    idempotency_key=IdempotencyKey(
+                        f"{self._run.run_id}:{self._agent_id}:{self._attempt}"),
+                    owner_id=self._run.owner_id,
                 ),
-                # Platform identity follows the spawn's durable identity and
-                # the attempt: agent_id is stable across D16 respawns (rebind
-                # via adopt, not duplicate) and unique between two same-named
-                # spawns; attempt fresh-mints retries. spec.name would collide
-                # same-named spawns, so there is no name fallback.
-                idempotency_key=IdempotencyKey(
-                    f"{self._run.run_id}:{self._agent_id}:{self._attempt}"),
-                owner_id=self._run.owner_id,
-            ),
-            timeout=self._create_call_timeout,
-        )
-        if not (self._bot_id or "").strip():
-            # A blank identifier is a contract violation, not a slow boot:
-            # fail now instead of polling bot_status(None) to the deadline.
-            raise RuntimeError(
-                f"platform returned invalid bot_id: {self._bot_id!r}")
-        state = await self._poll_ready(self._bot_id)
+                timeout=self._create_call_timeout,
+            )
+            if not (self._bot_id or "").strip():
+                # A blank identifier is a contract violation, not a slow boot:
+                # fail now instead of polling bot_status(None) to the deadline.
+                raise RuntimeError(
+                    f"platform returned invalid bot_id: {self._bot_id!r}")
+        state = await self._poll_ready(
+            self._bot_id, timeout=self._ready_poll_timeout)
         if state != BotState.READY.value:
             raise RuntimeError(f"bot {self._bot_id} did not reach READY: {state}")
         self.executor_id = self._bot_id
         # The platform derives the persona name from the same key digest
-        # (f"{spec.name}-{digest8}"); mirror it so the journaled executor
-        # name is the identity the host actually provisioned under.
+        # (f"{spec.name}_{digest12}"); mirror the naming so the journaled
+        # executor name is the prefix chain the host provisioned under.
         self.executor_name = (
-            f"{self._spec.name}-"
-            f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 8)}"
+            f"{self._spec.name}_"
+            f"{spawn_digest(str(self._run.run_id), str(self._agent_id), self._attempt, 12)}"
         )
+
+    def _resolved_chat_timeout(self) -> float | None:
+        """The per-run engine-chat deadline from the run's own options,
+        resolved against the platform's deployment-configured default.
+        None when the run carries no bot_chat_timeout_seconds — the
+        platform default then governs the chat leg."""
+        opts = getattr(self._run, "run_options", None)
+        if opts is None or opts.bot_chat_timeout_seconds is None:
+            return None
+        return opts.resolved_bot_chat_timeout(
+            getattr(self._platform, "chat_timeout_seconds", 1800.0))
 
     async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:
         if self._bot_id is None:
@@ -144,12 +182,15 @@ class AvernetSubagent:
         # continuing the orphaned turn's history.
         cancel = threading.Event()
         self._register_active_chat(cancel)
-        leg = functools.partial(
-            self._platform.chat,
+        chat_kwargs = dict(
             bot_id=self._bot_id, message=prompt,
             owner_id=self._run.owner_id,
             cancel_event=cancel,
         )
+        resolved_chat_timeout = self._resolved_chat_timeout()
+        if resolved_chat_timeout is not None:
+            chat_kwargs["timeout_seconds"] = resolved_chat_timeout
+        leg = functools.partial(self._platform.chat, **chat_kwargs)
         # Chat rides the module-scoped bounded bridge (host.py), not the raw
         # default executor: the pool caps how many engine chats the pod may
         # hold, and wrap_future bridges its thread future into this loop —
@@ -218,6 +259,50 @@ class AvernetSubagent:
             )
             if state == BotState.READY.value:
                 return state
+            if state == BotState.AWAITING_AUTHORIZATION.value:
+                # The human gate: reset the provisioning-delay marker so
+                # the post-gate boot simulation fires once per gate cycle.
+                self._prov_delay_fired = False
+                # The human gate: the passport application is
+                # pending inside its window and only a human can move it, so
+                # burning the poll budget against this deadline is guaranteed
+                # waste. Park now — the pool rechecks this same continuation
+                # cheaply and parks time never touches the setup clock. The
+                # window's own deadline (in the status answer's authorization
+                # descriptor when the platform serves one) is the park's bound.
+                parked = "bot {} parked awaiting human authorization".format(
+                    bot_id)
+                authorization = getattr(state, "authorization", None)
+                if authorization is not None:
+                    deadline = str(getattr(authorization, "deadline", "") or "")
+                    if deadline:
+                        parked += f" (window deadline {deadline})"
+                raise ParkedAwaitingAuthorization(parked, bot_id=bot_id)
+            if state in _AUTHORIZATION_TERMINAL:
+                # The authorization answered with its own terminal verdict:
+                # a retry would re-open a fresh gate the same human just
+                # declined (or let yet another window lapse), so classify
+                # non-retryable and let the pool stop the attempt loop.
+                # The identity + verdict ride the marker so the pool can
+                # record the terminal state on the agent row
+                # without parsing this message.
+                raise NonRetryableProvisioningError(
+                    f"bot {bot_id} creation failed: {state}",
+                    bot_id=bot_id, bot_state=state,)
+            if (state not in _TERMINAL_FAILURE
+                    and state != ""
+                    and not self._prov_delay_fired
+                    and self._setup_delay_seconds > 0):
+                # PRE parity: after the passport resolves (gate clears),
+                # the persona's container takes ~180s to boot on ARCA.
+                # Locally the container is up in <5s, so inject the
+                # observed PRE provisioning depth here — once per gate
+                # resolution — to exercise the real setup budget.
+                self._prov_delay_fired = True
+                logger.info(
+                    "[agentswarm][bot] simulating PRE provisioning: "
+                    "%.0fs for bot %s", self._setup_delay_seconds, bot_id)
+                await asyncio.sleep(self._setup_delay_seconds)
             if state in _TERMINAL_FAILURE:
                 # A terminal-failure state will not become READY by polling
                 # longer, so stop the poll now; the pool decides whether the

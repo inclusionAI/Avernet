@@ -36,13 +36,11 @@ use bcs_service_api::{
     GroupChatCommand, GroupChatOutcome, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
     GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupDetailResult, GroupKind, GroupManagementService, GroupMetricCount,
-    GroupMetricsSnapshotPort, GroupPatchSettingsCommand, GroupPatchSettingsResult,
-    GroupParticipantModeCommand, GroupParticipantModeResult,
+    GroupMetricsSnapshotPort, GroupParticipantModeCommand, GroupParticipantModeResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupSessionMetricCount,
     GroupSessionMetricsSnapshotPort, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand,
-    GroupUseCaseError, GroupWorkspaceResult, MessageFlowService, MetricsResult,
+    GroupUseCaseError, MessageFlowService, MetricsResult,
     PersistentGroupSendCommand, PersistentGroupSendOutcome, ServiceError, ServiceResult,
     SessionKind, SessionStatus, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
@@ -713,13 +711,6 @@ impl GroupManagementService for MetricsGroupManagementService {
         self.inner.update_visibility(cmd).await
     }
 
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> std::result::Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.inner.update_workspace(cmd).await
-    }
-
     async fn update_routing_policy(
         &self,
         cmd: GroupRoutingPolicyCommand,
@@ -734,12 +725,6 @@ impl GroupManagementService for MetricsGroupManagementService {
         self.inner.update_participant_mode(cmd).await
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> std::result::Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        self.inner.patch_group_settings(cmd).await
-    }
 }
 
 #[cfg(feature = "prometheus-metrics")]
@@ -1479,9 +1464,10 @@ fn delivery_error_code_label(error_code: DeliveryErrorCode) -> &'static str {
 fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
     match error {
         ServiceError::DeliveryNotSent { .. } => DeliveryErrorCode::InvalidOperation,
+        // A closed client-actionable outcome: reconcile and resubmit.
+        ServiceError::RegistrationReconciliationRequired => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotNotFound(_)
         | ServiceError::GroupNotFound(_)
-        | ServiceError::ProposalNotFound(_)
         | ServiceError::ParticipantNotFound(_)
         | ServiceError::FriendRequestNotFound(_) => DeliveryErrorCode::NotFound,
         ServiceError::BotNotRegistered(_) => DeliveryErrorCode::NotRegistered,
@@ -1501,13 +1487,11 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
         ServiceError::CannotRejectAccepted => DeliveryErrorCode::CannotRejectAccepted,
         ServiceError::NotFriends(_) => DeliveryErrorCode::NotFriends,
         ServiceError::PrivateBotCannotCollaborate => DeliveryErrorCode::PrivateBot,
-        ServiceError::SessionNotFound(_)
-        | ServiceError::SessionInvalidParams(_)
-        | ServiceError::SessionCallbackPending(_) => DeliveryErrorCode::Internal,
         ServiceError::ProviderNotFound(_) => DeliveryErrorCode::NotFound,
         ServiceError::ProviderNotReadyForDownlink { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotAlreadyBound { .. } => DeliveryErrorCode::InvalidOperation,
-            ServiceError::ExistNonPublicBots { .. } => DeliveryErrorCode::InvalidOperation,
+            ServiceError::SessionNotFound(_) | ServiceError::SessionInvalidParams(_) => DeliveryErrorCode::Internal,
+        ServiceError::ExistNonPublicBots { .. } => DeliveryErrorCode::InvalidOperation,
     }
 }
 

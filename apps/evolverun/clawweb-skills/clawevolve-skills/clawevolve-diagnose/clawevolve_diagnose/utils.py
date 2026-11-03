@@ -135,7 +135,6 @@ _REPLAY_CLI_RE = re.compile(
     r"|\s+[A-Za-z0-9][A-Za-z0-9_.:/-]*)",
     re.S,
 )
-_SECRET_LIKE_RE = re.compile(r"(?:api[_ -]?key|token|authorization|cookie|secret)\s*[:=]\s*[^\s*]+", re.I)
 _REPLAY_CONTEXT_ANCHOR_RE = re.compile(
     r"(?:https?://|/[^\s]+|\b(?:id|task[_ -]?id|step[_ -]?id|path|file|url|name)\s*[:=]\s*[^\s]+|\b[0-9a-f]{8,}\b)",
     re.I,
@@ -176,8 +175,6 @@ def assess_replayability(text: str) -> ReplayabilityAssessment:
         return ReplayabilityAssessment(False, "empty", ("empty_query",), confidence=0.0)
     if is_trivial_query(value):
         return ReplayabilityAssessment(False, "trivial", ("trivial_or_greeting_query",), confidence=0.0)
-    if _SECRET_LIKE_RE.search(value):
-        return ReplayabilityAssessment(False, "unsafe", ("contains_secret_like_material",), confidence=0.0)
 
     slash = _REPLAY_SLASH_COMMAND_RE.fullmatch(value)
     if slash:
@@ -259,7 +256,6 @@ def compact_replay_text(text: str, max_len: int = 1200) -> str:
     """Clean and bound text while preserving enough task context for replay."""
 
     value = strip_runtime_metadata(text or "")
-    value = redact_secrets(value, [])
     lines: list[str] = []
     for raw in re.split(r"\n+", value):
         line = re.sub(r"\s+", " ", raw).strip(" ，,。\t")

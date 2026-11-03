@@ -1,3 +1,4 @@
+mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -90,6 +91,7 @@ impl GroupSessionConnectionService for RecordingConnectionService {
                 message_view_scope: MessageViewScope::Full,
                 joined_at: None,
             }],
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
     }
 }
@@ -108,15 +110,25 @@ fn app_with_registry(service: Arc<RecordingConnectionService>, registry: Arc<Wor
         group_session_connections: Some(service.clone()),
         frontend_connections: registry,
         run_channels: Arc::new(RunChannelManager::new()),
+        delivery_admission: Arc::new(support::AllowAllAdmission),
+        // Lease wiring is not under test here: lease commands answer
+        // an explicit error.
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
     group_session_websocket_router(
         service,
         dispatch_state.clone(),
         Arc::new(NoopWsLifecycleInstrumentationHook),
+        // Test chain of the local auth plugin family.
+        Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
     ).route("/ws", axum::routing::get(move |ws: axum::extract::ws::WebSocketUpgrade| {
         let state = dispatch_state.clone();
         async move { ws.on_upgrade(move |socket| bcs_ws::web::handle_client_connection(
-            socket, state, bcs_ws::web::WorkbenchConnectionAuth::UserBound { actor_id: None },
+            socket, state, bcs_ws::web::WorkbenchConnectionAuth::UserBound {
+                actor_id: None,
+                caller_ingress: None,
+            },
             Arc::new(NoopWsLifecycleInstrumentationHook),
         )) }
     }))

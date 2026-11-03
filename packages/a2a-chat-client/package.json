@@ -1,0 +1,41 @@
+{
+  "name": "@avernet/a2a-chat-client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Avernet A2A chat client: JSON-RPC/SSE streaming, card capability gating, transport choice, recovery/cancel lifecycle, HITL approvals, context send-ban. SDK-agnostic via parserFactory injection.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/inclusionAI/Avernet.git",
+    "directory": "packages/a2a-chat-client"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "default": "./src/testing.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@tc-chat/adapters": "2.1.0",
+    "@types/jest": "^30.0.0",
+    "@babel/plugin-transform-modules-commonjs": "7.29.7",
+    "@umijs/babel-preset-umi": "4.7.6",
+    "babel-jest": "29.7.0",
+    "jest": "^30.3.0",
+    "typescript": "^5.6.3"
+  }
+}

@@ -19,7 +19,7 @@ export function RoutineExecutionEnvironment({
   onChange: (next: BotEditorRoutineInput) => void;
 }) {
   return (
-    <div className="border-t border-border pt-4">
+    <div className="border-t border-divider pt-4">
       <p className="m-0 mb-3 text-sm font-medium text-foreground">执行环境</p>
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="block text-sm">

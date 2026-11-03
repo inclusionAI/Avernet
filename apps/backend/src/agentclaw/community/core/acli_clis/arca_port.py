@@ -1,5 +1,8 @@
 """``AcliPort`` over the engine adapter's ``/api/cli/acli/*`` endpoints.
 
+teclaw serves the same endpoints under its own API prefix,
+``/api/v1/cli/acli/*``; the runtime's engine picks the prefix.
+
 Built like ``ArcaCliToolPort``: resolve the runtime's device, call the engine
 over :class:`DeviceAdapterTransport`, and shape every failure the same way.
 The envelope is read as well as the status: an operation that ended in
@@ -45,6 +48,10 @@ class RuntimeContextPort(Protocol):
     def resolve(self, *, bot_id: str, owner_id: str, stage: str) -> Any: ...
 
 
+_ACLI_PREFIX = "/api/cli/acli"
+#: The prefix per engine that does not serve the adapter's.
+_ENGINE_PREFIXES = {"teclaw": "/api/v1/cli/acli"}
+
 INSTALL_PATH = "/api/cli/acli/install"
 UNINSTALL_PATH = "/api/cli/acli/uninstall"
 OPERATION_PATH = "/api/cli/acli/operations/{id}"
@@ -83,7 +90,7 @@ class ArcaAcliPort(AcliPort):
         try:
             envelope = await self._invoke(
                 runtime, "GET", OPERATION_PATH.format(id=operation_id),
-                timeout=READ_TIMEOUT_SECONDS,
+                timeout=READ_TIMEOUT_SECONDS, route_known=True,
             )
         except AcliPortError as error:
             if error.code == "operation_not_found":
@@ -127,8 +134,14 @@ class ArcaAcliPort(AcliPort):
         *,
         timeout: float,
         body: dict[str, Any] | None = None,
+        route_known: bool = False,
     ) -> Mapping[str, Any]:
-        """The engine's envelope for a ``2xx``; every other answer raises."""
+        """The engine's envelope for a ``2xx``; every other answer raises.
+
+        ``route_known`` is for reading back an operation the engine accepted:
+        the endpoints exist there, so a ``404`` came from the hop and may pass.
+        """
+        path = _engine_path(runtime.engine, path)
         try:
             # Resolution can block on network I/O (BaaS connection info), so it
             # runs off the event loop, as the engine relay's does.
@@ -149,23 +162,29 @@ class ArcaAcliPort(AcliPort):
                 context.conn_info, method, path, body=body, timeout=timeout,
             )
         except DeviceAdapterEndpointNotFoundError as error:
-            if error.standard_route_missing:
-                # The engine itself answered "no such route": its build predates
-                # these endpoints, and nothing ran.
-                raise AcliPortError(
-                    "engine_outdated",
-                    "the bot's engine version has no acli endpoints; update or restart the bot",
-                ) from error
             envelope = _envelope_in(error)
             if envelope is not None and envelope.get("error") == "operation_not_found":
                 raise _refusal(envelope) from error
-            # Any other 404 came from the hop (gateway, proxy, a recycled
-            # container), so whether the engine ran anything is unknown.
+            if route_known:
+                # The engine accepted this operation, so its endpoints exist: the
+                # 404 came from the hop (proxy, a recycled container).
+                logger.warning(
+                    "acli_port_unreachable bot_id=%s path=%s status=404", runtime.bot_id, path,
+                )
+                raise AcliPortError(
+                    "engine_unreachable", "the engine could not be reached (HTTP 404)"
+                ) from error
+            # Any other 404 means the endpoint is not there: an engine build that
+            # predates it, or an engine that does not implement it at all (one
+            # serving its own API answers in its own 404 shape, not FastAPI's).
+            # Nothing ran, and asking again will not change the answer.
             logger.warning(
-                "acli_port_unreachable bot_id=%s path=%s status=404", runtime.bot_id, path,
+                "acli_port_endpoint_missing bot_id=%s path=%s standard_route_missing=%s",
+                runtime.bot_id, path, error.standard_route_missing,
             )
             raise AcliPortError(
-                "engine_unreachable", "the engine could not be reached (HTTP 404)"
+                "engine_outdated",
+                "the bot's engine does not provide acli endpoints; update the engine",
             ) from error
         except DeviceAdapterHTTPStatusError as error:
             if error.status_code == 501:
@@ -192,6 +211,14 @@ class ArcaAcliPort(AcliPort):
         if not isinstance(response, Mapping):
             raise AcliPortError("engine_unreachable", "the engine answered with no envelope")
         return response
+
+
+def _engine_path(engine: str, path: str) -> str:
+    """``path`` (an adapter ``/api/cli/acli/*`` path) as ``engine`` serves it."""
+    prefix = _ENGINE_PREFIXES.get(engine)
+    if prefix is None:
+        return path
+    return prefix + path.removeprefix(_ACLI_PREFIX)
 
 
 def _envelope_in(error: Exception) -> Mapping[str, Any] | None:

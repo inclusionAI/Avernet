@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from secbaas.community.logger import get_logger
 
-from ._async_chat_client_transport import AsyncChatTransportBase
+from ._async_chat_client_transport import (
+    AsyncChatTransportBase,
+    AsyncChatTransportOwner,
+)
+from ._async_chat_client_ws import WebSocketChatTransport, make_ws_client
 from ._bot_a2a_client import A2aUnavailableError, BotA2aClient
 
 logger = get_logger("core-bot-run")
@@ -63,11 +67,18 @@ class A2aChatTransport(AsyncChatTransportBase):
     WebSocket implementation never sees any of this state.
     """
 
-    def __init__(self, owner: Any, mode: str) -> None:
+    def __init__(
+        self,
+        owner: AsyncChatTransportOwner,
+        mode: str,
+        *,
+        proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
+    ) -> None:
         super().__init__(owner)
         if mode not in {"grey", "on"}:
             raise ValueError(f"invalid A2A transport mode: {mode!r}")
         self.mode = mode
+        self._proxypass_token_minter = proxypass_token_minter
         self._current_name = "unknown"
         self.fallback_client: Any | None = None
         self.routed_sessions: dict[str, str] = {}
@@ -77,6 +88,12 @@ class A2aChatTransport(AsyncChatTransportBase):
     @property
     def transport_name(self) -> str:
         return self._current_name
+
+    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
+        super().refresh_outbound_auth(headers)
+        client = self.owner._client
+        if self._current_name == "a2a" and client is not None:
+            client.refresh_proxypass_token(headers)
 
     async def create(self) -> tuple[Any, dict[str, Any]]:
         a2a_base = _a2a_base_url_from_ws(self.owner.uri)
@@ -91,6 +108,7 @@ class A2aChatTransport(AsyncChatTransportBase):
                     base_url=a2a_base,
                     headers=self.owner.headers,
                 )
+                self.owner._bind_client_events(candidate)
                 await candidate.connect()
                 self._current_name = "a2a"
                 return candidate, dict(candidate.server_info or {})
@@ -99,8 +117,7 @@ class A2aChatTransport(AsyncChatTransportBase):
                     raise
                 logger.info("[a2a-transport] probing failed (%s) — v3", exc)
 
-        client = self.owner._make_ws_client()  # noqa: SLF001
-        hello = await client.connect()
+        client, hello = await WebSocketChatTransport(self.owner).create()
         self._current_name = "v3-ws"
         return client, hello
 
@@ -139,6 +156,20 @@ class A2aChatTransport(AsyncChatTransportBase):
         client = self.owner._client  # noqa: SLF001
         if self._current_name != "a2a":
             return client, {}
+        # Background HITL dispatch does not pass through pool.get(). Only the
+        # HTTP leg needs fresh request-level auth; WS (main or fallback) must
+        # never invoke the A2A minter or receive A2A-only resolve arguments.
+        if client is not None and self._proxypass_token_minter is not None:
+            try:
+                self.refresh_outbound_auth(
+                    {"x-proxypass-token": await self._proxypass_token_minter()}
+                )
+            except Exception:
+                logger.warning(
+                    "[a2a-transport] proxypass re-mint failed; "
+                    "resolve continues on last-known token",
+                    exc_info=True,
+                )
         return client, {"session_key": session_key}
 
     async def create_fallback(self) -> Any:
@@ -152,9 +183,9 @@ class A2aChatTransport(AsyncChatTransportBase):
                 self.fallback_client = None
                 self.routed_sessions.clear()
 
-            client = self.owner._make_ws_client()  # noqa: SLF001
-            await client.connect()
+            client = make_ws_client(self.owner)
             self.bind_fallback_client(client, self.owner._event_bridge_snapshot())  # noqa: SLF001
+            await client.connect()
             self.fallback_client = client
             return client
 
@@ -216,6 +247,8 @@ class A2aChatTransport(AsyncChatTransportBase):
         """Find a routed key with the same exact/contains semantics as
         ``SessionKeyMatcher`` without pretending routed values are session
         states."""
+        if session_key in self.routed_sessions:
+            return session_key
         ignore_case = bool(self.owner._ignore_case)  # noqa: SLF001
         target = session_key.lower() if ignore_case else session_key
         for stored_key in self.routed_sessions:

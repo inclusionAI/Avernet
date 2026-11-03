@@ -64,7 +64,8 @@ def lock_epoch_matches(
     """Whether the caller's collaboration-lock epoch is current.
 
     The collaboration lock is one database row per bot, keyed
-    ``{bot_id}:{owner_id}`` (as ``CollaboratorLockService`` builds it) and held
+    ``{bot_id}:{entity_id}``; the legacy ``owner_id`` argument is the
+    already-resolved entity locator (as ``CollaboratorLockService`` builds it) and held
     by one user at a time; ``lock_epoch`` is that row's id. No epoch is valid
     only while no lock exists; a supplied epoch must name the lock the actor
     holds, so a client acting on a lock it has since lost is refused.

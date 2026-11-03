@@ -34,10 +34,11 @@ class TaskArtifactRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_by_task(
-        self, task_id: str, *, limit: int = 200
+        self, task_id: str, *, limit: int | None = 200
     ) -> "list[TaskArtifactRecord]":
         """List the task's artifacts across all nodes, attempt DESC then
-        ``gmt_create`` DESC. Empty list when the task has none."""
+        ``gmt_create`` DESC. ``limit=None`` returns the complete manifest;
+        empty list when the task has none."""
         ...
 
     @abstractmethod
@@ -46,4 +47,14 @@ class TaskArtifactRepositoryProtocol(Protocol):
     ) -> "list[TaskArtifactRecord]":
         """List one node's artifacts across all attempts, attempt DESC then
         ``gmt_create`` DESC. Empty list when the node has none."""
+        ...
+
+    @abstractmethod
+    def get_by_artifact_id(self, artifact_id: str) -> "TaskArtifactRecord | None":
+        """Fetch one artifact row by its globally unique id.
+
+        Backs the OBJECT_FILE download path (row lookup before bytes are
+        fetched from the artifact object store). ``None`` when the id is
+        unknown — caller decides the refusal. Not used to authorize; the
+        download access posture equals the manifest-read posture."""
         ...

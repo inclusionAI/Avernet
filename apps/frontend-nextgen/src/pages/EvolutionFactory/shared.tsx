@@ -102,7 +102,7 @@ export function EvolutionHeader({
         {actions}
       </header>
       {showTabs && (
-        <div role="tablist" aria-label="智能进化" className="flex gap-6 border-b border-border">
+        <div role="tablist" aria-label="智能进化" className="flex gap-6 border-b border-divider">
           {(
             [
               ['tasks', '进化任务'],

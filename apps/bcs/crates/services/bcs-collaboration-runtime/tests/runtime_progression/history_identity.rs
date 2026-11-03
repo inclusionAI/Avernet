@@ -15,7 +15,7 @@ async fn durable_audience_and_body_override_mutable_human_snapshot() {
         group_id: "group-1".into(), session_id: None, definition_yaml: Some(human_input_yaml()),
         definition: None, definition_ref: None, participant_bindings: None, opening_message_override: None,
         input: json!({}), caller_id: Some("human_1001".into()),
-        authenticated_human: Some(AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: Some("Reviewer".into()) }),
+        authenticated_human: Some(AuthenticatedHumanCaller { actor_id: "human_1001".into(), display_name: Some("Reviewer".into()) }), caller_association: None,
     }).await.unwrap();
     let run = &started.view.run;
     runtime.respond_human_node(RespondHumanNodeCommand {

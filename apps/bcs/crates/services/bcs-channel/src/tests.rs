@@ -489,7 +489,7 @@ async fn inbound_service(
         Arc::new(RecordingCollaborationRuntime::default()),
         groups,
         registry,
-        Arc::new(ChannelProviderRegistry::empty()),
+        Arc::new(ChannelProviderRegistry::new(vec![Arc::new(RecordingProvider::new(Arc::new(RecordingDelivery::default())))]).unwrap()),
         "pre",
         Arc::new(|| 42),
         Arc::new(|| "generated_id".to_string()),
@@ -674,6 +674,7 @@ fn inbound(
     msg_id: &str,
 ) -> InboundMessage {
     InboundMessage {
+        execution_token: None,
         channel_type: channel_type(),
         account_ref: "robot_1".to_string(),
         im_conversation_id: conversation_id.to_string(),
@@ -695,6 +696,7 @@ fn group_inbound(
     is_at_bot: bool,
 ) -> InboundMessage {
     InboundMessage {
+        execution_token: None,
         channel_type: channel_type(),
         account_ref: "robot_1".to_string(),
         im_conversation_id: conversation_id.to_string(),
@@ -830,3 +832,5 @@ use delivery_fixtures::*;
 use runtime_fixtures::*;
 
 mod human_input_queue;
+
+mod caller_execution;

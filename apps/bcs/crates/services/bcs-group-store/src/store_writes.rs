@@ -75,13 +75,6 @@ impl MySqlGroupStore {
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         let g_service_group_uuid: Option<String> = group.service_group_uuid.clone();
         let g_service_mode: Option<String> = group.service_mode.clone();
-        let g_service_spec_json: Option<String> = match group.service_spec {
-            Some(ref spec) => Some(
-                serde_json::to_string(spec)
-                    .map_err(|e| ServiceError::InternalError(format!("service_spec: {e}")))?,
-            ),
-            None => None,
-        };
         let g_version: i64 = group.version as i64;
         let g_record_status = group.record_status.clone();
         // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json, scope)
@@ -115,7 +108,7 @@ impl MySqlGroupStore {
                 "routing_policy_json",
                 "context",
                 "opening_message_json",
-                "service_spec",
+
                 "version",
                 "record_status",
                 "visibility",
@@ -124,14 +117,21 @@ impl MySqlGroupStore {
             &[("gmt_modified", self.flavor.now())],
         );
         let upsert_sql = format!(
-            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
+            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
              {upsert}",
             now = self.flavor.now(),
             upsert = upsert_clause,
         );
 
         let mut steps = Vec::with_capacity(2 + g_participants.len());
+        let guard_step = if let Some(lock) = self.public_provider_lock(&group)? {
+            steps.push(DbTransactionStep::Query(lock));
+            steps.push(DbTransactionStep::Query(self.public_bot_lock(&group)));
+            let guard = steps.len();
+            steps.push(DbTransactionStep::Query(self.public_scope_assertion(&group, None)));
+            Some(guard)
+        } else { None };
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
             // 1. Upsert session metadata
             &upsert_sql,
@@ -150,7 +150,7 @@ impl MySqlGroupStore {
                 Value::from(g_group_strategy_str),
                 Value::from(g_service_group_uuid.as_deref()),
                 Value::from(g_service_mode.as_deref()),
-                Value::from(g_service_spec_json.as_deref()),
+
                 Value::from(g_version),
                 Value::from(g_record_status.as_str()),
                 Value::from(g_visibility.as_str()),
@@ -183,7 +183,20 @@ impl MySqlGroupStore {
             )));
         }
 
+        if let Some(guard) = guard_step {
+            // Bind the first group_id INSERT value to the assertion row. An
+            // empty assertion fails before the write and rolls back the txn.
+            let index = guard + 1;
+            if let DbTransactionStep::Execute(statement) = &steps[index] {
+                let mut params = statement.params().iter().cloned().map(DbTransactionParam::Value).collect::<Vec<_>>();
+                params[0] = DbTransactionParam::query_result(guard, 0, "group_id");
+                steps[index] = DbTransactionStep::Execute(DbStatement::with_transaction_params(statement.sql(), params));
+            }
+        }
         self.db.plugin().transaction(steps).await.map_err(|e| {
+            if provider_scope_guard::public_scope_denied(&e, guard_step) {
+                return ServiceError::Forbidden("same_owner groups must remain private".into());
+            }
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())
         })?;
@@ -207,6 +220,9 @@ impl MySqlGroupStore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
+        if self.provider_scope_guard && patch.visibility.is_some() {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::PatchMutableFields(patch)).await;
+        }
         let routing_policy_snapshot = match patch.default_bot_final_delivery {
             Some(delivery) => Some((
                 delivery,
@@ -328,6 +344,11 @@ impl MySqlGroupStore {
 
     /// Add a participant to a session.
     pub(crate) async fn add_participant_sql(&self, id: &str, participant: Participant) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::AddParticipant {
+                participant, actor_is_public: true,
+            }).await;
+        }
         // Verify group exists
         if self.get(id).await.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));
@@ -397,6 +418,11 @@ impl MySqlGroupStore {
         participant: Participant,
         actor_is_public: bool,
     ) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::AddParticipant {
+                participant, actor_is_public,
+            }).await;
+        }
         let role = Self::role_to_str(&participant.role);
         let actor_kind = Self::actor_kind_to_str(participant.actor_kind);
         let mode = Self::mode_to_str(participant.effective_mode());
@@ -613,19 +639,6 @@ impl MySqlGroupStore {
         Ok(())
     }
 
-    /// Update workspace - NOT PERSISTED (memory only, lost on restart).
-    pub(crate) async fn update_workspace_sql(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut group = self
-            .get(id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.workspace = workspace;
-        self.cache.write().await.insert(id.to_string(), group);
-
-        debug!(group_id = %id, "Group workspace updated in memory (not persisted)");
-        Ok(())
-    }
-
     /// Update session label.
     pub(crate) async fn update_label_sql(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         // Verify group exists
@@ -695,55 +708,12 @@ impl MySqlGroupStore {
         Ok(())
     }
 
-    /// Persist a `service_spec` patch to MySQL. `Some(spec)` writes a JSON
-    /// blob into the `service_spec` column; `None` clears the column. Caller
-    /// is responsible for validation (route-field lock, callback_config
-    /// immutability) — this method only writes.
-    pub(crate) async fn update_service_spec_sql(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
-
-        let spec_json = match service_spec.as_ref() {
-            Some(s) => {
-                serde_json::to_string(s).map_err(|e| ServiceError::InternalError(e.to_string()))?
-            }
-            None => String::new(),
-        };
-        let spec_value: Value = if service_spec.is_some() {
-            Value::from(spec_json.as_str())
-        } else {
-            Value::Null
-        };
-
-        self.db
-            .execute_with(
-                &self.logical_db,
-                "UPDATE bcs_groups SET service_spec = ? WHERE group_id = ? AND env = ?",
-                vec![spec_value, Value::from(id), Value::from(self.env.as_str())],
-            )
-            .await
-            .map_err(|e| {
-                warn!(group_id = %id, error = %e, "Failed to update group service_spec");
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        debug!(group_id = %id, "Group service_spec updated");
-        {
-            let mut cache = self.cache.write().await;
-            if let Some(group) = cache.get_mut(id) {
-                group.service_spec = service_spec;
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) async fn update_visibility_sql(&self, id: &str, visibility: &str) -> ServiceResult<()> {
+        if self.provider_scope_guard {
+            return self.guarded_legacy_mutation(id, GroupEventfulMutation::PatchMutableFields(
+                GroupMutableFieldsPatch { visibility: Some(visibility.into()), ..Default::default() }
+            )).await;
+        }
         // Verify group exists
         if self.get(id).await.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));

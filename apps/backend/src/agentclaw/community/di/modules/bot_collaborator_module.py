@@ -15,11 +15,13 @@ bindings exist so production routes can use ``Injected(...)``.
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.addressing import BotAddressResolverProtocol
 from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.member_management_capability import (
     MemberManagementCapabilityProtocol,
@@ -107,12 +109,14 @@ class BotCollaboratorModule(Module):
         lock_repo: BotCollabLockRepositoryProtocol,
         collab_service: CoreCollaboratorServiceProtocol,
         bot_service: BotServiceProtocol,
+        bot_addresses: BotAddressResolverProtocol,
     ) -> CollaboratorLockService:
         """Construct ``CollaboratorLockService``."""
         return CollaboratorLockService(
             lock_repo=lock_repo,
             collab_service=collab_service,
             bot_service=bot_service,
+            bot_addresses=bot_addresses,
         )
 
     @singleton
@@ -162,6 +166,7 @@ class BotCollaboratorModule(Module):
         passport_plugin: PassportPlugin,
         credentials_admins_writer: DeviceCredentialsAdminsWriter,
         space_access_service: SpaceAccessServiceProtocol,
+        manager_sync: BotManagerSyncProtocol,
         member_management_capability_service: MemberManagementCapabilityService,
     ) -> CollaboratorService:
         """Construct ``CollaboratorService``.
@@ -169,6 +174,11 @@ class BotCollaboratorModule(Module):
         ``.credentials`` 的 ADMINS= 同步委托给 ``DeviceCredentialsAdminsWriter`` (对
         service bot 解析在线 binding、对其它 bot 回退 resolve_for_bot)。设备解析/读写
         的 DI 循环由 writer 内部的 lazy thunk 打断。
+
+        ``manager_sync`` 是必填的 BCS 管理集同步旁路
+        (``BotManagerSyncProtocol``)：feature 关闭或栈不可用时由
+        ``BotManagerSyncModule`` 绑定 ``DisabledBotManagerSync``（零资源），
+        协作变更回调把同步请求只送进这个入口、失败不上抛。
         """
         return CollaboratorService(
             collaborator_repo=collaborator_repo,
@@ -176,6 +186,7 @@ class BotCollaboratorModule(Module):
             passport_plugin=passport_plugin,
             credentials_admins_writer=credentials_admins_writer,
             space_access_service=space_access_service,
+            manager_sync=manager_sync,
             member_management_capability_service=member_management_capability_service,
         )
 

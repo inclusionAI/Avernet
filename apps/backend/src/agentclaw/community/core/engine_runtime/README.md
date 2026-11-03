@@ -37,6 +37,7 @@ internal_dependencies:
   - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
+  - agentclaw.community.core.devices.services.a2a_issuance_gray    # 用户级 A2A 灰度门：desktop 分支不经设备服务，由本模块就地判定（连接签发治理）
   - agentclaw.community.core.service_bot.repository.models
   - agentclaw.community.core.service_bot.types
   - agentclaw.community.log

@@ -73,7 +73,7 @@ class ChannelService:
         - 根据 type + identity_id + aideskdingding(默认配置) + bind_bot_id 查询
         """
         # identity_ids 包含传入的 identity_id 和 aideskdingding
-        identity_ids = [identity_id, "aideskdingding"]
+        identity_ids = [self._resource_identity(bind_bot_id, identity_id), "aideskdingding"]
         return self._repository.get_by_type_and_identity_ids(
             type=type,
             identity_ids=identity_ids,
@@ -95,7 +95,7 @@ class ChannelService:
         return self._repository.insert_channel(
             type=type,
             description=description,
-            identity_id=identity_id,
+            identity_id=self._resource_identity(bind_bot_id, identity_id),
             bind_bot_id=bind_bot_id,
             config=config,
             status=status,
@@ -206,25 +206,30 @@ class ChannelService:
         )
         record.config = config
 
+    def _resource_identity(self, bot_id: str, identity_id: str) -> str:
+        """Keep transferable Bot channels under their immutable entity.
+
+        Access is checked by the delivery boundary. Shared defaults and legacy
+        missing-Bot records retain their existing identity and behavior.
+        """
+        if identity_id == "aideskdingding":
+            return identity_id
+        try:
+            bot = self._bot_service.get_bot_by_address(bot_id, identity_id)
+        except BotNotFoundError:
+            return identity_id
+        if bot.get("bot_type") == "service" and bot_id != "default":
+            return str(bot["entity_id"])
+        return identity_id
+
     def _is_teclaw_bot(self, bot_id: str, user_id: str) -> bool:
         """Whether ``bot_id`` runs on the teclaw engine.
 
-        Resolved from ``ac_bots.active_engine`` via :meth:`BotService.get_bot`
-        (``user_id`` is the channel row's ``identity_id`` — the same id the
-        openclaw write path keys on at ``get_bot_work_path`` below). A
-        missing/unknown bot is treated as non-teclaw so the established openclaw
-        file-write path runs unchanged.
-
-        Known limitation: ``get_bot`` is owner-scoped, so this only resolves
-        correctly when the channel's ``identity_id`` is the bot owner — true for
-        user-configured channels (``create_channel`` stores the acting user). A
-        shared default row (``identity_id == "aideskdingding"``) resolves to
-        non-teclaw and would fall to the openclaw path; that path already keys on
-        ``identity_id`` the same way, and there is no owner-free bot lookup today,
-        so this matches existing behavior rather than introducing a new gap.
+        A channel row carries a resource locator, which can remain the old
+        entity after handoff. Missing Bots retain the existing non-teclaw path.
         """
         try:
-            bot = self._bot_service.get_bot(bot_id, user_id)
+            bot = self._bot_service.get_bot_by_address(bot_id, user_id)
         except BotNotFoundError:
             return False
         return bot.get("active_engine") == TECLAW_ENGINE
@@ -401,7 +406,9 @@ class ChannelService:
             raise ValueError(f"bind_bot_id not found for channel: {channel_id}")
 
         # 4. 获取 bot 工作目录，openclaw.json 位于工作目录下
-        work_path = self._bot_service.get_bot_work_path(bot_id=bind_bot_id, user_id=channel.identity_id, engine_type='openclaw')
+        bot = self._bot_service.get_bot_by_address(bind_bot_id, channel.identity_id)
+        current_owner_id = str(bot["owner_id"])
+        work_path = self._bot_service.get_bot_work_path(bot_id=bind_bot_id, user_id=current_owner_id, engine_type='openclaw')
         openclaw_config_path = work_path / "openclaw.json"
 
         # 5. 如果文件不存在，抛出异常
@@ -409,7 +416,7 @@ class ChannelService:
         #     raise FileNotFoundError(f"openclaw.json not found: {openclaw_config_path}")
 
         # 6. 获取 device_fs 并使用 JsonConfigFile 操作配置
-        ctx = self._resolver.resolve_for_bot(bind_bot_id, channel.identity_id)
+        ctx = self._resolver.resolve_for_bot(bind_bot_id, current_owner_id)
         device_fs = self._device_fs_dispatcher.dispatch(ctx)
         json_config = await JsonConfigFile.load(openclaw_config_path, device_fs)
 
@@ -583,16 +590,30 @@ class ChannelService:
         Raises:
             FileNotFoundError: openclaw.json 不存在
         """
+        # Resolve the resource locator once. Owner-scoped APIs require the
+        # current Owner; channel rows and storage remain under the stable entity.
+        bot = self._bot_service.get_bot_by_address(bot_id, owner_id)
+        current_owner_id = str(bot["owner_id"])
+        resource_identity = (
+            str(bot["entity_id"])
+            if bot.get("bot_type") == "service" and bot_id != "default"
+            else owner_id
+        )
+        logger.info(
+            "[ChannelService.generate_openclaw_configs] bot_id=%s "
+            "resource_identity=%s current_owner_id=%s",
+            bot_id, resource_identity, current_owner_id,
+        )
         # 1. 获取 bot 工作目录和 openclaw.json 路径
         work_path = self._bot_service.get_bot_work_path(
             bot_id=bot_id,
-            user_id=owner_id,
+            user_id=current_owner_id,
             engine_type='openclaw'
         )
         openclaw_config_path = work_path / "openclaw.json"
 
         # 2. 获取 device_fs
-        ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+        ctx = self._resolver.resolve_for_bot(bot_id, current_owner_id)
         device_fs = self._device_fs_dispatcher.dispatch(ctx)
 
         # 3. 加载当前 openclaw.json 作为模版
@@ -602,7 +623,7 @@ class ChannelService:
         # 4. 查询所有钉钉配置，在内存中过滤 verify 和 online
         all_channels = self._repository.get_by_type_and_identity_ids(
             type="dingding",
-            identity_ids=[owner_id],
+            identity_ids=[resource_identity],
             bind_bot_id=bot_id,
         )
 

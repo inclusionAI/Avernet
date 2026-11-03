@@ -13,14 +13,14 @@ traversal is rejected downstream.
 from __future__ import annotations
 
 import logging
-from typing import List as ListType, Optional
+from typing import List as ListType
+from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
-
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
-from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
+from agentclaw.community.adapters.http.dependencies import (
+    RequestContext,
+    get_request_context,
+)
 from agentclaw.community.adapters.http.resources.schemas import (
     FileActionResponse,
     FileItem,
@@ -29,20 +29,34 @@ from agentclaw.community.adapters.http.resources.schemas import (
     PreviewData,
     PreviewResponse,
 )
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import (
+    BotAddressNotFoundError,
+    BotLookupAmbiguousError,
+)
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_runtime_engine_for_bot,
+)
+from agentclaw.community.core.devices.services.device_filesystem import (
+    FileTooLargeError,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.bot_management.services.engine_resolver import resolve_runtime_engine_for_bot
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
 )
-from agentclaw.community.core.devices.services.device_filesystem import FileTooLargeError
-from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +98,24 @@ def _resolve_params(
     """
     effective_bot_id = bot_id or ctx.bot_id or "default"
     effective_owner_id = owner_id or ctx.user_id
+    engine_owner_id = effective_owner_id
+    if effective_bot_id != "default":
+        try:
+            resolved = BotAddressResolver(bot_repo).resolve(
+                bot_id=effective_bot_id, legacy_owner_id=effective_owner_id
+            )
+            effective_owner_id = resolved.entity_id
+            engine_owner_id = resolved.current_owner_id
+        except BotAddressNotFoundError:
+            raise HTTPException(status_code=404, detail="Bot not found") from None
+        except BotLookupAmbiguousError:
+            raise HTTPException(status_code=409, detail="Ambiguous Bot address") from None
     return (
         effective_owner_id,
         effective_bot_id,
         resolve_runtime_engine_for_bot(
             bot_id=effective_bot_id,
-            owner_id=effective_owner_id,
+            owner_id=engine_owner_id,
             override=engine_type,
             bot_repo=bot_repo,
         ),
@@ -135,20 +161,32 @@ def _authorize_preview_bot(
             )
         return user_id
 
-    bot = None
-    if requested_owner_id:
-        bot = bot_repo.get_by_id_and_owner(bot_id, requested_owner_id)
-    if bot is None:
-        bot = bot_repo.get_by_id_and_owner(bot_id, user_id)
-    if bot is None:
-        bot = bot_repo.get_by_id(bot_id)
+    addresses = BotAddressResolver(bot_repo)
+    try:
+        try:
+            resolved = addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=requested_owner_id or user_id
+            )
+        except BotAddressNotFoundError:
+            if requested_owner_id:
+                # Preserve Legacy preview's explicit cross-owner refusal (403)
+                # for an existing unique Bot. This lookup only selects the
+                # denial status; it never authorizes or reads resource files.
+                addresses.resolve(bot_id=bot_id, allow_unique_bot_id=True)
+                raise HTTPException(status_code=403, detail="No permission to access this bot's files") from None
+            resolved = addresses.resolve(bot_id=bot_id, allow_unique_bot_id=True)
+        bot = resolved.bot
+    except BotAddressNotFoundError:
+        raise HTTPException(status_code=404, detail="Bot not found") from None
+    except BotLookupAmbiguousError:
+        raise HTTPException(status_code=409, detail="Ambiguous Bot address") from None
 
     authoritative_owner_id = (bot or {}).get("owner_id")
     if not isinstance(authoritative_owner_id, str) or not authoritative_owner_id:
         raise HTTPException(status_code=404, detail="Bot not found")
 
     if user_id == authoritative_owner_id:
-        return authoritative_owner_id
+        return resolved.entity_id
 
     try:
         permission = collaborator_svc.check_collaborator_permission(
@@ -172,7 +210,7 @@ def _authorize_preview_bot(
             status_code=403,
             detail="No permission to access this bot's files",
         )
-    return authoritative_owner_id
+    return resolved.entity_id
 
 
 def _validate_preview_publish(
@@ -333,7 +371,7 @@ async def preview_file(
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> PreviewResponse:
     """Preview file content (text files only)."""
-    eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
+    ebid = bot_id or ctx.bot_id or "default"
     eid = _authorize_preview_bot(
         bot_id=ebid,
         requested_owner_id=owner_id,
@@ -341,6 +379,7 @@ async def preview_file(
         bot_repo=bot_repo,
         collaborator_svc=collaborator_svc,
     )
+    eid, ebid, eeng = _resolve_params(ctx, ebid, engine_type, eid, bot_repo=bot_repo)
     _validate_preview_publish(
         publish_id=publish_id,
         bot_id=ebid,

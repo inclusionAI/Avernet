@@ -1,5 +1,6 @@
 use std::{collections::HashSet, net::SocketAddr, path::{Path, PathBuf}};
 use serde::Deserialize;
+pub use crate::bridge_config::BridgeConfig;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]

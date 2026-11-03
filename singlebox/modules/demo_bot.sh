@@ -9,6 +9,10 @@ demo_bot_defaults() {
     DEMO_BOT_NAME="${SINGLEBOX_DEMO_BOT_NAME:-developer}"
     DEMO_BOT_DESC="${SINGLEBOX_DEMO_BOT_DESC:-Local demo bot for OpenOCB Singlebox}"
     DEMO_ENTITY_ID="${SINGLEBOX_DEMO_ENTITY_ID:-mock-user}"
+    # Local BaaS stub auth represents the caller as 000001. Keep only the
+    # BBS role bots on that owner so their grant flow exercises production
+    # owner checks without changing shared BaaS authentication behavior.
+    DEMO_BBS_ENTITY_ID="${SINGLEBOX_BBS_DEMO_ENTITY_ID:-000001}"
     DEMO_ENTITY_TYPE="${SINGLEBOX_DEMO_ENTITY_TYPE:-staff}"
     DEMO_ENGINE_TYPE="${SINGLEBOX_DEMO_ENGINE_TYPE:-openclaw}"
     DEMO_BOT_TYPE="${SINGLEBOX_DEMO_BOT_TYPE:-personal}"
@@ -17,6 +21,8 @@ demo_bot_defaults() {
     DEMO_GATEWAY_PORT="${GATEWAY_PORT:-8889}"
     DEMO_BOT_READY_TIMEOUT_SECONDS="${SINGLEBOX_DEMO_BOT_READY_TIMEOUT_SECONDS:-120}"
     DEMO_BOT_READY_POLL_INTERVAL_SECONDS="${SINGLEBOX_DEMO_BOT_READY_POLL_INTERVAL_SECONDS:-2}"
+    DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS="${SINGLEBOX_BBS_SUBSCRIPTION_TIMEOUT_SECONDS:-30}"
+    DEMO_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS="${SINGLEBOX_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS:-1}"
 
     DEMO_BBS_SKILL_ROOT="${SINGLEBOX_BBS_SKILL_ROOT:-${PROJECT_ROOT}/singlebox/skills/infra}"
     DEMO_BBS_SKILL_NAMES=(
@@ -149,15 +155,15 @@ demo_bbs_find_existing() {
     base_url="$(demo_bot_backend_base_url)"
     response="$(
         curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
-            -H "x-user-id: ${DEMO_ENTITY_ID}" \
-            "${base_url}/api/bots?user_id=${DEMO_ENTITY_ID}&entity_id=${DEMO_ENTITY_ID}&entity_type=${DEMO_ENTITY_TYPE}&page=1&page_size=100" \
+            -H "x-user-id: ${DEMO_BBS_ENTITY_ID}" \
+            "${base_url}/api/bots?user_id=${DEMO_BBS_ENTITY_ID}&entity_id=${DEMO_BBS_ENTITY_ID}&entity_type=${DEMO_ENTITY_TYPE}&page=1&page_size=100" \
             2>>"${DEMO_BOT_LOG}" || true
     )"
     [ -n "$response" ] || return 0
 
     printf '%s\n' "$response" | jq -r \
         --arg name "$bot_name" \
-        --arg entity_id "$DEMO_ENTITY_ID" \
+        --arg entity_id "$DEMO_BBS_ENTITY_ID" \
         '
             (.data.bots // .data.items // .data.list // .data.records // .data // [])
             | if type == "array" then . else [] end
@@ -175,7 +181,7 @@ demo_bbs_create() {
         jq -n \
             --arg bot_name "$bot_name" \
             --arg bot_desc "$bot_desc" \
-            --arg entity_id "$DEMO_ENTITY_ID" \
+            --arg entity_id "$DEMO_BBS_ENTITY_ID" \
             --arg entity_type "$DEMO_ENTITY_TYPE" \
             --arg engine_type "$DEMO_ENGINE_TYPE" \
             --arg bot_type "$DEMO_BOT_TYPE" \
@@ -192,9 +198,9 @@ demo_bbs_create() {
     )"
     response="$(
         curl --noproxy '*' --connect-timeout 2 --max-time 60 -fsS \
-            -X POST "${base_url}/api/bots?user_id=${DEMO_ENTITY_ID}" \
+            -X POST "${base_url}/api/bots?user_id=${DEMO_BBS_ENTITY_ID}" \
             -H "Content-Type: application/json" \
-            -H "x-user-id: ${DEMO_ENTITY_ID}" \
+            -H "x-user-id: ${DEMO_BBS_ENTITY_ID}" \
             -d "$payload" \
             2>>"${DEMO_BOT_LOG}" || true
     )"
@@ -232,7 +238,7 @@ demo_bbs_skill_upload() {
     base_url="$(demo_bot_gateway_base_url)"
     package_file="$(demo_bbs_skill_package "$skill_name")" || return 1
     response="$(
-        curl --noproxy '*' --connect-timeout 2 --max-time 30 -sS             -X POST             "${base_url}/openapi/v1/bots/${backend_bot_id}/skills?user_id=${DEMO_ENTITY_ID}&owner_id=${DEMO_ENTITY_ID}"             -H "x-dev-user: ${DEMO_ENTITY_ID}"             -H "Content-Type: application/zip"             --data-binary "@${package_file}"             2>>"${DEMO_BOT_LOG}" || true
+        curl --noproxy '*' --connect-timeout 2 --max-time 30 -sS             -X POST             "${base_url}/openapi/v1/bots/${backend_bot_id}/skills?user_id=${DEMO_BBS_ENTITY_ID}&owner_id=${DEMO_BBS_ENTITY_ID}"             -H "x-dev-user: ${DEMO_BBS_ENTITY_ID}"             -H "Content-Type: application/zip"             --data-binary "@${package_file}"             2>>"${DEMO_BOT_LOG}" || true
     )"
     printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
     skill_id="$(printf '%s\n' "$response" | jq -r         --arg name "$skill_name"         '.data.skill.skill_id // empty
@@ -258,7 +264,7 @@ demo_bbs_skill_activate() {
 
     base_url="$(demo_bot_gateway_base_url)"
     response="$(
-        curl --noproxy '*' --connect-timeout 2 --max-time 30 -sS             -X POST             "${base_url}/openapi/v1/bots/${backend_bot_id}/skills/${skill_id}/activate?user_id=${DEMO_ENTITY_ID}&owner_id=${DEMO_ENTITY_ID}"             -H "x-dev-user: ${DEMO_ENTITY_ID}"             2>>"${DEMO_BOT_LOG}" || true
+        curl --noproxy '*' --connect-timeout 2 --max-time 30 -sS             -X POST             "${base_url}/openapi/v1/bots/${backend_bot_id}/skills/${skill_id}/activate?user_id=${DEMO_BBS_ENTITY_ID}&owner_id=${DEMO_BBS_ENTITY_ID}"             -H "x-dev-user: ${DEMO_BBS_ENTITY_ID}"             2>>"${DEMO_BOT_LOG}" || true
     )"
     printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
     if ! printf '%s\n' "$response" | jq -e         --arg name "$skill_name"         '
@@ -363,6 +369,46 @@ demo_bbs_subscription_payload() {
     jq -n --arg note "$note" '{note: $note}'
 }
 
+demo_bbs_subscription_persisted() {
+    local backend_bot_id="$1"
+    local base_url response
+
+    base_url="$(demo_bot_backend_base_url)"
+    response="$(
+        curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
+            -X GET \
+            -H "x-user-id: ${DEMO_BBS_ENTITY_ID}" \
+            "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription" \
+            2>>"${DEMO_BOT_LOG}" || true
+    )"
+    [ -n "$response" ] || return 1
+    printf '%s\n' "$response" >> "${DEMO_BOT_LOG}"
+    printf '%s\n' "$response" | jq -e \
+        --arg bot_id "$backend_bot_id" \
+        --arg mode "openclaw" \
+        '.code == 200000
+            and (.data.bot_id == $bot_id)
+            and (.data.mode == $mode)' >/dev/null 2>&1
+}
+
+demo_bbs_subscription_wait_persisted() {
+    local backend_bot_id="$1"
+    local started_at elapsed
+
+    started_at=$SECONDS
+    while true; do
+        if demo_bbs_subscription_persisted "$backend_bot_id"; then
+            return 0
+        fi
+        elapsed=$((SECONDS - started_at))
+        if [ "$elapsed" -ge "$DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS" ]; then
+            log_error "BBS Browse-Loop did not persist for ${backend_bot_id} within ${DEMO_BBS_SUBSCRIPTION_TIMEOUT_SECONDS}s. Check ${DEMO_BOT_LOG}"
+            return 1
+        fi
+        sleep "$DEMO_BBS_SUBSCRIPTION_POLL_INTERVAL_SECONDS"
+    done
+}
+
 demo_bbs_subscription_enable() {
     local backend_bot_id="$1"
     local note="$2"
@@ -371,9 +417,9 @@ demo_bbs_subscription_enable() {
     payload="$(demo_bbs_subscription_payload "$note")"
     response="$(
         curl --noproxy '*' --connect-timeout 2 --max-time 30 -fsS \
-            -X POST "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription?owner_user_id=${DEMO_ENTITY_ID}" \
+            -X POST "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription?owner_user_id=${DEMO_BBS_ENTITY_ID}" \
             -H "Content-Type: application/json" \
-            -H "x-user-id: ${DEMO_ENTITY_ID}" \
+            -H "x-user-id: ${DEMO_BBS_ENTITY_ID}" \
             -d "$payload" \
             2>>"${DEMO_BOT_LOG}" || true
     )"
@@ -382,10 +428,16 @@ demo_bbs_subscription_enable() {
     if ! printf '%s\n' "$response" | jq -e \
         --arg bot_id "$backend_bot_id" \
         --arg mode "openclaw" \
-        '(.code == 200000 or .code == 201000) and (.data.bot_id == $bot_id) and (.data.mode == $mode)' \
+        '(.code == 200000 or .code == 201000 or .code == 202000)
+            and (.data.bot_id == $bot_id)
+            and (.data.mode == $mode)' \
         >/dev/null 2>&1; then
         log_error "BBS Browse-Loop did not initialize for ${backend_bot_id}. Check ${DEMO_BOT_LOG}"
         return 1
+    fi
+
+    if printf '%s\n' "$response" | jq -e '.code == 202000' >/dev/null 2>&1; then
+        demo_bbs_subscription_wait_persisted "$backend_bot_id"
     fi
 }
 
@@ -431,16 +483,18 @@ demo_bot_create() {
 
 demo_bot_wait_ready() {
     local backend_bot_id="$1"
+    local owner_user_id="${2:-}"
     local base_url response bot_status error_message started_at elapsed
     demo_bot_defaults
+    owner_user_id="${owner_user_id:-$DEMO_ENTITY_ID}"
     base_url="$(demo_bot_backend_base_url)"
     started_at=$SECONDS
 
     while true; do
         response="$(
             curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
-                -H "x-user-id: ${DEMO_ENTITY_ID}" \
-                "${base_url}/api/bots/${backend_bot_id}/status?owner_id=${DEMO_ENTITY_ID}" \
+                -H "x-user-id: ${owner_user_id}" \
+                "${base_url}/api/bots/${backend_bot_id}/status?owner_id=${owner_user_id}" \
                 2>>"${DEMO_BOT_LOG}" || true
         )"
 
@@ -640,7 +694,7 @@ demo_bot_start() {
             log_error "Failed to create or locate BBS demo bot: ${bot_name}. Check ${DEMO_BOT_LOG}"
             return 1
         fi
-        if ! demo_bot_wait_ready "$backend_bot_id"; then
+        if ! demo_bot_wait_ready "$backend_bot_id" "$DEMO_BBS_ENTITY_ID"; then
             log_error "BBS demo bot backend did not become ready: ${bot_name} (${backend_bot_id})"
             return 1
         fi
@@ -673,7 +727,7 @@ demo_bot_ready() {
     for index in "${!DEMO_BBS_BOT_NAMES[@]}"; do
         backend_bot_id="$(demo_bbs_find_existing "${DEMO_BBS_BOT_NAMES[$index]}")"
         [ -n "$backend_bot_id" ] || return 1
-        demo_bot_wait_ready "$backend_bot_id" || return 1
+        demo_bot_wait_ready "$backend_bot_id" "$DEMO_BBS_ENTITY_ID" || return 1
     done
 }
 

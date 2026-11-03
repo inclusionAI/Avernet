@@ -23,11 +23,11 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-from agentclaw.community.core.bot_config_manifest.cli_tools import (
+from agentclaw.community.core.apply_engine.cli_tools import (
     CliToolScope,
     CliToolStore,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools import (
+from agentclaw.community.core.apply_engine.cli_tools import (
     arca_port,
     teclaw_port,
 )

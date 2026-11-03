@@ -176,46 +176,6 @@ async fn test_add_participant_to_nonexistent_group() {
 }
 
 #[tokio::test]
-async fn test_update_workspace() {
-    let store = MemoryGroupRepo::new();
-
-    let group = GroupBuilder::new("driver").id("test-group").build();
-
-    store.upsert(group).await.unwrap();
-
-    let workspace = Workspace {
-        tasks: vec![bcs_service_api::Task {
-            id: "task-1".to_string(),
-            description: "Test task".to_string(),
-            assigned_to: Some("driver".to_string()),
-            status: bcs_service_api::TaskStatus::InProgress,
-        }],
-        decisions: vec!["Decision 1".to_string()],
-        notes: vec![],
-        audit_log: vec![],
-    };
-
-    store
-        .update_workspace("test-group", workspace.clone())
-        .await
-        .unwrap();
-
-    let retrieved = store.get("test-group").await.unwrap();
-    assert_eq!(retrieved.workspace.tasks.len(), 1);
-    assert_eq!(retrieved.workspace.tasks[0].id, "task-1");
-    assert_eq!(retrieved.workspace.decisions.len(), 1);
-}
-
-#[tokio::test]
-async fn test_update_workspace_nonexistent_group() {
-    let store = MemoryGroupRepo::new();
-
-    let workspace = Workspace::default();
-    let result = store.update_workspace("nonexistent", workspace).await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
 async fn test_update_label() {
     let store = MemoryGroupRepo::new();
 
@@ -642,54 +602,4 @@ async fn test_group_long_running_project() {
 
     assert_eq!(session.participants.len(), 3);
     assert_eq!(session.originator(), "pm-bot");
-}
-
-#[tokio::test]
-async fn test_group_workspace_persistence() {
-    let store = MemoryGroupRepo::new();
-
-    let session = GroupBuilder::new("driver").id("test-group").build();
-    store.upsert(session).await.unwrap();
-
-    let workspace = Workspace {
-        decisions: vec![
-            "决定使用方案A".to_string(),
-            "安全审查由安全Bot负责".to_string(),
-        ],
-        tasks: vec![
-            bcs_service_api::Task {
-                id: "task-1".to_string(),
-                description: "数据库死锁排查".to_string(),
-                assigned_to: Some("dba".to_string()),
-                status: bcs_service_api::TaskStatus::Completed,
-            },
-            bcs_service_api::Task {
-                id: "task-2".to_string(),
-                description: "安全审核".to_string(),
-                assigned_to: Some("security".to_string()),
-                status: bcs_service_api::TaskStatus::InProgress,
-            },
-        ],
-        notes: vec!["需要注意性能影响".to_string()],
-        audit_log: vec![bcs_service_api::AuditEntry {
-            timestamp: 1234567890,
-            action: "task_completed".to_string(),
-            actor: "dba".to_string(),
-            details: "Marked task-1 as completed".to_string(),
-        }],
-    };
-
-    store
-        .update_workspace("test-group", workspace)
-        .await
-        .unwrap();
-
-    let retrieved = store.get("test-group").await.unwrap();
-    assert_eq!(retrieved.workspace.decisions.len(), 2);
-    assert_eq!(retrieved.workspace.tasks.len(), 2);
-    assert_eq!(retrieved.workspace.audit_log.len(), 1);
-    assert_eq!(
-        retrieved.workspace.tasks[0].status,
-        bcs_service_api::TaskStatus::Completed
-    );
 }

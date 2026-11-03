@@ -31,18 +31,27 @@ export interface EventFrame {
 
 export type BcnFrame = RequestFrame | ResponseFrame | EventFrame;
 
+export interface ProviderRegistration {
+  providerId: string;
+  providerBotRef: string;
+  mode: 'plugin';
+  authMode: 'static_bearer';
+}
+
 export interface BotSession {
   version: 1;
   endpoint: string;
   botUuid: string;
   botToken: string;
   botName: string;
+  registration?: ProviderRegistration;
 }
 
 export interface RegisterBotResponse {
   bot_name: string;
   bot_uuid: string;
   bot_token: string;
+  registration?: ProviderRegistration;
 }
 
 export interface BotConnectResponse {
@@ -178,6 +187,16 @@ function parseResponseError(value: unknown): NonNullable<ResponseFrame['error']>
   };
 }
 
+function parseProviderRegistration(value: unknown): ProviderRegistration {
+  const record = asRecord(value);
+  const providerId = asNonEmptyString(record?.providerId);
+  const providerBotRef = asNonEmptyString(record?.providerBotRef);
+  if (!providerId || !providerBotRef || record?.mode !== 'plugin' || record.authMode !== 'static_bearer') {
+    throw new Error('BCN Bot Session has invalid Provider registration metadata');
+  }
+  return { providerId, providerBotRef, mode: 'plugin', authMode: 'static_bearer' };
+}
+
 export function parseBotSession(value: string): BotSession {
   let parsed: unknown;
   try {
@@ -193,7 +212,8 @@ export function parseBotSession(value: string): BotSession {
   if (record?.version !== 1 || !endpoint || !botUuid || !botToken || !botName) {
     throw new Error('BCN Bot Session credential has an unsupported or incomplete shape');
   }
-  return { version: 1, endpoint, botUuid, botToken, botName };
+  const registration = record.registration === undefined ? undefined : parseProviderRegistration(record.registration);
+  return { version: 1, endpoint, botUuid, botToken, botName, ...(registration ? { registration } : {}) };
 }
 
 export function parseChatSendParams(value: unknown): ChatSendParams {

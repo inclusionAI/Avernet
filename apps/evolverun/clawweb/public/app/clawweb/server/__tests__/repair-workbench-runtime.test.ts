@@ -79,6 +79,22 @@ it('drains an unrelated manual completion even if background result reconciliati
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: '优化任务已完成，无需修改', recipientId: 'editor' }));
   } finally { broken.mockRestore(); }
 });
+it('limits the fast result poll to unfinished generations and notifications, not planning or historical Git scans', async () => {
+  const { db } = await fixture();
+  const notify = vi.fn(async () => ({ status: 'sent' as const }));
+  const runtime = createWorkflowRepairRuntime(db, { principal: async () => ({ actorId: 'editor', isAdmin: true }),
+    automation: { settings: createAutoAnalysisSettings({ repo: new AppConfigRepository(db), environmentDefault: '' }),
+      ports: { owner: async () => 'editor', canEdit: async () => true, baseline: async () => { throw new Error('must not fetch'); },
+        analysis: { lookup: async () => ({ status: 'absent' }), start: async () => ({ status: 'running' }) }, notify } } });
+  const tick = vi.spyOn(runtime.automation!, 'tick').mockResolvedValue(undefined);
+  const query = vi.spyOn(db, 'query');
+  try {
+    await runtime.monitor.reconcile();
+    expect(tick).not.toHaveBeenCalled();
+    expect(query.mock.calls.some(([sql]) => sql.includes("record_kind = 'deployment'"))).toBe(false);
+    expect(query.mock.calls.some(([sql]) => sql.includes('workflow_healing_outcomes'))).toBe(false);
+  } finally { tick.mockRestore(); query.mockRestore(); }
+});
 
 describe('real repair Host composition', () => {
   it('queues manual AIS completion through the real Host even without automatic-analysis configuration', async () => {
@@ -153,7 +169,7 @@ describe('real repair Host composition', () => {
 });
 
 
-it('loads only actionable publications before keyset paging settled history', async () => {
+it('does not poll pending or settled publication history in the fast result consumer', async () => {
   const { db, runtime } = await fixture();
   const records = new RepairReleaseRepository(db);
   const make = (id: string, status: RepairDeployment['status']) => ({ id, workflowId: 'wf', taskId: 'task', revision: 1,
@@ -170,12 +186,12 @@ it('loads only actionable publications before keyset paging settled history', as
   const reconcile = vi.spyOn(runtime.release, 'reconcile').mockImplementation(async (_actor, _task, id) => make(id, 'running'));
   const query = vi.spyOn(db, 'query');
   await runtime.monitor.reconcile();
-  expect(reconcile).toHaveBeenCalledTimes(101);
-  expect(new Set(reconcile.mock.calls.map(call => call[2])).size).toBe(101);
+  expect(reconcile).not.toHaveBeenCalled();
   const pages = await Promise.all(query.mock.calls.flatMap(([sql], i) =>
     sql.includes('SELECT record_id, body_json FROM workflow_repair_release_records') ? [query.mock.results[i].value] : []));
-  expect(pages.map(page => page.length)).toEqual([100, 1, 0]);
+  expect(pages).toEqual([]);
   reconcile.mockClear();
   await runtime.monitor.reconcile();
-  expect(reconcile).toHaveBeenCalledTimes(101);
+  expect(reconcile).not.toHaveBeenCalled();
+  expect(await db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind = 'deployment'")).toHaveLength(351);
 });

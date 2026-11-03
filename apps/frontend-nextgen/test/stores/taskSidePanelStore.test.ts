@@ -66,6 +66,49 @@ describe('taskSidePanelStore', () => {
     expect(after.nodeScrollSignal).toBe(1);
   });
 
+  it('selectRootNode 在宿主会话已展示时只更新根节点选中态', () => {
+    useTaskSidePanelStore.getState().selectRootNode('t1', 'n-root');
+
+    const after = useTaskSidePanelStore.getState();
+    expect(after.navByTask['t1']?.selectedNodeId).toBe('n-root');
+    expect(after.pendingNavigation).toBeNull();
+    expect(after.linkedSession).toBeNull();
+    expect(after.nodeScrollSignal).toBe(0);
+  });
+
+  it('selectRootNode 可发出恢复原宿主会话的真实路由目标', () => {
+    useTaskSidePanelStore
+      .getState()
+      .selectRootNode(
+        't1',
+        'n-root',
+        target('sess-origin', { routeUrl: '/workspace/chat?bot=bot-1&session=sess-origin' }),
+      );
+
+    expect(useTaskSidePanelStore.getState().pendingNavigation).toMatchObject({
+      taskId: 't1',
+      sessionId: 'sess-origin',
+      routeUrl: '/workspace/chat?bot=bot-1&session=sess-origin',
+    });
+  });
+
+  it('selectRootNode 退出其他节点的联动会话并取消待消费跳转', () => {
+    useTaskSidePanelStore.getState().selectNode('t1', 'n-other', target('sess-other'));
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'sess-other',
+      kind: 'bot',
+      botId: 'bot-9',
+    });
+
+    useTaskSidePanelStore.getState().selectRootNode('t1', 'n-root');
+
+    const after = useTaskSidePanelStore.getState();
+    expect(after.navByTask['t1']?.selectedNodeId).toBe('n-root');
+    expect(after.pendingNavigation).toBeNull();
+    expect(after.linkedSession).toBeNull();
+    expect(after.nodeScrollSignal).toBe(1);
+  });
+
   it('drillInto 去重 push、封顶 2 层、不增加滚动信号', () => {
     const s = useTaskSidePanelStore.getState();
     s.drillInto('t1', 'n2', target('sess-grp'));
@@ -114,17 +157,18 @@ describe('taskSidePanelStore', () => {
     expect(s.navByTask['tB']?.drillStack).toEqual(['nB1']);
   });
 
-  it('setActiveTask 切换激活任务并清掉待消费跳转,不动下钻分片', () => {
+  it('setActiveTask 切换激活任务并清掉待消费跳转,重置目标任务导航', () => {
     useTaskSidePanelStore.getState().setActiveTask('t1');
     useTaskSidePanelStore.getState().drillInto('t1', 'n2', null);
     useTaskSidePanelStore.getState().selectNode('t1', 'n2', target('sess-main'));
 
-    useTaskSidePanelStore.getState().setActiveTask('t2');
+    useTaskSidePanelStore.getState().setActiveTask('t1');
 
     const s = useTaskSidePanelStore.getState();
-    expect(s.activeTaskId).toBe('t2');
+    expect(s.activeTaskId).toBe('t1');
     expect(s.pendingNavigation).toBeNull();
-    expect(s.navByTask['t1']?.drillStack).toEqual(['n2']);
+    expect(s.navByTask['t1']?.drillStack).toEqual([]);
+    expect(s.navByTask['t1']?.selectedNodeId).toBeNull();
   });
 
   it('resetAll 回到初始态', () => {

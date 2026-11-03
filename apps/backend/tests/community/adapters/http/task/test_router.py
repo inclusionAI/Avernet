@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,9 @@ from agentclaw.community.adapters.http.task.auth import (
 from agentclaw.community.adapters.http.task.router import router, task_callback_router
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskArtifactRepositoryProtocol,
 )
@@ -282,6 +286,15 @@ class _StubTaskModule(Module):
 
     @singleton
     @provider
+    def artifact_service(self) -> TaskArtifactApiServiceProtocol:
+        class _EmptyArtifactService:
+            def list_artifacts(self, task_id, *, node_id=None, limit=200):
+                return []
+
+        return _EmptyArtifactService()
+
+    @singleton
+    @provider
     def artifact_repo(self) -> TaskArtifactRepositoryProtocol:
         class _EmptyArtifactRepo:
             def list_by_task(self, task_id, *, limit=200):
@@ -344,6 +357,45 @@ def _body(node=False, **kw):
 
 
 class TestRouter:
+    def test_execute_logs_full_request_at_entry(self, task_client, caplog):
+        client, svc = task_client
+        request_body = {
+            "task_spec": {
+                "context": {
+                    "title": "Execute request log",
+                    "background": "Endpoint entrance diagnostics",
+                    "extend_props": {"request_trace": "trace-endpoint"},
+                },
+                "goal": {
+                    "objective": "exercise execute logging",
+                    "acceptances": [{"id": "ac1", "acceptance": "log request"}],
+                },
+                "metadata": {
+                    "title": "Execute request metadata",
+                    "instruction": "log accepted boundary fields",
+                },
+            },
+            "source_type": "bot",
+            "owner_user_id": "owner-1",
+            "owner_bot_id": "bot-1",
+            "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 2},
+        }
+
+        with caplog.at_level(logging.INFO, logger="start"):
+            response = client.post("/api/v1/collaboration/tasks/execute", json=request_body)
+
+        assert response.status_code == 200, response.text
+        assert [call for call in svc.callback.calls if call[0] == "execute"]
+        entry_log = next(
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "start" and "task_execute_internal" in record.getMessage()
+        )
+        assert "'request_trace': 'trace-endpoint'" in entry_log
+        assert "'metadata': {'title': 'Execute request metadata'" in entry_log
+        assert "'MAX_DEPTH': 2" in entry_log
+        assert "'owner_user_id': 'owner-1'" in entry_log
+
     def test_new_relay_rejects_legacy_node_write(self, task_client):
         client, svc = task_client
         svc.set_execution_config(

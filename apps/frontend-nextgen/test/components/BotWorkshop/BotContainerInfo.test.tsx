@@ -25,6 +25,13 @@ beforeEach(() => {
   list.mockReset();
 });
 
+test('Teclaw 运行态服务 Bot 不展示容器入口且不请求快照', () => {
+  const bot = { ...serviceBot, runtime: { ...serviceBot.runtime, engine: 'teclaw' as const } };
+  render(<BotContainerInfo bot={bot} userId="user-1" canView onOpen={jest.fn()} />);
+  expect(list).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});
+
 test('无 Owner/协作者资格时不预取容器，避免公共空间 404', async () => {
   render(<BotContainerInfo bot={serviceBot} userId="user-1" canView={false} onOpen={jest.fn()} />);
 

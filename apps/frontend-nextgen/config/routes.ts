@@ -29,7 +29,12 @@ export const routes = [
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
+      // 老版分享链接路径兜底（/private-chat/chat?id=bot_id:owner_id）：老域名重定向在
+      // 运维层完成域名/路径转换；组件运行时把 query 原样透传至 /workspace/chat，
+      // 交由对话页解析链路（route.ts id 别名 + Guard）接管。
+      { path: '/private-chat/chat', component: '@/pages/LegacyPrivateChatRedirect' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
+      { path: '/collaboration-square/experts', component: '@/pages/CollaborationSquare/Experts' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。

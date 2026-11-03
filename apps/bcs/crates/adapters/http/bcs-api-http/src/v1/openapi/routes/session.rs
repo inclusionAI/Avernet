@@ -60,7 +60,7 @@ async fn create_session(
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let command = body
-        .into_command(&caller, group_id)
+        .into_command(caller, group_id)
         .map_err(|error| application_error_response(&request_id, error))?;
     let result = state
         .session_service

@@ -6,6 +6,7 @@ import React from 'react';
 interface DetailNavigationItem<T extends string> {
   key: T;
   label: string;
+  shortLabel?: string;
   icon: React.ReactNode;
 }
 
@@ -43,7 +44,7 @@ function NavigationButton<T extends string>({
             onClick={onClick}
           >
             {item.icon}
-            <span>{item.label.slice(0, 2)}</span>
+            <span>{item.shortLabel ?? item.label.slice(0, 2)}</span>
           </Button>
         </TooltipTrigger>
         {item.label.length > 2 ? <TooltipContent side="right">{item.label}</TooltipContent> : null}
@@ -65,7 +66,7 @@ export function DetailNavigation<T extends string, U extends string>({
     <nav
       aria-label="Bot 编辑模块"
       className={cn(
-        'bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-card py-3',
+        'bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-divider bg-card py-3',
         hidden && 'hidden',
       )}
     >

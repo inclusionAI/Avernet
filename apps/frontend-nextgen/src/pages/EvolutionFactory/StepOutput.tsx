@@ -83,7 +83,7 @@ export function StepOutput({
         <ResultCard title="本轮 Diff">
           <p className="text-sm leading-relaxed">{text(change.summary)}</p>
           {array(change.files).length > 0 && (
-            <div className="mt-3 divide-y divide-border rounded-lg bg-background/80 px-3">
+            <div className="mt-3 divide-y divide-divider rounded-lg bg-background/80 px-3">
               {array(change.files).map((file, i) => (
                 <div key={i} className="py-3">
                   <p className="break-all font-mono text-xs">{text(file.path)}</p>

@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from agentclaw.community.core.bot_management.bcn_identity import provider_address_kwargs
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
 )
@@ -148,6 +149,7 @@ class AicodingBaasPreparation:
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            **provider_address_kwargs(bot),
             respect_drm=False,
         )
 

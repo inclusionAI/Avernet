@@ -1,6 +1,8 @@
 """BotBuildService 生成多阶段 OpenClaw 配置文件的单测。"""
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +21,7 @@ _UNSET = object()
 
 def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
+    service._artifact_transfers = ArtifactTransferRegistry({})
     service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
     service._env = "test"
     service._user_list_repository = MagicMock(exists=MagicMock(return_value=False))
@@ -146,6 +149,9 @@ class TestGenerateOpenClawStageConfigs:
     def test_build_invokes_openclaw_config_generation_after_mcp(self, tmp_path: Path):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -204,6 +210,9 @@ class TestGenerateOpenClawStageConfigs:
     def test_build_marks_failure_when_openclaw_config_generation_fails(self, tmp_path: Path):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -256,6 +265,9 @@ class TestGenerateOpenClawStageConfigs:
     ):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:
@@ -316,6 +328,9 @@ class TestBuildMigrationPathWhitelist:
     ):
         @dataclass
         class DummyProvider:
+            def get_base_path(self):
+                return Path("/home/admin/.aicoding")
+
             plan: EngineBuildPlan
 
             def get_build_plan(self, build_rsync_excludes_append=None, bot=None, **kwargs) -> EngineBuildPlan:

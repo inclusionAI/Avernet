@@ -2,14 +2,21 @@ import { workflowSnapshotKey } from '@avernet/clawweb-shared/server/contracts/wo
 import { itemSnapshotKey } from '../contracts/repair-version-scope.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MAX_ITEMS, MAX_MODEL_INPUT_BYTES, type RepairItem } from '../contracts/repair-batch.js';
-import { validateWorkflowPatchProposal } from '@avernet/clawevolve/server/services/evolution/contracts';
 import type { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
 import { proposalMembers, expandProposalCards, proposalConflicts, proposalPending } from '../contracts/repair-proposal.js';
 import { digestRepairJson } from '../contracts/repair-batch.js';
 import type { RepairBaseline } from '../contracts/repair-batch.js';
 import type { AutomationWorkbench } from '../contracts/workflow-automation.js';
 import type { RepairInboxItem } from '../contracts/repair-workbench.js';
-async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: RepairBaseline) {
+export type AutomaticPlanningBaseline = Pick<RepairBaseline, 'activeDeployNumber' | 'specDigest' | 'proposalSpecDigest'>;
+/** Text goals may omit baseline metadata; concrete changes must satisfy generation's baseline guard. */
+function matchesProposalBaseline(item: RepairItem, workflowId: string, baseline: AutomaticPlanningBaseline) {
+  const structured = [item.proposal?.operations, item.proposal?.patches].some(value => Array.isArray(value) && value.length > 0);
+  return (item.proposal?.workflowId == null || item.proposal.workflowId === workflowId)
+    && (!structured && item.proposal?.baseSpecDigest == null
+      || item.proposal?.baseSpecDigest === (baseline.proposalSpecDigest ?? baseline.specDigest));
+}
+async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository, workflowId: string, baseline: AutomaticPlanningBaseline) {
   const header=await workbench.candidates(workflowId,{state:'pending',pageSize:1,versionScope:'current'});
   if(header.activeSnapshot!==undefined&&(header.activeSnapshot?.status!=='resolved'||header.activeSnapshot.snapshot.kind!=='deployment'||header.activeSnapshot.snapshot.deployNumber!==baseline.activeDeployNumber))return null;
   const ranked = await issues.listPage(workflowId, { page: 1, pageSize: 20, sort: 'priority',...(header.activeSnapshot!==undefined?{versionScope:'current' as const}:{}) });
@@ -32,11 +39,7 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
         const { aggregation: _projection, ...raw } = item;
         if (targetSnapshotKey&&itemSnapshotKey(item)!==targetSnapshotKey)continue;
         if (item.state !== 'pending' || !item.sourceAvailable || (!Array.isArray(item.context?.diagnoses) || !item.context.diagnoses.length) || Buffer.byteLength(JSON.stringify(raw)) > 32000) continue;
-        try {
-          const proposal = validateWorkflowPatchProposal(item.proposal);
-          if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== (baseline.proposalSpecDigest ?? baseline.specDigest)) continue;
-          candidates.push(item);
-        } catch { /* Unstructured, stale or ungrounded proposals remain available for manual selection. */ }
+        if (matchesProposalBaseline(item, workflowId, baseline)) candidates.push(item);
       }
       if (number >= page.page.totalPages) break;
       number++;
@@ -62,7 +65,7 @@ async function legacyAutomaticScope(workbench: AutomationWorkbench, issues: Issu
     if (selectedUnits === 5) break;
   }
   if (!items.length) return null;
-  const fingerprint = digestRepairJson({ baseline: [baseline.packCommit,baseline.activeDeployNumber], items: items.map(item => ({ id: item.itemId,
+  const fingerprint = digestRepairJson({ baseline: [baseline.activeDeployNumber, baseline.proposalSpecDigest ?? baseline.specDigest], items: items.map(item => ({ id: item.itemId,
     revision: item.contentRevision, proposal: item.proposalKey, recurrence: item.context?.recurrence ?? null,
     flows: [...new Set(item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : []))].sort() })) });
   return { items, inputDigest, fingerprint,...(targetSnapshotKey?{targetSnapshotKey}:{}) };
@@ -80,7 +83,7 @@ export function automaticItemDigest(item: RepairItem) {
   return digestRepairJson({ id: item.itemId, revision: item.contentRevision, proposal: item.proposal, sources: item.sources, context: item.context ?? null });
 }
 export async function selectAutomaticScope(workbench: AutomationWorkbench, issues: IssueAggregationRepository,
-  workflowId: string, baseline: RepairBaseline, scope?: { db: IDatabase; minimumImpact: 'medium' | 'high'; evidenceCutoffMs: number }): Promise<AutomaticScope | null> {
+  workflowId: string, baseline: AutomaticPlanningBaseline, scope?: { db: IDatabase; minimumImpact: 'medium' | 'high'; evidenceCutoffMs: number }): Promise<AutomaticScope | null> {
   if (!scope) return legacyAutomaticScope(workbench, issues, workflowId, baseline);
   const window = previousShanghaiDay(scope.evidenceCutoffMs);
   const deferred: Record<string, string> = {}, revisions: Record<string, string> = {};
@@ -129,10 +132,7 @@ export async function selectAutomaticScope(workbench: AutomationWorkbench, issue
         });
       }
       if (!reason && !grounded) reason = 'RUN_TIME_NOT_IN_SCOPE';
-      if (!reason) try {
-        const proposal = validateWorkflowPatchProposal(item.proposal);
-        if (proposal.workflowId !== workflowId || proposal.baseSpecDigest !== (baseline.proposalSpecDigest ?? baseline.specDigest)) reason = 'BASELINE_REASSESSMENT_REQUIRED';
-      } catch { reason = 'PROPOSAL_REASSESSMENT_REQUIRED'; }
+      if (!reason && !matchesProposalBaseline(item, workflowId, baseline)) reason = 'BASELINE_REASSESSMENT_REQUIRED';
       if (reason) deferred[item.itemId] = reason;
       else { items.push(item); revisions[item.itemId] = automaticItemDigest(item); }
     }

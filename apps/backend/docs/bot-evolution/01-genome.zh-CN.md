@@ -56,8 +56,8 @@ Bot 的变更都是对某个修订版的应用。
 
 **放置位置。** 放在 Backend 中，作为新的核心包 `core/bot_genome/`，与
 `core/bot_config_manifest/` 并列，因为 Backend 负责期望状态，且 Manifest
-已经位于此处。内容复用 manifest 内容存储
-（`core/bot_config_manifest/content/service.py`）。晋升同样位于 Backend 中、
+已经位于此处。内容复用内容存储
+（`core/content_store/`，自 #3064 起为独立组件）。晋升同样位于 Backend 中、
 与其相邻，因为晋升必须与应用放在一起。
 
 **分层。** 基因组构建在 Manifest 之上。Manifest 不感知修订版：它只获得格式特性
@@ -77,16 +77,16 @@ Bot 的变更都是对某个修订版的应用。
 - 一个 Bot 有多个**修订版**。每个修订版持有一个 `spec`（可进化内容）和一个
   `policy`（所有者的规则），外加平台写入的元数据。
 - 除 Bot 的第一个修订版外，每个修订版恰好有一个**父代**。**补丁**（一组操作）
-  就是把父代变成新修订版的东西。所有者也可以从一份完整的 Manifest 文档记录修订版，
+  就是把父代变成新修订版的东西。所有者也可以把 Bot 的当前状态**捕获**为一个修订版，
   而不使用补丁。
 - **引用**是指向修订版的名字（`active`、`draft`……）。
-- **编译**一个修订版会得到 `CompiledManifest`，供应用和评估 Bot 使用。
+- **编译**一个修订版会得到应用引擎的类型化期望状态（`DesiredState`），供应用和评估 Bot 使用。
 - 文件内容从不内联存储：`spec` 中的每个文件都是一个**摘要**，即其字节在内容存储中的
   地址。
 
 | 类型 | 含义 | 负责方 | 生命周期 |
 | --- | --- | --- | --- |
-| `GenomeRevision` | Bot 定义的一个不可变版本：`spec` + `policy`，加上平台写入的元数据（`revision`） | 基因组注册表 | 只记录一次（来自补丁或 Manifest 文档），从不编辑；只有其 `status`、注解和只追加的 `evaluations` 列表会变化；从不删除 |
+| `GenomeRevision` | Bot 定义的一个不可变版本：`spec` + `policy`，加上平台写入的元数据（`revision`） | 基因组注册表 | 只记录一次（来自补丁或通过捕获），从不编辑；只有其 `status`、注解和只追加的 `evaluations` 列表会变化；从不删除 |
 | `GenomeSpec` | 修订版的可进化内容：人设、技能、记忆、资源、工具、引擎配置、脚本 | 基因组注册表（由所有者编写，由进化策略提议） | 修订版的一部分；参与哈希 |
 | `GenomePolicy` | 不可进化的部分：可变基因、固定项、风险覆盖 | Bot 所有者 / 租户管理员 | 修订版的一部分；参与哈希；由平台原样向后复制；任何补丁都不得触及 |
 | `RevisionMetadata` | Id、每个 Bot 的 `seq`、父代、来源、状态、证据与评估 id、注解 | 基因组注册表（平台写入） | 在记录时写入；状态/注解之后更新，评估 id 由验证追加；不参与哈希 |
@@ -95,7 +95,7 @@ Bot 的变更都是对某个修订版的应用。
 | `GenomePatch` | 针对具名基础修订版的、带类型的逐项变更；进化策略唯一可提交的内容 | 由进化策略（通过[进化运行](06-evolution-run.zh-CN.md)）或人提交；由注册表校验 | 以内容寻址方式存储；其摘要即候选 id |
 | `PatchOp` | 补丁中的一项（`file.edit`、`skill.add`、`memory.add`……） | 补丁的一部分 | 每个操作映射到一个风险等级 |
 | `MemoryItem` | 一条精选记忆事实/规则/教训，带键 | 基因组（精选记忆） | 由补丁操作添加、更新和退役 |
-| `CompiledManifest` | 渲染为一份普通 Manifest 文档（已固定版本，每个类别都存在）的修订版，另附修订版 id 和该文档的摘要用于记账 | 基因组注册表（派生而来，不作为事实存储） | 按需为应用和评估 Bot 生成 |
+| `DesiredState` | 修订版渲染成的应用引擎类型化期望状态：它覆盖的每个类别都有声明（空列表即声明「没有」），`cli_tools` 与 `engine_config` 不声明；Manifest 文档也编译成同一种状态 | 应用引擎（`core/apply_engine/desired_state.py`）；由基因组注册表派生，不作为事实存储 | 按需为应用和评估 Bot 生成 |
 
 ### 2.1 基因
 
@@ -163,7 +163,7 @@ class PersonaFile:
     digest: Digest                   # where its bytes are, e.g. "sha256:3f9a…"
 
 class SkillOrigin(StrEnum):
-    CENTER = "center"                # a governed skill from Skill Center: pinned by version, not copied
+    CENTER = "center"                # a governed skill from Skill Center, by name: not copied, not version-pinned
     LOCAL = "local"                  # the skill's files are stored (fetched from git or OSS, uploaded, or created
                                      # by a patch); where they were fetched from is not part of the revision (§4.2)
 
@@ -172,7 +172,9 @@ class SkillEntry:
     name: str                        # the skill's name, the entry's key, e.g. "refund-policy"
     origin: SkillOrigin
     digest: Digest | None = None     # LOCAL only: the acm-tree-v1 encoding of the skill's files (§9.1), e.g. "sha256:0c55…"
-    center_version: str | None = None  # CENTER only: the pinned Skill Center version, e.g. "v7"
+    repo_path: str | None = None     # REPO only: the path after git:// on the skill row, e.g. "team/weather"
+    # A CENTER entry is its name alone: the bot runs whatever version the Center publishes (ADR 0002),
+    # so a newer Center version is not drift; apply finds the Center asset by this name.
 ```
 
 精选记忆：
@@ -296,7 +298,7 @@ class GenomeSpec:
   ],
   "skills": [                                     // sorted by name
     {"name": "quality-check", "origin": "local", "digest": "sha256:0c55…"},   // stored: acm-tree-v1 of its files
-    {"name": "refund-policy", "origin": "center", "center_version": "v7"}     // pinned Center version, not copied
+    {"name": "refund-policy", "origin": "center"}     // a Center skill, by name: not copied, no version
   ],
   "memory": {                                     // new category, see §7
     "mode": "seed",                               // seed | merge | replace (MemoryMode)
@@ -364,7 +366,7 @@ class GenomePolicy:
   再次检查“只触及可变基因，未触及固定条目”；见 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)。
 
 正是在这里，“工具和权限变更只能由人完成”得以**结构性地**而非靠约定来强制执行：
-不存在针对工具或脚本的补丁操作，因此它们只能在所有者记录一份完整的 Manifest 文档时
+不存在针对工具或脚本的补丁操作，因此它们只能在所有者编辑 Bot 并捕获它时
 变更，而策略配置本身处于补丁可触及的范围之外。
 更改策略配置是一项所有者操作，会记录一个新的修订版（§4.4）。
 
@@ -404,14 +406,15 @@ class RevisionMetadata:
                                      # 42nd is 42 ("r42"). UIs show it, and paths accept it
                                      # (GET …/revisions/r42), but it is not an identity: other records store `id`
     bot: BotRef                      # the bot this revision belongs to (owner + bot id)
-    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or the `base` given
-                                     # when a whole document was recorded; None only for the bot's first revision
+    parent: RevisionId | None        # the revision this one was made from: the patch's `base`, or `active` when the
+                                     # bot was captured or its policy changed (the latest revision while there is no
+                                     # `active` yet); None only for the bot's first revision
     created_by: Provenance
     created_at: datetime
     status: RevisionStatus
     patch_digest: Digest | None      # digest of the stored GenomePatch that turned `parent` into this revision
-                                     # (= the candidate id, §6.5); None when the revision was recorded from a whole
-                                     # Manifest document instead of a patch (§4.1)
+                                     # (= the candidate id, §6.5); None when the revision was captured or is a
+                                     # policy change instead of a patch (§4.1)
     evidence: list[EvidenceRef]      # the Experience records that motivated the change, e.g.
                                      # ["episode:ep_91", "feedback:fb_311"]; [] for most manual edits
     evaluations: list[EvaluationId]  # the Verification evaluations run on this revision, e.g. ["ev_301", "ev_302"];
@@ -601,7 +604,7 @@ class MemorySetMode:
     mode: MemoryMode
 
 # No op reaches tools, script, engine_config or the policy: MCP servers and the script change only when
-# an owner records a whole Manifest document; engine_config waits for #2858.
+# an owner edits the bot and captures it; the policy has its own operation; engine_config waits for #2858.
 PatchOp = (FileEdit | PersonaAdd | PersonaRemove | SkillAdd | SkillUpdate | SkillRemove | ResourceAdd
            | ResourceRemove | MemoryAdd | MemoryUpdate | MemoryRetire | MemorySetMode)
 
@@ -665,46 +668,49 @@ Always apologise first.                                                         
 `skill.update` 则为每个变更的文件携带一个 unified diff：即 `git diff` 和 `diff -u`
 输出的标准文本差异格式，用 `@@` 标出 hunk 头，`-` 表示删除的行，`+` 表示新增的行。
 
-### 2.7 CompiledManifest
+### 2.7 编译后的期望状态
 
 ```python
+# core/apply_engine/desired_state.py — 应用引擎唯一的输入，与 Manifest 编译器共用
 @dataclass(frozen=True)
-class CompiledManifest:
-    revision_id: RevisionId          # bookkeeping: which revision this was compiled from (not inside the document)
-    document: dict                   # a plain Manifest document, exactly what apply consumes (shape below)
-    document_digest: Digest          # digest of that document; apply reports record it (§8 item 5), and the
-                                     # Registry maps it back to `revision_id`
+class DesiredState:
+    script: Declaration[DesiredScript] | None            # None = 未声明：apply 不动 Bot 的脚本
+    identity: Declaration[DesiredIdentityFile] | None    # Declaration(()) = 声明为空：apply 删除现有内容
+    resources: Declaration[DesiredResource] | None
+    skills: Declaration[DesiredSkill] | None
+    mcp: Declaration[DesiredMcpServer] | None
+    engine_config: Declaration[DesiredEngineConfig] | None
+    cli_tools: Declaration[DesiredCliTool] | None
 ```
 
-`document` 就是一份 Manifest 文档。除 §8 列出的 Manifest 变更外，编译不会给
-Manifest 格式增加任何东西：每个类别都存在，文件条目按摘要指向内容存储（§8 第 1
-项），精选记忆就是 Manifest 新增的 `memory` 类别（§8 第 3 项）。另外两个字段是
-放在文档旁边用于记账的信息，不会发送给应用。当晋升应用该文档时，应用报告会记录
-其摘要（§8 第 5 项），注册表也会记录该修订版编译出了这个摘要，因此该摘要可以
-映射回该修订版（§5.5）。
+编译一个修订版（`core/bot_genome/compile.py` 的 `compile_spec`）得到的是这个
+类型化状态，而不是一份 Manifest 文档：修订版覆盖的每个类别都有声明——
+`identity`、`resources`、`skills`、`mcp` 和 `script`，空列表即声明「没有」，
+引擎会通过删除现有内容来收敛到它——修订版从不覆盖的两个类别（`cli_tools`、
+`engine_config`）保持未声明。每个条目以摘要指向内容存储中的字节
+（`ContentRef`），Skill Center 技能以固定版本表示，共享仓库技能以路径表示；
+精选记忆在引擎记忆投影落地（§7，RSI-05）之前不投递。Bot Config Manifest 文档
+通过自己的编译器编译成同一种状态，两者之间从不互相转换：契约测试把每个示例
+用例按两条路各编译一次并比较
+（`api-contracts/genome/v1/manifest-v1-compatibility.md`）。
 
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{
-  "revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:f27a…",
-  "document": {
-    "schema_version": 1,
-    "manifest": {
-      "identity": [{"type": "SOUL.md", "source": {"protocol": "content_store", "digest": "sha256:3f9a…"}}],
-      "skills": [{"name": "quality-check", "source": {"protocol": "content_store", "digest": "sha256:0c55…"}},
-                 {"name": "refund-policy", "source": {"protocol": "center", "version": "v7"}}],   // §8 item 6
-      "resources": [{"path": "data/kb/", "source": {"protocol": "content_store", "digest": "sha256:d4a7…"}}],
-      "mcp": [],
-      "memory": {"mode": "seed", "items": {"source": {"protocol": "content_store", "digest": "sha256:9e20…"}}}   // §8 item 3
-    }
-  }
-}
+```python
+# 示意：r42 编译出的结果
+DesiredState(
+    script=Declaration(()),                                             # 修订版没有脚本：删除现有脚本
+    identity=Declaration((DesiredIdentityFile("SOUL.md", ContentRef("sha256:3f9a…")),)),
+    skills=Declaration((DesiredSkill("quality-check", LocalSkillPackage(ContentRef("sha256:0c55…"))),
+                        DesiredSkill("refund-policy", CenterSkillVersion("v7")))),                # §8 第 6 项
+    resources=Declaration((DesiredResourceTree("data/kb/", ContentRef("sha256:d4a7…")),)),
+    mcp=Declaration(()),
+    engine_config=None, cli_tools=None,                                 # 从不在修订版中：保持原样
+)
 ```
 
-`document` 中确切的 Manifest 字段名遵循 Manifest schema v1 以及 §8 中新增的
-内容存储来源和 Center 来源；上面的来源写法是提议，由 RSI-04 确定。每个 Manifest v1
-字段的映射见
+该状态不携带自身的摘要，也不会被记录下来：Bot 运行的是哪个修订版，靠读取
+Bot 来观察（§5.5），而不是通过文档摘要来追踪。本文及相邻文档中旧有的
+「已编译文档」指的就是这个状态。每个 Manifest v1 字段在修订版中的位置，以及
+修订版在该状态中的位置，见
 [`manifest-v1-compatibility.md`](../../api-contracts/genome/v1/manifest-v1-compatibility.md)。
 
 ## 3. 为什么 Manifest 还不够
@@ -743,9 +749,9 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **一个通过独立路径交付的单独进化产物（例如 ClawEvolve Pack）。** 否决原因：
   两个事实来源，而且 Pack 是 OpenClaw 专属的工作区快照，无法触达 teclaw。
 - **在 Manifest 之外做版本管理，并让 Manifest 完全保持不变。** 否决原因：如果
-  没有内容存储来源以及应用报告上的已应用文档摘要，应用仍会重新获取可移动的来源，
-  也无法说明它应用了哪份文档，因此行为无法归因到某个版本。基因组确实构建在
-  Manifest 之上，但 Manifest 会获得这些格式特性（§8）。
+  没有按摘要寻址的已存储内容，应用仍会重新获取可移动的来源，也无法说明它应用了
+  哪些字节，因此行为无法归因到某个版本。基因组确实构建在 Manifest 之上，但两者
+  现在都编译成应用引擎的同一种类型化期望状态（§2.7、§8）。
 - **每个 Bot 一个 Git 仓库作为事实来源。** 暂缓；见 §9.2。
 
 ## 4. 修订版
@@ -761,11 +767,12 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 3. **固定版本的内容**：每个来源都解析为提交 SHA 或内容摘要，因此同一修订版总是
    产生相同的字节（§4.2）。
 4. **完整性**：每个修订版中都包含所有类别（§4.3）。
-5. **自动化参与者只能通过补丁变更**：进化策略针对具名基础修订版提交带类型的
-   逐项补丁（§6）。人仍然可以通过基因组 API（`POST …/genome/revisions` 并携带
-   `{manifest}`，§12），从一份完整的 **Manifest 文档**（Bot Config Manifest API
-   所接受的完整 YAML 文档）记录修订版，而不是使用补丁。这样的修订版没有
-   `patch_digest`。直接发送到 `PUT /config-manifest` 的文档不会记录修订版（§5.5）。
+5. **自动化参与者只能通过补丁变更**：进化策略针对补丁自身的基础修订版提交带类型的
+   逐项补丁（§6）。人仍然可以用任何方式编辑 Bot（控制台、`PUT /config-manifest`），
+   然后通过基因组 API（`POST …/genome/revisions:capture`，§12）把它的当前状态
+   **捕获**为一个修订版；所有者的策略配置则通过它自己的操作
+   （`PUT …/genome/policy`）变更。这样的修订版没有 `patch_digest`，其父代是
+   `active`。发送到 `PUT /config-manifest` 的文档本身不会记录修订版（§5.5）。
 6. **一个新的内容类别：精选记忆**（§7），这需要新的引擎契约。
 
 刻意**不**增加的内容：
@@ -781,12 +788,13 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **摘要，而非内容。** `digest`（`sha256:…`）是文件字节的*地址*，而不是字节本身。
   字节在现有 manifest 内容存储中只存储一次，需要时按摘要获取（§9.1）。共享同一
   文件的两个修订版共享其字节，因此存储被去重，差异计算也很廉价。
-- **固定，而非浮动。** 当从一份使用带可移动引用的 `sources` 的 Manifest 记录修订版时，
-  平台会解析它们并存储字节。浮动的 Manifest 是一种*输入*；修订版是一项*事实*。
+- **固定，而非浮动。** 当一份 `sources` 指向可移动引用的 Manifest 被应用、随后 Bot
+  被捕获时，修订版按摘要持有应用所获取到的字节。浮动的 Manifest 是一种*输入*；
+  修订版是一项*事实*。
 - **地址不参与哈希。** 字节从哪里获取（git 的 `url`、`ref`、`subpath`；OSS 的
   `bucket`、`key`；`auth` 凭证名）不属于 `spec`，因此从迁移后的仓库获取到相同的字节
-  会得到相同的修订版。记录下来的 Manifest 文档把它们作为来源信息保留。`${BOT_*}`
-  占位符只在记录时使用记录该修订版的 Bot 的值解析一次。
+  会得到相同的修订版。Manifest 自己的应用报告把它们作为来源信息保留。`${BOT_*}`
+  占位符已由应用使用该 Bot 的值解析过。
 - **目录是一棵树。** 技能或目录资源以其文件的 `acm-tree-v1` 编码存储和计算哈希
   （§9.1），因此其摘要永远不取决于归档的压缩方式。
 - **Center 技能被固定，而不是被复制。** Skill Center 已经存储了不可变、受治理的版本
@@ -796,16 +804,21 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 ### 4.3 完整性
 
-从一份不完整的 Manifest 文档记录修订版时，所有被省略的类别都会从父修订版
-（对于 Bot 的第一个修订版，则从 Bot 的当前状态）中补齐，因此存储的修订版是完整的。
-为应用而编译修订版时，总会输出每个类别。`[]` 表示“无”。与 Manifest 文档不同，
-修订版从不把某个类别留给先前状态，因此同一修订版的两次应用总是产生相同的 Bot。
+捕获会记录 Bot 当前状态的每个类别，而补丁从一个完整的基础修订版出发，因此存储的
+修订版总是完整的。为投递而编译修订版时，总会输出每个类别。`[]` 表示“无”。与
+Manifest 文档不同，修订版从不把某个类别留给先前状态，因此同一修订版的两次投递
+总是产生相同的 Bot。
 
 ### 4.4 标识、序号与状态
 
 - **Id。** `id = "sha256:" + hex(SHA-256(RFC8785({spec, policy})))`。`revision`
   元数据被排除在外，因此相同的内容总是具有相同的 id，无论由谁产生。记录已存在的
   内容会返回已有的修订版；不会创建重复项，也不会分配新的 `seq`。
+  运行的候选是唯一的例外：候选 id 就是其补丁摘要，指向该修订版的补丁，所以当候选补丁
+  的结果是由另一个补丁（或一次捕获）记录的修订版时会被拒绝（`already_recorded`），
+  而不是被交给那个修订版；候选补丁的结果若是另一个运行或所有者已用同一补丁记录的修订版，
+  同样被拒绝；应改为晋升已有的修订版。只有最初记录该候选的运行以同一补丁重试时才会得到其
+  修订版（同一运行用产生相同内容的另一补丁提交也会被拒绝：修订版的 `patch_digest` 指向第一个补丁）。
 - **`seq`。** 一个每 Bot 计数器，在新的 id 首次被记录时分配，供人阅读：Bot 第一个
   记录的修订版是 `r1`，下一个新修订版是 `r2`，依此类推。示例：进化策略提交了一个内容
   全新的候选，于是它成为 `r42`；同一提交的重试会再次返回 `r42`，而不是创建 `r43`。
@@ -813,8 +826,8 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
   `seq` 是记录的先后顺序，而不是父子关系：`r42` 的父代是它的 base，可以是 `r39`
   （例如一次在 `r39` 为 `active` 时开始的运行），而 `r41` 的父代可以是 `r38`。
 - **父代。** 除 Bot 的第一个修订版外，每个修订版恰好有一个 `parent`：补丁所针对的基础
-  修订版，或记录整份文档时给出的 `base`。沿着 `parent` 链接可以得到 Bot 的历史，
-  它呈树状（由 `r41` 生成的两个候选互为兄弟）。
+  修订版，或捕获 Bot 或更改其策略配置时的 `base`。沿着 `parent` 链接可以得到 Bot
+  的历史，它呈树状（由 `r41` 生成的两个候选互为兄弟）。
 - **状态**是平台写入的元数据，位于哈希之外：
 
 | 状态 | 含义（提议） | 设置者 |
@@ -836,7 +849,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 - **`script` 不可进化。** 命令式启动脚本是最危险的面，并且已经在 teclaw 上被拒绝。
   它们仍是基因组的一部分，以保证修订版完整，但没有任何补丁操作能触及它们：脚本只能在
-  所有者记录一份完整的 Manifest 文档时变更。
+  所有者编辑 Bot 并捕获它时变更。
 - **`engine_config`** 在 v1 中总是 `{}`，因为目前没有任何东西应用它（Manifest 对每个
   Bot 都拒绝该类别）。它的键和值类型与 Manifest 一起在
   [#2858](https://github.com/inclusionAI/Avernet/issues/2858) 中确定。
@@ -928,20 +941,22 @@ CAS 引用移动和编译步骤。
 
 Manifest 不感知修订版，现有的 `/config-manifest` 端点也与今天完全一样继续工作。
 直接的 `PUT /config-manifest` 会绕过基因组：它不记录修订版，也不移动任何引用。
-想要保留历史的所有者应改为通过基因组 API 编辑：记录一个修订版（这会移动 `draft`），
-然后晋升它。基因组 API 也可以从一份完整的 Manifest 文档记录修订版
-（`POST …/genome/revisions` 并携带 `{manifest}`，§12）；那是一项基因组操作，而不是
-Manifest 操作。
+想要保留历史的所有者应通过基因组 API 记录一个修订版并晋升它：要么提交一个补丁
+（`POST …/genome/revisions`），要么用任意方式编辑之后再捕获该 Bot
+（`POST …/genome/revisions:capture`，§12）。捕获是一项基因组操作，而不是 Manifest
+操作。
 
-**注册表如何知道 Bot 在运行什么。** 每份应用报告（个人 Bot）和每条发布记录（服务
-Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。当晋升应用一个已编译的
-修订版时，注册表会记录该修订版编译出了这个摘要（`CompiledManifest.document_digest`，
-§2.7）。给定 Bot 最近一次应用的摘要，注册表就知道 Bot 运行的是哪个修订版。
+**注册表如何知道 Bot 在运行什么。** 读取 Bot。晋升和应用时都不会记录 Bot 持有
+哪个修订版——应用报告上没有文档摘要，晋升行上也没有应用 id。
+`GenomeRegistry.drift(bot)` 像 `capture` 那样捕获 Bot 的当前状态（什么都不记录，
+捕获到的字节随即丢弃），计算该状态在 `active` 的策略配置下会记录成的修订版 id，
+再与 `active` 比较。相等说明 Bot 持有其 active 修订版；不等说明它持有别的东西，
+而这个 id 说明是什么。
 
-**漂移。** 当 Bot 最近一次应用的文档摘要（来自最新的应用报告，或正在提供服务的
-版本的发布记录）与 `active` 编译出的摘要不同时，该 Bot 就*发生了漂移*。漂移通常
-发生在直接的 Manifest 编辑之后。漂移是被检测的，而不是被阻止的。注册表在运行开始
-和晋升时检查漂移：
+**漂移。** 当 Bot 当前状态会记录成的修订版 id 与 `active` 不同时，该 Bot 就
+*发生了漂移*。漂移通常发生在直接的 Manifest 编辑或设备上的手工编辑之后。漂移是被
+检测的，而不是被阻止的，也从不被追踪：每当有调用方询问时才去观察。注册表在运行
+开始和晋升时检查漂移：
 
 - **运行开始。** 运行不会在已漂移的 Bot 上启动：进化运行以结束原因
   `out_of_band_change` 结束它（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
@@ -964,8 +979,8 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
    应用成功；其报告记录 `sha256:b7e3…`，没有任何修订版编译为该摘要。Bot 发生了漂移。
 2. 10 月 10 日 02:00，夜间绑定触发。注册表报告漂移，因此 `run_8a1` 在预留任何预算
    之前就以 `out_of_band_change` 结束。
-3. 所有者将当前的 Manifest 记录为一个修订版（`POST …/genome/revisions` 并携带
-   `{manifest}`，base 为 `r42`），它成为 `r46`，然后晋升 `r46`。其应用报告记录
+3. 所有者将当前的 Manifest 记录为一个修订版（`POST …/genome/revisions:capture`；
+   其父代是 `active`，即 `r42`），它成为 `r46`，然后晋升 `r46`。其应用报告记录
    `r46` 编译出的摘要，也正是 `active` 现在编译出的摘要。下一次夜间运行从 `r46`
    开始。
 
@@ -975,7 +990,7 @@ Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。
 
 基因组补丁是进化策略唯一可以提交的东西。它是逐项且带类型的，这遵循了 ACE 的发现：
 增量更新可以避免上下文坍缩（整体重写会逐渐抹去累积的细节）。不支持自动化参与者进行
-整份文档替换。人也可以提交补丁（通过 `POST …/genome/revisions`，§12），或记录一份完整文档。
+整份文档替换。人也可以提交补丁（通过 `POST …/genome/revisions`，§12），或编辑 Bot 然后捕获它。
 
 操作集（待定决策 G-2 和 G-10，已关闭；规范定义见
 [契约 README §6](../../api-contracts/genome/v1/README.md#6-patches)）：
@@ -1118,12 +1133,18 @@ class EngineMemoryProjection(Protocol):
 
 ## 8. Manifest 变更
 
-Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以及一项自身的事实，全部
-与 schema v1 文档保持向后兼容。完整清单如下：
+Manifest 保持对修订版无感知（§1、§5.5），其语法也**不新增任何来源类型**：已编译的
+修订版被**直接**投递进应用引擎的各物化器（RSI-04），中间不经过 Manifest 文档。
+注册表的 `RevisionApplier` 接缝绑定为 `DirectApplier`，它启动一次 apply 运行，其状态引用
+指明该次晋升（08-promotion.zh-CN.md §7.1）。Manifest 一侧仍然获得的内容如下，全部与 schema v1
+文档保持向后兼容：
 
-1. **内容存储来源。** 条目可以指向平台自身 manifest 内容存储中的摘要，而不是外部
-   来源。应用从存储中读取字节，并跳过获取步骤。已编译的修订版总是使用它，因此
-   已编译的文档是完全可复现的（P1）。
+1. **已编译修订版的直接投递。** 应用引擎从两个编译器之一——Manifest 的或
+   基因组的——接收同一种类型化期望状态（§2.7），运行服务按 apply 携带的状态
+   引用（`StateRef("manifest")`，或指明某次晋升的 `StateRef("genome", promotion_id)`）查找编译器。
+   各物化器从内容存储读取字节，并按类型化条目解析 Center 技能与仓库技能（Center 技能按
+   名称，仓库技能按路径，遵循 Skill Center 自身的可见性规则）；已编译的修订版在 Center
+   版本与仓库提交之外是可复现的，Bot 跟随这两者（ADR 0002）。已完成（RSI-04）。
 2. **`engine_config` 生效。** 该类别已经存在于 Manifest 模式中
    （`schema/validator.py` 会校验 `engine_config.config` 映射），但目前没有任何东西
    应用它：它已被移出第一批，也没有物化器。这项变更是为白名单中的键提供一个物化器，
@@ -1133,19 +1154,15 @@ Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以
    （`EngineMemoryProjection`，§7；P5，依赖 RSI-05）。
 4. **产出型内容写入路径。** manifest 内容存储接受带补丁来源的**产出型**（非获取
    得到的）内容，例如由补丁创建的内容（§9.1；P2）。
-5. **应用报告上的已应用文档摘要。** 应用完成时，应用报告记录它所应用的确切
-   Manifest 文档的哈希（例如 `sha256:f27a…`）。对于服务 Bot，发布记录记录所发布
-   文档的摘要。这是一项不含修订版概念的 Manifest 事实；基因组注册表把摘要映射到
-   修订版（§5.5）（P1）。
-6. **Center 技能来源。** 条目可以指定一个固定的 Skill Center 版本（提议写法
-   `source: {protocol: center, version: "v7"}`）。Manifest v1 无法声明 Center 技能，
-   而应用会删除 `skills` 部分中省略的每个技能，因此没有这一项，已编译的修订版会删除
-   Bot 的 Center 技能（P1）。
+5. **应用报告上不记录摘要。** 已取消：应用报告记录它应用的是哪个状态引用
+   （Manifest，或某次晋升）以及逐条目的结果；Bot 运行哪个修订版靠读取 Bot 来
+   观察（§5.5），因此任何应用事实都不需要携带文档摘要。
 
-另外两个 Manifest 缺陷也会破坏完整性，必须在应用已编译的修订版之前修复：从文档中
-删除一个资源不会把它从 Bot 上删除
-（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)），而 `script: null` 被当作
-“未声明”，因此文档无法删除脚本
+两个破坏完整性的 Manifest 缺陷已经修复：应用引擎整体拥有资源根目录（即 workspace 根目录，减去 `core/workspace/protected_entries` 中的受保护条目），
+每次 apply 先清空再写入声明的内容，因此从文档中省略的资源——或 Bot 自己写进去的
+文件——都会被删除（[#2162](https://github.com/inclusionAI/Avernet/issues/2162)）；
+`script: null` 声明「没有脚本」，因此文档（或修订版）会删除 Bot 现有的脚本，而
+省略 `script` 仍然是「不动它」
 （[#2862](https://github.com/inclusionAI/Avernet/issues/2862)）。
 
 修订版、引用、比较并交换、固定版本、来源和注解都无需修改 Manifest：它们存放在
@@ -1156,7 +1173,7 @@ Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以
 ### 9.1 内容：复用 manifest 内容存储
 
 manifest 应用流水线已经为其获取的所有内容保留了平台自己的持久副本
-（`core/bot_config_manifest/content/service.py`）：
+（`core/content_store/`，作为 Manifest 的 W11 构建，#3064 起独立为组件）：
 
 - **字节**存放在一个内容寻址的 blob 目录中，
   `<root>/blobs/<hex[:2]>/<hex64>`，只原子地写入一次，并在读取时校验哈希。一个目录
@@ -1174,7 +1191,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 如何根据摘要获取内容：
 
-- **在 Backend 内部，** `ManifestContentService.read(digest)` 返回字节，并在读取时
+- **在 Backend 内部，** `ContentStoreService.read(digest)` 返回字节，并在读取时
   重新校验哈希。
 - **在 Backend 外部**（UI、流水线、进化策略、评估器），注册表 API 提供
   `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
@@ -1186,9 +1203,11 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 
 需要三项扩展：
 
-1. **产出型内容的写入路径。** 目前每个存储事件都是一次*获取*（`source_url` 是必需的）。
-   由进化策略创建的内容，例如编辑过的 `SKILL.md` 或新的记忆条目，从未被获取过。
-   它需要一个存储调用，其来源为产出它的补丁和运行。
+1. **产出型内容的写入路径**（已在 RSI-03 交付，`ContentStoreService.store_produced`）。
+   在此之前，每个存储事件都是一次*获取*（`source_url` 是必需的）。由进化策略创建的
+   内容（例如编辑过的 `SKILL.md` 或新的记忆条目）、从 Bot 捕获的内容，或上传的内容，
+   都以其来历（`capture`、`patch`、`upload`）和记录它的参与者作为来源信息存储，
+   每个 Bot 和摘要一行；一个摘要只有通过这样的一行才能被某个 Bot 读取。
 2. **归档的保留策略。** 归档保留每一个候选。大多数 blob 是小型文本且可去重，但
    manifest 资源每个可能有 100–200 MiB。v1 可以接受无条件保留。之后的任何清扫
    都只能删除没有任何修订版引用的 blob，并且绝不能删除可从 `promoted` 修订版
@@ -1196,20 +1215,22 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 3. **Backend 外部的读取方。** `apps/evolution` 中的进化策略和评估器通过注册表 API
    （或一个已物化的沙箱）读取内容，从不直接读取 blob 目录。
 
-### 9.2 修订版：数据库，而非 git（待定决策 D-6）
+### 9.2 修订版：数据库，而非 git（决策 D-6，已关闭）
 
 | 选项 | 优点 | 缺点 |
 | --- | --- | --- |
 | **数据库修订版 + 现有的内容寻址存储**（推荐） | 租户隔离、ACL、可对谱系和状态进行查询、复用 manifest 内容存储、符合 Backend 的模式 | 需要自己的 diff/merge 工具 |
 | 每个 Bot 一个 Git 仓库 | 免费获得历史、diff、blame；编码智能体本就熟悉 git | 多租户托管、ACL、跨 Bot 查询、GC：一项新的基础设施依赖 |
 
-建议：原生数据库方案，外加 **修订版历史的 git 导出**（提议；§12 中尚无对应端点），使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
+决策（RSI-03）：原生数据库方案。**修订版历史的 git 导出**（提议；§12 中尚无对应端点）
+可以随后跟进，使人和编码智能体类进化策略可以在熟悉的文件系统历史上工作
 （Meta-Harness 的经验），而无需让 git 成为事实来源。
 
-提议的表（名称仅为示意，由 RSI-03 确定）：`ac_genome_revision`
-（id、owner_id、bot_id、seq、父代、来源、状态、`{spec, policy}` 的规范
-JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 的版本），
-`ac_genome_ref_event`（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）。
+表（`core/bot_genome/sql/2026_10_19_bot_genome.sql`）：`ac_genome_revision`
+（id、env、entity、bot、seq、父代、来源、状态、`{spec, policy}` 的规范 JSON、注解），
+`ac_genome_ref`（每个名称一行，含修订版和用于 CAS 的版本），`ac_genome_ref_event`
+（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）以及
+`ac_genome_promotion`（移动的引用与投递接缝的答复；该行不携带它所投递状态的任何内容）。
 
 ### 9.3 序列化：规范 JSON
 
@@ -1228,10 +1249,9 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
   `BotConfigArtifact` 已在使用的机制（`artifact.schema.json`）相同，也是 OpenAPI
   所基于的机制。
 - **所有新内容都只使用 JSON**，无论是编写时还是存储时。
-- **Bot Config Manifest 仍使用 YAML。** 它是一个现有契约，不做改变。从 Manifest
-  文档记录修订版时，YAML 只被解析一次，省略的类别被补齐，来源被固定，然后存储规范
-  JSON。原始 YAML 作为来源记录保留，因此其中的注释不会丢失，但它从不作为参与哈希
-  或用于交换的形式。
+- **Bot Config Manifest 仍使用 YAML。** 它是一个现有契约，不做改变。注册表从不解析
+  Manifest 文档：文档像今天一样被应用，捕获再把 Bot 由此产生的状态记录为规范 JSON。
+  YAML 从不作为参与哈希或用于交换的形式。
 
 为什么不使用 YAML 作为存储形式：它没有规范序列化（同样的数据可以有多种写法，因此
 无法直接哈希）；其隐式类型在 YAML 1.1 与 1.2 之间以及不同库之间存在差异（`no`、`on`、
@@ -1252,7 +1272,7 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
 
 ## 11. 服务接口
 
-基因组注册表是一个 Backend 核心服务，与传输无关，提供 `GenomeRegistry` Protocol。
+基因组注册表是一个 Backend 核心服务，与传输无关，提供 `GenomeRegistryProtocol`。
 Backend 中的调用方（晋升）在进程内使用它；
 `apps/evolution` 中的调用方（进化运行、验证）通过 §12 中的 API 使用它。
 
@@ -1280,67 +1300,107 @@ class GenomeDiff:
 
 # Page[T] {total, items}: the shared pagination shape, 09-evolution-api.md.
 
-class GenomeRegistry(Protocol):
+@dataclass(frozen=True)
+class RecordedRevision:
+    revision: GenomeRevision
+    created: bool                    # False when the content already existed (same id, seq and parent)
+    risk_tier: RiskTier | None = None   # a patch's tier; None for a capture or a policy change
+    flags: list[str] = ()            # gene paths of files the patch rewrote (§6.2)
+    ref: str | None = None           # the candidate ref a run's candidate was named
+
+@dataclass(frozen=True)
+class RunScope:
+    run_id: str                      # 命名 candidate/<run_id>/<n>
+    strategy: str                    # "<id>@<version>"：记录为候选的 actor
+    allowed_genes: list[str]         # 运行的绑定允许其改动的基因
+    step: str | None = None          # 策略自己给该步骤的标签
+
+class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
-    def get_revision(self, bot: BotRef, rev: RevisionId | str) -> GenomeRevision:
-        """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
+    def get_revision(self, bot: BotRef, rev: str) -> GenomeRevision:
+        """Accepts a revision id, "r<seq>", or a ref name. Raises RevisionNotFound."""
 
     def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
                        parent: RevisionId | None = None,
-                       page: int = 1, page_size: int = 20) -> Page[RevisionMetadata]:
+                       page: int = 1, page_size: int = 20) -> RevisionPage:
         """Metadata only, newest seq first."""
 
-    def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
-                     status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
-                     allowed_genes: list[str] | None = None) -> GenomeRevision:
-        """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
-        and record the resulting revision. Idempotent: the same patch returns the same
-        revision. `allowed_genes` is None for owner patches (policy only), a list for runs.
-        Raises BaseMismatch, PatchRejected(reasons), LimitExceeded."""
+    async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
+        """Record the bot's current state; parent `active` (the latest revision until there is one; none for the first); policy copied from `active`.
+        Idempotent: unchanged state returns the existing revision with created=False.
+        Raises CaptureRefused naming what cannot be recorded."""
 
-    def record_manifest(self, bot: BotRef, manifest_yaml: str, *, created_by: Provenance,
-                        base: RevisionId | None) -> GenomeRevision:
-        """Parse a Manifest document, fill omitted categories from `base` (or current state),
-        pin every source, store canonical JSON, keep the YAML as provenance. Status `draft`."""
+    async def commit_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
+                           status: RevisionStatus,          # DRAFT (owner) or CANDIDATE (run) only
+                           run: RunScope | None = None) -> RecordedRevision:
+        """Apply `patch` to its own `base` (a revision of this bot) and record the result (contract §6.4).
+        A CANDIDATE needs `run`, whose allowed_genes bound the ops and whose run_id names
+        candidate/<run>/<n>. Idempotent for the recorder: the same run retrying the same patch gets its
+        revision; a candidate whose result another run, a draft or a capture recorded is refused.
+        Raises RevisionNotFound (the base), PatchRejected(reasons), LimitExceeded, ContentNotReachable."""
 
-    def set_status(self, bot: BotRef, rev: RevisionId, status: RevisionStatus,
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
+        """Record a revision with `active`'s spec and the new policy. Raises PolicyRejected(reasons)."""
+
+    def set_status(self, bot: BotRef, revision_id: RevisionId, status: RevisionStatus,
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> GenomeDiff:
+    def diff(self, bot: BotRef, rev: str, against: str) -> GenomeDiff:
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
     def list_refs(self, bot: BotRef) -> list[GenomeRef]: ...
 
-    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance) -> GenomeRef:
-        """Compare-and-swap. Raises RefConflict(current) if the ref moved.
-        Only the designated mover may move each ref kind (§5.1); `active`, `previous`,
-        `canary` are moved only by Promotion."""
+    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance, mover: RefMover) -> GenomeRef:
+        """Compare-and-swap. Raises RefConflict(current) if the ref moved, MoverNotAllowed when
+        `mover` is not the ref kind's designated mover (§5.1): `active` and `previous` move only
+        through Promotion, `draft` through the owner, candidate refs through the registry itself."""
 
     # --- content ---------------------------------------------------------
     def read_content(self, bot: BotRef, digest: Digest) -> bytes:
-        """Access-checked against the bot; the digest must be reachable from one of its revisions
-        or uploads. Hash re-verified on read."""
+        """Access-checked against the bot: the digest must have been stored for it (captured, written
+        by a patch or uploaded). Hash re-verified on read. Raises ContentNotReachable."""
 
-    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> Digest:
-        """Produced content (§9.1 extension 1). Idempotent by digest."""
+    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> ContentReceipt:
+        """Produced content (§9.1 extension 1). Idempotent by digest; the receipt says whether it was new."""
 
-    # --- apply / materialisation -----------------------------------------
-    def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
-        """Pinned, total Manifest document (curated memory in its `memory` category). Used by Promotion (apply,
-        service-bot publish) and Verification (eval bot materialisation)."""
+    # --- delivery --------------------------------------------------------
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
+        """The revision as the apply engine's typed desired state (§2.7): every category it covers
+        declared, cli_tools and engine_config undeclared. Used by Promotion and Verification (eval
+        bot materialisation). Raises NotAppliable for a revision the state model refuses as recorded."""
 
-    def applied_revision(self, bot: BotRef) -> RevisionId | None:
-        """The revision the bot runs: its last applied document digest (Manifest apply report or service-bot
-        publish record) mapped back through the digests recorded at promotion. None when that digest maps to
-        no revision. The bot is drifted when this differs from `active` (§5.5); Evolution Run checks it at run
-        start and Promotion before promoting."""
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than `active`, found by reading the bot: capture its
+        state as `capture` would, compute the revision id it would record under `active`'s policy,
+        compare with `active`. None without an `active` or while they agree; else Drift(active,
+        observed). Nothing is recorded; CaptureRefused propagates. Evolution Run asks at run start,
+        Promotion before an automated promotion (§5.5)."""
+
+class GenomePromotionServiceProtocol(Protocol):   # core/bot_genome/promotion/promotion_service_protocol.py
+    async def promote(self, bot: BotRef, *, revision: str, ref: str, expected_revision: RevisionId | None,
+                      actor: Provenance, reason: str) -> Promotion:
+        """File the promotion `pending` and start the apply run that delivers the revision (the
+        RevisionApplier seam; `applying` with its apply id). `ref` (`active`) moves by compare-and-swap
+        only when that apply ends: `applied`, `applied_partial` (active labelled `partial`), or
+        `apply_failed` (nothing moves). The seam's preflight runs before anything is written.
+        Raises RevisionNotFound, NotPromotable, Drifted (automated actors only), NotAppliable,
+        PromotionUnsupported, RefConflict, ApplyBusy (another apply holds the bot's lock)."""
+
+    def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion: ...
+    def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage: ...
 ```
 
-错误是带类型的，并映射到 §12 中的 HTTP 状态码：`NotFound` → 404，
-`RefConflict` / `BaseMismatch` → 409，`PatchRejected` → 422，
-`LimitExceeded` → 413，`MoverNotAllowed` → 403。
+进程内调用方通过 Service API 的再导出（`api/bot_genome_registry_service.py`、
+`api/bot_genome_promotion_service.py`）使用这两个接口。
+
+错误是带类型的，并映射到 §12 中的 HTTP 状态码：`RevisionNotFound` /
+`RefNotFound` / `ContentNotReachable` → 404，`RefConflict` / `Drifted` → 409，
+`PatchRejected`（以及 `PolicyRejected`）/ `CaptureRefused` / `NotPromotable` /
+`NotAppliable` / `PromotionUnsupported` → 422，`LimitExceeded` → 413，
+`MoverNotAllowed` → 403。不是该 Bot 的修订版的 base 属于 `RevisionNotFound`，
+而不是单独的一种冲突。
 
 ## 12. API
 
@@ -1377,18 +1437,20 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 
 ### POST /bots/{bot_id}/genome/revisions
 
-从补丁（`{base, patch}`）或 Manifest 文档（`{manifest}`）记录修订版。调用方：
-进化运行（当进化策略调用 `ctx.candidates.submit` 时；进化策略从不直接调用此接口），
-以及通过 UI 或 API 操作的所有者。返回该修订版；记录已存在的
-内容时，以 `200` 返回已有修订版。
+通过把基因组补丁应用到它自己的 `patch.base` 上来记录修订版。请求级别没有 `base`：
+由补丁指明它。调用方：进化运行（当进化策略调用 `ctx.candidates.submit` 时；
+进化策略从不直接调用此接口），以及通过 UI 或 API 操作的所有者。返回该修订版；
+记录已存在的内容时，以 `200` 和 `created: false` 返回已有修订版。记录者即审计身份：
+用户记录写入调用者（被准入的应用写为 `app:<id>:on-behalf-of:<user>`）；运行的候选写入
+策略（`id@version`）及其运行 id，代表运行提交它的应用由运行记录保存
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），而不是每个修订版都保存。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a patch, recorded as a run candidate (internal caller: Evolution Run)
+// Request: a patch recorded as a run candidate (internal caller: Evolution Run)
 {
-  "base": "sha256:a90b…",
   "status": "candidate",
-  "run": {"run_id": "run_7f3", "binding_id": "bind_01", "allowed_genes": ["persona", "skills"]},
+  "run": {"run_id": "run_7f3", "strategy": "clawevolve/bot-evolution@2.0.0", "step": "propose", "allowed_genes": ["persona", "skills"]},
   "patch": {
     "patch_schema": 1,
     "base": "sha256:a90b…",
@@ -1397,16 +1459,6 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
     "rationale": "Partial-refund requests were escalated too late.",
     "evidence": ["episode:ep_91"]
   }
-}
-```
-
-```jsonc
-// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: from a Manifest document (owner edit); YAML carried as a string, stored as provenance
-{
-  "base": "sha256:a90b…",
-  "status": "draft",
-  "manifest": {"format": "yaml", "document": "schema_version: 1\nmanifest:\n  identity:\n    - type: SOUL.md\n      source: {git: support-bot, path: SOUL.md, ref: main}\n"}
 }
 ```
 
@@ -1421,13 +1473,52 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
   "patch_digest": "sha256:c41e…",
   "risk_tier": "T2",
   "flags": [],
-  "ref": "candidate/run_7f3/1"
+  "ref": "candidate/run_7f3/1",
+  "created": true
 }
 ```
 
-错误：409 `base_mismatch`（base 不是当前父代，或操作无法干净地应用）；
-422 `patch_rejected` 并附带原因（`gene_not_mutable`、`pinned_item`、`gene_not_allowed`、
-`missing_rationale`、`schema`）；413 `limit_exceeded`。
+错误：404 补丁的 `base` 不是此 Bot 的修订版；422 `patch_rejected` 并附带全部原因
+（`does_not_apply`、`gene_not_mutable`、`pinned_item`、`gene_not_allowed`、
+`missing_rationale`、`missing_evidence`、`schema`、`not_canonical`、候选结果为已有
+修订版时的 `already_recorded`，以及契约 §6.4 的各项应用判定）；413 `limit_exceeded`。
+请求体超出规范 JSON 子集（重复成员名、浮点数、孤立代理项）会在解析前被拒绝（契约 §3.1）。
+审计身份超过 1024 个字符（内容存储 `modifier` 列的宽度；应用的身份为
+`app:<id>:on-behalf-of:<user>`）会在写入任何内容前以 413 `limit_exceeded` 拒绝。
+
+### POST /bots/{bot_id}/genome/revisions:capture
+
+把 Bot 的当前状态记录为一个修订版：父代为 `active`（Bot 的第一个修订版没有父代），
+策略配置从 `active` 复制，状态为 `draft`。无请求体。在基因组之外做出的编辑
+（控制台、`PUT /config-manifest`）正是通过它成为修订版，Bot 也正是通过它获得第一个
+修订版。调用方：通过 UI 或 API 操作的所有者，以及在 Manifest 应用之后的流水线。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Response 201 Created (200 with `created: false` when nothing changed since the last record)
+{"id": "sha256:7c1e…", "seq": 42, "status": "draft", "parent": "sha256:a90b…",
+ "patch_digest": null, "risk_tier": null, "flags": [], "ref": null, "created": true}
+```
+
+错误：422 `capture_refused`，指明无法记录的内容（资源路径不符合 Manifest 的路径
+规则，契约 §7；由平台管理的 Bot）。
+
+### PUT /bots/{bot_id}/genome/policy
+
+用 `active` 的内容和这份策略配置记录一个修订版（§2.3、§4.4）。策略配置不是 Bot
+状态，因此它有自己的操作，而不是一种补丁操作。调用方：通过 UI 或 API 操作的所有者。
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Request
+{"mutable_genes": ["memory", "persona", "resources", "skills"], "pins": ["persona/SAFETY.md"], "risk_overrides": {}}
+```
+
+响应与捕获相同（`201`；当 `active` 已经持有这份策略配置时为 `200`）。错误：422
+`policy_rejected` 并附带策略配置自身的原因（`schema`、`not_canonical`、`order`），
+或者——由于该记录携带的是 `active` 的 spec——当该内容已不再可应用时附带 spec 的
+应用期原因（契约 §7）：收紧策略配置同样会被拒绝，原因会说明需要先修复什么。低于某个操作
+自身等级的覆盖不是错误；它没有效果，因为覆盖只能提升（§6.3）。
 
 ### GET /bots/{bot_id}/genome/revisions/{rev}
 
@@ -1479,7 +1570,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
 }
 ```
 
-错误：404 任一修订版不存在；422 修订版属于不同的 Bot。
+错误：404 任一修订版不存在（属于另一个 Bot 的修订版在这里视为不存在）。
 
 ### GET /bots/{bot_id}/genome/refs
 
@@ -1506,8 +1597,9 @@ GET /openapi/v1/bots/bot_123/genome/refs
 
 ### PUT /bots/{bot_id}/genome/refs/draft
 
-以比较并交换方式移动所有者的 `draft` 引用。由所有者通过 UI 或 API 调用。
-（`active`、`previous`、`canary` 不能在此移动；它们只能通过
+以比较并交换方式移动所有者的 `draft` 引用。记录修订版不会移动它：由所有者把它指向
+自己正在处理的修订版。由所有者通过 UI 或 API 调用。（`active`、`previous`、`canary`
+不能在此移动；`active` 和 `previous` 只能通过
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的 `POST /bots/{bot_id}/genome/promotions`
 移动。）
 
@@ -1550,7 +1642,7 @@ Content-Type: application/octet-stream
 You are the support agent for …
 ```
 
-错误：404 未知摘要，或该摘要无法从此 Bot 到达。
+错误：404 未知摘要，或该摘要从未为此 Bot 存储过（为它捕获、由补丁写入或上传）。
 
 ### PUT /bots/{bot_id}/genome/content
 
@@ -1567,20 +1659,22 @@ def lookup(order_id): ...
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Response 201 (200 if the bytes already exist)
-{"digest": "sha256:6b1d…", "size": 1834}
+// Response 201 (200 with `created: false` if this bot already held the bytes)
+{"digest": "sha256:6b1d…", "size": 1834, "created": true}
 ```
 
 错误：413 超过 Manifest 文件大小限制。
 
 ### 由其他组件负责的相关端点
 
-`POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版）。
-它位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
+`POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版），
+`GET …/genome/promotions` 和 `GET …/genome/promotions/{promotion_id}` 读取晋升记录。
+它们位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
+晋升返回 `applying`；投递该修订版的 apply 结束时 `active` 才移动（RSI-04）。
 
 ### 内部接口
 
-- 进程内的 `GenomeRegistry`（§11），供 Backend 中的晋升使用。
+- 进程内的 `GenomeRegistryProtocol`（§11），供 Backend 中的晋升使用。
 - 引擎记忆投影契约（§7），一个由引擎适配器实现的 Plugin API（RSI-05）。
 
 ## 13. 示例
@@ -1609,7 +1703,6 @@ def lookup(order_id): ...
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Request body of step 2
 {
-  "base": "sha256:a90b…",
   "status": "draft",
   "patch": {
     "patch_schema": 1,
@@ -1630,8 +1723,8 @@ def lookup(order_id): ...
 async def submit_candidate(run: Run, candidate: Candidate) -> str:
     rev = await genome_api.record_revision(
         bot_id=run.bot.bot_id, entity_id=run.bot.owner_id,   # the run's bot: id in the path, owner as entity_id
-        base=candidate.patch["base"], status="candidate",
-        run={"run_id": run.id, "binding_id": run.binding_id, "allowed_genes": run.allowed_genes},
+        status="candidate",
+        run={"run_id": run.id, "strategy": run.strategy, "step": candidate.step, "allowed_genes": run.allowed_genes},
         patch=candidate.patch,
         idempotency_key=f"{run.id}/candidate/{candidate.patch_digest}",
     )
@@ -1647,25 +1740,30 @@ async def submit_candidate(run: Run, candidate: Candidate) -> str:
 
 ```python
 # Illustrative only: inside Backend promotion, after the gate accepted r42
-bot = BotRef(owner_id="user_owner_5", bot_id="bot_123")
-compiled = registry.compile(bot, "sha256:7c1e…")
-registry.move_ref(bot, RefUpdate(name="previous", revision=current_active,
-                  expected_revision=current_previous, reason=reason), actor=actor)
-registry.move_ref(bot, RefUpdate(name="active", revision=compiled.revision_id,
-                  expected_revision=current_active, reason=reason), actor=actor)
-apply_service.apply(bot=bot, document=compiled.document)
-# The apply report records the digest of the applied document (compiled.document_digest, §8 item 5);
-# the Manifest knows nothing about r42. Promotion keeps the revision <-> digest mapping on its own
-# record and in the Registry (§5.5).
+bot = BotRef(owner_id="user_owner_5", bot_id="bot_123", entity_id="user_owner_5", engine_type="openclaw", bot_type="personal")
+state = registry.compile(bot, "sha256:7c1e…")          # the typed desired state (§2.7)
+if actor.kind is not ProvenanceKind.USER and await registry.drift(bot):   # automated actors may not promote
+    raise Drifted(...)                                 # over a bot that has moved by hand; an owner may
+applier.preflight(bot, state)                          # the delivery seam refuses here, before anything is written
+row = promotions.insert(pending_row)                   # filed `pending`; no ref has moved
+apply_id = applier.start(bot, promotion_id=row.promotion_id, principal_id=..., audit_actor=...)
+                                                       # DirectApplier: an apply run whose state reference is
+                                                       # StateRef("genome", promotion_id), under the apply lock
+promotions.mark_applying(..., apply_id=apply_id)
+# ... the apply worker compiles the promotion back to r42 and applies it; when it ends the apply engine
+# publishes the outcome and PromotionSettler, in one transaction, moves active <- r42 (CAS against the
+# promotion's from_revision) and previous, marks r42 promoted and settles the row.
+# The Manifest knows nothing about r42; no digest is recorded anywhere — drift is read off the bot.
 ```
 
-顺序、失败处理和服务 Bot 发布路径由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责。
+顺序和失败处理由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责；通过发布流水线晋升服务
+Bot 的 verify 或 online 阶段见 [#3212](https://github.com/inclusionAI/Avernet/issues/3212)。
 
 ## 14. 交互
 
 | 其他组件 / 服务 | 方向 | 传递内容 |
 | --- | --- | --- |
-| Bot Config Manifest（现有） | 基因组 → Manifest | 通过基因组 API 从 Manifest 文档记录修订版；编译后的修订版通过 Manifest 应用进行应用；应用报告携带所应用文档的摘要，由注册表映射到修订版；直接的 Manifest 编辑会绕过基因组，并作为漂移被检测到（§5.5） |
+| Bot Config Manifest（现有） | 基因组 → Manifest | 基因组从不读取 Manifest 文档：文档像今天一样被应用，然后捕获该 Bot；修订版编译成与 Manifest 相同的类型化期望状态，并被直接投递进应用引擎（RSI-04）；直接的 Manifest 编辑会绕过基因组，并通过读取 Bot 作为漂移被检测到（§5.5） |
 | Manifest 内容存储（现有） | 基因组 → 存储 | 按摘要的字节；面向产出型内容的新写入路径 |
 | Skill Center（现有） | 基因组 → Center | 在编译/应用时解析固定的 Center 版本 |
 | [经验](02-experience.zh-CN.md) | 经验 → 基因组（按 id） | 每个片段和反馈记录都携带产生它的修订版 id，该 id 通过注册表的摘要 → 修订版映射归因得到；Bot 处于漂移状态期间为 `null` |
@@ -1673,7 +1771,7 @@ apply_service.apply(bot=bot, document=compiled.document)
 | [实验记录](05-experiment-ledger.zh-CN.md) | 基因组 → 实验记录 | 修订版记录、引用移动事件、供实验记录归档视图和审计使用的谱系 |
 | [进化运行](06-evolution-run.zh-CN.md) | 运行 → 基因组 | 运行开始时的漂移检查（§5.5）；解析绑定的 `parent`；以 `allowed_genes` 记录候选；上传产出型内容；针对 `policy` 检查绑定 |
 | [验证](07-verification.zh-CN.md) | 验证 → 基因组 | 将父代和候选编译/物化为评估 Bot；将评估链接到修订版 |
-| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；记录已应用的修订版编译出了哪个文档摘要；发生漂移时拒绝（§5.5） |
+| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；自动晋升前询问漂移（§5.5） |
 | [进化 API](09-evolution-api.zh-CN.md) | 调用方 → 基因组 | 公共基因组端点 |
 | [元进化](10-meta-evolution.zh-CN.md) | 之后 | 用于机制修订版的同一套修订版/引用/补丁机制 |
 | 引擎适配器 | 基因组 → 引擎 | 记忆投影（`project_memory`、`export_memory`）；物理布局 |
@@ -1683,7 +1781,7 @@ apply_service.apply(bot=bot, document=compiled.document)
 
 | ID | 决策 | 说明 |
 | --- | --- | --- |
-| D-6 | 基因组存储：数据库修订版 + 内容存储（推荐）与每个 Bot 一个 git 仓库 | §9.2；RSI-03 |
+| D-6 | 基因组存储：数据库修订版 + 内容存储与每个 Bot 一个 git 仓库 | **已关闭（RSI-03）：** 数据库修订版（`ac_genome_revision`、`ac_genome_ref`、`ac_genome_ref_event`、`ac_genome_patch`、`ac_genome_promotion`）加上用于存放字节的 manifest 内容存储（§9.2）；git 导出可以随后跟进 |
 | G-1 | 目录如何存储 | **已关闭（RSI-02）：** 每个目录一个 `acm-tree-v1` blob；如果编辑大型目录树变得常见，后续改为每个文件一个 blob（§9.1） |
 | G-2 | 完整的补丁操作集，以及操作是否映射到 JSON Patch（RFC 6902） | **已关闭（RSI-02）：** §6.1 中的操作集；不使用 JSON Patch |
 | G-3 | 策略配置默认值 | **已关闭（RSI-02）：** `mutable_genes` = persona、skills、memory、resources；`pins` = `persona/SAFETY.md`；没有 `locked_genes` 列表（§2.3） |
@@ -1697,5 +1795,5 @@ apply_service.apply(bot=bot, document=compiled.document)
 
 相关：DR-1 已在 RSI-01 中被接受（[ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.zh-CN.md)），
 RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
-（面向基因组的 Manifest 变更）因此可以开始；见
+（已编译修订版的直接投递）因此可以开始；见
 [work-items.zh-CN.md](work-items.zh-CN.md)。

@@ -247,11 +247,27 @@ impl FriendWorkOrderEventRequest {
         let biz_data = serde_json::to_value(biz_data).expect("friend work-order biz_data json");
         let (applicant_user_id, approver_user_ids, recipient_user_ids) = match command.kind {
             FriendConnectNotificationKind::ApprovalRequested => (
-                command
-                    .applicant_user_id
-                    .clone()
-                    .or_else(|| applicant_user_id(&command.applicant_actor_id))
-                    .or_else(|| Some(command.applicant_actor_id.clone())),
+                // Human applicants: the acting Human IS a legitimate
+                // applicant id (command value first, then the `human_`
+                // strip mapping).
+                //
+                // Bot applicants: NEVER send an applicant user id. The
+                // Bot's id (and any historical `created_by` residual
+                // the producer may still carry) is not a Human identity;
+                // the work-order intake derives the acting Manager/Owner
+                // Human from the verified principal forwarded with this
+                // request. A missing `applicant_user_id` serializes to a
+                // field ABSENT from the JSON (serde skip), so the
+                // Backend's `(applicant_user_id or actor_id)` fallback
+                // naturally lands on the acting user.
+                if is_human_actor(&command.applicant_actor_id) {
+                    command
+                        .applicant_user_id
+                        .clone()
+                        .or_else(|| applicant_user_id(&command.applicant_actor_id))
+                } else {
+                    None
+                },
                 command.recipient_user_ids.clone(),
                 Vec::new(),
             ),
@@ -597,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_bot_to_bot_pending_payload() {
+    fn builds_bot_to_bot_pending_payload_without_applicant_user_id() {
         let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
             kind: FriendConnectNotificationKind::ApprovalRequested,
             env: "dev".to_string(),
@@ -609,16 +625,15 @@ mod tests {
             request_auth: None,
             applicant_name: None,
             target_bot_name: None,
-            applicant_user_id: Some("152819".to_string()),
+            applicant_user_id: None,
         });
 
         assert_eq!(payload.event_category, "APPROVAL");
         assert_eq!(payload.event_type, "BOT2BOT_FRIEND_APPLIED");
-        // bot→bot: applicant_user_id is the initiating bot's OWNER (user id),
-        // not the bot id (the backend rejects a bot id as not matching the user).
-        assert_eq!(payload.applicant_user_id.as_deref(), Some("152819"));
+        assert_eq!(payload.applicant_user_id, None);
         assert_eq!(payload.approver_user_ids, vec!["user_2001".to_string()]);
         assert!(payload.recipient_user_ids.is_empty());
+        assert_eq!(payload.biz_id, "4");
         assert_eq!(payload.title, "好友申请待审批");
         assert_eq!(payload.apply_reason.as_deref(), Some("bot-to-bot"));
         assert_eq!(
@@ -627,6 +642,74 @@ mod tests {
                 "text": "bot_1001申请添加你的 Bot「bot_2001」为好友，请及时处理。"
             }))
         );
+        // The Bot applicant still travels as the Bot actor id.
+        assert_eq!(
+            payload.biz_data,
+            Some(serde_json::json!({
+                "request_ids": ["4"],
+                "applicant_actor_id": "bot_1001",
+                "target_bot_id": "bot_2001",
+                "notification_kind": "approval_requested",
+                "message": "bot-to-bot"
+            }))
+        );
+
+        // SERIALIZED payload: the field is ABSENT — the Backend's
+        // `(applicant_user_id or actor_id)` fallback then derives the
+        // acting Manager/Owner Human from the verified principal.
+        let serialized = serde_json::to_value(&payload).expect("serialize payload");
+        assert!(
+            serialized.get("applicant_user_id").is_none(),
+            "bot→bot approval must omit applicant_user_id from the JSON"
+        );
+        assert_eq!(serialized["event_type"], "BOT2BOT_FRIEND_APPLIED");
+        assert_eq!(serialized["biz_data"]["applicant_actor_id"], "bot_1001");
+    }
+
+    #[test]
+    fn bot_pending_payload_ignores_residual_creator_values() {
+        // Even when the command still carries a residual historical
+        // creator value, a Bot applicant never maps it into the Human
+        // applicant field.
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["9".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: Some("152819".to_string()),
+        });
+        assert_eq!(payload.applicant_user_id, None);
+        let serialized = serde_json::to_value(&payload).expect("serialize payload");
+        assert!(serialized.get("applicant_user_id").is_none());
+    }
+
+    #[test]
+    fn human_pending_payload_keeps_the_human_applicant_mapping() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::ApprovalRequested,
+            env: "dev".to_string(),
+            request_ids: vec!["7".to_string()],
+            applicant_actor_id: "human_327325".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["user_2001".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: None,
+        });
+
+        assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_APPLIED");
+        assert_eq!(payload.applicant_user_id.as_deref(), Some("327325"));
+        let serialized = serde_json::to_value(&payload).expect("serialize payload");
+        assert_eq!(serialized["applicant_user_id"], "327325");
+        assert_eq!(serialized["biz_data"]["applicant_actor_id"], "human_327325");
     }
 
     #[test]

@@ -18,6 +18,12 @@ mod opening_recovery_tests;
 #[path = "dispatch_recovery.rs"]
 mod dispatch_recovery_tests;
 
+#[path = "caller_node_dispatch.rs"]
+mod caller_node_dispatch_tests;
+
+#[path = "../../../../test-support/message_flow_contract/registry_routing_fakes.rs"]
+mod registry_routing_fakes;
+
 #[path = "recovery_sqlite.rs"]
 mod sqlite_restart_tests;
 

@@ -183,7 +183,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
           {/* YAML view */}
           {viewMode === 'yaml' && (
             <Card className="overflow-hidden shadow-none">
-              <div className="border-b border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-1.5 text-xs font-medium">
+              <div className="border-b border-divider bg-[var(--color-panel-muted)] px-3 py-1.5 text-xs font-medium">
                 WorkflowSpec YAML
               </div>
               <pre className="max-h-[400px] overflow-auto bg-[var(--color-panel-muted)] p-3 text-[11px] leading-relaxed">

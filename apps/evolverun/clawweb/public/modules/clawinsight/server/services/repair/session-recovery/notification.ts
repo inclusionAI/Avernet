@@ -5,6 +5,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import type { RecoveryActionNotifier } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "./task-contracts.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
 
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
@@ -18,11 +19,12 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     if (!row || row.enabled === 0) return false;
     if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
     if (!this.sender) throw new Error("Notification unavailable");
-    const title = input.kind === "plan" ? "会话自愈方案待确认" : "会话自愈需要人工处理";
+    const recovered = input.kind === "result" && input.effect === "recovered";
+    const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", input.taskId);
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
-      text: `${input.summary}\n\n[查看完整方案、证据及任务时间线](${url.href})` });
+      text: `${input.summary}${input.kind === "result" ? recovered ? "\n\n本次自愈已结束，后续建议可按需处理。" : "\n\n本次自愈已结束，后续请自行处理。" : ""}\n\n[${input.kind === "plan" ? "查看完整方案、证据及任务时间线" : "查看处理指引、证据及任务时间线"}](${url.href})` });
     return true;
   }
 }
@@ -128,21 +130,30 @@ function notificationContent(task: RecoveryStoredTask, event: RecoveryTimelineEv
     section("执行结果", event.summary);
     if (event.payload.success === true) section("后续处理", "继续核对原任务的执行效果，方案执行完成不代表业务已恢复。", 200);
   } else {
-    title = task.status === "completed" ? "任务已完成" : task.status === "failed" ? "任务执行失败" : "任务已停止";
-    intervention();
+    const ownerHandoff = task.completionReason === "owner_handoff";
+    title = ownerHandoff ? "已转交 Owner，自愈已结束" : task.completionReason === "target_unavailable" ? "目标不可用，自愈已结束" : task.completionReason === "user_continued" ? "用户已接手，自愈已让路" : task.status === "completed" ? "任务已完成" : task.status === "failed" ? task.phase === "verify" && task.judgment?.effect === "not_recovered" ? "自愈处理结束" : "任务执行失败" : "任务已停止";
+    section("任务总结", task.final_summary ?? "摘要暂不可用，请查看完整任务与处理记录。", 2000);
+    if (!task.final_summary) intervention();
     const delivery = task.judgment?.delivery === "confirmed" ? "**消息已触达**：恢复指引已确认出现在原会话中。"
       : "**消息触达未确认**：尚无证据确认恢复指引进入原会话。";
     const response = { acted: "**Bot 已采取行动**：已采纳指引并实际执行。", replied: "**Bot 已回复**：尚未确认实际采取恢复行动。",
       none: "**尚未观察到 Bot 响应**。", unknown: "**Bot 响应无法判断**。" };
-    sections.push(`**【已验证的情况】**\n\n- ${delivery}\n- ${response[task.judgment?.response ?? "unknown"]}`);
+    if (task.completionReason !== "user_continued") sections.push(`**【已验证的情况】**\n\n- ${delivery}\n- ${response[task.judgment?.response ?? "unknown"]}`);
     const effects = { recovered: "原任务已恢复", not_recovered: "原任务未恢复", unknown: "恢复效果尚未确认", not_intervened: "未实际干预" };
     const effect = task.judgment?.effect ?? "unknown";
     sections.push(`**【恢复结论】**\n\n${effect === "recovered" ? `<font color="#16803C">${effects[effect]}</font>` : effects[effect]}`);
-    if (task.status === "failed" || task.status === "canceled") section("结束说明", event.summary);
+    if (ownerHandoff) {
+      const handoff = task.timeline.findLast(item => item.kind === "termination" && item.payload.completion_reason === "owner_handoff");
+      const summary = task.judgment?.summary?.trim() || handoff?.summary.trim() || task.final_summary?.trim()
+        || "转交说明暂不可用，请查看完整任务与处理记录。";
+      // Leave room for the existing task summary, UTF-8 and Markdown escaping.
+      section("转交原因与 Owner 处理事项", summary, 1600);
+      section("结束说明", "本次自愈已结束，后续由 Owner 处理。");
+    } else if (task.completionReason !== undefined || task.status === "failed" || task.status === "canceled") section("结束说明", event.summary);
   }
   const url = new URL("/insight", baseUrl);
   url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
-  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}`;
+  const context = `**Bot**：${clip(task.request.target.bot_id, 150)}\n\n**Entity ID**：${clip(task.request.target.entity_id, 150)}`;
   return { title: `会话自愈｜${title}`, text: `## 会话自愈｜${title}\n\n${[context, ...sections].join("\n\n")}\n\n[查看完整任务与处理记录](${url.href})` };
 }
 
@@ -158,7 +169,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
 
   after(input: GroupNotification): void {
     setImmediate(() => {
-      void this.notify(input).catch(() => console.error("[session-recovery] group notification unavailable", input.taskId, input.kind));
+      void this.notify(input).catch(error => logRepairEvent("session-recovery", "session_recovery_notification", "group_unavailable", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) }));
     });
   }
   private async notify(input: GroupNotification): Promise<void> {
@@ -168,6 +180,8 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     const config = webhookConfig(row.config_json);
     const task = await this.deps.tasks.find(input.taskId);
     if (!task || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
+    // Reuse the complete tool audit; uncertain delivery must not be treated as no intervention.
+    if (input.kind === "result" && task.interventionStatus === "none") return;
     const target = task.request.target;
     const webhook = config.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? config.webhook;
     const source = task.timeline.find(event => event.event_id === input.eventId);
@@ -185,8 +199,9 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
       await this.deps.sender.send({ webhook, timeoutSeconds: config.timeout_seconds,
         ...notificationContent(task, source, input.kind, this.deps.publicBaseUrl) });
       sent = true;
-    } catch {
-      console.error("[session-recovery] group notification not confirmed", input.taskId, input.kind);
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "group_unconfirmed", {
+        environment: this.deps.controlPlaneEnvironment, taskId: input.taskId, operation: input.kind, ...repairLogError(error) });
     }
     await this.deps.tasks.appendNotification(input.taskId, {
       event_id: `${id}-result`, at_ms: Date.now(), kind: "notification", actor: "service",

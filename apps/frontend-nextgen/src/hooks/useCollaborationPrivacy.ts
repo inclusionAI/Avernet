@@ -1,40 +1,40 @@
-import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { matchesBotIdentity, resolveFixedBotLoadScope, resolvePrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
-import type {
-  CollaborationBot,
-  FriendApprovalConfig,
-  PublicAudience,
-  PublicConfig,
-} from '@/domain/collaborationPrivacy/types';
+import { notifySuccess } from '@/components/ui/notify';
+import { resolvePublishChannel, toBotPublicRiskVisibility } from '@/domain/collaborationPrivacy/botPublicRisk';
+import {
+  matchesBotIdentity,
+  resolveFixedBotLoadScope,
+  resolvePrivacyLoadScope,
+} from '@/domain/collaborationPrivacy/loadScope';
+import type { CollaborationBot, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
+import { useBotPublicRisk } from '@/hooks/useBotPublicRisk';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { collaborationPrivacyService, type DirectSetting } from '@/services/collaborationPrivacy';
+import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  buildDirectConfirmation,
   buildPublicationCommand,
-  directSettingLabel,
   errorMessage,
   externalPublicationSaveMessage,
   publicationSuccessMessage,
-  type Confirmation,
   type PublicationEditorState,
   type ScopeViewerState,
 } from './collaborationPrivacyHelpers';
+import { useCollaborationPrivacyActions } from './useCollaborationPrivacyActions';
 import { useCopyBotId } from './useCopyBotId';
 
 /** 协作权限编排 Hook：默认按工作身份推导加载范围；传 fixedBotId 时按指定 Bot 弹窗加载（collab-permission-entry-migration）。isExternalBot 由外部 Bot 入口显式传入。 */
-export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: { fixedBotId?: string; isExternalBot?: boolean } = {}) {
+export function useCollaborationPrivacy({
+  fixedBotId,
+  isExternalBot = false,
+}: { fixedBotId?: string; isExternalBot?: boolean } = {}) {
   const store = useCollaborationPrivacyStore();
   const { identity, status: identityStatus, error: identityError } = useHumanIdentity();
   const activeIdentityId = useWorkspaceStore((state) => state.activeIdentityId);
   const identityViews = useWorkspaceStore((state) => state.identities);
   const userId = identity?.userId.trim() || null;
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [publicationEditor, setPublicationEditor] = useState<PublicationEditorState | null>(null);
   const [scopeViewer, setScopeViewer] = useState<ScopeViewerState | null>(null);
-  const [friendEditorBotId, setFriendEditorBotId] = useState<string | null>(null);
   const previousActiveIdentityId = useRef(activeIdentityId);
   const latestLoadId = useRef(0);
   const activeIdentity = useMemo(
@@ -64,7 +64,16 @@ export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: {
         if (loadId === latestLoadId.current) store.setLoading(false);
       }
     },
-    [activeIdentity, fixedBotId, identityError, isExternalBot, store.setError, store.setLoading, store.setOverview, userId],
+    [
+      activeIdentity,
+      fixedBotId,
+      identityError,
+      isExternalBot,
+      store.setError,
+      store.setLoading,
+      store.setOverview,
+      userId,
+    ],
   );
   useEffect(() => {
     const controller = new AbortController();
@@ -74,124 +83,22 @@ export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: {
       useCollaborationPrivacyStore.getState().reset();
     };
   }, [identityStatus, load]);
-  const runBotAction = useCallback(
-    async (actionKey: string, task: () => Promise<CollaborationBot>, success: string) => {
-      if (store.busyAction) return false;
-      store.setBusyAction(actionKey);
-      try {
-        store.updateBot(await task());
-        notifySuccess(success);
-        return true;
-      } catch (error) {
-        notifyError(errorMessage(error));
-        return false;
-      } finally {
-        store.setBusyAction(null);
-      }
-    },
-    [store.busyAction, store.setBusyAction, store.updateBot],
-  );
-
-  const refreshBot = useCallback(
-    (bot: CollaborationBot) =>
-      runBotAction(`${bot.id}:refresh`, () => collaborationPrivacyService.refreshBot(bot.id), 'Bot 权限状态已刷新'),
-    [runBotAction],
-  );
-
-  const executeDirect = useCallback(
-    (bot: CollaborationBot, setting: DirectSetting, value: Confirmation['value']) => {
-      if (setting === 'taskClaimingEnabled') {
-        return runBotAction(
-          `${bot.id}:taskClaimingEnabled`,
-          () =>
-            value
-              ? collaborationPrivacyService.enableTaskClaim(bot.id)
-              : collaborationPrivacyService.disableTaskClaim(bot.id),
-          directSettingLabel(setting, value),
-        );
-      }
-      return runBotAction(
-        `${bot.id}:${setting}`,
-        () => collaborationPrivacyService.updateDirectSetting({ botId: bot.id, setting, value }),
-        directSettingLabel(setting, value),
-      );
-    },
-    [runBotAction],
-  );
-
-  const toggleDirect = useCallback(
-    (bot: CollaborationBot, setting: DirectSetting, value: Confirmation['value']) => {
-      const next = buildDirectConfirmation(bot, setting, value);
-      if (next) {
-        setConfirmation(next);
-        return;
-      }
-      void executeDirect(bot, setting, value);
-    },
-    [executeDirect],
-  );
-
-  const confirmDirect = useCallback(async () => {
-    if (!confirmation) return;
-    const succeeded = await executeDirect(confirmation.bot, confirmation.setting, confirmation.value);
-    if (succeeded) setConfirmation(null);
-  }, [confirmation, executeDirect]);
-  const submitPublication = useCallback(
-    async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
-      if (!publicationEditor) return;
-      const bot = store.overview?.bots.find((item) => item.id === publicationEditor.botId);
-      if (!bot) return;
-      const succeeded = await runBotAction(
-        `${bot.id}:publication:${publicationEditor.audience}`,
-        () =>
-          collaborationPrivacyService.submitPublication(
-            buildPublicationCommand({ botId: bot.id, audience: publicationEditor.audience, config, deptEntries, isExternalBot }),
-          ),
-        isExternalBot ? externalPublicationSaveMessage : publicationSuccessMessage(config),
-      );
-      if (succeeded) setPublicationEditor(null);
-    },
-    [isExternalBot, publicationEditor, runBotAction, store.overview],
-  );
-
-  const submitFriendApproval = useCallback(
-    async (config: FriendApprovalConfig) => {
-      const bot = store.overview?.bots.find((item) => item.id === friendEditorBotId);
-      if (!bot) return;
-      const succeeded = await runBotAction(
-        `${bot.id}:friendApproval`,
-        () => collaborationPrivacyService.updateFriendApproval({ botId: bot.id, config }),
-        config.mode === 'none'
-          ? '好友审批策略已更新为“无需审批”'
-          : config.mode === 'all'
-          ? '好友审批策略已更新为“全部审批”'
-          : '好友审批策略已更新',
-      );
-      if (succeeded) setFriendEditorBotId(null);
-    },
-    [friendEditorBotId, runBotAction, store.overview],
-  );
-
-  const syncDepartment = useCallback(async () => {
-    if (store.busyAction) return;
-    store.setBusyAction('syncDepartment');
-    try {
-      if (!userId) {
-        notifyError(identityError ?? '当前用户身份未就绪，无法同步部门信息');
-        return;
-      }
-      const result = await collaborationPrivacyService.syncDepartment(userId);
-      store.updateCurrentUser(result.identity);
-      notifySuccess(result.changed ? '用户部门信息已同步' : '当前已是最新信息');
-    } catch (error) {
-      notifyError(errorMessage(error));
-    } finally {
-      store.setBusyAction(null);
-    }
-  }, [identityError, store.busyAction, store.setBusyAction, store.updateCurrentUser, userId]);
-  const searchDepartments = useCallback(async (keyword: string, signal?: AbortSignal) => {
-    return await collaborationPrivacyService.searchDepartments(keyword, signal);
-  }, []);
+  // 单项 Bot 动作编排与确认/好友编辑弹层状态收敛在子 Hook(TC-G005 拆分)。
+  const {
+    confirmation,
+    friendEditorBotId,
+    runBotAction,
+    refreshBot,
+    toggleDirect,
+    confirmDirect,
+    cancelConfirmation,
+    openFriendEditor,
+    closeFriendEditor,
+    submitFriendApproval,
+    syncDepartment,
+    searchDepartments,
+    resetDialogStates,
+  } = useCollaborationPrivacyActions({ userId, identityError });
   const copyBotId = useCopyBotId();
   const botsById = useMemo(
     () => new Map((store.overview?.bots ?? []).map((bot) => [bot.id, bot] as const)),
@@ -203,19 +110,77 @@ export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: {
   useEffect(() => {
     if (previousActiveIdentityId.current === activeIdentityId) return;
     previousActiveIdentityId.current = activeIdentityId;
-    setConfirmation(null);
+    resetDialogStates();
     setPublicationEditor(null);
     setScopeViewer(null);
-    setFriendEditorBotId(null);
-  }, [activeIdentityId]);
+  }, [activeIdentityId, resetDialogStates]);
   const visibleBots = useMemo(() => {
     if (!store.overview) return [];
     if (fixedBotId) return store.overview.bots.filter((bot) => matchesBotIdentity(bot.id, fixedBotId));
     if (activeIdentity?.kind !== 'bot') return [];
     return store.overview.bots.filter((bot) => matchesBotIdentity(bot.id, activeIdentity.id));
   }, [activeIdentity, fixedBotId, store.overview]);
+
+  // Bot 公开风险前置检测（bot-public-risk-check，design D3/D4）：仅「对用户」维度启用。
+  // 通用配置弹窗（fixedBotId 模式）打开期常开（行状态需要）；页面模式只在编辑器打开期活跃。
+  const riskBotId = publicationBot?.id ?? visibleBots[0]?.id;
+  const riskEnabled = Boolean(riskBotId && userId && (fixedBotId || publicationEditor));
+  const risk = useBotPublicRisk({ botId: riskBotId, userId, publicScope: 'user', enabled: riskEnabled });
+  useEffect(() => {
+    if (riskEnabled) void risk.queryCurrent();
+    // 打开弹窗/编辑器时恢复在途申请状态（spec「通用配置行在途状态」）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riskEnabled, riskBotId, userId]);
+  const submitPublication = useCallback(
+    async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
+      if (!publicationEditor) return;
+      const bot = store.overview?.bots.find((item) => item.id === publicationEditor.botId);
+      if (!bot) return;
+      // 对用户公开向变更走前置检测动线（design D1）：发起成功保持编辑器打开进入已发起终态；
+      // 收紧 / 外部 Bot / 对 Bot 维度继续走原直改/审批通道。
+      const isUserPublication = !isExternalBot && publicationEditor.audience === 'user';
+      if (isUserPublication && resolvePublishChannel(config, bot.publication.user, false) === 'risk-check') {
+        const actionKey = `${bot.id}:publication:${publicationEditor.audience}`;
+        if (store.busyAction) return;
+        store.setBusyAction(actionKey);
+        try {
+          const record = await risk.create(toBotPublicRiskVisibility(config.scope, deptEntries));
+          if (record) notifySuccess('Bot公开风险前置检测已发起');
+        } finally {
+          store.setBusyAction(null);
+        }
+        return;
+      }
+      const succeeded = await runBotAction(
+        `${bot.id}:publication:${publicationEditor.audience}`,
+        () =>
+          collaborationPrivacyService.submitPublication(
+            buildPublicationCommand({
+              botId: bot.id,
+              audience: publicationEditor.audience,
+              config,
+              deptEntries,
+              isExternalBot,
+            }),
+          ),
+        isExternalBot ? externalPublicationSaveMessage : publicationSuccessMessage(config),
+      );
+      if (succeeded) setPublicationEditor(null);
+    },
+    // risk.create 引用稳定（useCallback 于 useBotPublicRisk），依赖随 currentRecord 变化由 hook 内部消化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isExternalBot, publicationEditor, risk.create, runBotAction, store.overview],
+  );
+
   return {
     ...store,
+    userRisk: {
+      uiState: risk.uiState,
+      record: risk.currentRecord,
+      isCreating: risk.isCreating,
+      refreshCurrent: risk.refreshCurrent,
+      isRefreshing: risk.isRefreshing,
+    },
     load,
     confirmation,
     publicationEditor,
@@ -229,7 +194,7 @@ export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: {
     refreshBot,
     toggleDirect,
     confirmDirect,
-    cancelConfirmation: () => setConfirmation(null),
+    cancelConfirmation,
     openPublicationEditor: (bot: CollaborationBot, audience: PublicAudience) =>
       setPublicationEditor({ botId: bot.id, audience }),
     closePublicationEditor: () => setPublicationEditor(null),
@@ -238,8 +203,8 @@ export function useCollaborationPrivacy({ fixedBotId, isExternalBot = false }: {
     openFriendScopeViewer: (bot: CollaborationBot) => setScopeViewer({ kind: 'friendApproval', botId: bot.id }),
     closeScopeViewer: () => setScopeViewer(null),
     submitPublication,
-    openFriendEditor: (bot: CollaborationBot) => setFriendEditorBotId(bot.id),
-    closeFriendEditor: () => setFriendEditorBotId(null),
+    openFriendEditor,
+    closeFriendEditor,
     submitFriendApproval,
     syncDepartment,
     searchDepartments,

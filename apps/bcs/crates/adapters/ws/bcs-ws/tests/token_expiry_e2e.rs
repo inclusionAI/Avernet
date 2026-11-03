@@ -294,7 +294,6 @@ async fn start_test_server() -> (SocketAddr, Arc<BotConnectionRegistry>, Arc<Moc
         task_callback: None,
         session_management: Arc::new(NoopSessionManagementService),
         group_dispatch: Arc::new(bcs_test_support::NoopGroupDispatchContextPort),
-        callback_dispatch: Arc::new(bcs_test_support::NoopSessionCallbackDispatchPort),
         system_message: None,
         coordination_processed: Arc::new(Mutex::new(
             std::collections::HashMap::new(),

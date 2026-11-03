@@ -1,4 +1,5 @@
 """Local mock PassportPlugin."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -164,8 +165,14 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         bot_desc: str | None = None,
         engine_type: str | None = None,
         target_env: str | None = None,
+        handoff_operation_id: str | None = None,
+        expected_credential_id: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
+        if handoff_operation_id is not None or expected_credential_id is not None:
+            from agentclaw.community.plugin_api.passport import PassportError
+
+            raise PassportError("Local Passport does not support owner handoff")
         logger.info(
             "[LocalPassportUpdate] reissue_agent_credentials: bot_id=%s, "
             "owner_workno=%s, entity_id=%s, execution_workno=%s",
@@ -180,6 +187,26 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             "agent_code": f"local_{bot_id}",
             "token": f"mock_token_reissued_{bot_id}",
         }
+
+    def owner_handoff_supported(
+        self, *, bot_id: str, owner_workno: str, entity_id: str
+    ) -> bool:
+        return False
+
+    def retire_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        keep_credential_id: str,
+        handoff_operation_id: str,
+    ) -> None:
+        from agentclaw.community.plugin_api.passport import PassportError
+
+        raise PassportError(
+            "Local Passport cannot acknowledge real credential retirement"
+        )
 
     def destroy_passport(self, bot_id: str, owner_workno: str) -> None:
         logger.info(

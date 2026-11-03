@@ -27,6 +27,7 @@ from agentclaw.community.core.task.repository.models import (
     TaskDeliveryIntentModel, TaskInfoModel, TaskNodeModel,
 )
 from agentclaw.community.core.task.repository.task_intake_repository import TaskIntakeRepository
+from agentclaw.community.utils.app_utils import get_current_executor_app
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.task_intake import build_task_info_request
@@ -117,6 +118,7 @@ def test_intake_task_root_commits_without_delivery_intent() -> None:
         info = session.query(TaskInfoModel).one()
         root = session.query(TaskNodeModel).one()
         assert info.intake_session_id == result.session_id
+        assert info.executor_app == get_current_executor_app()
         assert root.node_id == task_info.task_id
         assert session.query(TaskDeliveryIntentModel).count() == 0
 

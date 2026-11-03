@@ -18,6 +18,10 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-group-store = { workspace = true }
+tempfile = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-edge-permission-store = { workspace = true }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import pytest
@@ -124,7 +125,33 @@ async def test_topic_tag_service_uses_context_and_fixed_vocabulary():
 
 
 @pytest.mark.asyncio
-async def test_topic_tag_service_skips_write_when_llm_returns_no_valid_tags():
+async def test_topic_tag_service_identifies_disabled_llm_reason(caplog):
+    caplog.set_level(logging.INFO, logger="start")
+
+    class DisabledLLM(FakeLLM):
+        async def generate_tags(self, prompt: str, *, max_tokens: int) -> str:
+            return "[bbs llm disabled]"
+
+    service = ForumTopicTagService(
+        repository=FakeReadRepository(),
+        tag_repository=FakeTagRepository(),
+        llm=DisabledLLM(),
+    )
+
+    result = await service.execute()
+
+    assert result == ForumTopicTagStatisticsResult(
+        topics_examined=1, topics_tagged=0
+    )
+    assert (
+        "[bbs-topic-tag][service] skip topic=topic-untagged reason=llm_disabled"
+        in {record.getMessage() for record in caplog.records}
+    )
+
+
+@pytest.mark.asyncio
+async def test_topic_tag_service_skips_write_when_llm_returns_no_valid_tags(caplog):
+    caplog.set_level(logging.INFO, logger="start")
     class EmptyLLM(FakeLLM):
         async def generate_tags(self, prompt: str, *, max_tokens: int) -> str:
             return '["未知标签"]'
@@ -142,3 +169,19 @@ async def test_topic_tag_service_skips_write_when_llm_returns_no_valid_tags():
         topics_examined=1, topics_tagged=0
     )
     assert tag_repository.updates == []
+    messages = {record.getMessage() for record in caplog.records}
+    assert (
+        "[bbs-topic-tag][service] scan page_items=2 page_total=2 "
+        "already_tagged=1 untagged=1 selected=1" in messages
+    )
+    assert (
+        "[bbs-topic-tag][service] skip topic=topic-untagged "
+        "reason=invalid_model_output" in messages
+    )
+    assert any(
+        message.startswith(
+            "[bbs-topic-tag][service] completed topics_examined=1 "
+            "topics_tagged=0 duration_ms="
+        )
+        for message in messages
+    )

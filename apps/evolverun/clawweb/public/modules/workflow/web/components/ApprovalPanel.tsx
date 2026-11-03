@@ -21,7 +21,7 @@ function formatTime(ts: number | null): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function ApprovalCard({ card }: { card: ApprovalCardSummary }) {
+function ApprovalCard({ card, readOnly }: { card: ApprovalCardSummary; readOnly: boolean }) {
   const cfg = STATUS_CFG[card.status] ?? STATUS_CFG.pending
   const approverNames = card.approverNames.length > 0 ? card.approverNames : card.approverIds
 
@@ -38,12 +38,12 @@ function ApprovalCard({ card }: { card: ApprovalCardSummary }) {
             {TYPE_LABEL[card.approvalType ?? ''] ?? card.approvalType ?? '审批'}
           </span>
         </div>
-        <Link
+        {!readOnly && <Link
           to={`/approval/${card.id}`}
           className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
         >
           前往审批 →
-        </Link>
+        </Link>}
       </div>
 
       {/* Body */}
@@ -85,7 +85,7 @@ function ApprovalCard({ card }: { card: ApprovalCardSummary }) {
   )
 }
 
-export default function ApprovalPanel({ flowId }: { flowId: string }) {
+export default function ApprovalPanel({ flowId, readOnly = false }: { flowId: string; readOnly?: boolean }) {
   const { data, isLoading, isError } = useFlowApprovals(flowId)
   const items = data?.items ?? []
   const pendingCount = items.filter((c) => c.status === 'pending').length
@@ -120,7 +120,7 @@ export default function ApprovalPanel({ flowId }: { flowId: string }) {
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {items.map((card) => (
-          <ApprovalCard key={card.id} card={card} />
+          <ApprovalCard key={card.id} card={card} readOnly={readOnly} />
         ))}
       </div>
     </div>

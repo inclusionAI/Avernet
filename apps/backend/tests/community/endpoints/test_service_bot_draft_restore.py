@@ -126,9 +126,15 @@ def _seed_restoreable_draft(world) -> None:
 def _seed_first_draft(world) -> None:
     """Seed a first-version draft, which has no historical artifact to restore."""
     make_staff_user(world, user_id=_OWNER)
+    bot = world.get(BotRepository).insert({
+        "bot_id": _BOT_ID, "bot_name": "First draft Bot", "owner_id": _OWNER,
+        "entity_id": _OWNER, "entity_type": "staff", "creator_id": _OWNER,
+        "bot_type": "service", "status": "ACTIVE", "active_engine": "openclaw",
+    })
     _insert_publish(
         world,
         publish_id=_DRAFT_ID,
+        source_bot_pk=bot["id"],
         status=PublishStatus.DRAFT,
         version=1,
     )

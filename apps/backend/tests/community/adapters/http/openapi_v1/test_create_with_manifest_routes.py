@@ -32,7 +32,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     require_delegated_user,
     require_granted_own_bot,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
     BOT_COULD_NOT_BE_PROVISIONED,
@@ -469,7 +469,7 @@ def _annotations(fn) -> set[str]:
 
 # ── RECORD_APPLY_PROVISION: the pre-container record is the terminal one (W8) ──
 
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
+from agentclaw.community.core.apply_engine.delivery import (  # noqa: E402
     CreationSequence,
 )
 

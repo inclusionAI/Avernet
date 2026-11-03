@@ -1,4 +1,5 @@
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
+import { logWorkflowBackground, withWorkflowBackgroundContext } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import { repairSourceSnapshot } from '@avernet/workflow/server/services/repair-source-snapshot';
 import type { ProposalModelPort } from '@avernet/workflow/server/services/repair-proposal-integration';
 import { createRepairTrialService } from '@avernet/workflow/server/services/repair-trial-service';
@@ -92,42 +93,31 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   } } : undefined;
   const service = createRepairWorkbenchService(db, sources, execution, undefined, queueRepairCompletion);
   if (options.automation) automation = createWorkflowAutomation({ db, workbench: service, ...options.automation, environment: options.environment });
-  const drainNotifications = !automation && options.notifications
-    ? createWorkflowNotificationDrain({ db, workbench: service, ...options.notifications, environment: options.environment }) : undefined;
+  const notificationOptions = options.notifications ?? options.automation;
+  const drainNotifications = notificationOptions
+    ? createWorkflowNotificationDrain({ db, workbench: service, ...notificationOptions, environment: options.environment }) : undefined;
   console.info('[workflow-notification] ' + JSON.stringify({ event: 'consumer_configured', environment: options.environment ?? 'prod',
-    consumer: automation ? 'automation' : drainNotifications ? 'notification_only' : 'none', completionObserverConfigured: true }));
+    consumer: drainNotifications ? 'notification_only' : 'none', completionObserverConfigured: true }));
   const release = createRepairReleaseService({ db, workbench: service, publisher: options.publication });
   const trials = createRepairTrialService({ db, workbench: service, port: options.trial });
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   const verification = createRepairVerificationService(db, options.publication);
-  const monitor = { async reconcile() {
-    let count = 0;
+  logWorkflowBackground('workflow_repair_runtime', 'configured', { enabled: true, environment: options.environment });
+  let lastSummaryAt = -Infinity;
+  const monitor = { async reconcile() { return withWorkflowBackgroundContext({ environment: options.environment }, async () => {
     try {
-      count = await service.reconcile();
-      let after = '';
-      const status = db.dialect.driver === 'better-sqlite3' ? "JSON_EXTRACT(body_json, '$.status')"
-        : "JSON_UNQUOTE(JSON_EXTRACT(body_json, '$.status'))";
-      for (;;) {
-        const pending = await db.query<{ record_id: string; body_json: string }>(`SELECT record_id, body_json FROM workflow_repair_release_records
-          WHERE record_kind = 'deployment' AND ${status} IN ('dispatching', 'running', 'uncertain')
-          AND record_id > ? ORDER BY record_id LIMIT 100`, [after]);
-        if (!pending.length) break;
-        for (const row of pending) {
-          const deployment = JSON.parse(row.body_json);
-          if (['dispatching', 'running', 'uncertain'].includes(deployment.status)) {
-            try { await release.reconcile(deployment.actorId, deployment.taskId, deployment.id); }
-            catch { console.warn('[workflow-repair] publication reconciliation requires attention', { deploymentId: deployment.id }); }
-          }
-        }
-        after = pending.at(-1)!.record_id;
+      // Fast recovery owns unfinished AIS executions only. Publication/effect
+      // checks and new automatic work remain explicit, separate operations.
+      const count = await service.reconcile();
+      if (count || Date.now() - lastSummaryAt >= 60_000) {
+        logWorkflowBackground('workflow_repair_runtime', 'summary', { count });
+        lastSummaryAt = Date.now();
       }
-      await verification.automatic.reconcile();
+      return count;
     } finally {
-      // Generation/verification failures must not prevent independent completion notices.
-      await automation?.tick();
+      // A failed generation must not prevent independent completion notices.
       await drainNotifications?.();
     }
-    return count;
-  } };
+  }); } };
   return { service, release, trials, monitor, automation, router: createRepairBatchesRouter({ service, authorize, release, trials, verification }) };
 }

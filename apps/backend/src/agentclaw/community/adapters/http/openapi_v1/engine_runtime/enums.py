@@ -54,17 +54,31 @@ class RuntimeStage(_DocumentedEnum):
 
 
 class SocketKind(_DocumentedEnum):
-    """Which WebSocket a connection entry describes."""
+    """Which connection a socket entry describes."""
 
-    # One member today. A terminal socket was implemented and then removed: the
+    # Two members. A terminal socket was implemented and then removed: the
     # engine offers an interactive PTY and openclaw declares the capability, but
     # the spec excludes "arbitrary command execution and interactive shell on a
     # tenant's device ... at any scope" from v1. Kept as an enum over a list so
-    # a second socket is additive rather than a shape change.
+    # each further socket is additive rather than a shape change. The A2A
+    # member is not a WebSocket: it publishes the engine's HTTP A2A face
+    # (agent card + JSON-RPC), offered only when the deployment can address it
+    # to the caller's browser directly.
 
     CHAT = "chat"
+    A2A = "a2a"
 
-    __descriptions__ = {"chat": "Converse with the bot."}
+    __descriptions__ = {
+        "chat": "Converse with the bot.",
+        "a2a": (
+            "The bot's A2A agent endpoint — an HTTP base URL. The agent "
+            "card is served at /.well-known/agent-card.json beneath it and "
+            "the A2A JSON-RPC surface at /rpc; address both against the URL "
+            "as given. Unlike a chat socket it carries no credential and "
+            "never expires on its own. Absent when the deployment defines "
+            "no browser-direct address for it."
+        ),
+    }
 
 
 class ApprovalMode(_DocumentedEnum):

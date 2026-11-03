@@ -7,7 +7,7 @@ the service already uses for ``permission_owner == "caller"``.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bot_publish_approval import (
@@ -43,7 +43,12 @@ class LocalBotPublishApproval(MockSeam, BotPublishApprovalPlugin):
         friend_approval: str,
         access_mode: str,
         callbacks: BotPublishCallbacks,
+        approval_biz_id: Optional[str] = None,
+        risk_check_id: Optional[str] = None,
+        on_approval_started: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
+        if risk_check_id:
+            raise RuntimeError("risk-aware approval is unavailable for this profile")
         logger.info(
             "[LocalBotPublishApproval] bot=%s owner=%s — antprocess "
             "unavailable in local mode, publishing directly",

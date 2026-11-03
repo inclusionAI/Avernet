@@ -8,6 +8,35 @@ import { repairRequestDiagnostic } from '../../observability/repair-diagnostics.
 let f: Awaited<ReturnType<typeof repairFixture>>;
 afterEach(() => { f?.raw.close(); vi.restoreAllMocks(); });
 
+it('coalesces overlapping source snapshot reads before version queries on non-serialized Hosts', async () => {
+  f = await repairFixture(2);
+  // Execute real SQLite queries, but exercise the non-serialized MySQL Host read path.
+  const db = Object.create(f.db);
+  Object.defineProperty(db, 'dbType', { value: 'mysql' });
+  f.sourcePort.readVersion = vi.fn(async () => 'v1');
+  const load = vi.spyOn(f.sourcePort, 'load');
+  const service = createRepairWorkbenchService(db, f.sourcePort);
+  const pages = await Promise.all([1, 2].map(page => service.candidates('wf-1', { page, pageSize: 1, includeTasks: false })));
+  expect(pages.map(page => page.items[0].itemId)).toEqual(['item-0', 'item-1']);
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(f.sourcePort.readVersion).toHaveBeenCalledTimes(1);
+});
+
+it('does not retain failed in-flight reads or share different history scopes', async () => {
+  f = await repairFixture(2);
+  const db = Object.create(f.db);
+  Object.defineProperty(db, 'dbType', { value: 'mysql' });
+  f.sourcePort.readVersion = async () => 'v1';
+  const load = vi.spyOn(f.sourcePort, 'load').mockRejectedValueOnce(new Error('source temporarily unavailable'));
+  const service = createRepairWorkbenchService(db, f.sourcePort);
+  const failed = await Promise.allSettled([1, 2].map(() => service.candidates('wf-1', { includeTasks: false })));
+  expect(failed.map(result => result.status)).toEqual(['rejected', 'rejected']);
+  expect(load).toHaveBeenCalledTimes(1);
+  const pages = await Promise.all([false, true].map(includeHistorical => service.candidates('wf-1', { includeHistorical, includeTasks: false })));
+  expect(pages.map(page => page.page.total)).toEqual([2, 2]);
+  expect(load).toHaveBeenCalledTimes(3);
+});
+
 it('keeps the unavailable-generation response without reading an unrelated task', async () => {
   f = await repairFixture(1);
   const service = createRepairWorkbenchService(f.db, f.sourcePort);

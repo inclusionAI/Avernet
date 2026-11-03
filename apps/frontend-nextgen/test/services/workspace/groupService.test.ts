@@ -583,21 +583,30 @@ describe('createGroup', () => {
     });
     gc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
     sc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
-    const yaml = 'participants:\n  - alpha\nroles:\n  - driver';
+    const yaml = 'participants:\n  writer: {}\n  editor: {}';
+    const participantBindings = [
+      { binding: 'editor', actor_ids: ['b1'] },
+      { binding: 'writer', actor_ids: ['b2'] },
+    ];
     await groupService.createGroup({
       name: '我的群',
       strategy: 'state_machine',
       definitionYaml: yaml,
       driverBotUuid: 'b1',
       originator: 'actor-bot',
-      participants: [{ actor_id: 'b1' }],
+      participants: [{ actor_id: 'b1' }, { actor_id: 'b2' }],
+      participantBindings,
     });
     expect(gc.createGroup).toHaveBeenCalledWith(
       expect.objectContaining({
+        participants: [
+          { actor_id: 'b1', role: 'driver' },
+          { actor_id: 'b2', role: 'consultant' },
+        ],
         collaboration: {
           strategy: 'state_machine',
           definition: { content_yaml: yaml },
-          participant_bindings: [{ binding: 'role-1', actor_ids: ['b1'] }],
+          participant_bindings: participantBindings,
         },
       }),
     );

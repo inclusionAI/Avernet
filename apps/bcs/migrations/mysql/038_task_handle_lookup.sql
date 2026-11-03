@@ -1,0 +1,7 @@
+-- Dispatch identities are queryable. Result intents also suppress obsolete uncertainty.
+ALTER TABLE bcs_message_deliveries ADD COLUMN task_lookup_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN flow_kind = 'task' AND json_unquote(json_extract(semantic_projection_json, '$.task.leg')) = 'dispatch' THEN lower(replace(json_unquote(json_extract(semantic_projection_json, '$.task.task_id')), '-', '')) ELSE json_unquote(json_extract(semantic_projection_json, '$.task_rejected_id')) END) VIRTUAL;
+CREATE INDEX idx_delivery_task_lookup_id ON bcs_message_deliveries (env, task_lookup_id);
+ALTER TABLE bcs_message_deliveries ADD COLUMN task_lookup_intent VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN flow_kind = 'task' AND json_unquote(json_extract(semantic_projection_json, '$.task.leg')) IN ('dispatch', 'result') THEN lower(replace(json_unquote(json_extract(semantic_projection_json, '$.task.assignment_intent_id')), 'bcs_intent_', '')) ELSE json_unquote(json_extract(semantic_projection_json, '$.task_rejected_id')) END) VIRTUAL;
+CREATE INDEX idx_delivery_task_lookup_intent ON bcs_message_deliveries (env, task_lookup_intent);
+ALTER TABLE bcs_message_deliveries ADD COLUMN task_lookup_uncertain VARCHAR(64) GENERATED ALWAYS AS (json_unquote(json_extract(semantic_projection_json, '$.task_uncertain_id'))) VIRTUAL;
+CREATE INDEX idx_delivery_task_lookup_uncertain ON bcs_message_deliveries (env, task_lookup_uncertain);

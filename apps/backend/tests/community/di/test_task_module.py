@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.auth import (
@@ -12,12 +14,24 @@ from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.forum.browsing import (
+    BbsBrowseLoopRunner,
+    BbsBrowseLoopScheduler,
+)
 from agentclaw.community.core.task.forum.browsing.cron_setup import (
     BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
+from agentclaw.community.core.task.forum.service_protocol import (
+    ForumServiceProtocol,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.task_runner.callback_correlation import (
@@ -36,6 +50,9 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
     CatalogKeywordBotDiscover,
+)
+from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
+    SemanticKeywordBotDiscover,
 )
 
 
@@ -92,7 +109,7 @@ class _StubBbsDigestModule(Module):
 
     @singleton
     @provider
-    def notify_messages(self) -> BbsDigestNotifyProvider:
+    def notify_messages(self) -> Annotated[NotifySenderPlugin, QUALIFIER_BBS_DIGEST]:
         class _NotifyMessages:
             def send(self, message, *, channel="tc_card"):
                 return "notify-1"
@@ -122,12 +139,40 @@ class _StubBbsCronModule(Module):
             skill_report_enabled=True,
         )
 
+    @singleton
+    @provider
+    def forum_service(self) -> ForumServiceProtocol:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def openapi_bot_runtime(self) -> OpenApiBotPort:
+        return object()  # type: ignore[return-value]
+
+    @singleton
+    @provider
+    def bbs_browse_scheduler(self) -> BbsBrowseLoopScheduler:
+        return object()  # type: ignore[return-value]
+
 
 def test_task_module_wires_bbs_browse_cron_manager():
     injector = Injector([TaskModule(), _StubDiscoverModule(), _StubBbsCronModule()])
     manager = injector.get(BbsBrowseCronManager)
     assert manager is injector.get(BbsBrowseCronManager)
     assert manager._backend_base_url == "http://backend.example"
+
+
+def test_task_module_wires_digest_cron_and_subscription_provisioner():
+    injector = Injector([TaskModule(), _StubDiscoverModule(), _StubBbsCronModule()])
+    digest_manager = injector.get(BbsDigestCronManager)
+    assert digest_manager is injector.get(BbsDigestCronManager)
+    assert digest_manager._backend_base_url == "http://backend.example"
+
+    runner = injector.get(BbsBrowseLoopRunner)
+    assert runner is injector.get(BbsBrowseLoopRunner)
+
+    provisioner = injector.get(BbsBrowseSubscriptionProvisioner)
+    assert provisioner is injector.get(BbsBrowseSubscriptionProvisioner)
 
 
 def test_task_module_binds_callback_singletons():
@@ -145,7 +190,7 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
 
 
-def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
+def test_task_module_uses_keyword_discovery_when_semantic_port_is_absent(monkeypatch):
     class _BotPublic:
         def search_catalog_public_bots_by_keyword(self, **_kwargs):
             return {"total": 0, "items": []}
@@ -154,6 +199,20 @@ def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
         monkeypatch.setenv("DEPLOY_PROFILE", profile)
         discover = TaskModule._resolve_discover(bot_public=_BotPublic())
         assert isinstance(discover, CatalogKeywordBotDiscover)
+
+
+def test_task_module_uses_semantic_hybrid_when_semantic_port_is_available():
+    class _BotPublic:
+        def search_catalog_public_bots_by_keyword(self, **_kwargs):
+            return {"total": 0, "items": []}
+
+    discover = TaskModule._resolve_discover(
+        bot_public=_BotPublic(), semantic_discover=object()
+    )
+    assert isinstance(discover, SemanticKeywordBotDiscover)
+    assert isinstance(
+        discover.search_by_keyword(keyword="市场", user_id="146836"), dict
+    )
 
 
 class _FakeSettings(TaskSettingsServiceProtocol):
@@ -232,7 +291,8 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
     )
     monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "0")
     svc = module.TaskModule().task_service(
-        _Graph(), object(),
+        _Graph(),
+        object(),
         TaskDispatchConfig(backend_url="https://backend.example"),
         _Injector(),
     )
@@ -242,7 +302,12 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
 
 def test_task_module_wires_bbs_digest_report_service_singleton():
     injector = Injector(
-        [TaskModule(), _StubDiscoverModule(), _StubBbsCronModule(), _StubBbsDigestModule()]
+        [
+            TaskModule(),
+            _StubDiscoverModule(),
+            _StubBbsCronModule(),
+            _StubBbsDigestModule(),
+        ]
     )
     service = injector.get(ForumDigestReportServiceProtocol)
     assert service is injector.get(ForumDigestReportServiceProtocol)

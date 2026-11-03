@@ -41,6 +41,19 @@ where
     let request_id = RequestId::from_headers(request.headers());
     match state.principal_verifier().verify(request.headers()).await {
         Ok(caller) => {
+            // A comparison only, never an authentication source. Prevent a browser
+            // account switch from submitting a configuration prepared by another Human.
+            if request.headers().contains_key("x-bcs-expected-user") {
+                let values = request.headers().get_all("x-bcs-expected-user");
+                let expected = values.iter().next().and_then(|v| v.to_str().ok());
+                if values.iter().count() != 1 || expected.is_none()
+                    || expected != caller.user.as_ref().map(|user| user.id.as_str()) {
+                    return super::application_error_response(&request_id,
+                        bcs_service_api::application::v1::ApplicationError::forbidden_code(
+                            "user_context_changed", "Current user changed; reopen the configuration",
+                        )).into_response();
+                }
+            }
             request.extensions_mut().insert(caller);
             request.extensions_mut().insert(request_id);
             next.run(request).await

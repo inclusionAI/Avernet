@@ -79,6 +79,13 @@ class _Bots:
         self.reads += 1
         return self._bot
 
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
+
 
 class _SkillSets:
     """Stands in for the repository seam that owns resolution and membership."""
@@ -283,6 +290,13 @@ class _AssetBots:
             "bot_type": "personal",
             "env": "pre",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
 
 
 class _RecordingReader:
@@ -628,6 +642,13 @@ class _ReadmeBotRepository:
             return None
         return self.bot
 
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
+
 
 class _DuplicateDefaultBots:
     def get_unique_by_id(self, _bot_id: str):
@@ -643,6 +664,13 @@ class _DuplicateDefaultBots:
             "entity_type": "staff",
             "active_engine": "openclaw",
         }
+
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
 
 
 class _ReadmeStorage:
@@ -747,7 +775,7 @@ async def test_skill_only_readme_masks_missing_bot_owner_and_denied_collaborator
     service = SkillQueryService(
         _ReadmeSkillRepository({"1": skill}),
         _ReadmeBotRepository(
-            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+            {"entity_id": "owner", "owner_id": "owner", "active_engine": "x"}
         ),
         _Collaborators(allowed=False),
         object(),
@@ -790,7 +818,7 @@ async def test_skill_only_readme_returns_string_content():
             }
         ),
         _ReadmeBotRepository(
-            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+            {"entity_id": "owner", "owner_id": "owner", "active_engine": "x"}
         ),
         _Collaborators(),
         object(),
@@ -818,7 +846,7 @@ async def test_skill_only_readme_tries_readme_fallback_and_decodes_bytes():
             }
         ),
         _ReadmeBotRepository(
-            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+            {"entity_id": "owner", "owner_id": "owner", "active_engine": "x"}
         ),
         _Collaborators(),
         object(),
@@ -847,7 +875,7 @@ async def test_skill_only_readme_masks_empty_local_files():
             }
         ),
         _ReadmeBotRepository(
-            {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
+            {"entity_id": "owner", "owner_id": "owner", "active_engine": "x"}
         ),
         _Collaborators(),
         object(),

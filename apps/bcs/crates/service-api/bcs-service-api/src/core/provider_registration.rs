@@ -1,5 +1,6 @@
 //! Scoped registration, independent of Provider-admin and delivery bindings.
 use crate::ServiceResult;
+pub use crate::types::bot_authority::OwnershipInitialization;
 pub use crate::types::provider_registration::{
     ProviderRegistrationMode, ProviderRegistrationRecord,
 };
@@ -47,8 +48,44 @@ pub trait ProviderRegistrationCoreService: Send + Sync {
     /// Reauthorizes and creates a scoped Bot. Duplicate Provider/ref conflicts;
     /// no credentials are replayed. Human/owner-edge failures propagate and may
     /// require explicit reconciliation after the Bot transaction has committed.
+    ///
+    /// Trusted v2 registration surfaces call
+    /// [`Self::register_with_ownership`] instead.
     async fn register(
         &self,
         command: RegisterProviderBot,
     ) -> ServiceResult<ProviderRegistrationResult>;
+
+    /// Explicit management authority is required to bind a remote Agent;
+    /// self-service ordinary Bot registration alone does not grant it.
+    async fn authorize_a2a_registration(&self, _provider_id: &str, _owner: &str) -> ServiceResult<()> {
+        Err(crate::ServiceError::Forbidden("A2A registration is not configured".into()))
+    }
+
+    /// Scoped A2A registration uses a validated declaration and commits
+    /// its Card with the existing ownership composite. No HTTP inside Core.
+    async fn register_a2a_with_ownership(
+        &self, _command: RegisterProviderBot, _initialization: OwnershipInitialization,
+        _card: crate::types::a2a_bot::A2aRegistrationCard,
+    ) -> ServiceResult<ProviderRegistrationResult> {
+        Err(crate::ServiceError::InternalError("atomic A2A registration is not configured".into()))
+    }
+
+    /// Trusted scoped registration: the existing Provider admission,
+    /// mode/ref/webhook validation and result types are reused, and
+    /// the repo's composite create commits Bot, Human, owner,
+    /// ownership version, default profile, gateway projection and
+    /// the initialization audit in ONE transaction.
+    /// `initialization.owner_user_id` comes only from the verified
+    /// registration token and the mutation keeps the real initiator;
+    /// failure returns no credential and publishes nothing.
+    async fn register_with_ownership(
+        &self,
+        _command: RegisterProviderBot,
+        _initialization: OwnershipInitialization,
+    ) -> ServiceResult<ProviderRegistrationResult> {
+        Err(crate::ServiceError::InternalError(
+            "trusted provider registration is not configured".into(),
+        ))
+    }
 }

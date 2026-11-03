@@ -110,6 +110,7 @@ class AgentSwarmModule(Module):
         result_repo: AgentResultRepository,
         attempt_repo: AgentAttemptRepository,
         config: AgentSwarmConfig,
+        injector: Injector,
     ) -> AgentSwarmService:
         return AgentSwarmService(
             run_repo=run_repo,
@@ -121,7 +122,39 @@ class AgentSwarmModule(Module):
             result_repo=result_repo,
             attempt_repo=attempt_repo,
             config=config,
+            authorization_source=self._authorization_source(injector),
         )
+
+    @staticmethod
+    def _authorization_source(injector: Injector):
+        """The run surfaces' read-only tower into the pending passport gate.
+
+        Same fail-clear shape as ``bot_platform`` below: profiles that can
+        resolve the manifest seam and the passport plugin get the
+        human-gate descriptor join on run detail and SSE — presence keyed
+        off the facade's live PENDING status; profiles that cannot keep
+        the pre-change reads (parked agents surface their ``bot_state``
+        with ``None`` gate fields, and nothing else changes).
+        """
+        try:
+            from agentclaw.community.core.bot_management.manifest_seam import (
+                ManifestCreationSeam,
+            )
+            from agentclaw.community.plugin_api.passport import PassportPlugin
+            from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
+                ManifestBotAuthorizationSource,
+            )
+            return ManifestBotAuthorizationSource(
+                manifest_seam=injector.get(ManifestCreationSeam),
+                passport_plugin=injector.get(PassportPlugin),
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm] authorization source resolution failed — run "
+                "surfaces degrade to pre-change reads (parked agents surface "
+                "no consent URLs)",
+            )
+            return None
 
     @singleton
     @provider
@@ -267,8 +300,8 @@ class AgentSwarmModule(Module):
         construction never refuses for identity reasons.
         ``max_platform_workers`` sizes the module-scoped chat bridge
         (``executor`` block)."""
-        from agentclaw.community.api.bot_config_manifest_apply_service import (
-            BotConfigManifestApplyServiceProtocol,
+        from agentclaw.community.api.apply_run_service import (
+            ApplyRunServiceProtocol,
         )
         from agentclaw.community.api.bot_service import BotServiceProtocol
         from agentclaw.community.core.bot_inventory.protocols import (
@@ -288,10 +321,11 @@ class AgentSwarmModule(Module):
             passport_plugin=injector.get(PassportPlugin),
             skill_set_factory=injector.get(SkillSetServiceFactoryProtocol),
             bot_repo=injector.get(BotRepository),
-            apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
+            apply_service=injector.get(ApplyRunServiceProtocol),
             space_context=injector.get(BusinessSpaceContextProtocol),
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,
+            chat_timeout_seconds=config.executor.bot_chat_timeout_seconds,
         )
 
     @provider
@@ -334,6 +368,11 @@ class AgentSwarmModule(Module):
         factory = DefaultSubagentFactory(
             llm, platform, attempt_repo=attempt_repo,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
+            subagent_setup_delay=config.orchestration.subagent_setup_delay_seconds,
         )
         store = FilesystemArtifactStore(config.artifact_store_root)
         # The pool's binding-journal SliceStore (D-L): the same repos, its
@@ -356,6 +395,10 @@ class AgentSwarmModule(Module):
             max_attempts=config.orchestration.agent_max_attempts,
             per_task_timeout=config.orchestration.per_attempt_timeout,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
             artifact_inline_threshold=config.artifact_inline_threshold,
             upstream_breaker=UpstreamBreaker(
                 failure_threshold=config.upstream_breaker.failure_threshold,

@@ -37,7 +37,7 @@ where
             parts
                 .extensions
                 .get::<IdentityPolicy>()
-                .copied()
+                .cloned()
                 .unwrap_or_default(),
         ))
     }

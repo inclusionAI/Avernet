@@ -7,6 +7,7 @@ use bcs_service_api::{
     ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
+    ControllableCandidateQuery, ControlledBotCandidate,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
@@ -89,6 +90,54 @@ impl BotControlPlaneCore {
 
 #[async_trait]
 impl BotControlPlaneCoreService for BotControlPlaneCore {
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane.get_caller_configuration(bot_id, env).await
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, bcs_service_api::port::repo::BotCallerConfiguration)>> {
+        self.control_plane.get_caller_configurations(bot_ids, env).await
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane.sync_caller_configuration(bot_id, env, snapshot).await
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane
+            .get_provider_caller_configuration(bot_id, env, provider_id)
+            .await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane
+            .sync_provider_caller_configuration(bot_id, env, provider_id, snapshot)
+            .await
+    }
+
     async fn get_record(
         &self,
         bot_id: &str,
@@ -179,6 +228,18 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
             .list_control_plane_by_creator(query)
             .await?;
         self.hydrate(records).await
+    }
+
+    /// Mine-union candidates (spec §8.0): a pure
+    /// forwarding read — persistent-only filtering,
+    /// role dedup and stable order happen in the ONE
+    /// store snapshot; this core adds no pagination and
+    /// no reachability.
+    async fn list_controllable(
+        &self,
+        query: ControllableCandidateQuery,
+    ) -> ServiceResult<Vec<ControlledBotCandidate>> {
+        self.control_plane.list_controllable(query).await
     }
 
     async fn list_by_task_modes(

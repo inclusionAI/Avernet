@@ -1,5 +1,7 @@
 //! Test fixtures for BCS.
 
+pub mod bot_authority;
+pub mod bot_authority_sqlite;
 pub mod contract;
 
 mod db_transactions;
@@ -14,6 +16,14 @@ mod logs;
 pub use logs::capture_request_logs;
 
 pub use auth_noop::{NoopAuthPlugin, NoopUserIdentityPort};
+pub use bot_authority::{
+    AUTHORITY_FIXTURE_APP_NAME, AuthorityEdgeFixture, FailingAuthorityHook,
+    LazyAuthorityFixture, LazySeedAuthorityHook,
+    NoopBotAuthorityPort, NoopBotAuthorityService, failing_authority_hook,
+    authority_edge_fixture, authority_hook_for, grant_manager_edge,
+    grant_owner_edge, grant_owner_edge_sync, lazy_authority_chain,
+    lazy_authority_chain_with_repo, revoke_authority_edge,
+};
 pub use auth_oauth_mock::{
     run_oauth_provider_offline_contract, run_oauth_provider_roundtrip_contract, MockFailure,
     MockOAuthProvider,
@@ -532,6 +542,7 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
         expected_affected_rows: 1,
     }]).await.expect("matched CAS commits");
     db_transactions::stop_on_no_rows_contract(plugin).await;
+    db_transactions::transaction_deadline_contract(plugin).await;
 }
 
 /// Contract suite every `SecretAccessPort` implementation must satisfy.

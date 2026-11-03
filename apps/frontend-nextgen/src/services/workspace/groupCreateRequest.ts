@@ -24,9 +24,9 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
         ? input.strategy === 'manager_worker'
           ? ('manager' as const)
           : ('driver' as const)
-        : input.strategy === 'chat'
-        ? ('consultant' as const)
-        : ('worker' as const),
+        : input.strategy === 'manager_worker'
+        ? ('worker' as const)
+        : ('consultant' as const),
     ...(participant.message_view_scope ? { message_view_scope: participant.message_view_scope } : {}),
   }));
   const base = {

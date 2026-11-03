@@ -73,3 +73,13 @@ preserved; ambiguous installations and conflicting listeners fail closed.
 Deinitialization uses the same composition-root callback boundary and config lock.
 It removes owned global HTTP Hooks using URL/credential identity, preserves
 unrelated settings and registration, and performs zero database operations.
+
+## Multi-Provider configuration
+
+Initialization/deinitialization supports legacy TOML and V2 `[[provider.bot]]`.
+It automatically locates the single QwenWork Bot across the selected document;
+zero or multiple candidates fail before configuration/Hook writes. Other
+Provider tables, credentials and state paths are retained. QwenWork keeps its
+single-Bot contract: no initializer Bot selector, multi-Bot resource claims,
+or machine-wide profile scanning is introduced. Engine cleanup retains its
+existing drop-triggered cancellation; turn execution is unchanged.

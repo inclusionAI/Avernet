@@ -174,7 +174,53 @@ modules:
     router_api: *pending_router_denominator
     plugin_api: *pending_plugin_denominator
     thresholds:
+      # Existing non-regression threshold is unchanged by sync simplification.
       core_min_percent: 53.88
+
+  manager_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/manager_sync/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      # Preserve the existing manager-sync gate. Singlebox uses direct BCS
+      # delivery with the same best-effort implementation as production;
+      # no Redis or alternate coordination mode is required. A passing
+      # coverage result alone does not prove the BCS roster is correct.
+      core_min_percent: 54.03
+
+  ownership_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_ownership_sync
+    core_paths:
+      - src/agentclaw/community/core/bot_management/ownership_sync/
+    router_api:
+      status: not_applicable
+      reason: Ownership sync owns no HTTP routes; handoff routes belong to the upstream business module.
+      items: []
+    plugin_api:
+      status: applicable
+      reason: Real direct BCS ownership delivery and its lifecycle release at stack shutdown.
+      items:
+        - key: BcsOwnershipPlugin.replace_ownership
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_ownership.py
+            symbol: HttpBcsOwnershipPlugin.replace_ownership
+        - key: BcsOwnershipPlugin.aclose
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_ownership.py
+            symbol: HttpBcsOwnershipPlugin.aclose
+    thresholds:
+      # Initial live Backend floor: floor(87 / 132 * 10000) / 100.
+      # Task 10 owner-enabled-live4 Backend report SHA-256:
+      # e8e970a9f3f8127598cf4d5f1e721c1119fafb91f13dc826e893fbc206c84931
+      # Includes repair and error paths; no unit/maintenance-driver coverage.
+      core_min_percent: 65.90
+      plugin_min_percent: 100.0
 
   cron:
     system: backend
@@ -310,6 +356,10 @@ modules:
       core_min_percent: 40.86
 
 pending_modules:
+  bot_knowledge:
+    acceptance_targets:
+      - tests/community/acceptance/bot_knowledge
+    reason: The AGENTS.md projection (agents_md_sync.py) added under core/bot_knowledge/ writes the enabled-knowledge section through the device-bound identity seam; the SQL-seeded selection story bots carry no device binding, so those statements stay outside the legacy acceptance path. Pending device-bound acceptance coverage; aligned with the resources pending pattern.
   skill_center:
     acceptance_targets:
       - tests/community/acceptance/skill_center

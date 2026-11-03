@@ -771,11 +771,16 @@ class LocalDeviceService(DeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
         ``device_uuid`` targets a specific instance for multi-instance BaaS bots;
         local devices are single-instance and ignore it.
+
+        ``caller_id`` is accepted to keep the provider signatures equal and
+        ignored: the local provider issues no a2a face, so the user-level
+        gray gate has nothing to withhold here.
 
         ``path`` is ignored here: this provider returns a bare routing target
         (and an HTTP base URL), never a finished WebSocket URL, so the caller
@@ -788,14 +793,13 @@ class LocalDeviceService(DeviceService):
         if record.status == DeviceBindingStatus.FAILED.value:
             raise InvalidDeviceStatusError("cannot get connection for failed device")
 
-        # Permission check: allow public bots
-        if record.entity_id != operator.staff_id:
-            is_public = False
-            try:
-                bot = self._bot_query.get_by_binding_id(binding_id)
-                is_public = bot is not None and bot.get("public") == "1"
-            except Exception as e:
-                logger.warning("[get_device_connection] Failed to check bot visibility: %s", e)
+        from .binding_identity import bot_for_binding
+
+        bot = bot_for_binding(self._bot_query, record)
+        current_owner_id = (bot or {}).get("owner_id") or record.entity_id
+        # A retained binding entity is a resource address, not Owner authority.
+        if current_owner_id != operator.staff_id:
+            is_public = bot is not None and bot.get("public") == "1"
             if not is_public:
                 raise InvalidDeviceStatusError(
                     "非公开Bot只能获取本人设备的连接信息"

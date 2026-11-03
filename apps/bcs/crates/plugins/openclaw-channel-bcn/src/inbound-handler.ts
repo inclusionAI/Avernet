@@ -2861,7 +2861,9 @@ export const BCS_ASSIGN_TASK_TOOL_SCHEMA = {
   description:
     'Dispatch a task to a sub bot in this task group. Returns immediately — ' +
     "the sub bot's response will arrive as a follow-up message. " +
-    'You can dispatch multiple sub bots in parallel.',
+    'You can dispatch multiple sub bots in parallel. Use task_ref for on-demand status/cancel. ' +
+    'For a blocked result, assign a follow-up to the same Worker with necessary context. ' +
+    'unknown/not_found never proves stopped or safe to resend.',
   parameters: {
     type: 'object' as const,
     properties: {
@@ -2873,6 +2875,7 @@ export const BCS_ASSIGN_TASK_TOOL_SCHEMA = {
         type: 'string' as const,
         description: 'The task description / instruction to send to the sub bot.',
       },
+      timeout_s: { type: 'integer' as const, minimum: 1, description: 'Optional runtime seconds; clamped to server policy.' },
       response_mode: {
         type: 'string' as const,
         enum: [ 'after-last-tool-call', 'full' ],
@@ -2889,7 +2892,7 @@ export async function handleAssignTask(
   sessionKey: string,
   params: Record<string, unknown>,
   log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void },
-): Promise<{ ok: boolean; task_id?: string; status?: string; error?: string }> {
+): Promise<{ ok: boolean; task_ref?: string; status?: string; error?: string }> {
   const client = sessionKeyToClient.get(sessionKey);
   if (!client?.connected) {
     return { ok: false, error: 'BCS WebSocket not connected' };
@@ -2922,6 +2925,7 @@ export async function handleAssignTask(
         target_bot: targetBot,
         message,
         ...(responseMode ? { response_mode: responseMode } : {}),
+        ...(params.timeout_s !== undefined ? { timeout_s: params.timeout_s } : {}),
       },
       30_000,
     );
@@ -2937,7 +2941,7 @@ export async function handleAssignTask(
 
     return {
       ok: true,
-      task_id: payload.task_id,
+      task_ref: `T-${payload.task_id.replace(/-/g, '').slice(0, 8).toLowerCase()}`,
       status: payload.status ?? 'dispatched',
     };
   } catch (err) {
@@ -2951,23 +2955,7 @@ export async function handleAssignTask(
 // bcs_send_task_message tool (Task Group)
 // ---------------------------------------------------------------------------
 
-export const BCS_TASK_MESSAGE_TOOL_SCHEMA = {
-  name: 'bcs_send_task_message',
-  description:
-    'Send a task-scoped message from this worker bot to the manager bot. ' +
-    'Use this for progress updates, blockers, intermediate findings, or supplemental information.',
-  parameters: {
-    type: 'object' as const,
-    properties: {
-      message: {
-        type: 'string' as const,
-        description: 'The task-scoped message to send to the manager bot.',
-      },
-    },
-    required: [ 'message' ],
-  },
-};
-
+// Compatibility helper for old callers; not registered or exposed as a tool.
 export async function handleTaskMessage(
   sessionKey: string,
   params: Record<string, unknown>,
@@ -3093,5 +3081,19 @@ export async function handleTaskComplete(
     const errMsg = err instanceof Error ? err.message : String(err);
     log?.error?.(`[bcs_task_complete] Error: ${errMsg}`);
     return { ok: false, error: errMsg };
+  }
+}
+
+
+export async function handleTaskControl(sessionKey: string, method: 'task.status' | 'task.cancel', params: Record<string, unknown>): Promise<unknown> {
+  const client = sessionKeyToClient.get(sessionKey);
+  try {
+    if (!client?.connected) throw new Error('BCS WebSocket not connected');
+    const response = await client.sendRequest(method, params, 25_000);
+    if (!response.ok) throw new Error(response.error?.message ?? 'Task control failed');
+    return response.payload;
+  } catch (error) {
+    if (method === 'task.cancel') return { ref: params.task_ref, status: 'unknown' };
+    throw error;
   }
 }

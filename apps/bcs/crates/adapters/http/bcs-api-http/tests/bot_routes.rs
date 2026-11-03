@@ -1241,6 +1241,7 @@ fn physical_bot() -> PhysicalBot {
         friend_check_in_strategy: FriendCheckInStrategy::Approval,
         created_at: 1,
         updated_at: 2,
+        access_relation: None,
     }
 }
 
@@ -1258,6 +1259,7 @@ fn human_bot() -> HumanBot {
         friend_check_in_strategy: FriendCheckInStrategy::Approval,
         created_at: 1,
         updated_at: 2,
+        access_relation: None,
     }
 }
 

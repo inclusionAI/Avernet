@@ -28,6 +28,8 @@ const baseGroup = {
 const mockState: { selectedGroupId: string | null } = { selectedGroupId: 'g1' };
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
+const mockCreateGroupShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/groups/test' } }));
+const mockCreateSessionShare = jest.fn(async () => ({ ok: true, data: { invitationUrl: '/invite/sessions/test' } }));
 
 const mockStore = {
   sessionTabsByGroup: {},
@@ -103,8 +105,12 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
 jest.mock('@/pages/Workspace/hooks/useGroupChat', () => ({
   useGroupChat: () => ({ chat: { messages: [] }, panelRef: { current: null } }),
 }));
-jest.mock('@/pages/Workspace/hooks/useGroupManagement', () => ({ useGroupManagement: () => ({}) }));
-jest.mock('@/pages/Workspace/hooks/useSessionManagement', () => ({ useSessionManagement: () => ({}) }));
+jest.mock('@/pages/Workspace/hooks/useGroupManagement', () => ({
+  useGroupManagement: () => ({ createShare: mockCreateGroupShare }),
+}));
+jest.mock('@/pages/Workspace/hooks/useSessionManagement', () => ({
+  useSessionManagement: () => ({ createShare: mockCreateSessionShare }),
+}));
 jest.mock('@/pages/Workspace/hooks/useGroupCreateDialog', () => ({
   useGroupCreateDialog: () => ({ open: false, openModal: jest.fn(), closeModal: jest.fn(), handleCreated: jest.fn() }),
 }));
@@ -136,7 +142,15 @@ jest.mock('@/pages/Workspace/components/Modals/CreateGroupModal', () => ({
   CreateGroupModal: () => null,
 }));
 jest.mock('@/pages/Workspace/components/WorkspaceManagePanels', () => ({
-  WorkspaceManagePanels: () => null,
+  WorkspaceManagePanels: ({ onShareGroup, onShareSession }: {
+    onShareGroup: (expiresInSeconds: number) => Promise<unknown>;
+    onShareSession: (expiresInSeconds: number) => Promise<unknown>;
+  }) => (
+    <>
+      <button type="button" onClick={() => void onShareGroup(604800)}>生成群分享链接</button>
+      <button type="button" onClick={() => void onShareSession(2592000)}>生成会话分享链接</button>
+    </>
+  ),
 }));
 jest.mock('@/pages/Workspace/components/GroupSidebar', () => {
   const actual = jest.requireActual<typeof import('@/pages/Workspace/components/GroupSidebar')>(
@@ -156,6 +170,17 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
     mockReloadSelectedGroup.mockClear();
+    mockCreateGroupShare.mockClear();
+    mockCreateSessionShare.mockClear();
+  });
+
+  it('管理面板分享有效期传入 createShare 的第二个参数，不作为目标 ID', () => {
+    renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '生成群分享链接' }));
+    expect(mockCreateGroupShare).toHaveBeenCalledWith(undefined, 604800);
+
+    fireEvent.click(screen.getByRole('button', { name: '生成会话分享链接' }));
+    expect(mockCreateSessionShare).toHaveBeenCalledWith(undefined, 2592000);
   });
 
   it('打开管理面板时为当前选中群拉取详情', () => {

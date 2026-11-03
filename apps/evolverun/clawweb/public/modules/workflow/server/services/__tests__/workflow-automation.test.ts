@@ -1,84 +1,90 @@
 // @vitest-environment node
-import { afterEach, expect, it, vi } from 'vitest';
-import { repairFixture } from './repair-batch-fixtures.js';
-import { repairReleaseMigrations } from '@avernet/clawweb-shared/server/schema-repair-release';
+import { expect, it, vi } from 'vitest';
+import { fixture } from './workflow-automation-fixtures.js';
 import { AppConfigRepository } from '../../repositories/app-config-repository.js';
 import { createAutoAnalysisSettings } from '../task-guard/auto-analysis-settings.js';
-import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { queueRepairCompletion } from '../repair-completion-notification.js';
 import { createWorkflowNotificationDrain } from '../workflow-notification-delivery.js';
 import { createRepairReleaseService } from '../repair-release-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import type { RepairPublicationPort } from '../../contracts/repair-release.js';
-import { createWorkflowAutomation, automationDue } from '../workflow-automation-service.js';
+import { automationDue } from '../workflow-automation-service.js';
 import { WorkflowAutomationRepository } from '../../repositories/workflow-automation-repository.js';
-import type { WorkflowAutomationPorts, WorkflowAutomationService, AnalysisObservation } from '../../contracts/workflow-automation.js';
-const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
-afterEach(async () => { for (const f of fixtures.splice(0)) await f.db.close(); vi.restoreAllMocks(); });
-async function fixture(autoDraft = false, count = 3, full = false) {
-  const f = await repairFixture(count); fixtures.push(f);
-  for (const m of repairReleaseMigrations) for (const sql of m.sql) await f.db.exec(f.db.dialect.renderDdl(sql));
-  f.raw.exec(`CREATE TABLE cm_app_config (id INTEGER PRIMARY KEY, config_key TEXT UNIQUE, config_yaml TEXT, version INTEGER, enabled INTEGER,
-    description TEXT, updated_by TEXT, gmt_create INTEGER, gmt_modified INTEGER);
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, status TEXT, started_at INTEGER,
-      completed_at INTEGER, gmt_create INTEGER, gmt_modified INTEGER);
-    CREATE TABLE node_executions (flow_id TEXT, node_id TEXT);
-    CREATE TABLE workflow_evolution_analysis_runs (id INTEGER PRIMARY KEY, analysis_id TEXT, workflow_id TEXT, flow_id TEXT,
-      scope_type TEXT, scope_json TEXT, status TEXT, result_json TEXT, requested_at_ms INTEGER, completed_at_ms INTEGER, state_version INTEGER DEFAULT 0);
-    CREATE TABLE workflow_healing_diagnoses (diagnosis_id TEXT, workflow_id TEXT, flow_id TEXT, failure_signature TEXT,
-      failure_mode TEXT, node_id TEXT, weak_node_id TEXT, error_text TEXT, gmt_modified INTEGER);
-    CREATE TABLE workflow_deploy_history (workflow_id TEXT, deploy_number INTEGER, is_active INTEGER);`);
-  let clock = Date.parse('2026-11-01T02:00:00Z');
-  let owner: string | null = 'owner'; let permitted = true;
-  const observations = new Map<string, AnalysisObservation>();
-  const settings = createAutoAnalysisSettings({ repo: new AppConfigRepository(f.db), environmentDefault: '' });
-  await settings.save('wf-1', { enabled: true, autoDraft, dailyTime: '09:00', expectedVersion: 0, ...(full ? { minimumImpact: 'medium' as const } : {}) }, 'owner');
-  const baseline = { ...await f.executionPort.resolveBaseline('wf-1'), activeDeployNumber: 7 };
-  f.executionPort.resolveBaseline = async () => baseline;
-  f.executionPort.diff = async input => ({ ...input, files: [{ path: 'workflows/wf-1.yaml', status: 'M', before: 'old', after: 'new', patch: '@@ -1 +1 @@\n-old\n+new', binary: false, truncated: false }], truncated: false });
-  const analyze = (flowId: string, diagnoses: unknown[] = []) => {
-    f.raw.prepare(`INSERT INTO workflow_evolution_analysis_runs (analysis_id, workflow_id, flow_id, scope_type, scope_json,
-      status, result_json, requested_at_ms, completed_at_ms) VALUES (?, 'wf-1', ?, 'single_run', ?, 'completed', ?, ?, ?)`)
-      .run(flowId, flowId, JSON.stringify({ flowIds: [flowId] }), JSON.stringify({ schemaVersion: 'workflow-evolution-analysis/v1',
-        analysisId: flowId, facts: [], inferences: [], unknowns: [], diagnoses }), clock - 1000, clock - 1000);
-    observations.set(flowId, { status: 'completed', analysisId: flowId, complete: true });
-  };
-  for (let i = 0; i < count; i++) {
-    const proposal = { schemaVersion: 'workflow-patch/v1', workflowId: 'wf-1', baseSpecDigest: baseline.specDigest,
-      summary: `修复节点 ${i}`, operations: [{ op: 'replace', nodeId: `n-${i}`, path: '/executor/timeoutSeconds', value: 60 }] };
-    f.items[i].proposal = proposal;
-    f.items[i].context = { signature: `timeout-${i}`, failureMode: 'timeout', nodeId: `n-${i}`, diagnoses: [{ flowIds: [`known-${i}`] }] };
-    if (full) {
-      f.items[i].context!.diagnoses = [{ flowId: `known-${i}`, severity: 'high', completedAtMs: clock - 1000 }];
-      f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(100 + i, `known-${i}`, 'wf-1', 'failed', (clock - 86400000) / 1000, (clock - 86300000) / 1000, (clock - 86400000) / 1000, (clock - 86300000) / 1000);
-    }
-    analyze(`known-${i}`, [{ diagnosisId: `diag-${i}`, flowIds: [`known-${i}`], nodeId: `n-${i}`, failureSignature: `timeout-${i}`,
-      failureMode: 'timeout', severity: 'high', reasoning: 'observed timeout', evidenceEventIds: [], proposal }]);
-  }
-  f.raw.prepare("INSERT INTO flow_runs VALUES (1, 'late-run', 'wf-1', 'failed', ?, ?, ?, ?)")
-    .run(Math.floor((clock - 30 * 86400000) / 1000), Math.floor((clock - 30 * 86400000) / 1000), Math.floor((clock - 5000) / 1000), Math.floor((clock - 5000) / 1000));
-  const ports: WorkflowAutomationPorts = { owner: async () => owner, canEdit: async () => permitted,
-    baseline: async () => baseline,
-    analysis: { lookup: vi.fn(async id => observations.get(id) ?? { status: 'absent' as const }),
-      start: vi.fn(async ({ flowId }) => { observations.set(flowId, { status: 'running' }); return { status: 'running' as const }; }) },
-    notify: vi.fn(async () => ({ status: 'sent' as const })) };
-  let service: WorkflowAutomationService;
-  let disableBeforeDispatch = false;
-  const workbench = createRepairWorkbenchService(f.db, f.sourcePort, { ...f.executionPort, async dispatch(request) {
-    if (disableBeforeDispatch) await settings.set('wf-1', false, 'owner');
-    if (request.input.automation) await service.authorizeDraft({ workflowId: 'wf-1', actorId: request.actorId,
-      taskId: request.input.taskId, origin: request.input.automation, itemIds: request.input.items.map(item => item.itemId) });
-    return f.executionPort.dispatch(request);
-  } }, undefined, queueRepairCompletion);
-  const create = (environment = 'prod', hostPorts = ports) => createWorkflowAutomation({ db: f.db, settings, ports: hostPorts, workbench, environment, now: () => clock });
-  service = create();
-  return { ...f, settings, ports, baseline, observations, analyze, workbench, get service() { return service; },
-    host: create, restart(environment = 'prod') { service = create(environment); return service; }, advance(ms = 60000) { clock += ms; }, setOwner(value: string | null) { owner = value; },
-    setPermission(value: boolean) { permitted = value; }, disableAtDispatch() { disableBeforeDispatch = true; } };
+async function planWithoutDispatch(f: Awaited<ReturnType<typeof fixture>>) {
+  // Simulate a restart between persisted planning and provider dispatch.
+  const original = WorkflowAutomationRepository.prototype.ready;
+  const ready = vi.spyOn(WorkflowAutomationRepository.prototype, 'ready').mockImplementation(function (...args) {
+    return args[1] === 'auto_draft' ? Promise.resolve([]) : original.apply(this, args);
+  });
+  try { await f.service.tick(); } finally { ready.mockRestore(); }
 }
 it('uses Shanghai daily boundaries and merges missed days', () => {
   expect(automationDue(Date.parse('2026-11-01T00:59:00Z'), '09:00').key).toBe('2026-10-31');
   expect(automationDue(Date.parse('2026-11-01T01:00:00Z'), '09:00').key).toBe('2026-11-01');
+});
+it.each([false, true])('plans automatic scope without fetching Git, including an empty scope (full=%s)', async full => {
+  const f = await fixture(true, 0, full);
+  const baseline = vi.spyOn(f.ports, 'baseline');
+  await f.service.tick(); f.advance(); await f.service.tick();
+  expect(baseline).not.toHaveBeenCalled();
+  expect(f.calls).toHaveLength(0);
+});
+it.each([false, true])('dispatches a planned draft without rereading its Git baseline (batched=%s)', async full => {
+  const f = await fixture(true, 1, full);
+  await planWithoutDispatch(f);
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  expect(job).toBeTruthy();
+  expect(job.taskId).toBeUndefined();
+  f.ports.baseline = async () => { throw new Error('Git unavailable after planning'); };
+  f.advance(); await f.service.tick();
+  const record = await new WorkflowAutomationRepository(f.db).get(job.id);
+  expect(record).toMatchObject({ status: 'waiting', reason: null });
+  expect(f.calls).toHaveLength(1);
+  const task = await f.workbench.task(record!.data.realTaskId);
+  expect(task.latestAttempt.input.baseline).toEqual(f.baseline);
+});
+it.each([false, true])('parks a disabled planned draft without journal churn (analysis enabled=%s)', async analysisEnabled => {
+  const f = await fixture(true, 1);
+  await planWithoutDispatch(f);
+  const job = (await f.service.status('wf-1')).jobs.find(row => row.kind === 'auto_draft')!;
+  const before = await new WorkflowAutomationRepository(f.db).get(job.id);
+  const policy = await f.settings.get('wf-1');
+  await f.settings.save('wf-1', { enabled: analysisEnabled, autoDraft: false, dailyTime: policy.dailyTime, expectedVersion: policy.version }, 'owner');
+  f.ports.baseline = async () => { throw new Error('Git unavailable while disabled'); };
+  f.advance(); await f.service.tick();
+  expect(await new WorkflowAutomationRepository(f.db).get(job.id)).toEqual(before);
+  expect(f.calls).toHaveLength(0);
+});
+it('parks disabled, never-dispatched analysis without claims, source reads or journal churn, and resumes on enable', async () => {
+  const f = await fixture(false, 0);
+  const repo = new WorkflowAutomationRepository(f.db);
+  const job = await repo.ensure('wf-1', 'auto_run', 'parked', { flowId: 'parked' }, 0);
+  await f.settings.set('wf-1', false, 'owner');
+  await f.service.tick(); f.advance(); await f.service.tick();
+  expect(f.ports.analysis.lookup).not.toHaveBeenCalled();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(await repo.get(job.id)).toEqual(job);
+  expect((await repo.recent('wf-1')).filter(row => row.kind === 'auto_cycle')).toEqual([]);
+  await f.settings.set('wf-1', true, 'owner');
+  f.advance(); await f.service.tick();
+  expect(f.ports.analysis.lookup).toHaveBeenCalledWith('parked', 'wf-1');
+  expect(await repo.get(job.id)).toMatchObject({ status: 'waiting', attempts: 1 });
+});
+it('still settles previously dispatched analysis while disabled, without replaying unknown requests', async () => {
+  const f = await fixture(false, 0);
+  const repo = new WorkflowAutomationRepository(f.db);
+  for (let i = 0; i < 4; i++) await repo.ensure('wf-1', 'auto_run', `parked-${i}`, { flowId: `parked-${i}`, analysisId: null }, -100);
+  const pending = await repo.ensure('wf-1', 'auto_run', 'sent', { flowId: 'sent' }, 0);
+  const claimed = (await repo.claim(pending.id, 0))!;
+  await repo.patch(claimed, { status: 'waiting', attempts: 1 }, 0, true);
+  await f.settings.set('wf-1', false, 'owner');
+  await f.service.tick();
+  expect(await repo.get(pending.id)).toMatchObject({ status: 'uncertain', attempts: 1 });
+  f.observations.set('sent', { status: 'completed', analysisId: 'result' });
+  f.advance(); await f.service.tick();
+  expect(await repo.get(pending.id)).toMatchObject({ status: 'done', attempts: 1 });
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  expect(vi.mocked(f.ports.analysis.lookup).mock.calls.map(([id]) => id)).toEqual(['sent', 'sent']);
 });
 
 it('logs worker entry and its first empty environment-scoped batch once, not every poll', async () => {
@@ -89,6 +95,8 @@ it('logs worker entry and its first empty environment-scoped batch once, not eve
   const lines = info.mock.calls.map(([line]) => String(line));
   expect(lines.filter(line => line.includes('"event":"worker_started"'))).toHaveLength(1);
   expect(lines.filter(line => line.includes('"event":"batch_ready"'))).toHaveLength(1);
+  expect(lines.filter(line => line.includes('"job":"workflow_notification_drain"') && line.includes('"event":"start"'))).toHaveLength(1);
+  expect(lines.filter(line => line.includes('"job":"workflow_notification_drain"') && line.includes('"event":"end"'))).toHaveLength(1);
   expect(lines).toContainEqual(expect.stringContaining('"environment":"pre"'));
   expect(lines).toContainEqual(expect.stringContaining('"eligibleCount":0'));
 });
@@ -201,6 +209,7 @@ it('leaves a pre workflow unclaimed by prod and dispatches once across two pre h
   expect(f.ports.analysis.start).not.toHaveBeenCalled();
   expect(await f.db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind='auto_cycle'")).toEqual([]);
   const pre = f.restart('pre'), pre2 = f.host('pre');
+  await Promise.all([pre.onRunTerminal({ flowId: 'late-run', status: 'failed' }), pre2.onRunTerminal({ flowId: 'late-run', status: 'failed' })]);
   await Promise.all([pre.tick(), pre2.tick()]);
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
   f.advance(); await Promise.all([pre.tick(), pre2.tick()]);
@@ -375,9 +384,11 @@ it('keeps generation in drafting if its completion notification cannot be persis
   expect((await f.workbench.task(task.taskId)).latestAttempt.phase).toBe('drafting');
   expect(f.ports.notify).not.toHaveBeenCalled();
 });
-it('claims one daily scan across hosts, analyzes late arrivals once and preserves frozen draft scope', async () => {
+it('claims one daily draft plan across hosts and keeps failed-run analysis independent with frozen draft scope', async () => {
   const f = await fixture(true);
   await Promise.all([f.service.tick(), f.restart().tick()]);
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(1);
   f.advance(); await f.service.tick();
   expect(f.calls).toHaveLength(1);
@@ -392,7 +403,9 @@ it('claims one daily scan across hosts, analyzes late arrivals once and preserve
   expect((await f.workbench.task(draftId)).latestAttempt.input).toEqual(original.latestAttempt.input);
 });
 it('disabling before final dispatch prevents AIS and still reconciles an already-started analysis', async () => {
-  const f = await fixture(true); f.disableAtDispatch();
+  const f = await fixture(true);
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
+  f.disableAtDispatch();
   await f.service.tick(); f.advance(); await f.service.tick();
   expect(f.calls).toHaveLength(0);
   expect((await f.settings.get('wf-1')).enabled).toBe(false);
@@ -416,6 +429,7 @@ it('notification rejection retries only notification and re-resolves Owner permi
 it('unknown notification results and expired analysis dispatches are not blindly replayed', async () => {
   const f = await fixture();
   vi.mocked(f.ports.notify).mockResolvedValue({ status: 'uncertain' });
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   await f.service.tick(); const sent = vi.mocked(f.ports.notify).mock.calls.length;
   f.advance(300000); await f.restart().tick();
   expect(f.ports.notify).toHaveBeenCalledTimes(sent);
@@ -467,8 +481,9 @@ it('excludes only actually deployed changed items in the next daily round and re
     targets: async () => [{ id: 'wf-target', scope: 'workflow', botId: '', ownerId: '', environment: 'pre', label: 'workflow' }],
     activeBaseline: async () => f.baseline,
     dispatch: async deployment => {
-      f.baseline.activeDeployNumber = 8; f.baseline.packCommit = deployment.candidateCommit; f.baseline.specDigest = 'c'.repeat(64);
-      await f.db.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 8, 1)");
+      f.baseline.activeDeployNumber = 8; f.baseline.packCommit = deployment.candidateCommit; f.baseline.specDigest = digestRepairJson({ release: 8 });
+      await f.db.exec('UPDATE workflow_deploy_history SET is_active = 0');
+      await f.db.exec("INSERT INTO workflow_deploy_history VALUES ('wf-1', 8, 1, 8, ?)", [JSON.stringify({ release: 8 })]);
       return { status: 'succeeded', receipt: { requestId: deployment.requestId, candidateCommit: deployment.candidateCommit,
         packDigest: deployment.packDigest, deployNumber: 8, releaseVersion: 8, tagName: 'deploy/wf-1/#8', targetId: 'wf-target' } };
     }, reconcile: async () => ({ status: 'uncertain' }),
@@ -476,14 +491,16 @@ it('excludes only actually deployed changed items in the next daily round and re
   const release = createRepairReleaseService({ db: f.db, workbench: f.workbench, publisher });
   await release.publish('owner', task.taskId, { revision: 1, expectedStateVersion: task.latestAttempt.stateVersion,
     requestId: 'human-publication', targetId: 'wf-target', acknowledgeUncoveredChecks: true });
-  const inbox = await f.workbench.candidates('wf-1');
+  const inbox = await f.workbench.candidates('wf-1', { versionScope: 'all' });
   expect(inbox.items.find(item => item.itemId === task.latestAttempt.input.items[0].itemId)?.state).toBe('awaiting_verification');
   expect(inbox.items.find(item => item.itemId === task.latestAttempt.input.items[1].itemId)?.state).toBe('pending');
   expect(inbox.counts.pending).toBe(2);
   // Reassess the independently unselected scope against the actual new baseline.
   const unselected = f.items.find(item => !task.latestAttempt.input.items.some(old => old.itemId === item.itemId))!;
   unselected.proposal = { ...unselected.proposal!, baseSpecDigest: f.baseline.specDigest };
-  f.analyze('new-baseline-evidence');
+  unselected.context!.sourceSnapshot = { status: 'resolved', snapshot: { kind: 'deployment', workflowId: 'wf-1', workflowVersion: 8, deployNumber: 8, configDigest: f.baseline.specDigest } };
+  f.analyze('new-baseline-evidence', [{ diagnosisId: 'new-baseline', flowIds: ['new-baseline-evidence'], nodeId: 'new-node',
+    failureSignature: unselected.context!.signature, failureMode: 'timeout', severity: 'high', reasoning: 'new baseline evidence', evidenceEventIds: [], proposal: unselected.proposal }]);
   f.advance(86400000); await f.service.tick(); f.advance(); await f.service.tick();
   const jobs = (await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_draft' && job.taskId !== task.taskId);
   expect(jobs).toHaveLength(1);
@@ -504,6 +521,7 @@ it('does not auto-select mutually exclusive proposals and lets manual scopes coe
 it('preserves historical pending items and explicit analysis failures without claiming full coverage', async () => {
   const f = await fixture();
   vi.mocked(f.ports.analysis.start).mockResolvedValue({ status: 'failed' });
+  await f.service.onRunTerminal({ flowId: 'late-run', status: 'failed' });
   await f.service.tick();
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
   expect(f.ports.analysis.start).toHaveBeenCalledTimes(3);
@@ -576,13 +594,15 @@ it('recovers a confirmed failed automatic batch using a durable request key afte
   f.advance(); await f.restart().tick();
   expect(f.calls).toHaveLength(2);
 });
-it('does not lose today runs when the incremental watermark advances before tomorrow scope', async () => {
+it('does not scan today or older runs on the daily timer but still analyzes explicit failure events', async () => {
   const f = await fixture(false, 1, true);
   const started = Date.parse('2026-11-01T00:00:00Z') / 1000;
-  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
+  f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'today-run', 'wf-1', 'failed', started, started + 60, started, started + 60);
   await f.service.tick();
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(false);
   f.advance(86400000); await f.restart().tick(); f.advance(); await f.service.tick();
+  expect(f.ports.analysis.start).not.toHaveBeenCalled();
+  await f.service.onRunTerminal({ flowId: 'today-run', status: 'failed' });
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'today-run')).toBe(true);
 });
 it.each([true, false])('notifies a final no_change round only when prior batches have publishable changes: %s', async priorChanged => {
@@ -645,7 +665,7 @@ it('excludes trials from terminal analysis and daily jobs', async () => {
   expect((await f.service.status('wf-1')).jobs.filter(job => job.kind === 'auto_run')).toEqual([]);
 });
 
-it('stops an automatic round before appending another batch after a deployment change',async()=>{
+it('advances an existing round without rereading Git and retains its frozen baseline',async()=>{
  const f=await fixture(true,101,true);
  for(let i=0;i<10;i++){await f.service.tick();f.advance();if(f.calls.length)break;}
  const job=(await f.service.status('wf-1')).jobs.find(j=>j.kind==='auto_draft'&&j.taskId)!;
@@ -654,10 +674,12 @@ it('stops an automatic round before appending another batch after a deployment c
  const draft={candidateCommit:'d'.repeat(40),parentCandidateCommit:f.baseline.packCommit,packDigest:'e'.repeat(40),itemResults:task.latestAttempt.input.items.map(item=>({itemId:item.itemId,status:'changed',reason:'fixture'}))};
  await f.workbench.report({workflowId:'wf-1',taskId:task.taskId,revision:1,expectedStateVersion:0,status:'succeeded',draft,checks:{schemaVersion:'workflow-repair-checks/v1',candidateCommit:draft.candidateCommit,packDigest:draft.packDigest,candidateDigest:digestRepairJson(draft),static:{status:'passed'},mock:{status:'not_covered'},coverage:task.latestAttempt.input.items.map(item=>({itemId:item.itemId}))}});
  f.baseline.activeDeployNumber=8;
+ f.ports.baseline=async()=>{throw new Error('Git unavailable after generation');};
  f.advance();await f.restart().tick();
  const record=await new WorkflowAutomationRepository(f.db).get(job.id);
- expect(record).toMatchObject({status:'blocked',reason:'BASELINE_REASSESSMENT_REQUIRED'});
- expect(record!.data.request.automation.batchIndex).toBe(0);
+ expect(record).toMatchObject({status:'pending',reason:null});
+ expect(record!.data.request.automation.batchIndex).toBe(1);
+ expect(record!.data.baseline.activeDeployNumber).toBe(7);
  expect(f.calls).toHaveLength(1);
 });
 
@@ -674,7 +696,7 @@ it('does not let an old reviewed draft permanently block a different deployment,
 });
 
 // A completed generation journal is not a completed human review.
-it.each([false, true])('pauses new automatic drafts across days while analysis continues, then resumes after cancellation (full=%s)', async full => {
+it.each([false, true])('pauses new drafts while analysis continues and resumes at the next daily plan after cancellation (full=%s)', async full => {
   const f = await fixture(true, 6, full);
   await f.service.tick();
   const task = await readyDraft(f);
@@ -685,7 +707,8 @@ it.each([false, true])('pauses new automatic drafts across days while analysis c
   f.analyze('additional-evidence');
   f.advance(86400000);
   const now = Date.parse('2026-11-02T02:02:00Z') / 1000;
-  f.raw.prepare('INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
+  f.raw.prepare('INSERT INTO flow_runs (id,flow_id,workflow_id,status,started_at,completed_at,gmt_create,gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(999, 'new-unanalysed-run', 'wf-1', 'failed', now - 86400, now - 86300, now - 10, now - 10);
+  await f.service.onRunTerminal({ flowId: 'new-unanalysed-run', status: 'failed' });
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
   expect(f.calls).toHaveLength(1);
   expect(vi.mocked(f.ports.analysis.start).mock.calls.some(([value]) => value.flowId === 'new-unanalysed-run')).toBe(true);
@@ -694,6 +717,8 @@ it.each([false, true])('pauses new automatic drafts across days while analysis c
   expect(pending.tasks).toHaveLength(1);
   await f.workbench.cancel('owner', task.taskId, task.latestAttempt.revision);
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
+  expect(f.calls).toHaveLength(1);
+  f.advance(86400000); await f.restart().tick();
   expect(f.calls).toHaveLength(2);
   expect((await f.workbench.candidates('wf-1')).tasks).toHaveLength(2);
 });

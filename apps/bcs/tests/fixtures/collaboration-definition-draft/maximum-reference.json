@@ -3,9 +3,8 @@
   "reference": {
     "schemaVersion": 2,
     "draftId": "e5940694-e813-4fb7-a48b-b8b70d05ee12",
-    "revision": 9007199254740991,
-    "readToken": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    "revision": 9007199254740991
   },
-  "message": "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{\"schemaVersion\":2,\"draftId\":\"e5940694-e813-4fb7-a48b-b8b70d05ee12\",\"revision\":9007199254740991,\"readToken\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}' />",
-  "size_bytes": 234
+  "message": "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{\"schemaVersion\":2,\"draftId\":\"e5940694-e813-4fb7-a48b-b8b70d05ee12\",\"revision\":9007199254740991}' />",
+  "size_bytes": 176
 }

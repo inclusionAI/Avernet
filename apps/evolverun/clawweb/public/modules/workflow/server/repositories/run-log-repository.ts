@@ -5,6 +5,7 @@
  * keyed by flow_id for run archive generation.
  */
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
+import { truncateRunLogMessage } from "../utils/run-log-message.js";
 
 export type RunLogInsert = {
   flow_id: string;
@@ -34,7 +35,7 @@ export class RunLogRepository {
       const placeholders = entries.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
       const params: unknown[] = [];
       for (const e of entries) {
-        params.push(e.flow_id, e.node_id, e.level, e.source, e.message, e.timestamp, e.seq);
+        params.push(e.flow_id, e.node_id, e.level, e.source, truncateRunLogMessage(e.message), e.timestamp, e.seq);
       }
       const sql = `INSERT INTO run_logs (flow_id, node_id, level, source, message, timestamp, seq) VALUES ${placeholders}`;
       const result = await this.db.exec(sql, params);

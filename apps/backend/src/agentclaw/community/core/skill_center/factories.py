@@ -398,7 +398,7 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 bot_repo=self._bot_repo,
             )
             pool_paths = self.resolve_pool_paths(
-                str(lookup_owner_id),
+                str(entity_id),
                 str(bot_id),
                 runtime_engine or "",
             )
@@ -712,12 +712,18 @@ class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
             _get_bot_paths,
         )
 
+        device_owner = user_id or entity_id
+        resource_entity = entity_id or user_id
+        user_id = resource_entity
+        entity_id = resource_entity
         is_desktop = False
         if user_id or entity_id:
             try:
                 owner_id = user_id or entity_id
-                bot = self._bot_repo.get_by_id_and_owner(bot_id or "default", owner_id)
+                bot = self._bot_repo.get_by_id_and_entity(bot_id or "default", owner_id)
                 is_desktop = bool(bot and bot.get("bot_type") == "desktop")
+                if bot and bot.get("owner_id"):
+                    device_owner = bot["owner_id"]
             except Exception as exc:
                 logger.warning(
                     "[SkillSetServiceFactory] bot_type lookup failed for "
@@ -781,7 +787,7 @@ class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
             # needs this flag to retain Pool-specific activation and cleanup
             # semantics without resolving the same layout a second time.
             runtime_uses_pool_paths=local_skill_path_adapter is not None,
-            device_owner_id=effective_owner,
+            device_owner_id=device_owner,
         )
 
         return SkillSetService(
@@ -797,6 +803,7 @@ class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
             user_id=user_id,
             entity_id=entity_id,
             bot_id=bot_id,
+            device_owner_id=device_owner,
             engine_type=engine_type,
             runtime_engine_type=effective_runtime_engine,
             entity_type=entity_type,

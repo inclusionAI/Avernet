@@ -15,6 +15,9 @@
   authorization and race rejection. Paths encode returned IDs as opaque segments.
 - Validation text preserves server warnings and authoring paths; a successful
   v2 preview does not enable production execution.
+- Direct group creation via `create-group`, with explicit participants and a driver
+  or manager. Discover collaborators first when participants are unknown.
+- Group proposals and confirmation links are not exposed by this tool.
 - A tool boundary separate from server runtime assembly.
 
 ## Consumes

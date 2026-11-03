@@ -55,28 +55,14 @@ Legacy/Pool layouts, explicit Local removal, dangling and external entries,
 empty snapshots, failed preparation, validation and unlink failures.
 
 
-Steady-state filesystem delivery serializes across Backends using the shared
-Cache strict lease scoped to tenant/env/owner/Bot, then rechecks the current Bot
-identity and Reader snapshot. Superseded plans return PENDING without writes.
-Runtime identity includes the resolved filesystem engine, so Claude Code and
-AICoding template changes cannot deliver a plan against the previous roots.
-Lock contention/outages and incomplete reads fail closed. The delivery budget
-is bounded inside the lease; a canceled/timed-out unknown request retains the
-lease until expiry. Multi-process deployments require the shared Redis/ZCache
-implementation; the local in-memory test plugin is process-local only.
-Connection-info build errors (including confirmed offline and transient provider
-failures) release the lease: no mapping request was sent, so recovery can project
-immediately. Unknown mapping transport outcomes retain the isolation window.
-Existing Desktop recovery tasks classify guard contention, stale snapshots,
-lock/read failures and delivery timeout as transient failures with backoff;
-they do not complete solely because a guard deferred the attempt. The existing
-task deadline and device-reconnect semantics remain unchanged.
+Steady-state filesystem delivery sends the resolved plan directly to Engine without
+acquiring a Backend cache lease or re-reading the plan in a delivery guard.
+Engine retains its existing per-runtime serialization. This does not order
+concurrent snapshots by desired-state revision: a delayed old request may apply
+after a newer request. No fencing token or new recovery mechanism is introduced.
+Existing Desktop recovery continues to retry unresolved runtime delivery.
 Operator-managed PostgreSQL/SQLite use the matching dialect SQL beside the
 MySQL migration. Rollout order: additive schema, Engine image, then Backend.
-
-The lease is bounded isolation, not an Engine fencing token. Normal delayed
-snapshots are rejected; an arbitrarily suspended remote worker outliving the
-lease is not proven terminated. Engine runtime serialization still applies.
 
 
 ## Simulator verification

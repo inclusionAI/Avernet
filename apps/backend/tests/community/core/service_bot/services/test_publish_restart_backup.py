@@ -63,7 +63,7 @@ async def test_real_coding_backup_transport_failure_still_issues_published_resta
     record = _record(PublishStatus.SUCCESS.value)
     record.ext['binding'] = {'online': 42}
     svc = _restart_flow(ledger, baas, build, record)
-    svc._bot_service.get_bot.return_value = {
+    svc._bot_service.get_bot_by_address.return_value = {
         'bot_id': 'b', 'owner_id': 'u1', 'entity_id': 'u1', 'active_engine': 'aicoding',
     }
 
@@ -72,5 +72,5 @@ async def test_real_coding_backup_transport_failure_still_issues_published_resta
 
     build.upgrade_async = AsyncMock(side_effect=upgrade)
     await svc.execute_restart(1, 'online', 'operator')
-    baas.post_bots_api.assert_called_once()
+    assert baas.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
     build.upgrade_async.assert_awaited_once()

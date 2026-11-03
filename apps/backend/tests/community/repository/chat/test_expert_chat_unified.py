@@ -58,6 +58,8 @@ def _create_schema(engine):
             ],
             UniqueConstraint(*unique_columns, name=unique_name),
         )
+    from agentclaw.community.plugin_api.models import BotModel
+    BotModel.__table__.to_metadata(md)
     md.create_all(engine)
 
 
@@ -189,6 +191,7 @@ def test_owned_session_upsert_reactivates_soft_deleted_row(repo):
 
 def test_owned_session_uses_mysql_atomic_upsert_contract():
     db_session = MagicMock()
+    db_session.query.return_value.filter.return_value.limit.return_value.all.return_value = []
     db_session.get_bind.return_value.dialect = mysql.dialect()
     db_session.execute.return_value.lastrowid = 42
     stored_row = MagicMock()

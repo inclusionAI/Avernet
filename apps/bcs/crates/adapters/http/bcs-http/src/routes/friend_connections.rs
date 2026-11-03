@@ -23,12 +23,12 @@ use bcs_protocol::http::friends::{
     RevokeFriendResponse, StatusResponse, envelope,
 };
 use bcs_service_api::application::{ConnectStatus, RequestDirection};
-use bcs_service_api::RequestAuthHeaders;
+use bcs_service_api::{RequestAuthHeaders, ServiceError};
 
 use crate::error::HttpAdapterError;
 use crate::{headers::extract_bearer_token, state::HttpAppState};
 
-use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
+use super::{caller::caller_actor_id_from_headers};
 
 
 fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
@@ -234,9 +234,14 @@ pub async fn list_friends_by_actor(
 ///    This closes the unauthenticated-self-declaration hole that the old
 ///    `/friends/*` Strategy-A fallback allowed.
 ///
-/// Ownership rule: a human bearer may only act as a bot they own
-/// (`bot_query.list_bots_by_creator(staff_no)`), and a bot bearer may only act
-/// as itself. Any other `from_actor` is rejected with 403.
+/// Control rule (bot-authority plan Task 6.5, spec
+/// §8 好友代操作): a human bearer may only act as a
+/// BOT it CURRENTLY CONTROLS through the live
+/// authority hook; the historical
+/// `list_bots_by_creator` probe is gone (no owner
+/// suffix, no `created_by: None` auto-claim). A
+/// failing authority read is an internal error,
+/// never a deny-as-403.
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -267,14 +272,21 @@ async fn resolve_caller(
 
     if matches!(actor_kind, Some("bot")) && bearer.starts_with("human_") {
         let staff_no = bearer.strip_prefix("human_").unwrap_or(&bearer);
-        let owned_bots = state
+        match state
             .services
-            .bot_query
-            .list_bots_by_creator(staff_no)
+            .bot_authority_hook
+            .can_manage(staff_no, &canonical)
             .await
-            .map_err(bot_use_case_error_to_http)?;
-        if owned_bots.iter().any(|bot| bot.bot_uuid == canonical) {
-            return Ok(canonical);
+        {
+            Ok(true) => return Ok(canonical),
+            Ok(false) => {}
+            Err(error) => {
+                return Err(HttpAdapterError::Service(
+                    ServiceError::InternalError(format!(
+                        "bot authority lookup failed: {error}"
+                    )),
+                ));
+            }
         }
     }
 

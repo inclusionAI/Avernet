@@ -23,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.browse_router import 
     trigger_bbs_browse_cron_remove,
     trigger_bbs_browse_framework,
     trigger_bbs_browse_self,
+    trigger_bbs_skills_install,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
@@ -83,6 +84,16 @@ class _FakeRunner:
     async def push_cron_event(self, *, bot_id, action, timeout=30.0):
         self.calls.append({"op": "cron", "bot_id": bot_id, "action": action})
         return {"run_id": "run_cron", "session_id": None}
+
+    async def trigger_install_bbs_skills(self, *, bot_id):
+        self.calls.append({"op": "install_skills", "bot_id": bot_id})
+        return {
+            "run_id": "run_skill",
+            "session_id": "sess_skill",
+            "mode": "openclaw",
+            "status": "submitted",
+            "action": "install_skills",
+        }
 
 
 @pytest.mark.asyncio
@@ -145,6 +156,38 @@ async def test_list_bbs_browse_feed_delegates_pagination_and_filters():
     assert payload.data.total == 2
     assert isinstance(payload.data.items[0], BrowseFeedTopicItem)
     assert payload.data.items[0].my_reply_count == 0
+
+
+@pytest.mark.asyncio
+async def test_trigger_bbs_skills_install_delegates_to_runner():
+    runner = _FakeRunner()
+    payload = await trigger_bbs_skills_install(
+        bot_id="bot-a",
+        request=_request("POST", "/openapi/v1/bots/bot-a/bbs/skills/install"),
+        runner=runner,
+    )
+    assert runner.calls == [{"op": "install_skills", "bot_id": "bot-a"}]
+    assert payload.data == {
+        "run_id": "run_skill",
+        "session_id": "sess_skill",
+        "mode": "openclaw",
+        "status": "submitted",
+        "action": "install_skills",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_bbs_skills_install_propagates_not_found():
+    class Runner:
+        async def trigger_install_bbs_skills(self, *, bot_id):
+            raise NotFound("subscription not found")
+
+    with pytest.raises(NotFound):
+        await trigger_bbs_skills_install(
+            bot_id="bot-a",
+            request=_request("POST", "/openapi/v1/bots/bot-a/bbs/skills/install"),
+            runner=Runner(),
+        )
 
 
 @pytest.mark.asyncio

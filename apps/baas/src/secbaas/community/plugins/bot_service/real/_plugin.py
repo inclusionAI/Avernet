@@ -73,7 +73,7 @@ _BINDING_RETRY_DELAY_SECONDS = 0.1
 _CALLER_POLL_INITIAL_DELAY_SECONDS = 1.0
 _CALLER_POLL_BACKOFF_FACTOR = 1.5
 _CALLER_POLL_MAX_DELAY_SECONDS = 5.0
-_CALLER_POLL_DEADLINE_SECONDS = 180.0
+_CALLER_POLL_DEADLINE_SECONDS = 1800.0
 
 
 def resolve_claude_code_engine(active_engine: str, template_type: str | None) -> str:
@@ -485,7 +485,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         runs exactly once and is never retried on failure:
 
         - ``iam-token``: GET /api/v1/token/iam with the IAM-token cookie;
-        - ``agentpaas``: append an outbound ``x-caller-token`` rule
+        - ``agentpass``: append an outbound ``x-caller-token`` rule
           to the ready sandbox through the BaaS PaasServiceFacade. The operator
           must provide the immutable domain allowlist in deployment config;
           request data cannot enlarge it.
@@ -524,20 +524,20 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a non-empty execution credential",
             )
-        if not (credential.is_iam_token or credential.is_agentpaas):
+        if not (credential.is_iam_token or credential.is_agentpass):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 f"caller-connection received an unsupported credential type: {credential.type}",
             )
-        if credential.is_agentpaas and self._paas_service_facade is None:
+        if credential.is_agentpass and self._paas_service_facade is None:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                "AgentPaaS caller credential requires a PaasServiceFacade",
+                "AgentPass caller credential requires a PaasServiceFacade",
             )
-        if credential.is_agentpaas and not self._caller_token_domains:
+        if credential.is_agentpass and not self._caller_token_domains:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                "AgentPaaS caller credential requires configured caller domains",
+                "AgentPass caller credential requires configured caller domains",
             )
 
         url = f"{self._base_url.rstrip('/')}/api/v1/expert-chats/app-caller-connection"
@@ -612,12 +612,9 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                             cookie=f"IAM_TOKEN={credential.token}",
                         )
                     else:
-                        paas_device_id = self._extract_caller_paas_device_id(
-                            caller_data, request_id
-                        )
-                        await self._append_agentpaas_caller_token(
+                        await self._append_agentpass_caller_token(
                             credential=credential,
-                            paas_device_id=paas_device_id,
+                            paas_device_id=sandbox_id,
                         )
                     logger.info(
                         "[bot-service] caller-connection ready: request_id=%s "
@@ -722,22 +719,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         return result.data
 
-    @staticmethod
-    def _extract_caller_paas_device_id(
-        data: CallerConnectionData, request_id: str
-    ) -> str:
-        """Extract the PaaS device ID required by the outbound-rule append API."""
-        connection = data.connection
-        paas_device_id = connection.paas_device_id if connection is not None else None
-        if not paas_device_id:
-            raise PaasError(
-                ErrorCode.PLATFORM_ERROR,
-                "caller-connection response missing connection.paas_device_id "
-                f"(request_id={request_id})",
-            )
-        return paas_device_id
-
-    async def _append_agentpaas_caller_token(
+    async def _append_agentpass_caller_token(
         self,
         *,
         credential: CallerExecutionCredential,
@@ -767,8 +749,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 mode=OutBoundOperationRuleUpdatedMode.APPEND,
             )
         except Exception as e:
-            logger.warning(
-                "[bot-service] AgentPaaS caller outbound-rule append failed: "
+            logger.error(
+                "[bot-service] AgentPass caller outbound-rule append failed: "
                 "paas_device_id=%s credential_type=%s error_type=%s",
                 paas_device_id,
                 credential.type,
@@ -776,15 +758,15 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "AgentPaaS caller outbound-rule append failed",
+                "AgentPass caller outbound-rule append failed",
             ) from e
         if not updated:
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "AgentPaaS caller outbound-rule append returned failure",
+                "AgentPass caller outbound-rule append returned failure",
             )
         logger.info(
-            "[bot-service] AgentPaaS caller outbound-rule appended: "
+            "[bot-service] AgentPass caller outbound-rule appended: "
             "paas_device_id=%s credential_type=%s domains=%d",
             paas_device_id,
             credential.type,

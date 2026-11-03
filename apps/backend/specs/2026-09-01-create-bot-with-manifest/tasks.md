@@ -69,7 +69,7 @@ Conventions from `plan.md` that every task assumes:
   - [x] The docstring's "started, not awaited" reasoning is updated to say what
         now runs the work, and why that is durable where a thread was not.
   - [x] `POST …/config-manifest/apply` is unchanged in every observable way:
-        `202` + `apply_id`, `ManifestApplyInProgressError` on a concurrent apply,
+        `202` + `apply_id`, `ApplyInProgressError` on a concurrent apply,
         a validation failure raised synchronously, the same report from the poll.
         **Its existing tests pass with their assertions untouched** — that is the
         check. Two waiting helpers change, because their subject is the execution

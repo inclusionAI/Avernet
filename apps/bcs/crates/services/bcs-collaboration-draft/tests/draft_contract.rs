@@ -1,9 +1,9 @@
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::draft::DbCollaborationDraftStore;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{ValidateCollaborationDefinitionYamlCommand, core::collaboration_draft::*};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 const ID: &str = "8d75fb68-628c-4e92-8431-e76870788f3c";
 const OTHER: &str = "879160ac-3cb0-4cf4-9c4e-c8db18c1a541";
@@ -16,12 +16,8 @@ async fn initialize(db: &dyn DbPlugin) {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
 }
-fn core(db: Arc<dyn DbPlugin>, deployment: &str) -> CollaborationDraftCore {
-    let keys = BTreeMap::from([("initial".into(), vec![0x4a; 32])]);
-    CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, deployment.into())),
-        DraftSigningKeys::new(deployment.into(), "initial".into(), keys).unwrap(),
-    )
+fn core(db: Arc<dyn DbPlugin>) -> CollaborationDraftCore {
+    CollaborationDraftCore::new(Arc::new(DbCollaborationDraftStore::new(db)))
 }
 fn content(text: &str) -> DraftContent {
     DraftContent {
@@ -32,7 +28,7 @@ fn content(text: &str) -> DraftContent {
 async fn setup() -> (Arc<LocalSqliteDbPlugin>, CollaborationDraftCore) {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     initialize(db.as_ref()).await;
-    let service = core(db.clone(), "deployment-a");
+    let service = core(db.clone());
     (db, service)
 }
 
@@ -51,9 +47,8 @@ async fn incident_bytes_survive_storage_and_validate_while_transcribed_source_fa
         saved.content.content_hash,
         fixture["revision"]["content_hash"]
     );
-    let reference = service.reference("owner", ID, 1).await.unwrap();
     let fetched = service
-        .read(DraftAccess::ReadToken(reference.read_token), ID, 1)
+        .read(ID, 1)
         .await
         .unwrap();
     assert_eq!(fetched.definition_yaml.as_bytes(), yaml.as_bytes());
@@ -82,7 +77,7 @@ async fn create_is_idempotent_against_first_revision_and_cas_has_one_winner() {
     let retried = retried.unwrap();
     assert_ne!(first.created, retried.created);
     assert_eq!(first.content.created_at, retried.content.created_at);
-    let token = service.reference("owner", ID, 1).await.unwrap().read_token;
+    let reference = service.reference("owner", ID, 1).await.unwrap();
     let (a, b) = tokio::join!(
         service.update("owner", ID, 1, content("a: 2")),
         service.update("owner", ID, 1, content("a: 3")),
@@ -100,8 +95,8 @@ async fn create_is_idempotent_against_first_revision_and_cas_has_one_winner() {
     assert_eq!(replay.content.revision, 1);
     assert_eq!(replay.content.created_at, first.content.created_at);
     assert_eq!(
-        token,
-        service.reference("owner", ID, 1).await.unwrap().read_token
+        reference.revision,
+        service.reference("owner", ID, 1).await.unwrap().revision
     );
     assert!(matches!(
         service.create("owner", ID, content("different")).await,
@@ -121,8 +116,6 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
         .update("owner", ID, 1, content("invalid: ["))
         .await
         .unwrap();
-    let first = service.reference("owner", ID, 1).await.unwrap();
-    let second = service.reference("owner", ID, 2).await.unwrap();
     assert!(matches!(
         service.metadata("other", ID).await,
         Err(DraftCoreError::Forbidden)
@@ -135,24 +128,7 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
         service.delete("other", ID).await,
         Err(DraftCoreError::Forbidden)
     ));
-    assert!(matches!(
-        service
-            .read(DraftAccess::ReadToken(first.read_token.clone()), ID, 2)
-            .await,
-        Err(DraftCoreError::Unavailable)
-    ));
-    // Same key, ID, source and revision in another deployment still cannot read.
-    let other_deployment = core(db.clone(), "deployment-b");
-    other_deployment
-        .create("owner", ID, content(" "))
-        .await
-        .unwrap();
-    assert!(matches!(
-        other_deployment
-            .read(DraftAccess::ReadToken(first.read_token.clone()), ID, 1)
-            .await,
-        Err(DraftCoreError::Unavailable)
-    ));
+    assert_eq!(service.read(ID, 2).await.unwrap().definition_yaml, "invalid: [");
     service.revoke("owner", ID, 1).await.unwrap();
     service.revoke("owner", ID, 1).await.unwrap();
     assert!(matches!(
@@ -162,20 +138,12 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
     service.create("owner", ID, content(" ")).await.unwrap();
     assert!(matches!(
         service
-            .read(DraftAccess::ReadToken(first.read_token), ID, 1)
+            .read(ID, 1)
             .await,
         Err(DraftCoreError::Unavailable)
     ));
-    assert_eq!(
-        service
-            .read(DraftAccess::Owner("owner".into()), ID, 1)
-            .await
-            .unwrap()
-            .definition_yaml,
-        " "
-    );
     service
-        .read(DraftAccess::ReadToken(second.read_token.clone()), ID, 2)
+        .read(ID, 2)
         .await
         .unwrap();
     service.delete("owner", ID).await.unwrap();
@@ -191,23 +159,23 @@ async fn authorization_revocation_and_tombstones_are_independent_of_chat() {
     ));
     assert!(matches!(
         service
-            .read(DraftAccess::ReadToken(second.read_token), ID, 2)
+            .read(ID, 2)
             .await,
         Err(DraftCoreError::Unavailable)
     ));
-    let rows = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_collaboration_draft_revisions WHERE deployment_id='deployment-a'")).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM bcs_collaboration_draft_revisions")).await.unwrap();
     assert_eq!(bcs_db_api::db_get_column::<i64>(&rows[0], "n").unwrap(), 0);
 }
 
 #[tokio::test]
-async fn restart_and_key_rotation_preserve_old_references_and_revocation() {
+async fn restart_preserves_references_and_revocation_without_keys() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("drafts.sqlite");
     let reference;
     {
         let db = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
         initialize(db.as_ref()).await;
-        let service = core(db, "deployment-a");
+        let service = core(db);
         service
             .create("owner", ID, content("\r\n😀\r\n"))
             .await
@@ -220,21 +188,14 @@ async fn restart_and_key_rotation_preserve_old_references_and_revocation() {
         reference = service.reference("owner", ID, 1).await.unwrap();
     }
     let db = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
-    let keys = BTreeMap::from([
-        ("initial".into(), vec![0x4a; 32]),
-        ("rotated".into(), vec![0x6b; 32]),
-    ]);
-    let service = CollaborationDraftCore::new(
-        Arc::new(DbCollaborationDraftStore::new(db, "deployment-a".into())),
-        DraftSigningKeys::new("deployment-a".into(), "rotated".into(), keys).unwrap(),
-    );
+    let service = core(db);
     assert_eq!(
-        reference.read_token,
-        service.reference("owner", ID, 1).await.unwrap().read_token
+        reference.revision,
+        service.reference("owner", ID, 1).await.unwrap().revision
     );
     assert_eq!(
         service
-            .read(DraftAccess::ReadToken(reference.read_token), ID, 1)
+            .read(ID, 1)
             .await
             .unwrap()
             .definition_yaml,
@@ -292,4 +253,23 @@ async fn byte_title_revision_limits_and_storage_rollback() {
         service.metadata("owner", OTHER).await,
         Err(DraftCoreError::Unavailable)
     ));
+}
+
+#[tokio::test]
+async fn new_revisions_omit_credentials_and_old_payloads_remain_readable() {
+    let (db, service) = setup().await;
+    service.create("owner", ID, content("原文\r\n")).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT payload_json FROM bcs_collaboration_draft_revisions")).await.unwrap();
+    let text: String = bcs_db_api::db_get_column(&rows[0], "payload_json").unwrap();
+    let mut payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(payload.get("read_token").is_none());
+    // Retained databases may contain the former field; it has no access semantics.
+    payload["read_token"] = serde_json::json!("obsolete");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_collaboration_draft_revisions SET payload_json=? WHERE draft_id=? AND revision=1",
+        vec![payload.to_string().into(), ID.into()],
+    )).await.unwrap();
+    assert_eq!(service.read(ID, 1).await.unwrap().definition_yaml, "原文\r\n");
+    service.revoke("owner", ID, 1).await.unwrap();
+    assert!(matches!(service.read(ID, 1).await, Err(DraftCoreError::Unavailable)));
 }

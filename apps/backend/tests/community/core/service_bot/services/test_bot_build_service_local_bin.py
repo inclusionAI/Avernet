@@ -1,5 +1,7 @@
 """CLI snapshots copy independently of the engine root and retry cleanly."""
 
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
+
 import shutil
 import os
 from pathlib import Path
@@ -194,6 +196,7 @@ def _restore_service(monkeypatch, artifact, target_home):
         rsync_excludes=[],
     )
     service = BotBuildService.__new__(BotBuildService)
+    service._artifact_transfers = ArtifactTransferRegistry({})
     service._resolve_sandbox_provider = MagicMock(
         return_value=MagicMock(get_build_plan=MagicMock(return_value=plan)),
     )

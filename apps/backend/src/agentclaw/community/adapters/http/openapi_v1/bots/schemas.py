@@ -8,9 +8,15 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
+from .schemas_metadata import (
+    BotMetadata as BotMetadata,
+    BotMetadataId as BotMetadataId,
+    BotMetadataQuery as BotMetadataQuery,
+    BotMetadataQueries as BotMetadataQueries,
+)
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
 from .schemas_inventory import InventoryPublication
@@ -108,6 +114,7 @@ class Bot(BaseModel):
         "lifecycle is not managed through this API."
     )
     status: str = Field(description=_BOT_STATUS_DESC)
+    expert_name: str | None = Field(default=None, description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.")
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )
@@ -129,50 +136,6 @@ class Bot(BaseModel):
         description="Business space the bot's record is assigned to (owner view). "
         "Populated on the listing endpoints.",
     )
-
-
-BotMetadataId = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
-]
-
-
-class BotMetadataQuery(BaseModel):
-    """One exact Bot identity whose display metadata should be resolved."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    bot_id: BotMetadataId = Field(description="Bot identifier.")
-    owner_id: BotMetadataId = Field(
-        description="Owner identifier paired with bot_id to identify one Bot."
-    )
-
-
-class BotMetadataQueries(BaseModel):
-    """Exact Bot identities whose display metadata should be resolved."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    bots: list[BotMetadataQuery] = Field(
-        min_length=1,
-        max_length=100,
-        description=(
-            "Bot and owner identifier pairs to resolve. Pairs may come from any "
-            "upstream source; duplicates are ignored. At most 100 may be submitted."
-        ),
-    )
-
-
-class BotMetadata(BaseModel):
-    """Display-safe Bot metadata, without ownership or runtime internals."""
-
-    bot_id: str = Field(description="Unique Bot identifier.")
-    owner_id: str = Field(description="Owner identifier paired with the Bot identifier.")
-    bot_name: str = Field(description="Display name.")
-    bot_desc: str = Field(description="Display description; may be empty.")
-    engine: str = Field(description="Engine that powers the Bot.")
-    bot_type: str = Field(description="Bot kind, such as personal or service.")
-    status: str = Field(description="Current lifecycle status.")
 
 
 class BotCreateEngineProperties(BaseModel):
@@ -904,6 +867,11 @@ class BusinessSpace(BaseModel):
 class BotInventoryItem(BaseModel):
     """Unified card for a personal cloud, local, or service bot."""
 
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+        json_schema_extra={"readOnly": True},
+    )
     bot_id: str = Field(description="Unique identifier of the bot.")
     card_id: str = Field(
         description="Stable card identity; service cards include the publication id."

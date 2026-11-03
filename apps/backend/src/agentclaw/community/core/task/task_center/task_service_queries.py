@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
+from agentclaw.community.utils.app_utils import get_current_executor_app
+
 from agentclaw.community.core.task.domain.models import (
     TaskContext,
     TaskExecutionGraph,
@@ -102,7 +104,18 @@ def get_task_dashboard(
     无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
     # Dashboard requests can land on a different worker than the acceptor; re-register on every full-graph
     # read so this worker's Harness also watches persisted PENDING nodes (idempotent; skipped for subtree reads).
-    if node_id is None and self._harness is not None:
+    task_owner_app = get_current_executor_app()
+    if self._task_info_repo is not None:
+        task_record = self._task_info_repo.get(task_id)
+        if task_record is not None:
+            task_owner_app = task_record.executor_app
+    # Dashboard reads are presentation-only. Another application may view the
+    # task, but only the owning executor may register its harness for recovery.
+    if (
+        node_id is None
+        and self._harness is not None
+        and task_owner_app == get_current_executor_app()
+    ):
         self._harness.register(task_id)
     graph = self._graph.query_task_dashboard(task_id, node_id)
     if node_id is None:

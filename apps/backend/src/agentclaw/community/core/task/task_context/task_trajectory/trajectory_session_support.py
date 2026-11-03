@@ -9,9 +9,6 @@ import time
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import Status
-from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    TaskTrajectory,
-)
 
 logger = logging.getLogger("task.trajectory")
 _RUNNING_SESSION_DEFAULT_MSG_LIMIT = 200
@@ -24,6 +21,12 @@ _ENGINE_SESSION_KEY_RE = re.compile(
 
 def _is_engine_session_id(session_id: str) -> bool:
     return bool(session_id) and _ENGINE_SESSION_KEY_RE.match(session_id) is not None
+
+
+def _bcs_group_id_from_session_id(session_id: str) -> "str | None":
+    """Extract the collaboration group ID from ``bcs_grp_*:session`` keys."""
+    match = re.match(r"^(bcs_grp_[^:]+):.+$", session_id, re.IGNORECASE)
+    return match.group(1) if match else None
 
 
 class TrajectorySessionSupport:
@@ -270,9 +273,9 @@ class TrajectorySessionSupport:
                     return None
                 # BCS 会话历史读口是参与者级 ACL(401 "valid Human identity or
                 # Bot token is required"):带持有者 bot 的 session_token 做
-                # ``Authorization: Bearer``(执行 Bot 取值序 driver_bot_id →
-                # assignee,详见 _holder_bearer_token)。
-                caller_bearer = self._holder_bearer_token(node)
+                # ``Authorization: Bearer``。协作群 assignee 是 group_id 时,
+                # 必须解析群详情中的 driver bot,不能把 group_id 当 Bot id。
+                caller_bearer = await self._holder_bearer_token(node)
                 logger.info(
                     "[task][trajectory], collect_trajectory_event_session_msgs,"
                     " begin get bcs msgs holder_bearer=%s",
@@ -360,24 +363,47 @@ class TrajectorySessionSupport:
             )
         return msgs_by_node
 
-    def _holder_bearer_token(self, node) -> "str | None":
-        """解析 RUNNING 节点**持有者 bot** 的 BCS session_token(会话历史读取身份)。
+    async def _holder_bearer_token(self, node) -> "str | None":
+        """Resolve the node holder bot token for BCS participant-level history ACL.
 
-        执行 Bot 取值序(都是执行链路落在 extend_props/assignee 上的事实字段):
-        ``driver_bot_id``(协作群 driver)→ ``run_info.assignee``(single_bot
-        执行 bot;协作群时该值是
-        group_id——交给 provider 解析,自然 None)。经 ``BcsBotTokenProvider``
-        (corp 读 ``bcs_bots.session_token``,带缓存)取 token;未注入 provider /
-        id 缺失 / 解析失败 → ``None``,调用方回退裸 HMAC(BCS 按 401 拒,走
-        既有 WARNING 降级)。全程防御,永不抛。token 不落日志。
+        Prefer persisted driver facts, then the single-bot assignee.  For a
+        cooperation-group node, ``assignee`` is the group ID, so when that is
+        the only candidate query the authoritative BCS group detail and use its
+        driver bot instead.  No token means the transport falls back to
+        HMAC-only and BCS keeps rejecting the optional trajectory read.
         """
         if self._bcs_bot_tokens is None:
             return None
         try:
             ep = node.run_info.extend_props or {}
-            holder = ep.get("driver_bot_id") or getattr(node.run_info, "assignee", None)
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, hold is = %s", holder)
-            if not holder or not isinstance(holder, str):
+            session_id = str(ep.get("session_id") or "").strip()
+            group_id = (
+                str(ep.get("group_id") or "").strip()
+                or _bcs_group_id_from_session_id(session_id)
+            )
+            holder = str(
+                ep.get("bcs_driver_bot")
+                or ep.get("assignee_bcs_uuid")
+                or ep.get("driver_bot_id")
+                or ""
+            ).strip()
+            if group_id and (not holder or holder == group_id):
+                group = await self._bcs.get_group(group_id)
+                if isinstance(group, dict):
+                    holder = str(
+                        group.get("driver_bot_id")
+                        or group.get("driver_bot")
+                        or ""
+                    ).strip()
+            if not holder:
+                holder = str(getattr(node.run_info, "assignee", "") or "").strip()
+            if group_id and holder == group_id:
+                holder = ""
+            logger.info(
+                "[task][trajectory], collect_trajectory_event_session_msgs, hold is = %s",
+                holder or group_id or "<none>",
+            )
+            if not holder:
                 return None
             return self._bcs_bot_tokens.get_token(holder) or None
         except Exception:  # noqa: BLE001  身份解析是观测旁路,任何失败回退匿名

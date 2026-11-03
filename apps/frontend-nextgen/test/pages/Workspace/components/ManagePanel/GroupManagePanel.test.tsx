@@ -58,6 +58,35 @@ const panelProps = (overrides: Partial<GroupManagePanelProps> = {}): GroupManage
 
 const trigger = () => screen.getByRole('combobox', { name: '@Human 通知来源' });
 
+it.each([
+  ['1 天', 86400],
+  ['7 天', 604800],
+  ['30 天', 2592000],
+])('分享协作群卡片定位在操作按钮，选择 %s 后才生成链接', async (expiryLabel, seconds) => {
+  const user = userEvent.setup();
+  const props = panelProps();
+  render(
+    <ResizableWorkspaceSidebar ariaLabel="群管理面板" side="right" onDismiss={props.onClose}>
+      <GroupManagePanel {...props} />
+    </ResizableWorkspaceSidebar>,
+  );
+  const shareButton = screen.getByRole('button', { name: /分享协作群/ });
+  const measureAnchor = jest.spyOn(shareButton, 'getBoundingClientRect');
+
+  await user.click(shareButton);
+  expect(screen.getByRole('button', { name: '生成链接' })).toBeVisible();
+  // 没有真实锚点时 Radix 无法定位，内容会一直停在屏幕外的初始位置。
+  await waitFor(() => expect(measureAnchor).toHaveBeenCalled());
+  expect(props.onShare).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: expiryLabel }));
+  await user.click(screen.getByRole('button', { name: '生成链接' }));
+  await waitFor(() => expect(props.onShare).toHaveBeenCalledWith(seconds));
+  expect(props.onShare).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText('邀请链接')).toHaveTextContent('http://example.com/g1');
+  expect(props.onClose).not.toHaveBeenCalled();
+});
+
 it('基础信息卡渲染「@Human 通知来源」标签与三个选项，当前值受控自群详情', async () => {
   const user = userEvent.setup();
   render(

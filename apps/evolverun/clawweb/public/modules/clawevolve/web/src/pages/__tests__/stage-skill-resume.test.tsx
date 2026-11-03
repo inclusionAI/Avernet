@@ -215,7 +215,8 @@ describe('Stage Skill exact-version resume', () => {
     fireEvent.click(screen.getByRole('button', { name: '上传并校验' }))
     await screen.findByText('Evidence v3')
     expect(api.evolve.uploadStageSkill).toHaveBeenCalledWith(expect.objectContaining({ stageSkillId: 'STAGE-1' }))
-    expect(screen.getByTestId('location').textContent).toBe('/evolve/stage-skills/new?implementationId=IMPL-v3')
+    // Upload state may render before the router commits the navigation.
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/stage-skills/new?implementationId=IMPL-v3'))
     await waitFor(() => expect(api.evolve.getStageSkill).toHaveBeenCalledExactlyOnceWith('IMPL-v3'))
   })
 

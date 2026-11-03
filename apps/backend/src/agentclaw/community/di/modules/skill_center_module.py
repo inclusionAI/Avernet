@@ -6,7 +6,6 @@ module; request-scoped service factories remain here.
 
 from __future__ import annotations
 
-from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
 
 import dataclasses
 from typing import Callable
@@ -158,6 +157,8 @@ from agentclaw.community.core.skill_center.services.installation_backfill_servic
 from agentclaw.community.di.modules.skill_center_internal_token_module import (
     SkillCenterInternalTokenBindings,
 )
+from agentclaw.community.core.expert_market.scanner import ExpertScanner
+from agentclaw.community.core.expert_market.service import ExpertCatalogConfig
 from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
     GitSyncService,
@@ -595,9 +596,8 @@ class SkillCenterModule(
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         device_contexts: DeviceContextResolver,
         center_content: CenterContentDistribution,
-        guard: SkillProjectionGuard,
     ) -> EngineRuntimeProjectionRegistry:
-        """Wire guarded per-domain delivery; Teclaw keeps whole-artifact delivery."""
+        """Wire per-domain delivery; Teclaw keeps whole-artifact delivery."""
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
@@ -615,7 +615,6 @@ class SkillCenterModule(
                     pool_layouts=pool_layouts,
                     device_contexts=device_contexts,
                     center_content=center_content,
-                    guard=guard,
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},
@@ -654,6 +653,8 @@ class SkillCenterModule(
         oss_storage: ObjectStoragePlugin,
         secret_resolver: SecretResolver,
         secret_names: cfg.SecretNamesConfig,
+        expert_scanner: ExpertScanner,
+        expert_config: ExpertCatalogConfig,
     ) -> GitSyncService:
         # Explicit provider: GitSyncService.__init__ types
         # SkillServiceFactory under TYPE_CHECKING (to avoid circular import
@@ -683,6 +684,8 @@ class SkillCenterModule(
             secret_resolver=secret_resolver,
             allow_missing_repo_url=allow_missing_repo_url,
             repo_url_secret_name=secret_names.aiworkbench_repo_url,
+            expert_scanner=expert_scanner,
+            expert_source_repo_id=expert_config.source_repo_id,
         )
 
     @singleton

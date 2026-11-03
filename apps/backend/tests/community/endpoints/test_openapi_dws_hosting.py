@@ -9,6 +9,7 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 from agentclaw.community.di.dws_management_config import DwsManagementConfig
 from agentclaw.community.utils.gateway_principal_config import (
@@ -66,6 +67,11 @@ def _headers():
 def _seed(operation, expected_data):
     def seed(world):
         init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+        bind_overrides(
+            world,
+            SystemConfigServiceProtocol,
+            {"get_config": lambda self, **kw: {"mode": "all"}},
+        )
 
         async def resolve(_self, bot_id, owner_id, caller_id):
             assert (bot_id, owner_id, caller_id) == (_BOT, _OWNER, _OWNER)
@@ -122,6 +128,7 @@ _SETTINGS = {
     "label_suffix": "",
 }
 _CASES = (
+    ("GET", "/eligibility", "eligibility", None, {}),
     ("GET", "", "status", None, {}),
     ("GET", "/settings", "settings.get", None, {}),
     (
@@ -165,7 +172,12 @@ for _method, _suffix, _operation, _body, _data in _CASES:
         seed=_seed(_operation, _data),
         expect=ExpectSuccess(
             status=200,
-            json_contains={"code": 200000, "data": {"operation": _operation}},
+            json_contains={
+                "code": 200000,
+                "data": {"available": True}
+                if _operation == "eligibility"
+                else {"operation": _operation},
+            },
         ),
     )(lambda: None)
     endpoint_test(

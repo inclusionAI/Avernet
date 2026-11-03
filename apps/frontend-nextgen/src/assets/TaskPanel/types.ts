@@ -18,14 +18,28 @@ export interface TaskArtifactView {
   kind?: 'text' | 'file' | 'url_link' | 'code' | null;
   url?: string | null;
   summary?: string | null;
+  /** url_link 形态的完整业务信息；url 继续保留给既有外链入口。 */
+  linkRef?: {
+    url: string | null;
+    type: string | null;
+  } | null;
+  /** code 形态的完整代码库 / PR 信息；url、summary 继续兼容既有消费方。 */
+  codeRef?: {
+    codeBaseName: string | null;
+    codeBaseAddress: string | null;
+    pullRequestUrl: string | null;
+    description: string | null;
+  } | null;
   /** 归属节点(产物区按 node 过滤用);legacy 回落入参 nodeId */
   nodeId?: string | null;
   /** 产出者(Descriptor.creator);legacy 为 null */
   owner?: string | null;
+  /** 产出者可读名：单 Bot 名或协作群成员名列表；缺省回落 owner ID。 */
+  ownerLabel?: string | null;
   updatedAt: string; // ISO 或格式化后的展示串
-  /** file 形态的存储寻址(前端自行拼预览链接,后端不给现成 URL) */
+  /** file 形态的存储寻址(使用既有资源/会话文件服务读取,后端不给现成 URL) */
   fileRef?: {
-    storageType: 'BOT_WORKSPACE' | 'SESSION_FILE';
+    storageType: 'bot_workspace' | 'session_file' | 'object_file';
     storageId: string;
     fileId?: string | null;
     fileType?: string | null;
@@ -77,6 +91,8 @@ export interface TaskNodeView {
   assignee?: string | null;
   /** run_info.assignee_name:绕过群执行时 assignee 常为 bcs 群 id,用此可读 bot 名展示执行者。 */
   assigneeName?: string | null;
+  /** 协作群节点执行体展示名；由群成员名列表富化。 */
+  executorLabel?: string | null;
   /** 派发未命中事件(extend_props.miss_events):非空表示该节点未真正分配 bot,不应回退任务归属 bot 当执行人。 */
   missEvents?: string[];
   /** 节点挂起原因(extend_props.hung_reason):MISS+HUNG 时配合状态展示。 */
@@ -138,6 +154,8 @@ export interface TaskView {
   sourceLabel: string;
   ownerBotName: string;
   ownerBotId: string;
+  /** 资源归属用户；读取 bot_workspace 产物时作为 owner_id 传给既有资源接口。 */
+  ownerUserId: string;
   createdAt: string;
   finishedAt: string | null;
   loopRound: number;

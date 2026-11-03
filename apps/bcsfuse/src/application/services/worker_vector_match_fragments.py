@@ -289,6 +289,45 @@ class FragmentMatchingMixin:
         return search_k
 
 
+    def _load_rerank_profiles(self, candidates: list) -> None:
+        """Fill missing profile fragments for selected candidates, using the store port."""
+        if self._profile_content_store is None:
+            return
+        attempted = loaded = failed = 0
+        for candidate in candidates:
+            if candidate.metadata.get("profile") or any(
+                fragment.fragment_type == "profile" and (fragment.content or fragment.content_preview)
+                for fragment in candidate.fragments
+            ):
+                continue
+            worker_id, separator, profile_id = candidate.profile_key.rpartition(":")
+            if not separator:
+                continue
+            worker_id = candidate.metadata.get("worker_id") or worker_id
+            profile_id = candidate.metadata.get("profile_id") or profile_id
+            attempted += 1
+            try:
+                record = self._profile_content_store.get(worker_id, profile_id)
+                if record is None:
+                    continue
+                # Internal legacy providers may still return the serialized form.
+                contents = record.get("contents", {}) if isinstance(record, dict) else record.contents
+                name = record.get("display_name") if isinstance(record, dict) else record.display_name
+                profile = contents.get("profile", "")
+                if isinstance(profile, str):
+                    candidate.metadata["profile"] = profile
+                if name:
+                    candidate.metadata["display_name"] = name
+                loaded += 1
+            except Exception:
+                # Read failure preserves recalled profile/name and the existing fallback policy.
+                failed += 1
+        if attempted:
+            log_stage(logger, "rerank_profile_load", attempted_count=attempted,
+                      loaded_count=loaded, failed_count=failed)
+        if failed:
+            logger.warning("[FRAGMENT-MATCH] profile reload failed for %d candidates", failed)
+
     def _execute_rerank(
         self,
         query: str,
@@ -314,8 +353,9 @@ class FragmentMatchingMixin:
         diagnostics = diagnostics if diagnostics is not None else {}
         reranker = self._reranker_service
 
-        # 如果指定了不同的 reranker_model，需要创建临时 reranker 实例
-        if reranker_model and reranker_model != self._fragment_config.reranker_model:
+        # Compare the live adapter, since configuration may change after construction.
+        current_model = getattr(reranker, "model", None) or self._fragment_config.reranker_model
+        if reranker_model and reranker_model != current_model:
             try:
                 from src.domain.services.fragment_reranker_service import (
                     FragmentRerankerService,
@@ -332,15 +372,18 @@ class FragmentMatchingMixin:
                 reranker = self._reranker_service
 
         if reranker is None:
+            diagnostics["reranker_model"] = None
             diagnostics["rerank_degraded"] = True
             logger.warning("[FRAGMENT-MATCH] reranker unavailable, skipping")
             if reranker_fail_action == "empty":
                 return []
             return self._build_results_from_aggregation(candidates[:top_k])
 
+        diagnostics["reranker_model"] = getattr(reranker, "model", reranker_model)
         try:
             from src.domain.services.fragment_reranker_service import RerankRequest
 
+            self._load_rerank_profiles(candidates)
             rerank_request = RerankRequest(
                 query=query,
                 candidates=candidates,
@@ -555,8 +598,8 @@ class FragmentMatchingMixin:
                     "profile_id": hit.payload.get("profile_id"),
                     "active_skills": hit.payload.get("active_skills", []),
                     "short_profile": hit.payload.get("short_profile", ""),
+                    "display_name": hit.payload.get("display_name", ""),
                 }
-                logger.debug("[VECTOR-MATCH-Agg] Saved metadata for %r", profile_key)
 
         # 计算最终分数
         for profile_key, data in profile_map.items():

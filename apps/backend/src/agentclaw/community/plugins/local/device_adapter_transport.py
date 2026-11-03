@@ -421,6 +421,9 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                 },
             }
 
+        if path.startswith("/api/v1/cli/acli/"):
+            # teclaw serves the same acli contract under its own ``/api/v1``.
+            path = "/api" + path.removeprefix("/api/v1")
         if path.startswith("/api/cli/acli/"):
             return self._acli(conn_info, path, body or {}, params or {})
 

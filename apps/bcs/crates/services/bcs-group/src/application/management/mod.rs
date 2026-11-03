@@ -3,36 +3,37 @@
 use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
-use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::core::{
+    GroupMutationCommand, GroupMutationKind, SessionAuthorizationCoreService,
+};
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 
-use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
 use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
-    CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
+    CanResolveInteraction, CanResolveInteractionCommand,
     ChannelBindingCleanupPort, CollaborationRuntimeService, DeliveryType, DmActorSpec,
     DmCreateCommand, DmCreateResult, FriendCoreService, Group as DomainGroup,
     GroupAddMemberCommand, GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
     GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
     GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantModeResult,
-    GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
-    GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
+    GroupParticipantView, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
-    GroupWorkspaceResult, InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
+    GroupUseCaseError,
+    InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
     NoopChannelBindingCleanupPort, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    RelationCoreService, ServiceError, ServiceResult, ServiceSpec, ServiceSpecPatchConflictField,
-    Session, SessionKind, SessionManagementService, SystemMessageEvent,
+    RelationCoreService, ServiceError, ServiceResult,
+    SessionKind, SessionManagementService, SystemMessageEvent,
     WorkbenchChatAbortAuthorizationCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
-    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
+    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchSpeakingModeCommand,
+    WorkbenchUseCaseError, backfill_bot_names,
     generated_group_id, validate_sender_routes,
 };
 use tracing::warn;
@@ -78,8 +79,26 @@ pub struct GroupManagement {
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
-    outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
+    /// The narrow authority hook (bot-authority plan
+    /// Task 6.3): the Human→Bot control judgments in
+    /// this service consult it live; a missing wiring
+    /// fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// The narrow Session authorization-fact Core (F4,
+    /// spec §8.3): Workbench connect/send admission reads
+    /// an explicit Session target ONLY through this strict
+    /// snapshot read — never the display cache, never a
+    /// fallback to Group membership. A missing wiring
+    /// fails closed.
+    session_authorization: Option<Arc<dyn SessionAuthorizationCoreService>>,
+
+    /// Batched caller-config read plane for the connect-time
+    /// `speaking_mode` projection. None = no caller capability is wired,
+    /// which resolves to `Plain` (the same closed-by-assembly default
+    /// every other caller consumer follows).
+    caller_config_plane:
+        Option<Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>>,
 }
 
 pub struct GroupManagementWithRuntimeCleanup {
@@ -183,13 +202,6 @@ impl GroupManagementService for GroupManagementWithRuntimeCleanup {
         self.inner.update_visibility(cmd).await
     }
 
-    async fn update_workspace(
-        &self,
-        cmd: GroupUpdateWorkspaceCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        self.inner.update_workspace(cmd).await
-    }
-
     async fn update_routing_policy(
         &self,
         cmd: GroupRoutingPolicyCommand,
@@ -204,33 +216,6 @@ impl GroupManagementService for GroupManagementWithRuntimeCleanup {
         self.inner.update_participant_mode(cmd).await
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        self.inner.patch_group_settings(cmd).await
-    }
-}
-
-pub(crate) fn validate_service_spec_callback_urls(
-    guard: &OutboundUrlGuard,
-    service_spec: Option<&ServiceSpec>,
-) -> Result<(), GroupUseCaseError> {
-    let Some(callback_config) = service_spec.and_then(|spec| spec.callback_config.as_ref()) else {
-        return Ok(());
-    };
-    for (index, channel) in callback_config.channels.iter().enumerate() {
-        if let CallbackChannelConfig::Baas { base_url, .. } = channel {
-            guard
-                .validate_configured_http_url(base_url)
-                .map_err(|error| {
-                    GroupUseCaseError::InvalidProposal(format!(
-                        "service_spec.callback_config.channels[{index}].base_url is not allowed: {error}"
-                    ))
-                })?;
-        }
-    }
-    Ok(())
 }
 
 impl GroupManagement {
@@ -254,14 +239,144 @@ impl GroupManagement {
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             bot_runtime: None,
-            outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
+            bot_authority: None,
+            session_authorization: None,
+
+            caller_config_plane: None,
         }
     }
 
     pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
+    }
+
+    /// Wire the authority hook (rows 14/15/16,
+    /// bot-authority plan Task 6.3).
+    pub fn with_bot_authority(mut self, bot_authority: Arc<dyn BotAuthorityPort>) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is
+    /// a composition error and must fail closed (never
+    /// deny-as-Ok).
+    pub(crate) fn authority(
+        &self,
+    ) -> Result<&dyn BotAuthorityPort, GroupUseCaseError> {
+        self.bot_authority.as_deref().ok_or_else(|| {
+            GroupUseCaseError::Service(ServiceError::InternalError(
+                "bot authority hook is not wired".to_string(),
+            ))
+        })
+    }
+
+    /// Wire the strict Session authorization snapshot Core
+    /// (F4, bot-authority plan §3).
+    pub fn with_session_authorization(
+        mut self,
+        session_authorization: Arc<dyn SessionAuthorizationCoreService>,
+    ) -> Self {
+        self.session_authorization = Some(session_authorization);
+        self
+    }
+
+    /// The wired Session authorization Core; failing to
+    /// wire one is a composition error and must fail
+    /// closed (never degrade to a display-cache read).
+    pub(crate) fn session_authorization(
+        &self,
+    ) -> Result<&dyn SessionAuthorizationCoreService, WorkbenchUseCaseError> {
+        self.session_authorization.as_deref().ok_or_else(|| {
+            WorkbenchUseCaseError::Service(ServiceError::InternalError(
+                "session authorization snapshot service is not wired".to_string(),
+            ))
+        })
+    }
+
+    /// Row 14/15/16 Human→Bot control leg: a live
+    /// `can_manage` edge for the staff id; the
+    /// historical `created_by` fact, the creator
+    /// relation edge and the bot-id owner suffix no
+    /// longer authorize anything here (spec §3.2).
+    pub(crate) async fn human_controls_bot(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        match self.authority()?.can_manage(staff_no, bot_id).await {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(GroupUseCaseError::Forbidden(message))
+            }
+            Err(other) => Err(ServiceError::InternalError(format!(
+                "bot authority lookup failed: {other}"
+            ))
+            .into()),
+        }
+    }
+
+    pub fn with_caller_config_plane(
+        mut self,
+        plane: Arc<dyn bcs_service_api::core::bot_control_plane::BotControlPlaneCoreService>,
+    ) -> Self {
+        self.caller_config_plane = Some(plane);
+        self
+    }
+
+    /// Advisory session-UI semantics for the Workbench connect outcome: the
+    /// same `resolve_speaking_mode` reduction the message admission fence
+    /// performs, read over the CURRENT membership and the CURRENT per-bot
+    /// caller configuration. State-machine groups use the same caller-aware
+    /// projection so a caller-enabled bot can show the speaking-lease control;
+    /// message/state-machine admission still re-resolves authoritatively.
+    /// Without a wired caller-config plane no caller capability exists, so
+    /// the reduction stays `Plain` (assembly-closed default).
+    pub(crate) async fn resolve_connect_speaking_mode(
+        &self,
+        participants: &[WorkbenchParticipantView],
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        use bcs_domain::speaking_lease::SessionSpeakingMode;
+
+        // Human members carry the canonical `human_<staff_no>` actor id — the
+        // same format every Workbench scope check trims on.
+        let has_human_member = participants
+            .iter()
+            .any(|participant| participant.bot_uuid.starts_with("human_"));
+        if !has_human_member {
+            return SessionSpeakingMode::Plain;
+        }
+        let Some(plane) = self.caller_config_plane.as_ref() else {
+            return SessionSpeakingMode::Plain;
+        };
+        let bot_ids: Vec<String> = participants
+            .iter()
+            .filter(|participant| !participant.bot_uuid.starts_with("human_"))
+            .map(|participant| participant.bot_uuid.clone())
+            .collect();
+        if bot_ids.is_empty() {
+            return SessionSpeakingMode::Plain;
+        }
+        // One batched read (§15.96) over the same cache path the message
+        // fence uses; a read failure keeps the advisory projection Plain
+        // instead of failing the connect handshake.
+        let any_bot_caller_enabled = match plane
+            .get_caller_configurations(&bot_ids, &bcs_config::resolve_env_str())
+            .await
+        {
+            Ok(configs) => configs.iter().any(|(_, config)| {
+                config
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.caller_identity.enabled)
+            }),
+            Err(_) => false,
+        };
+        bcs_domain::speaking_lease::resolve_speaking_mode(
+            has_human_member,
+            any_bot_caller_enabled,
+        )
     }
 
     pub fn with_channel_binding_cleanup(
@@ -277,11 +392,6 @@ impl GroupManagement {
         participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     ) -> Self {
         self.participant_view_bindings = participant_view_bindings;
-        self
-    }
-
-    pub fn with_outbound_url_guard(mut self, outbound_url_guard: OutboundUrlGuard) -> Self {
-        self.outbound_url_guard = outbound_url_guard;
         self
     }
 
@@ -333,58 +443,44 @@ pub(crate) fn staff_no_from_bound_actor(bound_actor_id: Option<&str>) -> Result<
     Ok(staff_no)
 }
 
+/// Whether the bound Human participates in `group` directly,
+/// or through a Bot participant it CURRENTLY controls (rows
+/// 14/15, bot-authority plan Task 6.3): a live `can_manage`
+/// edge per Bot participant — never the historical
+/// `created_by` and never the bot-id owner suffix. A
+/// same-named manager role inside the Group is NOT what this
+/// helper checks: Group-level management gating continues to
+/// derive from the Group's own rules (driver/originator
+/// strategy). Group facts come from the STRICT authorization
+/// snapshot (F4), never from a display cache.
 pub(crate) async fn human_has_group_access(
-    registry: &dyn BotRegistryCoreService,
-    group: &DomainGroup,
+    service: &GroupManagement,
+    group: &bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot,
     actor_id: &str,
     staff_no: &str,
-) -> bool {
+) -> Result<bool, GroupUseCaseError> {
     if group
         .participants
         .iter()
-        .any(|participant| participant.bot_uuid == actor_id)
+        .any(|participant| participant.actor_id == actor_id)
     {
-        return true;
+        return Ok(true);
     }
 
     for participant in group
         .participants
         .iter()
-        .filter(|participant| participant.is_bot())
+        .filter(|participant| participant.actor_kind == ActorKind::Bot)
     {
-        let Some(bot) = registry.get(&participant.bot_uuid).await else {
-            continue;
-        };
-        if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
-            return true;
+        if service
+            .human_controls_bot(staff_no, &participant.actor_id)
+            .await?
+        {
+            return Ok(true);
         }
     }
 
-    false
-}
-
-pub(crate) fn bot_belongs_to_staff(bot_uuid: &str, created_by: Option<&str>, staff_no: &str) -> bool {
-    if created_by == Some(staff_no) {
-        return true;
-    }
-    if created_by.is_some() {
-        return false;
-    }
-    bot_uuid
-        .rsplit_once(':')
-        .map(|(_, suffix)| suffix == staff_no)
-        .unwrap_or(false)
-}
-
-pub(crate) fn find_session_participant(
-    session: &Session,
-    actor_id: &str,
-) -> Option<bcs_service_api::Participant> {
-    session
-        .participants
-        .iter()
-        .find(|participant| participant.bot_uuid == actor_id)
-        .cloned()
+    Ok(false)
 }
 
 pub(crate) fn workbench_participants(group: &DomainGroup) -> Vec<WorkbenchParticipantView> {

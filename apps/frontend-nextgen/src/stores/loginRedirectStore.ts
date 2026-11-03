@@ -1,3 +1,4 @@
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { create } from 'zustand';
 
 /**
@@ -27,8 +28,12 @@ interface LoginRedirectState {
   pendingLoginUrl: string | undefined;
   /** 内部(ace-gateway)：登记硬跳转。已 pending 或 url 非法时 no-op（单飞）。 */
   requestRedirect: (url: string) => void;
-  /** 外部(oauth-provider)：登记弹窗提示。已 pending 时 no-op（单飞）。 */
-  requestPrompt: () => void;
+  /**
+   * 外部(oauth-provider)：登记弹窗提示。已 pending 时 no-op（单飞）。
+   * `fromEpoch`：请求发出时捕获的认证代次——仅当与当前一致才登记；晚到的上一代认证请求
+   * 的 401 已被新一轮登录取代，直接忽略（stale 401 防线）。
+   */
+  requestPrompt: (fromEpoch?: number) => void;
   /** 重置（测试隔离用；产线一般无需调用）。 */
   reset: () => void;
 }
@@ -41,8 +46,14 @@ export const useLoginRedirectStore = create<LoginRedirectState>((set, get) => ({
     if (typeof url !== 'string' || url.trim() === '') return; // 非法 url 不登记。
     set({ pendingLogin: { mode: 'redirect', url }, pendingLoginUrl: url });
   },
-  requestPrompt: () => {
+  requestPrompt: (fromEpoch) => {
+    // 旧请求防线：发起时属于上一代认证的请求，其未登录响应晚到于新一轮成功登录，忽略。
+    if (fromEpoch !== undefined && useExternalAuthStore.getState().authEpoch !== fromEpoch) return;
     if (get().pendingLogin !== undefined) return; // 单飞：首个信号胜出。
+    // 未登录信号即事实：本地登录态快照（可能仍停留在过期前的 authenticated）同步翻转为
+    // unauthenticated，否则 useExternalLoginPrompt 的 authenticated 联锁会屏蔽弹窗
+    // （P2 回归：会话过期后操作无结果也无提示）。翻转对已 unauthenticated 的调用幂等。
+    useExternalAuthStore.getState().setUnauthenticated();
     set({ pendingLogin: { mode: 'prompt' } });
   },
   reset: () => set({ pendingLogin: undefined, pendingLoginUrl: undefined }),

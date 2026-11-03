@@ -9,13 +9,14 @@ Real digests in place of the doc's shortened ones, as in `01-complete`.
   first, so its digest does not depend on how the zip was compressed.
 - A skill's tree is the files the Skill Center validator keeps: the zip's `order-lookup/` wrapper is
   stripped, and the macOS files in both skills (`.DS_Store`, `__MACOSX/`, `._SKILL.md`) are dropped.
-- `cli_tools` is ignored: not in the revision, omitted from `compiled.yaml`, so apply leaves the
-  bot's CLI tools as they are.
-- Equivalent: applying `compiled.yaml` gives the same identity files, skills, resources, MCP server
-  and script that applying `manifest.yaml` did when it was recorded.
+- `cli_tools` is ignored: not in the revision and undeclared in the compiled state, so apply
+  leaves the bot's CLI tools as they are.
+- Equivalent: the revision compiles to the same desired state — identity files, skills, resources,
+  MCP server and script — that `manifest.yaml` compiles to.
 
 Every case records the bot's **first** revision on a bot that has nothing yet,
 so categories the document leaves out are filled with "none" (README §7). The
 fetched bytes are the fixtures under [`../sources/`](../sources/).
-`compiled.yaml` uses the content-store and Center sources that RSI-04 adds to
-the Manifest; their spelling is **proposed** and fixed by RSI-04.
+The revision compiles into the apply engine's typed desired state (`compile_spec`,
+`core/bot_genome/compile.py`); the contract tests check that it equals the state
+the Manifest compiler produces from `manifest.yaml` over these fixtures.

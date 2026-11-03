@@ -88,6 +88,9 @@ NON_SECRET_VALUE_RE = re.compile(
 
 # These values name entries in the existing secret resolver, not credentials.
 SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
+# The adapter maps this public protocol label to senderId=agentswarm and
+# msgType=tcApp2a; it is not a certified token. Keep this exact, not prefix-wide.
+PUBLIC_PROTOCOL_LABELS = frozenset({"OPEN_API:app:agentswarm"})
 PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
 
 
@@ -106,7 +109,7 @@ def _looks_like_plaintext_value(value: str) -> bool:
     # such as `"KEY=" + value` as a literal credential.
     if any(char.isspace() for char in value):
         return False
-    if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
+    if (value in PUBLIC_PROTOCOL_LABELS or len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
             or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
@@ -263,6 +266,65 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     ) and safe(node)
 
 
+# Deliberately a small lexical recognizer, not a Rust parser. Unknown syntax
+# retains the conservative assignment rule. Literals are checked before any
+# expression exemption, including literals nested in constructors/macros.
+RUST_STRING_RE = re.compile(r'(?:b?r(?P<hashes>\#*)"(?P<raw>.*?)"(?P=hashes)|b?"(?P<escaped>(?:\\.|[^"\\])*)")')
+RUST_TYPE_FIELD_RE = re.compile(
+    r"^\s*pub(?:\(crate\))?\s+\w+\s*:\s*"
+    r"(?:[A-Za-z_]\w*::)*[A-Z]\w*(?:<(?:[A-Za-z_]\w*::)*[A-Z]\w*>)?\s*,?\s*$"
+)
+
+
+def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, bool]:
+    """Return (recognized nonliteral expression, suspicious nested literal)."""
+    if assignment.group("quoted") is not None:
+        return False, False
+    expression = content[assignment.start("bare"):].strip()
+    suspicious = False
+
+    def replace_literal(match: re.Match[str]) -> str:
+        nonlocal suspicious
+        value = match.group("raw")
+        if value is None:
+            escaped = match.group("escaped")
+            try:
+                # Decode the shared Python/Rust escape subset. Unsupported Rust
+                # escapes fail closed rather than silently exempting a literal.
+                value = ast.literal_eval('"' + escaped + '"')
+            except (SyntaxError, ValueError):
+                suspicious = True
+                return "LITERAL"
+        # Mapping keys are field names, not credential values. A Rust :: path
+        # following a literal is not a mapping key.
+        following = expression[match.end():].lstrip()
+        mapping_key = following.startswith(":") and not following.startswith("::")
+        # A bracket alone can start an array literal. Only exempt simple
+        # identifier/chained-index receivers; other receivers stay conservative.
+        receiver = re.search(r"(?P<name>[A-Za-z_]\w*|\])\s*\[\s*$", expression[:match.start()])
+        index_key = bool(
+            receiver and following.startswith("]")
+            and receiver.group("name") not in {
+                "return", "break", "yield", "else", "in", "loop", "move",
+                "const", "unsafe", "async",
+            }
+        )
+        if not (mapping_key or index_key):
+            suspicious |= _looks_like_plaintext_value(value)
+        return "LITERAL"
+
+    skeleton = RUST_STRING_RE.sub(replace_literal, expression)
+    if suspicious:
+        return False, True
+    if RUST_TYPE_FIELD_RE.fullmatch(content):
+        return True, False
+    # Require a path/member access or call: an arbitrary bare high-entropy
+    # identifier must never be mistaken for a runtime expression.
+    runtime = re.match(r"^&?[A-Za-z_]\w*(?:::|\.|\(|!\(|\[)", skeleton)
+    supported = re.fullmatch(r"[A-Za-z0-9_\s.:,;(){}\[\]<>!?&|=+*\-]+", skeleton)
+    return bool(runtime and supported), False
+
+
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
     for path, line, content in _added_lines(diff):
@@ -284,6 +346,18 @@ def _findings(diff: str) -> list[Finding]:
                         or (assignment.group("quoted") is None
                             and PYTHON_ATTRIBUTE_RE.fullmatch(value))
                     ):
+                        continue
+                    rust_safe, rust_literal = (
+                        _rust_assignment(content, assignment)
+                        if path.endswith(".rs") else (False, False)
+                    )
+                    if rust_literal:
+                        # Do not print Rust literals here: Python tokenization
+                        # cannot reliably mask raw/escaped Rust strings.
+                        findings.append(Finding(path, line, rule, "<Rust credential literal redacted>"))
+                        detected = True
+                        break
+                    if rust_safe:
                         continue
                     if _looks_like_plaintext_value(value):
                         findings.append(Finding(path, line, rule, _redact_content(content)))

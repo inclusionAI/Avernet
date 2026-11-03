@@ -21,7 +21,7 @@ export function BotManagementTabs({
     <div className={cn('flex items-center gap-1', className)} role="tablist" aria-label="Bot 类型">
       {(
         [
-          ['tc', 'TC Bot'],
+          ['tc', '内部Bot'],
           ['external', '外部 Bot'],
         ] as const
       ).map(([tab, label]) => (

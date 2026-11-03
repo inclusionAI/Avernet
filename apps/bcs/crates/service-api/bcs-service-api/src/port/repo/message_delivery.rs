@@ -13,10 +13,19 @@ pub enum DeliveryWorkBatch { Expired, Control, Recovery }
 #[derive(Debug, Clone)]
 pub enum DeliveryLookup {
     Id(String),
+    /// At most two DISTINCT retained dispatch task identities; hex prefix only.
+    TaskPrefix { prefix: String, retained_after_ms: i64, legacy_intents: Vec<String> },
+    /// One bounded round-trip for at most twenty normalized selectors. Exclude
+    /// at most 256 known legacy intents BEFORE the uncertain-candidate LIMIT;
+    /// these are suppression evidence, not additional lookup selectors.
+    TaskPrefixes { prefixes: Vec<String>, retained_after_ms: i64, legacy_intents: Vec<String> },
     /// Bounded lookup for projection recovery; at most 8 identities.
     Ids(Vec<String>),
     Request(String),
     Run { bot: String, alias: String },
+    /// Exact internal Run in one Bot/Session, at most two rows to detect
+    /// ambiguity. Does not interpret transport/request aliases.
+    CanonicalRun { bot: String, session: String, run: String },
     Bound(String),
     Lane { bot: String, session: String },
     /// At most one unfinished Send; Inject must not block legacy drain.
@@ -57,6 +66,14 @@ pub struct DeliveryAdmissionTarget {
     pub kind: DeliveryType,
     pub max_queued: u32,
     pub semantic_projection_json: serde_json::Value,
+    /// Caller-preassigned canonical run identity for this delivery
+    /// (Send targets only). The sending flow assigns it BEFORE the
+    /// durable admission commits so the run's operation binding and
+    /// frozen producer facts exist before ANY queue worker can
+    /// execute the row — a callback can never observe an admitted
+    /// run without its trusted operation identity (spec §8.2).
+    /// `None` lets the admission assign one (legacy producers).
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

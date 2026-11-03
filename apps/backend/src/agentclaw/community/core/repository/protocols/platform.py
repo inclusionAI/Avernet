@@ -10,12 +10,13 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Any, List, Optional, Protocol, Sequence, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.quality.models import QualityTaskRecord
     from agentclaw.community.core.session_resources.types import SessionResourceRecord
     from agentclaw.community.core.task_queue.types import (
+        ClaimOutcome,
         EnqueueResult,
         TaskRecord,
         TaskStatus,
@@ -177,6 +178,25 @@ class TaskQueueRepositoryProtocol(Protocol):
         ``RUNNING`` with a lapsed lease -- are taken ahead of due ``PENDING``
         ones, both drawing on that one ``limit``. Due work has the next poll;
         a row abandoned by a worker that died holding it has no other path back.
+        """
+        ...
+
+    @abstractmethod
+    def claim_batch_reporting_retired(
+        self,
+        *,
+        worker_id: str,
+        env: str,
+        app: str,
+        limit: int,
+        lease_seconds: int,
+    ) -> ClaimOutcome:
+        """:meth:`claim_batch`, also answering the rows the scan retired ``TIMED_OUT``.
+
+        Same claim, same retirement; ``won`` is what ``claim_batch`` returns.
+        ``retired`` holds each row whose retirement *this* call made (read back
+        after its ``UPDATE`` landed), so the worker can run the task type's
+        give-up hook for it. A row another worker retired first is not in it.
         """
         ...
 
@@ -435,6 +455,16 @@ class ResourceRepositoryProtocol(Protocol):
     @abstractmethod
     def delete(self, resource_id: str) -> bool:
         """Soft-delete (status=deleted). Returns True if a row was updated."""
+        ...
+
+    @abstractmethod
+    def delete_many(self, resource_ids: Sequence[str]) -> int:
+        """Soft-delete every listed row in one statement; the number of rows updated (0 for no ids)."""
+        ...
+
+    @abstractmethod
+    def create_many(self, rows: Sequence[dict]) -> List[dict]:
+        """Insert every row in one flush, in order; the stored representations (empty for no rows)."""
         ...
 
     @abstractmethod

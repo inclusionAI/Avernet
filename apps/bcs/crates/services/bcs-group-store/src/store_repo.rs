@@ -6,6 +6,7 @@
 //! those inherent methods; inherent candidates win method resolution, so these
 //! one-line bodies do not recurse into themselves.
 use super::*;
+use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 
 #[async_trait]
 impl GroupRepoPort for MySqlGroupStore {
@@ -47,6 +48,14 @@ impl GroupRepoPort for MySqlGroupStore {
         group_id: &str,
     ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
         self.read_human_notify_policy_sql(group_id).await
+    }
+
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        // Strict master-source read; no cache fallback.
+        self.read_authorization_snapshot_sql(group_id).await
     }
 
     async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
@@ -110,24 +119,12 @@ impl GroupRepoPort for MySqlGroupStore {
             .await
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        self.update_workspace_sql(id, workspace).await
-    }
-
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         self.update_label_sql(id, label).await
     }
 
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()> {
         self.update_status_sql(id, status).await
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        self.update_service_spec_sql(id, service_spec).await
     }
 
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>> {

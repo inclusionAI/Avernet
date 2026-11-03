@@ -51,7 +51,7 @@ beforeEach(async () => {
     .mocked(ctrl.favoriteBotSession)
     .mockResolvedValue({ code: 200000, data: { session_id: 'session-1', favorited: true } });
 });
-const params = { user_id: 'login-viewer', owner_id: 'team-entity', stage: 'draft' };
+const params = { user_id: 'login-viewer', owner_id: 'team-entity' };
 test('mine 列表、创建、详情、消息和模型都使用登录用户+实体 owner，无 f_user_id', async () => {
   await botSessionService.listSessionsPage(bot, 'login-viewer');
   await botSessionService.createSession(bot, 'login-viewer');

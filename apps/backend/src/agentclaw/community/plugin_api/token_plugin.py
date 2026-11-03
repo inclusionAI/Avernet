@@ -40,6 +40,7 @@ class TokenScopeMatcher(Protocol):
         entity_id: str,
         user_list_type: str,
         env: str,
+        bot_type: str,
     ) -> bool: ...
 
 

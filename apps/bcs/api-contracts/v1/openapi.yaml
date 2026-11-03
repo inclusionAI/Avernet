@@ -4,6 +4,8 @@ info:
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
 tags:
+  - name: Collaboration / Users
+    description: Verified Human context for collaboration clients.
   - name: Authentication
     description: OAuth login and session lifecycle operations for the public OpenAPI auth facade.
   - name: Collaboration / Bots
@@ -27,6 +29,8 @@ tags:
   - name: Group Context
     description: Versioned, permission-tagged KV store for bot teams within a group.
 paths:
+  /openapi/v1/collaboration/me:
+    $ref: ./openapi/human.yaml#/CurrentUserPath
   /openapi/v1/auth/url:
     $ref: ./openapi/auth.yaml#/AuthUrlPath
   /openapi/v1/auth/callback/{provider}:
@@ -39,12 +43,16 @@ paths:
     $ref: ./openapi/auth.yaml#/AuthLogoutPath
   /openapi/v1/collaboration/bots/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath
+    parameters:
+      - $ref: ./openapi/human.yaml#/ExpectedUser
   /openapi/v1/collaboration/bots/query:
     $ref: ./openapi/bots.yaml#/QueryBotsPath
   /openapi/v1/collaboration/bots/{bot_id}:
     $ref: ./openapi/bots.yaml#/BotPath
   /openapi/v1/collaboration/bots/{bot_id}/candidates:
     $ref: ./openapi/bots.yaml#/BotCandidatesPath
+    parameters:
+      - $ref: ./openapi/human.yaml#/ExpectedUser
   /openapi/v1/collaboration/bots/{bot_id}/eligible-candidates:
     $ref: ./openapi/bots.yaml#/EligibleBotCandidatesPath
   /openapi/v1/collaboration/bots/{bot_uuid}/friendships:
@@ -69,6 +77,8 @@ paths:
     $ref: ./openapi/friendships.yaml#/FriendConnectionsPath
   /openapi/v1/collaboration/groups:
     $ref: ./openapi/groups.yaml#/GroupsPath
+    parameters:
+      - $ref: ./openapi/human.yaml#/ExpectedUser
   /openapi/v1/collaboration/public-groups:
     $ref: ./openapi/groups.yaml#/PublicGroupsPath
   /openapi/v1/collaboration/groups/{group_id}:

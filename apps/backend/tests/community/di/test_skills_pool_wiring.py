@@ -3,7 +3,6 @@
 from dataclasses import replace
 from unittest.mock import MagicMock
 
-from tests.community.helpers.skill_projection_guard import PassThroughSkillProjectionGuard
 
 import pytest
 
@@ -93,7 +92,6 @@ def test_skill_runtime_delivery_is_wired_only_into_per_domain_projection() -> No
     center_content = MagicMock(spec=CenterContentDistribution)
 
     registry = SkillCenterModule().engine_runtime_projection_registry(
-        guard=PassThroughSkillProjectionGuard(),
         pool_runtime=pool_runtime,
         pool_layouts=pool_layouts,
         device_contexts=device_contexts,
@@ -401,14 +399,60 @@ def test_coding_template_pool_paths_use_aicoding_physical_layout(
     assert delete_storage._device_directory == expected
 
 
-def test_real_composition_wires_shared_snapshot_guard(test_injector):
-    from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
-    from agentclaw.community.core.skill_center.services.runtime_projections.registry import EngineRuntimeProjectionRegistry
-    from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
-    from agentclaw.community.plugin_api.cache import CachePlugin
 
-    registry = test_injector.get(EngineRuntimeProjectionRegistry)
-    guard = registry.for_engine("openclaw")._skill_delivery._guard
-    assert isinstance(guard, SkillProjectionGuard)
-    assert guard._cache is test_injector.get(CachePlugin)
-    assert guard._reader is test_injector.get(BotCapabilityStateReaderProtocol)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("engine", "names"), [
+    ("claude_code", ("worktime-tracker", "featurepro-knowledge-flow", "jar-publish", "aix-support")),
+    ("openclaw", tuple(f"repo-{i}" for i in range(8)) + ("learn-method", "antwork")),
+])
+async def test_composed_skill_delivery_reaches_transport_when_cache_locks_fail(
+    test_injector, monkeypatch, engine, names,
+):
+    from unittest.mock import AsyncMock
+
+    from agentclaw.community.core.devices.services.device_context import DeviceContext
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        ResolvedSkillPlan, RuntimeProjectionStatus,
+    )
+    from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjectionResolver
+    from agentclaw.community.core.skill_center.services.runtime_projections.registry import EngineRuntimeProjectionRegistry
+    from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+    from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError, CachePlugin
+    from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+
+    cache = test_injector.get(CachePlugin)
+    locks = {}
+    for method in ("acquire_lock_strict", "renew_lock_strict"):
+        locks[method] = MagicMock(side_effect=CacheLockInfrastructureError("cache unavailable"))
+        monkeypatch.setattr(cache, method, locks[method])
+    context = DeviceContext(
+        provider="baas", conn_info={"binding_id": 19}, binding_id=19,
+        bot_id="bot-1", user_id="owner-1", bot_type="personal",
+    )
+    monkeypatch.setattr(test_injector.get(DeviceContextResolver), "resolve_for_bot", lambda *_: context)
+    monkeypatch.setattr(test_injector.get(SkillsPoolLayoutRepositoryProtocol), "get", lambda _: None)
+    assets = tuple(RegisteredSkillAsset(
+        skill_id=i + 1, name=name, git_path=f"git://infra/{name}",
+    ) for i, name in enumerate(names))
+    plan = ResolvedSkillPlan(
+        bot_id="bot-1", owner_id="owner-1", engine=engine,
+        bot={"env": "test", "entity_id": "owner-1", "active_engine": engine},
+        projection=RuntimeProjectionResolver().resolve_skills(assets),
+    )
+    async def respond(_conn, method, path, *, body, **_kwargs):
+        return {"success": True, "data": {"status": "CONVERGED", "items": [
+            {"mapping": mapping, "action": "APPLY", "status": "CONVERGED",
+             "target": f"/skills/{mapping['link_name']}", "retryable": False}
+            for mapping in body["mappings"]
+        ], "issues": [], "evidence": {}}}
+    invoke = AsyncMock(side_effect=respond)
+    monkeypatch.setattr(test_injector.get(DeviceAdapterTransport), "invoke", invoke)
+    result = await test_injector.get(EngineRuntimeProjectionRegistry).for_engine(engine).apply(
+        plan=plan, scope=ProjectionScope(skills=True), service_factory=MagicMock(),
+    )
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    invoke.assert_awaited_once()
+    assert invoke.call_args.args[1:3] == ("POST", "/api/skills/mappings/apply")
+    assert [item["link_name"] for item in invoke.call_args.kwargs["body"]["mappings"]] == list(names)
+    for lock in locks.values():
+        lock.assert_not_called()

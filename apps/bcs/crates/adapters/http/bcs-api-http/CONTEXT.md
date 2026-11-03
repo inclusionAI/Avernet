@@ -2,6 +2,17 @@
 
 ## Provides
 
+- Immutable Draft GET/validate at `/api/v1/collaboration/drafts/**`, outside
+  Gateway middleware, using public fixed-revision reads without credentials. The native
+  and V1 adapters share one injected Draft service; V1 adds an envelope, not
+  management routes, identity fallback or persistence.
+- `GET /openapi/v1/collaboration/me` projects the verified Human only. The native
+  `/collaboration/user` browser slice reuses V1 me/Bot mine/candidates/Group create
+  handlers with a bootstrap-selected Human verifier, no-store responses and a
+  cross-site/custom-header write boundary. `X-BCS-Expected-User` compares a
+  prepared configuration's user with verified identity before dispatch; it is
+  never an authentication source. Ownership and eligibility stay in application.
+
 - `GET /openapi/v1/collaboration/channels/conversations/by-session` reuses the
   Session V1 application facade's Human/owned-Bot read authorization before
   querying Channel mappings. It returns a V1 envelope with all mappings and
@@ -116,3 +127,8 @@ derives authentication mode from the Provider configuration and validates the
 parent/slug split. No separate request slug or expected auth mode is consumed.
 Gateway Principal checks retain the signed Bot UUID and reject a mismatching
 Actor; bootstrap additionally injects current persisted-state validation.
+
+Scoped A2A registration also accepts an optional JSON body containing inline
+agent_card or agent_card_url. Query/body duplicates and mixed sources are rejected.
+An omitted A2A display name is passed to the application for Card.name defaults;
+legacy registrations still require names. See minimal-card-registration-v1.md.

@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.task.trajectory_html import render_trajec
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
 )
+from agentclaw.community.adapters.http.task.schemas_execute_diagnostics import task_info_request_params_to_dict
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -52,6 +53,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
@@ -64,7 +68,9 @@ from agentclaw.community.api.task.task_context_service import (
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+
 
 def _validate_status_filter(status: str | None) -> None:
     """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
@@ -87,6 +93,8 @@ def _validate_single_status(status: str | None) -> str | None:
     return v
 
 
+logger = get_logger()
+
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 # Handler-level principal dependency: `test_public_routes_require_principal` walks each
@@ -108,6 +116,10 @@ async def execute_task(
     """提交执行任务。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute 首帧。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ @envelope_errors 映射 409。"""
+    logger.info(
+        "[task_execute_openapi] request params=%s",
+        task_info_request_params_to_dict(body),
+    )
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
@@ -127,9 +139,9 @@ async def get_task_dashboard(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+    """任务执行详情可视化(整图或按 node_id 子树投影)。
 
     include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
@@ -139,11 +151,13 @@ async def get_task_dashboard(
         graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
     else:
         graph = service.get_task_dashboard(task_id, node_id)
+    # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
+    artifact_rows = artifact_service.list_artifacts(graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
             include_action_log=include_action_log,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )

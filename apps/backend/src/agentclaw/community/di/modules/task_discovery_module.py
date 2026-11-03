@@ -67,6 +67,7 @@ from agentclaw.community.core.task.task_runner.client.bcs_token_provider import 
 from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolverProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -118,6 +119,7 @@ class TaskDiscoveryModule(Module):
     def _provide_discovery_service(
         self,
         reader: TaskReader,
+        bot_addresses: BotAddressResolverProtocol,
         session_initiator: SessionInitiator,
         notify_sender: NotifyMessagesProvider,
         bot_service: _TaskDiscoveryBotServiceProtocol,
@@ -136,6 +138,7 @@ class TaskDiscoveryModule(Module):
         except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
             fe_provider = ConfigFrontendUrlProvider()
         return DiscoveryService(
+            bot_addresses=bot_addresses,
             reader=reader,
             session_initiator=session_initiator,
             notify_sender=notify_sender,

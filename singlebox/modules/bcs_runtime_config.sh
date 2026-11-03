@@ -21,6 +21,79 @@ toml_sed_replacement() {
     printf '%s' "$value"
 }
 
+# Render a multiline PEM as one TOML string value (\n escaped, backslashes
+# doubled by toml_sed_replacement semantics are NOT wanted here — PEM has no
+# backslashes, so plain \n joining is enough).
+toml_single_line_pem() {
+    local line first=1
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        if [ "$first" -eq 1 ]; then
+            printf '%s' "$line"
+            first=0
+        else
+            printf '\\n%s' "$line"
+        fi
+    done
+}
+
+# Dev/test-only caller identity injection for the E2E run: generate a fresh
+# Ed25519 keypair per run with openssl so no PEM material ever lives in a
+# committed file while the instrumented BCS exercises the caller identity
+# plugin, dispatch pipeline and speaking lease end to end. Production config
+# comes from secret provisioning instead.
+append_bcs_e2e_caller_identity_config() {
+    local config_dir="$1"
+    local priv_pem pub_pem pseudonym_hex
+    # Idempotent: a developer-edited template may already carry a
+    # [caller_identity] section with its own dev keys — never inject a
+    # duplicate table (a duplicate would fail TOML parsing and take down
+    # the whole config load).
+    if grep -q '^\[caller_identity\]' "${config_dir}/bcs-config.toml" 2>/dev/null; then
+        log_info "Config template already carries [caller_identity]; skipping E2E keypair injection"
+        return 0
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        log_error "openssl is required to generate the E2E caller identity keypair"
+        return 1
+    fi
+    priv_pem="$(openssl genpkey -algorithm ed25519 2>/dev/null)" || {
+        log_error "openssl could not generate an Ed25519 keypair for the E2E caller identity"
+        return 1
+    }
+    pub_pem="$(printf '%s\n' "$priv_pem" | openssl pkey -pubout 2>/dev/null)" || return 1
+    pseudonym_hex="$(openssl rand -hex 16 2>/dev/null)" || return 1
+
+    local caller_block
+    caller_block="$(cat <<TOML
+
+[caller_identity]
+plugin = "jwt"
+
+[caller_identity.jwt]
+issuer = "https://singlebox-bcs.local/caller"
+signing_kid = "singlebox-caller-kid-01"
+signing_key_pem = "$(toml_single_line_pem <<<"$priv_pem")"
+pseudonym_key_hex = "${pseudonym_hex}"
+max_ttl_seconds = 300
+
+[[caller_identity.jwt.public_keys]]
+kid = "singlebox-caller-kid-01"
+public_pem = "$(toml_single_line_pem <<<"$pub_pem")"
+
+[speaking_lease]
+idle_timeout_ms = 60000
+TOML
+)"
+    local config_file
+    for config_file in \
+        "${config_dir}/bcs-config.toml" \
+        "${config_dir}/bcs-config-local.toml"; do
+        printf '%s\n' "$caller_block" >> "$config_file" || return 1
+    done
+    log_info "Generated E2E caller identity JWT keypair and injected [caller_identity]"
+}
+
 resolve_bcs_local_llm_api_key_reference() {
     # 以下为安全注释COSEC：仅解析明确的环境变量引用，避免将占位符传给 BCS Judge。
     if [ "${OPENCLAW_OPENAI_API_KEY:-}" != "OPENAI_API_KEY" ]; then
@@ -189,6 +262,10 @@ prepare_bcs_runtime_config() {
             fi
             mv "$tmp_file" "$config_file" || return 1
         done
+        # The e2e caller story needs the identity plugin assembled: inject a
+        # per-run dev keypair and the speaking-lease window. See
+        # append_bcs_e2e_caller_identity_config for the material lifecycle.
+        append_bcs_e2e_caller_identity_config "$config_dir" || return 1
     elif [ "${BCS_SERVER_ENV:-}" = "local" ]; then
         local bcs_llm_env_count=0
         local bcs_llm_missing=()

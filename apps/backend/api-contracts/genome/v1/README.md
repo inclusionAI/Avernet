@@ -322,7 +322,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
 | Category | Key | Value |
 | --- | --- | --- |
 | `persona` | `type` | `digest` |
-| `skills` | `name` | `origin: local` + `digest` (a tree), or `origin: center` + `center_version` |
+| `skills` | `name` | `origin: local` + `digest` (a tree), `origin: center` (nothing else), or `origin: repo` + `repo_path` |
 | `resources` | `path` (trailing `/` = directory) | `digest` (file bytes, or a tree for a directory) |
 | `tools.mcp` | `server_code` | optional `config` |
 | memory item | `key` | `text`, `tags`, `source` |
@@ -331,7 +331,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   never inline, whatever way it arrived (fetched, inline in a Manifest,
   written by a patch).
 - An entry with no bytes has inline fields only: an MCP server's bot-level
-  config, a Center skill's pinned version.
+  config, a shared-repository skill's path. A Center skill has none.
 - Keys are stable while values change, so a diff reports "modified", and a
   pin on a key keeps matching after its value changes.
 
@@ -364,10 +364,14 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   directory around the package and drops the paths the validator ignores
   (`.DS_Store`, `._*`, `Thumbs.db`, `ehthumbs.db`, `Desktop.ini`, a root
   `__MACOSX/`, any `.git` or `__pycache__` component, `*.pyc`, `*.pyo`), so
-  the digest is of what apply delivers. `center`: a governed Skill Center skill pinned by version and
-  not copied (ADR 0010); a pinned version is a reference to a published
-  version, not evidence that it is active. A Manifest v1 document cannot yet
-  declare a Center skill; RSI-04 adds that source.
+  the digest is of what apply delivers. `center`: a governed Skill Center skill,
+  named and not copied. No version is recorded: a bot runs whatever version
+  the Center publishes (ADR 0002), so a newer Center version is not drift;
+  apply finds the Center asset by this name (RSI-04). A Manifest v1 document
+  cannot declare a Center skill. `repo`: a skill supplied from the
+  platform-synced shared skill repository, named by `repo_path` (what follows
+  `git://` on the skill row); neither copied nor pinned to a commit, for the
+  same reason (added by RSI-03, additive under §1).
 - **`memory`.** `null`, or `{mode, items_digest}`. `mode` is `seed`, `merge`
   or `replace` (01-genome.md §2.2).
 - **`resources`.** `path` is workspace-relative: characters
@@ -392,7 +396,7 @@ Every entry in `spec` is a **key**, the one field that names it, plus a
   system's path limit (4096 bytes on Linux) once the workspace root is in
   front of it. The characters are the Manifest's own path rule, ASCII only:
   a resource with any other name could not be written back through a
-  compiled document, so it cannot be recorded (§7, §8). Every file a resource puts in the
+  compiled state, so it cannot be recorded (§7, §8). Every file a resource puts in the
   workspace (a file resource, or each member of a directory resource) must
   pass the workspace admission rule apply uses, `admission_refusal` in
   `core/resources/services/file_service.py`: an allowed extension
@@ -498,7 +502,7 @@ policy, copied unchanged.
   and the script change only when an owner records a whole Manifest document,
   which keeps tool changes human-only structurally.
 - Memory ops are rejected while `spec.memory` is `null`.
-- A Center skill's pinned version is changed by an owner recording a
+- Adding or removing a Center skill is done by an owner recording a
   document, not by a patch.
 - Content is given inline (a UTF-8 string, at most 64 KiB once encoded, the
   Manifest's inline limit; the schema's `maxLength` can only bound code points,
@@ -647,13 +651,25 @@ matters for resources, whose add and remove are T1.
 
 ### 6.4 Rules checked when a patch is recorded
 
-- `base` equals the revision it is applied to; every op applies exactly, or
-  the patch is rejected (no fuzzy merge).
+- A patch is applied to its own `base`, which must be a revision of the bot
+  the patch is recorded for; every op applies exactly, or the patch is
+  rejected (no fuzzy merge).
 - Every gene path in the policy and in the patch is in its canonical
   spelling (§2).
 - Every op's gene path is covered by `mutable_genes`, overlaps no pin, and,
   for a patch recorded for an Evolution Run, is covered by the run's
   `allowed_genes`.
+- A patch recorded for an Evolution Run is new content: when its result is
+  a revision already recorded from another patch or from a capture, it is
+  refused (`already_recorded`), because its candidate id (the patch digest)
+  would not name that revision's patch, and when its result is a revision
+  another run or an owner recorded from the same patch, because that
+  revision's status and provenance are not this candidate's. Only the run
+  that first recorded a candidate, resubmitting the same patch, gets the
+  revision back; the same run with a different patch (say, a new rationale)
+  that produces the same content is refused too, since the revision's
+  `patch_digest` names the first patch.
+  An owner's draft that reproduces a revision gets that revision.
 - `rationale` is non-empty. `evidence` is required for every op except
   `file.edit` on a resource, `memory.retire` and `persona.remove`, which can
   be motivated by the rationale alone.
@@ -668,7 +684,7 @@ matters for resources, whose add and remove are T1.
 
   | Category | Predicate apply uses | Checks |
   | --- | --- | --- |
-  | `persona` | `IdentityMaterialiser`, `legal_identity_types` | UTF-8 bytes (including content given by digest); a type the bot's engine accepts |
+  | `persona` | `IdentityMaterialiser`, `legal_identity_types`, the identity fetch cap | UTF-8 bytes (including content given by digest), at most 1 MiB; a type the bot's engine accepts |
   | `skills` (`local`) | `SkillPackageValidator`, skills materialiser | One root `SKILL.md` with front matter `name` equal to the entry name and a non-empty `description`; Skill Center limits and path rules |
   | `resources` | `admission_refusal` (`core/resources/services/file_service.py`) | Every file, and every member of a directory: an allowed extension, at most 500 MB |
   | `resources` | resources materialiser (`apply/materialisers/resources.py`) | With trailing `/` removed, paths unique and none a whole-segment prefix of another (`foo.md` with `foo.md/`, `data/` with `data/a.md`, `foo.md` with `foo.md/b.csv`) |
@@ -695,28 +711,40 @@ matters for resources, whose add and remove are T1.
 - Limits mirror the Manifest: 50 entries per category, 64 KiB of UTF-8 per
   inline content value and per unified diff (a change that needs more is
   sent as whole-file content by digest), at most 500 `file_diffs` in a
-  `skill.update`,
-  and the fetch-time size limits for skills (100 MiB), files (100 MiB) and
-  trees (200 MiB, 5000 files).
+  `skill.update`, at most 100 `evidence` refs of at most 128 characters
+  (the revision row stores them in a 64 KiB column),
+  and the fetch-time size limits for persona files (1 MiB), skills (100 MiB),
+  files (100 MiB) and trees (200 MiB, 5000 files).
 
-## 7. Recording a revision from a Manifest document
+## 7. Recording a revision
 
-A revision is recorded either from a patch (§6) or from a whole Bot Config
-Manifest v1 document. The second path:
+A revision is recorded in one of two ways, both total (§4.3) by construction:
 
-1. **Parse** the YAML once and validate it with the Manifest's own validator.
-2. **Fill** every category the document leaves out from the parent revision
-   (or, for the bot's first revision, from the bot's current state, below).
-3. **Fetch** every source once, through the Manifest's existing fetch
-   machinery (named sources, credentials, placeholders, `unpack`,
-   `strip_components`), and store the bytes in the content store.
-4. **Build** `spec` from the fetched bytes (§4); a skill's tree is built from
-   the files `SkillPackageValidator` keeps (§4.2). Copy the policy from the
-   parent (the default policy for a first revision).
-5. **Store** the original YAML as the provenance record. It keeps the source
-   addresses and comments; it is never hashed.
+- **From a patch** (§6): the ops are applied to the patch's own `base`, a
+  revision of the same bot, and the result is the new revision. Its parent is
+  `base`; its policy is the base's.
+- **By capture**: the bot's current state (persona files, skills, resources,
+  MCP servers, startup script) is read through the same services the
+  Manifest materialisers write through, normalised as below, and recorded
+  whole. Its parent is the bot's `active` revision (its latest revision
+  while it has no `active` yet), or none for the bot's first; its policy is
+  `active`'s (the default policy for a first revision).
+  Capturing an unchanged bot returns the existing revision.
 
-How fetch details end up:
+A policy change is its own record: a revision with `active`'s `spec` and the
+new `policy`, whose parent is `active`. It is recorded under the same rule as
+every other revision: the spec is re-checked against what apply accepts at
+that moment (§6.4), so a policy change, a tightening included, is refused
+while `active`'s content no longer applies (a revoked MCP permission, a
+retired server); the reasons name what to fix first. No request carries a
+base of its own; the base is always the patch's, `active`, or none.
+
+A Bot Config Manifest v1 document is not recorded directly. It is applied
+through `PUT /config-manifest` as today, and the resulting bot state is then
+captured; the field-by-field mapping of a document into the revision it
+yields, and of the revision into the compiled desired state, is in
+[`manifest-v1-compatibility.md`](manifest-v1-compatibility.md). How the
+document's fetch details end up, after apply and capture:
 
 - **Not needed after the fetch.** Source addresses (git `url`, `ref`,
   `subpath`, `mode`; OSS `bucket`, `key`), the `auth` credential name,
@@ -724,26 +752,27 @@ How fetch details end up:
   Once the bytes have a digest, applying the revision needs none of them, so
   they are not in `spec` and not hashed. The same bytes from a moved
   repository give the same revision. A revision cannot refresh itself from
-  its sources: refreshing means recording the Manifest again.
+  its sources: refreshing means applying the document again and capturing.
 - **Placeholders** (`${BOT_ENGINE_TYPE}`, `${BOT_ENV}`, `${BOT_TENANT}`,
-  `${BOT_ARCH}`) are resolved once, at record time, with the recording bot's
-  values. A revision belongs to one bot, whose engine, environment and tenant
-  do not change in normal use, so this gives the same bytes apply would have
-  fetched.
-- **Inline `content`** is stored in the content store and referenced by
-  digest, like fetched content.
-- **Script body.** The same placeholder substitution apply performs on a
-  script body is done once at record time, and the substituted body is stored.
+  `${BOT_ARCH}`) were resolved by apply with the bot's values; the captured
+  bytes are the resolved ones. A revision belongs to one bot, whose engine,
+  environment and tenant do not change in normal use.
+- **Inline `content`** reaches the bot as bytes and is captured like any
+  other file, stored in the content store and referenced by digest.
+- **Script body.** The body apply stored, with its placeholders substituted,
+  is what capture records.
 
-**First revision: capturing the bot's current state.** Categories the first
-document leaves out are captured from what the bot has now. One rule applies
-while capturing:
+**Capturing the bot's current state.** Two rules apply while capturing:
 
 A current-state resource whose path the Manifest's path rule refuses (any
 character outside `A–Z a–z 0–9 . _ - /`, for example `how to.md`, which the
-console upload accepts) cannot be captured, because no compiled document
+console upload accepts) cannot be captured, because no compiled state
 could deliver it back. Capture refuses and names the path, rather than
-dropping the resource silently; the owner renames it first (§8).
+dropping the resource silently; the owner renames it first (§8). Capture
+reads resource files the platform has a row for, by their workspace-relative
+path; a skill installed from a `local://` package is stored as the
+`acm-tree-v1` tree of the files `SkillPackageValidator` keeps (§4.2), a
+Center skill by its name, a shared-repository skill as its `repo_path`.
 
 > **The AGENTS.md reference block is removed.** On openclaw bots, writing any
 > of `RULES.md`, `OKR.md`, `SAFETY.md` or `OUTPUT.md` makes the platform
@@ -774,15 +803,29 @@ dropping the resource silently; the owner renames it first (§8).
 **Ignored and refused.**
 
 - `cli_tools` in a document is ignored: it stays only in the provenance YAML,
-  the revision has no CLI tools, and the compiled document omits the
-  category, so apply leaves the bot's existing CLI tools as they are.
+  the revision has no CLI tools, and the compiled state leaves the construct
+  undeclared, so apply leaves the bot's existing CLI tools as they are.
 - `engine_config` in a document is refused (the Manifest refuses it too),
   until #2858.
 
-**Compiling.** Compiling a revision gives a Manifest document whose entries
-point at the content store by digest. That source kind is added to the
-Manifest by RSI-04, as is a source for Center skills. The mapping of every
-field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
+**Compiling.** Compiling a revision gives the apply engine's typed desired
+state (`core/apply_engine/desired_state.py`): one declaration per construct
+the revision covers — `script`, `identity`, `resources`, `skills`, `mcp`,
+an empty list declaring "none" — whose entries name their bytes in the
+content store by digest, a Skill Center skill by its name and a
+shared-repository skill by its path; `cli_tools` and `engine_config` stay
+undeclared, and `memory` is not delivered while `null`. A Bot Config
+Manifest document compiles into the same state, so the two are compared,
+not translated: the contract tests check that every example case compiles
+to the same state from its document and from its revision. The state is
+consumed by the apply engine directly (RSI-04 binds the promotion to an
+apply whose state reference names the promotion), never by
+`PUT /config-manifest`.
+
+**What a bot runs.** Whether a bot holds its `active` revision is observed,
+never recorded: the registry captures the bot's state as `capture` would
+and compares the revision id it would record with `active`. The mapping of
+every field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
 
 ## 8. Known limitations
 
@@ -791,8 +834,6 @@ field is in [`manifest-v1-compatibility.md`](manifest-v1-compatibility.md).
 | A revision pins only the bot-level MCP override; the user-level MCP config and Center defaults are read at apply time, so the same revision can give a different MCP setup later | [#2859](https://github.com/inclusionAI/Avernet/issues/2859) |
 | MCP header values are stored as written. A credential put in a header would be kept in revisions, which are never deleted. No production bot does this today | [#2860](https://github.com/inclusionAI/Avernet/issues/2860) |
 | `engine_config` is refused | [#2858](https://github.com/inclusionAI/Avernet/issues/2858) |
-| Removing a resource from a Manifest does not remove it from the bot, so going back to a revision without a resource leaves it in place | [#2162](https://github.com/inclusionAI/Avernet/issues/2162) |
 | Editing one file of a directory stores a new blob for the whole tree | Open decision G-1 |
-| CLI tools are not part of a revision; compiled documents leave them untouched | acli work |
-| `script: null` in a Manifest document is read as "absent" by apply, so a compiled document cannot remove a bot's script | [#2862](https://github.com/inclusionAI/Avernet/issues/2862) |
+| CLI tools are not part of a revision; a compiled state leaves them undeclared, so apply leaves them untouched | acli work |
 | Resource paths use the Manifest's ASCII path rule, while the console upload accepts any name; a bot with a resource such as `how to.md` must rename it before its first revision is captured | Manifest v1 path rule (`_PATH_CHARS_RE`) |

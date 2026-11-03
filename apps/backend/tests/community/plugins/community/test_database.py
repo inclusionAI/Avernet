@@ -1,6 +1,6 @@
-"""Unit tests for the community CommunityDatabase (B3).
+"""Unit tests for the community CommunitySqliteDatabase (B3).
 
-CommunityDatabase owns the real schema by default: ``bootstrap()`` runs
+CommunitySqliteDatabase owns the real schema by default: ``bootstrap()`` runs
 ``core/schema.py``'s ``create_all`` unless ``create_schema=False``. The
 session-level tests below are about connection and transaction behaviour rather
 than the app schema, so they provision their own throwaway tables from a
@@ -22,6 +22,7 @@ from agentclaw.community.core.models.local_skill_security_observation import (
 )
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.community.database import CommunityDatabase
+from agentclaw.community.plugins.community.sqlite_database import CommunitySqliteDatabase
 
 Base = declarative_base()
 
@@ -42,7 +43,7 @@ class _Child(Base):
 
 @pytest.mark.asyncio
 async def test_operator_owned_database_starts_with_security_disabled(tmp_path):
-    database = CommunityDatabase(
+    database = CommunitySqliteDatabase(
         f"sqlite:///{tmp_path}/disabled.db", create_schema=False,
         security_schema_required=False,
     )
@@ -52,7 +53,7 @@ async def test_operator_owned_database_starts_with_security_disabled(tmp_path):
 
 @pytest.mark.asyncio
 async def test_operator_owned_sqlite_requires_the_one_observation_table(tmp_path):
-    database = CommunityDatabase(
+    database = CommunitySqliteDatabase(
         f"sqlite:///{tmp_path}/operator.db", create_schema=False,
         security_schema_required=True,
     )
@@ -65,7 +66,7 @@ async def test_operator_owned_sqlite_requires_the_one_observation_table(tmp_path
 
 @pytest.mark.asyncio
 async def test_old_observation_draft_requires_migration(tmp_path):
-    database = CommunityDatabase(
+    database = CommunitySqliteDatabase(
         f"sqlite:///{tmp_path}/draft.db", create_schema=False,
         security_schema_required=True,
     )
@@ -81,7 +82,7 @@ async def test_old_observation_draft_requires_migration(tmp_path):
 
 @pytest.mark.asyncio
 async def test_operator_owned_sqlite_rejects_any_missing_observation_column(tmp_path):
-    database = CommunityDatabase(
+    database = CommunitySqliteDatabase(
         f"sqlite:///{tmp_path}/partial.db", create_schema=False,
         security_schema_required=True,
     )
@@ -96,9 +97,9 @@ async def test_operator_owned_sqlite_rejects_any_missing_observation_column(tmp_
 
 
 @pytest.fixture
-def db(tmp_path) -> CommunityDatabase:
+def db(tmp_path) -> CommunitySqliteDatabase:
     url = f"sqlite:///{tmp_path}/b3.db"
-    database = CommunityDatabase(url)
+    database = CommunitySqliteDatabase(url)
     # These tests exercise session/transaction behaviour against throwaway
     # tables, so the private Base is provisioned directly instead of going
     # through bootstrap() (which would emit the real application schema).
@@ -211,7 +212,7 @@ class TestBootstrapSchemaOwnership:
     @pytest.mark.asyncio
     async def test_creates_the_schema_by_default(self, tmp_path, monkeypatch):
         calls = self._record_create_all(monkeypatch)
-        database = CommunityDatabase(f"sqlite:///{tmp_path}/boot.db")
+        database = CommunitySqliteDatabase(f"sqlite:///{tmp_path}/boot.db")
 
         await database.bootstrap()
 
@@ -223,7 +224,7 @@ class TestBootstrapSchemaOwnership:
         self, tmp_path, monkeypatch
     ):
         calls = self._record_create_all(monkeypatch)
-        database = CommunityDatabase(
+        database = CommunitySqliteDatabase(
             f"sqlite:///{tmp_path}/boot.db", create_schema=False
         )
         Skill.__table__.create(database._engine)
@@ -238,7 +239,7 @@ class TestBootstrapSchemaOwnership:
         self, tmp_path, monkeypatch
     ):
         calls = self._record_create_all(monkeypatch)
-        database = CommunityDatabase(f"sqlite:///{tmp_path}/boot.db")
+        database = CommunitySqliteDatabase(f"sqlite:///{tmp_path}/boot.db")
 
         await database.bootstrap()
 

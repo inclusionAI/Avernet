@@ -6,6 +6,7 @@ members = [
     "crates/adapters/http/bcs-api-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
+    "crates/external-clients/bcs-a2a-http",
     "crates/adapters/ws/bcs-ws",
     # service-api
     "crates/service-api/bcs-config-api",
@@ -34,6 +35,7 @@ members = [
     "crates/services/bcs-organization",
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
+    "crates/application/bcs-app-a2a-bot",
     "crates/services/bcs-bot-store",
     "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
@@ -53,8 +55,6 @@ members = [
     "crates/services/bcs-edge-permission-store",
     "crates/services/bcs-edge-permission",
     "crates/services/bcs-user-identity",
-    "crates/services/bcs-proposal",
-    "crates/services/bcs-proposal-store",
     "crates/services/bcs-route-security",
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
@@ -100,6 +100,8 @@ members = [
     "crates/plugins/bcs-auth-alipay",
     "crates/plugins/bcs-auth-local",
     "crates/plugins/bcs-auth-oauth",
+    "crates/plugins/bcs-caller-identity-jwt",
+    "crates/plugin-api/bcs-caller-identity-api",
     # external-clients
     "crates/external-clients/bcs-fuse-client",
     "crates/external-clients/bcs-webhook-client",
@@ -216,6 +218,7 @@ secrecy = { version = "0.8", features = ["serde"] }
 # Crypto for signing
 sha2 = "0.10"
 hmac = "0.12"
+subtle = "2.6"
 hex = "0.4"
 base64 = "0.22"
 httpdate = "1"
@@ -289,8 +292,6 @@ bcs-webhook-client = { path = "crates/external-clients/bcs-webhook-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
 bcs-secret-api             = { path = "crates/plugin-api/bcs-secret-api" }
-bcs-proposal   = { path = "crates/services/bcs-proposal" }
-bcs-proposal-store = { path = "crates/services/bcs-proposal-store" }
 bcs-friend     = { path = "crates/services/bcs-friend" }
 bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
@@ -308,6 +309,8 @@ bcs-protocol     = { path = "crates/contracts/bcs-protocol" }
 bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
+bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
+bcs-a2a-http = { path = "crates/external-clients/bcs-a2a-http" }
 bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }
 # New in C6
@@ -353,6 +356,8 @@ bcs-auth-wechat            = { path = "crates/plugins/bcs-auth-wechat" }
 bcs-auth-alipay            = { path = "crates/plugins/bcs-auth-alipay" }
 bcs-auth-local             = { path = "crates/plugins/bcs-auth-local" }
 bcs-auth-oauth             = { path = "crates/plugins/bcs-auth-oauth" }
+bcs-caller-identity-jwt = { path = "crates/plugins/bcs-caller-identity-jwt" }
+bcs-caller-identity-api = { path = "crates/plugin-api/bcs-caller-identity-api" }
 
 # ────────────────────────────────────────────────────────────────
 # Optimize the bignum stack even in dev/test builds.

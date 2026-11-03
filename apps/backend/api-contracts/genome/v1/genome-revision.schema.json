@@ -50,7 +50,7 @@
       "pattern": "^(?![/~])(?!.*(^|/)\\.{1,2}(/|(?![\\s\\S])))(?!.*//)[A-Za-z0-9._/-]+(?![\\s\\S])"
     },
     "memoryKey": {"description": "Stable name of one curated memory item, e.g. 'returns-window'; patch ops address an item by it.", "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])", "maxLength": 128},
-    "evidenceRef": {"description": "Reference to an Experience record that motivated a change or an item: 'episode:<id>', 'feedback:<id>' or 'eval:<id>' (01-genome.md §2.2).", "type": "string", "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+(?![\\s\\S])"},
+    "evidenceRef": {"description": "Reference to an Experience record that motivated a change or an item: 'episode:<id>', 'feedback:<id>' or 'eval:<id>' (01-genome.md §2.2).", "type": "string", "maxLength": 128, "pattern": "^(episode|feedback|eval):[A-Za-z0-9_-]+(?![\\s\\S])"},
     "sortedUniqueStrings": {
       "description": "A list of strings without duplicates, sorted ascending in code-point order (README §3.1). JSON Schema checks uniqueness; the Registry checks the order.",
       "type": "array",
@@ -68,7 +68,7 @@
       }
     },
     "skillEntry": {
-      "description": "One skill of the bot. oneOf: the entry matches exactly one of the two shapes, chosen by origin. 'local' is a bot-owned skill whose files are stored; 'center' is a Skill Center skill pinned by version and not copied (README §4.2).",
+      "description": "One skill of the bot. oneOf: the entry matches exactly one of the three shapes, chosen by origin. 'local' is a bot-owned skill whose files are stored; 'center' is a Skill Center skill pinned by version and not copied; 'repo' is a skill supplied from the platform-synced shared skill repository, named by its repository path (README §4.2).",
       "oneOf": [
         {
           "description": "A bot-owned skill; its files are stored as one acm-tree-v1 tree.",
@@ -82,14 +82,24 @@
           }
         },
         {
-          "description": "A governed Skill Center skill, pinned by version (ADR 0010).",
+          "description": "A governed Skill Center skill, by name: the bot runs whatever version the Center publishes (ADR 0002), so no version is recorded.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "origin", "center_version"],
+          "required": ["name", "origin"],
           "properties": {
             "name": {"$ref": "#/definitions/skillName", "description": "The skill's name in Skill Center, and its key."},
-            "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"},
-            "center_version": {"description": "The published Skill Center version this revision uses.", "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"}
+            "origin": {"description": "Marks this shape: a Skill Center skill.", "const": "center"}
+          }
+        },
+        {
+          "description": "A skill supplied from the shared skill repository, by repository path; neither copied nor version-pinned (README §4.2).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "origin", "repo_path"],
+          "properties": {
+            "name": {"$ref": "#/definitions/skillName", "description": "The skill's name as the bot sees it, and its key."},
+            "origin": {"description": "Marks this shape: a shared-repository skill.", "const": "repo"},
+            "repo_path": {"description": "The skill's path inside the shared skill repository (what follows git:// on the skill row): relative, /-separated, no empty, . or .. segment, no backslash or control character.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$))(?!.*//)[^\\u0000-\\u001f\\\\]+(?<!/)(?![\\s\\S])"}
           }
         }
       ]
@@ -247,7 +257,7 @@
         "created_at": {"description": "When it was recorded, UTC, RFC 3339 with a Z suffix.", "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"},
         "status": {"description": "Where the revision is in its lifecycle (01-genome.md §4.4). Besides status, only annotations and the append-only evaluations change after recording.", "type": "string", "enum": ["draft", "candidate", "accepted", "rejected", "promoted", "archived"]},
         "patch_digest": {"description": "The stored patch that turned parent into this revision; null when a whole Manifest document was recorded.", "oneOf": [{"type": "null"}, {"$ref": "#/definitions/digest"}]},
-        "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits.", "type": "array", "items": {"$ref": "#/definitions/evidenceRef"}},
+        "evidence": {"description": "The Experience records that motivated the change; [] for most manual edits. At most 100.", "type": "array", "maxItems": 100, "items": {"$ref": "#/definitions/evidenceRef"}},
         "evaluations": {"description": "Ids of the Verification evaluations run on this revision; scores stay in Verification. Append-only: [] at record time, then Verification appends an id when an evaluation of this revision finishes.", "type": "array", "items": {"type": "string", "pattern": "^ev_[A-Za-z0-9]+(?![\\s\\S])"}},
         "annotations": {"description": "Free-form labels added after recording, e.g. {'experiment': 'escalation-wording'}.", "type": "object", "additionalProperties": {"type": "string"}}
       }

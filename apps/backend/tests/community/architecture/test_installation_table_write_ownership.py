@@ -50,7 +50,7 @@ _TABLES_IMPORTER_ALLOWLIST = {
     "community/core/repository/implementations/skill_center/bot_skillset_installations.py",
     "community/core/repository/implementations/skill_center/default_exclusion_commands.py",
     "community/core/repository/implementations/skill_center/direct_installation_commands.py",
-    "community/core/repository/implementations/skill_center/manifest_direct_claim_commands.py",
+    "community/core/repository/implementations/skill_center/apply_claim_commands.py",
     "community/core/repository/implementations/skill_center/mcp_skill_set_control_plane.py",
     # Scoped user/Bot Header snapshot repository is also a transactional UoW;
     # it calls the shared BotMCPConfig table command in the same session.

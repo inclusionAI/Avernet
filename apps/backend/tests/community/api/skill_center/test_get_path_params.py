@@ -1,3 +1,4 @@
+from tests.community.bot_address_fakes import support_legacy_locator
 """Test _get_path_params returns is_desktop based on ac_bots.bot_type."""
 from unittest.mock import MagicMock
 
@@ -15,6 +16,7 @@ def mock_ctx():
 
 def _make_bot_repo(bot_type: str = "personal"):
     repo = MagicMock()
+    support_legacy_locator(repo)
     repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot_x",
         "owner_id": "user_001",
@@ -48,6 +50,7 @@ def test_returns_is_desktop_false_when_bot_type_is_service(mock_ctx):
 
 def test_returns_is_desktop_false_when_bot_record_missing(mock_ctx):
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
     bot_repo.get_by_id_and_owner.return_value = None
     _, _, _, _, _, is_desktop = _get_path_params(mock_ctx, bot_repo=bot_repo)
     assert is_desktop is False
@@ -55,17 +58,19 @@ def test_returns_is_desktop_false_when_bot_record_missing(mock_ctx):
 
 def test_returns_is_desktop_false_when_bot_type_missing(mock_ctx):
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
     bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
     _, _, _, _, _, is_desktop = _get_path_params(mock_ctx, bot_repo=bot_repo)
     assert is_desktop is False
 
 
-def test_lookup_failure_degrades_to_false(mock_ctx):
-    """If the DB lookup raises, _get_path_params must not bubble — return is_desktop=False."""
+def test_lookup_failure_propagates_without_guessing_resource_address(mock_ctx):
+    """A failed address lookup cannot safely select a resource path."""
     bot_repo = MagicMock()
+    support_legacy_locator(bot_repo)
     bot_repo.get_by_id_and_owner.side_effect = Exception("DB down")
-    _, _, _, _, _, is_desktop = _get_path_params(mock_ctx, bot_repo=bot_repo)
-    assert is_desktop is False
+    with pytest.raises(Exception, match="DB down"):
+        _get_path_params(mock_ctx, bot_repo=bot_repo)
 
 
 # ── Variant from skillsets.py (parallel definition) ──────────────────────

@@ -15,7 +15,10 @@ import pytest
 # 导入 ORM 模型以填充 Base.metadata，供 create_all 建表。
 import secbaas.community.core.repository.bot_run_queue._orm_model  # noqa: F401
 from secbaas.community.core.database import DatabaseManager
-from secbaas.community.core.repository.bot_run_queue import OrmBotRunQueueRepository
+from secbaas.community.core.repository.bot_run_queue import (
+    ActiveBot,
+    OrmBotRunQueueRepository,
+)
 from secbaas.community.core.repository.bot_run_queue._orm_model import BotRunQueueModel
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
@@ -41,6 +44,7 @@ def _insert(repo: OrmBotRunQueueRepository, bot_id: str, **kw) -> str:
         run_id=run_id,
         bot_id=bot_id,
         session_id=kw.get("session_id"),
+        meta=kw.get("meta"),
     )
     return run_id
 
@@ -143,7 +147,29 @@ def test_discover_active_bots_distinct_sorted(repo: OrmBotRunQueueRepository):
     _insert(repo, "bot-b")
     _insert(repo, "bot-b")
     _insert(repo, "bot-a")
-    assert repo.discover_active_bots() == ["bot-a", "bot-b"]
+    discovered = repo.discover_active_bots()
+    assert [b.bot_id for b in discovered] == ["bot-a", "bot-b"]
+    assert all(b.engine_type is None for b in discovered)
+
+
+def test_discover_extracts_engine_type_from_latest_pending(
+    repo: OrmBotRunQueueRepository,
+):
+    _insert(repo, "bot-1", meta={"engine_type": "teclaw"})
+    _insert(repo, "bot-1", meta={"engine_type": "openclaw"})
+    assert repo.discover_active_bots() == [
+        ActiveBot(bot_id="bot-1", engine_type="openclaw")
+    ]
+
+
+def test_discover_active_bots_respects_limit(
+    repo: OrmBotRunQueueRepository,
+):
+    _insert(repo, "bot-c")
+    _insert(repo, "bot-b")
+    _insert(repo, "bot-a")
+    discovered = repo.discover_active_bots(limit=2)
+    assert [b.bot_id for b in discovered] == ["bot-a", "bot-b"]
 
 
 def test_discover_excludes_running(repo: OrmBotRunQueueRepository):

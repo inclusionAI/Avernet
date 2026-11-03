@@ -65,7 +65,7 @@ function SystemContextPanel({ json }: { json: string }) {
 
   function renderEntries(entries: Record<string, unknown>, depth = 0): React.ReactNode {
     return (
-      <div className={depth > 0 ? 'ml-3 border-l-2 border-border pl-2' : 'space-y-1'}>
+      <div className={depth > 0 ? 'ml-3 border-l-2 border-divider pl-2' : 'space-y-1'}>
         {Object.entries(entries)
           .filter(([, v]) => v !== undefined)
           .map(([key, value]) => {

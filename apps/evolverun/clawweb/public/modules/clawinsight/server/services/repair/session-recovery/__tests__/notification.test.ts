@@ -20,16 +20,60 @@ function setup() {
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
 
+it.each([
+  ["completed", "recovered", undefined],
+  ["completed", "unknown", undefined],
+  ["failed", "unknown", undefined],
+  ["canceled", "unknown", undefined],
+  ["completed", "unknown", "user_continued"],
+  ["completed", "unknown", "owner_handoff"],
+] as const)("omits terminal group notices without intervention: %s/%s/%s", async (status, effect, completionReason) => {
+  const { notifier, task, tasks, sender, events } = setup();
+  task.status = status; task.completionReason = completionReason; task.interventionStatus = "none";
+  task.judgment = { delivery: "unconfirmed", response: "none", effect, summary: "仅调查，未实际干预", evidence_ids: [] };
+  task.timeline = [{ event_id: "result-1", kind: "observation", at_ms: 2, actor: "agent", summary: task.judgment.summary, payload: {} }];
+  const original = structuredClone(task);
+  notifier.after({ ...message, eventId: "result-1", kind: "result" });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(tasks.find).toHaveBeenCalledWith(task.taskId);
+  expect(sender.send).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled();
+  expect(events).toEqual([]); expect(task).toEqual(original);
+});
+
+it.each(["performed", "unknown", undefined] as const)("retains terminal notices for performed or uncertain intervention: %s", async interventionStatus => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = interventionStatus;
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].title).toBe("会话自愈｜任务已完成");
+});
+
+it.each(["message", "plan", "execution"] as const)("retains %s notices before any confirmed intervention", async kind => {
+  const { notifier, task, sender, events } = setup();
+  task.interventionStatus = "none";
+  if (kind === "plan") {
+    task.status = "waiting_owner";
+    task.timeline[0].payload.plan = { summary: "需要用户开通权限", actions: [], owner_cooperation: [{ request: "申请目标文档的读取权限" }] };
+  }
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  if (kind === "plan") expect(sender.send.mock.calls[0][0].text).toContain("申请目标文档的读取权限");
+});
+
 it.each(["message", "plan", "execution", "result"] as const)("routes %s to the exact Bot and Owner override only", async kind => {
   const { notifier, config, sender, task, events } = setup();
   task.request.target.bot_id = "default";
+  task.request.target.entity_id = "001234";
   config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
     bot_webhooks: [{ bot_id: "default", entity_id: "another-owner", webhook: "https://another.invalid/send" },
-      { bot_id: "default", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+      { bot_id: "default", entity_id: "001234", webhook: "https://test.invalid/send" }] }) });
   notifier.after({ ...message, kind });
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
   expect(sender.send).toHaveBeenCalledOnce();
   expect(sender.send.mock.calls[0][0]).toMatchObject({ webhook: "https://test.invalid/send", timeoutSeconds: 10 });
+  expect(sender.send.mock.calls[0][0].text).toContain("**Bot**：default\n\n**Entity ID**：001234");
   expect(JSON.stringify(events)).not.toMatch(/https:\/\/(test|business|another)\.invalid/);
 });
 it.each([["bot", "another-owner"], ["another-bot", "owner"]])("retains the default group for unmatched target %s/%s", async (bot_id, entity_id) => {
@@ -162,6 +206,91 @@ it("does not turn missing delivery, a reply or an ended task into confirmed reco
   expect(text).toContain("恢复效果尚未确认"); expect(text).not.toContain("<font");
 });
 
+it.each([
+  ["recovered", "原任务已恢复"],
+  ["not_recovered", "原任务未恢复"],
+  ["unknown", "恢复效果尚未确认"],
+] as const)("shows the saved Owner handoff details without changing effect %s", async (effect, conclusion) => {
+  const { notifier, task, sender, events } = setup();
+  const handoff = "## 转交原因\n\n原任务的外部上报缺少可独立核对的回执。\n\n"
+    + "已核查本轮执行记录，保留现有结果并避免重复业务操作。".repeat(18)
+    + "\n\n## Owner 处理事项\n\n核查 eventKey start-fixture-key、end-fixture-key 对应的服务端记录；核对 worker.py 的实际位置。";
+  task.status = "completed"; task.completionReason = "owner_handoff"; task.interventionStatus = "performed";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect, summary: handoff, evidence_ids: [] };
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent", summary: handoff,
+    payload: { completion_reason: "owner_handoff" } });
+  task.timeline.push({ event_id: "released", kind: "execution", at_ms: 3, actor: "service",
+    summary: "本次执行结束，已保存任务上下文", payload: {} });
+  // A queued legacy callback may still refer to the release event; the saved handoff remains authoritative.
+  notifier.after({ ...message, eventId: "released", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe("会话自愈｜已转交 Owner，自愈已结束");
+  expect(sent.text).toContain("**【转交原因与 Owner 处理事项】**");
+  expect(sent.text).toContain("外部上报缺少可独立核对的回执");
+  expect(sent.text).toContain("start\\-fixture\\-key"); expect(sent.text).toContain("end\\-fixture\\-key");
+  expect(sent.text).toContain("worker\\.py");
+  expect(sent.text).toContain(conclusion);
+  expect(sent.text).toContain("本次自愈已结束，后续由 Owner 处理。");
+  expect(sent.text).not.toContain("本次执行结束，已保存任务上下文");
+  expect(sent.text).not.toContain("等待 Owner");
+  expect(task.judgment.effect).toBe(effect);
+});
+
+it.each([
+  ["message", "已提交恢复消息"], ["plan", "已形成修复方案"], ["execution", "修复方案执行未完成"],
+] as const)("keeps a delayed %s notification unchanged after Owner handoff", async (kind, title) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe(`会话自愈｜${title}`);
+  expect(sent.text).not.toContain("转交原因与 Owner 处理事项");
+});
+
+it("uses the saved task summary when a legacy handoff has no detailed judgment", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "请 Owner 核查 start-fixture-key 对应的上报记录。";
+  task.timeline[0].summary = "本次执行结束，已保存任务上下文";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("start\\-fixture\\-key");
+  expect(text).not.toContain("本次执行结束，已保存任务上下文");
+});
+
+it("prefers the saved handoff event over a generic legacy task summary", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent",
+    summary: "缺少外部回执，请 Owner 核查 start-fixture-key 对应的服务端记录。",
+    payload: { completion_reason: "owner_handoff" } });
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("start\\-fixture\\-key");
+});
+
+it.each([
+  ["Chinese", "请核对原始执行回执。".repeat(700), "任务摘要。".repeat(400)],
+  ["emoji", "😀。".repeat(2000), "任务摘要。".repeat(400)],
+  ["escaped characters", "&&&&。".repeat(1600), "&&&&。".repeat(400)],
+])("bounds long Owner details with %s while retaining the task link", async (_name, summary, finalSummary) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = finalSummary;
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "unknown", summary, evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(Buffer.byteLength(text)).toBeLessThan(20000);
+  expect(text).toContain("完整内容见任务页");
+  expect(text).toContain("[查看完整任务与处理记录]");
+});
+
 it("shows the business summary of an audited plan action without claiming unexecuted actions", async () => {
   const { notifier, task, sender, events } = setup();
   task.status = "completed";
@@ -222,4 +351,74 @@ it("checks the independent Owner notification switch on each send", async () => 
   config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
   expect(await notifier.notify(input)).toBe(false);
   expect(sender.sendNotification).toHaveBeenCalledOnce();
+});
+
+
+it("notifies user handoff after intervention without claiming business recovery", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "user_continued"; task.interventionStatus = "performed";
+  task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "unknown", summary: "用户已继续对话，本次自愈已让路", evidence_ids: [] };
+  task.timeline = [{ event_id: "handoff", at_ms: 1, kind: "termination", actor: "agent", summary: task.judgment.summary, payload: { completion_reason: "user_continued" } }];
+  notifier.after({ taskId: task.taskId, eventId: "handoff", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0]).toMatchObject({ title: "会话自愈｜用户已接手，自愈已让路" });
+  expect(sender.send.mock.calls[0][0].text).toContain("恢复效果尚未确认");
+  expect(sender.send.mock.calls[0][0].text).not.toContain("原任务已恢复");
+  expect(sender.send.mock.calls[0][0].text).not.toContain("任务执行失败");
+});
+
+
+it("reuses the direct Owner DingTalk channel for ended permission cases without an approval link label", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  await expect(notifier.notify({ ownerId: "owner-fixture", taskId: "SR-permission", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
+  expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner-fixture", title: "会话自愈需要人工处理",
+    text: expect.stringContaining("查看处理指引、证据及任务时间线") });
+  expect(sender.sendNotification.mock.calls[0][0].text).toContain("请在能力集中申请 MCP 服务权限");
+  expect(sender.sendNotification.mock.calls[0][0].text).not.toContain("查看完整方案");
+  expect(sender.sendNotification.mock.calls[0][0].text).toContain("本次自愈已结束，后续请自行处理。");
+});
+
+it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: "{}" }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
+  await notifier.notify({ ownerId: "owner", taskId: "SR-suggestion", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
+  expect(sender.sendNotification).toHaveBeenCalledExactlyOnceWith({ recipientUserId: "owner", title: "会话自愈已恢复，有后续建议",
+    text: expect.stringContaining("原任务已完成") });
+  const text = sender.sendNotification.mock.calls[0][0].text;
+  expect(text).toContain("本次自愈已结束，后续建议可按需处理。");
+  expect(text).not.toMatch(/等待|确认方案|需要人工处理/);
+});
+
+it("uses the saved overall summary in final notices while preserving verified facts", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  task.final_summary = "原任务需要读取资料。核实调用参数后发送纠正指引，Bot已成功读取并继续原任务。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "很长的过程分析不代替整体摘要", evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.text).toContain(task.final_summary);
+  expect(sent.text).toContain("消息已触达"); expect(sent.text).toContain("原任务已恢复");
+  expect(sent.text).not.toContain(task.judgment.summary);
+});
+it("links to full results when a legacy or failed summary is unavailable", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("摘要暂不可用");
+  expect(sender.send.mock.calls[0][0].text).toContain("查看完整任务与处理记录");
+});
+it("describes a failed business verification as unrecovered rather than an execution error", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "failed"; task.phase = "verify"; task.interventionStatus = "performed";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "not_recovered", summary: "原任务仍受阻", evidence_ids: [] };
+  task.final_summary = "已执行完整方案，但原任务的后续步骤仍受阻，需继续处理。";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].title).not.toContain("执行失败");
+  expect(sender.send.mock.calls[0][0].text).toContain("原任务未恢复");
 });

@@ -76,3 +76,35 @@ class TaskArtifactContentError(TaskError):
     spec 2026-10-20-task-artifact-domain §3.4:内容分支校验 fail-loud,不静默丢弃、不猜分支;
     上报解析失败走既有回调错误信封(§4),写侧发布失败上抛回滚整个事务(§5.2)。
     """
+
+
+class TaskArtifactStorageError(TaskError):
+    """产物对象存储读写失败(put/get 返回 FAILED)。
+
+    OBJECT_FILE(2026-10-26 修订,spec §1.3 例外)字节经后端流式代理进出对象存储;
+    写失败时**不登记产修行**(单向失败安全:至多遗留无引用对象,决不出现引用悬空行),
+    该错映射为 HTTP 502(存储不可用,非内容非法)。
+    """
+
+
+class TaskArtifactStorageNotConfiguredError(TaskError):
+    """产物对象存储服务未接线(``TaskArtifactObjectStoragePlugin`` 未绑定)。
+
+    映射为 HTTP 503:能力未就绪(修配置),与 ``TaskArtifactStorageError`` 的 502
+    (存储挂了)及内容非法的 422 区分;仿 ``TrajectoryAnalysisNotConfiguredError`` 口径。
+    """
+
+
+class TaskArtifactObjectNotFoundError(TaskError):
+    """artifact_id 未知,或产物行存在但其对象 key 在存储中 NOT_FOUND。
+
+    下载口逐次校验:先按 artifact_id 查行,后按行上稳定 key 取字节;两段任一落空
+    均为本错(HTTP 404)——与存储 FAILED 的 502 区分,与权限无关。
+    """
+
+
+class TaskArtifactUploadTooLargeError(TaskError):
+    """上传字节超过 ``task_artifact_storage.max_upload_mb`` 配置上限。
+
+    映射为 HTTP 413;分块/直传通道不在本期(后端代理 + 封顶,spec 修订记录)。
+    """

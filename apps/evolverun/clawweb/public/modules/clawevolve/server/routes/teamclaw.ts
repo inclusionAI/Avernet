@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getCurrentEnv } from "../env.js";
 import type { SpaceDirectory } from "../contracts/space-directory.js";
 import type { BenchDomainRepository } from "../repositories/bench-domain-repository.js";
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
@@ -106,10 +107,12 @@ export function createTeamclawRouter(input: {
             .trim()
             .toLowerCase();
           const engine = String(req.query.engine ?? "openclaw").toLowerCase();
+          const production = getCurrentEnv() === "prod";
           const bots = scope.bots.filter(
             (b) =>
               b.activeEngine.toLowerCase() === engine &&
               engine === "openclaw" &&
+              (!production || b.env === "prod") &&
               (!keyword ||
                 [b.botName, b.botId, b.ownerId].some((s) =>
                   s.toLowerCase().includes(keyword)

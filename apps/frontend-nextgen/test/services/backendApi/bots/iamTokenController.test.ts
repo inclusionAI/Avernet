@@ -29,4 +29,16 @@ describe('iamTokenController OpenAPI contract', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+  test('omits stage when no runtime override is needed', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, data: { iam_token: 'token' } }),
+    } as Response);
+    await getBotIamToken('personal', 'viewer', 'owner');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/personal/iam-token?user_id=viewer&entity_id=owner',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });

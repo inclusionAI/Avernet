@@ -56,3 +56,21 @@ Creation/detail results expose runtime_stage, device_uuid and operator_id
 for subsequent management. Targets are container-local and are not migrated when
 a container is replaced. CronTargetedOperationsMixin records request, resolved
 binding, transport result/failure and response events without connection credentials.
+
+### Default list and Caller identity
+
+GET /api/cron with no operator_id/device_uuid supports bot_id=all and a specific
+Bot. With no runtime_stage, or with runtime_stage=online, Caller service Bots
+contribute only the authenticated user's existing Caller instances; their parent
+service draft/verify/online targets are not added. The Bot owner's identity stays
+separate from the authenticated Caller. Every returned Caller row includes
+runtime_stage=online, device_uuid where applicable, and operator_id. Missing or
+unavailable Caller instances produce failed_targets while other Bots remain
+queryable. No Caller provisioning or parent fallback occurs.
+
+Explicit draft/verify filters preserve their existing parent-stage query behavior,
+including OpenAPI draft-only queries. Explicit operator_id/device_uuid still use
+the existing targeted-list contract requiring a specific Bot and runtime_stage.
+Auto-selected Caller reads reuse its transport and request/response/failure
+diagnostics after binding resolution and instance enumeration establish
+authorization and device membership.

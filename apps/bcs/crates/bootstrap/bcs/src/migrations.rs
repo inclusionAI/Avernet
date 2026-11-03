@@ -153,6 +153,9 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 34, name: "group_context" },
     SqliteMigration { version: 35, name: "group_context_owners" },
     SqliteMigration { version: 36, name: "collaboration_drafts" },
+    SqliteMigration { version: 37, name: "bot_authority" },
+    SqliteMigration { version: 38, name: "task_handle_lookup" },
+    SqliteMigration { version: 39, name: "bot_a2a" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -512,6 +515,18 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        // Bot authority (spec §4): bcs_bots.ownership_version,
+        // edge_grants unique-key swap + approved-owner partial
+        // unique index, and the two authority tables/indexes.
+        37 => add_sqlite_bot_authority_schema(db).await,
+        38 => add_sqlite_task_handle_lookup(db).await,
+        39 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"))
+                .into_iter()
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -643,3 +658,7 @@ mod collection_migration_tests;
 #[cfg(test)]
 #[path = "migrations/eventing_migration_tests.rs"]
 mod eventing_migration_tests;
+
+#[cfg(test)]
+#[path = "migrations/a2a_tests.rs"]
+mod a2a_tests;

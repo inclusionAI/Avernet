@@ -56,6 +56,7 @@ export function TaskPanelAdapter({
   if (!p.taskId) {
     return (
       <div
+        data-task-panel-root="true"
         style={{ padding: 24, color: '#86909C', fontSize: 13, textAlign: 'center', ...(style as object) }}
         className={className}
       >

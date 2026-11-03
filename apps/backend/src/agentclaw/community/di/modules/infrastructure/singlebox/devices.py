@@ -53,6 +53,8 @@ from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import SystemConfigService
+from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
+from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
@@ -89,6 +91,7 @@ class SingleboxBaasDeviceService(BaasDeviceService):
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
         path: str | None = None,
+        caller_id: str | None = None,
     ) -> DeviceConnectionInfo:
         connection = super().get_device_connection(
             binding_id=binding_id,
@@ -98,6 +101,7 @@ class SingleboxBaasDeviceService(BaasDeviceService):
             device_uuid=device_uuid,
             ws_conn_mode=ws_conn_mode,
             path=path,
+            caller_id=caller_id,
         )
         if (
             connection.type == BAAS_DEVICE_PROVIDER
@@ -183,6 +187,7 @@ class SingleboxDevicesModule(Module):
         repository: DeviceBindingRepository,
         baas_service: BaasService,
         system_config_service: SystemConfigService,
+        config_repository: ConfigRepositoryProtocol,
         oss_record_repo: OssToNasRecordRepository,
         bot_repository: BotRepository,
         bot_service: BotService,
@@ -205,6 +210,7 @@ class SingleboxDevicesModule(Module):
             task_queue_service=task_queue_service,
             template_service=template_service,
             layout_confirmation=layout_confirmation,
+            a2a_issuance_gate=A2aIssuanceGate(config_repository),
         )
 
     @singleton

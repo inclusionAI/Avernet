@@ -79,6 +79,29 @@ pub trait UserIdentityPort: Send + Sync {
 /// request headers and maps the resolved principal to staff_no / nick_name.
 /// Delegates identity persistence methods to an optional inner
 /// `bcs_auth_api::UserIdentityPort`.
+/// Same-authentication pair (spec §10.1.1, P2-A): the display sender the
+/// routes keep consuming, plus the independent runtime-only trusted
+/// ingress. The pair is not serializable as a whole — the ingress is
+/// contractually non-persistable material.
+#[derive(Debug)]
+pub struct AuthenticatedCallerRequest {
+    pub sender: HttpUserIdentity,
+    pub ingress: bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress,
+}
+
+/// Closed extraction failures. The strict path never falls back to the
+/// display-only identity and never retries a different chain path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallerIngressExtractionError {
+    /// No human evidence with a trusted session window in this request: the
+    /// adapter does not synthesize a caller identity from display data.
+    Unsupported,
+    /// The chain matched but authentication itself failed.
+    AuthenticationFailed,
+    /// Authenticated identity could not become a valid ingress envelope.
+    InvalidIdentity,
+}
+
 pub struct ChainUserIdentityPort {
     chain: Arc<bcs_auth_api::AuthPluginChain>,
     inner: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
@@ -95,6 +118,58 @@ impl std::fmt::Debug for ChainUserIdentityPort {
 impl ChainUserIdentityPort {
     pub fn new(chain: Arc<bcs_auth_api::AuthPluginChain>) -> Self {
         Self { chain, inner: None }
+    }
+
+    /// Strict caller-identity extraction (spec §10.1.1/§10.13, P2-A):
+    /// from the SAME authentication run the route gets both its display
+    /// sender projection and an independent runtime-only
+    /// `AuthenticatedHumanCallerIngress`. Aligned with the WS decision
+    /// (2026-10-24 §15.97 + the 2026-10-25 incident follow-up): identity
+    /// carries NO expiry — windowless and lapsed-window principals yield a
+    /// caller identity just like the WS seam; a display-only principal (no
+    /// user id) still yields none. Explicit `now_ms` keeps the adapter
+    /// deterministic.
+    pub async fn extract_caller_request(
+        &self,
+        headers: &HeaderMap,
+        now_ms: i64,
+    ) -> Result<AuthenticatedCallerRequest, CallerIngressExtractionError> {
+        let result = self
+            .chain
+            .authenticate(headers)
+            .await
+            .map_err(|_| CallerIngressExtractionError::AuthenticationFailed)?;
+        let principal = result
+            .principal
+            .ok_or(CallerIngressExtractionError::Unsupported)?;
+        // Machine credentials/bot principals are never human callers.
+        if principal.bot_uuid.is_some() || principal.owner_id.is_some() {
+            return Err(CallerIngressExtractionError::Unsupported);
+        }
+        let mut staff_no = principal
+            .user_id
+            .clone()
+            .ok_or(CallerIngressExtractionError::Unsupported)?;
+        let nick_name = principal.user_name.clone();
+        let actor_id = format!("human_{staff_no}");
+        let ingress =
+            bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress::new(
+                bcs_service_api::application::principal::HumanActor {
+                    actor_id,
+                    staff_no: staff_no.clone(),
+                },
+                bcs_service_api::application::caller_identity::HumanCallerAuthSource::HttpAuth,
+                now_ms,
+                bcs_config::resolve_env_str(),
+            )
+            .map_err(|_| CallerIngressExtractionError::InvalidIdentity)?;
+        Ok(AuthenticatedCallerRequest {
+            sender: HttpUserIdentity {
+                staff_no: Some(staff_no),
+                nick_name,
+            },
+            ingress,
+        })
     }
 
     pub fn with_inner(mut self, inner: Arc<dyn bcs_auth_api::UserIdentityPort>) -> Self {
@@ -447,17 +522,17 @@ pub struct HttpAppState {
     pub chat_run_events: Arc<dyn ChatRunEventPort>,
     pub bot_request: Arc<dyn BotRequestPort>,
     pub user_identity: Arc<dyn UserIdentityPort>,
+    /// Concrete strict caller-identity extractor (P2-A): retains the
+    /// `ChainUserIdentityPort` behind `user_identity` so routes can request
+    /// the runtime-only ingress from the same authentication chain without a
+    /// downcast or a second chain instance. `None` keeps the legacy routes
+    /// untouched; callers fall back to the ordinary behavior.
+    pub caller_ingress_source: Option<Arc<ChainUserIdentityPort>>,
     pub bot_runtime_token_resolver: Arc<dyn BotRuntimeTokenResolverPort>,
     pub visibility_sync: Arc<dyn VisibilitySyncPort>,
     pub strict_container_validation: bool,
     pub onboard_binding_enabled: bool,
     pub default_visibility: Option<String>,
-    pub bcs_endpoint: Option<String>,
-    pub bind: String,
-    pub port: u16,
-    pub max_groups_as_driver: usize,
-    pub max_group_members: usize,
-    pub max_groups_as_member: usize,
     pub store_messages: bool,
     pub max_group_messages: u64,
     pub group_chat_delay_min_ms: u64,
@@ -504,6 +579,7 @@ impl HttpAppState {
             chat_run_cleanup: Arc::new(NoopChatRunCleanupPort),
             chat_run_events: Arc::new(NoopChatRunEventPort),
             bot_request: Arc::new(NoopBotRequestPort),
+            caller_ingress_source: None,
             user_identity: Arc::new(ChainUserIdentityPort::new(Arc::new(
                 bcs_auth_api::AuthPluginChain::new(vec![]),
             ))),
@@ -512,12 +588,6 @@ impl HttpAppState {
             strict_container_validation: false,
             onboard_binding_enabled: false,
             default_visibility: None,
-            bcs_endpoint: None,
-            bind: "127.0.0.1".to_string(),
-            port: 21000,
-            max_groups_as_driver: 3,
-            max_group_members: 5,
-            max_groups_as_member: 10,
             store_messages: true,
             max_group_messages: 100,
             group_chat_delay_min_ms: 0,
@@ -615,6 +685,11 @@ impl HttpAppState {
         self
     }
 
+    pub fn with_caller_ingress_source(mut self, source: Arc<ChainUserIdentityPort>) -> Self {
+        self.caller_ingress_source = Some(source);
+        self
+    }
+
     pub fn with_bot_runtime_token_resolver(
         mut self,
         resolver: Arc<dyn BotRuntimeTokenResolverPort>,
@@ -633,24 +708,6 @@ impl HttpAppState {
         let _sync_task = tokio::spawn(async move {
             visibility_sync.sync_visibility(request).await;
         });
-    }
-
-    pub fn with_group_request_config(
-        mut self,
-        bcs_endpoint: Option<String>,
-        bind: String,
-        port: u16,
-        max_groups_as_driver: usize,
-        max_group_members: usize,
-        max_groups_as_member: usize,
-    ) -> Self {
-        self.bcs_endpoint = bcs_endpoint;
-        self.bind = bind;
-        self.port = port;
-        self.max_groups_as_driver = max_groups_as_driver;
-        self.max_group_members = max_group_members;
-        self.max_groups_as_member = max_groups_as_member;
-        self
     }
 
     pub fn with_message_config(
@@ -874,12 +931,6 @@ impl std::fmt::Debug for HttpAppState {
             )
             .field("onboard_binding_enabled", &self.onboard_binding_enabled)
             .field("default_visibility", &self.default_visibility)
-            .field("bcs_endpoint", &self.bcs_endpoint)
-            .field("bind", &self.bind)
-            .field("port", &self.port)
-            .field("max_groups_as_driver", &self.max_groups_as_driver)
-            .field("max_group_members", &self.max_group_members)
-            .field("max_groups_as_member", &self.max_groups_as_member)
             .field("store_messages", &self.store_messages)
             .field("max_group_messages", &self.max_group_messages)
             .field("group_chat_delay_min_ms", &self.group_chat_delay_min_ms)

@@ -717,6 +717,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     sourceLabel: SOURCE_LABELS[graphSourceType ?? 'bot'] ?? graphSourceType ?? '',
     ownerBotName: graphOwnerBotName,
     ownerBotId: graphOwnerBotId,
+    ownerUserId: d.owner_user_id,
     createdAt: graphCreateTime,
     finishedAt: graphFinishTime,
     loopRound: d.loop_round ?? 0,

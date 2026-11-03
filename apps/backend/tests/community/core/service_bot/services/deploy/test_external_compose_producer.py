@@ -161,7 +161,7 @@ def test_produce_artifact_pins_refs_only_artifact() -> None:
     assert result.ext["config_artifact"]["engine_ext"] == {
         "memory_ref": "nas://ws/MEMORY.md",
         "bot_id": "b",
-        "owner_id": "u1",
+        "owner_id": "u",  # Legacy runtime locator remains the immutable entity.
         "bot_name": "",
         "stage": "draft",
     }

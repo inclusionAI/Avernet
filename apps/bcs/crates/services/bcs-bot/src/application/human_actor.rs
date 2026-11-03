@@ -59,11 +59,7 @@ impl HumanActorService for HumanActor {
                     skipped_reason = Some("nick_name_equals_staff_no");
                 }
                 (Some(_), Some(nick)) => {
-                    let needs_repair = match current_name.as_deref() {
-                        Some(name) if name == staff => true,
-                        Some(_) => false,
-                        None => true,
-                    };
+                    let needs_repair = human_name_is_fallback(current_name.as_deref(), staff);
                     if !needs_repair {
                         skipped_reason = Some("name_already_non_fallback");
                     } else {
@@ -137,6 +133,40 @@ impl HumanActorService for HumanActor {
         let mut total_upgraded: u32 = 0;
         let mut failed_bots: Vec<String> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
+
+        // Self-service name repair: the verified login nick heals a
+        // fallback-shaped stored name (an absent name or the raw
+        // staff_no the trusted-register / admin / backfill paths seed
+        // before a real name is at hand). Only fallback-shaped names
+        // are touched — a real stored name always wins, and the caller
+        // can only rewrite their OWN row. A failed heal is recorded
+        // like `repair_human_actor_info`'s best-effort rule and never
+        // fails the whole ensure call.
+        let mut name_repaired = false;
+        if let Some(nick) =
+            normalize_nick_name(command.nick_name).filter(|nick| nick != &staff_no)
+        {
+            let stored_name = self
+                .registry
+                .get(&human_id)
+                .await
+                .and_then(|bot| bot.capabilities.name);
+            if human_name_is_fallback(stored_name.as_deref(), &staff_no) {
+                match self.registry.update_human_name(&staff_no, &nick).await {
+                    Ok(()) => name_repaired = true,
+                    Err(error) => {
+                        tracing::warn!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            staff_no = %staff_no,
+                            error = %error,
+                            "ensure-human: name repair failed (recorded, not fatal)"
+                        );
+                        errors.push(format!("name repair failed: {error}"));
+                    }
+                }
+            }
+        }
+
         let matched_bot_ids: Vec<String> = matched_bots
             .iter()
             .map(|bot| bot.bot_uuid.clone())
@@ -169,6 +199,7 @@ impl HumanActorService for HumanActor {
         Ok(EnsureCurrentHumanActorResult {
             human_id,
             human_created: human_result.created,
+            name_repaired,
             matched_bots: matched_bot_ids,
             edges_created: total_created,
             edges_upgraded: total_upgraded,
@@ -184,6 +215,19 @@ fn normalize_nick_name(nick_name: Option<String>) -> Option<String> {
         .map(str::trim)
         .filter(|nick| !nick.is_empty())
         .map(str::to_string)
+}
+
+/// A stored Human display name counts as fallback-shaped when absent
+/// or echoing the raw staff_no (the placeholder the trusted-register /
+/// admin / backfill paths seed before a real name is at hand). Both
+/// name-repair sites (`repair_human_actor_info` and
+/// `ensure_current_human_actor`) touch ONLY fallback-shaped names — a
+/// real stored name always wins.
+fn human_name_is_fallback(name: Option<&str>, staff_no: &str) -> bool {
+    match name {
+        None => true,
+        Some(name) => name == staff_no,
+    }
 }
 
 fn resolve_human_nick_name(staff_no: &str, nick_name: Option<&str>) -> String {

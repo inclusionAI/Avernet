@@ -18,7 +18,7 @@ function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-border px-4 py-4 align-top', className)} {...props} />;
+  return <td className={cn('border-t border-divider px-4 py-4 align-top', className)} {...props} />;
 }
 
 function formatDateTime(value?: string | null): string {
@@ -93,7 +93,7 @@ export function MyTaskRoutineHistoryDrawer({
                   </tr>
                 ) : historyRuns.length > 0 ? (
                   historyRuns.map((item) => (
-                    <tr key={item.id} className="border-b border-border text-xs transition-colors hover:bg-muted/50">
+                    <tr key={item.id} className="border-b border-divider text-xs transition-colors hover:bg-muted/50">
                       <Td className="max-w-[18rem]">
                         <div className="space-y-1">
                           <div className="truncate font-medium text-foreground">{item.routineName}</div>

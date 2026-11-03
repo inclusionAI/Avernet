@@ -57,10 +57,10 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
+from agentclaw.community.plugin_api.notify_sender import (
+    NotifyMessage,
+    NotifySenderPlugin,
 )
-from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 
 logger = get_logger()
 
@@ -75,7 +75,7 @@ class BbsDigestReportService(ForumDigestReportServiceProtocol):
         repository: ForumDigestReportRepositoryProtocol,
         bot_service: BotServiceProtocol,
         openapi_bot: OpenApiBotPort,
-        notify_sender: BbsDigestNotifyProvider,
+        notify_sender: NotifySenderPlugin,
         frontend_url_provider: FrontendUrlProviderProtocol,
     ) -> None:
         self._repository = repository

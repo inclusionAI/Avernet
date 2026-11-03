@@ -2039,8 +2039,8 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
   const testEnvironmentSteps = isStageTest ? steps.filter((step) => ['skill_init', 'skill_prepare', 'skill_finalize'].includes(step.stepType) || step.command.startsWith('stage-test supplied ')) : []
   const visibleSteps = steps.filter((step) => !testEnvironmentSteps.includes(step))
   const shared = task.config.shared === true
-  const canShare = !adminReadMode && (user?.userId === task.created_by || user?.isClawEvolveAdmin === true)
-  const canOperate = !adminReadMode && (user?.userId === task.user_id || canShare)
+  const canShare = !adminReadMode && (task.canManage ?? (user?.userId === task.created_by || user?.isClawEvolveAdmin === true))
+  const canOperate = !adminReadMode && (task.canManage ?? (user?.userId === task.user_id || canShare))
   const renderStepInteractions = (stepId: string, result?: ReactNode) => <StepInteractions task={task} stepId={stepId} canOperate={canOperate} onUpdated={loadTask} result={result} />
   const canRetryRecordedStep = (step: EvolveStep, index: number) => {
     if (!['failed', 'canceled'].includes(step.status)) return false

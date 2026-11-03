@@ -299,20 +299,16 @@ async fn e2e_expert_consultation() {
 // │       │                       │                       │ skill: discover  │
 // │       │                       │ ◀─────────────────────│                  │
 // │       │                       │                       │                  │
-// │       │                       │                       │ skill: request   │
-// │       │                       │ ◀─────────────────────│  group-help      │
-// │       │                       │                       │                  │
-// │       │  Proposal res         │                       │                  │
-// │       │  with confirm_url     │                       │                  │
-// │       │ ◀─────────────────────│                       │                  │
+// │       │                       │                       │ skill: discover  │
+// │       │                       │ ◀─────────────────────│ bot candidates   │
 // │       │                       │                       │                  │
 // │                                                                           │
-// │  Phase 2: User confirms, group created                                   │
+// │  Phase 2: User creates the group directly                                │
 // │  ────────────────────────────────────                                     │
 // │                                                                           │
 // │  User                     BCS Server                                      │
 // │       │                        │                                          │
-// │       │  POST /groups/{token}/confirm                                    │
+// │       │  POST /groups                                                    │
 // │       │ ──────────────────────▶│                                          │
 // │       │                        │                                          │
 // │       │                        │  Create group                            │
@@ -357,8 +353,8 @@ async fn e2e_expert_consultation() {
 ///
 /// Flow:
 /// 1. User tells their bot to find collaborators via BCS
-/// 2. Bot discovers candidates and creates a proposal
-/// 3. User confirms proposal (creates group)
+/// 2. Bot discovers matching candidate bots
+/// 3. User (or the bot) creates the group directly
 /// 4. Group chat happens via BCS broadcast
 #[tokio::test]
 #[ignore = "requires external moltis binary"]
@@ -414,8 +410,7 @@ async fn e2e_group_chat() {
 
             // In a real flow with LLM, bot would:
             // 1. Discover 李四 candidates
-            // 2. Return proposal with confirm_url
-            // 3. User confirms, group created
+            // 2. Create the group directly with the matched participants
         }
         Ok(resp) => {
             println!("[S3] BCS returned error: {}", resp.status());
@@ -425,7 +420,7 @@ async fn e2e_group_chat() {
         }
     }
 
-    // Phase 2: Create group directly (simulating user confirmation)
+    // Phase 2: Create group directly
     println!("[S3] Creating group directly...");
     let create_response = client
         .post(format!("{}/groups", bcs_url))

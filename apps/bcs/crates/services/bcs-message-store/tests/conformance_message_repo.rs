@@ -149,3 +149,6 @@ mod history_window;
 
 #[path = "support/history_read.rs"]
 mod history_read;
+
+#[path = "support/cancelled_history.rs"]
+mod cancelled_history;

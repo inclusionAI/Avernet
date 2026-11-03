@@ -124,7 +124,7 @@ contract does not change**:
 
 | Stays in `start_apply`, synchronous on the caller's thread | Moves into the task handler |
 | --- | --- |
-| Acquire the lock (so a concurrent apply still raises `ManifestApplyInProgressError`) | Rebuild the context |
+| Acquire the lock (so a concurrent apply still raises `ApplyInProgressError`) | Rebuild the context |
 | Re-validate the stored document (so a validation failure still raises to the caller) | Run the orchestrator |
 | Mint `apply_id`, write the `RUNNING` record | Write the terminal record |
 | **Enqueue the task** (was: start the thread) | Release the lock, by token |

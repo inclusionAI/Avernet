@@ -213,6 +213,10 @@ def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
                 return None
             return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
 
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            row = self.get_by_id_and_owner(bot_id, locator)
+            return [] if row is None else [{"id": 1, "bot_id": bot_id, "entity_id": locator, **row}]
+
     class _Collaborators:
         # The operator ladder resolves explicitly now; these doubles'
         # operators ARE explicit collaborators, so both ladders agree.
@@ -274,6 +278,13 @@ class FakeExpertChat:
                 "bind_id": 123,
             },
         }
+
+    def resolve_chat_stage(self, bot_id, owner_id, stage):
+        from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
+
+        if stage == "verify":
+            raise EngineStageNotLiveError("friend chat cannot address verify")
+        return "online" if stage == "online" else "draft"
 
     def add_chat_bot(self, *args, **kwargs):
         self.calls.append(("add_chat_bot", args, kwargs))

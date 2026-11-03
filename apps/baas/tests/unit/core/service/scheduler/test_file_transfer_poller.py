@@ -11,7 +11,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from secbaas.community.core.repository.file_transfer_ticket import TicketRecord
+from secbaas.community.core.repository.file_transfer_ticket import (
+    OrmTicketRepository,
+    TicketRecord,
+)
 from secbaas.community.core.service.scheduler._tasks._file_transfer_poller import (
     FileTransferPoller,
     FileTransferPollerConfig,
@@ -354,6 +357,36 @@ class TestProcessDownloadTicket:
         result = asyncio.run(poller._process_download_ticket(ticket))
 
         assert result == "skipped"
+
+    @pytest.mark.parametrize(
+        "stored_status, expected", [("FAILED", "timed_out"), ("DONE", "failed")]
+    )
+    def test_timeout_uses_repository_readback(self, stored_status, expected):
+        """A stale scan can race another worker's terminal transition."""
+        import asyncio
+
+        session = MagicMock()
+        database = MagicMock()
+        database.orm_session.return_value.__enter__.return_value = session
+        database.orm_session.return_value.__exit__.return_value = False
+        query = session.query.return_value.filter.return_value
+        query.update.return_value = 0
+        query.first.return_value = MagicMock(
+            status=stored_status, error_message="Download timed out"
+        )
+        poller = _make_poller(ticket_repo=OrmTicketRepository(database))
+        ticket = _make_ticket(
+            direction="DOWNLOAD",
+            status="CREATED",
+            gmt_create=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2),
+        )
+
+        result = asyncio.run(poller._process_download_ticket(ticket))
+
+        assert result == expected
+        query.update.assert_called_once()
+        poller._file_backend.check_object_exists.assert_not_called()
+        poller._paas_facade.pull_file.assert_not_called()
 
     def test_lock_not_acquired(self):
         """Lock contention returns 'skipped' for DOWNLOAD."""

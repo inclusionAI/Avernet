@@ -1,7 +1,7 @@
 """Local package locators and device writes share one resolved root."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.plugins.community.local_skill_storage import (
@@ -113,6 +113,33 @@ def test_historical_locator_is_not_redirected_to_new_root():
             skill_name="sample",
         )
     f._device_fs_dispatcher.for_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_openclaw_legacy_engine_locator_deletes_through_current_bot_storage():
+    f = factory(ConfiguredLocalSkillStorage())
+    bot = {"bot_id": "b", "entity_id": "u", "entity_type": "staff",
+           "active_engine": "openclaw", "bot_type": "personal"}
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+    current = "/aidesktop/u/b/openclaw/workspace/skills/skills-local"
+    f._path_factory.get_bot_skills_local_dir.return_value = Path(current)
+    filesystem = f._device_fs_dispatcher.for_bot.return_value
+    filesystem.list_dir = AsyncMock(return_value=[{"name": "SKILL.md"}])
+    filesystem.delete_tree = AsyncMock(return_value=True)
+
+    storage = f.local_skill_package_storage_for_locator(
+        entity_id="u", owner_id="u", bot_id="b", engine_type="openclaw",
+        entity_type="staff", is_desktop=False, is_teclaw=False,
+        locator="/home/admin/.openclaw/workspace/skills/skills-local/sample",
+        skill_name="sample",
+    )
+
+    assert await storage.exists() is True
+    assert await storage.delete() is True
+    f._device_fs_dispatcher.for_bot.assert_called_once_with("b", "u")
+    filesystem.list_dir.assert_awaited_once_with(f"{current}/sample")
+    filesystem.delete_tree.assert_awaited_once_with(f"{current}/sample")
 
 
 @pytest.mark.parametrize(

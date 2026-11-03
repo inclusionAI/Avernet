@@ -15,6 +15,19 @@ const input: CreateGroupInput = {
   ],
   definitionYaml: 'participants: []',
 };
+it.each([
+  ['chat', 'driver', 'consultant'],
+  ['manager_worker', 'manager', 'worker'],
+  ['state_machine', 'driver', 'consultant'],
+] as const)('%s assigns participant roles allowed by the strategy', (strategy, leadRole, memberRole) => {
+  const body = buildCreateGroupBody({ ...input, strategy });
+  expect(body.participants).toEqual([
+    { actor_id: 'service', tags: ['online'], role: leadRole },
+    { actor_id: 'human_1', message_view_scope: 'participant', role: memberRole },
+    { actor_id: 'personal', role: memberRole },
+  ]);
+});
+
 describe.each(['chat', 'manager_worker', 'state_machine'] as const)('%s notification source', (strategy) => {
   it.each(['all', 'driver_bot_only', 'none'] as const)('sends %s at the top level', (humanMentionNotifyMode) => {
     const body = buildCreateGroupBody({ ...input, strategy, humanMentionNotifyMode });

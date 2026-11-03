@@ -207,17 +207,17 @@ class TestPerAttemptThreading:
         assert hasattr(bot_sub, "executor_id")
         assert hasattr(bot_sub, "executor_name")
         assert llm_sub.executor_id
-        assert llm_sub.executor_name.startswith("s1-")
+        assert llm_sub.executor_name.startswith("s1_")
 
     def test_llm_kind_exposes_the_bare_per_attempt_digest(self):
         factory = DefaultSubagentFactory(StubLLMProvider())
         run = _mk_run()
         sub = factory.create(_LLM_SPEC, run, dm.AgentId("agent-s1"), 2)
         digest16 = dm.spawn_digest("run-42", "agent-s1", 2, 16)
-        digest8 = dm.spawn_digest("run-42", "agent-s1", 2, 8)
+        digest12 = dm.spawn_digest("run-42", "agent-s1", 2, 12)
         assert sub.executor_id == digest16
         assert not sub.executor_id.startswith("agent_swarm_")
-        assert sub.executor_name == f"s1-{digest8}"
+        assert sub.executor_name == f"s1_{digest12}"
 
 
 class _DeletionPlatform:

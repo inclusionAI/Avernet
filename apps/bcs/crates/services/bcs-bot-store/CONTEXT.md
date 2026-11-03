@@ -89,3 +89,120 @@ credential can trigger one extra bounded existence query (Bot and binding keys,
 including tombstones). Any persisted identity blocks this fallback, so stale
 memory tokens cannot bypass revocation, deletion or Provider state. Unknown
 tokens incur no extra query; no writes or new cache are introduced.
+## Provider collaboration scope
+Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (maximum 256 actors per read); no policy cache or group policy table is introduced. Provider metadata writes atomically reject relaxation of same_owner, including stale ordinary PATCH config.
+Provider tightening to same_owner atomically rejects related public groups through current environment-scoped membership. Memory implementations receive a Group membership projection and weak Bot-metadata reference; their policy gate serializes Group writes against policy updates. Failed tightening leaves all Provider metadata unchanged.
+Affiliation into a same_owner Provider rejects current public membership before writing Bot metadata or gateway projection. SQL attachment locks Provider then Bot and checks membership inside the transaction; public Group writes also lock unbound Bot rows. Memory attachment uses the existing policy gate. A fresh preflight port supports registration before capability merging; the write always rechecks.
+## Bot authority
+
+Bot authority state (bot-authority spec, plan Tasks 3–4) joins the SAME
+atomic shared state for Memory (`MemoryBotState`) and the SQL chain: the
+owner/manager edge projection, `bcs_bots.ownership_version`, the
+`bot_ownership_transfers` current-round row (one pending per
+`(env, bot_id, target_owner_actor_id)`) and the `bot_authority_changes`
+permission-scope audit. Registration commits the owner identity, the owner
+edge, `ownership_version` and the default runtime profile in one command
+(`register_with_ownership` → `CommittedBotRegistration`); owner transfer
+acceptance moves owner/manager edges and bumps the version inside one
+transaction, restoring the ex-owner as a plain manager. Manager sync is a
+set replacement in one transaction (input ≤1,000 deduped known Humans,
+stock cap 10,000, bounded retry for deterministic local rollbacks only);
+the owner is never a sync operand. Provider retirement (three branches),
+cleanup-pending retry and retire audits share the same atomic command
+boundary; a failed post-commit cleanup returns
+`retirement_cleanup_pending` and stays retriable without new audit rows.
+The authority read-side same-record pin (profile port, memory mode) holds
+for both dialects.
+
+Ordinary Bot retirement rejects Human targets in the repository, not just the
+application hook. SQL checks actor_kind again under the existing Bot row lock;
+Memory checks it under the shared authority write lock. This API does not delete
+Humans, so registration/transfer cannot race it into orphaning an owner. No new
+Human lifecycle API, query, migration or owner scan is introduced. Authority
+role/fallback reads accept only physical Bot targets (scalar and batch).
+
+
+## Caller configuration storage seam
+
+`PersistentBotRepo` implements the P1.1 caller-configuration read/sync on the
+existing `bcs_bots.bot_info` JSON column — no schema migration. Reads treat a
+missing `$.caller` as "never configured" and surface `caller:null`, non-object
+roots and malformed snapshots as a closed sanitized storage error, never as a
+disable. Sync resolves the §10.7.2 revision matrix in storage order
+(Apply/Unchanged/Stale/Conflict), writes with a binary CAS over the original
+`bot_info` text (CAST on MySQL, binary TEXT compare on SQLite), preserves all
+sibling fields, and after a lost CAS re-reads exactly once — a still-writable
+decision becomes Conflict, never a blind overwrite. `MemoryBotRepo` keeps the
+port's explicit fail-closed defaults. Conformance:
+`tests/conformance_caller_configuration.rs` (real SQLite + contended fake).
+
+## Provider caller capabilities read
+
+`DbProviderStore` implements the P1.4 authoritative caller-capability read on
+`bcs_providers.config.$.caller_capabilities` as a direct, cache-bypassing
+SQLite/MySQL query: missing provider is `ProviderNotFound`, a disabled
+provider is a closed "unavailable" error (never "undeclared"), a missing or
+empty config is a legacy never-declared row, and `caller_capabilities:null`,
+non-object roots and malformed declarations are closed sanitized errors that
+never echo raw config. Conformance:
+`tests/provider_caller_capabilities_contract.rs` (real SQLite).
+
+The caller-configuration seam is also provider-scoped: the read JOINs the
+canonical `bcs_provider_bot_bindings` (non-deleted bot, enabled binding,
+exact provider) and the conditional write re-asserts the same ownership
+inside its WHERE clause, so Bots of other providers, unbound Bots and
+disabled bindings are out of scope without ever being reported
+"unconfigured".
+
+## A2A Card storage
+
+`DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
+nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
+SQLite 039. One explicit read returns one Card; one CAS commits all three fields
+and updates the generic Bot audit time. Writes fence environment, Provider/ref,
+active Gateway mode and revision; failures propagate. Routes and credential
+references are derived, never duplicated in this store.
+Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not
+one ID query plus per-Card lookups. Availability projects only interfaces for at
+most 256 IDs. No persistent refresh/error state or additional cache exists.
+See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
+
+Full Card queries select only Bot identity and Card payload in batches of 256.
+Discovery matches the local BCS display name/ID as well as Card
+names/descriptions and skill IDs/names/descriptions/tags
+in SQL before selecting matching payloads. A nonmatching A2A identity remains
+distinguishable from a legacy Bot, preventing stale capability fallback. Search
+count and pagination share the same predicate. Display aliases do not enable
+legacy skill/summary matching; explicit skill selectors still require Card skills.
+The alias predicate uses the existing SQL queries and pagination/batch bounds.
+Offline Gateway discovery also matches the alias in the Provider binding selector;
+organization candidate counts/pages use the same name rule. A live registry
+entry is not required to discover an enabled Gateway Bot. SQL flavor is explicitly injected;
+SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
+character and bound values. See the
+[MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
+Provider database implementations and tests are separated into provider_db.rs
+and provider_tests.rs; the existing Provider behavior remains covered by its suite.
+
+
+A2A strict registration extends the existing ownership composite with a checked
+Card UPDATE inside the same transaction, after the new Bot/binding and before
+ownership/profile/audit steps. Identity, credential scope and initial revision
+are checked before writing. It adds one single-row statement, no network or new
+schema. Failure of Card or a later ownership step rolls back every lifecycle row.
+
+
+Provider-admin A2A admission uses the separate
+`create_provider_admin_a2a_bot_with_ownership` operation. Its ownership builder
+requires a Provider actor exactly matching the Bot's Provider; the old Human
+registration operations still reject Provider actors. Both paths reuse the
+same SQL transaction/guard statements, differing only in verified audit identity.
+No credential reaches audit rows; no post-commit owner/profile/Card write is
+introduced. A rollback includes Bot, binding, Card, Human/owner and default profile.
+
+The mandatory bcs-admin full MySQL migration-chain gate also runs the shared A2A
+Card/Run/Task/context store cases from tests/support/a2a_mysql_cases.rs, using the
+same already-migrated disposable schema. The isolated a2a_mysql test reuses those
+cases. Failure injection uses temporary CHECK constraints, without requiring
+privileged trigger creation. JSON search, CAS, rollback of Task/context association,
+shared Task references and all audit fields are exercised on native MySQL.

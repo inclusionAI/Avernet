@@ -39,3 +39,65 @@ async fn presigned_download_follows_redirect_without_bcn_identity() {
     assert!(bcn_task.await.unwrap().contains("x-bcn-actor-bot-id: bot-a"));
     assert_no_identity(&storage_task.await.unwrap());
 }
+
+#[test]
+fn download_waits_for_file_writes_to_complete() {
+    use std::time::Duration;
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build().unwrap()
+        .block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let (send_body, body_ready) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0; 1024];
+                while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    assert_ne!(count, 0, "request ended before headers");
+                    request.extend_from_slice(&chunk[..count]);
+                }
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n").await.unwrap();
+                body_ready.await.unwrap();
+                socket.write_all(b"data").await.unwrap();
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("download");
+            let out = file.clone();
+            let bcs = client(&url);
+            let mut download = tokio::spawn(async move {
+                bcs.download_session_file("s", "f", out.to_str(), None).await
+            });
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !file.exists() {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            }).await.expect("download must create the output file before receiving the body");
+
+            // Hold the only blocking worker after file creation. The response
+            // body can be received, but its filesystem write cannot finish yet.
+            let (started, worker_started) = tokio::sync::oneshot::channel();
+            let (release, released) = std::sync::mpsc::channel();
+            let worker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                let _ = released.recv();
+            });
+            worker_started.await.unwrap();
+            send_body.send(()).unwrap();
+            let early_result = tokio::time::timeout(Duration::from_millis(100), &mut download).await;
+            let bytes_before_write = std::fs::read(&file).unwrap();
+            // Always unblock the worker before asserting, including on failure.
+            release.send(()).unwrap();
+            worker.await.unwrap();
+            assert!(early_result.is_err(),
+                "download returned before its file write completed: {early_result:?}, bytes: {bytes_before_write:?}");
+            tokio::time::timeout(Duration::from_secs(10), download).await
+                .expect("download must finish after releasing the writer").unwrap().unwrap();
+            assert_eq!(std::fs::read(&file).unwrap(), b"data");
+            server.await.unwrap();
+        });
+}

@@ -12,7 +12,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    is_dispatchable_single_bot_assignee,
+)
 from agentclaw.community.core.task.domain.models import TaskNode
 
 logger = logging.getLogger("task.harness.relay")
@@ -20,13 +23,24 @@ logger = logging.getLogger("task.harness.relay")
 
 RELAY_HARNESS_RESUME_PROMPT = (
     "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、"
-    "不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，"
-    "并继续执行后续步骤。"
+    "不要重新提交 execute。请从当前会话历史中获取 S1 到断点前已形成的"
+    "上下文和结果，不要重做已完成步骤；从第一个未完成步骤继续执行，"
+    "直到流程执行完为止。当前步骤无法完成时，请输出明确失败原因并按协议收口。"
 )
+
+
+def relay_harness_resume_prompt(resume_step: str | None = None) -> str:
+    """Return the single same-session continuation instruction."""
+    return RELAY_HARNESS_RESUME_PROMPT
+
 
 
 class RelaySessionRecoveryError(RuntimeError):
     """Raised when an existing Relay execution session cannot be continued."""
+
+
+class RelaySessionPreconditionError(RelaySessionRecoveryError):
+    """A node lacks a same-session prerequisite and cannot be resumed here."""
 
 
 @dataclass(frozen=True)
@@ -50,7 +64,9 @@ class RelaySessionRecovery:
         self._bcs = bcs
         self._bot_tokens = bot_tokens
 
-    async def resume(self, node: TaskNode) -> RelayResumeResult:
+    async def resume(
+        self, node: TaskNode, *, resume_step: str | None = None
+    ) -> RelayResumeResult:
         props = getattr(node.run_info, "extend_props", {}) or {}
         group_id = str(props.get("group_id") or "").strip()
         session_id = str(props.get("session_id") or "").strip()
@@ -60,13 +76,13 @@ class RelaySessionRecovery:
                     "relay resume has no BCS port for the existing group session"
                 )
             if not session_id:
-                raise RelaySessionRecoveryError(
+                raise RelaySessionPreconditionError(
                     "relay group node has no existing session_id to resume"
                 )
             caller_bearer = await self._resolve_group_bearer(group_id, node)
             result = await self._bcs.send_session_chat(
                 session_id,
-                message=RELAY_HARNESS_RESUME_PROMPT,
+                message=relay_harness_resume_prompt(resume_step),
                 caller_bearer=caller_bearer,
             )
             handle = str(
@@ -91,7 +107,7 @@ class RelaySessionRecovery:
             )
 
         if not session_id:
-            raise RelaySessionRecoveryError(
+            raise RelaySessionPreconditionError(
                 "relay node has no existing session_id to resume"
             )
         if self._bot is None:
@@ -99,9 +115,9 @@ class RelaySessionRecovery:
                 "relay resume has no OpenAPI Bot port for the existing session"
             )
         assignee = str(getattr(node.run_info, "assignee", "") or "")
-        if not assignee:
-            raise RelaySessionRecoveryError(
-                "relay node has no assignee for the existing session"
+        if not is_dispatchable_single_bot_assignee(assignee):
+            raise RelaySessionPreconditionError(
+                "relay node has no valid assignee for the existing session"
             )
         lifecycle_stage = str(props.get("lifecycle_stage") or "").strip()
         metadata: dict[str, Any] = {"session_id": session_id}
@@ -110,7 +126,7 @@ class RelaySessionRecovery:
 
         sent = await self._bot.send_message(
             bot_id=compose_bot_identity(assignee, props.get("assignee_owner_id")),
-            message=RELAY_HARNESS_RESUME_PROMPT,
+            message=relay_harness_resume_prompt(resume_step),
             metadata=metadata,
         )
         logger.info(

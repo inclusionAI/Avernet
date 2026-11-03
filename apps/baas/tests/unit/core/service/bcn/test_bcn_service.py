@@ -515,7 +515,7 @@ async def test_handle_chat_send_detached(service, mock_bot_runner):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("token_type", ["iam-token", "agentpaas"])
+@pytest.mark.parametrize("token_type", ["iam-token", "agentpass"])
 async def test_handle_chat_send_extracts_trusted_caller_identity(
     service,
     mock_bot_runner,

@@ -7,6 +7,7 @@ from agentclaw.community.core.task.task_harness.harness import (
     effective_sla_threshold_ms,
 )
 
+from agentclaw.community.core.task.domain.models import TaskRuntimeProfile
 from agentclaw.community.core.task.task_runner.centralized_support import (
     NodeAction,
     ReasonCatalog,
@@ -787,6 +788,16 @@ def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
     the root is blocked.
     """
     if execution_graph.status == Status.HUNG:
+        return False
+    if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(execution_graph):
+        logger.info(
+            "[task][bbs_mode] task=%s BBS recovery disabled by runtime profile", task_id
+        )
+        self._sync_graph_status_to_root(task_id)
+        self._report_graph_patch(
+            task_id,
+            TaskGraphPatch(extend_props_patch={"hung_reason": "bbs_disabled"}),
+        )
         return False
     root = self._root(task_id)
     if root is None or root.run_info.extend_props.get("bbs_owner"):

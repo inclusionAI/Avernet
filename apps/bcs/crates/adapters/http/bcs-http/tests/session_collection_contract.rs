@@ -81,7 +81,6 @@ impl SessionManagementService for CollectionMock {
             input: cmd.params.input.clone(),
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
@@ -141,26 +140,6 @@ impl SessionManagementService for CollectionMock {
             .filter(|s| s.group_id == group_id)
             .cloned()
             .collect())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(
@@ -368,7 +347,6 @@ async fn collect_and_list_collected_via_bot_token() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -474,7 +452,6 @@ async fn collected_list_rejects_unauthorized_participant() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -564,7 +541,6 @@ async fn collected_list_ordered_by_collect_event_desc() {
             input: None,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: 1,
             caller_principal: None,
@@ -647,7 +623,6 @@ async fn ordinary_list_with_participant_surfaces_collected_fields() {
             input: None,
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: 1,
             caller_principal: None,
@@ -759,7 +734,6 @@ async fn uncollect_removes_from_collected_list() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -879,7 +853,6 @@ async fn human_caller_collect_enforces_participant_and_ownership() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -982,7 +955,6 @@ async fn human_caller_uncollect_via_query_enforces_ownership() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -1144,6 +1116,13 @@ async fn human_app(
         .unwrap();
 
     let group_store = Arc::new(GroupStore::new());
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    for bot_id in owned_bot_ids {
+        authority.seed_owner(bot_id, staff_no);
+    }
+    authority.seed_owner("unauthorized-bot", "someone-else");
     let driver = owned_bot_ids.first().copied().unwrap_or("owned-bot");
     let participants: Vec<Participant> = owned_bot_ids
         .iter()
@@ -1173,6 +1152,7 @@ async fn human_app(
     services.registry = registry.clone();
     services.group = group_store;
     services.session_management = sessions.clone();
+    services.bot_authority_hook = authority;
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some(staff_no.to_string()),
@@ -1247,4 +1227,175 @@ impl UserIdentityPort for StaticHumanIdentity {
     ) -> Result<(), AuthError> {
         Ok(())
     }
+}
+
+/// §3.3 Human self right (GPT-review batch C
+/// finding #8): the collect / collect-listing
+/// routes pass the caller's OWN `human_{id}`
+/// collector through its self identity — NOT
+/// through the authority hook (no Human→Human
+/// edges exist). A different Human actor stays
+/// denied, and the Bot-participant leg keeps its
+/// A→B handover matrix.
+#[tokio::test]
+async fn human_self_collector_is_a_self_right_not_an_authority_call() {
+    let (app, mock, _temp_dir, _registry) = human_app("alice", &["owned-bot"]).await;
+    let sid = "group-1:abcd1234";
+    push_session(&mock, &sid, "owned-bot").await;
+
+    // Self: allowed with NO authority edge (the
+    // hook would always deny `can_manage` on a
+    // Human actor id).
+    let collect = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/sessions/{sid}/collect"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"participant": "human_alice"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(collect.status(), StatusCode::OK);
+
+    // Self on the collected LISTING too.
+    let listing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/groups/group-1/sessions?collected=true&participant=human_alice"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(listing.status(), StatusCode::OK);
+
+    // Uncollect self.
+    let uncollect = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/sessions/{sid}/collect?participant=human_alice"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(uncollect.status(), StatusCode::OK);
+
+    // A DIFFERENT Human actor is denied (the
+    // self branch is identity-bound, not a
+    // wildcard).
+    let other = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/sessions/{sid}/collect"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"participant": "human_bob"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(other.status(), StatusCode::FORBIDDEN);
+}
+
+/// The Bot-participant leg of the same route
+/// keeps its A→B handover matrix (the self
+/// branch must not widen it).
+#[tokio::test]
+async fn collect_participant_bot_leg_keeps_the_handover_matrix() {
+    // A controls the participant: collect passes.
+    let (app_a, mock, _t, _r) = human_app("alice", &["owned-bot"]).await;
+    let sid = "group-1:abcd1234";
+    push_session(&mock, &sid, "owned-bot").await;
+    let collect = app_a
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/sessions/{sid}/collect"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"participant": "owned-bot"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(collect.status(), StatusCode::OK);
+
+    // A→B handover: B collects; the revoked A
+    // (same staff identity) is denied.
+    let (app_b, mock_b, _t, _r) = human_app("bob", &["owned-bot"]).await;
+    push_session(&mock_b, &sid, "owned-bot").await;
+    let collect_b = app_b
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/sessions/{sid}/collect"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"participant": "owned-bot"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(collect_b.status(), StatusCode::OK);
+}
+/// Push a collectable session into the mock with
+/// `participant` as its Bot participant.
+async fn push_session(
+    mock: &Arc<CollectionMock>,
+    sid: &str,
+    participant: &str,
+) {
+    mock.sessions.lock().await.push(Session {
+        id: sid.to_string(),
+        group_id: "group-1".to_string(),
+        session_title: None,
+        env: None,
+        status: SessionStatus::Running,
+        session_kind: SessionKind::Chat,
+        participants: vec![Participant {
+            bot_uuid: participant.to_string(),
+            bot_name: Some(participant.to_string()),
+            kind: None,
+            role: ParticipantRole::Consultant,
+            actor_kind: ActorKind::Bot,
+            mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
+        }],
+        group_version: Some(1),
+        caller_id: None,
+        input: None,
+        output: None,
+        error_message: None,
+        activation_count: 1,
+        message_visibility_version: 1,
+        caller_principal: None,
+        created_by: None,
+        created_at: 1,
+        updated_at: 1,
+        completed_at: None,
+        meta: None,
+        current_msg_seq: 0,
+        participant_join_seq: None,
+        collected_at: None,
+    });
 }

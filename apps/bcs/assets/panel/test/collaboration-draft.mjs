@@ -16,18 +16,17 @@ const { CollaborationDefinitionCard, CollaborationDefinitionPreview, decodeColla
 const fixture = JSON.parse(readFileSync(new URL('../../../tests/fixtures/collaboration-definition-draft/indentation-regression.json', import.meta.url), 'utf8'));
 // Validator response for the unchanged 2,174-byte incident YAML above.
 const incidentValidation = JSON.parse(readFileSync(new URL('./fixtures/incident-loop-preview.json', import.meta.url), 'utf8'));
-const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1, readToken: 'A'.repeat(43) };
+const reference = { schemaVersion: 2, draftId: '750c52c6-60e2-4249-8ee5-1fb8cb9402ab', revision: 1 };
 assert.deepEqual(decodeCollaborationDefinitionReference(reference), reference);
 for (const bad of [
-  { ...reference, readToken: 'A'.repeat(42) + 'B' },
-  { ...reference, readToken: undefined },
-  { ...reference, revision: Number.MAX_SAFE_INTEGER + 1 },
-  { ...reference, revision: 0 },
-  { ...reference, title: 'forbidden' },
-  { ...reference, url: 'https://untrusted.example' },
-  { ...reference, apiBaseUrl: 'https://untrusted.example' },
-  { ...reference, definitionYaml: 'inline' },
+  null, [], { ...reference, schemaVersion: 3 }, { ...reference, draftId: 'invalid' },
+  { ...reference, revision: Number.MAX_SAFE_INTEGER + 1 }, { ...reference, revision: 0 },
 ]) assert.throws(() => decodeCollaborationDefinitionReference(bad));
+assert.deepEqual(decodeCollaborationDefinitionReference({ ...reference, readToken: 'obsolete',
+  url: 'https://untrusted.example', apiBaseUrl: '/untrusted', definitionYaml: 'inline' }), reference,
+  'historical or extra fields are discarded before opening or forwarding a reference');
+assert.deepEqual(decodeCollaborationDefinitionReference({ ...reference, readToken: 'A'.repeat(43) }), reference,
+  'cards emitted by the deployed CLI with the compatibility placeholder remain readable');
 assert.equal(decodeCollaborationDefinitionReference({ ...reference, revision: Number.MAX_SAFE_INTEGER }).revision, Number.MAX_SAFE_INTEGER);
 
 const opened = [], closed = [], requests = [];
@@ -43,13 +42,13 @@ assert.equal(opened.length, 0);
 await act(async () => container.querySelector('button').click());
 assert.equal(opened.length, 1);
 assert(!('apiBaseUrl' in opened[0].params.data), 'an unconfigured card must allow the preview host to inject its base');
-assert(!opened[0].id.includes(reference.readToken));
+assert.deepEqual(opened[0].params.data.snapshot, reference);
 await act(async () => container.querySelector('button').click());
 assert.equal(opened[0].id, opened[1].id);
-await act(async () => root.render(React.createElement(CollaborationDefinitionCard, { ...reference, readToken: 'B'.repeat(42) + 'A' })));
-assert.equal(closed.length, 1, 'credential changes close stale preview');
+await act(async () => root.render(React.createElement(CollaborationDefinitionCard, { ...reference, readToken: 'obsolete' })));
+assert.equal(closed.length, 0, 'obsolete fields do not change the fixed preview');
 await act(async () => container.querySelector('button').click());
-assert.equal(opened.at(-1).id, opened[0].id, 'capability never forms part of tab identity');
+assert.equal(opened.at(-1).id, opened[0].id, 'only the fixed revision forms the tab identity');
 await act(async () => root.unmount());
 
 const revision = { ...fixture.revision, draft_id: reference.draftId, revision: 1 };
@@ -61,10 +60,9 @@ const validation = {
 let mode = 'valid';
 globalThis.fetch = async (url, options) => {
   requests.push({ url, options });
-  assert.equal(options.headers['X-BCS-Draft-Read-Token'], reference.readToken);
+  assert.equal(options.headers, undefined, 'public reads must not add custom headers');
   assert.equal(options.cache, 'no-store');
   assert.equal(options.redirect, 'error');
-  assert(!url.includes(reference.readToken));
   if (mode === 'revoked') return new Response('{}', { status: 404 });
   if (url.endsWith('/validate')) {
     assert.equal(options.method, 'POST');
@@ -95,7 +93,7 @@ async function render() {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
 }
 await render();
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true');
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true');
 assert.equal(panel.querySelector('pre'), null, 'opening a draft shows preview without the source block');
 assert.match(panel.textContent, /定义校验通过/);
 assert.equal(panel.querySelectorAll('[data-node-id]').length, 3, 'incident shows writing, review and publish once');
@@ -108,43 +106,46 @@ const logicalNodes = [...panel.querySelectorAll('[data-node-id]')].map(node => n
 assert.deepEqual(logicalNodes, ['节点 写稿', '节点 审稿', '节点 发表']);
 let copied;
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async text => { copied = text; } } }, configurable: true });
-await act(async () => copyButton().click());
-assert.equal(copied, fixture.revision.definition_yaml);
-await selectTab('源码');
+assert.equal(copyButton(), null, 'copy appears only in the definition tab');
+await selectTab('查看定义');
+assert.equal(panel.querySelector('h3').textContent, '协作定义 YAML');
 assert.equal(panel.querySelector('pre').textContent, fixture.revision.definition_yaml);
 assert.equal(new TextEncoder().encode(panel.querySelector('pre').textContent).length, 2174);
+assert.ok(panel.querySelector('pre .hljs-attr'), 'the incident YAML highlights mapping keys');
+assert.ok(panel.querySelector('pre .hljs-literal'), 'the incident YAML highlights boolean values');
 assert.match(panel.textContent, /test-validator/);
 copied = undefined;
 await act(async () => copyButton().click());
-assert.equal(copied, fixture.revision.definition_yaml, 'copy works in both tabs');
-await act(async () => tab('源码').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
-assert.equal(document.activeElement, tab('预览'));
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true');
+assert.equal(copied, fixture.revision.definition_yaml, 'copy preserves the verified original in the definition tab');
+await act(async () => tab('查看定义').dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+assert.equal(document.activeElement, tab('协作预览'));
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true');
 assert.equal(panel.querySelector('pre'), null);
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelectorAll('[data-node-id]').length, 3, 'returning from source retains the logical loop view');
 assert.equal(requests.length, 2, 'switching tabs and copying reuse the fixed revision without refetching');
 mode = 'validation-down';
 await render();
+await selectTab('查看定义');
 assert.equal(copyButton().disabled, false, 'verified source remains available when validation fails');
-await selectTab('源码');
 assert.equal(panel.querySelector('pre').textContent, fixture.revision.definition_yaml);
 assert.match(panel.textContent, /HTTP 503/);
 mode = 'corrupt';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /SHA-256 不匹配/);
 mode = 'invalid-unicode';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /完整性检查失败/);
 mode = 'revoked';
 await render();
-assert.equal(copyButton().disabled, true);
-await selectTab('源码');
+await selectTab('查看定义');
+assert.equal(copyButton(), null);
 assert.equal(panel.querySelector('pre'), null);
 assert.match(panel.textContent, /引用不可用/);
 await act(async () => panelRoot.unmount());
@@ -213,16 +214,17 @@ await act(async () => {
   await new Promise(resolve => setTimeout(resolve, 20));
 });
 assert.match(panel.textContent, /定义校验通过/);
-await selectTab('源码');
+await selectTab('查看定义');
 assert.match(panel.textContent, /source-b/);
 assert(!panel.textContent.includes('source-a'));
 await act(async () => raceRoot.render(React.createElement(CollaborationDefinitionPreview, {
   snapshot: { ...reference, revision: 3 }, sourceMessageId: 'source-c',
 })));
 assert.equal(pending.length, 4);
-assert.equal(tab('预览').getAttribute('aria-selected'), 'true', 'a different version opens in preview');
+assert.equal(tab('协作预览').getAttribute('aria-selected'), 'true', 'a different version opens in preview');
 assert.equal(panel.querySelector('pre'), null);
-assert.equal(copyButton().disabled, true, 'never copy the previous version while the new one loads');
+await selectTab('查看定义');
+assert.equal(copyButton(), null, 'never copy the previous version while the new one loads');
 await act(async () => raceRoot.unmount());
 assert.equal(pending[3].options.signal.aborted, true);
 
@@ -243,7 +245,7 @@ await act(async () => {
   await new Promise(resolve => setTimeout(resolve, 20));
 });
 assert.equal(pending.length, start + 2, 'stale host response must not trigger validation');
-assert.equal(copyButton().disabled, true);
+assert.equal(copyButton(), null);
 await act(async () => {
   pending[start + 1].resolve(Response.json(revision));
   await new Promise(resolve => setTimeout(resolve, 30));
@@ -255,4 +257,4 @@ await act(async () => {
 });
 assert.match(panel.textContent, /定义校验通过/);
 await act(async () => baseRoot.unmount());
-console.log('Draft Panel: strict references, capability isolation, preview/source tabs, incident bytes/copy, fixed validation, unavailable and integrity states passed.');
+console.log('Draft Panel: normalized references, header-free reads, preview/source tabs, incident bytes/copy, fixed validation, unavailable and integrity states passed.');

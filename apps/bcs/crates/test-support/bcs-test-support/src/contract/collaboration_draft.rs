@@ -8,7 +8,7 @@ use bcs_service_api::{
 pub async fn collaboration_draft_core_service_contract_tests(
     service: &dyn CollaborationDraftCoreService,
 ) {
-    let id = "30000000-0000-0000-0000-000000000001";
+    let id = &uuid::Uuid::new_v4().to_string();
     service
         .create(
             "owner",
@@ -20,10 +20,9 @@ pub async fn collaboration_draft_core_service_contract_tests(
         )
         .await
         .unwrap();
-    let token = service.reference("owner", id, 1).await.unwrap().read_token;
     assert_eq!(
         service
-            .read(DraftAccess::ReadToken(token.clone()), id, 1)
+            .read(id, 1)
             .await
             .unwrap()
             .definition_yaml,
@@ -35,13 +34,13 @@ pub async fn collaboration_draft_core_service_contract_tests(
     ));
     service.revoke("owner", id, 1).await.unwrap();
     assert!(matches!(
-        service.read(DraftAccess::ReadToken(token), id, 1).await,
+        service.read(id, 1).await,
         Err(DraftCoreError::Unavailable)
     ));
 }
 
 pub async fn collaboration_draft_service_contract_tests(service: &dyn CollaborationDraftService) {
-    let id = "30000000-0000-0000-0000-000000000002";
+    let id = &uuid::Uuid::new_v4().to_string();
     let saved = service
         .create(
             "owner",
@@ -54,7 +53,7 @@ pub async fn collaboration_draft_service_contract_tests(service: &dyn Collaborat
         .await
         .unwrap();
     let validation = service
-        .validate(DraftAccess::Owner("owner".into()), id, 1)
+        .validate(id, 1)
         .await
         .unwrap();
     assert_eq!(validation.content_hash, saved.content.content_hash);
@@ -74,14 +73,14 @@ pub async fn collaboration_draft_service_contract_tests(service: &dyn Collaborat
     service.delete("owner", id).await.unwrap();
     assert!(matches!(
         service
-            .read(DraftAccess::Owner("owner".into()), id, 1)
+            .read(id, 1)
             .await,
         Err(DraftError::Unavailable)
     ));
 }
 
 pub async fn collaboration_draft_repo_port_contract_tests(repo: &dyn CollaborationDraftRepoPort) {
-    let id = "30000000-0000-0000-0000-000000000003";
+    let id = &uuid::Uuid::new_v4().to_string();
     let meta = DraftMetadata {
         draft_id: id.into(),
         owner_bot_id: "owner".into(),
@@ -100,8 +99,6 @@ pub async fn collaboration_draft_repo_port_contract_tests(repo: &dyn Collaborati
             created_by: "owner".into(),
             created_at: "now".into(),
         },
-        share_nonce: "test-nonce".into(),
-        key_id: "key".into(),
         revoked: false,
     };
     repo.create(meta.clone(), first.clone()).await.unwrap();

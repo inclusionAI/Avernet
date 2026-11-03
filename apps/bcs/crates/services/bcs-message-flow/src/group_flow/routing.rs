@@ -30,6 +30,10 @@ pub(super) async fn verify_group_chat_caller_access(
     group: &Group,
     caller: &CallerContext,
 ) -> ServiceResult<()> {
+    let actor = caller_actor_id(caller).ok_or_else(|| ServiceError::Unauthorized("authenticated actor is required".into()))?;
+    let mut scope_actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+    scope_actors.push(actor);
+    flow.registry.collaboration_owner(&scope_actors).await?;
     match caller {
         CallerContext::Bot(bot) => match group.get_participant(&bot.bot_uuid) {
             Some(participant) if participant.is_bot() => Ok(()),
@@ -39,7 +43,7 @@ pub(super) async fn verify_group_chat_caller_access(
             ))),
         },
         CallerContext::Human(human) => {
-            if human_has_group_access(flow, group, &human.actor_id, &human.staff_no).await {
+            if human_has_group_access(flow, group, &human.actor_id, &human.staff_no).await? {
                 Ok(())
             } else {
                 Err(ServiceError::Unauthorized(format!(
@@ -129,7 +133,7 @@ pub(super) async fn verify_http_group_message_sender(
 
     if let Some(bot) = flow.registry.get(sender).await {
         if bot.actor_kind == ActorKind::Bot
-            && bot_belongs_to_staff(sender, bot.created_by.as_deref(), &human.staff_no)
+            && human_controls_bot(flow, &human.staff_no, sender).await?
         {
             return Ok(());
         }
@@ -164,7 +168,7 @@ pub(super) async fn verify_http_group_message_caller_access(
         ));
     };
 
-    if human_has_group_access(flow, group, &human.actor_id, &human.staff_no).await {
+    if human_has_group_access(flow, group, &human.actor_id, &human.staff_no).await? {
         Ok(())
     } else {
         Err(ServiceError::Unauthorized(format!(
@@ -174,18 +178,27 @@ pub(super) async fn verify_http_group_message_caller_access(
     }
 }
 
+/// Live group access for a Human caller: self-participation
+/// counts directly; a controlled participant Bot counts through
+/// the bot-authority hook (bot-authority plan Task 6.5). The
+/// legacy `created_by` / owner-suffix probes are gone — the
+/// owner-suffix fallback granted nothing under the live
+/// management-edge model (spec §3.2).
+///
+/// A failing authority read is an internal error, not a
+/// deny-as-verdict.
 async fn human_has_group_access(
     flow: &BcsMessageFlow,
     group: &Group,
     actor_id: &str,
     staff_no: &str,
-) -> bool {
+) -> ServiceResult<bool> {
     if group
         .participants
         .iter()
         .any(|participant| participant.bot_uuid == actor_id)
     {
-        return true;
+        return Ok(true);
     }
 
     for participant in group
@@ -196,26 +209,17 @@ async fn human_has_group_access(
         let Some(bot) = flow.registry.get(&participant.bot_uuid).await else {
             continue;
         };
-        if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
-            return true;
+        if bot.actor_kind != ActorKind::Bot {
+            continue;
+        }
+        if human_controls_bot(flow, staff_no, &participant.bot_uuid).await? {
+            return Ok(true);
         }
     }
 
-    false
+    Ok(false)
 }
 
-fn bot_belongs_to_staff(bot_uuid: &str, created_by: Option<&str>, staff_no: &str) -> bool {
-    if created_by == Some(staff_no) {
-        return true;
-    }
-    if created_by.is_some() {
-        return false;
-    }
-    bot_uuid
-        .rsplit_once(':')
-        .map(|(_, suffix)| suffix == staff_no)
-        .unwrap_or(false)
-}
 
 pub(super) async fn sender_name_for_chat(
     flow: &BcsMessageFlow,

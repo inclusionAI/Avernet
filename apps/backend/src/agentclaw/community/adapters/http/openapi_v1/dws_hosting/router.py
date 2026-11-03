@@ -35,6 +35,11 @@ from agentclaw.community.di.dws_management_config import (
 )
 from .schemas import EnabledUpdate, SettingsUpdate, TakeoverUpdate
 from .admission import PATH
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.core.system_config.dws_rollout import is_allowed, is_stop
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
+from agentclaw.community.utils.env_utils import get_current_env
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(
     prefix=PATH,
@@ -45,8 +50,10 @@ router = APIRouter(
 
 
 class OwnerEndpoint:
-    def __init__(self, bot_id, actor, relay, config):
+    def __init__(self, bot_id, actor, relay, config, rollout=None, identity=DwsRolloutIdentity()):
         self.bot_id, self.actor, self.relay, self.config = bot_id, actor, relay, config
+        self.rollout = rollout
+        self.identity = identity
 
     async def call(self, operation, data, request):
         facts = await self.relay.resolve_bot_off_loop(
@@ -58,6 +65,15 @@ class OwnerEndpoint:
             return error_response(
                 409, "DWS hosting requires a personal OpenClaw Bot", request
             )
+        allowed = await run_in_threadpool(
+            is_allowed, self.rollout, self.actor, get_current_env(), self.identity
+        )
+        if operation == "eligibility":
+            return envelope({"available": allowed}, request)
+        # COSEC: UI visibility is not authorization; only safe stop operations
+        # remain available after revocation. Identity comes from signed principal.
+        if not allowed and not is_stop(operation, data):
+            return error_response(403, "DWS hosting is not available", request)
         if not self.config.key:
             return error_response(503, "DWS hosting is not configured", request)
         # COSEC: sign only server-resolved identity and a fixed operation; never
@@ -102,12 +118,20 @@ async def endpoint(
     principal: Annotated[Principal, Depends(require_principal)],
     config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    identity: DwsRolloutIdentity = Injected(DwsRolloutIdentity),
 ):
     actor = caller_owner_id(principal)
-    return OwnerEndpoint(bot_id, actor, relay, config)
+    return OwnerEndpoint(bot_id, actor, relay, config, rollout, identity)
 
 
 Endpoint = Annotated[OwnerEndpoint, Depends(endpoint)]
+
+
+@router.get("/eligibility", response_model=Envelope[dict])
+@envelope_errors
+async def eligibility(request: Request, service: Endpoint):
+    return await service.call("eligibility", {}, request)
 
 
 @router.get("", response_model=Envelope[dict])

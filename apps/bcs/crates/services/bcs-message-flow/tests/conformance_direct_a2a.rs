@@ -104,6 +104,7 @@ impl Harness {
             config: DeliveryRuntimeConfig { max_safe_retries: 0, pause_dispatch: false, bots: Default::default(), tick: Duration::from_millis(10),
                 expiry_tick: Duration::from_millis(20), io_timeout: Duration::from_secs(1), run_timeout: Duration::from_secs(30), cancel_timeout: Duration::from_secs(1),
                 startup_recovery_grace: Duration::ZERO, max_tasks: 4, max_abort_tasks: 1 },
+            caller_dispatch: None,
         }
     }
 }

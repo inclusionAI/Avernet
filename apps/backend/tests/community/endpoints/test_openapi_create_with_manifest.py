@@ -388,15 +388,15 @@ def a_bot_id_with_no_creation_is_a_404():
 import pytest
 from fastapi.testclient import TestClient
 
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -510,7 +510,7 @@ class _Worker:
         if task.task_type == CREATE_JOB_TASK_TYPE:
             return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
         if task.task_type == APPLY_TASK_TYPE:
-            self._world.get(BotConfigManifestApplyServiceProtocol).run_apply_task(
+            self._world.get(ApplyRunServiceProtocol).run_apply_task(
                 task.payload
             )
             return Complete()
@@ -882,7 +882,7 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     platform-managed sequence over the store-backed ports the DI graph already
     binds — the mock object store and the in-memory index.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    from agentclaw.community.core.apply_engine.delivery import (
         DeliveryStrategyFactory,
         EngineFamily,
         PlatformPorts,
@@ -890,8 +890,8 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
         TeclawPlatformDelivery,
         family_from_engine_test,
     )
-    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-        BotConfigManifestApplyService,
+    from agentclaw.community.core.apply_engine.run.service import (
+        ApplyRunService,
     )
 
     order: list[str] = []
@@ -933,7 +933,7 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     )
 
     applies = bind_overrides(
-        world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
+        world, ApplyRunServiceProtocol, {}, also_bind=(ApplyRunService,)
     )
     # The managed-files store keeps no index: the object store's listing is
     # the record, so the mock plugin has to remember what was put into it.
@@ -972,7 +972,7 @@ def test_a_teclaw_creation_walks_record_phase_container_ready(client, world):
     """`AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`, with
     the report from the single phase, and the phase's files in the platform's
     store before the container was provisioned."""
-    from agentclaw.community.core.bot_config_manifest.managed_files import (
+    from agentclaw.community.core.apply_engine.managed_files import (
         CATEGORY_IDENTITY,
         ManagedFileScope,
         ManagedFilesStore,

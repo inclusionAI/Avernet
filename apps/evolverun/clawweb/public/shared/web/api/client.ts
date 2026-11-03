@@ -382,6 +382,8 @@ export type WorkflowAutoAnalysisSetting = {
 
 
 export type EvolveTask = {
+  canManage?: boolean
+  canApplySkill?: boolean
   task_id: string
   task_type: EvolveTaskType | 'session_analysis' | 'session_export' | 'stage_test'
   task_name: string | null

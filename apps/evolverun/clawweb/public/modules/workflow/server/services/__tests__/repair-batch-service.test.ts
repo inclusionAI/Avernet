@@ -33,15 +33,17 @@ describe('repair workbench control service', () => {
     expect(retry.input.baseline).toEqual(revision.input.baseline);
     expect((await f.service.task(revision.taskId)).revisions.find(row=>row.revision===1)!.input.integration).toBeUndefined();
   });
-  it('retains execution failure details instead of replacing them with AIS lifecycle errors', async () => {
+  it('settles failed AIS from its status without fetching a Git failure branch', async () => {
     const f = await setup(1);
     const revision = await f.service.create('human', f.request);
     const error = { code: 'CANDIDATE_WRITE_FAILED', message: '模型结果不是合法 JSON',
       stage: 'parse_model_output', details: { reasonCode: 'MODEL_OUTPUT_INVALID_JSON', itemIds: ['item-0'], line: 1, column: 2 } };
     f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: 'container exited with code 1' });
     f.setGeneratedResult({ status: 'failed', error });
+    const read = vi.spyOn(f.executionPort, 'readResult');
     await f.service.reconcile();
-    expect((await f.service.task(revision.taskId)).latestAttempt.error).toEqual(error);
+    expect(read).not.toHaveBeenCalled();
+    expect((await f.service.task(revision.taskId)).latestAttempt.error).toMatchObject({ code: 'AIS_FAILED', message: 'container exited with code 1' });
   });
   it('groups node overlaps transitively while keeping a multi-node source atomic',async()=>{
     const f=await setup(4);
@@ -459,16 +461,16 @@ describe('repair workbench control service', () => {
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('review');
     expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'succeeded', jobId: 'job-1' });
   });
-  it('fails after bounded waiting when AIS succeeds but Git never publishes a valid result', async () => {
+  it('fails explicitly when AIS succeeds but Git has no valid result, without automatic rereads', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);
     f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
-    expect(await f.service.reconcile(10)).toBe(0);
+    expect(await f.service.reconcile(10)).toBe(1);
     const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
     const output = JSON.parse(row.output_json);
     expect(output.successObservedAtMs).toEqual(expect.any(Number));
     await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({ ...output, successObservedAtMs: Date.now() - 301_000 })]);
-    expect(await f.service.reconcile(10)).toBe(1);
+    expect(await f.service.reconcile(10)).toBe(0);
     expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
   });
   it('settles a timed-out AIS job and requests remote stop', async () => {
@@ -496,6 +498,25 @@ describe('repair workbench control service', () => {
     expect(task.latestAttempt.phase).toBe('no_change');
     expect(task.execution?.status).toBe('succeeded');
     expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
+  });
+  it('retains a later revision submitter independently of the task creator and cancelling operator', async () => {
+    const f = await setup();
+    const first = await f.service.create('task-creator', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'MODEL_FAILED' } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: null });
+    await f.service.retryGeneration('retry-operator', first.taskId, { expectedRevision: 1, requestId: 'retry-other-user' });
+    await f.service.cancel('cancelling-operator', first.taskId, 2);
+    expect(f.calls[1].actorId).toBe('retry-operator');
+    expect(f.stops).toHaveLength(1);
+    expect(f.stops[0].actorId).toBe('retry-operator');
+  });
+  it('retains the original submitter when another operator cancels the task', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    await f.service.cancel('another-operator', created.taskId, 1);
+    expect(f.stops).toHaveLength(1);
+    expect(f.stops[0]).toMatchObject({ actorId: 'human', jobId: 'job-1' });
   });
   it('persists cancellation before best-effort stopping the exact AIS attempt', async () => {
     const f = await setup();

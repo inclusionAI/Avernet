@@ -144,17 +144,18 @@ class TestExecCommandOnBot:
         with pytest.raises(BaasServiceError, match="500"):
             svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="echo hi")
 
-    def test_httpx_timeout_uses_cmd_timeout_plus_buffer(self):
+    @pytest.mark.parametrize("timeout_seconds", [30, 120, 910])
+    def test_httpx_timeout_uses_cmd_timeout_plus_buffer(self, timeout_seconds):
         svc, mock_http = _make_service()
         mock_response = MagicMock()
         mock_response.json.return_value = {"code": 0, "data": {}}
         mock_response.raise_for_status = MagicMock()
         mock_http.post.return_value = mock_response
 
-        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="ls", timeout_seconds=120)
+        svc.exec_command_on_bot(bot_uuid="BOT-1", cmd="ls", timeout_seconds=timeout_seconds)
 
         call_kwargs = mock_http.post.call_args[1]
-        assert call_kwargs["timeout"] == 130.0
+        assert call_kwargs["timeout"] == float(timeout_seconds + 10)
 
     def test_unexpected_exception_wraps_in_baas_error(self):
         svc, mock_http = _make_service()

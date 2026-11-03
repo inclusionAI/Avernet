@@ -1,8 +1,7 @@
 """CommunityDatabase — community DatabasePlugin over a configured SQLAlchemy URL.
 
-Builds a SQLAlchemy engine from the configured database URL (SQLite file /
-MySQL / Postgres) and hands out sessions. Which backend it talks to is one YAML
-field — ``user_config.database.backend`` — with the DSN in
+Builds a SQLAlchemy engine from the configured MySQL / Postgres URL and hands
+out sessions. Which backend it talks to is one YAML field — ``user_config.database.backend`` — with the DSN in
 ``user_config.database.url``; see ``di/config_community.py``.
 
 Owns its schema when asked to. ``create_schema`` (default on) makes the plugin a
@@ -10,9 +9,10 @@ Lifecycle participant that runs ``core/schema.py``'s ``create_all`` at boot, the
 same bootstrap the local SQLite plugin runs, because a container deployment has
 nobody to apply DDL by hand before the pods start. An operator who provisions the
 schema out of band (or runs migrations) sets ``create_schema: false`` and the
-plugin validates the required SQLite/PostgreSQL Skill and security-observation
-schema before serving requests. Managed MySQL/OceanBase schemas remain
-operator-migrated.
+plugin validates the required PostgreSQL Skill and security-observation
+schema before serving requests. SQLite engine and transaction behavior belongs
+to the dedicated CommunitySqliteDatabase plugin. Managed MySQL/OceanBase schemas
+remain operator-migrated.
 
 ``session()`` does not auto-commit; ``orm_session()`` commits on clean exit
 (write-persistence parity with corp's ``AUTOCOMMIT`` and the local impl).
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event, inspect
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -60,10 +60,6 @@ def _check_security_schema(engine: Engine, *, dialect: str) -> None:
         )
 
 
-def _is_sqlite(url: str) -> bool:
-    return url.startswith("sqlite")
-
-
 def _is_mysql(url: str) -> bool:
     return url.startswith("mysql")
 
@@ -89,21 +85,6 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
 
     @staticmethod
     def _make_engine(url: str):
-        if _is_sqlite(url):
-            # SQLite needs ``check_same_thread=False`` for FastAPI's threaded
-            # request handling, and a per-connection ``PRAGMA foreign_keys=ON``
-            # so ``ON DELETE CASCADE`` fires (parity with prod and the local
-            # impl — SQLite does not enforce FKs otherwise).
-            engine = create_engine(url, connect_args={"check_same_thread": False})
-
-            @event.listens_for(engine, "connect")
-            def _set_sqlite_pragma(dbapi_conn, _conn_record):
-                cursor = dbapi_conn.cursor()
-                cursor.execute("PRAGMA foreign_keys=ON")
-                cursor.close()
-
-            return engine
-
         if _is_mysql(url):
             # A managed MySQL (Aliyun RDS and friends) closes idle connections
             # server-side — the default wait_timeout is 8h but proxies and
@@ -123,10 +104,7 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
     async def bootstrap(self) -> None:
         """Lifecycle hook — create the schema unless the operator owns it."""
         if not self._create_schema:
-            if self._security_schema_required and _is_sqlite(self._url):
-                _check_security_schema(self._engine, dialect="SQLite")
-            elif self._security_schema_required and _is_postgres(self._url):
-                _check_security_schema(self._engine, dialect="PostgreSQL")
+            self._validate_security_schema()
             logger.info(
                 "CommunityDatabase: create_schema=false — schema is operator-provisioned"
             )
@@ -135,11 +113,12 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
         from agentclaw.community.core.schema import create_all
 
         create_all(self._engine, mysql=_is_mysql(self._url))
-        if self._security_schema_required and _is_sqlite(self._url):
-            _check_security_schema(self._engine, dialect="SQLite")
-        elif self._security_schema_required and _is_postgres(self._url):
-            _check_security_schema(self._engine, dialect="PostgreSQL")
+        self._validate_security_schema()
         logger.info("CommunityDatabase: schema bootstrap complete")
+
+    def _validate_security_schema(self) -> None:
+        if self._security_schema_required and _is_postgres(self._url):
+            _check_security_schema(self._engine, dialect="PostgreSQL")
 
     @contextmanager
     def session(self):
@@ -167,5 +146,5 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
             db.close()
 
     def transactional_orm_session(self):
-        """Reuse the existing community commit/rollback transaction."""
+        """Use the configured SQLAlchemy database transaction."""
         return self.orm_session()

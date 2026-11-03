@@ -17,6 +17,14 @@ const moduleNameMapper = {
   // （package.json main），故测试环境重定向到 lib/ 用真实实现：既省掉全量转译整个 UI 库的开销，
   // 也绕开 es/ 里的 .css/.less 副作用导入（lib/ 无此问题）。
   '^@tc-chat/ui/es/(.*)$': '<rootDir>/node_modules/@tc-chat/ui/lib/$1',
+  // @avernet/a2a-chat-client：file: 依赖经 node_modules 解析会被 transformIgnorePatterns
+  // 默认忽略（不转译包内 .ts 源码）——mapper 直指包源（唯一解析路径，防双注册：
+  // 宿主只许包名顶/子两级 import，hostDir 钉板 grep 深引）。
+  '^@avernet/a2a-chat-client$': '<rootDir>/../../packages/a2a-chat-client/src/index.ts',
+  '^@avernet/a2a-chat-client/testing$': '<rootDir>/../../packages/a2a-chat-client/src/testing.ts',
+  // @tc-chat/* 的 dist 引用了 @babel/runtime 的 esm helpers（同样是未转译 ESM）。
+  // @babel/runtime 在 helpers/ 下发了等价 CJS 版本，重定向过去即可，无需再转译一遍 runtime。
+  '^@babel/runtime/helpers/esm/(.*)$': '<rootDir>/node_modules/@babel/runtime/helpers/$1',
   '^react-syntax-highlighter/dist/esm/styles/prism$':
     '<rootDir>/node_modules/react-syntax-highlighter/dist/cjs/styles/prism/index.js',
 };

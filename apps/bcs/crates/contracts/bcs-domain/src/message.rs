@@ -134,45 +134,6 @@ pub const BCS_SESSION_OPENING_MESSAGE_SENDER: &str = "bcs_opening_message";
 pub const BCS_SESSION_OPENING_MESSAGE_SENDER_NAME: &str = "BCS";
 pub const SESSION_OPENING_MESSAGE_TYPE: &str = "opening_message";
 
-/// A task in the workspace.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    /// Task ID.
-    pub id: String,
-    /// Task description.
-    pub description: String,
-    /// Assigned bot (optional).
-    #[serde(default)]
-    pub assigned_to: Option<String>,
-    /// Task status.
-    pub status: TaskStatus,
-}
-
-/// Task status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum TaskStatus {
-    #[default]
-    Pending,
-    InProgress,
-    Completed,
-    Blocked,
-}
-
-/// Audit log entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    /// Timestamp.
-    pub timestamp: u64,
-    /// Action type.
-    pub action: String,
-    /// Actor (bot or user).
-    pub actor: String,
-    /// Details.
-    #[serde(default)]
-    pub details: String,
-}
-
 /// Attachment view for history echo: stable_metadata + a short-lived download
 /// `url` minted at read time.
 ///

@@ -281,13 +281,13 @@ async fn check_mysql_migration_state(
     result
 }
 
-struct ConfiguredMysqlDb {
-    manager: MysqlDbManager,
-    plugin: MysqlDbPlugin,
-    datasource_name: String,
+pub(crate) struct ConfiguredMysqlDb {
+    pub(crate) manager: MysqlDbManager,
+    pub(crate) plugin: MysqlDbPlugin,
+    pub(crate) datasource_name: String,
 }
 
-async fn open_configured_mysql_db(global: &MigrateGlobalArgs) -> Result<ConfiguredMysqlDb> {
+pub(crate) async fn open_configured_mysql_db(global: &MigrateGlobalArgs) -> Result<ConfiguredMysqlDb> {
     let config = load_bcs_config(global)?;
     let mysql = config.database.mysql.clone();
     if config.database.database_type != DatabaseType::Mysql {
@@ -744,7 +744,7 @@ fn resolve_sqlite_path(args: &MigrateArgs, global: &MigrateGlobalArgs) -> Result
     Ok(PathBuf::from(config.database.sqlite.path))
 }
 
-fn load_bcs_config(global: &MigrateGlobalArgs) -> Result<BcsConfig> {
+pub(crate) fn load_bcs_config(global: &MigrateGlobalArgs) -> Result<BcsConfig> {
     if let Some(config_file) = global.config_file.as_ref() {
         return BcsConfig::from_file(config_file)
             .map_err(|err| anyhow!("load config file '{}': {}", config_file.display(), err));
@@ -819,7 +819,7 @@ async fn emit_sqlite_migration_plan(sqlite_path: &Path) -> Result<String> {
     Ok(output)
 }
 
-fn open_sqlite_db(sqlite_path: &Path) -> Result<LocalSqliteDbPlugin> {
+pub(crate) fn open_sqlite_db(sqlite_path: &Path) -> Result<LocalSqliteDbPlugin> {
     LocalSqliteDbPlugin::new_file(sqlite_path)
         .map_err(|err| anyhow!("open sqlite database '{}': {}", sqlite_path.display(), err))
 }

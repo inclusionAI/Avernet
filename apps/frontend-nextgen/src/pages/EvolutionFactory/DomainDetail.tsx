@@ -192,7 +192,7 @@ function DomainDetailContent() {
             <p>{domain.data.templateCount} 个模板</p>
           </div>
         )}
-        <div role="tablist" aria-label="评测详情" className="flex gap-6 border-b border-border">
+        <div role="tablist" aria-label="评测详情" className="flex gap-6 border-b border-divider">
           {(
             [
               ['detail', '目标详情'],

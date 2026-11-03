@@ -9,6 +9,7 @@ from agentclaw.community.api.acli_cli_service import (
 from agentclaw.community.api.bot_config_manifest_service import (
     ManifestValidationError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import genome_error_data
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaExceededError,
 )
@@ -40,7 +41,7 @@ def error_data(exc: Exception) -> object | None:
     if isinstance(exc, AcliOperationInProgressError):
         op = exc.operation
         return {"operation": acli_operation_payload(op)} if isinstance(op, AcliOperation) else None
-    return None
+    return genome_error_data(exc)
 
 
 def acli_operation_payload(op: AcliOperation) -> dict[str, object]:

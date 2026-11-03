@@ -8,7 +8,10 @@ Business logic is delegated to SystemConfigService and DeviceConfigService.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
+from agentclaw.community.plugin_api.auth import AuthPlugin
+from agentclaw.community.core.system_config.dws_rollout import CATEGORY, KEY, DwsRollout, is_dws_category
 
 from agentclaw.community.adapters.http.system_config.schemas import (
     AddAllocationListRequest,
@@ -75,8 +78,14 @@ async def create_category(
     req: CreateCategoryRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     service: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    auth_plugin: AuthPlugin = Injected(AuthPlugin),
 ):
     """创建分类目录"""
+    # COSEC: protect DWS category upserts without changing other categories.
+    if is_dws_category(req.category):
+        await require_operator(user, auth_plugin)
+        if req.category != CATEGORY:
+            raise HTTPException(422, "Use canonical DWS category")
     env = env_utils.get_current_env()
     operator = get_operator(user)
     category_id = service.create_category(
@@ -151,8 +160,19 @@ async def set_config(
     req: SetConfigRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     service: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    auth_plugin: AuthPlugin = Injected(AuthPlugin),
 ):
     """设置配置值（分类不存在会自动创建）"""
+    # COSEC: account for case-insensitive DB collation and trailing spaces;
+    # existing delete endpoints already require operators for every category.
+    if is_dws_category(req.category):
+        await require_operator(user, auth_plugin)
+        if req.category != CATEGORY or req.config_key != KEY:
+            raise HTTPException(422, "Unknown DWS configuration key")
+        try:
+            DwsRollout.model_validate(req.config_value)
+        except ValidationError:
+            raise HTTPException(422, "Invalid DWS rollout configuration") from None
     env = env_utils.get_current_env()
     operator = get_operator(user)
     config_id = service.set_config(

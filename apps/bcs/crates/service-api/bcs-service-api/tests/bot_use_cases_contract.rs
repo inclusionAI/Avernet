@@ -112,6 +112,7 @@ fn bot_dtos_carry_route_compatibility_fields() {
         created_by: Some("alice".to_string()),
     };
     let detail = BotDetailResult {
+        agent_card: None,
         bot_uuid: "bot-1".to_string(),
         capabilities: capabilities.clone(),
         status: ActorStatus::Hidden,

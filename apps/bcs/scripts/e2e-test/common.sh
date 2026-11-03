@@ -441,7 +441,7 @@ BCS_CLI_TOKEN=""
 
 # Resolve the bcs-cli binary. Priority:
 #   1. $BCS_CLI_BIN (coverage script injects the instrumented build)
-#   2. src/bcs/target/debug/bcs-cli
+#   2. apps/bcs/target/debug/bcs-cli
 #   3. fallback: cargo run -p bcs-cli --quiet -- (with warn)
 # Echoes the invocation prefix; returns 0 if a real binary is in hand, 1 on fallback-only.
 get_bcs_cli_bin() {
@@ -451,7 +451,7 @@ get_bcs_cli_bin() {
     fi
     local repo_root
     repo_root="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-    local debug_bin="$repo_root/src/bcs/target/debug/bcs-cli"
+    local debug_bin="$repo_root/apps/bcs/target/debug/bcs-cli"
     if [[ -x "$debug_bin" ]]; then
         BCS_CLI_BIN_PATH="$debug_bin"
         return 0
@@ -459,6 +459,45 @@ get_bcs_cli_bin() {
     warn "bcs-cli binary not found; falling back to 'cargo run' (slow; build first for speed)"
     BCS_CLI_BIN_PATH="cargo run -p bcs-cli --quiet --"
     return 1
+}
+
+# Resolve the mock base URLs for the two viewpoints an e2e run spans.
+#
+# The Provider/Judge mock serves BOTH roles on the same process:
+#   - harness view: the e2e shell/python curls /control/*, /health, and the
+#     sync view endpoints directly from the host running the harness.
+#   - BCS sink view: URLs registered INTO BCS (provider webhook_url, group
+#     event subscriptions) that the BCS server calls back on.
+#
+# When BCS and the mock share a network namespace (singlebox, docker host
+# networking, CI compose) both viewpoints resolve to the same base URL, so
+# BCS_E2E_MOCK_BASE_URL alone is enough. When BCS runs on a separate network
+# plane (k3s nodeport with the mock on the host), the two viewpoints differ:
+# the harness may have to reach the mock through one address while BCS must
+# register another (and BCS's outbound-callback address policy may reject
+# loopback addresses). The two overrides exist for that case; each falls back
+# to BCS_E2E_MOCK_BASE_URL, preserving the documented single-URL behavior.
+mock_view_base_url() {
+    echo "${BCS_E2E_MOCK_VIEW_BASE_URL:-${BCS_E2E_MOCK_BASE_URL:-}}"
+}
+
+mock_sink_base_url() {
+    echo "${BCS_E2E_MOCK_SINK_BASE_URL:-${BCS_E2E_MOCK_BASE_URL:-}}"
+}
+
+# Create a temp file in a directory the bcs-cli process can read back.
+#
+# BSD `mktemp -t prefix` resolves against the system secure temp dir
+# (confstr(_CS_DARWIN_USER_TEMP_DIR)) and IGNORES $TMPDIR, so a path generated
+# on a macOS host is invisible to a containerized bcs-cli bind-mounting only
+# $HOME and $TMPDIR. GNU mktemp honors $TMPDIR, but the -t form is deprecated
+# there too. The concatenated form below is portable on both and pins the
+# directory so wrapper/host setups can bind-mount it. Override with
+# BCS_CLI_MKTEMP_DIR when the CLI container needs an explicitly shared path.
+bcs_cli_mktemp() {
+    local dir="${BCS_CLI_MKTEMP_DIR:-${TMPDIR:-/tmp}}"
+    mkdir -p "$dir"
+    mktemp "$dir/$1"
 }
 
 # Resolve the bots' data root in the singlebox standalone layout.
@@ -585,10 +624,7 @@ bcs_cli() {
     local sub="$1" nested="${2:-}" third="${3:-}" command_path
     local args=() global_args=()
     [[ "${BCS_CLI_FORCE_JSON:-0}" = "1" ]] && global_args+=(--json)
-    # bcs-cli's top-level URL flag is -u/--url (NOT --base-url), and
-    # confirm-group-help reuses --url/<URL> for the confirm URL. To avoid any
-    # flag-namespace collision, inject the base URL via the MOLTIS_BCS_URL env
-    # var (which bcs-cli reads for -u/--url) instead of a CLI flag.
+    # Set the API base URL for every CLI invocation.
     export MOLTIS_BCS_URL="$BCS_API_BASE_URL"
     if [[ -z "$sub" ]]; then
         BCS_CLI_STDOUT=""

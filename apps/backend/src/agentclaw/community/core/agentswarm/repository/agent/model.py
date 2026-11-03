@@ -16,7 +16,7 @@ class AcAgentSwarmAgentModel(_AgentSwarmBase, Base):
     parent_agent_id = Column(_ID128, nullable=True)
     depth = Column(Integer, nullable=False, default=0)
     name = Column(String(128), nullable=False)
-    role = Column(String(256), nullable=True)
+    role = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     kind = Column(String(16), nullable=False)
     task_spec = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     spawn_round = Column(Integer, nullable=False, default=0)

@@ -12,7 +12,7 @@ projection can be added later without a schema change.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
@@ -26,6 +26,8 @@ from agentclaw.community.core.task.domain.models import (
     Status,
 )
 from agentclaw.community.core.task.task_context.task_artifact import ArtifactContent
+from agentclaw.community.utils.app_utils import get_current_executor_app
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,8 @@ class TaskInfoRecord:
     lease_owner: Optional[str] = None
     lease_until: Optional[int] = None
     heartbeat_at: Optional[int] = None
+    env: str = field(default_factory=get_current_env)
+    executor_app: str = field(default_factory=get_current_executor_app)
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 

@@ -227,7 +227,7 @@ fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<Normalized
     ))
 }
 
-fn normalize_agent_error(
+pub(super) fn normalize_agent_error(
     run_id: String,
     session_id: Option<String>,
     seq: Option<u64>,

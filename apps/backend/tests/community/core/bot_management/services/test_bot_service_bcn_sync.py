@@ -227,6 +227,10 @@ class TestSyncBotToBcn:
             "bot_desc": "Test Description",
             "owner_id": "85020",
         }
+        mock_repo.list_matches_by_legacy_locator.side_effect = (
+            lambda *_: [dict(mock_repo.get_by_id_and_owner.return_value, id=1, entity_id="85020")]
+            if mock_repo.get_by_id_and_owner.return_value else []
+        )
         bot_service._repository = mock_repo
 
         bot_service._sync_bot_to_bcn(
@@ -257,6 +261,10 @@ class TestSyncBotToBcn:
             "bot_desc": "Existing Description",
             "owner_id": "85020",
         }
+        mock_repo.list_matches_by_legacy_locator.side_effect = (
+            lambda *_: [dict(mock_repo.get_by_id_and_owner.return_value, id=1, entity_id="85020")]
+            if mock_repo.get_by_id_and_owner.return_value else []
+        )
         bot_service._repository = mock_repo
 
         # Only name is updated, desc is None
@@ -287,6 +295,10 @@ class TestSyncBotToBcn:
             "bot_desc": "Existing Description",
             "owner_id": "85020",
         }
+        mock_repo.list_matches_by_legacy_locator.side_effect = (
+            lambda *_: [dict(mock_repo.get_by_id_and_owner.return_value, id=1, entity_id="85020")]
+            if mock_repo.get_by_id_and_owner.return_value else []
+        )
         bot_service._repository = mock_repo
 
         request_headers = {
@@ -324,6 +336,10 @@ class TestSyncBotToBcn:
             "bot_desc": "Test Description",
             "owner_id": "85020",
         }
+        mock_repo.list_matches_by_legacy_locator.side_effect = (
+            lambda *_: [dict(mock_repo.get_by_id_and_owner.return_value, id=1, entity_id="85020")]
+            if mock_repo.get_by_id_and_owner.return_value else []
+        )
         bot_service._repository = mock_repo
 
         # Should not raise, just log warning
@@ -346,6 +362,10 @@ class TestSyncBotToBcn:
 
         mock_repo = Mock()
         mock_repo.get_by_id_and_owner.return_value = None  # Bot not found
+        mock_repo.list_matches_by_legacy_locator.side_effect = (
+            lambda *_: [dict(mock_repo.get_by_id_and_owner.return_value, id=1, entity_id="85020")]
+            if mock_repo.get_by_id_and_owner.return_value else []
+        )
         bot_service._repository = mock_repo
 
         # Should not raise, just log warning and return

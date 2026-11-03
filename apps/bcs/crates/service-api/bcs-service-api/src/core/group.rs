@@ -8,8 +8,7 @@ use crate::types::{EventActor, GroupHumanNotifyPolicy};
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
-    RoutingPolicy, SenderRoutesValidationError, ServiceSpec, Workspace,
-};
+    RoutingPolicy, SenderRoutesValidationError, };
 
 /// Actor input for actor-level DM group creation.
 #[derive(Debug, Clone)]
@@ -46,7 +45,6 @@ pub enum GroupMutationKind {
         mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
-    UpdateServiceSpec(Option<ServiceSpec>),
     Delete {
         reason: String,
     },
@@ -211,6 +209,24 @@ pub trait GroupCoreService: Send + Sync {
         Ok(self.get(id).await)
     }
 
+    /// Read the Group's authorization-fact snapshot through the
+    /// strict repo read (spec §8.3).
+    ///
+    /// Only `Ok(None)` means Group not found; any storage or
+    /// decoding failure is `Err`. A Core that has no strict
+    /// snapshot repo keeps the default fail-closed error — it
+    /// must NEVER fall back to the ordinary cached `get`.
+    async fn read_authorization_snapshot(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::GroupAuthorizationSnapshot>>
+    {
+        Err(super::ServiceError::InvalidOperation {
+            message: "Group authorization snapshot reads are not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     /// Add a message to a group.
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()>;
 
@@ -285,23 +301,11 @@ pub trait GroupCoreService: Send + Sync {
         self.add_participant(group_id, participant).await
     }
 
-    /// Update group workspace.
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
-
     /// Update group label.
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
 
     /// Update group status.
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
-
-    /// Replace (or remove) the group's `service_spec`. Validation of the
-    /// patch (route-field lock, callback_config immutability) is done by the
-    /// HTTP/use-case layer; this contract just persists the new value.
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()>;
 
     /// Terminate a group.
     ///

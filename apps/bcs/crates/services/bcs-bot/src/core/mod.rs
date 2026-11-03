@@ -1,4 +1,6 @@
 pub mod bot_core;
+pub mod a2a_bot;
+pub mod a2a_provider_registration;
 pub mod bot_control_plane_core;
 pub mod candidate_search_core;
 mod ids;
@@ -15,3 +17,5 @@ pub use provider_core::ProviderCore;
 pub type BotRegistry = BotCore;
 
 mod agent_identity;
+
+mod collaboration_policy;

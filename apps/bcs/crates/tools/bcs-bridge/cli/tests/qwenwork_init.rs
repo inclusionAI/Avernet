@@ -10,7 +10,7 @@ fn init_is_wired_into_the_public_binary_and_does_not_construct_a_listener() {
     let db = rusqlite::Connection::open(&database).unwrap();
     db.execute_batch("CREATE TABLE chats(id TEXT, ext TEXT, deleted_at INTEGER); CREATE TABLE sub_chats(session_id TEXT, chat_id TEXT);").unwrap();
     fs::write(&config, "provider_id='test'\nmode='plugin'\n[plugin]\nurl='ws://127.0.0.1/ws/bot'\n[[bot]]\nengine='qwenwork'\nprovider_bot_ref='qwen'\nbot_id='test-bot'\ncwd='/tmp'\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"))
+    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", root.path())
         .arg("--config").arg(&config).args(["init", "--engine", "qwenwork", "--option"])
         .arg(format!("database_path={}", database.display())).arg("--option")
         .arg(format!("settings_path={}", settings.display())).output().unwrap();
@@ -22,7 +22,7 @@ fn init_is_wired_into_the_public_binary_and_does_not_construct_a_listener() {
     let parsed: toml::Value = toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
     assert_eq!(parsed["bot"][0]["engine_options"]["database_path"].as_str(), database.to_str());
     let original = fs::read(&config).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).arg("--config").arg(&config)
+    let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).env("HOME", root.path()).arg("--config").arg(&config)
         .args(["deinit", "--engine", "qwenwork"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(String::from_utf8_lossy(&output.stdout).contains("Removed 7 owned Hooks"));
@@ -34,4 +34,22 @@ fn deinit_help_is_wired_without_loading_configuration() {
     let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args(["deinit", "--help"]).output().unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("--engine"));
+}
+
+#[test]
+fn init_and_deinit_reject_bot_selectors_but_registration_keeps_them() {
+    for command in ["init", "deinit"] {
+        let help = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args([command, "--help"]).output().unwrap();
+        assert!(help.status.success());
+        assert!(!String::from_utf8_lossy(&help.stdout).contains("--bot-id"));
+        let output = Command::new(env!("CARGO_BIN_EXE_bcs-bridge"))
+            .args([command, "--engine", "qwenwork", "--bot-id", "test-bot"]).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--bot-id"));
+    }
+    let help = Command::new(env!("CARGO_BIN_EXE_bcs-bridge")).args(["register", "--help"]).output().unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(stdout.contains("--bot-id"));
+    assert!(stdout.contains("--add-bot"));
 }

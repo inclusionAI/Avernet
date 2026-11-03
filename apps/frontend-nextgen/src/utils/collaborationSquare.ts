@@ -38,11 +38,14 @@ export function getCollaborationSquareShareUrl(
   resource: SquareResource,
   id: string,
   searchHint?: string,
+  audience?: 'user' | 'bot',
 ): string {
   const pathname = resource === 'bot' ? '/collaboration-square/bots' : '/collaboration-square/groups';
   const params = new URLSearchParams({ resource, id });
   const normalizedSearchHint = searchHint?.trim();
   if (resource === 'bot' && normalizedSearchHint) params.set('name', normalizedSearchHint);
+  // 仅单一维度公开时携带受众类型：落地页据此提前匹配浏览身份，两类均公开不干预。
+  if (resource === 'bot' && (audience === 'user' || audience === 'bot')) params.set('audience', audience);
   return `${origin}${pathname}?${params.toString()}`;
 }
 
@@ -53,6 +56,7 @@ export function clearCollaborationSquareTargetingSearch(resource: SquareResource
   params.delete('resource');
   params.delete('id');
   params.delete('name');
+  params.delete('audience');
   const search = params.toString();
   window.history.replaceState(
     window.history.state,

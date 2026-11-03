@@ -95,7 +95,8 @@ impl SystemMessageQueueService for QueuedSystemAdmission {
                 if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
                 let limit = policy.as_ref().map_or_else(|| flow.group_delivery_limits.get(&bot).copied().unwrap_or(100), |p| p.policy.bot(&bot).max_queued);
                 targets.push(DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.clone(), kind: delivery_type,
-                    max_queued: limit, semantic_projection_json: projection });
+                    max_queued: limit, semantic_projection_json: projection, run_id: None,
+});
                 origin.push((index, bot));
             }
             let message_id = uuid::Uuid::new_v4().to_string();

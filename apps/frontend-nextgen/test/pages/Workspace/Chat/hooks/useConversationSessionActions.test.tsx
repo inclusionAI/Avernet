@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import type { ConversationBotView } from '@/domain/conversation';
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationSessionActions } from '@/pages/Workspace/Chat/hooks/useConversationSessionActions';
 import { botSessionService } from '@/services/workspace/botSessionService';
@@ -35,6 +36,10 @@ function deferred() {
   });
   return { promise, resolve };
 }
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   store.getState().reset();
@@ -52,6 +57,43 @@ it('executes and shows success after cache removal', async () => {
   expect(list().items).toEqual([]);
   expect(toast.success).toHaveBeenCalledWith('会话已删除');
 });
+it('delegates Coding Bot mutations to the embedded bridge and updates the local cache', async () => {
+  const codingView: ConversationBotView = {
+    ...view,
+    bot: { ...view.bot, engine: 'claude_code', isAgentCodingBot: true },
+  };
+  const runSessionAction = jest.fn().mockResolvedValue({ ok: true });
+  extendCapabilities({
+    getCodingBotConversationHost: () => ({
+      status: 'available',
+      value: { Stage: () => null, runSessionAction },
+    }),
+  });
+  store.getState().setManagedBotCache(
+    codingView.bot.botId,
+    managedViewOf(codingView.bot.botId, 'all', undefined, firstPageOf([{ ...session }], 1)),
+  );
+  const { result } = renderHook(() =>
+    useConversationSessionActions({ userId: 'user', managedBots: [codingView], friendBots: [] }),
+  );
+
+  await act(async () => {
+    expect(
+      await result.current.run(codingView.bot.botId, 'managed', 's1', { type: 'delete' }),
+    ).toBe(true);
+  });
+
+  expect(runSessionAction).toHaveBeenCalledWith({
+    botId: codingView.bot.realBotId,
+    userId: 'user',
+    ownerId: 'owner',
+    action: { type: 'delete', sessionId: 's1' },
+  });
+  expect(botSessionService.deleteSession).not.toHaveBeenCalled();
+  expect(store.getState().sessionsByBotId[codingView.bot.botId].sessions.items).toEqual([]);
+  expect(toast.success).toHaveBeenCalledWith('会话已删除');
+});
+
 it('blocks reentry for all writes on a Bot while pending and releases after completion', async () => {
   const req = deferred();
   jest.mocked(botSessionService.deleteSession).mockReturnValue(req.promise);

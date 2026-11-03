@@ -2,6 +2,26 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Provider-owned collaboration boundary, independent of visibility and friendship.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderCollaborationScope {
+    #[default]
+    Standard,
+    SameOwner,
+}
+
+impl ProviderCollaborationScope {
+    /// Missing configuration preserves legacy behavior; malformed policy fails closed.
+    pub fn from_config(config: &str) -> Result<Self, serde_json::Error> {
+        let value: serde_json::Map<String, serde_json::Value> = serde_json::from_str(config)?;
+        match value.get("collaboration_scope") {
+            None => Ok(Self::Standard),
+            Some(scope) => serde_json::from_value(scope.clone()),
+        }
+    }
+}
+
 fn default_worker_send_task_message_enabled() -> bool {
     true
 }
@@ -266,6 +286,16 @@ pub enum BotDeliveryTarget {
     WebSocket {
         bot_id: String,
     },
+    A2a {
+        bot_id: String,
+        provider_id: String,
+        provider_bot_ref: String,
+        interface: crate::a2a::A2aInterface,
+        credential_kind: String,
+        bearer: RedactedToken,
+        card_revision: u64,
+        extensions: Vec<crate::a2a::A2aExtensionDeclaration>,
+    },
     HttpProvider {
         bot_id: String,
         provider_id: String,
@@ -280,8 +310,12 @@ impl BotDeliveryTarget {
     pub fn bot_id(&self) -> &str {
         match self {
             Self::WebSocket { bot_id } => bot_id,
-            Self::HttpProvider { bot_id, .. } => bot_id,
+            Self::HttpProvider { bot_id, .. } | Self::A2a { bot_id, .. } => bot_id,
         }
+    }
+
+    pub fn is_gateway(&self) -> bool {
+        matches!(self, Self::HttpProvider { .. } | Self::A2a { .. })
     }
 
     pub fn is_http_provider(&self) -> bool {

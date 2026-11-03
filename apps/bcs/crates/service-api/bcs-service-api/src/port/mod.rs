@@ -1,5 +1,7 @@
 pub mod coordination_intent;
+pub mod a2a_card;
 pub use coordination_intent::*;
+pub mod bot_authority;
 pub mod bot_catalog_cleanup;
 pub mod bot_connection;
 pub mod bot_terminal_observer;
@@ -18,6 +20,10 @@ pub mod group_session_token;
 pub mod human_notify;
 pub mod interaction;
 pub mod judge;
+pub mod caller_history;
+pub mod orchestration_caller;
+pub use orchestration_caller::*;
+pub use caller_history::*;
 pub mod leader_election;
 pub mod metrics;
 pub mod participant_view_binding;
@@ -25,12 +31,18 @@ pub mod pending_group_message;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
-pub mod session_callback;
+
 pub mod session_channel_outbound;
 pub mod state_machine_metrics;
 pub mod state_machine_result;
 
+pub use bot_authority::BotAuthorityPort;
 pub use bot_catalog_cleanup::{BotCatalogCleanupPort, NoopBotCatalogCleanupPort};
+pub use caller_send::{
+    CallerDispatchAck, CallerDispatchAssociation, CallerExecutionHistory, CallerExecutionSendPort,
+    CallerSendError, ObserveInjectCommand, ObserveInjectError, ObserveInjectPort,
+    ObserveInjectorFactory, SendCallerExecutionCommand,
+};
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
     BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, CompositeBotTerminalObserver,
@@ -49,7 +61,8 @@ pub use delivery::{
     BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
     BotDeliveryPort, BotDeliveryResult, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
-    ProviderTransportPreference, RunFallbackDelivery,
+    OutputAdmissionPort, OutputOperationAdmission, ProviderTransportPreference,
+    RunFallbackDelivery,
 };
 pub use event_delivery::*;
 pub use event_metrics::*;
@@ -100,6 +113,9 @@ pub use repo::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
+    BotCallerConfiguration, CallerConfigRevisionConflict, CallerConfigRevisionDecision,
+    CallerConfigurationSync, CallerIdentitySnapshot, CallerTokenVisibility,
+    ProviderCallerCapabilities,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
@@ -121,7 +137,7 @@ pub use repo::{
     UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
-pub use session_callback::SessionCallbackDispatchPort;
+
 pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     StateMachineTerminalEvent, StateMachineTerminalStatus,
@@ -129,3 +145,10 @@ pub use session_channel_outbound::{
 pub use state_machine_metrics::*;
 pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};
 pub mod agent_identity;
+pub mod caller_container;
+pub mod caller_send;
+pub use caller_container::{CallerObserveTarget,
+    CallerContainerError, CallerContainerGatewayPort, CallerContainerDescriptor,
+    CallerContainerIsolation, CallerContainerMinimum, CallerOpaqueRef, ContainerRunAssociation,
+    EnsureCallerContainer, EnsureCreateMode,
+};

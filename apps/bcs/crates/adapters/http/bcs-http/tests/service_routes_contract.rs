@@ -16,7 +16,7 @@ use bcs_service_api::{
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
     ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, CreateOrReactivateOutcome, Group,
     GroupCoreService, GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
-    NewSessionParams, Participant, ParticipantMode, ParticipantRole, ServiceSpec, Session,
+    NewSessionParams, Participant, ParticipantMode, ParticipantRole, Session,
     SessionKind, SessionManagementService, SessionHistoryResult, SessionStatus,
     SessionUseCaseError, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDeliveryCorrelation, StateMachineRun,
@@ -29,9 +29,9 @@ use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn service_invocation_uses_api_key_and_seeds_group_session_fields() {
+async fn service_invocation_without_policy_uses_api_key_and_seeds_group_session_fields() {
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "group-1",
         "bot-manager",
         vec![
@@ -39,11 +39,6 @@ async fn service_invocation_uses_api_key_and_seeds_group_session_fields() {
             Participant::bot("bot-worker", ParticipantRole::Worker),
         ],
     );
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: Some(2),
-    });
     group_store.upsert(group).await.unwrap();
 
     let sessions = Arc::new(RecordingSessionManagement::default());
@@ -117,16 +112,11 @@ async fn service_invocation_without_api_key_uses_bot_identity() {
         .await;
 
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "group-1",
         "bot-manager",
         vec![Participant::bot("bot-manager", ParticipantRole::Manager)],
     );
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: Some(2),
-    });
     group_store.upsert(group).await.unwrap();
 
     let sessions = Arc::new(RecordingSessionManagement::default());
@@ -202,11 +192,6 @@ async fn state_machine_service_invocation_starts_run_with_created_session() {
     );
     group.group_strategy = GroupStrategy::StateMachine;
     group.version = 7;
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: Some(2),
-    });
     group_store.upsert(group).await.unwrap();
 
     let sessions = Arc::new(RecordingSessionManagement::default());
@@ -303,26 +288,6 @@ impl SessionManagementService for RecordingSessionManagement {
         Ok(Vec::new())
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -388,7 +353,6 @@ fn session_from_params(id: &str, group_id: &str, params: &NewSessionParams) -> S
         input: params.input.clone(),
         output: None,
         error_message: None,
-        callback_status: Some("pending".to_string()),
         activation_count: 1,
         caller_principal: params.caller_principal.clone(),
         created_by: params.created_by.clone(),
@@ -560,26 +524,6 @@ impl SessionManagementService for StaticSessionStore {
         Ok(Vec::new())
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -635,16 +579,11 @@ impl SessionManagementService for StaticSessionStore {
 async fn get_service_session_rejects_cross_caller_principal_access() {
     use bcs_service_api::ParticipantRole;
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "group-1",
         "bot-manager",
         vec![Participant::bot("bot-manager", ParticipantRole::Manager)],
     );
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     group_store.upsert(group).await.unwrap();
 
     // Two svc-keys, both bound to "group-1".
@@ -667,7 +606,6 @@ async fn get_service_session_rejects_cross_caller_principal_access() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: Some("pending".to_string()),
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: Some(caller_principal_for(&hash_a)),
@@ -798,26 +736,6 @@ impl SessionManagementService for ReactivateConflictSessions {
         Ok(Vec::new())
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -874,16 +792,11 @@ async fn post_invocation_running_session_returns_409() {
     use bcs_service_api::ParticipantRole;
 
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "group-1",
         "bot-manager",
         vec![Participant::bot("bot-manager", ParticipantRole::Manager)],
     );
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     group_store.upsert(group).await.unwrap();
 
     // Pre-existing running service-invocation session.
@@ -900,7 +813,6 @@ async fn post_invocation_running_session_returns_409() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: Some("pending".to_string()),
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -1000,26 +912,6 @@ impl SessionManagementService for ContractMismatchSessions {
         Ok(Vec::new())
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -1075,16 +967,11 @@ impl SessionManagementService for ContractMismatchSessions {
 async fn post_invocation_honors_belongs_to_group_contract_over_field_match() {
     use bcs_service_api::ParticipantRole;
     let group_store = Arc::new(GroupStore::new());
-    let mut group = Group::new(
+    let group = Group::new(
         "group-1",
         "bot-manager",
         vec![Participant::bot("bot-manager", ParticipantRole::Manager)],
     );
-    group.service_spec = Some(ServiceSpec {
-        callback_config: None,
-        timeout_seconds: None,
-        max_concurrency: None,
-    });
     group_store.upsert(group).await.unwrap();
 
     let session = Session {
@@ -1102,7 +989,6 @@ async fn post_invocation_honors_belongs_to_group_contract_over_field_match() {
         input: None,
         output: None,
         error_message: None,
-        callback_status: Some("succeeded".to_string()),
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,

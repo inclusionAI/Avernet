@@ -38,7 +38,7 @@ export function PermissionCard({
   const refreshBusy = busyAction === `${bot.id}:refresh`;
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="border-b border-border pb-5">
+      <CardHeader className="border-b border-divider pb-5">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <CardTitle className="min-w-0 truncate text-lg" title={bot.name}>
@@ -82,11 +82,11 @@ export function PermissionCard({
           <section className="min-w-0">
             <BotAbilitySettings bot={bot} busyAction={busyAction} onToggleDirect={onToggleDirect} />
           </section>
-          <div className="min-w-0 space-y-6 lg:border-l lg:border-border lg:pl-6">
+          <div className="min-w-0 space-y-6 lg:border-l lg:border-divider lg:pl-6">
             <section>
               <BotVisibilitySettings bot={bot} onEditPublication={onEditPublication} onViewScope={onViewScope} />
             </section>
-            <section className="border-t border-border pt-5">
+            <section className="border-t border-divider pt-5">
               <FriendApprovalSettings
                 bot={bot}
                 onEditFriendApproval={onEditFriendApproval}

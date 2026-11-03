@@ -31,7 +31,7 @@ from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
     get_current_avernet_tenant,
 )
-from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
 
@@ -89,11 +89,13 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
                local_mcp_registry=None, managed_files_reader=None,
                cli_tool_repository=None):
     center_store = _ready_center_store()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_entity.return_value = {"bot_type": "service"}
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
         mcp_config_service=mcp_config_service or MagicMock(),
         resource_repository=resource_repository or MagicMock(),
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         path_factory=MagicMock(),
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),
@@ -1154,30 +1156,45 @@ def test_mcps_lookups_run_under_the_requests_tenant():
 
 
 @pytest.mark.unit
-def test_resources_emit_absolute_container_path(monkeypatch):
+def test_resources_emit_absolute_container_path(tmp_path, monkeypatch):
     # ResourceService is constructed inside resources(); stub the class. Each file
-    # resource is emitted as data_dir + its relative path (a resolvable container
-    # path), NOT its origin label r.source ('upload'/'manual'). Non-file resources
+    # resource is emitted as the workspace root + its workspace-relative path (a
+    # resolvable container path), NOT its origin label r.source ('upload'/'manual').
+    # A row the deprecated upload wrote is relative to workspace/data, so a path
+    # with no file at the workspace root is taken from data/ when one is there; a
+    # path with no file anywhere keeps the contract's location. Non-file resources
     # (no path — URL/link/node) are dropped.
     import agentclaw.community.core.config_compose.services.collector as collector_mod
     import agentclaw.community.core.resources.services.resource_service as rs_mod
 
-    monkeypatch.setattr(collector_mod, "get_bolt_base_dir", lambda: Path("/bolt"))
+    monkeypatch.setattr(collector_mod, "get_bolt_base_dir", lambda: tmp_path)
+    workspace = tmp_path / "staff_u1/bot1/openclaw/workspace"
+    (workspace / "docs").mkdir(parents=True)
+    (workspace / "docs/a.md").write_text("a")
+    (workspace / "data").mkdir()
+    (workspace / "data/legacy.md").write_text("l")
 
-    r1 = MagicMock(source="upload")
-    r1.name = "r1"
-    r1.path = "docs/a.md"
-    r2 = MagicMock(source="manual")  # URL/link resource — no file path
-    r2.name = "r2"
-    r2.path = None
+    def row(name, path, source="upload"):
+        r = MagicMock(source=source)
+        r.name = name
+        r.path = path
+        return r
+
     fake_svc = MagicMock()
-    fake_svc.data_dir = Path("/bolt/staff_u1/bot1/openclaw/workspace/data")
-    fake_svc.list_resources.return_value = [r1, r2]
+    fake_svc.data_dir = workspace / "data"
+    fake_svc.list_resources.return_value = [
+        row("r1", "docs/a.md"),
+        row("r2", None, source="manual"),  # URL/link resource — no file path
+        row("r3", "legacy.md"),  # the deprecated upload's row: the file is under data/
+        row("r4", "gone.md"),  # no file anywhere: the contract's location is emitted
+    ]
     monkeypatch.setattr(rs_mod, "ResourceService", lambda **kw: fake_svc)
     files = _collector().resources(_req())
-    # emitted as bot-data store + bolt_data-relative key (data_dir+path minus /bolt root)
+    # emitted as bot-data store + bolt_data-relative key (host path minus the bolt root)
     assert [(f.name, f.store, f.path) for f in files] == [
-        ("r1", "bot-data", "staff_u1/bot1/openclaw/workspace/data/docs/a.md"),
+        ("r1", "bot-data", "staff_u1/bot1/openclaw/workspace/docs/a.md"),
+        ("r3", "bot-data", "staff_u1/bot1/openclaw/workspace/data/legacy.md"),
+        ("r4", "bot-data", "staff_u1/bot1/openclaw/workspace/gone.md"),
     ]
 
 
@@ -1247,9 +1264,9 @@ def test_engine_overrides_active_channel_maps_neutral_account():
     repo = _repo_returning([_channel_record()])
     out = _collector(channel_repo=repo).engine_overrides(_req())
 
-    # Lookup keyed on (type, [user_id, aideskdingding], bind_bot_id).
+    # Channel resources follow the immutable entity, independently of the actor.
     repo.get_by_type_and_identity_ids.assert_called_once_with(
-        type="dingding", identity_ids=["u1", "aideskdingding"], bind_bot_id="bot1"
+        type="dingding", identity_ids=["staff_u1", "aideskdingding"], bind_bot_id="bot1"
     )
     dingding = out["channels"]["dingding"]
     assert dingding["enabled"] is True

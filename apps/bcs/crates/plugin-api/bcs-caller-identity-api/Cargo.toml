@@ -1,0 +1,21 @@
+[package]
+name = "bcs-caller-identity-api"
+description = "Caller identity Plugin API v1: establish, issue and verify runtime-only proofs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-domain = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+bcs-config-api = { workspace = true }
+inventory = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

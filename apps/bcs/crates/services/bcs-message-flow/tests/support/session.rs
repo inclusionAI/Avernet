@@ -77,26 +77,6 @@ impl SessionManagementService for StaticSessionManagement {
         .collect())
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -164,7 +144,6 @@ pub fn test_session(session_id: &str, group_id: &str, participants: Vec<Particip
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,

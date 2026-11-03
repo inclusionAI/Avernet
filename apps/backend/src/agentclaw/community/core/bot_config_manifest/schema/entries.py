@@ -17,8 +17,11 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
+from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
+from agentclaw.community.core.apply_engine.capabilities import (
+    Category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -34,19 +37,13 @@ from agentclaw.community.core.bot_config_manifest.schema.sources import (
     SourceDecl,
     parse_source,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     ARCHIVE_FIELDS,
     SourceKind,
     archive_field_refusal,
     digest_required,
     refusal_for,
 )
-
-#: Engine-generated runtime state. Apply never writes them and never removes
-#: them (work-items §3.2), so a document declaring one would be accepted and
-#: then never converge. Refused at write time instead, which is what keeps
-#: "accepted" and "appliable" the same set.
-RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md", "IDENTITY.md"})
 
 #: ``skip`` is gone. Under per-entry diffing it meant "leave this one alone";
 #: under category overwrite (work-items §3.2) it would mean "delete this one" —
@@ -59,7 +56,7 @@ VALID_UNPACK: frozenset[str] = frozenset({"zip", "tar.gz"})
 
 #: Which (category, protocol) combinations this build accepts is no longer
 #: written here at all: it is
-#: :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`,
+#: :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`,
 #: one table that this validator and the capabilities endpoint both read. The
 #: per-category narrowing that used to live at this spot was the defect, not the
 #: rule — it could not be enumerated, published, or tested cell by cell.
@@ -75,14 +72,14 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 #: Every key a category's entry may carry. Closed: an unknown key is refused
 #: rather than ignored, because an ignored key is a caller believing they
 #: configured something.
-CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
-    ManifestCategory.RESOURCES: _COMMON_SOURCE_KEYS
+CATEGORY_ENTRY_KEYS: dict[Category, frozenset[str]] = {
+    Category.RESOURCES: _COMMON_SOURCE_KEYS
     | {"path", "unpack", "strip_components"},
-    ManifestCategory.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
-    ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
-    ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
+    Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
+    Category.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
+    Category.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference with an optional Bot-scoped connection override.
-    ManifestCategory.MCP: frozenset({"server_code", "config"}),
+    Category.MCP: frozenset({"server_code", "config"}),
 }
 
 _MCP_CONFIG_KEYS = frozenset({"url", "headers", "endpoint_env", "transport_protocol"})
@@ -95,28 +92,8 @@ _MAX_MCP_HEADER_VALUE_CHARS = 2000
 _SOURCE_SELECTORS = ("from", "source", "content")
 
 
-def legal_identity_types(engine_type: str) -> frozenset[str]:
-    """The identity files this engine accepts.
-
-    Imported lazily, and that is not style: ``core/services/identity.py`` pulls
-    in the device dispatcher and a DI module at import time, so a module-level
-    import would drag the injector into a pure validator and close a cycle. The
-    constants stay defined there — one definition, per that module's own
-    docstring — and ``harness/services/bot_profile.py`` reaches them the same
-    way for the same reason.
-    """
-    from agentclaw.community.core.services.identity import (
-        CLAUDE_CODE_IDENTITY_FILES,
-        VALID_IDENTITY_FILES,
-    )
-
-    if engine_type == "claude_code":
-        return frozenset(CLAUDE_CODE_IDENTITY_FILES)
-    return frozenset(VALID_IDENTITY_FILES)
-
-
 def check_entry_keys(
-    ctx: Context, location: str, entry: dict[str, Any], category: ManifestCategory
+    ctx: Context, location: str, entry: dict[str, Any], category: Category
 ) -> None:
     """Refuse any key the category does not define."""
     allowed = CATEGORY_ENTRY_KEYS[category]
@@ -139,7 +116,7 @@ def resolve_source(
     ctx: Context,
     location: str,
     entry: dict[str, Any],
-    category: ManifestCategory,
+    category: Category,
 ) -> SourceDecl | None:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
@@ -178,7 +155,7 @@ def resolve_source(
       has none, and a git ref's commit SHA *is* its digest (§2.2), so writing
       one there is a second, weaker pin that can disagree with the first.
     * **the (category, protocol) cell must be open.** Asked of
-      :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`
+      :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`
       — the same table ``GET …/capabilities`` publishes — so a refusal here and
       the answer a caller reads before writing are the same string, and the
       combination is refused at ``PUT`` rather than at apply.
@@ -557,7 +534,7 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
     bot type alone so that W13 can run it before a bot record exists. A registry
     lookup would need a tenant-scoped service that leg does not have.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.MCP)
+    check_entry_keys(ctx, location, entry, Category.MCP)
     server_code = entry.get("server_code")
     if not isinstance(server_code, str) or not server_code:
         ctx.add(
@@ -677,11 +654,26 @@ def validate_resource_entry(
     ctx: Context, location: str, entry: dict[str, Any]
 ) -> str | None:
     """A workspace resource. Returns its ``path`` when the path is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
+    check_entry_keys(ctx, location, entry, Category.RESOURCES)
     path = entry.get("path")
-    usable = check_relative_path(ctx, f"{location}.path", path, what="path")
+    # The engine writes this path, so it asks the engine's own rule (the
+    # shared relative-path rule plus normalisation): what passes here never
+    # fails the desired-state model the compiler builds from it.
+    refusal = resource_path_refusal(path, what="path")
+    usable = refusal is None
+    if refusal is not None:
+        ctx.add(f"{location}.path", refusal[0], refusal[1])
+    protected = protected_entry_refusal(str(path)) if usable else None
+    if protected is not None:
+        # The workspace root is the resources root: converging resources
+        # clears it and writes the declared entries back. The protected
+        # entries (``core/workspace/protected_entries``) belong to other
+        # constructs or to the engine, so a path naming one is refused here
+        # rather than written and never converged.
+        ctx.add(f"{location}.path", "resources_protected_entry", protected)
+        usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
-    source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
+    source = resolve_source(ctx, location, entry, Category.RESOURCES)
     # Git carries directory structure natively, so a tree needs no packaging
     # (schema §2.2); only an object store does, because one HTTPS GET fetches
     # one object and a tree has to travel inside it.
@@ -711,10 +703,10 @@ def validate_resource_entry(
 
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:
     """A local skill. Returns its ``name`` when the name is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
+    check_entry_keys(ctx, location, entry, Category.SKILLS)
     name = entry.get("name")
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
+    source = resolve_source(ctx, location, entry, Category.SKILLS)
     check_unpack(ctx, location, entry, source=source, archive_expected=True)
     # A skills entry over ``oss`` always unpacks — a skill IS a package — so
     # ``subpath`` always has an archive to select within.
@@ -734,7 +726,7 @@ def validate_identity_entry(
     ctx: Context, location: str, entry: dict[str, Any], *, engine_type: str
 ) -> None:
     """An identity file, checked against this engine's own legal set."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.IDENTITY)
+    check_entry_keys(ctx, location, entry, Category.IDENTITY)
     file_type = entry.get("type")
     legal = legal_identity_types(engine_type)
     if not isinstance(file_type, str) or file_type not in legal:
@@ -755,7 +747,7 @@ def validate_identity_entry(
             "writes it and never removes it, so a manifest declaring it could "
             "never converge",
         )
-    source = resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
+    source = resolve_source(ctx, location, entry, Category.IDENTITY)
     # An identity file is one text body and is never an archive, so on ``oss``
     # there is nothing a ``subpath`` could select within.
     check_source_subpath(
@@ -777,10 +769,10 @@ def validate_cli_tool_entry(
     implemented here either. What remains is the ordinary source machinery plus
     the two rules below.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    check_entry_keys(ctx, location, entry, Category.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    source = resolve_source(ctx, location, entry, Category.CLI_TOOLS)
     check_unpack(
         ctx, location, entry, source=source, archive_expected="unpack" in entry
     )

@@ -7,8 +7,15 @@ import type { ChatBridge } from '@tc-chat/core';
 import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
+
+let mockWorkspacePanelDismissCalls: Array<[boolean, unknown, unknown]> = [];
+jest.mock('@/hooks/useWorkspacePanelDismiss', () => ({
+  useWorkspacePanelDismiss: (...args: [boolean, unknown, unknown]) => {
+    mockWorkspacePanelDismissCalls.push(args);
+  },
+}));
 
 // 捕获 <ChatLayout.Panel> 收到的 props（断言 bridge 透传）。mock 前缀通过 jest.factory 检查。
 let mockPanelRenders: Array<Record<string, unknown>> = [];
@@ -138,6 +145,7 @@ describe('ChatPanel interactive', () => {
   beforeEach(() => {
     useTaskSidePanelStore.getState().resetAll();
     mockPanelRenders.length = 0;
+    mockWorkspacePanelDismissCalls.length = 0;
   });
 
   it('任务节点联动只替换左侧会话内容，右侧 ChatLayout.Panel 保持挂载', () => {
@@ -742,6 +750,35 @@ describe('ChatPanel interactive', () => {
     expect(typeof onLoadMore).toBe('function');
     onLoadMore?.();
     expect(onLoadMoreMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('副屏展开后不订阅点外收起，仅允许显式按钮关闭', () => {
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    const panelProps = mockPanelRenders.at(-1) as { onIsOpenChange?: (open: boolean) => void };
+    act(() => panelProps?.onIsOpenChange?.(true));
+
+    expect(mockWorkspacePanelDismissCalls.at(-1)).toEqual([
+      false,
+      expect.any(Function),
+      expect.any(Function),
+    ]);
   });
 
   it('把 chatBridge 透传给 ChatLayout.Panel（主→副通道接线）', () => {

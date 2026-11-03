@@ -1,5 +1,7 @@
 pub mod config;
+pub mod bridge_config;
 pub mod service;
+pub mod status;
 pub mod engine;
 pub mod error;
 pub mod idempotency;

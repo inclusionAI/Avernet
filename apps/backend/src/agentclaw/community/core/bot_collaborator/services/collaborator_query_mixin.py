@@ -65,7 +65,7 @@ class CollaboratorQueryMixin:
             env = get_current_env()
 
         # 1. 查询 Bot 信息
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        bot = self._editor_policy.resolve_bot(bot_id=bot_id, owner_id=owner_id)
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 

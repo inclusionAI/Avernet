@@ -37,6 +37,7 @@ export interface BotDomain {
   entityKey: string;
   name: string;
   description?: string;
+  expertOriginName?: string;
   spaceId?: string;
   spaceName?: string;
   /** 授权能力只跟随接口返回的 Bot 所属空间类型，不从 Bot 类型或部署形态推断。 */
@@ -58,6 +59,8 @@ export interface BotDomain {
   lock?: BotLock;
   /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
   needsEditLock?: boolean;
+  /** Bot 级协作关系；运行态不要求编辑锁，但仍允许管理已有协作锁。 */
+  hasCollaborators?: boolean;
   completeness: BotCompleteness;
   warnings: string[];
   actions: string[];
@@ -179,6 +182,52 @@ export interface BotCreateAuthorizationPollResult {
   afterCreateFailures?: Array<{ key: string; retryable: boolean; message: string }>;
 }
 
+export interface BotCopyInput {
+  sourceBotId: string;
+  sourceOwnerId?: string;
+  /** 仅名称与描述可编辑;其余字段均为源 Bot 透传只读值,锁定不可改。 */
+  name: string;
+  description: string;
+  /** 透传只读:从源 Bot 继承,服务端校验服务化/引擎合法性,FE 不二次校验。 */
+  engine?: string;
+  spaceId?: string;
+  ownership?: BotOwnership;
+  serviceMode?: BotServiceMode;
+  avatarUrl?: string;
+  /** 排除的资源路径集合;含目录则整子树排除。空集 = 全量复制。 */
+  excludes: string[];
+}
+
+/** 复制结果与创建结果同构:AgentPass 授权流程一致,便于复用 AuthorizationPanel。 */
+export type BotCopyResult = BotCreateResult;
+export type BotCopyAuthorization = BotCreateAuthorization;
+
+/**
+ * 复制入口可用性。默认仅 openclaw 引擎、且当前用户为 Owner 或协作者含 edit 权限时显示;
+ * PRD §状态前置:草稿/运行中/预发/下线/待预发发布可复制,部署中/失败/未知阻断(可见但禁用并给原因)。
+ */
+export function canCopyBot(
+  bot: BotDomain,
+  currentUserId?: string,
+): {
+  visible: boolean;
+  enabled: boolean;
+  disabledReason?: string;
+} {
+  const engineAllowsCopy = bot.runtime?.engine === 'openclaw';
+  const canEdit = Boolean(
+    currentUserId && (bot.ownerId === currentUserId || bot.actions.includes('edit')),
+  );
+  if (!engineAllowsCopy || !canEdit) return { visible: false, enabled: false };
+  const blockedReasons: Partial<Record<BotLifecycle, string>> = {
+    deploying: 'Bot 部署中,无法复制',
+    failed: 'Bot 创建失败,无法复制',
+    unknown: 'Bot 状态未知,无法复制',
+  };
+  const reason = blockedReasons[bot.lifecycle];
+  return reason ? { visible: true, enabled: false, disabledReason: reason } : { visible: true, enabled: true };
+}
+
 export type BotAction =
   | 'view'
   | 'edit'
@@ -206,7 +255,7 @@ export type BotInventoryAction =
   | 'open_folder';
 
 /** 卡片管理菜单可分发的动词（菜单路由键），是 BotInventoryAction 中管理类动词的子集。 */
-export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish' | 'open_folder';
+export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish' | 'open_folder' | 'activate';
 
 /** 重启发布的发布阶段：仅 prestable/online 存在已发布 runtime（Avernet #1911 词表口径）。 */
 export type BotPublishRestartStage = 'prestable' | 'online';

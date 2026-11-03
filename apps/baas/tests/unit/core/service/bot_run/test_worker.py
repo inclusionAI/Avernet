@@ -65,6 +65,26 @@ def queue(db: DatabaseManager) -> OrmBotRunQueueRepository:
     return OrmBotRunQueueRepository(database=db)
 
 
+class _ConfigQpmRepo:
+    def __init__(self, configs: dict[str, int]):
+        self._configs = configs
+
+    def list_all(self):
+        from secbaas.community.core.repository.bot_qpm import BotQpmRecord
+
+        return [
+            BotQpmRecord(
+                id=i,
+                bot_id=bot_id,
+                qpm=qpm,
+                env=None,
+                gmt_create=None,
+                gmt_modified=None,
+            )
+            for i, (bot_id, qpm) in enumerate(self._configs.items())
+        ]
+
+
 class _QpmRepo:
     def __init__(self, bot_qpm: int = 600):
         self._bot_qpm = bot_qpm
@@ -92,6 +112,14 @@ def _qpm(bot_qpm: int = 600) -> BotConcurrencyManager:
     # 预设 _configs，避免依赖 refresh() 的 import 时序
     mgr._configs = {"bot-1": bot_qpm}
     return mgr
+
+
+def _qpm_with_configs(configs: dict[str, int]) -> BotConcurrencyManager:
+    manager = BotConcurrencyManager(
+        _ConfigQpmRepo(configs), refresh_interval_seconds=999
+    )
+    manager.refresh()
+    return manager
 
 
 class _CompletingExecutor:
@@ -174,7 +202,11 @@ class _CancellableBlockingExecutor:
 
 
 def _insert(
-    repo: OrmBotRunRepository, queue: OrmBotRunQueueRepository, bot_id: str
+    repo: OrmBotRunRepository,
+    queue: OrmBotRunQueueRepository,
+    bot_id: str,
+    *,
+    meta: dict | None = None,
 ) -> str:
     """双写：结果行（baas_bot_run）+ 队列工作项（baas_bot_run_queue）。"""
     run_id = uuid4().hex
@@ -185,7 +217,7 @@ def _insert(
         message_long="m",
         metadata=None,
     )
-    queue.insert_queue(run_id=run_id, bot_id=bot_id)
+    queue.insert_queue(run_id=run_id, bot_id=bot_id, meta=meta)
     return run_id
 
 
@@ -488,7 +520,7 @@ async def test_run_one_executes_with_trace_context(repo, queue):
     )
 
 
-async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
+async def test_run_one_timeout_marks_timeout_with_trace(repo, queue):
     """_run_one timeout path should still restore trace context."""
     _insert(repo, queue, "bot-1")
     inner = _CompletingExecutor(repo)
@@ -506,7 +538,7 @@ async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
         await worker._run_one(record)
 
     rec = repo.get_by_run_id(record.run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     mock_tracer.start_span.assert_called_once_with(
         "bot_queue_worker.execute", child_of=None
     )
@@ -681,7 +713,7 @@ async def test_run_one_mark_done_raises_warning(repo, queue):
     assert repo.get_by_run_id(record.run_id).status == "COMPLETED"
 
 
-async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
+async def test_timeout_scan_marks_timeout_and_force_done(repo, queue):
     run_id = uuid4().hex
     repo.insert_run(
         run_id=run_id,
@@ -696,7 +728,7 @@ async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
 
     await worker._timeout_scan_once()
 
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "TIME_OUT"
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
@@ -760,8 +792,8 @@ async def test_timeout_scan_force_done_remote_running_with_stale_heartbeat(repo,
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_timeout_scan_remote_stale_writes_result_failed(repo, queue):
-    """非本机 RUNNING + 心跳过期 → 同时写 baas_bot_run=FAILED（不再卡 PENDING）。"""
+async def test_timeout_scan_remote_stale_writes_result_timeout(repo, queue):
+    """非本机 RUNNING + 心跳过期 → 同时写 baas_bot_run=TIME_OUT（不再卡 PENDING）。"""
     run_id = _insert(repo, queue, "bot-1")
     record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
     assert record is not None
@@ -801,7 +833,7 @@ async def test_timeout_scan_remote_stale_writes_result_failed(repo, queue):
 
     assert queue.get_by_run_id(run_id).status == "DONE"
     rec = repo.get_by_run_id(run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     assert "worker lost" in (rec.error or "")
 
 
@@ -1134,6 +1166,48 @@ async def test_tick_enforces_global_concurrency_cap(repo, queue):
     assert worker.active_count == 0
     # 在途释放后恢复派发
     assert await worker._tick() == 2
+
+
+async def test_tick_passes_teclaw_engine_to_teclaw_default(repo, queue):
+    """teclaw exact miss uses 5000 instead of the wildcard row."""
+    _insert(repo, queue, "bot-1", meta={"engine_type": "teclaw"})
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm_with_configs({"*": 60}),
+        executor=ex,
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
+    )
+
+    spy = MagicMock(wraps=queue.claim_pending_by_bot)
+    with patch.object(worker._queue, "claim_pending_by_bot", spy):
+        assert await worker._tick() == 1
+
+    assert spy.call_args.kwargs["max_running"] == 5000
+
+
+async def test_tick_passes_non_teclaw_engine_to_wildcard(repo, queue):
+    """openclaw exact miss keeps the existing wildcard concurrency."""
+    _insert(repo, queue, "bot-1", meta={"engine_type": "openclaw"})
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm_with_configs({"*": 60}),
+        executor=ex,
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
+    )
+
+    spy = MagicMock(wraps=queue.claim_pending_by_bot)
+    with patch.object(worker._queue, "claim_pending_by_bot", spy):
+        assert await worker._tick() == 1
+
+    assert spy.call_args.kwargs["max_running"] == 60
 
 
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")

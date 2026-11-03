@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import (
+    ActiveBot,
     BotRunQueueRecord,
     BotRunQueueRepository,
 )
@@ -253,9 +254,9 @@ class BotRequestWorker:
                     continue
                 # owner 已 down：先写结果终态再 force_done。否则队列置 DONE 后
                 # recovery/reset_stale_running 不再命中（按 RUNNING 过滤），
-                # baas_bot_run 会永远停在 PENDING/RUNNING。update_error 幂等。
+                # baas_bot_run 会永远停在 PENDING/RUNNING。update_timeout 幂等。
                 with contextlib.suppress(Exception):
-                    self._run_repository.update_error(
+                    self._run_repository.update_timeout(
                         record.run_id, "worker lost (stale heartbeat)"
                     )
                 with contextlib.suppress(Exception):
@@ -268,12 +269,12 @@ class BotRequestWorker:
                     record.assigned_worker,
                 )
             else:
-                # PENDING 超时：走 executor 标 FAILED + force_done
+                # PENDING 超时：走 executor 标 TIME_OUT + force_done
                 await self._executor.execute(record)
                 with contextlib.suppress(Exception):
                     self._queue.force_done(record.run_id)
                 logger.warning(
-                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked timeout",
                     record.run_id,
                     record.status,
                 )
@@ -389,8 +390,9 @@ class BotRequestWorker:
 
         bots = self._queue.discover_active_bots(self._config.discover_limit)
         dispatched = 0
-        idle_bots: list[str] = []
-        for bot_id in bots:
+        idle_bots: list[ActiveBot | str] = []
+        for item in bots:
+            bot_id, engine_type = self._active_bot_parts(item)
             if self._active >= self._config.max_concurrent:
                 logger.info(
                     "[BotRequestWorker] active bots(%s) > max concurrent(%s), skip %s",
@@ -400,7 +402,7 @@ class BotRequestWorker:
                 )
                 break
 
-            max_running = self._qpm.get_concurrency_num(bot_id)
+            max_running = self._qpm.get_concurrency_num(bot_id, engine_type=engine_type)
             if max_running is None:
                 logger.error(
                     "[BotRequestWorker] bot has no concurrency limit configured, "
@@ -433,7 +435,14 @@ class BotRequestWorker:
         self._maybe_log_cap(idle_bots)
         return dispatched
 
-    def _maybe_log_cap(self, idle_bots: list[str]) -> list[str]:
+    @staticmethod
+    def _active_bot_parts(item: ActiveBot | str) -> tuple[str, str | None]:
+        """适配 run 内的新旧 discover 返回值，保留 initialization/test seam。"""
+        if isinstance(item, ActiveBot):
+            return item.bot_id, item.engine_type
+        return item, None
+
+    def _maybe_log_cap(self, idle_bots: list[ActiveBot | str]) -> list[str]:
         """观测性：本轮「有 PENDING 但一个都没认领到」的 bot 中，若确实是被全局并发
         上限拦住的，按节流打一条 INFO，便于区分「被限流」与「没活了」。
 
@@ -449,8 +458,9 @@ class BotRequestWorker:
             return []
         self._last_cap_warn = now
         capped: list[str] = []
-        for bot_id in idle_bots:
-            max_running = self._qpm.get_concurrency_num(bot_id)
+        for item in idle_bots:
+            bot_id, engine_type = self._active_bot_parts(item)
+            max_running = self._qpm.get_concurrency_num(bot_id, engine_type=engine_type)
             if max_running is None:
                 continue
             try:
@@ -703,7 +713,7 @@ class BotRequestWorker:
     async def _terminate_local_timeout(self, record: BotRunQueueRecord) -> None:
         """本机超时终结：cancel 本机 task + force_done 队列行 + 触发回调。
 
-        结果终态（FAILED）由被 cancel 的 executor 链（ResultGuardExecutor 的
+        结果终态（TIME_OUT）由被 cancel 的 executor 链（ResultGuardExecutor 的
         CancelledError 分支）负责；这里补齐队列终态与回调，避免本机超时后队列行
         停在 RUNNING（占并发额度）且回调丢失。force_done/回调均幂等。
         """

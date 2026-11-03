@@ -148,8 +148,6 @@ pub enum SessionLaunchError {
     InvalidRequest(String),
     #[error("conflict: {0}")]
     Conflict(String),
-    #[error("session callback pending: {0}")]
-    CallbackPending(String),
     #[error(transparent)]
     Runtime(#[from] CollaborationRuntimeError),
     #[error(transparent)]

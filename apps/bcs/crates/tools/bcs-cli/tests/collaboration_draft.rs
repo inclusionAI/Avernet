@@ -10,7 +10,6 @@ use wiremock::{
 };
 
 const ID: &str = "01010101-0202-0303-0404-050505050505";
-const TOKEN: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[tokio::test]
 async fn local_input_and_output_failures_leave_no_partial_file_or_upload() {
@@ -103,7 +102,7 @@ fn source(yaml: &str, revision: u64) -> Value {
         "content_hash":hex::encode(Sha256::digest(yaml.as_bytes())),"size_bytes":yaml.len()})
 }
 fn reference(revision: u64) -> Value {
-    json!({"schemaVersion":2,"draftId":ID,"revision":revision,"readToken":TOKEN})
+    json!({"schemaVersion":2,"draftId":ID,"revision":revision,"readToken":"A".repeat(43)})
 }
 async fn delivery(server: &MockServer, r: &Value, valid: bool) {
     let rev = r["revision"].as_u64().unwrap();
@@ -160,6 +159,7 @@ async fn create_transfers_incident_file_directly_and_emits_only_short_reference(
     assert!(ok);
     assert_eq!(output["saved"], true);
     assert_eq!(output["size_bytes"], 2174);
+    assert!(!output.to_string().contains("readToken"));
     assert!(!output.to_string().contains("definition_yaml"));
     assert!(output["message"].as_str().unwrap().len() < 300);
     let requests = server.received_requests().await.unwrap();
@@ -361,7 +361,7 @@ async fn malformed_save_response_recovers_only_fixed_next_revision() {
 }
 
 #[test]
-fn reference_serializer_rejects_extra_fields_bad_ids_and_noncanonical_tokens() {
+fn reference_serializer_rejects_extra_fields_bad_ids_and_wrong_versions() {
     let maximum: Value = serde_json::from_str(include_str!(
         "../../../../tests/fixtures/collaboration-definition-draft/maximum-reference.json"
     ))
@@ -375,11 +375,21 @@ fn reference_serializer_rejects_extra_fields_bad_ids_and_noncanonical_tokens() {
     .unwrap();
     assert_eq!(message, maximum["message"].as_str().unwrap());
     assert_eq!(message.len() as u64, maximum["size_bytes"].as_u64().unwrap());
+    // Both server shapes produce the same new card, without forwarding the legacy field.
+    for placeholder in ["A".repeat(43), "previous-server-value".to_string()] {
+        let mut response = r.clone();
+        response["readToken"] = json!(placeholder);
+        let (normalized, compatible_message) = reference_message(
+            response, r["draftId"].as_str().unwrap(), 9_007_199_254_740_991,
+        ).unwrap();
+        assert_eq!(compatible_message, message);
+        assert!(serde_json::to_value(normalized).unwrap().get("readToken").is_none());
+    }
     let mut extra = reference(1);
     extra["title"] = json!("not allowed");
     assert!(reference_message(extra, ID, 1).is_err());
     let mut bad = reference(1);
-    bad["readToken"] = json!("A".repeat(42) + "B");
+    bad["draftId"] = json!("invalid");
     assert!(reference_message(bad, ID, 1).is_err());
     assert!(reference_message(reference(1), ID, 2).is_err());
 }

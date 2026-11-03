@@ -3,6 +3,7 @@ import { itemSnapshotKey, snapshotLabel } from '../../../server/contracts/repair
 import HistoricalIssueArchive from './repair-batch/HistoricalIssueArchive'
 import { expandProposalCards, proposalMembers, proposalChecked, proposalSelection } from '../../../server/contracts/repair-proposal'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useEvolveSuggestions,
@@ -52,12 +53,11 @@ type RepairViewState = {
   lineage?: { parentTaskId: string; childTaskId: string; publishedRevision: number }
 }
 
-function readRepairView(workflowId: string): RepairViewState {
+function readRepairView(workflowId: string, query: URLSearchParams): RepairViewState {
   const fallback: RepairViewState = { repairOpen: false, repairPage: 1, repairPageSize: 20,
     includeHistorical: false, selectedTaskId: '' }
   try {
     const saved = JSON.parse(sessionStorage.getItem(`workflow-repair:${workflowId}`) ?? '{}')
-    const query = new URLSearchParams(window.location.search)
     const task = query.get('workflowId') === workflowId ? query.get('repairTaskId') : null
     const linkedTask = task && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(task) ? task : ''
     const selectedTaskId = linkedTask || (typeof saved.selectedTaskId === 'string' ? saved.selectedTaskId : '')
@@ -120,7 +120,8 @@ function DiagnosisPanel({
   canEdit: boolean
   accessReady: boolean
 }) {
-  const [initialRepairView] = useState(() => readRepairView(workflowId))
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [initialRepairView] = useState(() => readRepairView(workflowId, searchParams))
   const [sort, setSort] = useState<'priority' | 'frequency' | 'recent'>('priority')
   const [severity, setSeverity] = useState('all')
   const [nodeFilter, setNodeFilter] = useState<string>('all')
@@ -158,7 +159,13 @@ function DiagnosisPanel({
   const returnScroll = useRef(0)
   const clearRoundLineage = () => { setPreviousRoundTaskId(''); setRoundChildTaskId(''); previousRoundRevision.current = 1 }
   const openTask = (id: string) => { if (id !== previousRoundTaskId && id !== roundChildTaskId) clearRoundLineage(); returnScroll.current = window.scrollY; setSelectedTaskId(id) }
-  const closeTask = () => { clearRoundLineage(); setSelectedTaskId(''); requestAnimationFrame(() => window.scrollTo?.(0, returnScroll.current)) }
+  const closeTask = () => {
+    clearRoundLineage(); setSelectedTaskId('')
+    if (searchParams.get('workflowId') === workflowId && searchParams.has('repairTaskId')) {
+      setSearchParams(current => { const next = new URLSearchParams(current); next.delete('repairTaskId'); return next }, { replace: true })
+    }
+    requestAnimationFrame(() => window.scrollTo?.(0, returnScroll.current))
+  }
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
   const [dispositionReason, setDispositionReason] = useState('')
   const [dispositionUntil, setDispositionUntil] = useState('')
@@ -540,6 +547,7 @@ function DiagnosisPanel({
 
   if (selectedTaskId) return <RepairTaskDialog key={selectedTaskId} workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
     canEdit={canEdit && repairData?.canEdit === true} onClose={closeTask} onChanged={() => setRepairRefresh(value => value + 1)}
+    onWorkflowMismatch={() => { closeTask(); setRepairNotice('原任务不属于当前工作流，已返回当前工作流的问题列表。') }}
     onNextRound={startNextRound} onPreviousRound={previousRoundTaskId && roundChildTaskId === selectedTaskId ? returnToPreviousRound : undefined} />
   if (draftOpen) return <>
     <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}

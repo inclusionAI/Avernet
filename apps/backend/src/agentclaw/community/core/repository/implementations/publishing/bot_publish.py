@@ -231,7 +231,7 @@ class BotPublishRepository(
                     self.Model.source_bot_pk == source_bot_pk,
                     self.Model.env == env,
                 )
-                .order_by(self.Model.gmt_create.desc())
+                .order_by(self.Model.gmt_create.desc(), self.Model.id.desc())
                 .all()
             )
             records = [r.to_record() for r in rows]

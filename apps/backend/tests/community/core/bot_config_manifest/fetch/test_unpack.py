@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
+from agentclaw.community.core.apply_engine.unpack import (
     UnpackError,
     UnpackedTree,
     unpack_archive,

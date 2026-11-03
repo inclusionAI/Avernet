@@ -1,10 +1,10 @@
 """Unit tests for TeclawFilePromotion (gather engine files → OSS → refs)."""
 from unittest.mock import MagicMock
 
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+from agentclaw.community.core.apply_engine.cli_tools.store import (
     CliToolStore,
 )
-from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
 

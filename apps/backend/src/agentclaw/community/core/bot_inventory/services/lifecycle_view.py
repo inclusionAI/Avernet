@@ -53,7 +53,7 @@ class BotLifecycleView:
             return DisplayState.RUNNING
         if status in {"FAILED", "ERROR"}:
             return DisplayState.FAILED
-        if status in {"DORMANT", "SLEEPING"}:
+        if status in {"DORMANT", "SLEEPING", "RECYCLED"}:
             return DisplayState.DORMANT
         return DisplayState.PENDING
 

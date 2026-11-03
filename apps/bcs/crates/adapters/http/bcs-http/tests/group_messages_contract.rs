@@ -289,26 +289,6 @@ impl SessionManagementService for StaticSessionManagement {
         unimplemented!("not needed by this test")
     }
 
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        unimplemented!("not needed by this test")
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,
@@ -396,7 +376,6 @@ fn test_session_with_status(
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -424,9 +403,16 @@ struct RecordingMessageFlow {
 
 #[async_trait::async_trait]
 impl MessageFlowService for RecordingMessageFlow {
+    async fn query_message_deliveries(
+        &self,
+        _query: bcs_service_api::application::message_delivery::DeliveryStatusQuery,
+    ) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
+        Ok(Vec::new())
+    }
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         self.web_sends.lock().await.push(cmd);
         Ok(WebSendOutcome {
+            operation_id: "op-test".to_string(),
             queue_admission: None,
             primary_run_id: "run-web".to_string(),
             status: "started".to_string(),
@@ -764,6 +750,45 @@ async fn collaboration_delivery_routes_require_authenticated_caller() {
     }
 }
 
+/// The batch query route is POST-only: a GET against the same
+/// path must never reach the handler (the single-message lookup
+/// lives on a different path) — axum answers 405 on the method
+/// mismatch, pinning the GET/POST contract surface.
+#[tokio::test]
+async fn collaboration_delivery_query_batch_route_is_post_only() {
+    let (app, ..) = build_group_app().await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/openapi/v1/collaboration/sessions/group-1:abcdef12/message-deliveries/query")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+/// An authenticated POST reaches the flow and returns its
+/// success body (the recording flow answers an empty page).
+#[tokio::test]
+async fn collaboration_delivery_query_post_succeeds_for_authenticated_caller() {
+    let (app, ..) = build_group_app().await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/openapi/v1/collaboration/sessions/group-1:abcdef12/message-deliveries/query")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"message_ids":["m"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 async fn build_group_app_with_identity(
     user_identity: Arc<dyn UserIdentityPort>,
 ) -> (
@@ -852,6 +877,10 @@ async fn build_group_app_with_identity_and_session_status(
     let group_store = Arc::new(GroupStore::new());
     group_store.upsert(group).await.unwrap();
 
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5).
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("owner-bot", "123");
     let routing = Arc::new(RecordingRouting::default());
     let bot_delivery = Arc::new(RecordingBotDelivery::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
@@ -889,6 +918,7 @@ async fn build_group_app_with_identity_and_session_status(
         )))
         .group_query(group_use_cases)
         .group_message_history(group_message_history.clone())
+        .bot_authority_hook(authority as _)
         .build_for_test();
     let app = build_router(
         HttpAppState::new(services)
@@ -1578,6 +1608,15 @@ async fn scoped_session_history_app(
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.group_message_history = history.clone();
     services.collaboration_runtime = runtime.clone();
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5):
+    // the adapter probes consult it instead of
+    // `list_bots_by_creator`.
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("owner-bot", "123");
+    authority.seed_owner("other-bot", "456");
+    authority.seed_owner("outside-bot", "123");
+    services.bot_authority_hook = authority;
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
     )));
@@ -1727,6 +1766,9 @@ async fn state_machine_session_messages_non_session_human_returns_forbidden() {
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.collaboration_runtime = collaboration_runtime.clone();
+    // LIVE authority chain with NO seeded edges: the
+    // intruding Human controls nothing.
+    services.bot_authority_hook = bcs_test_support::lazy_authority_chain().hook;
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(static_auth_chain("456", "Intruder")),
     )));

@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 import engine.community.api.transport.a2a.router as R
 import engine.community.api.transport.a2a.engine_bridge as bridge
 from engine.community.api.transport.a2a import kernel as kernel_mod
+from engine.community.api.transport.a2a.card import make_agent_card
 from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult  # noqa: E402
 from engine.community.kernel.frames import ErrorShape  # noqa: E402
 
@@ -1115,6 +1116,105 @@ def test_agent_card_declares_cancel_extension(app_client):
     uris = [e["url"] for e in card["capabilities"]["extensions"]]
     from engine.community.api.transport.a2a.card import EXTENSION_URIS
     assert EXTENSION_URIS["cancel"] in uris, uris
+
+
+# ── P0: resolve 能力条件声明（spec stage2 §5）──
+# 粒度=单一 URI 代表完整能力集：三方法全在场才声明；部分支持=不声明。
+# URI 字面量 = 契约定稿值，不用模块属性——测试与 card.py 实现漂移时字面量会红。
+
+RESOLVE_URI = "https://avernet.local/a2a/ext/resolve/v1"
+
+
+def test_agent_card_default_excludes_resolve_uri():
+    c = make_agent_card("http://127.0.0.1:20003")
+    urls = [e["url"] for e in c["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
+def test_agent_card_with_resolve_support_declares_uri_last():
+    c = make_agent_card("http://127.0.0.1:20003", resolve_supported=True)
+    urls = [e["url"] for e in c["capabilities"]["extensions"]]
+    assert RESOLVE_URI in urls
+    # 声明位序=最后（老消费方按索引/位序跳过未知扩展时 resolve 不前置扰序）
+    assert urls[-1] == RESOLVE_URI
+    # 既有五项不受影响（retry 被 router:232 retry-only 校验消费，不能动）
+    assert "https://avernet.local/a2a/ext/retry/v1" in urls
+    assert "https://avernet.local/a2a/ext/cancel/v1" in urls
+    assert len(urls) == 6
+    # 声明必须 required:false，与其余五项一致
+    resolve_entry = [e for e in c["capabilities"]["extensions"]
+                    if e["url"] == RESOLVE_URI][0]
+    assert resolve_entry["required"] is False
+
+
+class _FullResolveChat:
+    """三方法全有——声明满足。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+    def resolve_mode_transition(self, **kw): ...
+
+
+class _PartialResolveChat:
+    """缺 mode_switch——部分支持=不声明。"""
+    def resolve_exec_approval(self, **kw): ...
+    def resolve_interaction(self, **kw): ...
+
+
+def test_card_endpoint_declares_resolve_for_full_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _FullResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI in urls
+
+
+def test_card_endpoint_no_resolve_decl_for_partial_engine(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin", lambda: _PartialResolveChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+    # 基础五项仍在，老消费方（BaaS abort 判读）不受影响
+    assert "https://avernet.local/a2a/ext/cancel/v1" in urls
+
+
+def test_card_endpoint_no_resolve_decl_when_plugin_unavailable(
+        app_client, monkeypatch):
+    def _raise():
+        raise RuntimeError("no active engine")
+    monkeypatch.setattr(bridge, "_chat_plugin", _raise)
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # card 永可答，声明保守缺席
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
+
+
+class _PoisonedAttrChat:
+    """奇异插件：属性访问本身抛错（非 AttributeError）——真值检查
+    须降级为不声明，card 端点不得 500。三方法全毒化，绕开 all() 的
+    缺位短路路径，必中属性访问异常。"""
+    @property
+    def resolve_exec_approval(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_interaction(self):
+        raise RuntimeError("poisoned plugin surface")
+
+    @property
+    def resolve_mode_transition(self):
+        raise RuntimeError("poisoned plugin surface")
+
+
+def test_card_endpoint_no_resolve_decl_when_attr_access_raises(
+        app_client, monkeypatch):
+    monkeypatch.setattr(bridge, "_chat_plugin",
+                        lambda: _PoisonedAttrChat())
+    resp = app_client.get("/.well-known/agent-card.json")
+    assert resp.status_code == 200  # 真值检查吞异常降级，card 永可答
+    urls = [e["url"] for e in resp.json()["capabilities"]["extensions"]]
+    assert RESOLVE_URI not in urls
 
 
 # ══════════ R4-2: 多 pending 交互逐个可决（gateway 并发 canUseTool）══════════
@@ -2459,6 +2559,69 @@ async def test_sse_slow_consumer_kicked_and_stream_closes(monkeypatch):
     assert chunks, "先行 backlog 必须原样流出"
     assert k.runs[rid].subscribers == [], "队满踢出后订阅者必须被移除"
     assert any("先行块" in chunk for chunk in chunks)
+
+
+# ── SSE 空闲心跳：静默窗保活，事件不丢、终结信标不误吞 ─────────────────────
+
+@pytest.mark.asyncio
+async def test_stream_response_emits_keepalive_on_idle(monkeypatch):
+    """引擎静默窗发 SSE 注释帧保活；心跳后事件照常抵达，终结信标收线。
+
+    线上事故（10-28 灰度 11 例断流）：run 流在引擎长静默窗（思考/工具
+    执行）无字节输出，中间 L7 按 idle-timeout 掐死连接。心跳注释帧是
+    wire 层唯一保活手段，且必须与队列 None 终结信标严格区分。
+    """
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    monkeypatch.setattr(R, "_SSE_KEEPALIVE_SECONDS", 0.05)
+    k = R._kernel
+    rid, _ = await k.open_run("ka", "k", "first", "d")
+    backlog, q = await k.subscribe(rid, since_seq=0)
+    resp = R._stream_response(11, rid, backlog, q)
+
+    out: list[str] = []
+
+    async def consume():
+        async for chunk in resp.body_iterator:
+            out.append(chunk)
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.12)          # > 2×0.05s：至少一个心跳窗已过
+
+    assert R._SSE_KEEPALIVE_FRAME in out, "静默窗必须发出注释帧心跳"
+
+    await k.publish_delta(rid, "心跳后抵达")
+    q.put_nowait(None)                 # 终结信标：流收线契约
+    await asyncio.wait_for(task, 2)
+
+    assert any("心跳后抵达" in c for c in out), "心跳不得吞掉后续事件"
+    assert k.runs[rid].subscribers == [], "收线后必须摘除订阅者"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_context_emits_keepalive_on_idle(monkeypatch):
+    """SubscribeToContext 长订阅同样有静默窗，心跳保活语义与 run 流一致。"""
+    monkeypatch.setattr(R, "_kernel", kernel_mod.A2aKernel())
+    monkeypatch.setattr(R, "_SSE_KEEPALIVE_SECONDS", 0.05)
+    k = R._kernel
+    resp = await R._subscribe_context({"contextId": "ka-sc"}, "ctx-ka", None)
+    assert resp.media_type == "text/event-stream"
+
+    out: list[str] = []
+
+    async def consume():
+        async for chunk in resp.body_iterator:
+            out.append(chunk)
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.12)
+    assert R._SSE_KEEPALIVE_FRAME in out, "上下文订阅静默窗同样需要心跳"
+
+    k.publish_engine_inject("ka-sc", "后台注入", "inject-ka-1")
+    k._context_subs["ka-sc"][0].put_nowait(None)
+
+    await asyncio.wait_for(task, 2)
+    assert any("后台注入" in c for c in out), "心跳后事件必须照常送达"
+    assert k._context_subs.get("ka-sc") == [], "收线后必须摘除订阅"
 
 
 # ── wire 形状单测 ───────────────────────────────────────────────────────────

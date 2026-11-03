@@ -12,6 +12,8 @@ makes a SkillSet-bridged Skill answerable before anything else wrote its row.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from enum import StrEnum
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
@@ -25,9 +27,16 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, stable_resource_owner_id
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.center_skill_access import (
     CenterSkillAccessRepositoryProtocol,
+)
+from agentclaw.community.core.ports.shared_skill_port import (
+    SharedSkillAmbiguous,
+    SharedSkillNotFound,
+    SharedSkillPort,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -132,7 +141,7 @@ class _AssetAdapter(Protocol):
     ) -> tuple[dict[str, Any], dict[str, Any], str]: ...
 
 
-class SkillQueryService(SkillQueryServiceProtocol):
+class SkillQueryService(SkillQueryServiceProtocol, SharedSkillPort):
     """Resolve one public ``skill_id`` (or a Bot scope) and answer for it."""
 
     @inject
@@ -152,6 +161,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
+        self._bot_addresses = BotAddressResolver(bot_repo)
         self._collaborators = collaborators
         self._reader = reader
         self._skill_service_factory = skill_service_factory
@@ -199,7 +209,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
         member_ids = self._reader.member_skill_ids(bot=bot)
         return self._skill_repo.list_bot_skills(
             bot_id=bot_id,
-            user_id=owner_id,
+            user_id=stable_resource_owner_id(bot),
             skill_set_member_ids=member_ids,
             page=page,
             page_size=page_size,
@@ -209,6 +219,27 @@ class SkillQueryService(SkillQueryServiceProtocol):
         )
 
     # ── Detail ──────────────────────────────────────────────────────
+
+    def list_uploaded_skills(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> list[dict[str, Any]]:
+        """List the Bot's owned assets using its immutable resource identity."""
+        if not actor_id:
+            raise LocalSkillNotFoundError()
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            # Historical self-owned catalogs may outlive their Bot. A missing
+            # Bot never grants access to another user's detached assets.
+            if actor_id != owner_id:
+                raise LocalSkillNotFoundError() from None
+            resource_owner = actor_id
+        else:
+            self._authorize_view_access(bot_id=bot_id, bot=bot, actor_id=actor_id)
+            resource_owner = stable_resource_owner_id(bot)
+        return self._skill_repo.list_skills(resource_owner, bolt_id=bot_id)
 
     def get_local_skill(self, *, skill_id: str, actor_id: str) -> dict[str, Any]:
         """The legacy self-addressed Local detail: the Skill selects its Bot."""
@@ -221,7 +252,9 @@ class SkillQueryService(SkillQueryServiceProtocol):
             raise LocalSkillNotFoundError()
         owner_id = str(skill["user_id"])
         bot_id = str(skill["bolt_id"])
-        self._require_view_access(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        _, _, owner_id = self._resolve_local(
+            skill=skill, bot_id=bot_id, owner_id=owner_id, user_id=actor_id
+        )
         record = self._skill_repo.get_bot_local_skill(
             skill_id=skill_id, bot_id=bot_id, user_id=owner_id
         )
@@ -261,6 +294,44 @@ class SkillQueryService(SkillQueryServiceProtocol):
             user_id=user_id,
         )
         return skill
+
+    # ── Shared skills by name or path (the apply engine's SharedSkillPort) ──
+
+    def find_center_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str) -> str:
+        """The one online Center asset named ``name`` this bot and actor may use, by id."""
+        visible = [
+            str(skill["id"])
+            for skill in self._skill_repo.list_center_by_name(name)
+            if self._usable(skill_id=str(skill["id"]), bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        ]
+        if not visible:
+            raise SharedSkillNotFound(
+                f"no Skill Center skill named {name!r} is available to this bot (a market skill must be added first)"
+            )
+        if len(visible) > 1:
+            raise SharedSkillAmbiguous(f"{len(visible)} Skill Center skills named {name!r} are available to this bot")
+        return visible[0]
+
+    def find_repo_skill(self, *, bot_id: str, owner_id: str, actor_id: str, name: str, path: str) -> str:
+        """The shared-repository asset at ``git://<path>``, by id, when this bot and actor may use it."""
+        skill = self._skill_repo.get_by_git_path(f"git://{path}")
+        if skill is None or not self._usable(
+            skill_id=str(skill["id"]), bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        ):
+            raise SharedSkillNotFound(f"no shared-repository skill at {path!r} is available to this bot")
+        if skill.get("name") != name:
+            raise SharedSkillNotFound(
+                f"the shared-repository skill at {path!r} is named {skill.get('name')!r}, not {name!r}"
+            )
+        return str(skill["id"])
+
+    def _usable(self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str) -> bool:
+        """The same visibility and access rule ``resolve_skill`` enforces; not visible reads as not there."""
+        try:
+            self._resolve(skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, user_id=actor_id)
+        except LocalSkillNotFoundError:
+            return False
+        return True
 
     # ── Legacy reference resolution ─────────────────────────────────
 
@@ -382,17 +453,11 @@ class SkillQueryService(SkillQueryServiceProtocol):
         owner_id = str(skill.get("user_id") or "")
         if not bot_id or not owner_id:
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
+        bot = self._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+        if stable_resource_owner_id(bot) != owner_id:
             raise LocalSkillNotFoundError()
-        if str(bot.get("owner_id") or "") != owner_id:
-            raise LocalSkillNotFoundError()
-        if actor_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
 
         storage = self._local_storage(skill, bot, owner_id)
         for filename in ("SKILL.md", "README.md"):
@@ -473,44 +538,41 @@ class SkillQueryService(SkillQueryServiceProtocol):
         owner_id: str,
         user_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], str]:
-        skill_owner_id = str(skill.get("user_id") or "")
+        bot = self._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=user_id
+        )
+        resource_id = stable_resource_owner_id(bot)
         if (
-            not skill_owner_id
-            or skill_owner_id != owner_id
+            str(skill.get("user_id") or "") != resource_id
             or str(skill.get("bolt_id")) != bot_id
         ):
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if user_id != owner_id:
-            permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, user_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
-        return skill, bot, owner_id
+        return skill, bot, resource_id
 
     def _require_view_access(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
-        """Refuse an invisible Bot, and hand back the one row it took to say so.
+        """Resolve a locator, then authorize against the current Bot owner."""
+        try:
+            bot = self._bot_addresses.resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id
+            ).bot
+        except BotAddressNotFoundError:
+            raise LocalSkillNotFoundError() from None
+        self._authorize_view_access(bot_id=bot_id, bot=bot, actor_id=actor_id)
+        return bot
 
-        Returning the Bot rather than ``None`` is what keeps the listing to a
-        single Bot read: the engine that scopes its SkillSets and the env its
-        Installation rows are keyed on are both on it.
-        """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if actor_id == owner_id:
-            return bot
+    def _authorize_view_access(
+        self, *, bot_id: str, bot: Mapping[str, Any], actor_id: str
+    ) -> None:
+        current_owner = str(bot["owner_id"])
+        if actor_id == current_owner:
+            return
         permission = self._collaborators.check_collaborator_permission(
-            bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+            bot_id, current_owner, actor_id, PermissionLevel.MEMBER
         )
         if not permission.get("has_permission"):
             raise LocalSkillNotFoundError()
-        return bot
 
     @staticmethod
     def _is_exact_local_skill(skill: dict[str, Any] | None) -> bool:
@@ -664,20 +726,11 @@ class _RepoAssetAdapter:
             "git://"
         ):
             raise LocalSkillNotFoundError()
-        bot = self._service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            raise LocalSkillNotFoundError()
-        if str(bot.get("owner_id") or "") != owner_id:
-            raise LocalSkillNotFoundError()
-        if user_id != owner_id:
-            permission = self._service._collaborators.check_collaborator_permission(
-                bot_id, owner_id, user_id, PermissionLevel.MEMBER
-            )
-            if not permission.get("has_permission"):
-                raise LocalSkillNotFoundError()
-        # The HTTP adapter's grant checker is intentionally record-shaped.
-        # Enrich a copy only; shared Repo persistence remains bot-independent.
-        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
+        bot = self._service._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=user_id
+        )
+        resource_id = stable_resource_owner_id(bot)
+        return {**skill, "bolt_id": bot_id, "user_id": resource_id}, bot, resource_id
 
 
 class _CenterAssetAdapter:
@@ -698,4 +751,5 @@ class _CenterAssetAdapter:
             bot_id=bot_id, owner_id=owner_id, actor_id=user_id
         )
         self._service._require_center_access(skill=skill, actor_id=user_id)
-        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
+        resource_id = stable_resource_owner_id(bot)
+        return {**skill, "bolt_id": bot_id, "user_id": resource_id}, bot, resource_id

@@ -1,0 +1,232 @@
+"""The two ``ActivationPort`` implementations, one per delivery family (W8).
+
+``DirectActivationService`` writes the desired state and then projects it to
+the running container, and its ``project`` parameter selects whether that
+second half runs. Which value is right is a property of the *delivery family*,
+not of the capability being written:
+
+* **ARCA** takes everything as writes into a live container, so a write that
+  did not project has not arrived. ``project=True``.
+* **platform-managed teclaw** composes an artifact from the same rows and the
+  strategy closes the apply with one whole-artifact redeliver, so a
+  per-mutation projection would be one extra container round-trip per skill
+  and per MCP server — each redundant, and each made by an apply that needs no
+  container at all. ``project=False``.
+
+So neither value belongs to the ``mcp`` and ``skills`` materialisers, and
+``ActivationPort`` — what those materialisers hold — does not expose the
+parameter. These two classes are where the choice is made instead: peers, both
+declaring the port, both wrapping the same service, differing in one constant
+— named for where the write lands, the axis every delivery family splits on.
+
+**The service is never bound to the port raw.** It would satisfy the port by
+shape, and ARCA would then project because ``project`` *defaults* to ``True``
+— a family's delivery semantics resting on a parameter default, while the
+other family states its choice in source. Wrapping both makes the pair
+symmetric and the choice greppable: these are the only two places in the
+codebase that pass ``project`` at all.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
+from agentclaw.community.core.ports.activation_port import (
+    ActivationPort,
+)
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
+
+
+class _DelegatingActivation(ActivationPort):
+    """Forward reads unchanged and pin every write to ``project``.
+
+    ``list_installed_mcps`` answers a ``set[str]`` of server codes, e.g.
+    ``{"gh", "old"}``; ``set_supplied_capabilities`` answers the skill names
+    and server codes the bot's skill sets supply. The writes answer the service's own result dict, which
+    ``mcp`` and ``skills`` discard.
+
+    Subclasses set ``_PROJECT`` and add nothing else; writing the delegation
+    twice would let the two families drift apart in a method neither subclass
+    is about.
+    """
+
+    #: The ``project`` value every write is forwarded with. ``True`` projects
+    #: the row onto the live container, ``False`` writes the row only.
+    _PROJECT: bool
+
+    def __init__(self, inner: DirectActivationServiceProtocol) -> None:
+        self._inner = inner
+
+    # ── reads, unchanged: `project` is a write-side choice ───────────────
+
+    def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]:
+        return self._inner.list_installed_mcps(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+
+    def get_mcp_overrides(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, dict]:
+        return self._inner.get_mcp_overrides(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        return self._inner.set_supplied_capabilities(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+
+    # ── writes, each pinned to this family's projection choice ───────────
+
+    async def activate_mcp(
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        return await self._inner.activate_mcp(
+            server_code=server_code, bot_id=bot_id, owner_id=owner_id,
+            actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def set_mcp_override(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        return await self._inner.set_mcp_override(
+            server_code=server_code,
+            config=config,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            project=self._PROJECT,
+        )
+
+    async def deactivate_mcp(
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        return await self._inner.deactivate_mcp(
+            server_code=server_code, bot_id=bot_id, owner_id=owner_id,
+            actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        return await self._inner.activate_skill(
+            skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
+            actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        return await self._inner.deactivate_skill(
+            skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
+            actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def claim_apply_skill(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.claim_apply_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+    async def remove_apply_skill(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.remove_apply_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+    async def claim_apply_mcp(
+        self,
+        *,
+        server_code: str,
+        config: McpConfigWriteIntent[dict[str, Any]],
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.claim_apply_mcp(
+            server_code=server_code,
+            config=config,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+    async def remove_apply_mcp(
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.remove_apply_mcp(
+            server_code=server_code,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+
+class DeviceActivation(_DelegatingActivation):
+    """ARCA: write the rows, then project onto the live container.
+
+    Bound as ``MaterialiserPorts.activation_service`` for the ARCA family, and
+    for the device-backed teclaw shape (``TeclawDeviceDelivery``).
+    """
+
+    _PROJECT = True
+
+
+class PlatformActivation(_DelegatingActivation):
+    """Platform-managed teclaw: write the rows only; the artifact delivers.
+
+    Bound as ``MaterialiserPorts.activation_service`` in the store-backed
+    bundle. The projection the ``True`` variant would make per skill and per
+    MCP server is replaced by the strategy's single closing redeliver.
+    """
+
+    _PROJECT = False
+
+
+__all__ = ["DeviceActivation", "PlatformActivation"]

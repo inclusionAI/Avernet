@@ -1,3 +1,4 @@
+mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -26,7 +27,7 @@ use bcs_service_api::{
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService, WorkbenchUseCaseError,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand, WorkbenchUseCaseError,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionRequestedOutcome, InteractionService,
@@ -193,6 +194,7 @@ struct RecordingMessageFlow {
     web_sends: Mutex<Vec<WebSendCommand>>,
     aborts: Mutex<Vec<ChatAbortCommand>>,
     abort_outcome: Mutex<Option<ChatAbortOutcome>>,
+    output_admission: Mutex<Option<Arc<dyn bcs_service_api::OutputAdmissionPort>>>,
 }
 
 #[derive(Default)]
@@ -203,6 +205,9 @@ struct RecordingWorkbenchSessions {
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
     connect_scope: Mutex<Option<MessageViewScope>>,
     connect_participants: Mutex<Option<Vec<WorkbenchParticipantView>>>,
+    speaking_mode_commands: Mutex<Vec<WorkbenchSpeakingModeCommand>>,
+    speaking_mode_projection:
+        Mutex<Option<bcs_domain::speaking_lease::SessionSpeakingMode>>,
 }
 
 #[derive(Default)]
@@ -246,6 +251,7 @@ impl GroupSessionConnectionService for RecordingGroupSessionConnections {
                 message_view_scope: MessageViewScope::Full,
                 joined_at: None,
             }],
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
     }
 }
@@ -280,7 +286,19 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
         Ok(WorkbenchConnectOutcome {
             group_id: command.group_id,
             participants,
+            speaking_mode: bcs_domain::speaking_lease::SessionSpeakingMode::Plain,
         })
+    }
+
+    async fn resolve_speaking_mode_projection(
+        &self,
+        command: WorkbenchSpeakingModeCommand,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        self.speaking_mode_commands.lock().await.push(command);
+        self.speaking_mode_projection
+            .lock()
+            .await
+            .unwrap_or(bcs_domain::speaking_lease::SessionSpeakingMode::Plain)
     }
 
     async fn authorize_chat_send(
@@ -303,8 +321,20 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
 #[async_trait]
 impl MessageFlowService for RecordingMessageFlow {
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
+        let operation_id = format!("op-{}", self.web_sends.lock().await.len() + 1);
+        if let Some(port) = self.output_admission.lock().await.clone() {
+            port.admit_output_operation(
+                bcs_service_api::OutputOperationAdmission {
+                    operation_id: operation_id.clone(),
+                    group_id: cmd.group_id.clone(),
+                    session_id: cmd.session_id.clone(),
+                },
+            )
+            .await?;
+        }
         self.web_sends.lock().await.push(cmd);
         Ok(WebSendOutcome {
+            operation_id,
             queue_admission: None,
             primary_run_id: "run-web-1".to_string(),
             active_run_ids: vec!["run-web-1".to_string()],
@@ -388,6 +418,7 @@ struct TestState {
     message_flow: Arc<RecordingMessageFlow>,
     interactions: Arc<RecordingInteractions>,
     dispatch_state: Arc<WebDispatchState>,
+    delivery_admission: Arc<support::RecordingAdmission>,
 }
 
 #[derive(Default)]
@@ -469,7 +500,21 @@ fn new_state_with_collaboration_runtime(
     let group_session_connections = Arc::new(RecordingGroupSessionConnections::default());
     let message_flow = Arc::new(RecordingMessageFlow::default());
     let interactions = Arc::new(RecordingInteractions::default());
-    let frontend_connections = Arc::new(WorkbenchConnectionRegistry::new());
+    let output_permits = Arc::new(bcs_ws::shared::OutputPermitStore::new());
+    let delivery_admission = Arc::new(support::RecordingAdmission::new());
+    let frontend_connections = Arc::new(
+        WorkbenchConnectionRegistry::new().with_output_permits(output_permits.clone()),
+    );
+    frontend_connections.set_delivery_admission(delivery_admission.clone());
+    *message_flow
+        .output_admission
+        .try_lock()
+        .expect("fresh flow lock") = Some(Arc::new(
+        bcs_ws::web::WorkbenchOutputAdmission::new(
+            frontend_connections.clone(),
+            delivery_admission.clone(),
+        ),
+    ));
     let dispatch_state = Arc::new(WebDispatchState {
         message_flow: message_flow.clone(),
         collaboration_runtime,
@@ -477,7 +522,12 @@ fn new_state_with_collaboration_runtime(
         interactions: interactions.clone(),
         group_session_connections: Some(group_session_connections.clone()),
         frontend_connections,
-        run_channels: Arc::new(RunChannelManager::new()),
+        run_channels: Arc::new(
+            RunChannelManager::new().with_output_permits(output_permits),
+        ),
+        delivery_admission: delivery_admission.clone(),
+        speaking_leases: None,
+        lease_idle_timeout_ms: 60_000,
     });
 
     TestState {
@@ -486,6 +536,7 @@ fn new_state_with_collaboration_runtime(
         message_flow,
         interactions,
         dispatch_state,
+        delivery_admission,
     }
 }
 
@@ -502,6 +553,7 @@ async fn unexpected_frontend_frames_are_ignored_with_correlated_warnings() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection = WebClientConnectionState::default();
+    let _protected_rx = connection.open_protected_queue();
     let frames = [
         (BcsFrame::Response(ResponseFrame::ok("unexpected-response", serde_json::json!({}))), "Unexpected ResponseFrame from frontend client"),
         (BcsFrame::Event(bcs_protocol::EventFrame::new("unexpected.event", None, None)), "Unexpected EventFrame from frontend client"),
@@ -509,7 +561,7 @@ async fn unexpected_frontend_frames_are_ignored_with_correlated_warnings() {
     for (frame, message) in frames {
         let (result, logs) = bcs_test_support::capture_request_logs("unexpected-web-frame", async {
             dispatch_client_frame(&state.dispatch_state, &serde_json::to_string(&frame).unwrap(), &tx,
-                &mut connection, &WorkbenchConnectionAuth::UserBound { actor_id: None }).await
+                &mut connection, &WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None }).await
         }).await;
         assert!(matches!(result.unwrap(), WebDispatchOutcome::Dispatched));
         assert!(rx.try_recv().is_err(), "unexpected client frames must not produce responses");
@@ -525,8 +577,10 @@ async fn invalid_session_authorization_context_closes_and_logs_request_id() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection = WebClientConnectionState::default();
+    let _protected_rx = connection.open_protected_queue();
     let auth = WorkbenchConnectionAuth::SessionBound {
         tenant: None, actor_id: "bot-not-a-human".into(), group_id: "group-web-1".into(), session_id: "session-bound-1".into(),
+        caller_ingress: None,
     };
     let frame = BcsFrame::Request(RequestFrame::new("invalid-binding", "connect", Some(serde_json::json!({
         "group_id":"group-web-1", "session_id":"session-bound-1"
@@ -549,6 +603,7 @@ async fn interaction_service_failures_preserve_connect_ack_and_retryable_resolut
     *state.interactions.pending_error.lock().await = Some(bcs_service_api::ServiceError::InternalError("pending store unavailable".into()));
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection = WebClientConnectionState::default();
+    let _protected_rx = connection.open_protected_queue();
     let (_, logs) = bcs_test_support::capture_request_logs("interaction-failure-request", async {
         connect_session_bound(&state, &tx, &mut rx, &mut connection).await;
         assert!(rx.try_recv().is_err(), "failed replay must not fabricate an interaction event");
@@ -596,7 +651,7 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
             let finished_tx = finished_tx.clone();
             async move {
                 ws.on_upgrade(move |socket| bcs_observability::with_request_id(request_id, async move {
-                    bcs_ws::web::handle_client_connection(socket, state, WorkbenchConnectionAuth::UserBound { actor_id: None },
+                    bcs_ws::web::handle_client_connection(socket, state, WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None },
                         Arc::new(bcs_test_support::NoopWsLifecycleInstrumentationHook)).await;
                     finished_tx.lock().await.take().unwrap().send(()).unwrap();
                 }).with_subscriber(dispatch))
@@ -611,6 +666,20 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
         let response = timeout(Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
         let response: serde_json::Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
         assert_eq!(response["ok"], false);
+        assert_eq!(response["error"]["code"], "dispatch_error");
+        // 不可解析帧没有请求 id 可回显：保留 legacy 占位 "error"。
+        assert_eq!(response["id"], "error");
+        // 可解析的 req 帧派发失败时：错误响应必须回显请求 id —— 客户端按 id
+        // 等待应答，id-less 错误在 UI 侧表现为"毫无响应"（客户端永远等不到）。
+        socket
+            .send(Message::Text(
+                r#"{"type":"req","id":"boom-123","method":"connect","params":"malformed"}"#.into(),
+            ))
+            .await.unwrap();
+        let response = timeout(Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
+        let response: serde_json::Value = serde_json::from_str(response.to_text().unwrap()).unwrap();
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["id"], "boom-123");
         assert_eq!(response["error"]["code"], "dispatch_error");
         // Drop TCP without a close frame so the actual read loop observes a protocol error.
         drop(socket);
@@ -639,6 +708,7 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut fanout_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-1",
         "connect",
@@ -652,6 +722,7 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -673,6 +744,10 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
     );
     assert_eq!(connection_state.subscribed_sessions.len(), 1);
     assert!(connection_state.subscribed_sessions[0].2.is_none());
+    // FANOUT on a bound connection is admitted per EVENT (an
+    // independent resource event here): the frame reaches the
+    // queue already authorized — no per-frame writer decision
+    // exists any more (bot-authority spec §8.2).
     assert_eq!(
         state
             .dispatch_state
@@ -683,12 +758,20 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
                 MessageVisibilityDomain::ManagerWorker,
                 Some(&MessageAudience::FullOnly),
                 None,
+                None,
+                None,
+                false,
             )
             .await,
         1,
-        "omitting view_actor_id must keep the legacy unprojected connection"
+        "the admitted event is enqueued for the bound connection"
     );
-    assert_eq!(rx.recv().await.as_deref(), Some("legacy-full-only"));
+    match timeout(Duration::from_secs(1), fanout_rx.recv()).await {
+        Ok(Some(bcs_ws::shared::OutboundFrame::Data { payload })) => {
+            assert_eq!(payload, "legacy-full-only");
+        }
+        other => panic!("expected a fanout data frame, got {other:?}"),
+    }
     let connects = state.workbench_sessions.connects.lock().await;
     assert_eq!(connects.len(), 1);
     assert_eq!(connects[0].group_id, "group-web-1");
@@ -712,6 +795,7 @@ async fn web_connect_with_explicit_human_view_binds_participant_projection() {
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut fanout_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-participant",
         "connect",
@@ -728,6 +812,7 @@ async fn web_connect_with_explicit_human_view_binds_participant_projection() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -746,6 +831,13 @@ async fn web_connect_with_explicit_human_view_binds_participant_projection() {
             allow_legacy_unclassified_chat: true,
         })
     );
+    // The scope decision now happens at the ENQUEUE boundary:
+    // with a Participant-scoped admission the FullOnly event is
+    // filtered BEFORE enqueue — nothing reaches the queue, and
+    // per-frame writer re-authorization no longer exists (§8.2).
+    state
+        .delivery_admission
+        .set_scope(MessageViewScope::Participant);
     assert_eq!(
         state
             .dispatch_state
@@ -756,11 +848,20 @@ async fn web_connect_with_explicit_human_view_binds_participant_projection() {
                 MessageVisibilityDomain::ManagerWorker,
                 Some(&MessageAudience::FullOnly),
                 None,
+                None,
+                None,
+                false,
             )
             .await,
-        0
+        0,
+        "a FullOnly event outside the admitted scope is filtered at the enqueue boundary"
     );
-    assert!(rx.try_recv().is_err());
+    assert!(
+        timeout(Duration::from_millis(100), fanout_rx.recv())
+            .await
+            .is_err(),
+        "no frame is enqueued for a filtered event"
+    );
 }
 
 #[tokio::test]
@@ -769,6 +870,7 @@ async fn web_connect_with_session_id_subscribes_session_registry_key() {
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _fanout_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-1",
         "connect",
@@ -785,6 +887,7 @@ async fn web_connect_with_session_id_subscribes_session_registry_key() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -834,6 +937,7 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut protected_rx = connection_state.open_protected_queue();
     let send = BcsFrame::Request(RequestFrame::new(
         "send-1",
         "chat.send",
@@ -853,6 +957,7 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -863,21 +968,26 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
     assert_eq!(sent.payload.unwrap()["runId"], "run-web-1");
     assert!(rx.try_recv().is_err());
     assert_eq!(connection_state.active_run_ids, vec!["run-web-1"]);
+    // Send-before-connect with NO subscribed view instance: the run
+    // channel stays unregistered (spec §8.2 — 没有候选人即没有许可,
+    // 无许可的输出不得旁路到无绑定队列). The business send itself
+    // succeeded and tracks the run; only the output sink is refused.
     assert!(
-        state
+        !state
             .dispatch_state
             .run_channels
             .is_registered("run-web-1")
             .await,
-        "chat.send should register the run channel for bot events that do not echo bcs_session_id"
+        "an instance-less sender binds no protected run sink"
     );
-    assert_eq!(
+    assert!(
         state
             .dispatch_state
             .run_channels
             .get_session_runs("group-web-1:abcdef12")
-            .await,
-        vec!["run-web-1".to_string()]
+            .await
+            .is_empty(),
+        "no session mapping is created for an unbound run"
     );
     assert!(
         !state
@@ -888,12 +998,19 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
                 "hidden".to_string(),
                 MessageVisibilityDomain::StateMachine,
                 Some(&MessageAudience::FullOnly),
+                false,
             )
             .await,
-        "send-before-connect must bind the authoritative participant scope"
+        "unbound run output is refused at the boundary"
     );
-    assert!(rx.try_recv().is_err());
+    assert!(
+        timeout(Duration::from_millis(100), protected_rx.recv())
+            .await
+            .is_err(),
+        "nothing reaches the protected queue"
+    );
 
+    let _ = &mut protected_rx;
     let calls = state.message_flow.web_sends.lock().await;
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].group_id, "group-web-1");
@@ -925,14 +1042,20 @@ async fn session_chat_send_does_not_inherit_group_full_scope() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_100001".to_string()),
+        caller_ingress: None,
     };
 
+    // Connect with the SESSION key: a session-anchored operation is
+    // admitted against the Session subscribers only — a broader
+    // Group-bound subscription can never inherit the send's output
+    // (F4 strict target, now structural at the admission boundary).
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-group",
         "connect",
-        Some(serde_json::json!({"group_id": "group-web-1"})),
+        Some(serde_json::json!({"group_id": "group-web-1", "session_id": "group-web-1:abcdef12"})),
     ));
     dispatch_client_frame(
         &state.dispatch_state,
@@ -968,7 +1091,7 @@ async fn session_chat_send_does_not_inherit_group_full_scope() {
     assert!(recv_response(&mut rx).await.ok);
 
     assert!(
-        !state
+        state
             .dispatch_state
             .run_channels
             .send_visible_event(
@@ -976,10 +1099,20 @@ async fn session_chat_send_does_not_inherit_group_full_scope() {
                 "hidden".to_string(),
                 MessageVisibilityDomain::StateMachine,
                 Some(&MessageAudience::FullOnly),
+                false,
             )
             .await,
-        "Session run must use the Session participant scope, not the Group subscription"
+        "the session run's operation permit covers its enqueue"
     );
+    match timeout(Duration::from_secs(1), protected_rx.recv())
+        .await
+        .expect("permitted frame enqueued")
+    {
+        Some(bcs_ws::shared::OutboundFrame::Data { payload }) => {
+            assert_eq!(payload, "hidden");
+        }
+        other => panic!("expected a data frame, got {other:?}"),
+    }
     assert!(rx.try_recv().is_err());
 }
 
@@ -991,6 +1124,7 @@ async fn web_chat_send_is_consumed_by_the_single_pending_human_input_and_emits_e
     let state = new_state_with_collaboration_runtime(collaboration_runtime.clone());
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let send = BcsFrame::Request(RequestFrame::new(
         "send-human-1",
         "chat.send",
@@ -1009,6 +1143,7 @@ async fn web_chat_send_is_consumed_by_the_single_pending_human_input_and_emits_e
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1059,6 +1194,7 @@ async fn web_chat_send_is_rejected_when_state_machine_has_no_pending_human_input
     let state = new_state_with_collaboration_runtime(collaboration_runtime);
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let send = BcsFrame::Request(RequestFrame::new(
         "send-human-1",
         "chat.send",
@@ -1077,6 +1213,7 @@ async fn web_chat_send_is_rejected_when_state_machine_has_no_pending_human_input
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1124,6 +1261,7 @@ async fn web_chat_send_uses_session_subscription_key_for_sender_conn_id() {
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _fanout_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-1",
         "connect",
@@ -1140,6 +1278,7 @@ async fn web_chat_send_uses_session_subscription_key_for_sender_conn_id() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1168,6 +1307,7 @@ async fn web_chat_send_uses_session_subscription_key_for_sender_conn_id() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1214,6 +1354,13 @@ async fn web_chat_send_uses_view_bound_to_the_target_session() {
         })),
     ));
 
+    // The admission for THIS send resolves to a Participant scope:
+    // a FullOnly frame outside that scope is refused at the enqueue
+    // boundary — the permit freezes the view and the writer filters
+    // nothing (the old final-writer negative is now upstream).
+    state
+        .delivery_admission
+        .set_scope(MessageViewScope::Participant);
     dispatch_client_frame(
         &state.dispatch_state,
         &serde_json::to_string(&send).unwrap(),
@@ -1221,6 +1368,7 @@ async fn web_chat_send_uses_view_bound_to_the_target_session() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1236,9 +1384,10 @@ async fn web_chat_send_uses_view_bound_to_the_target_session() {
                 "full-only".to_string(),
                 MessageVisibilityDomain::ManagerWorker,
                 Some(&MessageAudience::FullOnly),
+                false,
             )
             .await,
-        "run fallback must use the participant view bound to the target Session"
+        "a frame outside the frozen participant scope has no permit at enqueue"
     );
 }
 
@@ -1247,6 +1396,7 @@ async fn user_bound_chat_abort_preserves_existing_response() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-abort",
         "connect",
@@ -1262,6 +1412,7 @@ async fn user_bound_chat_abort_preserves_existing_response() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1284,6 +1435,7 @@ async fn user_bound_chat_abort_preserves_existing_response() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1322,8 +1474,10 @@ async fn user_bound_chat_abort_reports_legacy_plugin_restart_resolution() {
     });
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_100001".to_string()),
+        caller_ingress: None,
     };
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-abort-legacy",
@@ -1382,8 +1536,10 @@ async fn user_bound_legacy_run_id_resolves_to_bot_session_scope() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_100001".to_string()),
+        caller_ingress: None,
     };
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-legacy-abort",
@@ -1436,6 +1592,7 @@ async fn user_bound_chat_abort_requires_connect() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let abort = BcsFrame::Request(RequestFrame::new(
         "abort-before-connect",
         "chat.abort",
@@ -1453,6 +1610,7 @@ async fn user_bound_chat_abort_requires_connect() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1478,7 +1636,9 @@ async fn anonymous_user_bound_chat_abort_is_unauthorized_after_connect() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
-    let auth = WorkbenchConnectionAuth::UserBound { actor_id: None };
+    let _protected_rx = connection_state.open_protected_queue();
+    let auth = WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None };
+    let auth = WorkbenchConnectionAuth::UserBound { actor_id: None, caller_ingress: None };
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-anonymous",
         "connect",
@@ -1537,8 +1697,10 @@ async fn user_bound_chat_abort_requires_target_session_subscription() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_100001".to_string()),
+        caller_ingress: None,
     };
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-one-session",
@@ -1598,6 +1760,7 @@ async fn user_bound_unknown_method_preserves_protocol_error_response() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let request = BcsFrame::Request(RequestFrame::new("unknown-1", "future.method", None));
 
     dispatch_client_frame(
@@ -1607,6 +1770,7 @@ async fn user_bound_unknown_method_preserves_protocol_error_response() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
@@ -1626,6 +1790,7 @@ fn session_bound_auth() -> WorkbenchConnectionAuth {
         actor_id: "human_100001".to_string(),
         group_id: "group-web-1".to_string(),
         session_id: "session-bound-1".to_string(),
+        caller_ingress: None,
     }
 }
 
@@ -1657,6 +1822,44 @@ async fn connect_session_bound(
 }
 
 #[tokio::test]
+async fn session_bound_connect_publishes_the_workbench_speaking_mode_projection() {
+    let state = new_state();
+    *state.workbench_sessions.speaking_mode_projection.lock().await = Some(
+        bcs_domain::speaking_lease::SessionSpeakingMode::LeaseRequired,
+    );
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-speaking",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-bound-1"
+        })),
+    ));
+    let outcome = dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection,
+        &session_bound_auth(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, WebDispatchOutcome::ClientConnect { subscribed: true }));
+    let response = recv_response(&mut rx).await;
+    assert!(response.ok);
+    let payload = response.payload.expect("connect payload");
+    // The session-bound handshake must publish the SAME advisory projection
+    // the UserBound connect resolves — never a hard-coded Plain.
+    assert_eq!(payload["speaking_mode"], "lease_required");
+    let commands = state.workbench_sessions.speaking_mode_commands.lock().await;
+    assert_eq!(commands.len(), 1, "one projection per session-bound connect");
+    assert_eq!(commands[0].group_id, "group-web-1");
+    assert_eq!(commands[0].session_id.as_deref(), Some("session-bound-1"));
+}
+
+#[tokio::test]
 async fn session_bound_connect_replays_pending_interactions_after_ack() {
     let state = new_state();
     state
@@ -1678,10 +1881,20 @@ async fn session_bound_connect_replays_pending_interactions_after_ack() {
         });
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut replay_rx = connection_state.open_protected_queue();
 
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
-    let replay: serde_json::Value =
-        serde_json::from_str(&rx.recv().await.expect("pending interaction replay")).unwrap();
+    // Replays are independent finite events: each is authorized
+    // once against CURRENT facts at replay time, and flows as an
+    // already-authorized Data frame (§8.2/§7.3).
+    let frame = timeout(Duration::from_secs(1), replay_rx.recv())
+        .await
+        .expect("pending interaction replay was not queued")
+        .expect("replay frame");
+    let bcs_ws::shared::OutboundFrame::Data { payload } = frame else {
+        panic!("expected a replay data frame")
+    };
+    let replay: serde_json::Value = serde_json::from_str(&payload).unwrap();
     assert_eq!(replay["event"], "interaction");
     assert_eq!(replay["bcsRunId"], "bcs-run-1");
     assert_eq!(replay["bcsSessionId"], "session-bound-1");
@@ -1710,6 +1923,7 @@ async fn user_bound_connect_replays_pending_interactions_after_ack() {
         });
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let mut replay_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-user-bound",
         "connect",
@@ -1726,19 +1940,22 @@ async fn user_bound_connect_replays_pending_interactions_after_ack() {
         &mut connection_state,
         &WorkbenchConnectionAuth::UserBound {
             actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
         },
     )
     .await
     .unwrap();
 
     assert!(recv_response(&mut rx).await.ok);
-    let replay: serde_json::Value = serde_json::from_str(
-        &timeout(Duration::from_secs(1), rx.recv())
-            .await
-            .expect("pending interaction replay was not sent after connect")
-            .expect("interaction channel closed"),
-    )
-    .unwrap();
+    let frame = timeout(Duration::from_secs(1), replay_rx.recv())
+        .await
+        .expect("pending interaction replay was not queued")
+        .expect("replay frame");
+    let bcs_ws::shared::OutboundFrame::Data { payload } = frame else {
+        panic!("expected a replay data frame")
+    };
+    let replay: serde_json::Value =
+        serde_json::from_str(&payload).unwrap();
     assert_eq!(replay["event"], "interaction");
     assert_eq!(replay["bcsRunId"], "bcs-run-1");
     assert_eq!(replay["bcsSessionId"], "group-web-1:abcdef12");
@@ -1750,6 +1967,7 @@ async fn interaction_resolve_returns_accepted_and_structured_failures() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
 
     let accepted = BcsFrame::Request(RequestFrame::new(
@@ -1894,6 +2112,7 @@ async fn interaction_resolve_preserves_empty_array_skip() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
 
     let request = BcsFrame::Request(RequestFrame::new(
@@ -1942,6 +2161,7 @@ async fn session_bound_requires_connect_before_business_frames() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let send = BcsFrame::Request(RequestFrame::new(
         "send-before-connect",
         "chat.send",
@@ -1986,6 +2206,7 @@ async fn session_bound_scope_mismatch_closes_without_dynamic_authorization() {
         let state = new_state();
         let (tx, mut rx) = mpsc::channel(8);
         let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
         let connect = BcsFrame::Request(RequestFrame::new(
             "connect-mismatch",
             "connect",
@@ -2017,6 +2238,7 @@ async fn session_bound_connect_projects_v1_participants_into_workbench_shape() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-projection",
         "connect",
@@ -2057,8 +2279,10 @@ async fn user_bound_connect_can_subscribe_multiple_sessions() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let auth = WorkbenchConnectionAuth::UserBound {
         actor_id: Some("human_100001".to_string()),
+        caller_ingress: None,
     };
 
     for (request_id, session_id) in [
@@ -2099,6 +2323,7 @@ async fn session_bound_connect_authorizes_once_with_immutable_binding() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
 
     assert_eq!(
         connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await,
@@ -2159,6 +2384,7 @@ async fn session_bound_chat_send_cannot_escape_bound_scope() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
     let send = BcsFrame::Request(RequestFrame::new(
         "send-mismatch",
@@ -2203,6 +2429,7 @@ async fn session_bound_chat_send_uses_bound_human_identity() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
     let send = BcsFrame::Request(RequestFrame::new(
         "send-bound",
@@ -2241,6 +2468,7 @@ async fn session_bound_chat_abort_passes_only_the_bound_session() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
     let abort = BcsFrame::Request(RequestFrame::new(
         "abort-bound",
@@ -2275,6 +2503,7 @@ async fn session_bound_chat_abort_scope_mismatch_closes_connection() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
     let abort = BcsFrame::Request(RequestFrame::new(
         "abort-scope-mismatch",
@@ -2318,6 +2547,7 @@ async fn session_bound_revoked_access_closes_with_stable_error() {
     *state.group_session_connections.reject_connect.lock().await = true;
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let _protected_rx = connection_state.open_protected_queue();
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-revoked",
         "connect",
@@ -2353,4 +2583,257 @@ async fn session_bound_revoked_access_closes_with_stable_error() {
             .len(),
         1
     );
+}
+
+fn system_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+fn upgrade_ingress(
+    staff_no: &str,
+    authenticated_ms: i64,
+) -> bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress {
+    // Identity carries no window: the historical expiry argument is dropped.
+    let principal = bcs_auth_api::AuthPrincipal {
+        user_id: Some(staff_no.to_string()),
+        ..Default::default()
+    };
+    bcs_ws::web::ws_upgrade_caller_ingress(&principal, authenticated_ms).expect("ingress")
+}
+
+#[tokio::test]
+async fn chat_send_loads_the_live_ws_upgrade_ingress_into_web_send() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    let now = system_now_ms();
+    let ingress = upgrade_ingress("100001", now);
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-ingress-1",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "sender_id": "11111111",
+            "sessionKey": "group-web-1:abcdef12",
+            "message": "hello"
+        })),
+    ));
+
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+        caller_ingress: Some(ingress),
+    };
+    // The connection snapshot Debug keeps principal material redacted: the
+    // display actor id is visible by design, the ingress actor/staff never.
+    let redacted = format!("{auth:?}");
+    assert!(
+        redacted.contains("actor_id: \"<redacted>\""),
+        "ingress business actor must stay redacted in Debug: {redacted}"
+    );
+    assert!(
+        redacted.contains("staff_no: \"<redacted>\""),
+        "ingress staff principal must stay redacted in Debug: {redacted}"
+    );
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+
+    let calls = state.message_flow.web_sends.lock().await;
+    assert_eq!(calls.len(), 1);
+    let sent = calls[0]
+        .caller_ingress
+        .as_ref()
+        .expect("live WS upgrade ingress must ride chat.send into message flow");
+    assert_eq!(sent.actor().actor_id, "human_100001");
+    assert_eq!(
+        sent.auth_source(),
+        bcs_service_api::application::caller_identity::HumanCallerAuthSource::WsAuth
+    );
+}
+
+#[tokio::test]
+async fn owned_bot_chat_send_does_not_carry_human_ingress() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    let now = system_now_ms();
+    let ingress = upgrade_ingress("100001", now);
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-ingress-owned-bot",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "bot-owned:100001",
+            "sender_id": "11111111",
+            "sessionKey": "group-web-1:abcdef12",
+            "message": "hello as owned bot"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+            caller_ingress: Some(ingress),
+        },
+    )
+    .await
+    .unwrap();
+
+    let calls = state.message_flow.web_sends.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].from_actor_id, "bot-owned:100001");
+    assert!(
+        calls[0].caller_ingress.is_none(),
+        "owned-Bot speech must not carry the authenticated Human ingress"
+    );
+}
+
+#[tokio::test]
+async fn upgraded_login_window_does_not_expire_the_connection_identity() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    // Authenticated two hours ago under a login that expired one hour ago:
+    // identity carries no window (§15.97 + the 2026-10-25 follow-up), so the
+    // ingress feeds frames regardless of the login's historical window.
+    let now = system_now_ms();
+    let ingress = upgrade_ingress("100001", now - 7_200_000);
+    assert_eq!(ingress.authenticated_at_ms(), now - 7_200_000);
+
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-ingress-2",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "sender_id": "11111111",
+            "sessionKey": "group-web-1:abcdef12",
+            "message": "hello"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+            caller_ingress: Some(ingress),
+        },
+    )
+    .await
+    .unwrap();
+    let calls = state.message_flow.web_sends.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0].caller_ingress.is_some(),
+        "the §15.97 connection-lifetime window keeps carrying the identity past the login expiry"
+    );
+}
+
+#[tokio::test]
+async fn the_adapter_sets_no_expiry_and_defense_belong_to_the_seam() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    // §15.97 deleted the per-frame window re-check AND identity now carries
+    // no window at all: the adapter hands on whatever material the upgrade
+    // built; the one-shot handoff claim is the structural bound.
+    let now = system_now_ms();
+    let ingress = bcs_service_api::application::caller_identity::AuthenticatedHumanCallerIngress::new(
+        bcs_service_api::application::principal::HumanActor {
+            actor_id: "human_100001".into(),
+            staff_no: "100001".into(),
+        },
+        bcs_service_api::application::caller_identity::HumanCallerAuthSource::WsAuth,
+        now - 7_200_000,
+        "local",
+    )
+    .expect("hand-crafted windowless ingress");
+
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-ingress-2-defense",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "sender_id": "11111111",
+            "sessionKey": "group-web-1:abcdef12",
+            "message": "hello"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+            caller_ingress: Some(ingress),
+        },
+    )
+    .await
+    .unwrap();
+    let calls = state.message_flow.web_sends.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0].caller_ingress.is_some(),
+        "the adapter passes material through; the seam (handoff publish) owns expired-material defense"
+    );
+}
+
+#[tokio::test]
+async fn display_only_identity_without_ingress_stays_caller_less() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-ingress-3",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "sender_id": "11111111",
+            "sessionKey": "group-web-1:abcdef12",
+            "message": "hello"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+            caller_ingress: None,
+        },
+    )
+    .await
+    .unwrap();
+    let calls = state.message_flow.web_sends.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].caller_ingress.is_none());
 }

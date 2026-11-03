@@ -91,6 +91,14 @@ def _declined_execution() -> TaskReportCommand:
     )
 
 
+def test_node_context_projects_current_graph_attempt() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.run_info.extend_props["harness_retries"] = 1
+
+    assert service.get_node_context("task-1", "task-1").attempt == 1
+
+
 def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     service = _graph_service()
     execution = _execution()
@@ -129,6 +137,7 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
     assert context.all_done_output == []
     next_context = service.get_node_context("task-1", result.target_node_id)
     assert [fact.node_id for fact in next_context.all_done_output] == ["task-1"]
+    assert next_context.used_executor_ids == ["bot-1", "bot-2"]
     actions = service.query_task_dashboard("task-1").tasks[0].run_info.action_log
     assert [event.action for event in actions] == [
         NodeAction.EXECUTE,
@@ -137,6 +146,109 @@ def test_report_creates_one_successor_and_projects_replay_receipt() -> None:
         NodeAction.TRANSITION,
     ]
 
+
+def _planned_single_bot_command(
+    *, event_id: str, assignee: str | None
+) -> TaskReportCommand:
+    planned = TaskNode(
+        node_id=None,
+        task_id="task-1",
+        status=None,
+        task_spec=TaskSpec(Context("next", title="next"), Goal("finish remainder", [])),
+        run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
+        node_run_graph=None,
+    )
+    return TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id=event_id,
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=planned,
+    )
+
+
+def test_report_rejects_bbs_plan_when_runtime_profile_disallows_it() -> None:
+    service = _graph_service()
+    graph = service.query_task_dashboard("task-1")
+    graph.extend_props["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    command = _planned_single_bot_command(event_id="unused", assignee="bot-2")
+    command.event.run_info.run_mode = "bbs"
+    command.event.run_info.assignee = None
+    command = replace(command, event_id="plan-bbs")
+
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    with pytest.raises(TaskStateError, match="planned run mode is not allowed: bbs"):
+        service.apply_relay_report(command)
+
+
+@pytest.mark.parametrize("assignee", ["NOT_DECIDED", "   "])
+def test_plan_rejects_placeholder_single_bot_assignee(assignee: str) -> None:
+    service = _graph_service()
+
+    assert service.apply_relay_report(_execution()).status == (
+        TaskReportStatus.APPLIED
+    )
+
+    with pytest.raises(
+        TaskStateError, match="single_bot plan requires a real bot assignee"
+    ):
+        service.apply_relay_report(
+            _planned_single_bot_command(
+                event_id=f"plan-invalid-{assignee.strip() or 'blank'}",
+                assignee=assignee,
+            )
+        )
+
+    graph = service.query_task_dashboard("task-1")
+    assert len(graph.tasks) == 1
+    assert graph.tasks[0].status == Status.RUNNING
+    assert not [
+        event for event in graph.tasks[0].run_info.action_log
+        if event.action == NodeAction.PLAN
+    ]
+
+
+def test_report_accepts_latest_skill_fact_after_infra_hung_state() -> None:
+    service = _graph_service()
+    node = service.query_task_dashboard("task-1").tasks[0]
+    node.status = Status.HUNG
+    node.run_info.failure_reason = "infra_reported_hung"
+    graph = service.query_task_dashboard("task-1")
+    graph.status = Status.HUNG
+    graph.extend_props["hung_reason"] = "infra_reported_hung"
+
+    assert service.apply_relay_report(_execution()).status == TaskReportStatus.APPLIED
+
+    complete = TaskReportCommand(
+        task_id="task-1",
+        node_id="task-1",
+        event_id="plan-after-hung",
+        relay_token="attempt-1",
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=None,
+        task_acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
+    )
+    result = service.apply_relay_report(complete)
+    assert result.task_completed
+    assert result.status == TaskReportStatus.APPLIED
+
+    graph = service.query_task_dashboard("task-1")
+    assert graph.status == Status.DONE
+    assert node.status == Status.SUCCESS
+    assert node.run_info.failure_reason is None
+    assert "hung_reason" not in graph.extend_props
+    transitions = [
+        event for event in graph.tasks[0].run_info.action_log
+        if event.action == NodeAction.TRANSITION
+    ]
+    assert transitions[-1].status_from == Status.HUNG
+    assert transitions[-1].status_to == Status.SUCCESS
 
 def test_report_rejects_conflicting_replay_and_invalid_plan_branch() -> None:
     service = _graph_service()

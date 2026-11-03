@@ -41,6 +41,11 @@ const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, ca
 export class BotWorkflowPermissionRepository implements RunViewPermissions {
   constructor(private db: IDatabase, private botDirectory?: Pick<BotDirectory, "listBots">) {}
 
+  /** Rebind persistence without dropping the host's permission-policy dependencies. */
+  withDatabase(db: IDatabase): BotWorkflowPermissionRepository {
+    return new BotWorkflowPermissionRepository(db, this.botDirectory);
+  }
+
   /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
    * Directory failures remove this additional access path; direct grants still work.
    * Do not cache relationships here: membership removal must take effect on the next check.
@@ -144,6 +149,35 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
       [id, workflowId],
     );
     return result.affectedRows > 0;
+  }
+
+  /**
+   * Exact-bot rows for one (owner, bot). Reads do NOT filter env (workflows
+   * are shared across environments), so the caller must de-duplicate by
+   * workflow_id and merge with widest-rule-wins before writing.
+   * Used by the permission-clone endpoint to read the source bot's grants.
+   */
+  async listRowsForBot(botOwnerId: string, botId: string): Promise<BotWorkflowPermissionRow[]> {
+    return this.db.query<BotWorkflowPermissionRow>(
+      `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions
+       WHERE bot_id = ? AND bot_owner_id = ?
+       ORDER BY gmt_modified DESC, id DESC`,
+      [botId, botOwnerId],
+    );
+  }
+
+  /**
+   * Owner-level rows (bot_id NULL / '' / '*') for one owner, across envs.
+   * These grant "all bots under this owner"; the clone endpoint materializes
+   * them into explicit target-bot rows only under scope="exact+owner-rows".
+   */
+  async listOwnerLevelRows(botOwnerId: string): Promise<BotWorkflowPermissionRow[]> {
+    return this.db.query<BotWorkflowPermissionRow>(
+      `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions
+       WHERE bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*')
+       ORDER BY gmt_modified DESC, id DESC`,
+      [botOwnerId],
+    );
   }
 
   async checkPermission(

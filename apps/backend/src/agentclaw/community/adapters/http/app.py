@@ -28,6 +28,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from agentclaw.community.adapters.http.space_knowledge.registration import mount_resource_routers, mount_space_routers
 
 # ─── Phase 1: pre-DI bootstrap ───────────────────────────────────────────
 # No injector is built here. ``Injected(X)`` is a per-request lookup, so
@@ -134,6 +135,7 @@ from agentclaw.community.adapters.http.bot_render_screen.router import router as
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_public import bot_public_auth_router, bot_public_router, bot_public_noauth_router  # noqa: E402
+from agentclaw.community.adapters.http.bot_public.risk_routes import legacy_router as risk_legacy_router  # noqa: E402
 from agentclaw.community.adapters.http.oss_to_nas.router import router as oss_to_nas_router  # noqa: E402
 from agentclaw.community.adapters.http.system import system_health_router, system_readiness_router, system_disk_usage_router  # noqa: E402
 from agentclaw.community.adapters.http.desktop.router import bot_router as desktop_bot_router, device_router as desktop_device_router  # noqa: E402
@@ -147,9 +149,6 @@ from agentclaw.community.adapters.http.aicoding.router import router as aicoding
 from agentclaw.community.adapters.http.aicoding.data_proxy_router import router as aicoding_data_proxy_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
-from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
-from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
-from agentclaw.community.adapters.http.tc_file_upload_integrations.resource_context_router import router as tc_resource_context_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -161,8 +160,6 @@ from agentclaw.community.adapters.http.caller_identity.router import router as c
 from agentclaw.community.adapters.http.acli_clis.router import router as acli_clis_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_management import router as spaces_management_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
@@ -340,7 +337,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
-    CallerMcpNotFoundError, CallerMcpSyncError,
+    CallerMcpNotFoundError, CallerMcpSyncError, CallerBcsSyncError,
 )
 from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
@@ -371,7 +368,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,
     CallerMcpNotFoundError: 404,
-    CallerMcpSyncError: 500,
+    CallerMcpSyncError: 500, CallerBcsSyncError: 500,
     CallerCliNotFoundError: 404,
     CallerCliSyncError: 500,
     CallerCallTypeInvalidError: 500,
@@ -932,6 +929,7 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
+app.include_router(risk_legacy_router)
 app.include_router(bot_public_noauth_router)
 app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
@@ -940,15 +938,9 @@ app.include_router(system_readiness_router)
 app.include_router(system_disk_usage_router)
 app.include_router(desktop_device_router)
 app.include_router(desktop_bot_router)
-
 # 2. OpenClawEnterprise 路由（统一挂载到 /api 下）
 # 注意：OpenClaw 的路由前缀和 AgentClaw 不冲突
-# - AgentClaw: /api/v1/devices
-# - OpenClaw: /api/resources, /api/sessions, /api/chat, /api/skills, /api/skillsets
-app.include_router(resources_router)
-app.include_router(session_resources_router)
-app.include_router(session_resources_internal_router)
-app.include_router(tc_resource_context_router)
+mount_resource_routers(app)
 app.include_router(skills.router)
 app.include_router(skillsets.router)
 app.include_router(approvals_router)
@@ -963,8 +955,7 @@ app.include_router(caller_identity_router)
 app.include_router(acli_clis_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
-app.include_router(spaces_internal_router)
-app.include_router(spaces_management_router)
+mount_space_routers(app)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
 app.include_router(service_bot_file_count_router)
@@ -988,7 +979,6 @@ app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
-
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated in
 # local boots via the test column's app-services module) are NOT mounted here:
 # they are the one route registration that needs a resolved binding, so

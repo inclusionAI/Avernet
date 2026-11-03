@@ -22,6 +22,9 @@ impl Pause {
 
 fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event, now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None,
         reply: None, transport_context_json: None, deadline_at_ms: None,

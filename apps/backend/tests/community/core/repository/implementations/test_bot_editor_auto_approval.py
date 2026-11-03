@@ -1,5 +1,7 @@
 """Policy and atomic auto-approval exercised against the real SQLite repository."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 import json
 
@@ -43,7 +45,7 @@ def setup():
     reset_for_tests()
     db = SqliteDB()
     asyncio.run(db.bootstrap())
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     with spaces.create_team_transaction(
         name="Team", creator_id="owner", creator_user_name=None, env="dev"
     ) as team:
@@ -74,7 +76,7 @@ def setup():
         session.add(bot)
         session.flush()
         bot_pk = bot.id
-    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db))
+    repo = WorkOrderRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
     request = dict(
         bot_pk=bot_pk,
         bot_id="bot-1",

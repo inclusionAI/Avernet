@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
 from injector import inject
 
 from agentclaw.community.core.bot_management.addressing import (
@@ -39,7 +41,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
@@ -130,7 +132,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             actor_id=actor_id, active=False, project=project,
         )
 
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self,
         *,
         skill_id: str,
@@ -140,7 +142,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest-only source conversion; ordinary activation stays guarded."""
+        """An apply's Direct claim; refused when a Set supplies the runtime name."""
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
@@ -149,7 +151,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.claim_manifest_skill(
+            mutation_result = self._repository.claim_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
@@ -177,13 +179,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
         return {**skill, **result}
 
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self,
         *,
         skill_id: str,
@@ -191,7 +193,6 @@ class DirectActivationService(DirectActivationServiceProtocol):
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
-        remove_inactive_memberships: bool,
         project: bool = True,
     ) -> dict[str, Any]:
         skill, bot = self._resolve_skill(
@@ -202,11 +203,10 @@ class DirectActivationService(DirectActivationServiceProtocol):
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.remove_manifest_skill(
+            mutation_result = self._repository.remove_apply_skill(
                 bot_id=bot_id,
                 owner_id=resource_owner_id,
                 skill_id=str(skill["id"]),
-                remove_inactive_memberships=remove_inactive_memberships,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             )
@@ -231,7 +231,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
@@ -389,25 +389,25 @@ class DirectActivationService(DirectActivationServiceProtocol):
         )
         return result
 
-    async def claim_manifest_mcp(
+    async def claim_apply_mcp(
         self,
         *,
         server_code: str,
-        config: dict | None,
+        config: McpConfigWriteIntent[dict[str, Any]],
         bot_id: str,
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest-only conversion to Direct plus complete Bot override."""
+        """An apply's Direct claim and preserve/clear/replace action; refused when a Set supplies it."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         mutation_result = None
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.claim_manifest_mcp(
+            mutation_result = self._repository.claim_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -428,6 +428,9 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=mutation,
                 scope_from_result=mcp_claim_scope,
+                # Explicit config still reaches the claim to consume aliases.
+                # Only an effective supply/config delta requires MCP delivery.
+                skip_projection_when_unchanged=True,
             )
             self._log_manifest_source_transitions(
                 apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
@@ -439,13 +442,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
         return result
 
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self,
         *,
         server_code: str,
@@ -455,13 +458,13 @@ class DirectActivationService(DirectActivationServiceProtocol):
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """Manifest full-replace removal without restoring inherited supply."""
+        """An apply's removal of one Direct MCP server; a Set-supplied one is refused."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         mutation_result = None
 
         def mutation():
             nonlocal mutation_result
-            mutation_result = self._repository.remove_manifest_mcp(
+            mutation_result = self._repository.remove_apply_mcp(
                 bot_id=bot_id,
                 owner_id=stable_resource_owner_id(bot),
                 server_code=server_code,
@@ -492,7 +495,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except Exception:
             if mutation_result is not None and mutation_result.changed:
-                raise ManifestDesiredStateCommittedError(
+                raise ApplyDesiredStateCommittedError(
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
@@ -545,42 +548,15 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot_id=bot_id, owner_id=stable_resource_owner_id(bot)
         )
 
-    def manifest_direct_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """The skill runtime names and MCP server codes the bot's Sets supply: what an apply may not claim."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        platform_codes = self._platform_default_mcp_policy.server_codes_for(bot)
-        return {
-            code
-            for code in server_codes
-            if self._repository.manifest_direct_mcp_exists(
-                bot_id=bot_id,
-                owner_id=stable_resource_owner_id(bot),
-                server_code=code,
-                platform_default_codes=platform_codes,
-                engine_type=bot_engine_type(bot),
-                default_engine_types=bot_default_engine_types(bot),
-            )
-        }
-
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]:
-        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        return self._repository.set_managed_mcp_codes(
+        return self._repository.set_supplied_capabilities(
             bot_id=bot_id,
             owner_id=stable_resource_owner_id(bot),
-            server_codes=server_codes,
+            platform_default_codes=self._platform_default_mcp_policy.server_codes_for(bot),
             engine_type=bot_engine_type(bot),
             default_engine_types=bot_default_engine_types(bot),
         )

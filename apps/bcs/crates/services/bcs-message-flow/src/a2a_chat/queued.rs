@@ -94,7 +94,8 @@ impl A2aChat {
             flow_kind: DeliveryFlowKind::DirectA2a,
             targets: vec![DeliveryAdmissionTarget { rejection, target_bot_id: cmd.target_bot_id.clone(), kind: DeliveryType::Send,
                 max_queued: policy.policy.bot(&cmd.target_bot_id).max_queued,
-                semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))? }],
+                semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))?, run_id: None,
+}],
             now_ms: now as i64, expire_at_ms: Some(policy.policy.queue_ttl_ms.map_or(expires, |ttl| expires.min((now as i64).saturating_add(ttl as i64)))), event: None,
         };
         // Independent replicas can lose the session-sequence CAS. Reuse the
@@ -244,8 +245,8 @@ pub(crate) fn transition_conflict(error: &bcs_service_api::ManagedDeliveryError)
 }
 
 pub(crate) fn transition(row: &PersistedMessageDelivery, event: Event, actor_id: Option<String>) -> DeliveryTransitionCommand {
-    DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
-        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None }
+    DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None, caller_cancel: None, caller_terminal: None }
 }
 
 

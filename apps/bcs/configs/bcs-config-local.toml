@@ -70,7 +70,8 @@ model = "gpt-4.1-mini"
 timeout_ms = 120000
 temperature = 0
 max_tokens = 4096
-structured_output = "json_schema"
+# Override in singlebox/.env.local when the local judge needs another transport.
+structured_output = "${BCS_LLM_STRUCTURED_OUTPUT:-json_schema}"
 
 [leader_election]
 enabled = false
@@ -80,6 +81,10 @@ type = "sqlite"
 
 [database.sqlite]
 path = "bcs.db"
+
+[collaboration_drafts]
+# Keep local previews available; revision availability persist in the database.
+enabled = true
 
 [secret]
 provider = "env"
@@ -208,6 +213,20 @@ mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
 
+# Trusted-App authority scope (bot-authority spec §3.1): an explicit allow
+# list of App scope rules the local dev BCS answers. The single entry names
+# the Backend service itself: the singlebox Backend PUTs manager snapshots
+# directly at this BCS under a self-signed X-Avernet-Principal (iss=backend,
+# aud=bcs, verified with the shared local signing key), so it is authorized
+# through the REAL authority policy path — byte-exact app name + tenant, no
+# wildcards, deny-everything default for every other App. Local/dev-only
+# identifiers; a production BCS provisions its own rules here.
+[bot_authority]
+[[bot_authority.trusted_apps]]
+app = "backend"
+tenant = "teamclaw"
+actions = ["managers:sync", "ownership:sync"]
+
 [bcsfuse]
 enabled = true
 url = "http://127.0.0.1:8765"
@@ -280,3 +299,8 @@ schema_version = 1
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
+
+[a2a_input]
+# Human approval wait is separate from the existing execution timeout.
+wait_timeout_ms = 600000
+total_timeout_ms = 1800000

@@ -1,13 +1,16 @@
 export type SessionRecoveryTermination = { status: 'remote_stopped' | 'remote_stop_failed' | 'stop_pending'; aisJobId: string | null };
 export type SessionRecoveryTask = {
   taskId: string;
+  final_summary?: string;
   shared: boolean;
   canOperate: boolean;
   canManageShare: boolean;
+  simulation?: { batchId: string; cutoffAtMs: number; cutoffNode: { messageId?: string; traceId?: string; observationId?: string }; inputDigest: string };
   level: 'debug' | 'approval' | 'automatic';
   status: 'running' | 'waiting_owner' | 'waiting_effect' | 'completed' | 'failed' | 'canceled';
+  completionReason?: 'user_continued' | 'target_unavailable' | 'owner_handoff' | 'mcp_permission_required';
   phase: 'assess' | 'observe' | 'plan' | 'apply' | 'verify';
-  request: { diagnosis: string; error_location?: string; target: { bot_id: string; entity_id: string; env: 'pre' | 'prod'; engine: 'OC' | 'CC' | 'TE' }; session_key: string; event_id: string; delivery_key: string; tc_fault_label: string | null };
+  request: { diagnosis: string; error_location?: string; target: { bot_id: string; entity_id: string; env: 'pre' | 'prod'; engine: 'OC' | 'CC' | 'TE' }; session_key: string; session_id?: string; event_id: string; delivery_key: string; tc_fault_label: string | null };
   plan: null | {
     digest: string; approvedAt: number | null;
     summary: string; basis: string; scope: string; verification: string;
@@ -20,4 +23,4 @@ export type SessionRecoveryTask = {
   executions?: Array<{ executionId: string; attempt: number; status: string; jobId: string | null; jobUrl: string | null; termination?: SessionRecoveryTermination }>;
   termination?: SessionRecoveryTermination;
 };
-export type SessionRecoverySummary = { task_id: string; status: SessionRecoveryTask['status']; phase: SessionRecoveryTask['phase']; effect: string };
+export type SessionRecoverySummary = { task_id: string; status: SessionRecoveryTask['status']; phase: SessionRecoveryTask['phase']; effect: string; completion_reason?: 'user_continued' | 'target_unavailable' | 'owner_handoff' | 'mcp_permission_required' };

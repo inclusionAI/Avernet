@@ -131,6 +131,13 @@ class _Bot:
             "entity_id": self.entity_id,
         }
 
+    def list_matches_by_legacy_locator(self, bot_id: str, locator: str) -> list[dict]:
+        bot = self.get_by_id_and_owner(bot_id, locator)
+        if bot is None:
+            return []
+        return [{"id": 1, "bot_id": bot_id, "owner_id": locator,
+                 "entity_id": locator, **bot}]
+
 
 class _Filesystem:
     def __init__(self, fail=False, cleanup_results=None):
@@ -1652,7 +1659,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
     assert factory.storage_calls == [
         {
             "entity_id": "project-entity",
-            "owner_id": "owner",
+            "owner_id": "project-entity",
             "bot_id": "bot",
             "engine_type": "openclaw",
             "entity_type": "staff",
@@ -1661,7 +1668,7 @@ async def test_upload_resolves_package_storage_with_bot_entity():
             "name": "upload-skill",
         }
     ]
-    assert repo.created[0]["user_id"] == "owner"
+    assert repo.created[0]["user_id"] == "project-entity"
 
 
 @pytest.mark.asyncio

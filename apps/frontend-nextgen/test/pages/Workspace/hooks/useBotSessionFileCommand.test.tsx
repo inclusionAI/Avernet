@@ -56,7 +56,7 @@ it('未打开文件面板时,/file 唤起经 onSearch 动态拉取服务端已�
   expect(items.map((item) => item.name)).toEqual(['已上传文件.txt']);
   expect(result.current.fileDrawerOpen).toBe(false);
   expect(botSessionFileService.loadReady).toHaveBeenCalledTimes(1);
-  expect(botSessionFileService.loadReady).toHaveBeenCalledWith('bot', 'session', 'human', 'owner');
+  expect(botSessionFileService.loadReady).toHaveBeenCalledWith('bot', 'session', 'human', 'owner', undefined);
   const insertFileChips = jest.fn();
   Object.assign(result.current.senderRef, { current: { insertFileChips, focus: jest.fn() } });
   act(() => items[0].onSelect?.(items[0]));

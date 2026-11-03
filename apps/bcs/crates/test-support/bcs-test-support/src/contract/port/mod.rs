@@ -1,6 +1,8 @@
 //! Port contract harnesses.
 
 pub mod coordination_intent;
+pub mod run_deadline;
+pub mod a2a_delivery;
 pub mod bot_terminal_observer;
 pub mod human_notify;
 pub mod metrics;
@@ -36,6 +38,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
     namespace: &str,
 ) {
     let canonical_run_id = format!("{namespace}-canonical");
+    let deadline_ms=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64+60_000;
     let initial_downstream_run_id = format!("{namespace}-downstream-initial");
     let bound_downstream_run_id = format!("{namespace}-downstream-bound");
     let scope = BotRunScope {
@@ -48,7 +51,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
         bot_id: scope.bot_id.clone(),
         group_id: scope.group_id.clone(),
         bcs_session_id: Some(scope.session_id.clone()),
-        deadline_ms: u64::MAX,
+        deadline_ms,
         terminal: false,
     })
     .await;
@@ -62,7 +65,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
             "x-sandbox-bypass".to_string(),
             format!("{namespace}-route"),
         )],
-        deadline_ms: u64::MAX,
+        deadline_ms,
     })
     .await
     .expect("register active run");
@@ -117,6 +120,23 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
         canonical_run_id
     );
 
+    // Direct A2A's accepted alias is a scope projection, not another active
+    // Group Run. Existing storage implementations retain the wire lookup.
+    let direct_id = format!("{namespace}-direct");
+    let projected_id = format!("{namespace}-direct-alias");
+    let direct = BotRunContext {
+        run_id: direct_id.clone(), bot_id: scope.bot_id.clone(), group_id: String::new(),
+        bcs_session_id: Some(scope.session_id.clone()), deadline_ms, terminal: false,
+    };
+    port.put_context(direct.clone()).await;
+    port.put_alias_context(BotRunContext { run_id: projected_id.clone(), ..direct }).await;
+    let projected = port.get_context(&projected_id).await.expect("alias scope projection");
+    assert_eq!(projected.bot_id, scope.bot_id);
+    assert!(projected.group_id.is_empty());
+    assert_eq!(projected.bcs_session_id.as_deref(), Some(scope.session_id.as_str()));
+    assert_eq!(port.get_context(&direct_id).await.unwrap().run_id, direct_id);
+    assert!(port.find_active_run(&projected_id).await.unwrap().is_none());
+
     let wrong_scope = BotRunScope {
         session_id: format!("{namespace}-other-session"),
         ..scope.clone()
@@ -144,6 +164,7 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
             .expect("query removed alias")
             .is_none()
     );
+    run_deadline::a2a_run_deadline_contract(port,namespace).await;
 }
 
 pub async fn event_recorder_port_contract_tests<T: EventRecorderPort + ?Sized>(

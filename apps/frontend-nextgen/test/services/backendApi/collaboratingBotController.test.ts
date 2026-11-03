@@ -18,3 +18,14 @@ test('collaborations 只发送登录 user_id 与分页，不注入工作身份',
     signal,
   });
 });
+
+test('collaborations forwards the online stage filter without injecting identity', async () => {
+  const params = { user_id: 'viewer', page: 1, page_size: 100, stage: 'online' as const };
+  await listCollaboratingBots(params);
+  expect(request).toHaveBeenCalledWith('/openapi/v1/bots/collaborations', {
+    method: 'GET',
+    params,
+    injectUserId: false,
+    signal: undefined,
+  });
+});

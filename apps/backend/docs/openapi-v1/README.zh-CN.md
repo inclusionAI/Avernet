@@ -1,5 +1,11 @@
 # `/openapi/v1` 公共 API + 租户隔离 —— 团队交接文档
 
+Bot 公开风险接口以完整的 `bot_id:entity_id` 路径身份寻址，复用声明式的显式 ADMIN
+权限检查和现有 Bot 应用授权。应用单独调用时指定被委托的 `user_id`，请求同时校验
+应用的有效 Bot 授权和该用户当前的协作权限。风险申请的操作者及审批申请人仍为被委托
+用户。鉴权与 handler 复用同一份请求级 Bot 上下文；发布前和审批回调时仍重新核对输入
+与用户权限。
+
 [English](README.md) | **简体中文**
 
 _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1` API 的工作。它是我们
@@ -990,7 +996,7 @@ try again later」，`data.operation` 为正在进行的操作。操作进行中
 | 202 | 仍在进行（`async`，或超过 30 秒等待） | 操作 |
 | 404 | 该 bot 没有这个操作 id | — |
 | 409 | 运行时有其他操作正在进行 | `{operation}` |
-| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎版本早于这些端点（`engine_outdated`） | 容器场景为 `{code, reason}` |
+| 409 | 删除默认 CLI；没有可取消的对应操作；操作已被取消（`cancelled`）；bot 不是 `ACTIVE` 或运行时没有运行中的容器（`not_running`）；引擎没有提供这些端点——版本较旧，或引擎未实现它们（`engine_outdated`；安装、卸载、取消或列表请求收到的任何 `404`，不重试） | 容器场景为 `{code, reason}` |
 | 422 | 传入别名（`di`） | `{market_name}` |
 | 422 | 非服务型 bot 传了 `stage` | — |
 | 422 | acli 拒绝请求（通常是名称不存在；`install_failed`、`name_mismatch`） | `{code, reason}` |
@@ -1237,6 +1243,10 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-10-22** —— **acli：引擎缺少端点时返回 `409 engine_outdated`。** 安装、卸载、
+  取消或列表请求收到的 `404`（不只是 FastAPI 原生的）现在都返回 `409`，`data.code: engine_outdated`，
+  不再是 `502`「无法连接引擎」；添加或删除操作立即结束，不再重试最长 40 分钟。轮询引擎已接受的
+  操作时收到的 `404` 仍会重试。
 - **2026-10-21** —— **acli CLI 操作化。** 添加、删除与新增的安装/卸载取消都是由 backend 任务执行的操作：
   可选 `async`，同步最多等 30 秒后返回 `202`，用 `GET …/cli-operations[/{operation_id}]` 查询；同一运行时同时只有
   一个添加/删除（进行中再提交返回 `409` 并带正在进行的操作）。`stage` 指定服务型 bot 的 draft/verify/online 运行时；
@@ -1583,3 +1593,6 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
   原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，
   以及运行时同步失败时的补偿。Skill Center 发布和租户级可复用 Skill 仍属于后续契约。
+
+
+专家模板的独立目录、字面搜索、分类和详情合同见[专家模板发现 API](expert-market.zh-CN.md)。

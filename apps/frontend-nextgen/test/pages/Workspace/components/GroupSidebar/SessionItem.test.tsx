@@ -5,7 +5,7 @@ import type { DomainResult } from '@/services/workspace/identityService';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 // 本套件重度使用 Radix 组件（会话操作 DropdownMenu/分享弹窗等），jsdom 下异步渲染开销大（20s+/例，
 // 串行实测约 19s/例），默认 30s 在并行/高负载下随机临界超时。统一放宽至 60s
@@ -195,5 +195,29 @@ describe('SessionItem 会话操作菜单（验收微调：对齐管理面板与 
     expect(screen.queryByRole('button', { name: '编辑标题' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '分享会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '删除会话' })).not.toBeInTheDocument();
+  });
+});
+
+describe('SessionItem 相对时间与选中锚点（2026-10-22 体验精修）', () => {
+  it('lastMessageAt 相对时间静默右缘可见，hover/聚焦/触屏/菜单开启让位；缺失（0）不渲染', () => {
+    const activeSession: SessionView = {
+      ...session,
+      lastMessageAt: Date.now() - 3 * 60 * 60 * 1000,
+    };
+    render(<SessionItem session={activeSession} selected={false} favorite={false} {...makeHandlers()} />);
+    // 3 小时前口径 + 11px hint 色 + 静默可见；让位触发集与星标/菜单显隐同构（方向相反）。
+    const time = screen.getByText('3 小时前');
+    expect(time).toHaveClass('text-[11px]', 'text-content-hint');
+    expect(time).toHaveClass(
+      'group-hover/row:opacity-0',
+      'group-focus-within/row:opacity-0',
+      'group-has-[[data-state=open]]/row:opacity-0',
+    );
+    // aria-hidden：时间是次级装饰信息，行可访问名保持纯标题。
+    expect(time).toHaveAttribute('aria-hidden', 'true');
+    cleanup();
+
+    render(<SessionItem session={session} selected={false} favorite={false} {...makeHandlers()} />);
+    expect(screen.queryByText('刚刚')).not.toBeInTheDocument();
   });
 });

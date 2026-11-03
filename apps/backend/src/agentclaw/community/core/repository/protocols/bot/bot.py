@@ -10,7 +10,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.render_screen.models import (
@@ -114,6 +114,17 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """List at most two live Bots by exact human owner in this tenant/env.
+
+        An entity identifier with the same spelling is not an owner match.
+        Callers must reject multiple matches rather than select arbitrarily.
+        """
+        ...
+
+    @abstractmethod
     def list_matches_by_legacy_locator(
         self, bot_id: str, locator: str
     ) -> List[Dict[str, Any]]:
@@ -156,6 +167,26 @@ class BotRepository(Protocol):
         soft-deleted rows — so "in this list" means "live for this owner right
         now".
         """
+        ...
+
+    @abstractmethod
+    def page_live_bots_by_pks(
+        self, bot_pks: list[int], *, exclude_owner_id: str, entity_pairs: list[tuple[str, str]] | None,
+        page: int, page_size: int, stage: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Page live relation targets by stable PK; optional app scope is exact entity pairs.
+
+        None means a human listing, an empty list means no application scope.
+        Historical collaborator owner snapshots are never used to locate Bots.
+        Current Owners are excluded from their own collaboration collection.
+        Optional stage filters only service Bots before count/pagination, using
+        the canonical published-runtime selection. Other kinds are unchanged.
+        """
+        ...
+
+    @abstractmethod
+    def get_live_bot_owners_by_entity(self, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Current personnel owners for exact stable Bot addresses, in one scoped read."""
         ...
 
     @abstractmethod
@@ -215,6 +246,7 @@ class BotRepository(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        stage: str | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
 
@@ -227,6 +259,8 @@ class BotRepository(Protocol):
         business Space (exact after canonical string persistence), ``engine``
         filters on the active engine (exact), and ``status`` filters on lifecycle
         status (exact). All are optional and additive.
+        ``stage`` selects service Bots with that runtime before pagination;
+        other Bot kinds retain the existing matching behavior.
         """
         ...
 
@@ -397,6 +431,17 @@ class BotRepository(Protocol):
     @abstractmethod
     def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         """Check if the owner has a live Bot of the requested type."""
+        ...
+
+    @abstractmethod
+    def is_soft_deleted(self, bot_id: str, entity_id: str) -> bool:
+        """Whether a soft-deleted Bot already exists for this bot and entity.
+
+        Every ordinary lookup filters ``is_delete == 0``, so a caller that
+        must tell "already deleted" apart from "never landed" cannot use
+        them: both answer ``None``. This is that distinction, scoped to the
+        current env like every other query on the table.
+        """
         ...
 
     @abstractmethod

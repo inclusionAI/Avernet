@@ -43,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
     HumanBotFriendshipServiceProtocol,
 )
@@ -86,24 +87,25 @@ async def list_models(
     device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
     ),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
     if f_user_id is not None:
-        if stage is not RuntimeStage.DRAFT:
-            raise EngineResourceNotFoundError(
-                "friend models are available only in draft"
-            )
-        await authorize_friend_chat(
+        if device_uuid is not None:
+            raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
+        resolved_stage = await authorize_friend_chat(
             request=request,
             bot_id=bot_id,
             caller_id=user_id,
             owner_id=owner_id,
             friend_user_id=f_user_id,
             friendships=friendships,
+            expert=expert, stage=stage.value,
         )
+        stage = RuntimeStage(resolved_stage)
     facts = await resolve_operable_bot(
         relay,
         bot_id,
@@ -147,6 +149,7 @@ async def get_model(
     device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
     ),
@@ -164,18 +167,18 @@ async def get_model(
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
     if f_user_id is not None:
-        if stage is not RuntimeStage.DRAFT:
-            raise EngineResourceNotFoundError(
-                "friend models are available only in draft"
-            )
-        await authorize_friend_chat(
+        if device_uuid is not None:
+            raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
+        resolved_stage = await authorize_friend_chat(
             request=request,
             bot_id=bot_id,
             caller_id=user_id,
             owner_id=owner_id,
             friend_user_id=f_user_id,
             friendships=friendships,
+            expert=expert, stage=stage.value,
         )
+        stage = RuntimeStage(resolved_stage)
     facts = await resolve_operable_bot(
         relay,
         bot_id,

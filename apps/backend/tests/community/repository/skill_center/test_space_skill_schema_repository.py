@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
+
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -80,7 +82,7 @@ def db() -> _Database:
 
 
 def _space_skills(db: _Database) -> SpaceSkillRepository:
-    return SpaceSkillRepository(db, SkillEditorRequestRepository(db))
+    return SpaceSkillRepository(db, SkillEditorRequestRepository(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def test_additive_schema_registers_space_and_skill_fact_scope(db):

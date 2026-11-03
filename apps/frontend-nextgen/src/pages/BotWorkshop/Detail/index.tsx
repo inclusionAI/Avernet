@@ -1,17 +1,10 @@
-import { CapabilityPanel } from '@/components/BotWorkshop/Editor/CapabilityPanel';
-import { ChannelConfigPanel } from '@/components/BotWorkshop/Editor/ChannelConfigPanel';
-import { DebugChatPanel } from '@/components/BotWorkshop/Editor/DebugChatPanel';
-import { IdentityConfigPanel } from '@/components/BotWorkshop/Editor/IdentityConfigPanel';
-import { LinkPanel } from '@/components/BotWorkshop/Editor/LinkPanel';
-import { MoreConfigPanel, type MoreConfigTab } from '@/components/BotWorkshop/Editor/MoreConfigPanel';
-import { RenderScreenPanel } from '@/components/BotWorkshop/Editor/RenderScreenPanel';
-import { ResourcePanel } from '@/components/BotWorkshop/Editor/ResourcePanel';
-import { RoutinePanel } from '@/components/BotWorkshop/Editor/RoutinePanel';
-import TaskEscort from '@/components/BotWorkshop/TaskEscort';
+import { ExpertCreationDetails } from '@/components/BotWorkshop/ExpertCreationDetails';
+import { useBotEditorAddress } from './useBotEditorAddress';
+import { useBotEditorPanels } from './useBotEditorPanels';
+import { DetailDebugChat } from './DetailDebugChat';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
-import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useBotAdvancedConfig } from '@/hooks/useBotAdvancedConfig';
 import { useBotEditor } from '@/hooks/useBotEditor';
@@ -19,30 +12,25 @@ import { useBotWorkshopDetail } from '@/hooks/useBotWorkshopDetail';
 import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useDesktopFolder } from '@/hooks/useDesktopFolder';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
-import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { isServiceVerification } from '@/services/botWorkshop/botPolicy';
+import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { cn } from '@/utils/cn';
-import { useLocation } from '@umijs/max';
 import React, { useEffect, useState } from 'react';
 import { DetailHeader } from './DetailHeader';
 import { DetailNavigation } from './DetailNavigation';
-import { mainTabs, moreTabs, type MainTab } from './detailTabs';
-
+import { DetailPanelContent } from './DetailPanelContent';
+import { moreTabs } from './detailTabs';
+import { useHostingTabs } from './useHostingTabs';
+import { Points } from '@/tracking/points';import { Tracert } from '@/utils/tracert';
 const BotWorkshopDetailPage: React.FC = () => {
-  const params = new URLSearchParams(useLocation().search);
-  const id = params.get('id');
+  const { id, ownerId, requestedEditable, runtimeStage } = useBotEditorAddress();
   const openDesktopFolder = useDesktopFolder(id);
-  const ownerId = params.get('owner_id')?.trim() || undefined;
-  const requestedEditable = params.get('type') === 'edit';
-  const runtimeStageParam = params.get('runtime_stage');
-  const runtimeStage: BotRuntimeStage | undefined =
-    runtimeStageParam === 'draft' || runtimeStageParam === 'verify' || runtimeStageParam === 'online'
-      ? runtimeStageParam
-      : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
   const detail = useBotWorkshopDetail(id, requestedEditable, requestIdentity.ready, ownerId, requestIdentity.userId);
-  const verifying = !!detail.bot && detail.bot.serviceMode === 'service' &&
+  const verifying =
+    !!detail.bot &&
+    detail.bot.serviceMode === 'service' &&
     (runtimeStage === 'verify' || isServiceVerification(detail.bot));
   const editable = requestedEditable && !verifying;
   const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
@@ -65,16 +53,19 @@ const BotWorkshopDetailPage: React.FC = () => {
     desktopPolicy.markdown,
     desktopPolicy.channels,
   );
-  const [tab, setTab] = useState<MainTab>('capability');
-  const [more, setMore] = useState<MoreConfigTab>();
-  const [debugOpen, setDebugOpen] = useState(true);
-  const [debugFullscreen, setDebugFullscreen] = useState(false);
+  const { panels, additionalTabs } = useBotEditorPanels();
+  const { tab, setTab, more, setMore, hostingAllowed, visibleMainTabs } = useHostingTabs(
+    id,
+    requestIdentity.userId,
+    detail.bot,
+    isOwner,
+    desktopPolicy.routines,
+    additionalTabs,
+    JSON.stringify([addressedOwnerId, runtimeStage, currentSpaceId]),
+  );
+  const ExtensionPanel = panels.find((panel) => `extension:${panel.id}` === tab)?.Panel;
+  const [debugOpen, setDebugOpen] = useState(true); const [debugFullscreen, setDebugFullscreen] = useState(false);
   useEffect(() => {
-    if (!isOwner && more === 'engine') setMore(undefined);
-  }, [isOwner, more]);
-  useEffect(() => {
-    setTab('capability');
-    setMore(undefined);
     setDebugOpen(true);
     setDebugFullscreen(false);
   }, [id]);
@@ -105,7 +96,6 @@ const BotWorkshopDetailPage: React.FC = () => {
       />
     );
   const bot = detail.bot;
-  const visibleMainTabs = mainTabs.filter((item) => item.key !== 'routine' || desktopPolicy.routines);
   const visibleMoreTabs = moreTabs.filter(
     (item) =>
       ({
@@ -114,173 +104,104 @@ const BotWorkshopDetailPage: React.FC = () => {
         node: desktopPolicy.nodes,
         channel: desktopPolicy.channels,
         screen: desktopPolicy.screens,
-      })[item.key],
+      }[item.key]),
   );
   return (
-    <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
-      <DetailHeader
-        bot={bot}
-        editable={editable}
-        isOwner={isOwner}
-        debugOpen={debugOpen}
-        saving={detail.saving}
-        onBack={detail.back}
-        onOpenDebug={() => setDebugOpen(true)}
-        onSaveBasic={detail.save}
-        onReload={() => void detail.retry()}
-      />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <DetailNavigation
-          hidden={debugFullscreen}
-          mainTabs={visibleMainTabs}
-          moreTabs={visibleMoreTabs}
-          activeTab={tab}
-          activeMore={more}
-          onTabChange={(nextTab) => {
-            setTab(nextTab);
-            setMore(undefined);
+    // 左右分栏:右侧调试对话整列到顶(与 header 同一起点);"调试对话/保存"按钮
+    // 随 DetailHeader 只占据左侧标题区,天然位于该区域最右端。
+    <main className="bot-editor-shell flex h-full min-h-0 bg-background">
+      <div
+        className={cn(
+          'flex h-full min-w-0 flex-1 flex-col',
+          debugFullscreen && 'hidden',
+        )}
+      >
+        <DetailHeader
+          bot={bot}
+          editable={editable}
+          isOwner={isOwner}
+          debugOpen={debugOpen}
+          saving={detail.saving}
+          onBack={detail.back}
+          onOpenDebug={() => setDebugOpen(true)}
+          onSaveBasic={async (input) => {
+            Tracert.click(Points.botWorkshop.saveConfig, { bot_id: id }); await detail.save(input);
           }}
-          onMoreChange={(nextMore) => {
-            setMore(nextMore);
-            if (nextMore === 'engine') void editor.loadEngineConfig();
-          }}
+          onReload={() => void detail.retry()}
         />
-        <section
-          className={cn(
-            'app-scrollbar min-w-0 flex-1 overflow-y-auto bg-background lg:max-w-none',
-            debugOpen && !debugFullscreen && 'border-r border-border lg:w-[56%] lg:flex-none',
-            debugFullscreen && 'hidden',
-          )}
-        >
-          {verifying ? <p className="border-b border-border bg-muted px-6 py-3 text-sm text-muted-foreground">预发验证中，配置已锁定；请在右侧对话区验证 Bot。</p> : null}
-          <fieldset disabled={verifying} className={cn('min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}>
-          {editor.loading ? (
-            <Spin tip="加载编辑配置…" />
-          ) : more === 'md' ? (
-            <IdentityConfigPanel
-              files={advanced.files}
-              editable={editable}
-              getFile={advanced.getFile}
-              onSave={advanced.saveFile}
-            />
-          ) : more === 'channel' ? (
-            <ChannelConfigPanel
-              channels={advanced.channels}
-              editable={editable}
-              serviceBot={bot.serviceMode === 'service'}
-              onCreate={advanced.createChannel}
-              onUpdate={advanced.updateChannel}
-              onToggle={advanced.toggleChannel}
-              onDelete={advanced.deleteChannel}
-            />
-          ) : more === 'screen' ? (
-            <RenderScreenPanel
-              screens={editor.screens}
-              editable={editable}
-              onSave={editor.saveScreen}
-              onDelete={editor.deleteScreen}
-            />
-          ) : more === 'engine' && editor.engineConfigLoading ? (
-            <Spin tip="正在加载引擎配置…" />
-          ) : more ? (
-            <MoreConfigPanel
-              tab={more}
-              config={editor.engineConfig}
-              editable={editable}
-              engineStatus={editor.engineStatus}
-              restoringDefaults={editor.restoringDefaultEngineConfig}
-              onConfigChange={editor.setEngineConfig}
-              onSave={editor.saveEngineConfig}
-              onRestoreDefaults={editor.restoreDefaultEngineConfig}
-            />
-          ) : tab === 'capability' ? (
-            <CapabilityPanel
-              compact={debugOpen && !debugFullscreen}
-              desktop={bot.deployment === 'local'}
-              onLocalToggle={editor.toggleSkill}
-              onLocalDelete={editor.deleteSkill}
-              onLocalUpload={editor.uploadSkill}
-              botId={bot.id}
-              ownerId={bot.ownerId}
-              skillSets={editor.skillSets}
-              mySkills={editor.skills.filter((skill) => skill.source === 'local')}
-              availableMcps={editor.availableMcps}
-              marketSkills={editor.marketSkills}
-              skillCenterSkills={editor.skillCenterSkills}
-              workshopSkills={editor.workshopSkills}
-              editable={editable}
-              onCreate={editor.createSkillSet}
-              onDelete={editor.deleteSkillSet}
-              onActive={editor.setSkillSetActive}
-              pendingSkillSetToggle={editor.pendingSkillSetToggle}
-              onSkill={editor.setSkillSetSkill}
-              onSkillCenterReferences={editor.addSkillCenterReferences}
-              onUploadSkillFolder={editor.uploadSkillFolder}
-              onLoadCandidates={editor.loadCapabilityCandidates}
-              candidatesLoading={editor.candidatesLoading}
-              onMcp={editor.setSkillSetMcp}
-              mcpCallTypes={editor.mcpCallTypes}
-              callerContextEditable={editable && editor.callerContextEditable}
-              mcpIdentityDisabledReason={
-                bot.serviceMode === 'service' ? undefined : '个人 Bot 固定使用 Owner 模式，不支持切换 MCP 访问方式'
-              }
-              updatingCallType={editor.updatingCallType}
-              onMcpCallType={editor.updateMcpCallType}
-            />
-          ) : tab === 'resource' ? (
-            <>
-              <ResourcePanel
-                desktop={bot.deployment === 'local'}
-                onOpenFolder={openDesktopFolder}
-                resources={editor.resources}
-                editable={editable && desktopPolicy.resourceWritable}
-                onCreateDirectory={editor.createDirectory}
-                onDelete={editor.deleteResource}
-                onUpload={editor.uploadResource}
-                onPreview={editor.previewResource}
-                onCopyPath={editor.copyResourcePath}
-                onDownload={editor.downloadResource}
-                onLoadDirectory={editor.loadResourceDirectory}
-                loadingPaths={editor.resourceLoadingPaths}
-              />
-              {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
-            </>
-          ) : tab === 'routine' ? (
-            <RoutinePanel
-              routines={editor.routines}
-              editable={editable}
-              onLoadModels={editor.loadRoutineModels}
-              onSave={editor.saveRoutine}
-              onToggle={editor.toggleRoutine}
-              onDelete={editor.deleteRoutine}
-            />
-          ) : (
-            <TaskEscort bot={bot} />
-          )}
-          </fieldset>
-        </section>
-        {debugOpen ? (
-          <div
+        {isOwner && !verifying && bot.expertOriginName && <ExpertCreationDetails key={bot.id} botId={bot.id} />}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <DetailNavigation
+            hidden={debugFullscreen}
+            mainTabs={visibleMainTabs}
+            moreTabs={visibleMoreTabs}
+            activeTab={tab}
+            activeMore={more}
+            onTabChange={(nextTab) => {
+              setTab(nextTab);
+              setMore(undefined);
+            }}
+            onMoreChange={(nextMore) => {
+              setMore(nextMore);
+              if (nextMore === 'engine') void editor.loadEngineConfig();
+            }}
+          />
+          <section
             className={cn(
-              'hidden min-w-0 flex-1 transition-[flex-basis,width] duration-200 ease-out lg:flex',
-              debugFullscreen && 'flex',
+              'app-scrollbar min-w-0 flex-1 overflow-y-auto bg-background lg:max-w-none',
+              // 去掉旧版的 lg:w-[56%] 定宽:flex-1 撑满左列,面板 header/内容右缘
+              // 才能与上方 bot 名称所在 header 对齐;右描边仅在对话区可见的 lg+ 生效。
+              debugOpen && !debugFullscreen && 'lg:border-r lg:border-divider',
+              debugFullscreen && 'hidden',
             )}
           >
-            <DebugChatPanel
-              key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
-              bot={bot}
-              runtimeStage={verifying ? 'verify' : runtimeStage}
-              ownerId={addressedOwnerId}
-              fullscreen={debugFullscreen}
-              onClose={() => {
-                setDebugOpen(false);
-                setDebugFullscreen(false);
-              }}
-              onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
-            />
+            {verifying ? (
+              <p className="border-b border-divider bg-muted px-6 py-3 text-sm text-muted-foreground">
+                预发验证中，配置已锁定；请在右侧对话区验证 Bot。
+              </p>
+            ) : null}
+            <fieldset
+              disabled={verifying}
+              // h-full 定高:Chromium 下 fieldset 内的百分比高度(min-h-full)不生效,
+              // 不给 fieldset 定高时面板内容不到底、分割线接不了页底(headless 实测 fieldset 内 min-height:100% 解析为 auto)。
+              className={cn('h-full min-w-0 border-0 p-0', verifying && 'pointer-events-none opacity-50')}
+            >
+              <DetailPanelContent
+                bot={bot}
+                editor={editor}
+                advanced={advanced}
+                desktopPolicy={desktopPolicy}
+                more={more}
+                tab={tab}
+                hostingAllowed={hostingAllowed}
+                editable={editable}
+                isOwner={isOwner}
+                compact={debugOpen && !debugFullscreen}
+                ExtensionPanel={ExtensionPanel}
+                currentSpaceId={currentSpaceId}
+                runtimeStage={runtimeStage}
+                ownerId={addressedOwnerId}
+                onOpenFolder={openDesktopFolder}
+              />
+            </fieldset>
+          </section>
           </div>
-        ) : null}
       </div>
+      {debugOpen ? (
+        <DetailDebugChat
+          authenticatedUserId={requestIdentity.ready ? requestIdentity.userId ?? null : null}
+          key={`${bot.id}:${verifying ? 'verify' : runtimeStage ?? bot.lifecycle}`}
+          bot={bot}
+          runtimeStage={verifying ? 'verify' : runtimeStage}
+          ownerId={addressedOwnerId}
+          fullscreen={debugFullscreen}
+          onClose={() => {
+            setDebugOpen(false);
+            setDebugFullscreen(false);
+          }}
+          onToggleFullscreen={() => setDebugFullscreen((current) => !current)}
+        />
+      ) : null}
     </main>
   );
 };

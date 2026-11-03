@@ -7,6 +7,8 @@ export function parseBotRuntimeIdentity(input: unknown): BotRuntimeIdentity | un
   const invalid = (): never => { throw new BotRuntimeError(422, "invalid_runtime_identity", "运行身份的阶段、设备或版本字段无效"); };
   if (!input || typeof input !== "object" || Array.isArray(input)) return invalid();
   const value = input as Record<string, unknown>;
+  // Personal Bots use their existing binding, not service release/instance locators.
+  if (value.BOT_TYPE === "personal") return undefined;
   const locator = (name: string, source: string) => {
     if (value[name] !== undefined && value[source] !== undefined && value[name] !== value[source]) return invalid();
     return value[name] === undefined ? value[source] : value[name];

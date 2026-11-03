@@ -9,6 +9,7 @@ import pytest
 
 from agentclaw.community.core.acli_clis.arca_port import (
     INSTALL_PATH,
+    OPERATION_PATH,
     TOOLS_PATH,
     UNINSTALL_PATH,
     ArcaAcliPort,
@@ -152,6 +153,19 @@ async def test_an_unknown_operation_reads_as_none() -> None:
     assert await _port(transport).get_operation(RUNTIME, "f" * 32) is None
 
 
+@pytest.mark.parametrize("body", ['{"error":"not found"}', '{"detail":"Not Found"}'])
+async def test_a_404_reading_back_an_accepted_operation_is_unreachable(body) -> None:
+    """The engine accepted the operation, so its endpoints exist: the hop failed."""
+    transport = _Transport(error=DeviceAdapterEndpointNotFoundError(
+        body, standard_route_missing=body.startswith('{"detail"'),
+    ))
+
+    with pytest.raises(AcliPortError) as caught:
+        await _port(transport).get_operation(RUNTIME, "e" * 32)
+
+    assert caught.value.code == "engine_unreachable"
+
+
 async def test_list_tools_reads_the_listing() -> None:
     transport = _Transport({"success": True, "data": {"tools": [
         {"name": "deepinsight-cli", "command": "di", "description": "d", "version": "1.0.9"},
@@ -186,9 +200,12 @@ async def test_a_failed_listing_raises_its_code() -> None:
     [
         (DeviceAdapterEndpointNotFoundError('{"detail":"Not Found"}', standard_route_missing=True),
          "engine_outdated"),
-        (DeviceAdapterEndpointNotFoundError("gateway says no"), "engine_unreachable"),
+        # A 404 in any other shape is a missing endpoint too, e.g. an engine
+        # serving its own API: never a transient failure.
+        (DeviceAdapterEndpointNotFoundError('{"error":"not found"}'), "engine_outdated"),
+        (DeviceAdapterEndpointNotFoundError("gateway says no"), "engine_outdated"),
         (DeviceAdapterEndpointNotFoundError('{"success": false, "error": "other"}'),
-         "engine_unreachable"),
+         "engine_outdated"),
         (DeviceAdapterHTTPStatusError(501, ""), "engine_unsupported"),
         (DeviceAdapterHTTPStatusError(400, "bad"), "invalid_input"),
         (DeviceAdapterHTTPStatusError(409, "not json"), "engine_unreachable"),
@@ -232,3 +249,45 @@ async def test_a_malformed_operation_is_bad_output() -> None:
         )
 
     assert caught.value.code == "bad_output"
+
+
+# ── teclaw serves acli under its own API prefix ──────────────────────────
+
+TECLAW = AcliRuntime(
+    bot_id="bot-1", owner_id="owner-1", stage=PublishStage.DRAFT, engine="teclaw"
+)
+
+
+async def test_teclaw_is_called_under_its_v1_prefix() -> None:
+    transport = _Transport(_envelope())
+    port = _port(transport)
+
+    await port.submit(TECLAW, action=AcliAction.INSTALL, name="x")
+    await port.submit(TECLAW, action=AcliAction.UNINSTALL, name="x")
+    await port.cancel(TECLAW, action=AcliAction.INSTALL, name="x")
+    await port.get_operation(TECLAW, "e" * 32)
+
+    assert [path for _, _, path, _, _ in transport.calls] == [
+        "/api/v1/cli/acli/install",
+        "/api/v1/cli/acli/uninstall",
+        "/api/v1/cli/acli/install/cancel",
+        f"/api/v1/cli/acli/operations/{'e' * 32}",
+    ]
+
+
+async def test_teclaw_lists_under_its_v1_prefix() -> None:
+    transport = _Transport({"success": True, "data": {"tools": []}})
+
+    assert await _port(transport).list_tools(TECLAW) == []
+    assert transport.calls[0][2] == "/api/v1/cli/acli/tools"
+
+
+async def test_other_engines_keep_the_adapter_prefix() -> None:
+    transport = _Transport(_envelope())
+
+    await _port(transport).get_operation(
+        AcliRuntime(bot_id="b", owner_id="o", stage=PublishStage.DRAFT, engine="openclaw"),
+        "e" * 32,
+    )
+
+    assert transport.calls[0][2] == OPERATION_PATH.format(id="e" * 32)

@@ -13,11 +13,12 @@ use bcs_event_store::MemoryEventStore;
 use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
+use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     Group as DomainGroup, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
-    ParticipantMode, ServiceError, ServiceResult, ServiceSpec, Workspace, generated_group_id,
+    ParticipantMode, ServiceError, ServiceResult, generated_group_id,
 };
 use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 
@@ -85,6 +86,12 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
+        let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
+        Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
+            && g.participants.iter().any(|p| ids.contains(&p.bot_uuid))))
+    }
+
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
         let event_store =
             self.event_store
@@ -396,20 +403,6 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-
-        group.workspace = workspace;
-        group.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        Ok(())
-    }
-
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
         let group = groups
@@ -431,23 +424,6 @@ impl GroupRepoPort for MemoryGroupRepo {
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
 
         group.status = status;
-        group.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        Ok(())
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.service_spec = service_spec;
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -678,6 +654,19 @@ impl GroupRepoPort for MemoryGroupRepo {
             mode: group.human_mention_notify_mode,
             driver_bot_id: group.driver_bot.clone(),
         }))
+    }
+
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        // Memory projects from the CURRENT state, so a second store
+        // instance always observes the just-committed value.
+        let groups = self.groups.read().await;
+        let env = bcs_config::resolve_env_str();
+        Ok(groups
+            .get(group_id)
+            .map(|group| super::authorization_snapshot::memory_snapshot(env, group)))
     }
 
     async fn message_count(&self, id: &str) -> ServiceResult<usize> {

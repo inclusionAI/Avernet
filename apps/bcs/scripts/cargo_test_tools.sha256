@@ -1,0 +1,13 @@
+# SHA-256 digests of the pinned upstream GitHub release archives.
+9164568e9840c6509177086828ac7d3178c2d8feb0658b4d2bff62fa620e98c8  0.9.150/cargo-nextest-0.9.150-aarch64-unknown-linux-gnu.tar.gz
+5a7fe62b64a9006e1e47422021df7b1d308cc76c528c9eaf4649a488615ed6fb  0.9.150/cargo-nextest-0.9.150-aarch64-unknown-linux-musl.tar.gz
+82a759b4d218d38359424196ab244c470e8f7c7d149c814fbbeef4d67c3c301a  0.9.150/cargo-nextest-0.9.150-universal-apple-darwin.tar.gz
+b0959bc64232974224cf9fb22c915845398c0e8668fa7831eb5b43fb1eef781f  0.9.150/cargo-nextest-0.9.150-x86_64-unknown-linux-gnu.tar.gz
+84f0f9ba75d0b6fa117bc418d49747ba78e20e4583057f6fa628f1b17c17234d  0.9.150/cargo-nextest-0.9.150-x86_64-unknown-linux-musl.tar.gz
+7e821a6c90c0884f79f759f5d9be50799ade67bb82515186d922f26032ef43b8  0.9.1/cargo-llvm-cov-aarch64-apple-darwin.tar.gz
+abf5f13c1520f8756d2192bfaaeadb0208f5b7eaa8cadc15bf847befa42b7360  0.9.1/cargo-llvm-cov-aarch64-unknown-linux-gnu.tar.gz
+49c0085628392a8d727c4464d91ec417c613c5015f5197cd16d5c05aa3fb5ad1  0.9.1/cargo-llvm-cov-aarch64-unknown-linux-musl.tar.gz
+cc00420e3a5500e4d603399fde223d76d84c1446102d1b60a9fbbbce1c1c2b52  0.9.1/cargo-llvm-cov-universal-apple-darwin.tar.gz
+ddf949b82a63017441ea76aa068bdd7e2dde8055f47cd3ef736fdbbd633bc33e  0.9.1/cargo-llvm-cov-x86_64-apple-darwin.tar.gz
+b3f68e625481fed9b16444174f3fa5ebcdbde4a1878803a35eabe2dcefcdc41a  0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz
+3fca950394a3c49457657c158b1619cec8dfd2647ae5b48746734c0ab969a522  0.9.1/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz

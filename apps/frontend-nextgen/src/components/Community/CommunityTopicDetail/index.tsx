@@ -1,16 +1,19 @@
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import type { CommunityReply, CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft } from 'lucide-react';
+import { TopicFirstFloor } from './TopicFirstFloor';
+import type {
+  CommunityAuthor,
+  CommunityReply,
+  CommunityTopic,
+  ForumTargetRef,
+  InteractionSummary,
+} from '@/domain/community/types';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Floor } from './Floor';
-import { PollTypeIcon } from '../PollTypeIcon';
-import { PollPanel } from './PollPanel';
+import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
+import { TopicDetailHeader } from './TopicDetailHeader';
 import { buildReplyGroups } from './model';
-import { ReplyComposer } from './ReplyComposer';
 
 export interface CommunityTopicDetailProps {
   topic: CommunityTopic | null;
@@ -18,22 +21,39 @@ export interface CommunityTopicDetailProps {
   loading: boolean;
   error: string | null;
   closing: boolean;
+  deleting: boolean;
+  helpfulPostId: string | null;
   onBack: () => void;
+  currentUserId?: string;
+  targetSummary?: InteractionSummary;
+  /** Actor-target summary used only to render the current viewer's liked/favorited state. */
+  viewerTopicSummary?: InteractionSummary;
+  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
+  loadAuthorSummary?: (author: CommunityAuthor) => void;
+  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
+  authorFollowLoading?: (author: CommunityAuthor) => boolean;
+  authorFollowed?: (author: CommunityAuthor) => boolean;
+  likePending?: boolean;
+  favoritePending?: boolean;
+  onLike?: (target: ForumTargetRef) => void;
+  onFavorite?: (target: ForumTargetRef) => void;
+  getReplySummary?: (postId: string) => InteractionSummary | undefined;
+  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
+  replyLikePending?: (postId: string) => boolean;
+  onLikeReply?: (postId: string) => void;
   onCloseTopic: () => Promise<boolean>;
+  onEditTopic: () => void;
+  onDeleteTopic: () => Promise<boolean>;
+  onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
   // 回帖分页
   replyLoading: boolean;
   replyError: string | null;
+  replySaving?: boolean;
+  onSubmitReply?: (payload: ReplyComposerPayload) => Promise<boolean>;
   replyPage: number;
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
-  replyTargetPostId: string | null;
-  replyPublishing: boolean;
-  hasVoted: boolean;
-  onStartReply: (postId: string) => void;
-  onCancelReply: () => void;
-  onSubmitReply: (body: string) => Promise<boolean>;
-  onSubmitVote: (optionIndices: number[]) => Promise<boolean>;
 }
 
 export function CommunityTopicDetail({
@@ -42,47 +62,57 @@ export function CommunityTopicDetail({
   loading,
   error,
   closing,
+  deleting,
+  helpfulPostId,
   onBack,
+  currentUserId,
+  targetSummary,
+  viewerTopicSummary,
+  getAuthorSummary,
+  loadAuthorSummary,
+  followAuthor,
+  authorFollowLoading,
+  authorFollowed,
+  likePending,
+  favoritePending,
+  onLike,
+  onFavorite,
+  getReplySummary,
+  getReplyViewerSummary,
+  replyLikePending,
+  onLikeReply,
   onCloseTopic,
+  onEditTopic,
+  onDeleteTopic,
+  onSetPostHelpful,
   replyLoading,
   replyError,
+  replySaving = false,
+  onSubmitReply,
   replyPage,
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
-  replyTargetPostId,
-  replyPublishing,
-  hasVoted,
-  onStartReply,
-  onCancelReply,
-  onSubmitReply,
-  onSubmitVote,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
+  const replyComposerRef = useRef<HTMLDivElement | null>(null);
 
   const replyOffset = (replyPage - 1) * replyPageSize;
-  const floorGroups = useMemo(
-    () => buildReplyGroups(replies, replyOffset + 1),
-    [replies, replyOffset],
-  );
-  const floorByPostId = useMemo(() => {
-    const floors = new Map<string, number>();
-    floorGroups.forEach(({ reply, floorNo, children }) => {
-      floors.set(reply.id, floorNo);
-      children.forEach(({ reply: childReply }) => floors.set(childReply.id, floorNo));
-    });
-    return floors;
-  }, [floorGroups]);
-  const replyTargetFloor = replyTargetPostId ? floorByPostId.get(replyTargetPostId) ?? null : null;
-
+  const floorGroups = useMemo(() => buildReplyGroups(replies, replyOffset + 1), [replies, replyOffset]);
   const registerReplyElement = useCallback(
-    (postId?: string) =>
-      (element: HTMLElement | null) => {
-        if (postId) replyElementsRef.current.set(postId, element);
-      },
+    (postId?: string) => (element: HTMLElement | null) => {
+      if (postId) replyElementsRef.current.set(postId, element);
+    },
     [],
   );
+
+  const goToReplyComposer = useCallback(() => {
+    const composer = replyComposerRef.current?.querySelector('textarea');
+    if (!composer) return;
+    composer.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    composer.focus();
+  }, []);
 
   const locateTargetReply = useCallback((postId: string) => {
     const element = replyElementsRef.current.get(postId);
@@ -96,6 +126,17 @@ export function CommunityTopicDetail({
     setExpandedReplyIds((previous) => ({ ...previous, [postId]: !previous[postId] }));
   }, []);
 
+  const getSummaryFor = useCallback((author: CommunityAuthor) => getAuthorSummary?.(author), [getAuthorSummary]);
+  const loadSummaryFor = useCallback((author: CommunityAuthor) => loadAuthorSummary?.(author), [loadAuthorSummary]);
+  const followFor = useCallback(
+    (author: CommunityAuthor) => followAuthor?.(author) ?? Promise.resolve(false),
+    [followAuthor],
+  );
+  const isReplyLikePending = useCallback(
+    (postId?: string) => (postId ? replyLikePending?.(postId) === true : false),
+    [replyLikePending],
+  );
+
   // 楼中楼是楼层页面内的局部展开状态；翻页后必须回到默认展示前 2 条。
   useEffect(() => {
     setExpandedReplyIds({});
@@ -103,74 +144,21 @@ export function CommunityTopicDetail({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* 原型结构：头部固定、主题流单独滚动。返回 / 标题 / 状态 / 分页收敛在同一行右列。 */}
-      <header className="flex w-full items-start gap-3 px-4 pb-4 pt-6 sm:px-6 lg:px-10">
-        <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回社区列表" className="mt-1 shrink-0">
-          <ArrowLeft className="size-4" aria-hidden />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-foreground">{topic?.title || '主题详情'}</h2>
-          {!!topic?.analysis?.tags?.length && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {topic.analysis.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
-                >
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
-            {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
-            {topic?.status === 'closed' && <Badge tone="outline">已结帖</Badge>}
-            {topic?.canClose && (
-              <ConfirmDialog
-                title="确认结帖？"
-                description="结帖后该主题将显示为已结束，本期暂不支持重新打开。"
-                confirmText="确认结帖"
-                loading={closing}
-                onConfirm={async () => {
-                  await onCloseTopic();
-                }}
-              >
-                <Button variant="outline" size="sm" className="h-8 px-3 text-xs">
-                  结帖
-                </Button>
-              </ConfirmDialog>
-            )}
-          </div>
-          {replyPageCount > 1 && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground" aria-label="回帖分页">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5"
-                disabled={replyPage <= 1 || replyLoading}
-                onClick={() => onGoToReplyPage(replyPage - 1)}
-              >
-                上一页
-              </Button>
-              <span className="px-1 tabular-nums">
-                {replyPage} / {replyPageCount}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5"
-                disabled={replyPage >= replyPageCount || replyLoading}
-                onClick={() => onGoToReplyPage(replyPage + 1)}
-              >
-                下一页
-              </Button>
-            </div>
-          )}
-        </div>
-      </header>
+      <TopicDetailHeader
+        topic={topic}
+        closing={closing}
+        deleting={deleting}
+        replyPage={replyPage}
+        replyPageCount={replyPageCount}
+        replyLoading={replyLoading}
+        currentUserId={currentUserId}
+        onBack={onBack}
+        onCloseTopic={onCloseTopic}
+        onEditTopic={onEditTopic}
+        onDeleteTopic={onDeleteTopic}
+        onGoToReplyPage={onGoToReplyPage}
+        onGoToReplyComposer={goToReplyComposer}
+      />
       <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="flex w-full flex-col px-4 pb-6 sm:px-6 lg:px-10">
           {loading ? (
@@ -192,31 +180,27 @@ export function CommunityTopicDetail({
           ) : topic ? (
             <>
               {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
-              {replyPage === 1 && (
-                <Floor
-                  floor={0}
-                  author={topic.author}
-                  body={topic.body}
-                  createdAt={topic.createdAt}
-                  threadReplies={[]}
-                  expanded={false}
-                  onToggleThreadReplies={() => undefined}
+              {replyPage === 1 ? (
+                <TopicFirstFloor
+                  topic={topic}
+                  currentUserId={currentUserId}
+                  targetSummary={targetSummary}
+                  viewerTopicSummary={viewerTopicSummary}
+                  getAuthorSummary={getSummaryFor}
+                  loadAuthorSummary={loadSummaryFor}
+                  followAuthor={followFor}
+                  authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
+                  likePending={likePending}
+                  favoritePending={favoritePending}
+                  onLike={onLike}
+                  onFavorite={onFavorite}
                   registerElement={registerReplyElement}
-                />
-              )}
-              {topic ? (
-                <PollPanel
-                  topicType={topic.topicType}
-                  status={topic.status}
-                  poll={topic.topicConfig?.poll}
-                  pollStats={topic.analysis?.pollStats}
-                  hasVoted={hasVoted}
-                  publishing={replyPublishing}
-                  onVote={onSubmitVote}
                 />
               ) : null}
               {floorGroups.map(({ reply, floorNo, children }) => (
                 <Floor
+                  topic={topic}
                   key={reply.id}
                   floor={floorNo}
                   postId={reply.id}
@@ -225,24 +209,35 @@ export function CommunityTopicDetail({
                   author={reply.author}
                   body={reply.body}
                   createdAt={reply.createdAt}
-                  onReply={onStartReply}
+                  helpful={reply.helpful}
+                  canToggleHelpful={topic.topicType === 'help' && topic.isMine}
+                  helpfulLoading={helpfulPostId === reply.id}
+                  getReplyLikeSummary={getReplySummary}
+                  getReplyViewerSummary={getReplyViewerSummary}
+                  replyLikePending={isReplyLikePending}
+                  onLike={onLikeReply}
+                  onToggleHelpful={() => {
+                    void onSetPostHelpful(reply.id, !reply.helpful);
+                  }}
                   threadReplies={children}
                   expanded={!!expandedReplyIds[reply.id]}
                   onToggleThreadReplies={() => toggleThreadReplies(reply.id)}
                   onLocateTarget={locateTargetReply}
                   registerElement={registerReplyElement}
+                  currentUserId={currentUserId}
+                  canReply={topic.topicType === 'discussion' || topic.topicType === 'share'}
+                  replySaving={replySaving}
+                  onSubmitReply={onSubmitReply}
+                  getAuthorSummary={getSummaryFor}
+                  loadAuthorSummary={loadSummaryFor}
+                  followAuthor={followFor}
+                  authorFollowLoading={authorFollowLoading}
+                  authorFollowed={authorFollowed}
                 />
               ))}
-              {topic.status === 'open' && topic.topicType !== 'poll' ? (
-                <ReplyComposer
-                  replyTargetFloor={replyTargetFloor}
-                  replyTargetPostId={replyTargetPostId}
-                  publishing={replyPublishing}
-                  onCancelReply={onCancelReply}
-                  onSubmitReply={onSubmitReply}
-                />
-              ) : null}
-              {!replies.length && !replyLoading && <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>}
+              {!replies.length && !replyLoading && (
+                <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>
+              )}
               {replyLoading && (
                 <p aria-live="polite" className="py-3 text-center text-xs text-muted-foreground">
                   回复加载中...
@@ -256,6 +251,16 @@ export function CommunityTopicDetail({
                   </Button>
                 </div>
               )}
+              {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
+                <div ref={replyComposerRef}>
+                  <ReplyComposer
+                    topic={topic}
+                    submitLabel="回复主题"
+                    saving={replySaving}
+                    onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
+                  />
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>

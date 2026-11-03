@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS `task_info` (
     `status`              varchar(64)   NOT NULL                COMMENT '节点状态',
     `graph_run_id`        varchar(512)  DEFAULT NULL,
     `graph_loop_round`   int           NOT NULL DEFAULT 0,
+    `env` varchar(32) NOT NULL DEFAULT 'pre' COMMENT '数据环境:dev|pre|prod',
+    `executor_app` varchar(32) NOT NULL DEFAULT 'agentclawengine' COMMENT '执行应用:agentclaw|agentclawengine',
     `graph_output`       text          DEFAULT NULL,
     `graph_extend_props` text          DEFAULT NULL,
     `graph_version`      bigint(20)    NOT NULL DEFAULT 0,
@@ -24,5 +26,7 @@ CREATE TABLE IF NOT EXISTS `task_info` (
     UNIQUE KEY `uk_task_id` (`task_id`) BLOCK_SIZE 16384 LOCAL,
     KEY `idx_status` (`status`, `gmt_modified`),
     KEY `idx_task_info_graph_version` (`task_id`, `graph_version`),
-    KEY `idx_task_info_recovery` (`status`, `lease_until`, `gmt_modified`)
+    KEY `idx_task_info_recovery` (`status`, `lease_until`, `gmt_modified`),
+    KEY `idx_task_info_env_status` (`env`, `status`, `gmt_modified`),
+    KEY `idx_task_info_executor_app_env_status` (`executor_app`, `env`, `status`, `gmt_modified`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='任务来源信息';

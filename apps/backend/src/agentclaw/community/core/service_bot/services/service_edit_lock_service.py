@@ -15,6 +15,8 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     resolve_operable_permission_level,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.service_bot.errors import (
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -47,15 +49,18 @@ class ServiceEditLockService(ServiceEditLockServiceProtocol):
         actor_id: str,
         owner_id: str,
     ) -> dict[str, Any]:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise ServicePublicationNotFoundError("bot not found")
+        try:
+            bot = dict(BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id,
+            ).bot)
+        except BotAddressNotFoundError as exc:
+            raise ServicePublicationNotFoundError("bot not found") from exc
 
         level = resolve_operable_permission_level(
             self._collaborator_service,
             bot=bot,
             user_id=actor_id,
-            owner_id=owner_id,
+            owner_id=str(bot["owner_id"]),
             env=get_current_env(),
         )
         if level < PermissionLevel.MEMBER:

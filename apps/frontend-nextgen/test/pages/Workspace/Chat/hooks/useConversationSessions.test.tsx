@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import type { ConversationBotView } from '@/domain/conversation';
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { useConversationSessions } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
@@ -118,6 +119,77 @@ describe('useConversationSessions', () => {
     expect(view.origin).toBe('mine');
     expect(view.scope).toBe('all');
     expect(result.current.openBotIds['bot-a:2088']).toBe(true);
+  });
+
+  it('loads and creates Coding Bot sessions through the normal chain', async () => {
+    const codingBot: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    listManagedSessions.mockResolvedValue(okPage(['s-coding']));
+    createSession.mockResolvedValue({ ok: true, data: { ...sessionOf('s-new-coding'), botId: codingBot.bot.botId } });
+    const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+
+    act(() => result.current.toggleBot(codingBot.bot.botId, 'managed'));
+    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(codingBot.bot, '327325', 'all', 1, 10, ''));
+
+    await act(async () => result.current.createSession(codingBot.bot.botId));
+    expect(createSession).toHaveBeenCalledWith(codingBot.bot, '327325');
+    expect(useConversationStore.getState().selectedBotId).toBe(codingBot.bot.botId);
+    expect(useConversationStore.getState().selectedSessionId).toBe('s-new-coding');
+  });
+
+  it('creates Coding Bot sessions through the embedded action bridge', async () => {
+    const codingBot: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const createCodingSession = jest.fn().mockResolvedValue({
+      ok: true,
+      session: {
+        sessionId: 's-from-aix',
+        title: '新对话',
+        messageCount: 0,
+        gmtModified: '2026-10-27T10:00:00.000Z',
+        gmtCreate: '2026-10-27T10:00:00.000Z',
+      },
+    });
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => null, createSession: createCodingSession },
+      }),
+    });
+    listManagedSessions.mockResolvedValue(okPage(['s-coding']));
+    const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+    act(() => result.current.toggleBot(codingBot.bot.botId, 'managed'));
+    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledTimes(1));
+
+    await act(async () => result.current.createSession(codingBot.bot.botId));
+
+    expect(createCodingSession).toHaveBeenCalledWith({
+      botId: 'coding-bot',
+      userId: '327325',
+      ownerId: '2088',
+      title: '新对话',
+    });
+    expect(createSession).not.toHaveBeenCalled();
+    const list = useConversationStore.getState().sessionsByBotId[codingBot.bot.botId].sessions;
+    expect(list.items[0]).toMatchObject({ sessionId: 's-from-aix', title: '新对话', botId: codingBot.bot.botId });
+    expect(useConversationStore.getState().selectedSessionId).toBe('s-from-aix');
+    extendCapabilities(defaultCapabilities);
   });
 
   it('keeps the loaded list when a Bot collapses and re-expands', async () => {

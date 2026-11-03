@@ -1,12 +1,13 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
- * 点整卡 = 选中(高亮 + 发跳转,selectNode);下钻按钮(仅协作群节点)= 选中 + 进栈(drillInto)。
+ * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
+ * 节点点击仅做会话联动；下钻入口当前先隐藏，不提供节点副屏下钻展示。
  * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
  */
 import React from 'react';
 
-import { DrillWorkflow, Info, Users } from '../icons';
+import { Info, Users } from '../icons';
 import { resolveNodeSessionTarget } from '../sessionResolution';
 import { Empty as StateEmpty } from '../theme';
 import { C, PRESENT_TONES } from '../tokens';
@@ -36,6 +37,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
   if (!task.nodes.length) {
     return <StateEmpty description="暂无任务节点" minHeight={200} />;
   }
+  const rootNodeId = task.nodes[0]?.id;
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {task.nodes.map((node) => {
@@ -43,20 +45,26 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         const tone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
         const isDone = present === 'done' || present === 'merged';
         const isGroup = node.runMode === 'coop_group' || node.runMode === 'bbs' || node.drillable === true;
-        const executorName = node.assigneeName || node.executor || '—';
+        const executorName =
+          node.executorLabel || node.assigneeName || (isGroup ? node.groupName : null) || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
+        const isRootNode = node.id === rootNodeId;
+        const selectForConversation = () => {
+          if (isRootNode) nav.selectRootNode(node.id);
+          else nav.selectNode(node.id, target);
+        };
         return (
           <li
             key={node.id}
             role="button"
             tabIndex={0}
             aria-label={`选中节点 ${node.name}`}
-            onClick={() => nav.selectNode(node.id, target)}
+            onClick={selectForConversation}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                nav.selectNode(node.id, target);
+                selectForConversation();
               }
             }}
             style={{
@@ -144,43 +152,6 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
               >
                 子任务
               </button>
-            )}
-            {node.drillable && (
-              <span
-                role="button"
-                tabIndex={0}
-                title="下钻节点副屏"
-                aria-label={`下钻 ${node.name}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  nav.selectNode(node.id, target);
-                  nav.drillInto(node.id, target);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    nav.selectNode(node.id, target);
-                    nav.drillInto(node.id, target);
-                  }
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  borderRadius: 6,
-                  color: C.textSecondary,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                <DrillWorkflow />
-              </span>
             )}
           </li>
         );

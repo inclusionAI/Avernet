@@ -92,7 +92,7 @@ export function snapshotInputFromProps(
   }
   if (props.snapshot !== undefined) return props.snapshot;
   // Host-injected transport settings are not fields of the message payload.
-  const { apiBaseUrl, baseUrl, data, ...snapshot } = props;
+  const { apiBaseUrl, baseUrl, onOpenCreateGroup, data, ...snapshot } = props;
   return snapshot;
 }
 

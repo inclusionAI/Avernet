@@ -74,6 +74,7 @@
 
   --muted: 240 4.8% 95.9%;
   --muted-foreground: 240 3.8% 46.1%;
+  --page-canvas: 0 0% 97.3%; /* 工作台页面画布底 #F8F8F8(Bot 管理/智能进化首页);暗色取随体的深色 muted */
 
   --accent: 240 4.8% 95.9%;
   --accent-foreground: 240 5.9% 10%;
@@ -99,6 +100,10 @@
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
   --ring: 240 5.9% 10%; /* 亮色焦点环刻意取近黑、不跟随 --primary（对比 17.72）；仅暗色跟随主色，见 ui-interaction-spec §2.1 */
+
+  /* 分割线（单侧结构性分界）：全局统一 #EEEEEE 1px（DMore 视觉稿基线）。
+     与 --border 分离 — border 同时承担输入框/卡片描边，不随分割线统一走。 */
+  --divider: 0 0% 93.3%;
 
   /* 圆角系统 §2.4 */
   --radius: 0.5rem;
@@ -204,6 +209,7 @@
 
   --muted: 240 3.7% 15.9%;
   --muted-foreground: 240 5% 64.9%;
+  --page-canvas: 240 3.7% 15.9%;
 
   --accent: 240 3.7% 15.9%;
   --accent-foreground: 0 0% 98%;
@@ -228,6 +234,7 @@
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
   --ring: 221.7 100% 62%; /* D2: follow --primary */
+  --divider: 240 3.7% 20%; /* 分割线暗色态：较 --border 亮一阶保持可见 */
 
   /* 业务蓝（admin 品牌蓝 / Button primary）暗色覆盖：亮色态值无自动暗色适配，
      这里补暗色值，使 var(--color-primary) 系在暗色下对比度不掉。
@@ -257,6 +264,7 @@
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-page-canvas: hsl(var(--page-canvas));
   --color-accent: hsl(var(--accent));
   --color-accent-foreground: hsl(var(--accent-foreground));
 
@@ -272,6 +280,7 @@
   --color-brand: hsl(var(--brand));
 
   --color-border: hsl(var(--border));
+  --color-divider: hsl(var(--divider));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
@@ -664,6 +673,31 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .capability-popover[data-state='open'],
   .capability-page-in {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   对话侧栏目录展开区（ConversationBotItem 展开区 / 会话ID检索输入）：
+   conversation-area-in —— 自所属 Bot 行上缘 2px 下落淡入，代替瞬现。
+   与 capability-* 同一纪律：局部 className、150ms、prefers-reduced-motion 静止。
+   ========================================================================== */
+@keyframes conversation-area-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.conversation-area-in {
+  animation: conversation-area-in 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-area-in {
     animation: none;
   }
 }

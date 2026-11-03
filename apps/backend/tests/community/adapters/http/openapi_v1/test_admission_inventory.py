@@ -39,6 +39,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import (
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
+from agentclaw.community.adapters.http.openapi_v1.bot_address import require_granted_collaboration_bot
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     refuse_app_only_caller,
@@ -54,7 +55,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 #: wrong one is not a naming slip, it is the wrong check.
 _GRANT_DEPENDENCY_BY_MODE = {
     AdmissionMode.GRANT_CHECKED_OWN_BOT: require_granted_own_bot,
-    AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT: require_granted_addressed_bot,
+    AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT: (require_granted_addressed_bot, require_granted_collaboration_bot),
 }
 
 _GRANT_CHECKED_MODES = frozenset(_GRANT_DEPENDENCY_BY_MODE)
@@ -129,6 +130,8 @@ def _dependant_of(ctx):
 
 
 def _depends_on(dependant, target) -> bool:
+    if isinstance(target, tuple):
+        return any(_depends_on(dependant, item) for item in target)
     if dependant is None:
         return False
     if dependant.call is target:
@@ -233,11 +236,11 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
 
     assert not unchecked, (
         f"operations whose mode is {mode.name} that do not declare "
-        f"{dependency.__name__} — an application would reach these with the "
+        f"{getattr(dependency, '__name__', 'addressed-Bot grant dependency')} — an application would reach these with the "
         "wrong authorization, or none at all:\n  " + "\n  ".join(unchecked)
     )
     assert not unexpected, (
-        f"operations declaring {dependency.__name__} whose mode is not "
+        f"operations declaring {getattr(dependency, '__name__', 'addressed-Bot grant dependency')} whose mode is not "
         f"{mode.name}. The declaration and the table must say the same thing — "
         "fix whichever one is wrong:\n  " + "\n  ".join(unexpected)
     )
@@ -271,7 +274,7 @@ def test_only_the_named_operations_check_their_own_grant():
         for key, ctx in _operations()
         if ADMISSION.get(key) in _GRANT_CHECKED_MODES
         and not _depends_on(_dependant_of(ctx), require_granted_own_bot)
-        and not _depends_on(_dependant_of(ctx), require_granted_addressed_bot)
+        and not _depends_on(_dependant_of(ctx), (require_granted_addressed_bot, require_granted_collaboration_bot))
         and key not in LEGACY_ROUTES
     }
     named = SKILL_SCOPED_OPERATIONS | HARNESS_SCOPED_OPERATIONS

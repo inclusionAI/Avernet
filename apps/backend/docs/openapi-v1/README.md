@@ -1,5 +1,14 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+Bot public-risk operations use the full `bot_id:entity_id` path identity. They
+reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
+application grant. An app-only caller names its delegating `user_id`; its live
+Bot grant and that user's current collaborator permission are both checked.
+The delegating user remains the risk application's operator and approval actor.
+The request-cached Bot context is shared by authorization and the handler;
+asynchronous input/permission revalidation still runs before publication and on
+approval callbacks.
+
 **English** | [简体中文](README.zh-CN.md)
 
 Bot classification for group creation: `GET /openapi/v1/bots/{bot_id}/classification`
@@ -1214,7 +1223,7 @@ literals the routes actually publish:
 <!-- reserved-component-names -->
 ```text
 all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  connection  engine  identity
-loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 
@@ -1743,7 +1752,7 @@ only uninstalls. So anything installed in any stage is granted.
 | 202 | Still running (`async`, or past the 30 s wait) | the operation |
 | 404 | An operation id this bot never had | — |
 | 409 | Another operation is running in the runtime | `{operation}` |
-| 409 | Removing a default CLI; nothing of that kind to cancel; the operation was cancelled (`cancelled`); the bot is not `ACTIVE` or the runtime has no running container (`not_running`); the engine build predates these endpoints (`engine_outdated`) | `{code, reason}` for the container cases |
+| 409 | Removing a default CLI; nothing of that kind to cancel; the operation was cancelled (`cancelled`); the bot is not `ACTIVE` or the runtime has no running container (`not_running`); the engine does not provide these endpoints — an older build, or an engine that does not implement them (`engine_outdated`; any `404` to an install, uninstall, cancel or listing, never retried) | `{code, reason}` for the container cases |
 | 422 | Passing an alias (`di`) | `{market_name}` |
 | 422 | A `stage` on a bot that is not a service bot | — |
 | 422 | acli rejected the request (usually an unknown name; `install_failed`, `name_mismatch`) | `{code, reason}` |
@@ -2041,6 +2050,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Changelog (append a dated line whenever you move the board)
 
+- **2026-10-22** — **acli: a missing engine endpoint is `409 engine_outdated`.** A
+  `404` to an install, uninstall, cancel or listing (not only FastAPI's own) now
+  answers `409` with `data.code: engine_outdated`, instead of `502` "could not be
+  reached", and an add or remove ends at once instead of retrying for up to 40
+  minutes. A `404` while polling an operation the engine accepted is still
+  retried.
 - **2026-10-21** — **acli CLI operations.** Add, remove and the new install/uninstall
   cancels are operations run by backend tasks: optional `async`, a 30 s sync wait
   then `202`, `GET …/cli-operations[/{operation_id}]` to read them, one add/remove

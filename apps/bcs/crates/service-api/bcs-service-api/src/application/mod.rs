@@ -1,10 +1,15 @@
 pub mod a2a_chat;
+pub mod a2a_bot;
 pub mod collaboration_draft;
 pub mod actor_directory;
 pub mod admission;
 pub mod bot_management;
 pub mod bot_onboarding;
 pub mod bot_query;
+pub mod caller_container;
+pub mod caller_execution;
+pub mod caller_handoff;
+pub mod caller_identity;
 pub mod channel;
 pub mod collaboration_template;
 pub mod collaboration_runtime;
@@ -13,12 +18,12 @@ pub mod error;
 pub mod friends;
 pub mod group_management;
 pub mod group_message;
-pub mod group_proposal;
 pub mod human_actor;
 pub mod interaction;
 pub mod invite;
 pub mod message_flow;
 pub mod message_delivery;
+pub mod run_budget;
 pub mod message_log;
 pub mod organization;
 pub mod principal;
@@ -35,13 +40,16 @@ pub use actor_directory::*;
 pub use bot_management::*;
 pub use bot_onboarding::*;
 pub use bot_query::*;
+pub use caller_container::*;
+pub use caller_execution::*;
+pub use caller_handoff::*;
+pub use caller_identity::*;
 pub use channel::*;
 pub use collaboration_template::*;
 pub use collaboration_runtime::*;
 pub use friends::*;
 pub use group_management::*;
 pub use group_message::*;
-pub use group_proposal::*;
 pub use human_actor::*;
 pub use interaction::*;
 pub use message_flow::*;
@@ -61,3 +69,8 @@ pub use crate::port::{
 
 pub use admission::AdmissionService;
 pub use connect::{ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage};
+
+pub mod task_handle;
+pub use task_handle::*;
+
+pub mod task_delivery;

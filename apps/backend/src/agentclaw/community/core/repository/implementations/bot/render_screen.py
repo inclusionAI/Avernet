@@ -15,6 +15,7 @@ ddl-parity-ac_bot_render_screen.md — so a DB constraint violation can
 never occur on prod and the repo does not attempt to handle one. The old
 prod twin's ``pymysql.IntegrityError`` catch was likewise dead on prod.
 """
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from injector import inject
 from sqlalchemy import func
 
@@ -68,6 +69,7 @@ class RenderScreenRepository(
         creator_id: str,
     ) -> int:
         with self._db.orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
             row = self._Model(
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -98,6 +100,7 @@ class RenderScreenRepository(
                 self._Model.env == get_current_env(),
             ]
             if owner_id is not None:
+                owner_id = resource_locator(db, bot_id, owner_id)
                 filters.insert(1, self._Model.owner_id == owner_id)
             rows = (
                 db.query(self._Model)

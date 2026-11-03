@@ -370,7 +370,16 @@ lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_exp
 
 ## 查询与取消
 
-所有接口复用现有 Human/Bot 认证；当前 Session 成员资格、加入序号和消息可见性由应用层校验。
+所有接口复用现有 Human/Bot 认证；当前 Session 成员资格和消息可见性由应用层校验。
+只读投递查询对有加入序号的 Chat 成员复用历史消息的可见窗口：以该调用者的
+`participant_join_seq` 为锚点，使用现有 `message_history.new_participant_visible_limit`
+及 `MessageRepoPort::resolve_history_window_start`，而不是把加入序号本身当作硬下限。
+因此窗口内的入会前消息可查询，窗口外消息仍返回 403；补充 StateMachine 历史记录
+使用历史读取相同的窗口豁免，但不豁免私有消息和 Human audience 校验。
+ManagerWorker/StateMachine 查询不应用 Chat 加入窗口，仍逐条检查消息可见性。
+没有记录加入序号的旧 Session 保留原来的无序号限制行为。查询身份仍是认证调用者，
+不新增 `view_bot_id` 或隐式 Bot 代查权限。取消和人工处置保持原来的加入序号限制。
+窗口仅在存在匹配投递的请求中按批次解析一次；读取失败返回错误，不降级为无限可见。
 只有原发送者可以按消息或 delivery 取消。Admin/Integration 不隐式绕过成员权限。
 
 | 方法与路径 | 参数 | 结果 |
@@ -385,6 +394,48 @@ lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_exp
 这些查询/取消接口使用 401、403、404、400、503 表达认证、权限、Session 不存在、无效参数和
 服务故障；数据库详细错误不返回给客户端。不存在对应 delivery 时返回空集合，不伪造记录。
 多目标取消可能部分成功，应检查每个目标结果；后续存储失败不表示前面已提交的取消被回滚。
+
+### Client message correlation and cancelled history
+
+The WebSocket delivery adapter accepts optional `chat.send.params.client_message_id`
+(`clientMessageId` is also accepted). It supplies this value as the canonical
+message client key; requests without it keep using `idempotency_key`. The existing
+`bcs_messages.client_msg_id` column stores the key. No migration or new column is
+required. The assistant response/placeholder ID is a separate identity.
+
+Each successful cancellation result may additionally contain `client_message_id`.
+It is returned only when **all** deliveries of the canonical message are proven
+never sent and are in `cancelled`, `expired`, `rejected_capacity`, or
+`discarded_context`. A queued, active, uncertain, consumed, or potentially sent
+sibling prevents removal, even when cancellation of the selected target succeeds.
+Errors do not authorize frontend message removal. Older clients may ignore the
+additive field, and clients talking to older servers must not guess a match by
+content or timestamps. For a successful result carrying this correlation, clients
+may match optimistic user messages by their client key and history-loaded user
+messages by the **same result's** `delivery.message_id`. A canonical ID or a
+single target's cancelled status alone does not authorize removal.
+
+History queries omit a canonical message only if at least one delivery is
+`cancelled` and every delivery meets the unsent-terminal condition above.
+Filtering precedes pagination/limit in both the SQL and memory stores. Raw
+message lookup, delivery records, and `bcs_messages` retain the original record
+for authorization, idempotency, and auditing; this is not physical deletion.
+Legacy messages without managed deliveries remain visible.
+
+The SQL implementation uses one indexed aggregate on existing
+`(env, source_message_id)` rows in the original bounded history query, with
+Session and environment isolation and no per-message DB round trips. Memory
+history aggregates delivery states once per Session, rather than scanning all
+deliveries for each message. Cancellation reuses its existing message/delivery
+reads and CAS writes. After any successful transition, one additional source-message
+lookup confirms removability from persisted sibling states; it is not repeated per
+target. Confirmation-read failure returns a service error without authorizing
+message removal, and does not roll back already committed cancellations.
+Candidate-history and per-message target scans are data
+dependent in cancellation-dense ranges; LIMIT bounds returned rows, not all
+scanned rows. SQLite index selection is tested; remote MySQL/OceanBase plans
+require deployment verification. Publication of a correlation-capable SDK is independent:
+public frontend manifests keep their public SDK versions until that release.
 
 queued 取消直接进入 `cancelled`，不调用 `chat.abort`。bound inject 只在 carrier 尚未开始
 发送时允许撤回，并使旧准备结果失效。active WebSocket 请求先提交取消意图，再由有界

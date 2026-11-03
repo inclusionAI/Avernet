@@ -37,6 +37,7 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
+from agentclaw.community.core.bot_management.engines.artifact_transfer import ArtifactTransferRegistry
 from agentclaw.community.core.service_bot.services.agentclaw_artifact import (
     restore_agentclaw_artifact,
     sync_agentclaw_artifact,
@@ -185,6 +186,7 @@ class BotBuildService:
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         user_list_repository: UserListRepositoryProtocol,
         env: str,
+        artifact_transfers: ArtifactTransferRegistry,
     ):
         """初始化 BotBuildService。
 
@@ -211,6 +213,7 @@ class BotBuildService:
         self._build_ignore_repository = build_ignore_repository
         self._env = env
         self._user_list_repository = user_list_repository
+        self._artifact_transfers = artifact_transfers
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -371,7 +374,7 @@ class BotBuildService:
 
         try:
             # ============================================================
-            # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
+            # Step 1: 计算源目录和目标目录
             # ============================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
             nas_storage_id = get_bot_nas_dir(
@@ -410,7 +413,11 @@ class BotBuildService:
             transfer_started = time.monotonic()
             migration_success = False
             try:
-                migration_success = self._migrate_bot_instance(
+                migration_success = self._artifact_transfers.resolve(build_plan.engine_type).publish(
+                    device_id=device_id, plan=build_plan, provider=provider,
+                    target_dir=target_dir, ignore_paths=build_ignore_paths,
+                    include_runtime_artifacts=include_runtime_artifacts,
+                ) or self._migrate_bot_instance(
                     device_id=device_id,
                     source_dir=source_dir,
                     target_dir=target_dir,
@@ -432,7 +439,7 @@ class BotBuildService:
                     int((time.monotonic() - transfer_started) * 1000),
                 )
 
-            # The host-side engine-root rsync is the sole writer of the
+            # Unless handled by the engine transfer strategy, host-side rsync writes the
             # versioned artifact. It preserves active symlinks and local Skill
             # payloads while each engine build plan excludes mounted repo
             # corpora. Do not make the Draft runtime write this target again:
@@ -1879,7 +1886,7 @@ class BotBuildService:
     ) -> Dict[str, Any]:
         """Restore an ARCA/BAAS mounted draft from a historical artifact.
 
-        The historical version is restored host-side with ``rsync --delete``
+        Unless handled by the engine strategy, restore with host-side ``rsync --delete``
         into the draft NAS workspace; runtime/session exclusions are preserved.
         Only versioned ``migration_path`` artifacts participate in this operation.
         """
@@ -1923,6 +1930,14 @@ class BotBuildService:
             entity_type=entity_type,
         )
         draft_dir = draft_nas_dir / build_plan.source_root_name
+        restored = self._artifact_transfers.resolve(build_plan.engine_type).restore(
+            bot=bot, source_version=source_version, plan=build_plan,
+            provider=provider, artifact_dir=artifact_dir,
+            migration_path_base=self._get_migration_path_base,
+            remaining_timeout=remaining_timeout, migration_error=BotBuildMigrationError,
+        )
+        if restored is not None:
+            return restored
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 

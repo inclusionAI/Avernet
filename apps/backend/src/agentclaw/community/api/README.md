@@ -3,7 +3,7 @@
 **The Service API surface.** A flat collection of modules, one per
 public service, that re-export the `@runtime_checkable Protocol` any
 consumer (HTTP, CLI, in-process embedder) calls against. FastAPI routers
-live next door under [`adapters/http/`](../adapters/http/README.md); they
+live next door under `adapters/http/`; they
 Inject a Protocol from this layer rather than the concrete service class
 in `core/`.
 
@@ -56,6 +56,8 @@ api/
 
 ## Enforcement
 
+Current conventions and authority: [Backend development guide](../../../../README.md).
+
 Five gates under `tests/community/architecture/`:
 
 - `test_protocol_base_ordering.py` — a Protocol base never precedes a
@@ -101,9 +103,10 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - BotOwnershipSyncProtocol
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
-  - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
+  - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
@@ -116,6 +119,9 @@ provides:
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
+  - ForumInteractionServiceProtocol
+  - ForumAuthorStatsServiceProtocol
+  - ForumPersonalCenterActivityServiceProtocol
   - FeedbackServiceProtocol
   - ForumDigestReportServiceProtocol
   - BotQuotaServiceProtocol
@@ -127,12 +133,20 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.bot_public_risk.service_protocol
+  - agentclaw.community.kernel.knowledge_content
+  - agentclaw.community.kernel.knowledge  # BotKnowledgeScope used by the conversation knowledge contract
+  - agentclaw.community.core.expert_market
+  - agentclaw.community.core.bot_knowledge
+  - agentclaw.community.core.space_knowledge
+  - agentclaw.community.core.bot_management.owner_handoff.contracts
   - agentclaw.community.core.bot_management.engine_version.protocol
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow
   - agentclaw.community.core.service_bot.file_count_service_protocol
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync  # submit-only DTOs (SyncReason / SubmissionResult / SpaceChange) — typed in bot_manager_sync.py
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
@@ -183,6 +197,7 @@ internal_dependencies:
   - agentclaw.community.core.task.task_service_protocol # TaskServiceProtocol authority re-exported by api/task/task_service.py
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
   - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
+  - agentclaw.community.core.task.forum.interaction  # BBS interaction, author-stats, and personal-center Service API Protocols re-exported by api/task modules
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
@@ -213,11 +228,15 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.render_screen_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_overview.bot_overview_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.bot_config_manifest.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
+  - agentclaw.community.core.apply_engine.compiler  # StateRef — the (kind, reference) pair apply_run_service's start_apply takes, re-exported beside the Protocol; each producer declares its own (MANIFEST_STATE via bot_config_manifest_service, genome_state in core.bot_genome.compile)
+  - agentclaw.community.core.apply_engine.run.service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_genome.genome_registry_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_genome.promotion.promotion_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.apply_engine.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
   - agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_credential_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_iam_token_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -313,3 +332,35 @@ The 100-character name and 65,535-byte description limits match the current
 `ac_skill` persistence columns. Legacy no-frontmatter upload remains a
 compatibility fallback outside the canonical Protocol; removing that fallback
 would require a separate migration and compatibility review.
+
+
+## User-list Service API V2
+
+UserListServiceProtocol retains exact legacy is_in_user_list reads (user/all).
+correct_membership adds subject_type=user|department (default user) and
+bot_type=service|personal|all (default all), and changes only the specified complete
+scope. matches_user requires a trusted actual Bot type (service or personal),
+checks that type or all, then combines user membership OR department ancestry.
+It resolves departments through StaffDeptPlugin only when applicable rules exist;
+missing data or directory failure grants nothing. Path segments are case-sensitive,
+subject to explicit legacy unique-collation write conflicts (409). No public rule
+listing is exposed. The real DI provider supplies repository plus staff directory.
+The signature gate and real SQLite/HTTP behavior tests cover this contract.
+
+## Ownership sync Service API v1
+
+`api.bot_ownership_sync.BotOwnershipSyncProtocol` is an additive, transport-free
+notification contract, separate from the unchanged managers-only v1 API:
+
+```python
+request_ownership_sync(*, bot_pk: int, env: str, avernet_tenant: str,
+                       reason: SyncReason) -> SubmissionResult
+```
+
+It performs only memory admission (`QUEUED`, `COALESCED`, `DISABLED`, `REJECTED`),
+not database reads, HTTP delivery, or confirmation. Owner handoff and the
+ownership notification/repair helpers consume it. The composition root binds
+both sync APIs to the same `BotManagerSyncDispatcher` when enabled. The current
+contract is defined here rather than re-exported from Core; its specific Core
+consumer edges must be declared, not generalized into permission to import
+HTTP adapters. `reason` is diagnostic only, never a work-kind selector.

@@ -96,6 +96,9 @@ async fn delivery_ports_are_transport_free_contracts() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -157,6 +160,7 @@ async fn added_message_flow_methods_fail_closed_for_noop_and_legacy_implementati
 
 fn group_chat_command() -> GroupChatCommand {
     GroupChatCommand {
+        caller_ingress: None,
         caller: CallerContext::Public,
         group_id: "group-1".to_string(),
         requested_sender_id: None,

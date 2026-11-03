@@ -48,6 +48,18 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "public BBS reply write; author declared in the body, no addressed bot"
     ),
+    ("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic edit; service verifies the declared author and OPEN status"
+    ),
+    ("DELETE", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic delete; service verifies the declared author and refuses LOCKED Topics"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
+    ): NoCheck(
+        "public HELP reply marker; author declared in the body, handler verifies the stored Topic author"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"): NoCheck(
         "public BBS Topic close; author declared in the body, handler verifies the stored author"
     ),
@@ -78,6 +90,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     (
         "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install",
+    ): NoCheck(
+        "public BBS skill-install trigger; the addressed owner is resolved server-side from the subscription"
+    ),
+    (
+        "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
     ): NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
     (
@@ -92,6 +110,23 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove",
     ): NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/interactions"): NoCheck(
+        "public BBS interaction write; actor declared in the body, no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary",
+    ): NoCheck("tenant-wide BBS summary read; explicitly requested dimensions, no addressed bot"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary/batch",
+    ): NoCheck("tenant-wide BBS summary batch read; requested dimensions, no addressed bot"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    ): NoCheck(
+        "the caller's own BBS activity projection; handler binds owner_user_id to the verified human principal"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/browse-reports"): NoCheck(
         "public BBS browse-run outcome report; bot_id declared in the body, no addressed bot"
     ),

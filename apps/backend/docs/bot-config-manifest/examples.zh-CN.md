@@ -337,9 +337,10 @@ bot 当前引擎校验并明确报错，而不是 apply 时静默跳过。
 路径差异由 `path_factory` 现状处理）；teclaw 物化后以
 `FileRef{name, store, path}` 进 `identity_files[]`。
 
-**提醒**：`MEMORY.md` 与 `IDENTITY.md` 在**保留名单**上——apply 永不写入、
-永不移除，声明它们会在 `PUT` 时被拒（schema §3.5）。人设/规则类文件才是本
-类目的主场景。
+**提醒**：`MEMORY.md` 不可声明且永不移除。`IDENTITY.md` 在原引擎白名单允许时
+可显式写入并按普通文件参与集合替换：identity 类目缺省不操作、[] 清空、非空列表完整替换
+（schema §3.5）。Claude Code 仍只接受
+`CLAUDE.md`，由专家编排确定性合并多文件，不扩展原生白名单。
 
 ## 5. `resources` — 工作区资源（单文件与目录）
 
@@ -545,6 +546,17 @@ Manifest 显式协议必须能在 Center 的对应环境中找到，不能 fallb
 **apply 做什么**：校验注册、权限及 Center 端点组合 → 在同一事务中收敛该 Bot
 的 MCP 安装关系和 override 配置 → best-effort 投影。配置字段优先级是
 Manifest/Bot > user config > Center/default。
+条目省略 `config` 会保留已保存的 Bot override，仅声明供应；`config: {}`
+明确清除完整 override，非空对象则完整替换。父条目从 Direct/非 Set 配置管理
+范围内移除时仍清 override；当前 Set 供应不被省略清理。
+
+```yaml
+mcp:
+  - server_code: mcp.ant.homistudio.meetmcp  # 沿用当前 Bot override
+  - server_code: mcp.example.reset
+    config: {}                            # 清 override，恢复继承来源
+```
+
 Manifest 只替换 Bot 显式 Header 集合；普通 Center 端点的最终 Header 按名称与
 user default 合并，同名由 Bot 覆盖。`headers: {}` 不再屏蔽 user headers；
 自定义 URL 仍不继承 user/default 凭据。

@@ -170,8 +170,9 @@ class ProgressSyncMixin:
         if not binding or not binding.device_id:
             return
         owner_id = self._get_owner_id(publish_record)
-        bot = self._bot_service.get_bot(
-            bot_id=publish_record.source_bot_id, user_id=owner_id
+        bot = self._bot_service.get_bot_by_address(
+            bot_id=publish_record.source_bot_id, user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             return
@@ -254,9 +255,10 @@ class ProgressSyncMixin:
         (provider-permitting — teclaw keeps it). Best-effort: a destroy failure is
         logged and does not block the publish."""
         owner_id = self._get_owner_id(publish_record)
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(

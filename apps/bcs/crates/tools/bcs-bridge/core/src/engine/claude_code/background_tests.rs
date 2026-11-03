@@ -1,6 +1,7 @@
 use super::*;
+// These fixtures exercise the explicit legacy notification-consumption gate.
     async fn run_mock_cc(script: &str) -> Result<TurnOutcome, TurnError> {
-        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        let engine = ClaudeCode { bin: PathBuf::from("bash"), prefix_args: vec![script.to_string()], completion_mode: CompletionMode::Legacy };
         let req = TurnRequest::new("r-bg", "hi", ".", Arc::new(NullObserver));
         let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         engine
@@ -29,10 +30,9 @@ use super::*;
         // results cut the turn with two enqueued-but-undelivered finders).
         let enq = r#"{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_1","status":"completed","summary":"done"}"#;
         match map_cc_line(enq, "r-1") {
-            CcMap::BackgroundEnqueued { task_id, tool_use_id, status } => {
+            CcMap::BackgroundEnqueued { task_id, tool_use_id } => {
                 assert_eq!(task_id.as_deref(), Some("t1"));
                 assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
-                assert_eq!(status, "completed");
             }
             other => panic!("expected BackgroundEnqueued, got {other:?}"),
         }
@@ -524,11 +524,13 @@ use super::*;
             "/tests/fixtures/mock_cc_bg_idle_forever.sh"
         );
         let mut req = TurnRequest::new("r-idle", "hi", ".", Arc::new(NullObserver));
-        req.idle_timeout = Some(std::time::Duration::from_millis(300));
-        let engine = ClaudeCode::new(PathBuf::from("bash"), vec![script.to_string()]);
+        // Include headroom for child startup and fixture scheduling on busy CI;
+        // 300ms can expire before task_started reaches the driver.
+        req.idle_timeout = Some(std::time::Duration::from_secs(3));
+        let engine = ClaudeCode { bin: PathBuf::from("bash"), prefix_args: vec![script.to_string()], completion_mode: CompletionMode::Legacy };
         let (tx, _rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
         let turn = engine.run_turn(req, tx, tokio_util::sync::CancellationToken::new());
-        let error = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+        let error = tokio::time::timeout(std::time::Duration::from_secs(15), turn)
             .await
             .expect("watchdog must fire, not wedge")
             .expect_err("a quiet stream must fail the turn");

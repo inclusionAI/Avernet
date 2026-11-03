@@ -260,7 +260,7 @@ port_already_assigned() {
 config_has_bcs_core_tools() {
     local config_file="$1"
     [ -f "$config_file" ] || return 1
-    for tool in bcs_route bcs_assign_task bcs_send_task_message bcs_task_complete; do
+    for tool in bcs_route bcs_assign_task bcs_task_status bcs_cancel_task bcs_task_complete; do
         if ! grep -q "\"${tool}\"" "$config_file"; then
             return 1
         fi
@@ -897,8 +897,7 @@ ${models_block}
     "profile": "coding",
     "alsoAllow": [
       "bcs_route",
-      "bcs_assign_task",
-      "bcs_send_task_message",
+      "bcs_assign_task", "bcs_task_status", "bcs_cancel_task",
       "bcs_task_complete"
     ]
   },
@@ -1278,9 +1277,16 @@ get_bot_token() {
     jq -r 'if (.token | type) == "string" then .token else empty end' "$session_file" 2>/dev/null | head -n 1
 }
 
+
 # ============================================================================
 # Bot Onboarding
 # ============================================================================
+
+#==============================================================================
+# Trusted-registration seeding helper: seeds the local 5bot ownership
+# through the GET /register/token -> POST /register chain so the mock
+# story human controls these bots (see the helper file for details).
+source "${SCRIPT_DIR}/bots_trusted_seed.sh"
 
 cmd_onboard() {
     info "Completing bot onboarding..."
@@ -1755,6 +1761,13 @@ case "${1:-start}" in
             echo ""
             info "Starting BCS server..."
             start_bcs || exit 1
+        fi
+
+        if [ "${BCS_TRUSTED_SEED_BOTS:-1}" = "1" ]; then
+            seed_trusted_registrations || exit 1
+        else
+            warn "BCS_TRUSTED_SEED_BOTS=0: skipping trusted registration seeding;"
+            warn "bots will stay human-unowned and Human->Bot story ops will 403"
         fi
 
         echo ""

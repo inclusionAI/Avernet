@@ -37,7 +37,7 @@ def setup(server, fake_engine, auth_gate_service, monkeypatch):
     websocket = SimpleNamespace(send_text=AsyncMock())
 
     async def start():
-        params = {"sessionKey": "sk", "message": "hello", "idempotencyKey": "new"}
+        params = {"sessionKey": "sk", "message": "hello", "idempotencyKey": "new", "resumeEnabled": False}
         response = await server._handle_chat_send(
             websocket, "conn-1", _req("chat.send", params), params,
             auth_gate_service=auth_gate_service,

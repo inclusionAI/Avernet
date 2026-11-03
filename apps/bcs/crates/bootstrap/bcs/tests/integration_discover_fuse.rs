@@ -227,7 +227,40 @@ async fn leave_bot_does_not_trigger_offline() {
     let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
-    let mut bot = MockBot::connect(addr).await;
+    // bot-authority ruling T6d-1: the owning Human seeds
+    // the ownership via the TRUSTED register surface
+    // (the raw connect+mock-user onboard never mints
+    // authority), then the bot RESUMES via its token.
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://{}/register/token", addr))
+        .header("X-Mock-User-Id", "alice")
+        .header("X-Mock-Nick-Name", "Alice")
+        .send()
+        .await
+        .expect("register token request");
+    assert!(resp.status().is_success());
+    let register_token = resp
+        .json::<serde_json::Value>()
+        .await
+        .expect("register token body")["token"]
+        .as_str()
+        .expect("register token")
+        .to_string();
+    let resp = client
+        .post(format!(
+            "http://{}/register?token={}&bot-name=LeaveTestBot",
+            addr,
+            register_token
+        ))
+        .send()
+        .await
+        .expect("trusted registration");
+    assert!(resp.status().is_success());
+    let registered = resp.json::<serde_json::Value>().await.unwrap();
+    let _trusted_token = registered["bot_token"].as_str().unwrap().to_string();
+
+    let mut bot = MockBot::reconnect(addr, &_trusted_token).await;
     bot.register("LeaveTestBot", &["testing"], addr).await;
     bot.send_heartbeat().await;
 

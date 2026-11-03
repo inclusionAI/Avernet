@@ -2,6 +2,12 @@
 
 ## Provides
 
+- Native `/collaboration/user` composition with the existing BCS Human browser
+  auth chain and existing V1 Bot/Group services. Its verifier rejects Bot, Actor,
+  Gateway and Draft credentials; it never promotes a Bot's owner to the caller.
+  Gateway V1 verification remains independent and never falls back to this chain.
+  Both Draft HTTP projections receive the same existing Draft service instance.
+
 The Prometheus message-flow decorator transparently forwards one-shot result
 publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
@@ -71,6 +77,9 @@ visible through the logging system. No
 Bot/session/message IDs, message text, Provider keys or credentials enter monitor records.
 The scheduler shutdown waits for sampling to stop; the process LoggingGuard
 subsequently flushes the shared logging workers when runtime shutdown completes.
+
+Delivery wiring also injects the existing message_history.new_participant_visible_limit
+into read-only delivery authorization; no new config key or schema is introduced.
 
 Delivery wiring loads DB policy, rejects non-default legacy file policy, and supervises a scheduler on durable storage even while flows are disabled. The existing LeaderElectionPort gates each master epoch; followers do not run recovery, expiry, dispatch, abort control or the queue aggregate sampler. Master acquisition reloads durable policy under the management write lock before recovery/dispatch. Failed reads or uncertain leadership fail closed. Demotion drops epoch futures without follower-side recovery; send-start records survive for conservative recovery by the next master. Management traffic must route to the master. This reuses deployment election, not a new distributed fencing/consensus protocol; already-issued network operations cannot be recalled on demotion. Lifecycle guards disable admissions and dynamic enforce when supervision stops.
 
@@ -199,3 +208,38 @@ whether this call hits storage and must be checked during deployment validation.
 Bot disconnect follows the existing local runtime cleanup, preserving credentials;
 it does not write persistent Bot metadata. Connection cancellation wakes O(N)
 local socket tasks, but does not scan database rows or issue N election queries.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A input composition
+
+The optional `a2a_grpc` configuration is validated before startup and injected
+into both Card selection and the shared delivery adapter. Bootstrap owns this
+concrete binding choice. Its explicit routes map selected Card interfaces to
+deployment-owned MOSN metadata; the adapter dials only the local sidecar. An
+absent configuration preserves HTTP-only selection. Core owns no tonic types,
+channels, registry calls or transport-specific routing headers.
+
+The infrastructure composition root passes full Card declarations to the outbound
+adapter and wires its InteractionProviderPort into the existing Provider mux.
+It injects the same managed-delivery service and tracked Run-context port used by
+the queue, the generic RunBudgetCore and a weak InteractionService back-reference.
+There is no adapter-to-concrete-service import or strong service cycle.
+`a2a_input.wait_timeout_ms` (600000) and `total_timeout_ms` (1800000) configure
+independent human-wait/total caps; typed config validation enforces positive
+wait <= total <= one day. Execution continues to use its existing timeout.
+Test-only server constructors retain the legacy mux unless explicitly configured;
+the production infrastructure path enables the supported Structured Input profile.

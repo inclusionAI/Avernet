@@ -1,6 +1,7 @@
 """Shared route policy keys for owner-only DWS admission and authorization."""
 
 OPERATIONS = (
+    ("GET", "/eligibility"),
     ("GET", ""),
     ("GET", "/settings"),
     ("PUT", "/settings"),

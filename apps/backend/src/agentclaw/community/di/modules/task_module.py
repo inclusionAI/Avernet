@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Annotated
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -37,6 +38,13 @@ from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumAuthorStatsServiceProtocol,
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
@@ -47,7 +55,10 @@ from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
 from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumAuthorStatsRepository,
     ForumDigestReportRepository,
+    ForumInteractionRepository,
+    ForumPersonalCenterActivityRepository as ForumPersonalCenterActivityRepositoryImpl,
     ForumRepository,
 )
 from agentclaw.community.core.repository.protocols.task import (
@@ -64,30 +75,67 @@ from agentclaw.community.core.repository.protocols.task.feedback import (
 from agentclaw.community.core.repository.protocols.task.forum import (
     ForumRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.task.forum_author_stats import (
+    ForumAuthorStatsRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_interaction import (
+    ForumInteractionRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum_personal_center_activity import (
+    ForumPersonalCenterActivityRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.forum_digest import (
     ForumDigestReportRepositoryProtocol,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
-from agentclaw.community.core.task.task_center.bot_intake_skill import BotTaskIntakeSkill
-from agentclaw.community.core.task.task_center.intake_target_resolver import DefaultIntakeTargetResolver
-from agentclaw.community.core.task.repository.task_intake_repository import TaskIntakeRepositoryProtocol
+from agentclaw.community.core.task.task_center.bot_intake_skill import (
+    BotTaskIntakeSkill,
+)
+from agentclaw.community.core.task.task_center.intake_target_resolver import (
+    DefaultIntakeTargetResolver,
+)
+from agentclaw.community.core.task.repository.task_intake_repository import (
+    TaskIntakeRepositoryProtocol,
+)
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
-from agentclaw.community.core.task.task_center.delivery_lifecycle import TaskDeliveryLifecycle
-from agentclaw.community.core.task.feedback.services.feedback_service import FeedbackService
+from agentclaw.community.core.task.task_center.delivery_lifecycle import (
+    TaskDeliveryLifecycle,
+)
+from agentclaw.community.core.task.feedback.services.feedback_service import (
+    FeedbackService,
+)
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
-from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
 from agentclaw.community.core.task.forum.services.forum_service import ForumService
+from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
+    ForumAuthorStatsService,
+)
+from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
+    ForumInteractionService,
+)
+from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
+    ForumPersonalCenterActivityService,
+)
+from agentclaw.community.core.task.forum.interaction.target_verifier import (
+    DatabaseForumInteractionTargetVerifier,
+)
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
     RelaySessionRecovery,
@@ -119,10 +167,14 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 from agentclaw.community.core.task.task_discovery.frontend_url import (
     ConfigFrontendUrlProvider,
 )
-from agentclaw.community.plugin_api.bbs_digest_notify import (
-    BbsDigestNotifyProvider,
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
+from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
+    ForumInteractionTargetVerifierProtocol,
+)
 from agentclaw.community.di.config import TaskDispatchConfig
 
 logger = logging.getLogger("task.module")
@@ -176,9 +228,38 @@ class TaskModule(Module):
         # pure construction + contextvar staging, no repository, no IO; the write
         # itself rides the graph transaction. "未接线不发布" refers to the
         # graph-repo-absent case handled in _persist_locked, not this binding.
-        binder.bind(TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton)
+        binder.bind(
+            TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton
+        )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
         binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumInteractionRepositoryProtocol,
+            to=ForumInteractionRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumAuthorStatsRepositoryProtocol,
+            to=ForumAuthorStatsRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumPersonalCenterActivityRepositoryProtocol,
+            to=ForumPersonalCenterActivityRepositoryImpl,
+            scope=singleton,
+        )
+        binder.bind(
+            ForumInteractionTargetVerifierProtocol,
+            to=DatabaseForumInteractionTargetVerifier,
+            scope=singleton,
+        )
+        binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
+        binder.bind(ForumInteractionServiceProtocol, to=ForumInteractionService, scope=singleton)
+        binder.bind(
+            ForumPersonalCenterActivityServiceProtocol,
+            to=ForumPersonalCenterActivityService,
+            scope=singleton,
+        )
         binder.bind(
             ForumDigestReportRepositoryProtocol,
             to=ForumDigestReportRepository,
@@ -207,7 +288,7 @@ class TaskModule(Module):
         repository: ForumDigestReportRepositoryProtocol,
         bot_service: BotServiceProtocol,
         openapi_bot: OpenApiBotPort,
-        notify_sender: BbsDigestNotifyProvider,
+        notify_sender: Annotated[NotifySenderPlugin, QUALIFIER_BBS_DIGEST],
         frontend_url_provider: ConfigFrontendUrlProvider,
     ) -> ForumDigestReportServiceProtocol:
         """Build the batch digest service from deployment-owned delivery ports."""
@@ -250,6 +331,39 @@ class TaskModule(Module):
 
     @singleton
     @provider
+    def bbs_digest_cron_manager(
+        self,
+        cron_relay: CronRelayServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
+    ) -> BbsDigestCronManager:
+        """Build the Bot-side BBS digest cron cleanup manager with its Backend URL."""
+        return BbsDigestCronManager(
+            cron_relay=cron_relay,
+            backend_base_url=task_dispatch.backend_url,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bbs_browse_subscription_provisioner(
+        self,
+        service: ForumServiceProtocol,
+        browse_cron: BbsBrowseCronManager,
+        digest_cron: BbsDigestCronManager,
+        runner: BbsBrowseLoopRunner,
+        scheduler: BbsBrowseLoopScheduler,
+    ) -> BbsBrowseSubscriptionProvisioner:
+        """Build the asynchronous BBS periodic-task subscription provisioner."""
+        return BbsBrowseSubscriptionProvisioner(
+            service=service,
+            browse_cron=browse_cron,
+            digest_cron=digest_cron,
+            runner=runner,
+            scheduler=scheduler,
+        )
+
+    @singleton
+    @provider
     @inject
     def callback_data_enricher(self, injector: Injector) -> CallbackDataEnricher:
         """回投数据 enricher(BCN 查 BCS run 详情 + ClawMind 构图);base_url 取自 BcsTokenProvider。
@@ -281,9 +395,10 @@ class TaskModule(Module):
         端口接线策略(所有部署 profile 均相同):只从 DI composition root 获取
         ``OpenApiBotPort`` / ``BcsClientPort``。部署差异由 application overlay 的配置块驱动
         具体端口实现,TaskModule 不读取部署 profile,也不携带环境专属分支。
-        - discover: every profile reuses ``CatalogKeywordBotDiscover`` over the public
-          Bot catalogue (BCS catalog keyword search). Task dispatch intentionally does
-          not invoke BCSFuse recommendation, whose availability must not decide routing.
+        - discover: every profile uses the same internal candidate contract. When the
+          BCSFuse-backed discover service is available, task search first uses one
+          candidate-query semantic recommendation and falls back to the existing
+          catalog keyword search; if BCSFuse is not bound, behavior stays keyword-only.
         """
         try:
             graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
@@ -304,7 +419,13 @@ class TaskModule(Module):
             type(bcs).__name__ if bcs is not None else "None",
             "" if (bot is not None and bcs is not None) else "不(全退 Avernet 桩)",
         )
-        discover_port = self._resolve_discover(bot_public=bot_public)
+        semantic_discover = self._resolve_optional_port(
+            injector, BotDiscoverServiceProtocol, "BCSFuse 语义搜推端口缺省"
+        )
+        discover_port = self._resolve_discover(
+            bot_public=bot_public,
+            semantic_discover=semantic_discover,
+        )
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
         # 未安装 BotManagement 的轻量 DI 测试路径取不到 → None(BBS 按可恢复态跳过;未配置 provider 时走 not-configured)。
@@ -351,7 +472,11 @@ class TaskModule(Module):
         # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
-            runtime_probe = TaskRuntimeLivenessProbe(bot=bot, bcs=bcs)
+            runtime_probe = TaskRuntimeLivenessProbe(
+                bot=bot,
+                bcs=bcs,
+                bot_tokens=bot_token_provider,
+            )
             # Relay no-progress is a same-session continuation, never a central
             # RUNNING→PENDING reset. Resolve the optional collaborators here so
             # production never falls back to the graph-retry semantics.
@@ -451,7 +576,8 @@ class TaskModule(Module):
                     intake_repository=intake_repo,
                 ),
                 DefaultIntakeTargetResolver(
-                    bot_service, staff_profile=staff_dept,
+                    bot_service,
+                    staff_profile=staff_dept,
                     search=TaskSearch(discover_port),
                 ),
             )
@@ -668,18 +794,26 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_discover(
-        *, bot_public: BotPublicServiceProtocol
+        *,
+        bot_public: BotPublicServiceProtocol,
+        semantic_discover: BotDiscoverServiceProtocol | None = None,
     ) -> BotDiscoverServiceProtocol:
-        """Reuse the catalog keyword candidate adapter for every profile.
+        """Resolve semantic-first hybrid retrieval, or the keyword-only fallback.
 
-        ``SearchBasedDispatchStrategy`` performs jieba tokenization and calls this
-        port once per token. The adapter delegates to BCS catalog keyword search
-        (``search_catalog_public_bots_by_keyword``); BCSFuse recommendation remains
-        available to the separate public Bot-discovery API and is not a task
-        dispatch dependency.
+        ``BotDiscoverServiceProtocol`` from bot_public is the optional BCSFuse
+        recommendation port. When it is absent in a lightweight injector, task
+        dispatch keeps the existing keyword-only adapter; when it is present,
+        the hybrid adapter tries the candidate query semantically first and only
+        falls back to the established tokenized catalog keyword search.
         """
         from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
             CatalogKeywordBotDiscover,
         )
+        from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
+            SemanticKeywordBotDiscover,
+        )
 
-        return CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        keyword_discover = CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        if semantic_discover is None:
+            return keyword_discover
+        return SemanticKeywordBotDiscover(keyword_discover, semantic_discover)

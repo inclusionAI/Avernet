@@ -6,12 +6,15 @@ use bcs_service_api::{
     ActorKind, BotCatalogCleanupPort, BotControlPlaneCoreService, BotRegistryCoreService,
     BotTaskModesQuery,
     ChannelBindingCleanupPort, DeleteProviderBotCommand, DeleteProviderBotOutcome,
-    NoopBotCatalogCleanupPort, NoopChannelBindingCleanupPort, ProviderBotBinding,
+    NoopBotCatalogCleanupPort, NoopChannelBindingCleanupPort,
+    ProviderBotBinding,
     ProviderBotCoreService,
     ProviderBotRosterItem, ProviderBotTaskModesFilter, ProviderCoreService,
     ProviderManagementService, ProviderRecord, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams, RegisterProviderCommand,
-    RegisterProviderOutcome, RelationCoreService, ServiceError, ServiceResult,
+    RegisterProviderOutcome, RelationCoreService, RetireProviderBotParams,
+    ServiceError, ServiceResult,
+    SyncProviderBotCallerConfigurationCommand,
     UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
@@ -95,6 +98,34 @@ impl ProviderManagement {
             .await
     }
 
+    /// Authority ownership initialization for a freshly created admin Bot
+    /// (spec §10.3 trusted delegation): the Provider-admin credential
+    /// authenticates the identity authority, so its declared single owner
+    /// initializes the owner edge the same way the trusted register chain
+    /// does — but the audit actor records `Provider { provider_id }`
+    /// (the Provider credential is its own principal), never the claimed
+    /// Human. The Provider-registration legacy guard already refuses
+    /// re-registering an existing Bot under a divergent owner, so a
+    /// divergent-owner composite conflict never reaches this call and
+    /// every composite failure propagates honestly.
+    async fn ensure_authority_ownership(
+        &self,
+        bot_uuid: &str,
+        owner: &str,
+        provider_id: &str,
+    ) -> ServiceResult<()> {
+        let mutation = bcs_service_api::types::bot_authority::AuthorityMutation {
+            mutation_id: uuid::Uuid::new_v4().to_string(),
+            actor: bcs_service_api::types::bot_authority::AuthorityActor::Provider {
+                provider_id: provider_id.to_string(),
+            },
+        };
+        self.registry
+            .initialize_ownership(bot_uuid, owner, mutation)
+            .await?;
+        Ok(())
+    }
+
     async fn resolve_owner_nick_name(&self, staff_no: &str) -> String {
         let Some(user_directory) = self.user_directory.as_ref() else {
             return staff_no.to_string();
@@ -171,6 +202,19 @@ impl ProviderManagement {
         }
         Ok(provider)
     }
+
+    /// The requested environment must equal the BCS environment of this
+    /// instance; trusted material is never environment-agnostic.
+    fn ensure_env_matches(requested: &str) -> ServiceResult<()> {
+        if requested == bcs_config::resolve_env_str() {
+            Ok(())
+        } else {
+            Err(ServiceError::InvalidOperation {
+                message: "caller configuration environment mismatch".to_string(),
+                request_id: None,
+            })
+        }
+    }
 }
 
 #[async_trait]
@@ -181,13 +225,105 @@ impl ProviderManagementService for ProviderManagement {
         self.provider_core.get_provider_by_slug(slug).await
     }
 
+    async fn resolve_provider_bot_uuid_for_caller_config(
+        &self,
+        provider_id: &str,
+        provider_bot_ref: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<String> {
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        let binding = self
+            .provider_bot_core
+            .get_provider_bot_binding_by_ref(provider_id, provider_bot_ref)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::BotNotFound(provider_bot_ref.to_string())
+            })?;
+        if binding.disabled {
+            return Err(ServiceError::BotNotFound(provider_bot_ref.to_string()));
+        }
+        Ok(binding.bot_uuid)
+    }
+
+    async fn get_provider_caller_capabilities(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::ProviderCallerCapabilities>> {
+        // Authenticate first: capability bytes never flow to callers that
+        // cannot prove provider admin identity against this provider.
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        self.provider_core.get_caller_capabilities(provider_id).await
+    }
+
+    async fn get_provider_bot_caller_configuration(
+        &self,
+        provider_id: &str,
+        bot_id: &str,
+        env: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<bcs_service_api::port::repo::BotCallerConfiguration> {
+        self.ensure_provider_admin_active(provider_id, provider_admin_token)
+            .await?;
+        Self::ensure_env_matches(env)?;
+        // Authoritative capability check before the scoped read: a broken or
+        // disabled declaration rejects; an undeclared one may still read.
+        self.provider_core.get_caller_capabilities(provider_id).await?;
+        let core = self.control_plane.clone().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "caller configuration management is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        core.get_provider_caller_configuration(bot_id, env, provider_id)
+            .await?
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "caller_configuration_target_out_of_scope".to_string(),
+                request_id: None,
+            })
+    }
+
+    async fn sync_provider_bot_caller_configuration(
+        &self,
+        command: SyncProviderBotCallerConfigurationCommand,
+        provider_admin_token: &str,
+    ) -> ServiceResult<bcs_service_api::port::repo::CallerConfigurationSync> {
+        self.ensure_provider_admin_active(&command.provider_id, provider_admin_token)
+            .await?;
+        Self::ensure_env_matches(&command.env)?;
+        // A broken or disabled provider declaration rejects the sync; an
+        // undeclared provider may still persist configuration intent.
+        self.provider_core
+            .get_caller_capabilities(&command.provider_id)
+            .await?;
+        let core = self.control_plane.clone().ok_or_else(|| {
+            ServiceError::InvalidOperation {
+                message: "caller configuration management is not configured".to_string(),
+                request_id: None,
+            }
+        })?;
+        core.sync_provider_caller_configuration(
+            &command.bot_id,
+            &command.env,
+            &command.provider_id,
+            command.snapshot,
+        )
+        .await?
+        .ok_or_else(|| ServiceError::InvalidOperation {
+            message: "caller_configuration_target_out_of_scope".to_string(),
+            request_id: None,
+        })
+    }
+
     async fn register_provider(
         &self,
         command: RegisterProviderCommand,
     ) -> ServiceResult<RegisterProviderOutcome> {
         let registered = self
             .provider_core
-            .register_provider_with_slug(
+            .register_provider_with_policy(
                 command.name,
                 command.webhook_url,
                 command.auth_mode,
@@ -196,6 +332,8 @@ impl ProviderManagementService for ProviderManagement {
                 command.coordination,
                 command.slug,
                 command.admin_callback_url,
+                command.collaboration_scope,
+                command.caller_capabilities,
             )
             .await?;
         Ok(RegisterProviderOutcome {
@@ -230,7 +368,7 @@ impl ProviderManagementService for ProviderManagement {
     ) -> ServiceResult<ProviderRecord> {
         self
             .provider_core
-            .update_provider_with_slug(
+            .update_provider_with_policy(
                 &command.provider_id,
                 &command.provider_admin_token,
                 &command.authenticated_staff_id,
@@ -241,6 +379,8 @@ impl ProviderManagementService for ProviderManagement {
                 command.organization_management,
                 command.slug,
                 command.admin_callback_url,
+                command.collaboration_scope,
+                command.caller_capabilities,
             )
             .await
     }
@@ -288,11 +428,36 @@ impl ProviderManagementService for ProviderManagement {
                     scopes: command.scopes,
                     bot_uuid: command.bot_uuid,
                     connection_mode: command.connection_mode,
+                    initial_caller: None,
                 },
             )
             .await?;
-        if !duplicate_registration {
+        // A duplicate binding only proves the Bot and binding rows
+        // committed — never that the authority composite survived its
+        // post-commit steps. A first attempt that failed between
+        // commit and the ensures leaves an uninitialized Bot behind,
+        // and the replay's `duplicate_registration = true` would then
+        // record success around ownership_version = 0. Retries must
+        // complete what the first attempt missed; `initialize_ownership`
+        // is idempotent with a creator-match guard and a plain owner
+        // echo for the agreeing state, so completing ONLY at
+        // ownership_version = 0 never pushes a completed (possibly
+        // transferred) Bot back at the original owner.
+        let complete_ownership = if !duplicate_registration {
+            true
+        } else {
+            self.registry
+                .ownership_governance_state(&binding.bot_uuid)
+                .await?
+                .map(|state| state.ownership_version == 0)
+                // No governance row is typed the same as unknown: the
+                // composite decides (it classifies never-creates).
+                .unwrap_or(true)
+        };
+        if complete_ownership {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
+            self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id)
+                .await?;
         }
         let created = !duplicate_registration;
         let capabilities = if created {
@@ -384,69 +549,57 @@ impl ProviderManagementService for ProviderManagement {
         self.ensure_provider_admin_active(&command.provider_id, &command.provider_admin_token)
             .await?;
 
-        if let Some(result) = self.provider_bot_core.delete_registered_provider_bot(
-            &command.provider_id, &command.provider_admin_token, &command.provider_bot_ref,
-        ).await? {
-            self.cleanup_deleted_bot(&result.bot_uuid).await?;
-            return Ok(DeleteProviderBotOutcome {
-                bot_uuid: result.bot_uuid, provider_id: command.provider_id,
-                provider_bot_ref: command.provider_bot_ref, deleted: result.deleted,
-            });
-        }
-        let mut was_active_binding = false;
-        let binding = self
+        // ONE atomic Provider retirement (spec §7.1): the
+        // Core verifies the Provider credential, resolves the
+        // branch and commits the tombstone, binding disable,
+        // authority cleanup and retire audit in one store
+        // transaction. No ordinary delete is chained after a
+        // committed Provider deletion.
+        let retirement = self
             .provider_bot_core
-            .get_provider_bot_binding_by_ref(&command.provider_id, &command.provider_bot_ref)
+            .retire_registered_bot(RetireProviderBotParams {
+                provider_id: command.provider_id.clone(),
+                provider_admin_token: command.provider_admin_token.clone(),
+                provider_bot_ref: command.provider_bot_ref.clone(),
+                allow_unbound_owner_suffixed_bot: command.allow_unbound_owner_suffixed_bot,
+            })
             .await?;
-        let (bot_uuid, cleanup_before_soft_delete) = match binding {
-            Some(binding) => {
-                was_active_binding = !binding.disabled;
-                if binding.provider_id != command.provider_id {
-                    return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
-                }
-                let _ = self
-                    .provider_bot_core
-                    .set_provider_bot_disabled(
-                        &command.provider_id,
-                        &binding.bot_uuid,
-                        &command.provider_admin_token,
-                        true,
-                    )
-                    .await?;
-                (binding.bot_uuid, false)
-            }
-            // Legacy bots on allowed-switch providers reuse provider_bot_ref as bot_uuid
-            // and may have no binding row.
-            None if command.allow_unbound_owner_suffixed_bot
-                && is_owner_suffixed_bot_id(&command.provider_bot_ref) =>
-            {
-                if self.registry.get(&command.provider_bot_ref).await.is_none() {
-                    return Err(ServiceError::BotNotFound(command.provider_bot_ref));
-                }
-                (command.provider_bot_ref.clone(), true)
-            }
-            None => {
-                return Err(ServiceError::BotNotFound(command.provider_bot_ref));
-            }
-        };
 
-        // Binding-backed bots can be tombstoned before cleanup because their
-        // binding retains the identity needed for retries. Unbound legacy bots
-        // have no such durable lookup key, so keep the registry identity active
-        // until cleanup succeeds and a failed request remains retryable.
-        let deleted = if cleanup_before_soft_delete {
-            self.cleanup_deleted_bot(&bot_uuid).await?;
-            self.registry.soft_delete(&bot_uuid).await
-        } else {
-            let deleted = self.registry.soft_delete(&bot_uuid).await || was_active_binding;
-            self.cleanup_deleted_bot(&bot_uuid).await?;
-            deleted
-        };
+        // Post-commit (spec §7.1): invalidate the
+        // runtime/token/metadata caches FIRST — a stale
+        // cache must never resurrect a valid identity from
+        // before the tombstone — then run the existing
+        // external cleanup.
+        self.registry.soft_delete(&retirement.bot_id).await;
+        if let Err(error) = self.cleanup_deleted_bot(&retirement.bot_id).await {
+            // Stable `retirement_cleanup_pending`: the
+            // durable retirement is committed and is NEVER
+            // rolled back, but the caller does NOT get a
+            // full success either. A retry re-derives the
+            // identity from the retained
+            // tombstone/metadata/binding (all three
+            // branches) and is idempotent: no resurrected
+            // Bot, no duplicate retire audit, no outbox.
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                bot_uuid = %retirement.bot_id,
+                provider_id = %command.provider_id,
+                error = %error,
+                "retirement external cleanup failed; cleanup pending"
+            );
+            return Err(ServiceError::Conflict(format!(
+                "{}: bot {} retirement is committed; retry the \
+                 external cleanup",
+                bcs_service_api::application::v1::bot_authority::
+                    ERROR_RETIREMENT_CLEANUP_PENDING,
+                retirement.bot_id
+            )));
+        }
         Ok(DeleteProviderBotOutcome {
-            bot_uuid,
+            bot_uuid: retirement.bot_id,
             provider_id: command.provider_id,
             provider_bot_ref: command.provider_bot_ref,
-            deleted,
+            deleted: retirement.changed,
         })
     }
 
@@ -517,10 +670,4 @@ impl ProviderManagementService for ProviderManagement {
             visibility: capabilities.visibility,
         })
     }
-}
-
-fn is_owner_suffixed_bot_id(bot_uuid: &str) -> bool {
-    bot_uuid
-        .rsplit_once(':')
-        .is_some_and(|(prefix, owner)| !prefix.trim().is_empty() && !owner.trim().is_empty())
 }

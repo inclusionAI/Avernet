@@ -51,7 +51,7 @@ def mock_resolver():
 def mock_bot_service():
     """Mock BotService — defaults to a non-teclaw (openclaw) bot."""
     svc = MagicMock()
-    svc.get_bot.return_value = {"active_engine": "openclaw"}
+    svc.get_bot_by_address.return_value = {"active_engine": "openclaw", "owner_id": "user1", "entity_id": "user1"}
     return svc
 
 
@@ -1067,10 +1067,10 @@ class TestProviderDispatch:
     """
 
     def _openclaw_bot(self, mock_bot_service):
-        mock_bot_service.get_bot.return_value = {"active_engine": "openclaw"}
+        mock_bot_service.get_bot_by_address.return_value = {"active_engine": "openclaw", "owner_id": "user1", "entity_id": "user1"}
 
     def _teclaw_bot(self, mock_bot_service):
-        mock_bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        mock_bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
 
     # ── teclaw: persist-then-deliver, best-effort ───────────────────────────
     @pytest.mark.asyncio
@@ -1187,7 +1187,7 @@ class TestProviderDispatch:
         self, channel_service, mock_bot_service
     ):
         """A missing bot resolves to non-teclaw so the openclaw path runs unchanged."""
-        mock_bot_service.get_bot.side_effect = BotNotFoundError("nope")
+        mock_bot_service.get_bot_by_address.side_effect = BotNotFoundError("nope")
         assert channel_service._is_teclaw_bot("botX", "u1") is False
 
     @pytest.mark.asyncio

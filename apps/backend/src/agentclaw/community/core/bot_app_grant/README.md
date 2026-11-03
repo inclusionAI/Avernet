@@ -1,5 +1,28 @@
 # `agentclaw.community.core.bot_app_grant`
 
+## B5 stable Bot locator
+
+The physical `owner_id` columns in `ac_bot_app_grant` and its log store the
+Bot's immutable entity locator, not a personnel snapshot. Existing names and
+wire fields remain compatible. `user_id` remains the actual delegating user;
+handoff never rewrites it or grants the new Owner that user's delegated identity.
+The repository canonicalizes owner/entity locators before grant, find, list and
+revocation. Missing Bots retain explicit detached/creation addresses; ambiguous
+live Bots and persistence errors are never ignored. App listings batch-filter
+exact `(bot_id, entity_id)` addresses, separately from current-owner liveness.
+Live list records receive a non-persisted `current_owner_id` projection; owner
+list filtering and HTTP personnel display use it, while the grant key stays
+immutable. Grant management resolves the locator before calling the existing
+permission checks and carries its stable context downstream. Collaboration listings use the existing relation PK,
+not its historical Owner snapshot, and apply app entity scope before pagination.
+Human grant authority and machine requests still require live permission checks.
+Owner==entity historical rows need no blanket migration. Bot deletion sweeps
+accept the existing current-Owner input while the Bot is live, then use its
+stable resource key; detached cleanup must supply the persisted entity locator.
+
+The older explanatory text below uses "owner" for the legacy locator column;
+it must not be interpreted as mutable personnel ownership after B5.
+
 User-granted authorizations letting one third-party application reach one bot
 **as the user who granted it** — and, one level up, letting an application act
 as a user where **no bot is addressed** (see *The user-level delegation* below).
@@ -99,6 +122,8 @@ consumed_by:
   - "core/bot_management (delete_bot) — withdraws every authorization on a bot as part of deleting it"
   - "core/bot_config_manifest (create_job) — withdraws the creation grant when a manifest creation gives up before a bot exists"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.addressing
+  - agentclaw.community.core.bot_management.errors
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.log

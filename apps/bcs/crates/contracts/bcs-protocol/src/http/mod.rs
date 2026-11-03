@@ -24,10 +24,9 @@ pub use friends::{
     RevokeFriendResponse, StatusResponse,
 };
 pub use groups::{
-    ConfirmProposalResponse, CreateGroupRequest, CreateGroupResponse, EvaluateProposalRequest,
-    InlineEventPayloadInfo, InlineEventPayloadMode, InlineEventSinkInfo,
-    InlineGroupEventSubscriptionInfo, ParticipantBindingInfo, ParticipantInfo, ProposalContext,
-    ProposalResponse,
+    CreateGroupRequest, CreateGroupResponse, InlineEventPayloadInfo, InlineEventPayloadMode,
+    InlineEventSinkInfo, InlineGroupEventSubscriptionInfo, ParticipantBindingInfo,
+    ParticipantInfo,
 };
 pub use messages::{
     BotContextSummary, Conflict, ConflictPosition, FusionRequest, FusionResponse,

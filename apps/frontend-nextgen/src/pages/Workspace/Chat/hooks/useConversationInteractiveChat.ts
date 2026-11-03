@@ -22,6 +22,8 @@ import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatBridge, PanelAction, PanelHandle, ResourceReference } from '@tc-chat/core';
 import type { SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /** 交互式主舞台依赖的既有会话操作(来自 useBotSessions,按结构最小面收窄)。 */
 export interface ConversationInteractiveSessionOperations {
@@ -50,8 +52,6 @@ export interface UseConversationInteractiveChatOptions {
   panelRef: RefObject<PanelHandle | null>;
   /** 主屏输入框 ref(页面持有;桥注册在页面/旧 useWorkspace 内)。 */
   inputRef: RefObject<SenderRef | null>;
-  /** Agent Coding 引导目标;存在时舞台以引导替代 ChatPanel。 */
-  selectedAgentCodingBot: ChatBotView | null;
   /** 既有会话操作(重命名/清除上下文/模型切换)。 */
   sessions: ConversationInteractiveSessionOperations;
   /** 副屏面板非填充动作的发送出口;缺省按旧页行为(单聊不处理)。 */
@@ -68,8 +68,6 @@ export interface ConversationInteractiveChatModel {
   authenticatedUserId: string | null | undefined;
   authenticatedUserName: string | null | undefined;
   userAvatarUrl: string | undefined;
-  /** Agent Coding 引导目标;存在时舞台渲染引导而非 ChatPanel。 */
-  agentCodingBot: ChatBotView | null;
   draft: string;
   onDraftChange: (draft: string) => void;
   handleSend: (content: string, context?: SubmitContext) => Promise<void>;
@@ -161,6 +159,7 @@ export function useConversationInteractiveChat(
       await sessions.renameSessionOnFirstMessage(selectedChatBot, selectedSession, content);
     },
     sendMessage: (content, context) => {
+      Tracert.click(Points.workspaceChat.sendMessage, { bot_id: selectedChatBot?.botId });
       const refs = context?.fileRefs;
       if (refs && refs.length > 0) {
         botChat.send(context?.resolvedContent ?? content, {
@@ -211,7 +210,6 @@ export function useConversationInteractiveChat(
     authenticatedUserId: options.authenticatedUserId,
     authenticatedUserName: options.authenticatedUserName,
     userAvatarUrl: options.authenticatedUserAvatarUrl,
-    agentCodingBot: options.selectedAgentCodingBot,
     draft,
     onDraftChange: setDraft,
     handleSend,

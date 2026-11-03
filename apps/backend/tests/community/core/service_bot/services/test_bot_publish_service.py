@@ -1779,6 +1779,9 @@ class TestDeleteServiceBot:
         """正常删除：草稿状态且无成功发布单，删除成功。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1823,6 +1826,9 @@ class TestDeleteServiceBot:
         """发布单不存在时抛出 PublishNotFoundError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         mock_repo.get_by_id.return_value = None
@@ -1844,6 +1850,9 @@ class TestDeleteServiceBot:
         """不满足删除条件时抛出 BotPublishServiceError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 成功状态的发布单，不满足删除条件
@@ -1870,6 +1879,9 @@ class TestDeleteServiceBot:
         """destroy_publish_history 失败时，抛出异常阻断删除流程。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1898,6 +1910,9 @@ class TestDeleteServiceBot:
         """存在其他成功发布单时，不能删除。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1929,6 +1944,9 @@ class TestDeleteServiceBot:
         """有 last_pub_id 时，销毁当前发布单和上一个发布单的发布历史。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 草稿记录有 last_pub_id=100
@@ -3514,7 +3532,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3536,7 +3554,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "TeClaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "TeClaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, _ = service.can_restore_draft(2)
@@ -3557,7 +3575,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3579,7 +3597,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3789,7 +3807,7 @@ class TestDraftRestore:
             }
         )
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "openclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "openclaw"}
         service = _make_service(
             repo,
             bot_service=bot_service,
@@ -3824,7 +3842,7 @@ class TestDraftRestore:
         operation_repo = self._stateful_operation_repo()
         task_queue = Mock()
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"
@@ -3879,7 +3897,7 @@ class TestDraftRestore:
         task_queue = Mock()
         task_queue.enqueue.side_effect = RuntimeError("queue unavailable")
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"

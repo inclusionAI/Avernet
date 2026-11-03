@@ -46,7 +46,7 @@ export function AntCodeProjectOption({ project, disabled = false, onSelect }: An
       onClick={() => onSelect(project)}
       disabled={disabled || isRestricted}
       className={cn(
-        'h-auto min-h-0 w-full flex-col items-stretch justify-start gap-0 rounded-none border-0 border-b border-slate-100 bg-transparent px-3 py-2 text-left font-normal shadow-none transition-colors last:border-b-0',
+        'h-auto min-h-0 w-full flex-col items-stretch justify-start gap-0 rounded-none border-0 border-b border-divider bg-transparent px-3 py-2 text-left font-normal shadow-none transition-colors last:border-b-0',
         disabled || isRestricted ? 'cursor-not-allowed bg-slate-50/80 opacity-70' : 'cursor-pointer hover:bg-slate-50',
       )}
     >

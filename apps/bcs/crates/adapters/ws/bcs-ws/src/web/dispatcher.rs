@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bcs_domain::HumanMessageView;
-use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
+use bcs_domain::{HumanMessageView, MessageVisibilityDomain};
+use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame};
 use bcs_service_api::application::v1::{
-    AuthorizeGroupSessionConnection, GroupSessionConnectionBinding, GroupSessionConnectionService,
-    ParticipantRole,
+    AuthorizeGroupSessionConnection, ConnectionView, DeliveryAdmissionService,
+    DeliveryScope, DeliveryVisibility, GroupSessionConnectionBinding,
+    GroupSessionConnectionService, ParticipantRole, ProtectedDeliveryBinding,
 };
 use bcs_service_api::{
     CallerContext, ChatAbortCommand, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -13,7 +14,7 @@ use bcs_service_api::{
     HumanResponseSource, MessageFlowService, ParticipantKind, ServiceError, WebSendCommand,
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
-    WorkbenchSessionService,
+    WorkbenchSessionService, WorkbenchSpeakingModeCommand,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionService, InteractionServiceError, InteractionStatus,
@@ -25,7 +26,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::shared::RunChannelManager;
+use crate::shared::{OutboundFrame, RunChannelManager};
 use crate::web::frontend_delivery::interaction_event_json;
 use crate::web::{WorkbenchConnectionAuth, WorkbenchConnectionRegistry};
 
@@ -62,6 +63,19 @@ pub struct WebDispatchState {
     pub group_session_connections: Option<Arc<dyn GroupSessionConnectionService>>,
     pub frontend_connections: Arc<WorkbenchConnectionRegistry>,
     pub run_channels: Arc<RunChannelManager>,
+    /// Operation-boundary delivery admission (bot-authority spec
+    /// §8.2 — 已准入输出不追溯): consulted ONCE per accepted
+    /// operation and per independent resource event; the per-frame
+    /// re-authorization contract is retired.
+    pub delivery_admission: Arc<dyn DeliveryAdmissionService>,
+    /// Speaking-lease store (spec §6.3, P3.3): `None` keeps every lease
+    /// command answered with an explicit error instead of a fake result.
+    pub speaking_leases:
+        Option<Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>>,
+    /// Idle window granted at acquire/preempt (§15.99; frozen 60s legacy
+    /// value default). Composition supplies it from
+    /// `[speaking_lease] idle_timeout_ms`.
+    pub lease_idle_timeout_ms: i64,
 }
 
 impl std::fmt::Debug for WebDispatchState {
@@ -80,6 +94,7 @@ impl std::fmt::Debug for WebDispatchState {
             )
             .field("frontend_connections", &"<WorkbenchConnectionRegistry>")
             .field("run_channels", &"<RunChannelManager>")
+            .field("delivery_admission", &"<DeliveryAdmissionService>")
             .finish()
     }
 }
@@ -98,6 +113,27 @@ pub struct WebClientConnectionState {
     pub subscribed_sessions: Vec<(String, u64, Option<HumanMessageView>)>,
     pub phase: WebConnectionPhase,
     pub shutdown: CancellationToken,
+    /// The connect-time authorized view actor (`human_*` self view
+    /// or the explicitly selected Bot uuid). Frame bindings derive
+    /// their view from this authorized selection, never from
+    /// per-frame business JSON.
+    pub authorized_view_actor: Option<String>,
+    /// The connection's bounded protected-frame queue. The final
+    /// socket writer drains it and re-authorizes every protected
+    /// frame before send (bot-authority spec §8.2).
+    pub protected_frames: Option<mpsc::Sender<OutboundFrame>>,
+}
+
+impl WebClientConnectionState {
+    /// Open the per-connection protected frame queue. Called once by
+    /// the connection handler; the receiver is drained by the socket
+    /// writer.
+    pub fn open_protected_queue(&mut self) -> mpsc::Receiver<OutboundFrame> {
+        let (tx, rx) =
+            mpsc::channel(crate::shared::PROTECTED_FRAME_QUEUE_SIZE);
+        self.protected_frames = Some(tx);
+        rx
+    }
 }
 
 pub async fn dispatch_client_frame(
@@ -182,6 +218,9 @@ async fn handle_client_request(
         "interaction.resolve" => {
             handle_interaction_resolve(state, req, tx, connection_state, auth).await?;
         }
+        "lease.acquire" | "lease.preempt" | "lease.release" | "lease.current" => {
+            handle_lease_command(state, req, tx, auth).await?;
+        }
         _ => {
             send_error(
                 tx,
@@ -193,262 +232,6 @@ async fn handle_client_request(
         }
     }
 
-    Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-struct ConnectParams {
-    group_id: String,
-    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
-    session_id: Option<String>,
-    #[serde(default, alias = "viewActorId")]
-    view_actor_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConnectResponse {
-    group_id: String,
-    participants: Vec<Value>,
-    view_actor_id: String,
-    message_view_scope: bcs_domain::MessageViewScope,
-}
-
-async fn handle_connect(
-    state: &Arc<WebDispatchState>,
-    req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
-    connection_state: &mut WebClientConnectionState,
-    auth: &WorkbenchConnectionAuth,
-) -> Result<()> {
-    let bound_actor_id = auth.actor_id();
-    let params: ConnectParams = serde_json::from_value(req.params.clone().unwrap_or(Value::Null))
-        .map_err(|e| {
-        WebWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
-    })?;
-
-    if connection_state.phase == WebConnectionPhase::Connected
-        && matches!(auth, WorkbenchConnectionAuth::SessionBound { .. })
-    {
-        send_error(
-            tx,
-            &req.id,
-            "already_connected",
-            "This WebSocket is already connected",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let (group_id, session_id) = match auth {
-        WorkbenchConnectionAuth::UserBound { .. } => {
-            (params.group_id.clone(), params.session_id.clone())
-        }
-        WorkbenchConnectionAuth::SessionBound {
-            group_id,
-            session_id,
-            ..
-        } => {
-            if params.group_id != *group_id || params.session_id.as_deref() != Some(session_id) {
-                send_error(
-                    tx,
-                    &req.id,
-                    "token_scope_mismatch",
-                    "Connect scope does not match the connection token",
-                )
-                .await?;
-                connection_state.phase = WebConnectionPhase::Closed;
-                return Ok(());
-            }
-            (group_id.clone(), Some(session_id.clone()))
-        }
-    };
-
-    debug!(
-        group_id = %group_id,
-        session_id = ?session_id,
-        bound_actor_id = ?bound_actor_id,
-        "Processing connect request"
-    );
-
-    let outcome = match auth {
-        WorkbenchConnectionAuth::UserBound { .. } => match state
-            .workbench_sessions
-            .connect(WorkbenchConnectCommand {
-                bound_actor_id: bound_actor_id.map(str::to_string),
-                view_actor_id: params.view_actor_id.clone(),
-                group_id: group_id.clone(),
-                session_id: session_id.clone(),
-            })
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(err) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    group_id = %group_id,
-                    session_id = ?session_id,
-                    bound_actor_id = ?bound_actor_id,
-                    error = ?err,
-                    "connect rejected by Workbench WS authorization"
-                );
-                let message = err.message();
-                send_error(tx, &req.id, err.code(), &message).await?;
-                return Ok(());
-            }
-        },
-        WorkbenchConnectionAuth::SessionBound {
-            tenant,
-            actor_id,
-            group_id,
-            session_id,
-        } => {
-            if params
-                .view_actor_id
-                .as_deref()
-                .is_some_and(|view_actor_id| view_actor_id != actor_id)
-            {
-                send_error(
-                    tx,
-                    &req.id,
-                    "forbidden_view_actor",
-                    "Session-bound connections may only use the authenticated Human view",
-                )
-                .await?;
-                return Ok(());
-            }
-            let user_id = actor_id
-                .strip_prefix("human_")
-                .filter(|user_id| !user_id.is_empty());
-            let service = state.group_session_connections.as_ref();
-            let authorized = match (service, user_id) {
-                (Some(service), Some(user_id)) => {
-                    service
-                        .authorize_connect(AuthorizeGroupSessionConnection {
-                            binding: GroupSessionConnectionBinding {
-                                tenant: tenant.clone(),
-                                user_id: user_id.to_string(),
-                                group_id: group_id.clone(),
-                                session_id: session_id.clone(),
-                            },
-                        })
-                        .await
-                }
-                _ => {
-                    warn!(request_id = %bcs_observability::CurrentRequestId, "session-bound connect is missing a valid V1 authorization context");
-                    send_session_access_revoked(tx, &req.id, connection_state).await?;
-                    return Ok(());
-                }
-            };
-            match authorized {
-                Ok(authorized) => WorkbenchConnectOutcome {
-                    group_id: group_id.clone(),
-                    participants: authorized
-                        .participants
-                        .into_iter()
-                        .map(|participant| WorkbenchParticipantView {
-                            bot_uuid: participant.actor_id,
-                            role: participant_role_to_wire(participant.role).to_string(),
-                            kind: ParticipantKind::Bot,
-                            mode: Some(participant.mode),
-                            message_view_scope: participant.message_view_scope,
-                        })
-                        .collect(),
-                },
-                Err(err) => {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        error = ?err,
-                        "connect rejected by V1 group-session authorization"
-                    );
-                    send_session_access_revoked(tx, &req.id, connection_state).await?;
-                    return Ok(());
-                }
-            }
-        }
-    };
-
-    // The bound actor remains the registry identity for legacy clients, but it
-    // must not implicitly opt those clients into participant projection.
-    let explicit_view_actor_id = params.view_actor_id.as_deref();
-    let resolved_view_actor_id = explicit_view_actor_id.or(bound_actor_id);
-    let resolved_participant = match explicit_view_actor_id {
-        Some(actor_id) => Some(
-            outcome
-                .participants
-                .iter()
-                .find(|participant| participant.bot_uuid == actor_id)
-                .ok_or_else(|| {
-                    WebWsDispatchError::InvalidFrameFormat(
-                        "authorized view actor is not a participant".to_string(),
-                    )
-                })?,
-        ),
-        None => None,
-    };
-    let resolved_message_view_scope = resolved_participant
-        .map(|participant| participant.message_view_scope)
-        .unwrap_or_default();
-    let connection_human_view = explicit_view_actor_id
-        .filter(|actor_id| actor_id.starts_with("human_"))
-        .and_then(|actor_id| {
-            resolved_participant.map(|participant| HumanMessageView {
-                actor_id: actor_id.to_string(),
-                scope: participant.message_view_scope,
-                allow_legacy_unclassified_chat: true,
-            })
-        });
-    let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
-    let conn_id = state
-        .frontend_connections
-        .subscribe_with_shutdown(
-            subscription_key.clone(),
-            tx.clone(),
-            resolved_view_actor_id.map(str::to_string),
-            connection_human_view.clone(),
-            connection_state.shutdown.clone(),
-        )
-        .await?;
-    connection_state.subscribed_sessions.push((
-        subscription_key,
-        conn_id,
-        connection_human_view.clone(),
-    ));
-    connection_state.phase = WebConnectionPhase::Connected;
-
-    let participants: Vec<Value> = outcome
-        .participants
-        .into_iter()
-        .map(|participant| serde_json::to_value(participant).unwrap_or(Value::Null))
-        .collect();
-
-    let response = ConnectResponse {
-        group_id: outcome.group_id,
-        participants,
-        view_actor_id: resolved_view_actor_id.unwrap_or_default().to_string(),
-        message_view_scope: resolved_message_view_scope,
-    };
-
-    send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
-    if let Some(session_id) = session_id.as_deref() {
-        match state.interactions.list_pending(session_id).await {
-            Ok(pending) => {
-                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
-                    view.allows_artifact(
-                        bcs_domain::MessageVisibilityDomain::StateMachine,
-                        Some(&bcs_domain::MessageAudience::FullOnly),
-                    )
-                });
-                if pending_visible {
-                    for event in pending {
-                        send_interaction_event(tx, &event).await?;
-                    }
-                }
-            }
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, session_id, %error, "pending interaction replay failed after connect");
-            }
-        }
-    }
     Ok(())
 }
 
@@ -478,234 +261,11 @@ fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct InteractionResolveParams {
-    #[serde(rename = "bcsRunId", alias = "bcs_run_id")]
-    bcs_run_id: String,
-    #[serde(rename = "interactionId", alias = "interaction_id")]
-    interaction_id: String,
-    #[serde(rename = "idempotencyKey", alias = "idempotency_key")]
-    idempotency_key: String,
-    #[serde(
-        default,
-        rename = "bcsSessionId",
-        alias = "bcs_session_id",
-        alias = "sessionId"
-    )]
-    bcs_session_id: Option<String>,
-    #[serde(default, rename = "groupId", alias = "group_id")]
-    group_id: Option<String>,
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(flatten)]
-    resolution: HashMap<String, Value>,
-}
+mod responses;
+use responses::{send_error, send_error_shape, send_ok};
 
-async fn handle_interaction_resolve(
-    state: &Arc<WebDispatchState>,
-    req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
-    connection_state: &mut WebClientConnectionState,
-    auth: &WorkbenchConnectionAuth,
-) -> Result<()> {
-    let params: InteractionResolveParams =
-        match serde_json::from_value(req.params.clone().unwrap_or(Value::Null)) {
-            Ok(params) => params,
-            Err(error) => {
-                send_error(
-                    tx,
-                    &req.id,
-                    "invalid_request",
-                    &format!("Invalid interaction.resolve params: {error}"),
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-    let Some(resolver_actor_id) = auth.actor_id().map(str::to_string) else {
-        send_error(
-            tx,
-            &req.id,
-            "unauthorized",
-            "An authenticated Human is required to resolve an interaction",
-        )
-        .await?;
-        return Ok(());
-    };
-    let (expected_bcs_session_id, expected_group_id) = match auth {
-        WorkbenchConnectionAuth::SessionBound {
-            group_id,
-            session_id,
-            ..
-        } => (Some(session_id.clone()), Some(group_id.clone())),
-        WorkbenchConnectionAuth::UserBound { .. } => (None, None),
-    };
-
-    if let WorkbenchConnectionAuth::SessionBound {
-        group_id,
-        session_id,
-        ..
-    } = auth
-    {
-        let mismatched = params
-            .group_id
-            .as_deref()
-            .is_some_and(|provided| provided != group_id)
-            || params
-                .bcs_session_id
-                .as_deref()
-                .is_some_and(|provided| provided != session_id);
-        if mismatched {
-            send_error(
-                tx,
-                &req.id,
-                "token_scope_mismatch",
-                "Request scope does not match the connection token",
-            )
-            .await?;
-            connection_state.phase = WebConnectionPhase::Closed;
-            return Ok(());
-        }
-    }
-
-    // `kind` is presentation context only. The Application service loads the
-    // authoritative kind and Provider route from its server-owned record.
-    let _ = params.kind;
-    match state
-        .interactions
-        .resolve(ResolveInteractionCommand {
-            bcs_run_id: params.bcs_run_id,
-            interaction_id: params.interaction_id.clone(),
-            idempotency_key: params.idempotency_key,
-            resolver_actor_id,
-            expected_bcs_session_id,
-            expected_group_id,
-            resolution: Value::Object(params.resolution.into_iter().collect()),
-        })
-        .await
-    {
-        Ok(result) => {
-            send_ok(
-                tx,
-                &req.id,
-                serde_json::json!({
-                    "accepted": result.accepted,
-                    "interactionId": result.interaction_id,
-                    "interactionStatus": interaction_status_slug(result.status),
-                    "idempotencyKey": result.idempotency_key,
-                }),
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::InvalidRequest(message)) => {
-            send_error(tx, &req.id, "invalid_request", &message).await?;
-        }
-        Err(InteractionServiceError::Unauthorized) => {
-            send_error(
-                tx,
-                &req.id,
-                "unauthorized",
-                "The current Human cannot resolve this interaction",
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::NotFound) => {
-            send_error(
-                tx,
-                &req.id,
-                "not_found",
-                "The interaction does not exist or is no longer retained",
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::ResolveFailed {
-            message,
-            retryable,
-            status,
-        }) => {
-            send_error_shape(
-                tx,
-                &req.id,
-                ErrorShape {
-                    code: "interaction_resolve_failed".to_string(),
-                    message,
-                    details: Some(serde_json::json!({
-                        "interactionId": params.interaction_id,
-                        "interactionStatus": interaction_status_slug(status),
-                    })),
-                    retryable,
-                    retry_after_ms: None,
-                },
-            )
-            .await?;
-        }
-        Err(InteractionServiceError::Internal(message)) => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, %message, "interaction resolve application service failed");
-            send_error_shape(
-                tx,
-                &req.id,
-                ErrorShape {
-                    code: "interaction_resolve_failed".to_string(),
-                    message: "Interaction resolution could not be processed".to_string(),
-                    details: Some(serde_json::json!({
-                        "interactionId": params.interaction_id,
-                        "interactionStatus": "pending",
-                    })),
-                    retryable: true,
-                    retry_after_ms: None,
-                },
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
-fn interaction_status_slug(status: InteractionStatus) -> &'static str {
-    match status {
-        InteractionStatus::Pending => "pending",
-        InteractionStatus::Accepted => "accepted",
-        InteractionStatus::Resolved => "resolved",
-        InteractionStatus::Invalidated => "invalidated",
-    }
-}
-
-async fn send_interaction_event(
-    tx: &mpsc::Sender<String>,
-    event: &InteractionFrontendEvent,
-) -> Result<()> {
-    let json = interaction_event_json(event)?;
-    tx.send(json).await.map_err(|error| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to replay interaction event: {error}"))
-    })?;
-    Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatSendParams {
-    #[serde(alias = "sessionKey")]
-    session_key: Option<String>,
-    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
-    session_id: Option<String>,
-    message: String,
-    group_id: String,
-    bot_uuid: Option<String>,
-    bot_id: Option<String>,
-    bot_name: Option<String>,
-    #[serde(default)]
-    mentions: Vec<String>,
-    thinking: Option<String>,
-    #[serde(alias = "idempotencyKey")]
-    idempotency_key: Option<String>,
-    attachments: Option<Vec<bcs_protocol::Attachment>>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChatSendResponse {
-    #[serde(rename = "runId")]
-    run_id: String,
-    status: String,
-}
+mod chat_send_params;
+use chat_send_params::{ChatSendParams, ChatSendResponse};
 
 async fn handle_chat_send(
     state: &Arc<WebDispatchState>,
@@ -793,6 +353,7 @@ async fn handle_chat_send(
             caller_actor_id: bound_actor_id.unwrap_or_default().to_string(),
             content: params.message.clone(),
             source: HumanResponseSource::Http,
+            caller_ingress: auth.caller_ingress().cloned(),
         })
         .await
     {
@@ -843,11 +404,9 @@ async fn handle_chat_send(
                 .find(|(key, _, _)| key == &group_id)
         });
     let sender_conn_id = sender_subscription.map(|(_, id, _)| *id);
-    // A Session run must never inherit a broader Group subscription. User-bound
-    // clients historically may send before connect, so resolve the authoritative
-    // Session participant view on demand instead of registering an unrestricted
-    // run channel.
-    let mut sender_human_view = exact_sender_subscription.and_then(|(_, _, view)| view.clone());
+    // A Session send must never inherit a broader Group subscription. User-bound
+    // clients historically may send before connect, so the authoritative
+    // Session participant qualification is verified on demand below.
     if from_id.starts_with("human_") {
         if let Some(session_id) = session_id.as_deref()
             && state
@@ -881,11 +440,11 @@ async fn handle_chat_send(
                 return Ok(());
             }
         };
-        let Some(participant) = outcome
+        if !outcome
             .participants
             .iter()
-            .find(|participant| participant.bot_uuid == from_id)
-        else {
+            .any(|participant| participant.bot_uuid == from_id)
+        {
             send_error(
                 tx,
                 &req.id,
@@ -894,24 +453,44 @@ async fn handle_chat_send(
             )
             .await?;
             return Ok(());
-        };
-        sender_human_view = Some(HumanMessageView {
-            actor_id: from_id.clone(),
-            scope: participant.message_view_scope,
-            allow_legacy_unclassified_chat: true,
-        });
+        }
     }
 
     let caller = caller_context_from_bound_actor(bound_actor_id, &from_id);
+
+    // Caller identity comes only from the authenticated WebSocket upgrade
+    // snapshot (spec §10.1.1): the runtime-only ingress with its trusted
+    // window re-checked per frame — a display actor alone is never a caller.
+    // Effective sender selects whether the Human authentication snapshot can
+    // become execution identity: speaking as an owned Bot is ordinary Bot
+    // speech and must not carry the bound Human's ingress. No window
+    // re-check exists on the WS channel (§15.97): the login was verified at
+    // the upgrade moment and the identity lives for the connection.
+    let caller_ingress = if bound_actor_id == Some(from_id.as_str()) {
+        auth.caller_ingress().cloned()
+    } else {
+        None
+    };
 
     info!("chat.send: calling message_flow.handle_web_send");
     let outcome = state
         .message_flow
         .handle_web_send(WebSendCommand {
+            caller_execution: None,
+            caller_ingress,
+            speaking_lease: params
+                .lease_id
+                .as_deref()
+                .filter(|lease_id| !lease_id.trim().is_empty())
+                .zip(params.lease_epoch)
+                .map(|(lease_id, epoch)| bcs_service_api::WebSendLeaseClaim {
+                    lease_id: lease_id.to_string(),
+                    epoch,
+                }),
             caller,
             group_id: group_id.clone(),
             session_id: session_id.clone(),
-            from_actor_id: from_id,
+            from_actor_id: from_id.clone(),
             from_name: params.bot_name.clone(),
             message: params.message,
             mentions: params.mentions,
@@ -922,7 +501,10 @@ async fn handle_chat_send(
                     .collect()
             }),
             thinking: params.thinking,
-            idempotency_key: params.idempotency_key,
+            // Preserve the explicit client correlation key for the
+            // canonical message/delivery cancellation path; fall back to the
+            // legacy request id for older callers.
+            idempotency_key: params.client_message_id.or(params.idempotency_key),
             source_im_message_id: None,
             channel_sender_identity: None,
             sender_conn_id,
@@ -939,17 +521,43 @@ async fn handle_chat_send(
     connection_state
         .active_run_ids
         .extend(outcome.active_run_ids.iter().cloned());
-    let run_session_key = session_id.unwrap_or_else(|| group_id.clone());
+    let run_session_key = session_id
+        .clone()
+        .unwrap_or_else(|| group_id.clone());
     for run_id in &outcome.active_run_ids {
+        // Each Workbench run attaches a PROTECTED sink pinned to THIS
+        // connection instance and binds the run to the operation that
+        // admitted it (bot-authority spec §8.2): the fanout lane of
+        // the same operation already holds this connection's frozen
+        // permit, and run frames check THAT permit at the enqueue
+        // boundary. There is no fallback to an unbound public sender.
+        let Some(protected_frames) = connection_state.protected_frames.clone() else {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                run_id = %run_id,
+                "protected frame queue is not open; refusing to register an unbound run sink"
+            );
+            break;
+        };
+        let Some(sender_conn_id) = sender_conn_id else {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                run_id = %run_id,
+                "run registration refused: no connection instance for the sender"
+            );
+            break;
+        };
         state
             .run_channels
-            .register_with_view(
+            .register_workbench(
                 run_id.clone(),
                 run_session_key.clone(),
-                tx.clone(),
+                protected_frames,
+                sender_conn_id,
+                &outcome.operation_id,
                 Some("workbench-ws".to_string()),
                 bound_actor_id.map(str::to_string),
-                sender_human_view.clone(),
+                None,
             )
             .await;
     }
@@ -1255,14 +863,56 @@ fn caller_context_from_bound_actor(
     CallerContext::Human(HumanActor { actor_id, staff_no })
 }
 
-async fn send_ok(tx: &mpsc::Sender<String>, req_id: &str, payload: Value) -> Result<()> {
-    let response = ResponseFrame::ok(req_id, payload);
-    let frame = BcsFrame::Response(response);
-    let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to send response: {}", e))
-    })?;
-    Ok(())
+/// The protected delivery binding of a run registration: identity
+/// from the AUTHENTICATED connection (token/cookie chain), the
+/// resource resolved by the send, the authorized view actor, and the
+/// connection instance. No cached role/scope is stored — the final
+/// writer re-reads current facts per frame.
+fn control_user_id(actor_id: Option<&str>) -> String {
+    actor_id
+        .and_then(|actor| actor.strip_prefix("human_"))
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_protected_delivery_binding(
+    auth: &WorkbenchConnectionAuth,
+    group_id: &str,
+    session_id: Option<&str>,
+    from_id: &str,
+    sender_human_view: Option<&HumanMessageView>,
+    sender_conn_id: Option<u64>,
+    authorized_view_actor: Option<&str>,
+) -> Option<ProtectedDeliveryBinding> {
+    let user_id = control_user_id(auth.actor_id());
+    if user_id.is_empty() {
+        // No authenticated Human identity: refuse rather than bind a
+        // public-unrestricted connection.
+        return None;
+    }
+    let view_actor_id = match auth {
+        WorkbenchConnectionAuth::SessionBound { .. } => authorized_view_actor
+            .unwrap_or(from_id)
+            .to_string(),
+        WorkbenchConnectionAuth::UserBound { .. } => sender_human_view
+            .map(|view| view.actor_id.clone())
+            .unwrap_or_else(|| from_id.to_string()),
+    };
+    let tenant = match auth {
+        WorkbenchConnectionAuth::SessionBound { tenant, .. } => {
+            tenant.clone()
+        }
+        WorkbenchConnectionAuth::UserBound { .. } => None,
+    };
+    Some(ProtectedDeliveryBinding {
+        tenant,
+        user_id,
+        group_id: group_id.to_string(),
+        session_id: session_id.map(str::to_string),
+        view_actor_id,
+        connection_instance_id: sender_conn_id.unwrap_or(0),
+    })
 }
 
 async fn send_empty_human_input_final(
@@ -1340,36 +990,9 @@ async fn send_human_input_error_event(
     Ok(())
 }
 
-async fn send_error(
-    tx: &mpsc::Sender<String>,
-    req_id: &str,
-    code: &str,
-    message: &str,
-) -> Result<()> {
-    send_error_shape(
-        tx,
-        req_id,
-        ErrorShape {
-            code: code.to_string(),
-            message: message.to_string(),
-            details: None,
-            retryable: false,
-            retry_after_ms: None,
-        },
-    )
-    .await
-}
-
-async fn send_error_shape(
-    tx: &mpsc::Sender<String>,
-    req_id: &str,
-    error: ErrorShape,
-) -> Result<()> {
-    let response = ResponseFrame::err(req_id, error);
-    let frame = BcsFrame::Response(response);
-    let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to send error response: {}", e))
-    })?;
-    Ok(())
-}
+mod connect;
+mod interaction;
+mod lease;
+use connect::handle_connect;
+use interaction::{handle_interaction_resolve, send_interaction_event};
+use lease::handle_lease_command;

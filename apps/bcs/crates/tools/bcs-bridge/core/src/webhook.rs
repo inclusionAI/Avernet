@@ -19,6 +19,27 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new().route("/webhook", post(handle_webhook)).with_state(state)
 }
 
+/// A listener may serve several Providers, but each request authenticates only
+/// against its target Provider. Never accept a bearer from another group.
+pub fn multi_router(states: Vec<Arc<AppState>>) -> Router {
+    let states: std::collections::BTreeMap<_, _> = states.into_iter()
+        .map(|state| (state.config.provider_id.clone(), state)).collect();
+    Router::new().route("/webhook", post(handle_multi_webhook)).with_state(Arc::new(states))
+}
+
+async fn handle_multi_webhook(
+    State(states): State<Arc<std::collections::BTreeMap<String, Arc<AppState>>>>,
+    headers: HeaderMap,
+    Json(value): Json<Value>,
+) -> Response {
+    let state = value.pointer("/to_bot/provider_id").and_then(Value::as_str).and_then(|id| states.get(id));
+    let Some(state) = state else { return BridgeError::unauthorized().into_response(); };
+    match dispatch(state.clone(), headers, value).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
+}
+
 async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

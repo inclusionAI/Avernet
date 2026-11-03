@@ -1,4 +1,6 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import '@/components/Workspace/ChatPanel/ChatPanel.css';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
@@ -8,7 +10,6 @@ import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSk
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { useEffect, useMemo, useState } from 'react';
 import { GroupHeader } from '../GroupHeader';
@@ -21,10 +22,10 @@ import type { GroupChatPaneProps } from './GroupChatPane.types';
 import { GroupChatPlaceholder } from './GroupChatPlaceholder';
 import { GroupExecApprovalPanel } from './GroupExecApprovalPanel';
 import { GroupQuestionPanel } from './GroupQuestionPanel';
+import { SpeakingLeaseStrip } from './SpeakingLeaseControl';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
-import { resolveSender } from './messageHelpers';
 import { useGroupChatPaneActions } from './useGroupChatPaneActions';
-export { resolveSender };
+export { resolveSender } from './messageHelpers';
 export function GroupChatPane(props: GroupChatPaneProps) {
   const {
     group,
@@ -38,7 +39,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     chat,
     questions,
-    execApprovals,
+    execApprovals, speakingLease,
     supportState,
     connectionStatus,
     historyOnly = false,
@@ -75,6 +76,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
   } = props;
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
   const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
   const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
 
@@ -87,7 +89,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
     props.identityLocked,
   );
-
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
   // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
@@ -99,7 +100,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     messages,
     isRequesting,
   });
-  const mentionConfig: MentionConfig | undefined = useMemo(
+  const mentionConfig = useMemo(
     () =>
       activeIdentity?.kind === 'user'
         ? buildGroupMentionConfig(session?.participants ?? [], {
@@ -149,9 +150,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
       userIdentityId,
       userIdentityName,
     });
-  if (!group) {
-    return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
-  }
+  if (!group) return <GroupChatPlaceholder onOpenSessionList={onOpenSessionList} />;
 
   const showError = supportState.phase === 'error';
   const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
@@ -164,7 +163,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   return (
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
-      <ChatLayout className="min-h-0 flex-1">
+      <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
         {linkedSession ? (
           <TaskLinkedSession target={linkedSession} userId={userIdentityId ?? undefined} onClose={closeLinkedSession} />
         ) : (
@@ -213,6 +212,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onInsertDraft={composerVisible ? insertDraft : undefined}
         />
         <GroupChatCollabPanel
+          connected={connectionStatus === 'connected'}
+          group={group}
           panel={collabPanel}
           session={session}
           messages={messages}
@@ -247,16 +248,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 switchingViewScope={collabPanel.switchingViewScope}
                 onViewScopeChange={(scope) => void collabPanel.setViewScope(scope)}
                 onLeave={() => collabPanel.leaveSession()}
-                onReconnect={() => {
-                  void reconnect();
-                }}
+                onReconnect={() => { void reconnect(); }}
               />
             ) : null}
+            <SpeakingLeaseStrip model={speakingLease} />
             <GroupChatComposer
               session={session}
               connectionStatus={connectionStatus}
               mentionConfig={mentionConfig}
-              onSend={handleGroupSend}
+              onSend={speakingLease?.composeSender(handleGroupSend) ?? handleGroupSend}
               draft={draft}
               onDraftChange={setDraft}
               inputRef={inputRef}
@@ -270,8 +270,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : null}
           </>
         )}
-        {/* 协作群副屏口径：加宽至 480（不动 WORKSPACE_RIGHT_PANEL_LAYOUT 共用宽度）；
-            不随点外收起，仅顶栏「副屏」钮/悬浮「收起」钮关闭。 */}
+        {/* 协作群副屏加宽至 480，且仅由顶栏或悬浮按钮关闭。 */}
         <ChatLayoutPanelSlot
           ref={panelRef}
           onAction={handlePanelAction}
@@ -281,8 +280,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           onOpenStateChange={onSidePaneIsOpenChange}
         />
       </ChatLayout>
-      {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {!persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
       {session && (
         <FuseSlot
           group={group}

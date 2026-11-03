@@ -1047,6 +1047,16 @@ class EngineWebSocketServer:
         request: RequestFrame,
         params: Dict[str, Any],
     ) -> ResponseFrame:
+        if "resumeTicket" not in params:
+            from engine.community.api.transport.openclaw_session_resume import resume_session
+
+            async def read_history(probe: RequestFrame) -> ResponseFrame:
+                response, _ = await self._forward_request(conn_id, probe)
+                return response
+
+            return await resume_session(
+                self._openclaw_resume, websocket, conn_id, request, read_history
+            )
         run = self._openclaw_resume.lookup(
             session_key=params.get("sessionKey"),
             ticket=params.get("resumeTicket"),
@@ -1203,58 +1213,44 @@ class EngineWebSocketServer:
             params.setdefault("idempotencyKey", uuid.uuid4().hex)
 
         manager = EngineManager.get_instance()
-        if manager.engine == "openclaw" and params.get("resumeEnabled") is True:
+        if manager.engine == "openclaw" and params.get("resumeEnabled", True) is True:
             run_id = params.get("idempotencyKey") or uuid.uuid4().hex
             if not isinstance(run_id, str) or not run_id:
                 return ResponseFrame.err_response(
                     request.id,
                     ErrorShape(ErrorCodes.INVALID_REQUEST, "Invalid idempotencyKey"),
                 )
-            created = self._openclaw_resume.create(
-                session_key=session_key, run_id=run_id
-            )
-            if created is None:
-                return ResponseFrame.err_response(
-                    request.id,
-                    ErrorShape(ErrorCodes.UNAVAILABLE, "Chat recovery capacity reached"),
-                )
-            run, ticket = created
             auth = self._auth_for(conn_id)
-            try:
-                # Keep the upstream token client alive after this browser socket closes.
-                await manager.on_connection_open(auth)
-            except Exception:
-                self._openclaw_resume.discard(run)
-                log.exception("chat recovery: could not retain upstream connection")
-                return ResponseFrame.err_response(
-                    request.id,
-                    ErrorShape(ErrorCodes.UNAVAILABLE, "Chat recovery unavailable"),
+            created = await self._prepare_openclaw_recovery(manager, session_key, run_id, auth)
+            if created is not None:
+                run, ticket = created
+                try:
+                    await self._subscribe_conn_to_session(conn_id, session_key)
+                except Exception as e:
+                    log.warning("chat.send: failed to bind inject listener: %s", e)
+                await run.attach(conn_id, websocket)
+                run.task = asyncio.create_task(
+                    self._run_resumable_chat(
+                        run,
+                        websocket,
+                        conn_id,
+                        session_key,
+                        message,
+                        params.get("timeoutMs"),
+                        run_id,
+                        auth,
+                        request_id=request.id,
+                        resume_ticket=ticket,
+                        attachments=attachments,
+                        chat_attachment_requests=chat_attachment_requests,
+                        chat_image_requests=chat_image_requests,
+                        resource_references=resource_references,
+                        prompt_file_refs=prompt_file_refs,
+                    )
                 )
-            try:
-                await self._subscribe_conn_to_session(conn_id, session_key)
-            except Exception as e:
-                log.warning("chat.send: failed to bind inject listener: %s", e)
-            await run.attach(conn_id, websocket)
-            run.task = asyncio.create_task(
-                self._run_resumable_chat(
-                    run,
-                    websocket,
-                    conn_id,
-                    session_key,
-                    message,
-                    params.get("timeoutMs"),
-                    run_id,
-                    auth,
-                    request_id=request.id,
-                    resume_ticket=ticket,
-                    attachments=attachments,
-                    chat_attachment_requests=chat_attachment_requests,
-                    chat_image_requests=chat_image_requests,
-                    resource_references=resource_references,
-                    prompt_file_refs=prompt_file_refs,
-                )
-            )
-            return None
+                return None
+            # Recovery is best effort. No engine send has happened yet, so it is
+            # safe to use the original path exactly once (never retry after ACK).
 
         # The browser only sends chat.send. Bind this connection before starting
         # the stream so OpenClaw-originated inject events can reach the session.
@@ -1299,6 +1295,26 @@ class EngineWebSocketServer:
         )
 
         return response
+
+    async def _prepare_openclaw_recovery(
+        self, manager: EngineManager, session_key: str, run_id: str, auth: AuthContext,
+    ) -> tuple[OpenClawResumeRun, str] | None:
+        created = self._openclaw_resume.create(session_key=session_key, run_id=run_id)
+        if created is None:
+            log.warning("chat recovery capacity reached; using ordinary chat")
+            return None
+        run, _ = created
+        try:
+            # Retain the upstream client independently of the browser socket.
+            await manager.on_connection_open(auth)
+        except asyncio.CancelledError:
+            self._openclaw_resume.discard(run)
+            raise
+        except Exception:
+            self._openclaw_resume.discard(run)
+            log.warning("chat recovery initialization failed; using ordinary chat")
+            return None
+        return created
 
     async def _run_resumable_chat(
         self,

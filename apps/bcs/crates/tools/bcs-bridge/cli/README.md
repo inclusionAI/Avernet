@@ -33,6 +33,14 @@ a `mcporter_mcp` Provider does not match this handshake. V2 fallback remains sup
 
 The only BCS dependency is the `bcs-protocol` contract crate.
 
+## Multiple Providers
+
+A single configuration/daemon can host Bots from multiple Providers in one BCS
+deployment. Legacy TOML is read without rewriting; adding another Provider
+backs up and upgrades the same file to V2. See [compatibility, commands and
+isolation](MULTI_PROVIDER.md). Stop before registration changes; use
+`status --json` to check the selected Bot rather than just process readiness.
+
 ## Usage
 
 ```bash
@@ -77,6 +85,27 @@ bcs-bridge stop
 - One instance runs per user: `start`, `status` and `stop` share
   `~/.bcn-bridge/bridge.lock` and a private control socket.
 
+### Plugin stop and restart
+
+`start --daemon` reports local process initialization, not successful Bot login.
+Check `status --json`: the process can be `running` while `health` is
+`connecting` or `degraded`. Each Plugin Bot must reach `online` before it can
+receive work (`ready` also includes Gateway Providers that are `listening`).
+
+On stop, the Plugin client sends a normal WebSocket Close, waits up to 2 seconds
+for the peer, and attempts TCP/TLS shutdown for up to another 500 ms. The same
+cleanup runs after rejected/interrupted login and identity persistence failures.
+The instance lock remains held through connection and engine cleanup, so `stop`
+does not release the local owner while the Close handshake is still pending.
+Unresponsive/broken peers are logged and dropped after the bounded cleanup;
+`stop` confirms local shutdown, not that remote application occupancy has expired.
+
+If a subsequent `bot.connect` reports `already_connected`, BCS still considers
+that identity occupied. This does not by itself prove another local process is
+alive. Check other bridge instances, the close timeout/failure logs, and remote
+connection expiry. Keep the saved identity and session database; deleting them
+or repeatedly restarting is not a connection-release mechanism.
+
 Configuration written by `register` (gateway example):
 
 ```toml
@@ -98,6 +127,92 @@ cwd = "/home/me/workspace"
 
 [registration]
 api_url = "https://bcs.example.com/prefix"
+```
+
+## Claude completion mode (default: `hook_idle`)
+
+Claude-compatible drivers, including `claude-code` and launcher registrations
+such as `cfuse-cc`, default to `hook_idle`. No `engine_options` entry or manual
+Hook configuration is needed. This applies both to `ClaudeCode::new` and to
+factories loading configurations without `completion_mode`; explicitly saved
+mode choices are not overwritten. Codex and QwenWork defaults are unchanged.
+
+- The driver registers a native Stop callback before sending the user prompt.
+  Successful completion requires, in order, an empty `background_tasks` Stop
+  snapshot, a successful result and a fresh idle event for the same main epoch.
+  Background work and intervening activity invalidate stale evidence.
+- Native versions **>= Claude Code 2.1.199** are admitted using semantic-version
+  ordering, including later patch, minor and major versions. Older, missing or
+  malformed versions fail explicitly. Native lifecycle checks have been exercised
+  with 2.1.199 / cfuse 2.6.44 and 2.1.258 / cfuse 2.6.46; admitting a newer version
+  does not bypass protocol validation or certify every future runtime combination.
+  Unsupported task kinds or missing/conflicting completion evidence still fail;
+  `hook_idle` never silently falls back to legacy completion. Managed policies,
+  cron/monitor tasks and every nested/resumed-background combination are not certified.
+- Initialization is bounded by 30 seconds, result-to-idle waiting by 5 seconds,
+  and ordinary stream inactivity by the 600-second default idle window. A shorter
+  per-turn idle timeout still applies. Failed result frames return an error
+  without waiting for successful Stop/idle evidence (see diagnostics below).
+- Explicit `legacy` and `observe` remain supported. `legacy` uses the previous
+  notification-consumption completion gate without hook initialization;
+  `observe` collects hook evidence but preserves legacy completion behavior.
+
+For an older or unsupported native engine, explicitly opt back into legacy:
+
+```toml
+# Inside the relevant [[bot]] entry:
+engine_options = { completion_mode = "legacy" }
+```
+
+An existing `completion_mode = "hook_idle"` entry is harmless but unnecessary.
+Removing the mode key selects the new default after the updated bridge loads the
+configuration; changing source/configuration does not alter a running process.
+
+## Owned Codex Unix WebSocket transport
+
+Launcher distributions on Unix can compose
+`CodexAppServerFactory::custom(...).with_owned_unix_socket()`. This selects
+`app-server --listen unix://PATH` for an **owned** server; it does not select
+`codex-desktop` or connect to a user's desktop listener. The public `codex`
+factory continues using stdio. This builder is unavailable on non-Unix targets.
+
+- Each engine instance/process generation gets a new temporary directory with
+  mode 0700 and a private socket. Socket ownership, permissions and peer UID are
+  validated before the WebSocket handshake. No TCP port is opened. Keep the
+  temporary path short enough for the platform's Unix socket limit.
+- The launcher must forward `--listen unix://PATH`, and the selected Codex must
+  support it. Readiness, handshake and initialization share a 30-second startup
+  deadline and respect cancellation. Unsupported engines fail explicitly; there
+  is no stdio fallback, desktop discovery or replay of an ambiguous request.
+- Bridge still owns the launcher and its process group. Normal completion
+  releases only that turn's managed lease; idle servers remain available.
+  Transport failure closes admissions, fails in-flight work and reaps the owned
+  process tree before a later request starts a new server and resumes its saved
+  thread. Startup cancellation/failure and engine shutdown also release the
+  process and temporary endpoint. Externally owned desktop hosts are never
+  signalled or removed.
+- Existing RPC ID routing, concurrent-thread isolation, thread mappings, caller
+  environment, workspace, model and sandbox/approval options are unchanged.
+  Diagnostic stdout is drained as bounded byte chunks and discarded; it is not
+  parsed as JSON-RPC. Stderr retains the existing trace/debug logging path.
+- This bypasses the app-server stdio writer's nonblocking stdout failure path;
+  it is not a promise that arbitrary engine hangs cannot occur. WebSocket
+  messages retain the existing 8 MiB limit. No additional database queries or
+  migrations are introduced.
+
+The socket implementation is shared with desktop attachment, but process
+ownership is held separately in the native server. Do not use the desktop
+constructor to enable owned sockets: its permissions, connection lifetime and
+cancellation rules intentionally differ.
+
+Validation: `codex_owned_socket`, `codex_persistent`, `codex_desktop` and
+`codex_questions` exercise the lifecycle and compatibility contracts. An
+optional real-engine transport test (no model turn, isolated engine home) is:
+
+```bash
+BCS_BRIDGE_TEST_CODEX_BIN=/absolute/path/to/codex \
+  cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-bridge-core --lib \
+  real_codex_socket_initialization_and_rpc_burst -- --ignored --nocapture
 ```
 
 ## Codex process and thread lifecycle
@@ -222,6 +337,28 @@ pending forms; late answers
 do not resume a closed turn. Execution approvals remain on their configured
 review policy and are separate from user questions.
 
+## Engine failure diagnostics
+
+Claude-compatible engines (including `cfuse-cc`) report failed result frames as
+terminal chat errors, including in `hook_idle` mode: an error does not wait for
+a successful Stop/idle sequence. Bridge preserves recognized upstream causes in
+the existing `errorMessage` field, for example:
+
+```text
+engine exited: upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later
+```
+
+For failed results, a recognized numeric `api_error_status` takes precedence
+over the `error`, `errors` and `result` fallbacks. Missing, malformed or unknown
+status values retain those fallbacks; successful results remain unchanged.
+Known authentication, permission, request-size, rate-limit and provider-service
+errors are converted to constant diagnostic summaries. Free-form provider
+messages, credentials, prompts and response bodies are not forwarded in the
+terminal error. Unknown failures retain the native result subtype or the
+`engine_result_error` fallback; correlate their run ID with local engine logs.
+The existing `state: error` and `errorKind: runtime_error` wire contract is
+unchanged for Gateway SSE and Plugin WebSocket V2/V3.
+
 ## Event retention and delivery guarantees
 
 Plugin mode retains events that have not yet been locally consumed. After a
@@ -286,6 +423,16 @@ configuration, not an implicit service URL; supply the intended registration
 API and upstream endpoints when registering. Names accept 1-64 ASCII letters,
 digits, hyphens or underscores. `--config` remains supported but cannot be
 combined with `--profile`.
+
+For `start` (including `start --daemon`), explicit `--profile`, `--config` or
+`BRIDGE_CONFIG` takes precedence. Without a selector, the bridge uses
+`~/.bcn-bridge/bridge.toml` when it exists. Otherwise it discovers named profiles
+with a `bridge.toml` file: a unique profile is selected and its name is printed;
+multiple profiles produce a sorted list of startup commands and require an
+explicit choice. Configuration contents are validated after selection; an
+invalid selected configuration fails rather than falling back to another one.
+When no configuration exists, the error suggests completing Bot onboarding.
+Registration, initialization and deinitialization retain their existing defaults.
 
 Repeated registration of an existing profile verifies provider, engine and
 endpoints and reuses the stored Bot without a network registration request.

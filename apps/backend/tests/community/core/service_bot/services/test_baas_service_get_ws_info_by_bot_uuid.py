@@ -132,6 +132,43 @@ class TestGetWsInfoByBotUuid:
         assert result.baas_base_url == "http://baas.test"
         assert result.engine_port == 20003  # default
 
+    def test_a2a_base_url_missing_key_falls_back_to_empty(self):
+        """An older BaaS that answers no a2a_base_url must keep working
+        verbatim: the field is additive, and its absence means the empty
+        string, never a derivation and never a failure."""
+        response_data = {
+            "code": 0,
+            "data": {
+                "ws_url": "wss://baas.test/ws/BOT-xyz",
+                "token": "tok123",
+                "target": "TARGET-123",
+                "expires_at": "2026-01-01T00:00:00Z",
+            },
+        }
+        service = _make_service_with_response(response_data)
+
+        result = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert result.a2a_base_url == ""
+
+    def test_a2a_base_url_passes_through_verbatim(self):
+        """The issuer owns the A2A address; the answer arrives unmangled."""
+        response_data = {
+            "code": 0,
+            "data": {
+                "ws_url": "wss://baas.test/ws/BOT-xyz",
+                "token": "tok123",
+                "target": "TARGET-123",
+                "expires_at": "2026-01-01T00:00:00Z",
+                "a2a_base_url": "http://bot-a1b2-vc.stable.alipay.net:32196",
+            },
+        }
+        service = _make_service_with_response(response_data)
+
+        result = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+        assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+
     def test_custom_port_and_path(self):
         """Custom port and path are passed to API."""
         response_data = {

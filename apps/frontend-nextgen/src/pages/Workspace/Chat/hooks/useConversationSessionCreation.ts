@@ -1,6 +1,7 @@
 import type { ConversationBotView, ConversationSessionScope } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { botSessionService } from '@/services/workspace/botSessionService';
+import { getCapabilities } from '@/capabilities';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
@@ -23,7 +24,7 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
     async (botId: string): Promise<void> => {
       const view = botByBotId.get(botId);
       const userIdNow = userIdRef.current;
-      if (!userIdNow || !view?.bot.chatable || view.bot.isAgentCodingBot) return;
+      if (!userIdNow || !view?.bot.chatable) return;
       if (
         isManagedConversationSection(view.section) &&
         (useConversationStore.getState().originByManagedBotId[botId] ?? 'mine') !== 'mine'
@@ -32,10 +33,51 @@ export function useConversationSessionCreation(userId: string | null, botByBotId
       }
       const started = generation.current;
       const selectionAtStart = useConversationStore.getState();
-      const result = await botSessionService.createSession(view.bot, userIdNow); // 复用既有实现,不重复建。
+      const codingHost = view.bot.isAgentCodingBot
+        ? getCapabilities().getCodingBotConversationHost().value
+        : null;
+      let result;
+      if (view.bot.isAgentCodingBot && codingHost?.createSession) {
+        result = await codingHost.createSession({
+          botId: view.bot.realBotId,
+          userId: userIdNow,
+          ownerId: view.bot.ownerId,
+          title: '新对话',
+        });
+        if (!result.ok) {
+          if (userIdRef.current === userIdNow && generation.current === started) {
+            toast.error(result.message);
+          }
+          return;
+        }
+        const summary = result.session;
+        if (!summary?.sessionId) {
+          if (userIdRef.current === userIdNow && generation.current === started) {
+            toast.error('创建会话失败：未返回会话 ID');
+          }
+          return;
+        }
+        const now = new Date().toISOString();
+        result = {
+          ok: true,
+          data: {
+            sessionId: summary?.sessionId ?? '',
+            botId: view.bot.botId,
+            title: summary?.title || '新对话',
+            messageCount: summary?.messageCount ?? 0,
+            gmtModified: summary?.gmtModified || now,
+            gmtCreate: summary?.gmtCreate || now,
+            model: summary?.model,
+            favorite: false,
+          },
+        };
+      } else {
+        result = await botSessionService.createSession(view.bot, userIdNow); // 复用既有实现,不重复建。
+      }
       if (userIdRef.current !== userIdNow || generation.current !== started) return;
       if (!result.ok) {
-        toast.error(result.error.friendlyMessage);
+        const createError = result as { error?: { friendlyMessage?: string }; message?: string };
+        toast.error(createError.error?.friendlyMessage || createError.message || '创建会话失败');
         return;
       }
       const store = useConversationStore.getState();

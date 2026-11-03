@@ -75,29 +75,6 @@ impl SessionManagementService for NoopSessionManagementService {
         Ok(Vec::new())
     }
 
-    async fn count_running_service(
-        &self,
-        _group_id: &str,
-    ) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
     async fn complete_if_running(
         &self,
         _session_id: &str,

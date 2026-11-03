@@ -149,7 +149,7 @@ class CallerSubject(BaseModel):
 
 
 class CallerContext(BaseModel):
-    """caller_context — AgentPaaS/BCN 传入的调用方上下文"""
+    """caller_context — AgentPass/BCN 传入的调用方上下文"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -161,7 +161,7 @@ class CallerExecutionToken(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: Literal["iam-token", "agentpaas"]
+    type: Literal["iam-token", "agentpass"]
     token: str
     version: str | None = None
     format: str | None = None

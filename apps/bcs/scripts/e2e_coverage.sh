@@ -27,7 +27,7 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
 #                                                    # gate line >=41%, method >=36%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
-#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 50]
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 60]
 #                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -240,6 +240,9 @@ mkdir -p "$cov_dir"
 : > "$cli_coverage_log"
 export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
+# Exercise channel plugins through a separate real server without enabling a
+# test ingress on the shared production-composition Singlebox instance.
+bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi
@@ -348,8 +351,25 @@ if [[ "$no_stop" -eq 0 ]]; then
   # A listed file that shows any E2E hit is counted again with a warning.
   e2e_unreachable_memory_repos=(
     bcs-bot-store/src/memory.rs
+    bcs-bot-store/src/memory_authority.rs
+    bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
+    bcs-bot-store/src/memory_bot_repo_port.rs
+    bcs-bot-store/src/memory_control_plane.rs
+    bcs-bot-store/src/memory_controllable.rs
+    bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
+    bcs-bot-store/src/memory_registration_ownership.rs
+    bcs-bot-store/src/memory_retirement.rs
+    # The collaboration-store split introduced memory_* module files; the four
+    # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11
+    # instrumentable lines). memory_events.rs is deliberately NOT listed: its
+    # shared state_machine_transition_events helper is executed via the SQL path
+    # (11 E2E hits), so the warn-and-re-include rule would fire on it.
+    bcs-collaboration-store/src/memory_binding.rs
+    bcs-collaboration-store/src/memory_definition.rs
+    bcs-collaboration-store/src/memory_runs.rs
+    bcs-collaboration-store/src/memory_transition.rs
     bcs-event-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs
@@ -365,7 +385,22 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-store/src/memory_operations/
     bcs-user-identity/src/memory.rs
   )
-  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable_memory_repos[*]}" | sed 's/\./\\./g'))"
+  # P2 caller A2A delegation chain: the delegate stage only runs for queue
+  # rows carrying a delegated parent (a Bot handing its own caller turn to a
+  # second Bot, parent execution token exchange). The caller e2e story now
+  # proves the root protected ride, the queue admission seam and the observe
+  # fan-out end to end, but bot-to-bot handoff rows are not produced in the
+  # e2e stack; a listed file that shows any E2E hit is counted again (the
+  # gate warns and re-includes).
+  e2e_unreachable_p2_caller_delivery=(
+    bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+    bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  )
+  e2e_unreachable=(
+    "${e2e_unreachable_memory_repos[@]}"
+    "${e2e_unreachable_p2_caller_delivery[@]}"
+  )
+  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable[*]}" | sed 's/\./\\./g'))"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")

@@ -95,36 +95,37 @@ describe('botController OpenAPI contracts', () => {
     );
   });
 
-  test('engine-version inspection carries the caller, owner, draft stage and selected device', async () => {
+  test('engine-version inspection omits the default draft stage and preserves instance identity', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ comparison: 'older' }));
 
     await getBotEngineVersion('bot-1', {
       userId: '900001',
       ownerId: 'owner-1',
+      stage: 'draft',
       deviceUuid: 'device-1',
     });
 
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/engine-version?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      '/openapi/v1/bots/bot-1/engine-version?user_id=900001&entity_id=owner-1&device_uuid=device-1',
       expect.objectContaining({ method: 'GET' }),
     );
   });
 
-  test('engine status and restart keep the same explicit draft instance identity', async () => {
+  test('engine status and restart omit the default draft stage and preserve instance identity', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ running: true }));
-    const target = { userId: '900001', ownerId: 'owner-1', deviceUuid: 'device-1' };
+    const target = { userId: '900001', ownerId: 'owner-1', deviceUuid: 'device-1', stage: 'draft' as const };
 
     await getBotEngineStatus('bot-1', target);
     await restartBotEngine('bot-1', target);
 
     expect(spy).toHaveBeenNthCalledWith(
       1,
-      '/openapi/v1/bots/bot-1/engine/status?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      '/openapi/v1/bots/bot-1/engine/status?user_id=900001&entity_id=owner-1&device_uuid=device-1',
       expect.objectContaining({ method: 'GET' }),
     );
     expect(spy).toHaveBeenNthCalledWith(
       2,
-      '/openapi/v1/bots/bot-1/engine/restart?user_id=900001&entity_id=owner-1&stage=draft&device_uuid=device-1',
+      '/openapi/v1/bots/bot-1/engine/restart?user_id=900001&entity_id=owner-1&device_uuid=device-1',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ force: false }) }),
     );
   });

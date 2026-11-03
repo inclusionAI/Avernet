@@ -178,7 +178,10 @@ from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .bots.classification import router as classification_router
+from .bots.overview import router as bot_overview_router
+from .bot_access_check import router as bot_access_check_router
 from .collaboration_bots import public_router as collaboration_public_router
+from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_version import router as engine_version_router
@@ -189,6 +192,7 @@ from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -222,6 +226,7 @@ from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .experts import router as experts_router
 from .market import router as market_router
 from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
@@ -244,6 +249,7 @@ from .skills import (
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_envs import router as service_envs_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -307,6 +313,10 @@ _MIXED_GROUPS = [
 # precede `bots`.
 _OPEN_SUBGROUPS = [
     classification_router,
+    # Transitional, undocumented (include_in_schema=False) app-only access check.
+    bot_access_check_router,
+    # Non-user Bot overview: app-admissible, no user_id, tenant-identical.
+    bot_overview_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
@@ -391,6 +401,9 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # grant rather than the own-bot one.
     config_manifest_router,
     config_manifest_apply_router,
+    # The genome registry is collaborator-scoped on the manifest's bars
+    # (MEMBER to read, ADMIN to record) and addresses a shared bot the same way.
+    genome_router,
     # The startup script, data-init state, identity persona files and the
     # workspace resources/routines are collaborator-scoped on the manifest's
     # bars (MEMBER to read, ADMIN behind the lock to write), so they take the
@@ -456,7 +469,10 @@ _GRANT_CHECKED_SUBGROUPS = [
 # their order relative to each other and to `_SUBGROUPS` is free. They are still
 # mounted before the bots router for the one rule stated above, not because any
 # of them needs it.
+from .engine_runtime.engine.default_model import router as engine_default_model_router
+
 _ENGINE_RUNTIME_GROUPS = [
+    engine_default_model_router,
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
@@ -505,6 +521,8 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter(route_class=PublicAPIRoute)
+    # Explicit business locators, no acting-user query dimension.
+    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
@@ -563,6 +581,7 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
+    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
@@ -671,6 +690,7 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    public.include_router(risk_openapi_router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not

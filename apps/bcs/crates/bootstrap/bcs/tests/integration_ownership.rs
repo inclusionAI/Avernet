@@ -371,40 +371,43 @@ async fn ownership_no_sdk_created_by_stays_null_after_reconnect() {
     // Close WebSocket and reconnect with same token
     let _ = sink.close().await;
 
-    // Reconnect with the saved token
-    let url = format!("ws://{}/ws/bot", addr);
-    let (ws2, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .expect("Reconnect WebSocket");
-    let (mut sink2, mut stream2) = ws2.split();
-
-    let connect_frame = json!({
-        "type": "req",
-        "id": "reconnect_001",
-        "method": "bot.connect",
-        "params": { "token": token }
-    });
-    sink2.send(Message::Text(connect_frame.to_string().into()))
-        .await
-        .expect("Send bot.connect");
-
-    let resp = loop {
-        match tokio::time::timeout(Duration::from_secs(5), stream2.next()).await {
-            Ok(Some(Ok(Message::Text(text)))) => {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if v["type"] == "res" && v["id"] == "reconnect_001" {
-                        break v;
+    // Client close does not synchronously release the server's connection slot.
+    // Retry only that documented rejection, bounded across all attempts/frames.
+    let (mut sink2, _stream2, resp) = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/bot"))
+                .await.expect("Reconnect WebSocket");
+            let (mut sink, mut stream) = ws.split();
+            sink.send(Message::Text(json!({
+                "type": "req", "id": "reconnect_001", "method": "bot.connect",
+                "params": { "token": token }
+            }).to_string().into())).await.expect("Send bot.connect");
+            let response = loop {
+                match stream.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if value["type"] == "res" && value["id"] == "reconnect_001" {
+                                break value;
+                            }
+                        }
                     }
+                    Some(Ok(Message::Ping(data))) => {
+                        sink.send(Message::Pong(data)).await.expect("reply to ping");
+                    }
+                    _ => panic!("No response to reconnect bot.connect"),
                 }
+            };
+            if response["ok"] == true {
+                break (sink, stream, response);
             }
-            Ok(Some(Ok(Message::Ping(data)))) => {
-                let _ = sink2.send(Message::Pong(data)).await;
-                continue;
-            }
-            _ => panic!("No response to reconnect bot.connect"),
+            assert_eq!(response["error"]["code"], "already_connected", "Reconnect failed: {response}");
+            drop((sink, stream));
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    };
-    assert!(resp["ok"].as_bool().unwrap_or(false), "Reconnect failed: {resp}");
+    }).await.expect("reconnect must succeed after old connection cleanup");
+    assert_eq!(resp["payload"]["bot_uuid"], bot_uuid);
+    assert_eq!(resp["payload"]["token"], token);
+    assert_eq!(resp["payload"]["is_new"], false);
 
     // After reconnect, created_by should still be null
     let resp_after: serde_json::Value = http

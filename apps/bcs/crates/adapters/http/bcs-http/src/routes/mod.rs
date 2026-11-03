@@ -6,6 +6,7 @@ pub mod assets;
 pub mod bot_chat;
 pub mod bot_events;
 pub mod bots;
+pub mod bot_agent_card;
 pub mod channel;
 pub mod collaboration_definitions;
 pub mod collaboration_drafts;
@@ -16,7 +17,6 @@ pub mod ensure;
 pub mod friends;
 pub mod group_context;
 pub mod group_messages;
-pub mod group_requests;
 pub mod groups;
 pub mod health;
 pub mod invite;
@@ -28,6 +28,7 @@ pub mod delivery_policy;
 pub mod onboard;
 pub mod organizations;
 pub mod providers;
+pub mod a2a_bots;
 pub mod register;
 pub mod secret;
 pub mod services;
@@ -84,3 +85,4 @@ pub(crate) fn reject_judge_definition_when_unavailable(
     Ok(())
 }
 pub mod friend_connections;
+pub mod task_handle;

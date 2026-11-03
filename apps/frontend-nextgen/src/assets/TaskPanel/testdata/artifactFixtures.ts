@@ -11,7 +11,7 @@ export const artifactDescriptorWorkspaceFile: TaskArtifactDescriptorDto = {
   artifact_name: null, // 缺名回落 content.file_name
   kind: 'file',
   content: {
-    storage_type: 'BOT_WORKSPACE',
+    storage_type: 'bot_workspace',
     storage_id: 'workspace/report.md',
     file_name: '竞品分析报告.md',
     file_id: null,
@@ -27,7 +27,7 @@ export const artifactDescriptorSessionFile: TaskArtifactDescriptorDto = {
   artifact_name: '附件材料.pdf',
   kind: 'file',
   content: {
-    storage_type: 'SESSION_FILE',
+    storage_type: 'session_file',
     storage_id: 'sess-9',
     file_name: '材料.pdf',
     file_id: 'f-1',
@@ -36,6 +36,22 @@ export const artifactDescriptorSessionFile: TaskArtifactDescriptorDto = {
   attempt: null,
   creator: 'group-902',
   created_at: 1729400100000,
+};
+
+export const artifactDescriptorObjectFile: TaskArtifactDescriptorDto = {
+  artifact_id: 'art-obj-file',
+  artifact_name: null, // 缺名回落 content.file_name
+  kind: 'file',
+  content: {
+    storage_type: 'object_file',
+    storage_id: 'task-artifacts/tk_20261027_0001/analysis-report.pdf',
+    file_name: 'analysis-report.pdf',
+    file_id: null,
+    file_type: 'application/pdf',
+  },
+  attempt: 0,
+  creator: 'bot-claw',
+  created_at: 1729400150000,
 };
 
 export const artifactDescriptorUrlLink: TaskArtifactDescriptorDto = {

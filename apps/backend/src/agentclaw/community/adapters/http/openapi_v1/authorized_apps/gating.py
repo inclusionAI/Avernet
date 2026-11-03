@@ -30,28 +30,30 @@ from __future__ import annotations
 from typing import Any
 
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
 from agentclaw.community.core.engine_runtime.gate import require_bot_operator
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
 
 def resolve_delegable_bot(
-    bots: Any,
     collaborators: Any,
     *,
     bot_id: str,
     caller_id: str,
     owner_id: str | None = None,
-) -> tuple[str, int]:
+    bot_repository: BotRepository,
+) -> ResolvedBotContext:
     """Resolve the addressed bot and refuse a caller who may not operate it.
 
-    Returns the resolved ``(owner_id, bot_pk)`` — the owner because the grant
-    records it, and the primary key because the collaborator table is keyed on
-    it.
+    Returns the immutable resource address and the resolved Bot row. Current
+    ownership is used for permission checks; downstream resources use entity_id.
 
     **The bot is addressed, not inferred.** ``bot_id`` alone does not identify a
     bot: ``ac_bots`` carries no unique key on it, and the retired ``default``
@@ -88,8 +90,10 @@ def resolve_delegable_bot(
     """
     addressed_owner = owner_id or caller_id
     try:
-        bot = bots.get_bot(bot_id, addressed_owner)
-    except BotNotFoundError:
+        resolved = BotAddressResolver(bot_repository).resolve(
+            bot_id=bot_id, legacy_owner_id=addressed_owner
+        )
+    except BotAddressNotFoundError:
         # Re-raised with a server-authored message. The one it carries names the
         # bot id, and this one reaches a log line verbatim.
         logger.warning(
@@ -98,8 +102,7 @@ def resolve_delegable_bot(
             for_log(addressed_owner),
         )
         raise BotNotFoundError("Bot not found") from None
-    resolved_owner = str(bot.get("owner_id") or "")
-    bot_pk = int(bot.get("id") or 0)
+    resolved_owner = resolved.current_owner_id
     if not resolved_owner:
         # Unreachable for a well-formed row, and refused rather than trusted:
         # an empty owner would be written into the grant as the bot's owner and
@@ -111,12 +114,12 @@ def resolve_delegable_bot(
         raise BotNotFoundError("Bot not found")
     require_bot_operator(
         collaborators,
-        bot=bot,
+        bot=resolved.bot,
         bot_id=bot_id,
         caller_id=caller_id,
         owner_id=resolved_owner,
     )
-    return resolved_owner, bot_pk
+    return resolved
 
 
 __all__ = ["resolve_delegable_bot"]

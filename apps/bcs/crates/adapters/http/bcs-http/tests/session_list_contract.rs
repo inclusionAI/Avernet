@@ -152,7 +152,6 @@ async fn participant_scoped_empty_result_does_not_create_legacy_session_when_gro
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -216,7 +215,6 @@ async fn list_sessions_treats_human_owner_of_participant_bot_as_formal_member() 
         input: None,
         output: None,
         error_message: None,
-        callback_status: None,
         activation_count: 1,
         message_visibility_version: 1,
         caller_principal: None,
@@ -304,6 +302,13 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
     services.registry = registry.clone();
     services.group = group_store;
     services.session_management = sessions.clone();
+    // LIVE authority chain mirroring the fixture
+    // `created_by` rows (bot-authority plan Task 6.5);
+    // the legacy alias (`created_by: None → allow`)
+    // no longer auto-claims.
+    let authority = bcs_test_support::lazy_authority_chain().hook;
+    authority.seed_owner("driver-bot", "alice");
+    services.bot_authority_hook = authority;
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
         staff_no: Some("alice".to_string()),
@@ -508,7 +513,6 @@ impl SessionManagementService for RecordingSessions {
             input: cmd.params.input.clone(),
             output: None,
             error_message: None,
-            callback_status: None,
             activation_count: 1,
             message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
@@ -589,26 +593,6 @@ impl SessionManagementService for RecordingSessions {
             .take(limit as usize)
             .cloned()
             .collect())
-    }
-
-    async fn count_running_service(&self, _group_id: &str) -> Result<u64, SessionUseCaseError> {
-        Ok(0)
-    }
-
-    async fn list_running_service(
-        &self,
-        _offset: u64,
-        _limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(Vec::new())
-    }
-
-    async fn update_callback_status(
-        &self,
-        _session_id: &str,
-        _status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        Ok(())
     }
 
     async fn complete_if_running(

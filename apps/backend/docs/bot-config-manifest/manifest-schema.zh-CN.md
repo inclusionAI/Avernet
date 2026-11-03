@@ -553,8 +553,14 @@ mcp:
   State 事务中写入 `ac_bot_mcp_installation` 和 `ac_bot_mcp_config`，随后按既有
   best-effort 语义投影到设备。
 - 配置逐字段优先级为 `Manifest Bot override > user config > Center/default`。
-  只有 Manifest 显式字段写入 Bot override；删除 MCP、`mcp: []` 或从条目移除
-  `config` 时，同步删除对应 override。省略整个 `mcp` 类别仍是 no-op。
+  父 MCP 条目仍在时，省略 `config` 保留当前 Bot override；显式 `config: {}`
+  清除完整 override；非空 `config` 完整替换 override，未声明的旧覆盖字段恢复继承。
+  删除管理范围内的 MCP 父条目或声明 `mcp: []`，同步删除对应 override；
+  省略整个 `mcp` 类别仍是 no-op。当前 Set 供应不在 Manifest 管理范围内：
+  active 普通集、扣除 exclusion 的 Default 和对应平台默认项被省略时不变；
+  显式声明这些项目会在任何类别写入前拒绝整个 Apply。
+- 兼容性修订：历史版本在条目省略 `config` 时也清除 override；需要重置的调用方
+  现在应显式发送 `config: {}`。不自动重写历史文档或恢复已经删除的配置。
 
 账号级 MCP 配置仍通过既有公开端点管理，并作为未被 Bot override 覆盖字段的默认值：
 
@@ -609,6 +615,16 @@ resources:
 **共同规则**：
 - `path` 是 workspace 相对的**逻辑路径**，不是引擎物理路径；寻址语义与
   现有 resources API 一致，物理位置由各引擎照现状决定。
+- **资源根目录就是 workspace 根目录**（与资源 Open API 一致：不传路径即为根），
+  **`path` 不得命名受保护条目**：身份文件（`SOUL.md` 等）、`skills/`、
+  `skills-pool/`、引擎的 `state/`、`conf/`、`<engine>_conf/`、以及任何点文件
+  ——清单集中在 `core/workspace/protected_entries.py`，归其他 construct 或引擎
+  所有。资源根目录整体归 apply 引擎所有：每次声明了 `resources` 的 apply 都先
+  清空 workspace 下所有未受保护的条目、再写入声明的全部内容，所以上一份文档
+  声明而这一份省略的路径，以及 Bot 运行期自己写进 workspace 的文件，都会被
+  删除（#2162）；dry run 的 report 用 `removals` 列出将被清除的路径。受保护
+  条目一概不碰。命名了受保护条目的 `path` 在 PUT 时拒绝
+  （`resources_protected_entry`）。
 - 校验：白名单字符、禁止路径穿越（`../`、绝对路径）。
 
 **目录条目语义**（HTTP 没有目录语义，归档是把树运过来的约定形态）：
@@ -619,7 +635,8 @@ resources:
   口径是**每个 apply 点整体替换**；「读并哈希已部署的子树再比对」是可选优化，
   只有当读这棵树比重写它更便宜时才值得做。
 - **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
-  文件在 apply 时被清除（含手工添加的）。目录之外不碰。
+  文件在 apply 时被清除（含手工添加的）。这是上面「资源根目录整体归 apply
+  引擎所有」这条规则的推论：清空的是整个 workspace（受保护条目除外），不止目录条目。
 - **替换只原子到传输层允许的程度**：平台侧解包到临时位置（保证一次失败的
   取源或一个坏归档永远到不了 bot），但下发只有 `delete_tree` + 逐文件写
   ——设备文件系统契约里没有 rename/move。所以 `path` 下的树存在一个真实的
@@ -712,11 +729,11 @@ identity:
   AGENTS/USER/TOOLS/HEARTBEAT/BOOTSTRAP/KNOWLEDGE/CLAUDE/GREETING/README
   .md）；**claude_code 引擎仅允许 `CLAUDE.md`**。写入时按 bot 当前引擎
   校验并明确报错，而不是 apply 时静默跳过。
-- **保留名单：`MEMORY.md` 与 `IDENTITY.md` 声明即拒。**这两个是引擎生成的
-  运行期状态，apply **永不写入、也永不移除**它们——它们是类目覆盖（§1）
-  唯一的例外。两者都在 `VALID_IDENTITY_FILES` 里，所以上一条会放行，必须
-  在 `PUT` 时单独拒绝：否则用户会得到一份「被接受、却永远收敛不了」的文档。
-  名单**有限且可枚举**，正因如此它才是两个引擎系都能同意并检查的契约。
+- **`MEMORY.md` 声明即拒，且永不因替换而删除。**它仍为引擎运行期记忆。
+- **`IDENTITY.md` 在目标引擎原有白名单内可显式创建/覆盖。**显式空内容沿原空写
+  语义，与其他可配置身份文件一致。省略整个 identity 类目不操作；`identity: []` 清空
+  可管理集合；非空列表完整替换，未列出的 IDENTITY.md 同样移除。
+  此能力不扩大 Claude Code 白名单，不修改 MEMORY、权限或 stage 隔离。
 - 其余引擎可能写入的文件（运行期会被引擎更新的那些）技术上可声明，但声明
   获胜语义会在每个 apply 点重置它们——SOUL.md、RULES.md 等人设/规则文件
   才是本类目的主场景。
@@ -736,6 +753,9 @@ script:
   **体内无密**（下发链路日志可见）、退出码不影响平台就绪判定。
 - **生效时机**：`PUT` 之后**立即下发、下次启动时执行**。它是唯一效果被延后
   的类别——其余类别 `PUT` 后立即生效、且不需要重启。
+- **`script: null` 与省略 `script` 不同**：`script: null` 是声明「没有脚本」，
+  apply 会删除 Bot 现有的启动脚本；省略整个 `script` 才是「不动它」（#2862）。
+  这与其余类别的口径一致：声明为空（`mcp: []`）即删除，省略即不碰。
 - ⚠️ **第一期：`script` 不得依赖同一份清单声明的任何内容。**脚本被烤进启动
   命令，而 `identity` / `resources` / `skills` 在容器**起来之后**才下发，所以
   **首启时脚本跑在它们之前**。这**反转了 design §3.4** 的顺序承诺（「脚本

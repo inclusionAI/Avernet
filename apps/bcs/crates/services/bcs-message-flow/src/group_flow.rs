@@ -48,7 +48,25 @@ use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 
+/// Live Human→Bot control judgment (bot-authority plan
+/// Task 6.5, spec §8): the legacy `created_by` comparison
+/// is replaced by the authority hook. A failing authority
+/// read is an internal error — never a deny-as-verdict.
+pub(crate) async fn human_controls_bot(
+    flow: &BcsMessageFlow,
+    staff_no: &str,
+    bot_id: &str,
+) -> ServiceResult<bool> {
+    match flow.authority()?.can_manage(staff_no, bot_id).await {
+        Ok(controlled) => Ok(controlled),
+        Err(error) => Err(ServiceError::InternalError(format!(
+            "bot authority lookup failed: {error}"
+        ))),
+    }
+}
+
 pub struct BcsMessageFlow {
+    pub execution_cache: Option<Arc<dyn bcs_cache_api::CachePlugin>>,
     pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
     pub routing: Arc<dyn RoutingCoreService>,
@@ -64,6 +82,9 @@ pub struct BcsMessageFlow {
     pub provider_chat_run_timeout_ms: u64,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub message_repo: Option<Arc<dyn MessageRepoPort>>,
+    /// Read-only delivery queries share the configured Chat history window.
+    /// Bootstrap overrides this with message_history.new_participant_visible_limit.
+    pub new_participant_visible_limit: u64,
     pub event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     pub event_recorder: Option<Arc<dyn EventRecorderPort>>,
     pub message_tracker: Arc<crate::message_tracker::MessageTracker>,
@@ -74,16 +95,61 @@ pub struct BcsMessageFlow {
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
     pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
     pub managed_deliveries: Option<Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>>,
+    /// Narrow bot-authority hook consulted for Human→Bot control
+    /// judgments (bot-authority plan Task 6.5). Unwired flows fail
+    /// closed at any judgment that needs live facts.
+    pub bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    /// Output-permit admission for accepted business operations
+    /// (bot-authority spec §8.2): installed by composition, consulted
+    /// by `handle_web_send_with_result` / `handle_persistent_group_send`
+    /// BEFORE their first side effect. A `None` flow (unit fixtures)
+    /// simply skips the output-admission boundary.
+    pub output_admission: Option<Arc<dyn bcs_service_api::OutputAdmissionPort>>,
     /// Composition supplies only Bots enabled for new Group admissions.
     pub group_delivery_limits: BTreeMap<String, u32>,
     pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
     pub delivery_queue_ttl_ms: Option<i64>,
+    /// Speaking-lease idle window for workbench submissions (§15.99,
+    /// `[speaking_lease] idle_timeout_ms`): both the submission check and
+    /// the post-acceptance renewal use this exact configured value.
+    pub speaking_lease_idle_timeout_ms: i64,
     pub queue_persistable_headers: Vec<String>,
     /// Retained policy for replies from already-admitted Group runs during drain.
     pub group_reply_delivery_limits: BTreeMap<String, u32>,
     pub delivery_shutdown: OnceLock<(tokio::sync::watch::Sender<bool>, tokio::sync::watch::Receiver<bool>)>,
     pub(crate) delivery_event_locks: tokio::sync::Mutex<BTreeMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
-    terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
+    /// Caller admission seam dependencies (spec §7.5.1). `None` keeps the
+    /// ordinary web_send behavior untouched; the composition root opts in.
+    pub caller_admission: Option<Arc<crate::caller_admission::CallerAdmissionDeps>>,
+    /// Speaking-lease store (spec §6.3, P3): injected only where the
+    /// composition provides one. `None` keeps ordinary groups untouched;
+    /// a caller group without a store fails closed instead of un-limiting
+    /// Human concurrency.
+    pub speaking_leases: Option<
+        Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+    >,
+    /// Caller root-lineage registry (spec §8.3, L243-A): runtime-only, the
+    /// accepted protected dispatch is the single trusted producer; the
+    /// coordination derivation gate is the single reader. `None` keeps the
+    /// composition without caller derivations entirely.
+    pub caller_root_lineage: Option<Arc<crate::caller_lineage::RootLineageIndex>>,
+    /// Shared observe assembly (spec §6.4, L243③ wire): the runtime-only
+    /// observe index plus the composition's injector factory — the reply
+    /// sync's collaborators. Set by the caller wiring epoch together with
+    /// the runtime pipeline; `None` keeps reply syncs off.
+    pub caller_observe: Option<Arc<crate::caller_dispatch_pipeline::ObserveSyncAssembly>>,
+    /// §15.83 S3/S4 (review-VI P1): the protected dispatch pipeline this
+    /// composition built — the composition root hands the SAME instance to
+    /// other application services (the collaboration runtime's orchestration
+    /// node dispatch + instance registrar). Absent in test/dev compositions.
+    pub caller_dispatch_pipeline: Option<Arc<crate::caller_dispatch_pipeline::CallerDispatchPipeline>>,
+    /// Owner→caller identity relay (spec L62 direction, opt-in): the ledger
+    /// captures the session's current human ingress at admission and the
+    /// trusted task-assign edge redeems it onto an allowlisted caller
+    /// target's handoff scope. None of it travels through the middle bot;
+    /// `None` keeps every session fail-closed to today's behavior.
+    pub caller_relay: Option<crate::caller_relay::CallerRelayState>,
+    pub(crate) terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
     terminal_slots: Arc<tokio::sync::Semaphore>,
     system_queue: Arc<crate::queued_system::QueuedSystemAdmission>,
 }
@@ -97,6 +163,7 @@ impl BcsMessageFlow {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         Self {
+            execution_cache: None,
             direct_chat: None,
             group,
             routing,
@@ -112,6 +179,7 @@ impl BcsMessageFlow {
             provider_chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             system_message: None,
             message_repo: None,
+            new_participant_visible_limit: 100,
             event_record_factory: None,
             event_recorder: None,
             message_tracker: Arc::new(crate::message_tracker::MessageTracker::new()),
@@ -119,10 +187,13 @@ impl BcsMessageFlow {
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
             human_mention_notify: None,
+            bot_authority: None,
+            output_admission: None,
             managed_deliveries: None,
             group_delivery_limits: BTreeMap::new(),
             delivery_policy: None,
             delivery_queue_ttl_ms: None,
+            speaking_lease_idle_timeout_ms: 60_000,
             group_reply_delivery_limits: BTreeMap::new(),
             queue_persistable_headers: Vec::new(),
             delivery_shutdown: OnceLock::new(),
@@ -130,10 +201,60 @@ impl BcsMessageFlow {
             terminal_owner: OnceLock::new(),
             terminal_slots: Arc::new(tokio::sync::Semaphore::new(64)),
             system_queue: Arc::new(crate::queued_system::QueuedSystemAdmission::default()),
+            caller_admission: None,
+            speaking_leases: None,
+            caller_root_lineage: None,
+            caller_observe: None,
+            caller_dispatch_pipeline: None,
+            caller_relay: None,
         }
     }
 
+    pub fn with_caller_relay(mut self, relay: crate::caller_relay::CallerRelayState) -> Self {
+        self.caller_relay = Some(relay);
+        self
+    }
+
+    pub fn with_execution_cache(mut self, cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Self {
+        self.execution_cache = Some(cache);
+        self
+    }
+
     pub fn with_direct_chat(mut self, direct: Arc<crate::a2a_chat::A2aChat>) -> Self { self.direct_chat = Some(direct); self }
+
+    /// Wire the narrow bot-authority hook (Task 6.5). A flow
+    /// without one fails closed at its Human→Bot control
+    /// judgments instead of consulting legacy `created_by` data.
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
+    }
+
+    /// Wire the output-admission port (spec §8.2): every accepted
+    /// business operation freezes per-connection delivery permits
+    /// through it before its first side effect, so later output of
+    /// THAT operation needs no fresh authority read and is never
+    /// retroactively revoked.
+    pub fn with_output_admission(
+        mut self,
+        port: Option<Arc<dyn bcs_service_api::OutputAdmissionPort>>,
+    ) -> Self {
+        self.output_admission = port;
+        self
+    }
+
+    /// The authority hook; failing to wire one is an error, never
+    /// a deny-as-Ok nor a deny-as-forbidden.
+    pub(crate) fn authority(
+        &self,
+    ) -> Result<&dyn bcs_service_api::port::bot_authority::BotAuthorityPort, ServiceError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| ServiceError::InternalError("bot authority hook is not wired".into()))
+    }
 
     pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
         self.coordination_intents = port;
@@ -158,6 +279,39 @@ impl BcsMessageFlow {
 
     pub fn with_managed_deliveries(mut self, service: Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>) -> Self {
         self.managed_deliveries = Some(service);
+        self
+    }
+
+    pub fn with_speaking_leases(
+        mut self,
+        leases: Arc<dyn bcs_service_api::port::repo::session_speaking_lease::SpeakingLeaseRepoPort>,
+    ) -> Self {
+        self.speaking_leases = Some(leases);
+        self
+    }
+
+    /// Attach the caller derivation collaborators (spec §8.3/§7.2, L243-A):
+    /// both must be present — the runtime-only lineage registry the accepted
+    /// protected dispatch produces, and the durable child repo the
+    /// coordination edge registers derived children under. Partial
+    /// assemblies stay absent entirely (fail-closed, no phantom store).
+    /// Attach the shared observe assembly for the reply-side sync
+    /// (spec §6.4 Bot 共享回复同步): the same index the accepted dispatch
+    /// seeds, plus the injector factory for the replying bot's own
+    /// Provider target.
+    pub fn with_caller_observe(
+        mut self,
+        observe: Arc<crate::caller_dispatch_pipeline::ObserveSyncAssembly>,
+    ) -> Self {
+        self.caller_observe = Some(observe);
+        self
+    }
+
+    pub fn with_caller_derivation(
+        mut self,
+        root_lineage: Arc<crate::caller_lineage::RootLineageIndex>,
+    ) -> Self {
+        self.caller_root_lineage = Some(root_lineage);
         self
     }
 
@@ -217,6 +371,14 @@ impl BcsMessageFlow {
 
     pub fn with_bot_run_context(mut self, run_context: Arc<dyn BotRunContextPort>) -> Self {
         self.bot_run_context = Some(run_context);
+        self
+    }
+
+    /// Share the producer registry used by ALL context writers (A2A, system,
+    /// queue and group sends). Composition passes this same port to producers.
+    pub fn with_tracked_run_context(mut self, context: Arc<crate::TrackedBotRunContext>) -> Self {
+        self.message_tracker = context.tracker();
+        self.bot_run_context = Some(context);
         self
     }
 
@@ -285,8 +447,11 @@ impl BcsMessageFlow {
         if delivery_type != DeliveryType::Send {
             return Ok(());
         }
+        let timeout_ms = self.task_store.get(run_id).await.and_then(|task| task.timeout_s)
+            .map(|seconds| seconds.saturating_mul(1000).saturating_add(300_000).max(self.provider_chat_run_timeout_ms))
+            .unwrap_or(self.provider_chat_run_timeout_ms);
+        let deadline_ms = now_ms().saturating_add(timeout_ms);
         if let Some(run_context) = &self.bot_run_context {
-            let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
             let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
                 .put_context(BotRunContext {
@@ -298,22 +463,8 @@ impl BcsMessageFlow {
                     terminal: false,
                 })
                 .await;
-            let (transport_owner, provider_bypass_headers) = match delivery_target {
-                BotDeliveryTarget::WebSocket { .. } => {
-                    (BotRunTransportOwner::WebSocket, Vec::new())
-                }
-                BotDeliveryTarget::HttpProvider {
-                    provider_id,
-                    provider_bot_ref,
-                    ..
-                } => (
-                    BotRunTransportOwner::HttpProvider {
-                        provider_id: provider_id.clone(),
-                        provider_bot_ref: provider_bot_ref.clone(),
-                    },
-                    provider_bypass_headers.to_vec(),
-                ),
-            };
+            let transport_owner = BotRunTransportOwner::from_target(delivery_target);
+            let provider_bypass_headers = if delivery_target.is_http_provider() { provider_bypass_headers.to_vec() } else { Vec::new() };
             run_context
                 .register_active_run(ActiveBotRunContext {
                     canonical_run_id: run_id.to_string(),
@@ -330,10 +481,14 @@ impl BcsMessageFlow {
                 })
                 .await?;
         }
+        // Explicitly distinguish live internal/relay Runs from a retired Run
+        // whose operation binding was cleaned up. Never recreate this at ingress.
+        self.message_tracker.register_independent_output_run(run_id, deadline_ms).await;
         Ok(())
     }
 
     pub(crate) async fn discard_send_context(&self, run_id: &str) -> ServiceResult<()> {
+        self.message_tracker.cleanup_output_run(run_id).await;
         let Some(run_context) = self.bot_run_context.as_ref() else {
             return Ok(());
         };
@@ -345,6 +500,34 @@ impl BcsMessageFlow {
             .remove_active_run(&context.scope, &context.canonical_run_id)
             .await?;
         Ok(())
+    }
+
+    /// Explicitly release runs that can no longer produce output
+    /// (confirmed rejection or an unsent target): drop their operation
+    /// bindings so stray events stop tagging the operation, and
+    /// tell the delivery adapter — an explicit end-state that lets
+    /// the operation complete on its surviving streams (spec §8.2).
+    pub(crate) async fn release_output_runs(&self, operation_id: &str, run_ids: &[String]) {
+        for run_id in run_ids {
+            self.message_tracker.cleanup_output_run(run_id).await;
+        }
+        if let Some(output_admission) = self.output_admission.as_ref() {
+            let _ = output_admission
+                .release_operation_runs(operation_id, run_ids.to_vec())
+                .await;
+        }
+    }
+
+    /// A durable terminal for a never-sent Send has no Bot callback to close
+    /// its stream. No TTL: queued/unknown/running work retains its permit.
+    pub(crate) async fn release_unsent_output(&self, row: &bcs_domain::message_delivery::PersistedMessageDelivery) {
+        if row.state.kind != DeliveryType::Send || row.state.may_have_been_sent || !row.state.status.is_terminal() {
+            return;
+        }
+        let Some(run) = &row.run_id else { return; };
+        if let Some(operation) = self.message_tracker.operation_of_run(run).await {
+            self.release_output_runs(&operation, std::slice::from_ref(run)).await;
+        }
     }
 
     pub(crate) async fn complete_send_context(&self, run_id: &str) -> ServiceResult<()> {
@@ -401,6 +584,12 @@ impl MessageFlowService for BcsMessageFlow {
             }));
         }
         Ok(None)
+    }
+    async fn task_status(&self, refs: Vec<String>) -> ServiceResult<Vec<bcs_service_api::TaskHandleView>> {
+        crate::task_handle::status(self, refs).await
+    }
+    async fn cancel_task(&self, task_ref: String, reason: String) -> ServiceResult<bcs_service_api::TaskHandleView> {
+        crate::task_handle::cancel(self, task_ref, reason).await
     }
     async fn query_message_deliveries(&self, query: bcs_service_api::application::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
         crate::delivery_control::query(self, query).await
@@ -514,6 +703,11 @@ impl MessageFlowService for BcsMessageFlow {
         source_run_id: &str,
         accepted_run_id: &str,
     ) -> ServiceResult<bool> {
+        // All tracked aliases normalize to their source Run at event ingress;
+        // keep its IM destination under that same canonical identity.
+        if self.message_tracker.output_binding(source_run_id).await.is_some() {
+            return Ok(self.message_tracker.channel_source_message_id(source_run_id).await.is_some());
+        }
         Ok(self
             .message_tracker
             .rebind_channel_source_message_id(source_run_id, accepted_run_id)
@@ -526,10 +720,37 @@ impl MessageFlowService for BcsMessageFlow {
         run_id: &str,
         bot_id: &str,
     ) -> ServiceResult<TaskRunAliasRegistration> {
-        let result = self
-            .task_store
-            .register_alias_for_dispatched_target(task_id, run_id, bot_id)
-            .await;
+        let task = self.task_store.get(task_id).await;
+        if task.as_ref().is_some_and(|entry| entry.target_bot != bot_id
+            || entry.status != crate::task_store::TaskLedgerStatus::Dispatched)
+            || self.task_store.resolve_task_id(run_id).await.is_some_and(|id| id != task_id) {
+            return Ok(TaskRunAliasRegistration::Rejected);
+        }
+        if self.message_tracker.output_binding(task_id).await.is_some() {
+            let scope = if let Some(entry) = task {
+                Some(BotRunScope {
+                    session_id: entry.session_id.unwrap_or_else(|| entry.group_id.clone()),
+                    group_id: entry.group_id, bot_id: entry.target_bot,
+                })
+            } else if let Some(contexts) = &self.bot_run_context {
+                match contexts.find_active_run(task_id).await? {
+                    Some(context) => Some(context.scope),
+                    None => contexts.get_context(task_id).await
+                        .filter(|context| !context.terminal && context.deadline_ms > now_ms())
+                        .map(|context| BotRunScope {
+                            session_id: context.bcs_session_id.unwrap_or_default(),
+                            group_id: context.group_id, bot_id: context.bot_id,
+                        }),
+                }
+            } else { None };
+            let Some(scope) = scope.filter(|scope| scope.bot_id == bot_id) else {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            };
+            if !self.message_tracker.register_output_alias(task_id, run_id, scope).await {
+                return Ok(TaskRunAliasRegistration::Rejected);
+            }
+        }
+        let result = self.task_store.register_alias_for_dispatched_target(task_id, run_id, bot_id).await;
         Ok(match result {
             Some(true) => TaskRunAliasRegistration::Registered,
             Some(false) => TaskRunAliasRegistration::Rejected,
@@ -650,3 +871,6 @@ mod delivery;
 pub use delivery::{build_chat_abort_frame};
 pub(crate) use delivery::{ContextProjection, context_projection_for_delivery, frame_protocol_version, frontend_domain_for_group};
 use delivery::{frame_for_target, bot_delivery_kind, delivery_metric_kind, publish_web_user_message, publish_group_callback_event, publish_chat_abort_event, route_source_for_web_send, log_message_received, log_routing_digest, log_bot_deliver_result};
+mod output_facts;
+pub(crate) use output_facts::freeze_run_output_facts;
+use output_facts::session_snapshot_for_freeze;

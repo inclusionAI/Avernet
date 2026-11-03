@@ -124,6 +124,16 @@ fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ args: process.argv.slic
   assert.equal(calls[2]?.token, 'registration-secret');
   assert.deepEqual(calls[2]?.args, ['--profile', 'installer-test']);
   assert.ok(calls[0]?.args.includes(join(root, 'package with spaces.tgz')));
+  await writeFile(logPath, '');
+  const defaultInstall = spawnSync('bash', [installer.pathname,
+    '--endpoint', 'http://127.0.0.1:21000/', '--no-start'], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ''}`, CALL_LOG: logPath },
+  });
+  assert.equal(defaultInstall.status, 0, defaultInstall.stderr);
+  const defaultCalls = (await readFile(logPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual(defaultCalls[0].args, ['plugin', '--profile', 'web', 'add', '--', `${manifest.name}@${manifest.version}`]);
+
 });
 
 test('install script is valid Bash', () => {
@@ -169,6 +179,6 @@ test('install script explains how to install DSH when the CLI is missing', async
     },
   });
   assert.equal(result.status, 1);
-  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.2\.1-alpha\.2/);
+  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.2\.1-rc\.2/);
   assert.doesNotMatch(`${result.stdout}${result.stderr}`, /registration-secret/);
 });

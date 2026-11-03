@@ -21,7 +21,7 @@ class ResultQueueStory(Story):
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
         self.provider = self.post("/providers", {
-            "name": "Result queue E2E", "webhook_url": self.args.mock_url + "/provider/webhook",
+            "name": "Result queue E2E", "webhook_url": (self.args.mock_sink_url or self.args.mock_url) + "/provider/webhook",
             "auth": {"mode": "static_bearer"}, "protocol_version": "2.0",
             "coordination": {"mode": "native_tool"},
         })
@@ -144,6 +144,9 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ("base-url", "mock-url", "human"):
         parser.add_argument("--" + name, required=True)
+    # BCS-facing sink URL for the provider webhook registration. Falls back to
+    # --mock-url when the harness and BCS share one network viewpoint.
+    parser.add_argument("--mock-sink-url", required=False)
     story = ResultQueueStory(parser.parse_args())
     try:
         story.setup()

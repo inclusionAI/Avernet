@@ -151,6 +151,91 @@ use super::permission::*;
     }
 
     #[test]
+    fn result_error_reports_safe_upstream_causes() {
+        let cases = [
+            (json!({"is_error":true,"subtype":"success","api_error_status":401,
+                "result":"Failed to authenticate. API Error: 401 review synthetic authentication failure"}),
+                "upstream authentication_error (HTTP 401): model provider authentication failed; check credentials"),
+            (json!({"is_error":true,"subtype":"success","api_error_status":429,"result":"PRIVATE detail"}),
+                "upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+            (json!({"is_error":true,"subtype":"success","api_error_status":401,
+                "error":{"type":"rate_limit_error","message":"PRIVATE detail"},
+                "result":"API Error: 503 PRIVATE detail"}),
+                "upstream authentication_error (HTTP 401): model provider authentication failed; check credentials"),
+            (json!({"is_error":true,"subtype":"success",
+                "result":"API Error: Request rejected (429) · provider rate limit; PRIVATE credential"}),
+                "upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+            (json!({"is_error":true,"subtype":"error_during_execution",
+                "errors":["PRIVATE detail", "API Error: 401 invalid credential PRIVATE"]}),
+                "upstream authentication_error (HTTP 401): model provider authentication failed; check credentials"),
+            (json!({"subtype":"error_during_execution",
+                "error":{"type":"overloaded_error","message":"PRIVATE detail"}}),
+                "upstream overloaded_error (HTTP 529): model provider overloaded; retry later"),
+            (json!({"is_error":true,"subtype":"success",
+                "errors":[{"error":{"type":"rate_limit_error","message":"PRIVATE detail"}}]}),
+                "upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+            (json!({"is_error":true,"subtype":"success",
+                "errors":[{"status":503,"message":"PRIVATE detail"}]}),
+                "upstream service_unavailable (HTTP 503): model provider unavailable; retry later"),
+            (json!({"is_error":true,"subtype":"success",
+                "errors":[r#"{"error":{"type":"rate_limit_error","message":"PRIVATE detail"}}"#]}),
+                "upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+        ];
+        for (mut event, expected) in cases {
+            event["type"] = json!("result");
+            match map_cc_line(&event.to_string(), "r-error") {
+                CcMap::Failed(note) => assert_eq!(note, expected),
+                other => panic!("expected safe error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn result_error_invalid_api_status_preserves_existing_fallbacks() {
+        for status in [json!(null), json!("401"), json!(-1), json!(401.5), json!(true),
+            json!({}), json!([]), json!(200), json!(418), json!(4010)] {
+            let mut event = json!({"type":"result","is_error":true,"subtype":"success",
+                "api_error_status":status,"result":"PRIVATE detail"});
+            match map_cc_line(&event.to_string(), "r-error") {
+                CcMap::Failed(note) => assert_eq!(note, "engine_result_error"),
+                other => panic!("expected generic error for {event}, got {other:?}"),
+            }
+            event["result"] = json!("API Error: 429 PRIVATE detail");
+            match map_cc_line(&event.to_string(), "r-error") {
+                CcMap::Failed(note) => assert_eq!(note,
+                    "upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later"),
+                other => panic!("expected text fallback for {event}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn result_error_does_not_guess_from_private_or_successful_content() {
+        for text in ["private document mentions 429", "API Error: 4290 private", "PRIVATE secret"] {
+            let event = json!({"type":"result","is_error":true,"subtype":"success","result":text});
+            match map_cc_line(&event.to_string(), "r-error") {
+                CcMap::Failed(note) => assert_eq!(note, "engine_result_error"),
+                other => panic!("expected generic error, got {other:?}"),
+            }
+        }
+        for status in [json!(null), json!(401)] {
+            let text = "API Error: Request rejected (429) is an example, not a failure";
+            let event = json!({"type":"result","subtype":"success","is_error":false,
+                "api_error_status":status,"result":text});
+            match map_cc_line(&event.to_string(), "r-ok") {
+                CcMap::Final(result) => assert_eq!(result, text),
+                other => panic!("expected unchanged successful result, got {other:?}"),
+            }
+        }
+        let event = json!({"type":"result","subtype":"error_max_turns","is_error":true,
+            "api_error_status":418,"errors":["PRIVATE"]});
+        match map_cc_line(&event.to_string(), "r-error") {
+            CcMap::Failed(note) => assert_eq!(note, "engine result subtype: error_max_turns"),
+            other => panic!("expected native error category, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn control_request_can_use_tool_maps_to_control_request() {
         // 不再发占位 thinking（Task 9）——Task 12 接线为 ControlRequest 载体，
         // 由 run_turn 驱动 HITL 交互；绝不发 `stream:"approval"`（spec §2）。

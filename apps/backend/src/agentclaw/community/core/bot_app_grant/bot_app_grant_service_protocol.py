@@ -137,6 +137,11 @@ class BotAppGrantServiceProtocol(Protocol):
         Names no bot and performs no bot-existence check: there is nothing to
         mask, since the result is one user's own delegations to one application.
         May include bots that user does not own.
+
+        Only live exact entity-addressed Bots are returned. Each record keeps
+        its immutable owner_id locator and has current_owner_id populated from
+        the live Bot for personnel display and owner-scoped filtering. That
+        projection is not persisted or substituted for the resource key.
         """
 
 

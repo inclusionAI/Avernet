@@ -87,6 +87,7 @@ describe('CollaborationSquareApiAdapter', () => {
         capabilities: [],
         relationshipStatus: 'none',
         friendRequestBotId: 'bot-1:entity-1',
+        status: 'online',
       },
     ]);
   });
@@ -189,6 +190,7 @@ describe('CollaborationSquareApiAdapter', () => {
         relationshipStatus: 'none',
         friendRequestBotId: 'bot-smart-1:entity-smart-1',
         shortProfile: '内部推荐摘要',
+        status: 'online',
       },
     ]);
     // 仅暴露 short_profile 为 shortProfile，不透传原始 recommendation 结构。

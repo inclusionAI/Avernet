@@ -1,20 +1,28 @@
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import type { ExpertSummary } from '@/domain/expertMarket';
 import { useAgentCodingTemplates } from '@/hooks/useAgentCodingTemplates';
+import { useExpertBotCreation } from '@/hooks/useExpertBotCreation';
+import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { BotCreateAuthorization, BotCreateInput, BotCreateScenario, BotCreateSpace } from '@/services/botWorkshop';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { Cloud, Laptop } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { AuthorizationPanel } from './AuthorizationPanel';
 import { CreateBotFormFields } from './CreateBotFormFields';
+import { ExpertCreationResult } from './ExpertCreationResult';
 
 interface CreateBotModalProps {
   scenario?: BotCreateScenario;
+  expert?: ExpertSummary;
   spaces: BotCreateSpace[];
   creating: boolean;
   authorization?: BotCreateAuthorization & { message?: string; error?: string };
   onClose: () => void;
+  onExpertCreated?: () => void;
   onSubmit: (input: BotCreateInput) => Promise<void>;
 }
+
+const expertBotName = (expert?: ExpertSummary): string => expert ? `我的${expert.name}`.slice(0, 40) : '';
 
 const initialValues = (scenario: BotCreateScenario, spaces: BotCreateSpace[]): BotCreateInput => {
   const firstSpace = spaces[0] ?? { id: '', ownership: 'personal' as const };
@@ -33,18 +41,42 @@ const initialValues = (scenario: BotCreateScenario, spaces: BotCreateSpace[]): B
 
 const CreateBotModal: React.FC<CreateBotModalProps> = ({
   scenario,
-  spaces,
+  expert: fixedExpert,
+  spaces: suppliedSpaces,
   creating,
   authorization,
   onClose,
+  onExpertCreated,
   onSubmit,
 }) => {
+  const accessibleSpaces = useSpaceContext((state) => state.spaces);
+  const spaces =
+    accessibleSpaces.length && scenario === 'cloud'
+      ? accessibleSpaces.map((space) => ({
+          id: String(space.spaceId),
+          name: space.spaceName,
+          ownership: space.spaceType === 'PERSONAL' ? ('personal' as const) : ('team' as const),
+          canCreate: true,
+        }))
+      : suppliedSpaces;
+  const [expertMode, setExpertMode] = useState(Boolean(fixedExpert));
+  const [selectedExpert, setSelectedExpert] = useState<ExpertSummary | undefined>(fixedExpert);
   const [values, setValues] = useState<BotCreateInput>(() => initialValues('cloud', spaces));
   const [error, setError] = useState<string>();
   const [agentCodingError, setAgentCodingError] = useState<string>();
   const agentCodingValidatorRef = useRef<(() => Promise<string | undefined>) | null>(null);
   const initializedScenarioRef = useRef<BotCreateScenario>();
   const open = Boolean(scenario);
+  const expertCreation = useExpertBotCreation(open);
+  const notifiedBot = useRef<string>();
+  useEffect(() => {
+    const status = expertCreation.status;
+    if (status?.bot && ['READY', 'APPLY_FAILED'].includes(status.state) && notifiedBot.current !== status.bot_id) {
+      notifiedBot.current = status.bot_id;
+      onExpertCreated?.();
+    }
+  }, [expertCreation.status, onExpertCreated]);
+  const busy = creating || expertCreation.submitting || expertCreation.initializationPending;
   const isLocal = scenario === 'local';
   const isAgentCoding = values.engine === 'aicoding';
 
@@ -58,7 +90,14 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
     }
     if (initializedScenarioRef.current !== scenario) {
       initializedScenarioRef.current = scenario;
-      setValues(initialValues(scenario, spaces));
+      const initial = initialValues(scenario, suppliedSpaces.length ? suppliedSpaces : spaces);
+      setValues(
+        fixedExpert
+          ? { ...initial, name: expertBotName(fixedExpert), description: fixedExpert.description.slice(0, 200) }
+          : initial,
+      );
+      setSelectedExpert(fixedExpert);
+      setExpertMode(Boolean(fixedExpert));
       setError(undefined);
       setAgentCodingError(undefined);
       agentCodingValidatorRef.current = null;
@@ -73,6 +112,11 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (busy || expertCreation.locked) return;
+    if (expertMode && !selectedExpert) {
+      setError('请选择专家模板');
+      return;
+    }
     setError(undefined);
     if (isAgentCoding) {
       const validationError = await agentCodingValidatorRef.current?.();
@@ -83,19 +127,45 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       }
     }
     try {
-      await onSubmit(values);
+      if (expertMode && selectedExpert) await expertCreation.submit(selectedExpert.expert_id, values);
+      else await onSubmit(values);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '创建失败，请重试');
     }
   };
 
   // AgentPass 授权沿用老版全屏承载方式。此时必须卸载创建 Modal，避免其遮罩、内容框和关闭按钮覆盖授权页。
+  const expertAuth =
+    expertCreation.status?.state === 'AWAITING_AUTHORIZATION'
+      ? expertCreation.status
+      : !expertCreation.status
+      ? expertCreation.accepted
+      : undefined;
+  if (expertAuth && (expertAuth.iframe_url || expertAuth.redirect_url))
+    return (
+      <AuthorizationPanel
+        authorization={{
+          type: 'authorization_required',
+          botId: expertAuth.bot_id,
+          iframeUrl: expertAuth.iframe_url,
+          redirectUrl: expertAuth.redirect_url,
+          request: {
+            bot_name: values.name,
+            bot_desc: values.description,
+            engine: values.engine,
+            cluster_name: 'ACRA',
+            bot_type: values.serviceMode === 'service' ? 'service' : 'personal',
+          },
+        }}
+      />
+    );
   if (authorization) return <AuthorizationPanel authorization={authorization} />;
 
   return (
-    <Modal open={open} onOpenChange={(nextOpen) => !nextOpen && !creating && onClose()}>
+    <Modal open={open} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
       <ModalContent
         size="lg"
+        showClose={!expertCreation.initializationPending}
         aria-describedby="create-bot-description"
         className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] overscroll-y-none p-4"
       >
@@ -113,24 +183,45 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
               </ModalDescription>
             </div>
           </ModalHeader>
-          <CreateBotFormFields
-            values={values}
-            setValues={setValues}
-            spaces={spaces}
-            creating={creating}
-            error={error}
-            agentCodingError={agentCodingError}
-            agentCodingTemplates={agentCodingTemplates.templates}
-            agentCodingTemplatesLoading={agentCodingTemplates.loading}
-            agentCodingTemplatesError={agentCodingTemplates.error}
-            onRetryAgentCodingTemplates={agentCodingTemplates.retry}
-            onValidateReady={(validator) => {
-              agentCodingValidatorRef.current = validator;
-            }}
-            onAgentCodingErrorChange={setAgentCodingError}
-            onCancel={onClose}
-            onSubmit={submit}
-          />
+          {expertMode && selectedExpert && (
+            <p className="text-sm text-muted-foreground">来自专家市场 · {selectedExpert.name}</p>
+          )}
+          {expertCreation.accepted || expertCreation.unknown ? (
+            <ExpertCreationResult
+              botId={expertCreation.accepted?.bot_id}
+              status={expertCreation.status}
+              error={expertCreation.error}
+              initializing={expertCreation.initializing}
+              initializationPending={expertCreation.initializationPending}
+              afterCreateError={expertCreation.afterCreateError}
+              unknown={expertCreation.unknown}
+              input={values}
+              onClose={onClose}
+            />
+          ) : (
+            <>
+              <fieldset disabled={busy} className="min-w-0 space-y-4">
+                <CreateBotFormFields
+                  values={values}
+                  setValues={setValues}
+                  spaces={spaces}
+                  creating={busy}
+                  error={error || expertCreation.error}
+                  agentCodingError={agentCodingError}
+                  agentCodingTemplates={agentCodingTemplates.templates}
+                  agentCodingTemplatesLoading={agentCodingTemplates.loading}
+                  agentCodingTemplatesError={agentCodingTemplates.error}
+                  onRetryAgentCodingTemplates={agentCodingTemplates.retry}
+                  onValidateReady={(validator) => {
+                    agentCodingValidatorRef.current = validator;
+                  }}
+                  onAgentCodingErrorChange={setAgentCodingError}
+                  onCancel={onClose}
+                  onSubmit={submit}
+                />
+              </fieldset>
+            </>
+          )}
         </>
       </ModalContent>
     </Modal>

@@ -21,6 +21,10 @@ if ! bash "$(dirname "${BASH_SOURCE[0]}")/check-observability-deps.sh"; then
   fail=1
 fi
 
+if ! bash "$(dirname "${BASH_SOURCE[0]}")/check-caller-identity-deps.sh"; then
+  fail=1
+fi
+
 # ─── 工具函数：列出 crate 的 bcs-* 依赖 ───
 bcs_deps_of() {
   local crate=$1
@@ -33,7 +37,7 @@ assert_only_allows() {
   local allowed="$* "
   for d in $(bcs_deps_of "$crate"); do
     if [[ " $allowed " != *" $d "* ]]; then
-      log FAIL "$id" "$crate 依赖 $d（不在允许列表 [${allowed% }] 中）"
+      log FAIL "$id" "$crate 依赖 ${d}（不在允许列表 [${allowed% }] 中）"
       fail=1
     fi
   done

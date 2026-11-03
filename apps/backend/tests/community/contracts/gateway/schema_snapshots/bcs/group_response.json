@@ -31,7 +31,6 @@
     "updated_at": {"type": "integer"},
     "message_count": {"type": "integer"},
     "latest_running_session_id": {"type": "string"},
-    "workspace": {"type": "object"},
     "service_group_uuid": {"type": "string"},
     "service_mode": {"type": "string"},
     "service_spec": {},

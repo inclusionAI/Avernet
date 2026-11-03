@@ -2,17 +2,23 @@ import {
   closeCommunityTopic,
   createCommunityReply,
   createCommunityTopic,
+  deleteCommunityTopic,
   getCommunityTopic,
   listCommunityReplies,
   listCommunityTopics,
+  setCommunityPostHelpful,
+  updateCommunityTopic,
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
 // list/get/posts/create/close 均由 capability getBbsApiBase 注入前缀——mock 为当前公开 task 域路径。
 jest.mock('@/capabilities', () => ({
-  getCapabilities: () => ({
-    getBbsApiBase: () => ({ status: 'available', value: '/openapi/v1/collaboration/tasks/bbs/topics' }),
-  }),
+  getCapabilities: jest.fn(() => ({
+    getBbsApiBase: jest.fn(() => ({
+      status: 'available',
+      value: '/openapi/v1/collaboration/tasks/bbs/topics',
+    })),
+  })),
 }));
 jest.mock('@/services/backendApi/httpClient');
 const mockedRequest = (http as unknown as { backendRequest: jest.Mock }).backendRequest;
@@ -29,6 +35,50 @@ describe('communityController', () => {
       params: { page: 2, page_size: 10, keyword: 'Bot' },
       signal: undefined,
     });
+  });
+
+  test('公开面 scope=following 只下发 following，不泄露显式关注 owner', async () => {
+    await listCommunityTopics({ scope: 'following', followingOwnerId: '900003', offset: 0, limit: 20 });
+
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({
+      page: 1,
+      page_size: 20,
+      following: true,
+    });
+  });
+
+  test('内部面 scope=following 额外下发当前登录人 following_owner_id', async () => {
+    const capabilities = jest.requireMock('@/capabilities');
+    capabilities.getCapabilities.mockImplementationOnce(() => ({
+      getBbsApiBase: () => ({
+        status: 'available',
+        value: '/api/v1/collaboration/tasks/bbs/topics',
+      }),
+    }));
+
+    await listCommunityTopics({
+      scope: 'following',
+      followingOwnerId: ' 900003 ',
+      offset: 0,
+      limit: 20,
+    });
+
+    expect(mockedRequest.mock.calls[0][0]).toBe('/api/v1/collaboration/tasks/bbs/topics');
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({
+      page: 1,
+      page_size: 20,
+      following: true,
+      following_owner_id: '900003',
+    });
+  });
+
+  test('列表类型筛选下发 SHARE/HELP topic_type', async () => {
+    await listCommunityTopics({ topicType: 'share', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'SHARE' });
+
+    mockedRequest.mockClear();
+    await listCommunityTopics({ topicType: 'help', offset: 0, limit: 20 });
+    expect(mockedRequest.mock.calls[0][1].params).toEqual({ page: 1, page_size: 20, topic_type: 'HELP' });
   });
 
   test('无搜索词时不下发 keyword', async () => {
@@ -62,61 +112,64 @@ describe('communityController', () => {
     });
   });
 
-  test('普通回复不携带 reply_to_post_id，沿用 HUMAN 作者声明和幂等键', async () => {
-    await createCommunityReply({
-      topicId: 'topic/1',
-      body: '回复',
-      authorId: 'u1',
-      authorName: '张三',
-    });
+  test('标记有帮助使用 PUT 并编码 topicId/postId，透传作者类型和目标状态', async () => {
+    await setCommunityPostHelpful('topic/1', 'post/2', 'BOT', 'bot-1', true);
 
     expect(mockedRequest).toHaveBeenCalledWith(
-      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts',
-      expect.objectContaining({
-        method: 'POST',
-        data: expect.objectContaining({
-          client_request_id: expect.any(String),
-          author_type: 'HUMAN',
-          author_id: 'u1',
-          body: '回复',
-          author_display_name: '张三',
-        }),
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts/post%2F2/helpful',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'BOT',
+          author_id: 'bot-1',
+          helpful: true,
+        },
         signal: undefined,
-      }),
+      },
     );
-    expect(mockedRequest.mock.calls[0][1].data).not.toHaveProperty('reply_to_post_id');
   });
 
-  test('楼层回复携带被引用 Post id', async () => {
-    await createCommunityReply({
-      topicId: 'topic/1',
-      body: '回复楼层',
-      authorId: 'u1',
-      replyToPostId: ' post-1 ',
-    });
-
-    expect(mockedRequest.mock.calls[0][0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
-    expect(mockedRequest.mock.calls[0][1].data).toMatchObject({
-      body: '回复楼层',
-      reply_to_post_id: 'post-1',
-    });
-  });
-
-  test('投票回复下发结构化 poll_selection，且不携带楼层引用', async () => {
+  test('投票回复下发结构化 poll_selection，且前端不再携带楼层引用', async () => {
     await createCommunityReply({
       topicId: 'topic/1',
       body: '投票选择：方案 A',
       authorId: 'u1',
+      authorName: '张三',
       pollSelection: [0],
     });
 
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
     expect(arg?.[1].data).toMatchObject({
+      client_request_id: expect.any(String),
+      author_type: 'HUMAN',
+      author_id: 'u1',
       body: '投票选择：方案 A',
+      author_display_name: '张三',
       poll_selection: { option_indices: [0] },
     });
     expect(arg?.[1].data).not.toHaveProperty('reply_to_post_id');
+  });
+
+
+  test('楼中楼回复下发 reply_to_post_id', async () => {
+    await createCommunityReply({
+      topicId: 'topic/1',
+      body: '回复楼层成员',
+      authorId: 'u1',
+      replyToPostId: 'post/2',
+    });
+
+    const arg = mockedRequest.mock.calls[0];
+    expect(arg?.[0]).toBe('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts');
+    expect(arg?.[1].data).toMatchObject({
+      client_request_id: expect.any(String),
+      author_type: 'HUMAN',
+      author_id: 'u1',
+      body: '回复楼层成员',
+      reply_to_post_id: 'post/2',
+    });
+    expect(arg?.[1].data).not.toHaveProperty('poll_selection');
   });
 
   test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
@@ -180,6 +233,30 @@ describe('communityController', () => {
     });
   });
 
+  test('分享和求助主题均不下发 topic_config', async () => {
+    await createCommunityTopic({
+      title: '分享资料',
+      body: '正文',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'share',
+    });
+    await createCommunityTopic({
+      title: '求助排查',
+      body: '请帮忙看一下',
+      authorId: 'u1',
+      authorName: '张三',
+      topicType: 'help',
+    });
+
+    const shareData = mockedRequest.mock.calls[0][1].data;
+    const helpData = mockedRequest.mock.calls[1][1].data;
+    expect(shareData).toMatchObject({ topic_type: 'SHARE' });
+    expect(shareData).not.toHaveProperty('topic_config');
+    expect(helpData).toMatchObject({ topic_type: 'HELP' });
+    expect(helpData).not.toHaveProperty('topic_config');
+  });
+
   test('authorAvatarUrl 缺勤时不发 author_avatar_url 快照；author_display_name 仍下发（§2.1 不传则 null）', async () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '张三' });
     const arg = mockedRequest.mock.calls[0];
@@ -191,6 +268,40 @@ describe('communityController', () => {
     await createCommunityTopic({ title: '标题', body: '正文', authorId: 'u1', authorName: '   ' });
     const arg = mockedRequest.mock.calls[0];
     expect(arg?.[1].data).not.toHaveProperty('author_display_name');
+  });
+
+  test('编辑主题使用 PUT，删除主题使用 DELETE，两者均携带声明作者', async () => {
+    await updateCommunityTopic({
+      topicId: 'topic/1',
+      authorId: 'u1',
+      title: '新标题',
+      body: '新正文',
+    });
+    await deleteCommunityTopic('topic/1', 'u1');
+
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      1,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'PUT',
+        data: {
+          author_type: 'HUMAN',
+          author_id: 'u1',
+          title: '新标题',
+          body: '新正文',
+        },
+        signal: undefined,
+      },
+    );
+    expect(mockedRequest).toHaveBeenNthCalledWith(
+      2,
+      '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1',
+      {
+        method: 'DELETE',
+        data: { author_type: 'HUMAN', author_id: 'u1' },
+        signal: undefined,
+      },
+    );
   });
 
   test('详情请求透传 viewer 身份参数', async () => {

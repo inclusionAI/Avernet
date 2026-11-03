@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Socket(BaseModel):
-    """One WebSocket you may open against the bot."""
+    """One connection endpoint you may reach the bot on."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -25,10 +25,13 @@ class Socket(BaseModel):
 
     kind: SocketKind = Field(description="Which socket this is.")
     url: str = Field(
-        description="Complete WebSocket URL, credential included. Open it as "
-        "given — do not append to it, rebuild it, or move any part of it into "
-        "a header; a browser cannot set headers on a WebSocket handshake, "
-        "which is why everything needed is in the URL."
+        description="Complete URL for this socket, credential included on the "
+        "chat kinds. Open it as given — do not append to it, rebuild it, or "
+        "move any part of it into a header; a browser cannot set headers on a "
+        "WebSocket handshake, which is why everything needed is in the URL. "
+        "The a2a kind is the exception in shape, not in the rule: it is an "
+        "HTTP base URL with no credential, and the two A2A paths "
+        "(/.well-known/agent-card.json and /rpc) hang beneath it as given."
     )
 
 
@@ -65,6 +68,15 @@ class Connection(BaseModel):
     sockets: list[Socket] = Field(
         description="Exactly the sockets this bot offers. A kind absent from "
         "the list is not available for this bot."
+    )
+    a2a_withheld: bool = Field(
+        False,
+        description="The server governs this user's A2A access (user-level "
+        "gray release) and withheld the a2a socket on purpose. Absent a2a "
+        "socket with this flag false is *no address available* (fallback "
+        "derivation stays allowed); with this flag true it is an explicit "
+        "refusal — a client must not derive, probe, or reuse an A2A choice "
+        "for this connection.",
     )
 
 

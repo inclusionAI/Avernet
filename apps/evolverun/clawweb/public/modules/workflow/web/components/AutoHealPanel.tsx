@@ -1,5 +1,6 @@
+import { assertDeploymentAvailable, clearConfirmedDeployment, markDeploymentPending } from '../editor/deploymentGuard'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '@avernet/workflow/web/api/hooks'
+import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
 import { useAutoHealSourceRun } from '../api/useAutoHealSourceRun'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion } from '@avernet/clawweb-shared/web/types'
@@ -13,8 +14,32 @@ interface AutoHealPanelProps {
   onRerunComplete?: () => void
 }
 
-export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHealPanelProps) {
+export default function AutoHealPanel(props: AutoHealPanelProps) {
+  // Diagnosis and rerun must never carry over to a different source run.
+  return <AutoHealPanelSession key={JSON.stringify([props.run.workflow_id, props.run.flow_id])} {...props} />
+}
+
+function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelProps) {
   const [phase, setPhase] = useState<Phase>('idle')
+  // A previous implementation persisted sensitive diagnosis/spec data without a
+  // verified actor. Never read or render it. Remove it and leave a non-sensitive
+  // marker so an unknown in-flight write cannot silently be replaced on reload.
+  const [legacyBlocked, setLegacyBlocked] = useState(true)
+  useEffect(() => {
+    const prefix = 'clawweb.autoheal.operation.v1.'
+    const marker = 'clawweb.autoheal.review-blocked.v1.'
+    try {
+      const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      let failed = false
+      for (const key of keys) {
+        if (!key?.startsWith(prefix)) continue
+        const suffix = key.slice(prefix.length)
+        try { localStorage.setItem(marker + suffix, '1') } catch { failed = true }
+        try { localStorage.removeItem(key) } catch { failed = true }
+      }
+      setLegacyBlocked(failed || localStorage.getItem(marker + encodeURIComponent(run.workflow_id)) !== null)
+    } catch { setLegacyBlocked(true) }
+  }, [run.workflow_id])
   const [customPrompt, setCustomPrompt] = useState('')
   const [diagnosisResult, setDiagnosisResult] = useState<AutoHealDiagnosisResult | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -23,7 +48,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   const [errorChainExpanded, setErrorChainExpanded] = useState(true)
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(true)
   const [autoRun, setAutoRun] = useState(true)
-  const [saveResult, setSaveResult] = useState<{ packId: string } | null>(null)
+  const [saveResult, setSaveResult] = useState<{ workflowId: string; packId: string } | null>(null)
 
   const diagnoseMutation = useAutoHealDiagnose()
   const saveMutation = useAutoHealSave()
@@ -87,7 +112,11 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   }, [phase])
 
   const handleSave = useCallback(() => {
-    if (!diagnosisResult?.fixedSpec) return
+    if (!diagnosisResult?.fixedSpec || legacyBlocked) return
+    if (diagnosisResult.workflowId !== run.workflow_id) { setPhase('error'); setErrorMessage('诊断工作流不匹配，无法保存。'); return }
+    try { assertDeploymentAvailable(diagnosisResult.workflowId) } catch (err) {
+      setLegacyBlocked(true); setPhase('error'); setErrorMessage(extractErrorMessage(err, '无法访问浏览器核对标记。')); return
+    }
 
     setPhase('saving')
     setErrorMessage(null)
@@ -102,7 +131,12 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
       },
       {
         onSuccess: (result) => {
-          setSaveResult({ packId: result.packId })
+          if (!result || result.ok !== true || result.saved !== true || result.workflowId !== diagnosisResult.workflowId || typeof result.packId !== 'string' || !result.packId.trim()) {
+            setPhase('error')
+            setErrorMessage('保存结果无效或工作流不匹配，无法部署。请先核对草稿。')
+            return
+          }
+          setSaveResult({ workflowId: result.workflowId, packId: result.packId })
           setPhase('saved')
         },
         onError: (err) => {
@@ -111,7 +145,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
         },
       },
     )
-  }, [diagnosisResult, saveMutation])
+  }, [diagnosisResult, saveMutation, legacyBlocked, run.workflow_id])
 
   const handleRerun = useCallback(() => {
     if (!diagnosisResult || runInFlight.current) return
@@ -145,35 +179,58 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
   }, [diagnosisResult, run.flow_id, runMutation, onRerunComplete])
 
   const handleDeploy = useCallback(() => {
-    if (!diagnosisResult || deployInFlight.current) return
+    if (!diagnosisResult || !saveResult || deployInFlight.current || legacyBlocked) return
 
+    // Persist only a non-sensitive uncertainty marker before sending. Without a
+    // server journal, a reload after lost acknowledgement must not silently retry.
+    try { markDeploymentPending(saveResult.workflowId) } catch (err) {
+      setLegacyBlocked(true)
+      setPhase('error')
+      setErrorMessage(extractErrorMessage(err, '无法记录待核对标记，部署未发送；请检查浏览器存储。'))
+      return
+    }
     deployInFlight.current = true
     setPhase('deploying')
     setErrorMessage(null)
 
     deployMutation.mutate(
       {
-        workflowId: diagnosisResult.workflowId,
-        packId: saveResult?.packId ?? null,
+        workflowId: saveResult.workflowId,
+        packId: saveResult.packId,
         diagnosisId: diagnosisResult.diagnosisId,
         note: 'auto-heal deploy',
         // The legacy server callback cannot resolve the original run's bot/lifecycle.
         autoRun: false,
       },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           deployInFlight.current = false
+          if (!result || result.ok !== true || result.deployed !== true || result.workflowId !== saveResult.workflowId || result.packId !== saveResult.packId
+            || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
+            || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()) {
+            setLegacyBlocked(true)
+            setPhase('error')
+            setErrorMessage('部署结果无法确认；请先人工核对 Git 和数据库，勿重试。')
+            return
+          }
+          try { clearConfirmedDeployment(saveResult.workflowId) } catch (err) {
+            setLegacyBlocked(true)
+            setPhase('error')
+            setErrorMessage(extractErrorMessage(err, '无法清除浏览器核对标记。'))
+            return
+          }
           setPhase('deployed')
           if (autoRun) handleRerun()
         },
         onError: (err) => {
           deployInFlight.current = false
+          setLegacyBlocked(true)
           setPhase('error')
-          setErrorMessage(extractErrorMessage(err, '部署修复失败'))
+          setErrorMessage(`${extractErrorMessage(err, '部署修复失败')}；结果可能未知，请先人工核对 Git 和数据库，勿重试。`)
         },
       },
     )
-  }, [diagnosisResult, saveResult, deployMutation, autoRun, handleRerun])
+  }, [diagnosisResult, saveResult, deployMutation, autoRun, handleRerun, legacyBlocked])
 
   const handleReset = useCallback(() => {
     setPhase('idle')
@@ -198,6 +255,9 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {legacyBlocked && <div role="alert" className="rounded border border-amber-300 p-3 text-sm">
+            存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请联系管理员核对 Git 和数据库后处理，暂不能保存或部署。
+          </div>}
           {/* Error */}
           {(phase === 'error' || phase === 'run-error') && errorMessage && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
@@ -245,7 +305,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在保存修复…</p>
-              <p className="text-xs">git commit + push saved/分支</p>
+              <p className="text-xs">正在将工作流保存到数据库，保存不会部署</p>
             </div>
           )}
 
@@ -255,7 +315,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
               <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
                 <h3 className="font-semibold text-blue-800">修复已保存</h3>
                 <p className="mt-1 text-blue-700 text-sm">
-                  工作流已保存到 git 的 <code className="rounded bg-blue-100 px-1">saved/{diagnosisResult?.workflowId}</code> 分支。
+                  修复后的工作流已保存到数据库，尚未部署。部署时将发布当前保存的工作流。
                 </p>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
@@ -280,7 +340,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
             <div className="flex flex-col items-center py-12 text-gray-400">
               <div className="mb-3 h-10 w-10 animate-spin rounded-full border-3 border-gray-300 border-t-blue-600" />
               <p className="font-medium text-gray-600 text-sm">正在部署修复…</p>
-              <p className="text-xs">git tag + push wf/分支</p>
+              <p className="text-xs">正在发布已保存的工作流</p>
             </div>
           )}
 
@@ -316,6 +376,7 @@ export default function AutoHealPanel({ run, onClose, onRerunComplete }: AutoHea
           onRerun={handleRerun}
           onReset={handleReset}
           isDiagnosing={diagnoseMutation.isPending}
+          isWriteBlocked={legacyBlocked}
           isSaving={saveMutation.isPending}
           isDeploying={deployMutation.isPending}
           isRunning={runMutation.isPending}
@@ -758,12 +819,13 @@ interface PanelFooterProps {
   onRerun: () => void
   onReset: () => void
   isDiagnosing: boolean
+  isWriteBlocked: boolean
   isSaving: boolean
   isDeploying: boolean
   isRunning: boolean
 }
 
-function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDeploy, onRerun, onReset, isDiagnosing, isSaving, isDeploying, isRunning }: PanelFooterProps) {
+function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDeploy, onRerun, onReset, isDiagnosing, isWriteBlocked, isSaving, isDeploying, isRunning }: PanelFooterProps) {
   return (
     <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
       <div className="flex items-center justify-between gap-3">
@@ -796,11 +858,11 @@ function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDepl
           {(phase === 'diagnosed' || (phase === 'error' && hasFixedSpec)) && (
             <button
               onClick={onSave}
-              disabled={isSaving || !hasFixedSpec}
+              disabled={isSaving || isWriteBlocked || !hasFixedSpec}
               className="inline-flex items-center gap-2 rounded-md bg-orange-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" stroke-linejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
               {isSaving ? '保存中…' : '保存修复'}
             </button>
@@ -810,7 +872,7 @@ function PanelFooter({ phase, isFailed, hasFixedSpec, onDiagnose, onSave, onDepl
           {phase === 'saved' && (
             <button
               onClick={onDeploy}
-              disabled={isDeploying}
+              disabled={isDeploying || isWriteBlocked}
               className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -169,7 +169,7 @@ class TestSkillSetServiceUsesResolver:
             user_id="owner-1", bolt_id="bot-1"
         )
         resolver.resolve_for_bot.assert_called_once_with("bot-1", "owner-1")
-        bot_repo.get_by_id_and_owner.assert_called_once_with("bot-1", "owner-1")
+        bot_repo.get_by_id_and_entity.assert_called_once_with("bot-1", "project-1")
 
 
 # ── SkillPropagationService ──────────────────────────────────────────

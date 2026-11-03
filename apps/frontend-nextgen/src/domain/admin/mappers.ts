@@ -172,6 +172,9 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
   const applicantName = asString(dto.applicant_name) ?? (contentObj ? asString(contentObj.applicant_name) : undefined);
   // session_url：详情藏 content 对象内，列表 VO 可能在顶层；顶层优先、对象兜底。仅非空字符串透传，抽屉据此渲染外链按钮。
   const sessionUrl = asString(dto.session_url) ?? (contentObj ? asString(contentObj.session_url) : undefined);
+  // detail_url（bot-public-risk-check）：BOT_PUBLIC_RISK 通知的检测工单外链藏在 content 对象内；顶层优先、对象兜底。
+  const detailUrl =
+    asString((dto as Record<string, unknown>).detail_url) ?? (contentObj ? asString(contentObj.detail_url) : undefined);
 
   const typeMeta =
     itemType === 'APPROVAL'
@@ -200,6 +203,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     content: summary ?? contentDisplay,
     contentRaw,
     sessionUrl,
+    detailUrl,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],
     typeLabel: typeMeta.label,

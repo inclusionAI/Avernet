@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
-
+import { isCurrentTaskConversationOrigin } from '@/services/tasks/taskConversationNavigation';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useTaskSidePanelStore, type TaskNavRecord, type TaskNavTarget } from '@/stores/taskSidePanelStore';
+import { useCallback } from 'react';
 
 /**
  * 资产层 TaskPanelNav 的结构类型（结构即契约，资产层 v2/taskPanelNav.ts 落地后如有
@@ -9,7 +10,9 @@ import { useTaskSidePanelStore, type TaskNavRecord, type TaskNavTarget } from '@
 export interface TaskPanelNav {
   selectedNodeId: string | null;
   drillStack: string[];
+  selectRootNode: (nodeId: string) => void;
   selectNode: (nodeId: string, target: TaskNavTarget | null) => void;
+  selectDefaultNode: (nodeId: string) => void;
   drillInto: (nodeId: string, target: TaskNavTarget | null) => void;
   backToOverview: () => void;
 }
@@ -21,9 +24,23 @@ export interface TaskPanelNav {
 export function useTaskPanelNavBinding(taskId: string): TaskPanelNav {
   const record: TaskNavRecord | undefined = useTaskSidePanelStore((s) => s.navByTask[taskId]);
 
+  const selectRootNode = useCallback(
+    (nodeId: string) => {
+      const origin = useTaskConversationNavigationStore.getState().originsByTask[taskId];
+      const restoreTarget = origin && !isCurrentTaskConversationOrigin(origin) ? origin : null;
+      useTaskSidePanelStore.getState().selectRootNode(taskId, nodeId, restoreTarget);
+    },
+    [taskId],
+  );
   const selectNode = useCallback(
     (nodeId: string, target: TaskNavTarget | null) => {
       useTaskSidePanelStore.getState().selectNode(taskId, nodeId, target);
+    },
+    [taskId],
+  );
+  const selectDefaultNode = useCallback(
+    (nodeId: string) => {
+      useTaskSidePanelStore.getState().selectRootNode(taskId, nodeId, null);
     },
     [taskId],
   );
@@ -40,7 +57,9 @@ export function useTaskPanelNavBinding(taskId: string): TaskPanelNav {
   return {
     selectedNodeId: record?.selectedNodeId ?? null,
     drillStack: record?.drillStack ?? [],
+    selectRootNode,
     selectNode,
+    selectDefaultNode,
     drillInto,
     backToOverview,
   };

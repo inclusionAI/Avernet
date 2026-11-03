@@ -489,3 +489,177 @@ async def test_unavailable_stage_returns_actionable_business_error(stage, messag
     svc._transport.invoke.assert_not_awaited()
     assert "cron.target.runtime_unavailable" in caplog.text
     assert str(cause) in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bot_filter", ["bot", "all"])
+async def test_default_listing_uses_authenticated_users_caller_not_parent(bot_filter):
+    """Owner-scoped Bot lookup must not choose the owner's Caller container."""
+    svc = service(caller=True, provider="local")
+    caller = dict(svc._bot_provider.get_bot.return_value)
+    svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [caller]}
+    svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 1})
+    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+    svc._resolver.resolve_for_binding.side_effect = lambda binding, actor, **kw: SimpleNamespace(
+        conn_info={"binding": binding, "actor": actor}
+    )
+    svc._transport.invoke.side_effect = lambda conn, *args, **kw: {
+        "success": True,
+        "data": [{"id": "caller-job" if conn.get("binding") == 99 else "parent-job"}],
+    }
+
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id=bot_filter,
+        authenticated_user_id="viewer",
+    )
+
+    assert [row["id"] for row in result["data"]] == ["caller-job"]
+    assert result["data"][0]["operator_id"] == "viewer"
+    assert result["data"][0]["runtime_stage"] == "online"
+    assert result["failed_targets"] == []
+    request = svc._runtime_bindings.resolve.call_args.args[0]
+    assert (request.owner_id, request.actor_user_id, request.stage) == ("owner", "viewer", "online")
+    assert svc._resolver.resolve_for_binding.call_args.args == (99, "viewer")
+    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_default_listing_merges_shared_and_callers_existing_instances():
+    svc = service(caller=True)
+    caller = dict(svc._bot_provider.get_bot.return_value)
+    personal = dict(caller, bot_id="personal", bot_type="personal", call_type="owner", binding_id=2)
+    svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [personal, caller]}
+    svc._device_provider.get_device.side_effect = lambda *, binding_id: {
+        "status": "ACTIVE", "device_provider": "baas" if binding_id == 99 else "local"
+    }
+    svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 2})
+    svc._resolver.resolve_for_binding.side_effect = lambda binding, actor, **kw: SimpleNamespace(
+        conn_info={"binding": binding, "actor": actor, "device": kw.get("device_uuid")}
+    )
+    svc._transport.invoke.side_effect = lambda conn, *args, **kw: {
+        "success": True, "data": [{"id": "same-id", "source": conn["binding"]}],
+    }
+
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="all", authenticated_user_id="viewer",
+    )
+
+    assert sorted(row["source"] for row in result["data"]) == [2, 99, 99]
+    caller_rows = [row for row in result["data"] if row["source"] == 99]
+    assert {row["device_uuid"] for row in caller_rows} == {"instance-a", "instance-b"}
+    assert {row["operator_id"] for row in caller_rows} == {"viewer"}
+    assert {call.args[1] for call in svc._resolver.resolve_for_binding.call_args_list} == {"viewer"}
+    assert result["total"] == 3
+    svc._runtime_bindings.resolve.assert_called_once()
+    svc._device_provider.list_devices_by_runtime_binding.assert_called_once_with(
+        binding_id=99, timeout=10.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_missing_current_caller_does_not_fall_back_or_block_other_bots():
+    svc = service(caller=True, provider="local")
+    caller = dict(svc._bot_provider.get_bot.return_value)
+    personal = dict(caller, bot_id="personal", bot_type="personal", call_type="owner", binding_id=2)
+    svc._bot_provider.list_bots_by_owner_or_collaborator.return_value = {"items": [caller, personal]}
+    svc._runtime_bindings.resolve.side_effect = CallerInstanceNotReadyError("Caller instance is not ready")
+    svc._resolver.resolve_for_bot.return_value = SimpleNamespace(conn_info={"binding": 2})
+    svc._transport.invoke.return_value = {"success": True, "data": [{"id": "personal-job"}]}
+
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="all", authenticated_user_id="viewer",
+    )
+
+    assert [row["id"] for row in result["data"]] == ["personal-job"]
+    assert len(result["failed_targets"]) == 1
+    assert result["failed_targets"][0]["bot_id"] == "bot"
+    assert result["failed_targets"][0]["reason"] == "caller_unavailable"
+    assert svc._transport.invoke.await_count == 1
+    assert svc._resolver.resolve_for_bot.call_args.args[:2] == ("personal", "owner")
+    svc._resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_default_caller_online_filter_and_internal_user_fallback():
+    svc = service(caller=True, provider="local")
+    svc._transport.invoke.return_value = {"success": True, "data": [{"id": "job"}]}
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", runtime_stage="online",
+    )
+    assert result["data"][0]["operator_id"] == "owner"
+    assert svc._runtime_bindings.resolve.call_args.args[0].actor_user_id == "owner"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["draft", "verify"])
+async def test_explicit_non_online_listing_does_not_select_caller(stage):
+    svc = service(caller=True, provider="local")
+    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = None
+    svc._publish_repo.get_retained_verify_by_source_bot_id_and_owner.return_value = None
+    svc._transport.invoke.return_value = {"success": True, "data": []}
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", runtime_stage=stage,
+        authenticated_user_id="viewer",
+    )
+    assert result["success"] is True
+    svc._runtime_bindings.resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [CallerInstanceNotReadyError("not ready"), RuntimeError("lookup failed")])
+async def test_caller_resolution_failures_return_failed_targets_without_parent_read(error):
+    svc = service(caller=True, provider="local")
+    svc._runtime_bindings.resolve.side_effect = error
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", authenticated_user_id="viewer",
+    )
+    assert result["data"] == []
+    assert result["failed_targets"][0]["reason"] == "caller_unavailable"
+    svc._transport.invoke.assert_not_called()
+    svc._publish_repo.get_latest_by_source_bot_id_and_owner_and_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_implicit_caller_read_keeps_boundary_logs_and_credentials_private(monkeypatch, fails):
+    from agentclaw.community.core.cron.services import cron_targeted_operations, cron_relay
+
+    log = MagicMock()
+    monkeypatch.setattr(cron_targeted_operations, "logger", log)
+    monkeypatch.setattr(cron_relay, "logger", log)
+    svc = service(caller=True, provider="local")
+    if fails:
+        svc._transport.invoke.side_effect = ValueError("adapter offline")
+    else:
+        svc._transport.invoke.return_value = {
+            "success": True,
+            "data": [{"id": "caller-job", "sessionKey": "business-session", "Authorization": "response-secret"}],
+        }
+    result = await svc.list_all_crons(
+        user_id="owner", nick_name="Owner", bot_id="bot", authenticated_user_id="viewer",
+    )
+    output = "\n".join(call.args[0] % call.args[1:] for call in log.mock_calls if call.args)
+    assert "cron.list.caller_selected" in output
+    assert "cron.request" in output
+    assert "cron.transport.request" in output
+    assert "viewer" in output and "owner" in output and "99" in output
+    assert "test-secret" not in output and "response-secret" not in output
+    if fails:
+        assert result["data"] == []
+        assert len(result["failed_targets"]) == 1
+        assert "cron.transport.failure" in output
+        assert "exception_type=ValueError" in output
+    else:
+        assert result["data"][0]["id"] == "caller-job"
+        assert "cron.transport.success" in output and "cron.response" in output
+        assert "business-session" in output
+
+
+@pytest.mark.asyncio
+async def test_unsupported_caller_engine_is_not_resolved_or_queried():
+    svc = service(caller=True)
+    svc._bot_provider.get_bot.return_value["active_engine"] = "hermes"
+    result = await svc.list_all_crons(user_id="owner", nick_name="Owner", bot_id="bot")
+    assert result["data"] == [] and result["failed_targets"] == []
+    svc._runtime_bindings.resolve.assert_not_called()
+    svc._transport.invoke.assert_not_called()

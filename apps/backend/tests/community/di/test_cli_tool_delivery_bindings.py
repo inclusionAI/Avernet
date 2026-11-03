@@ -14,17 +14,17 @@ So the bindings are asserted here rather than left to the reader of a factory.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
+from agentclaw.community.core.apply_engine.cli_tools.arca_port import (
     ArcaCliToolPort,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+from agentclaw.community.core.apply_engine.cli_tools.bot_service import (
     FAMILY_ARCA,
     FAMILY_TECLAW,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+from agentclaw.community.core.apply_engine.cli_tools.service import (
     CliToolServiceFactory,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+from agentclaw.community.core.apply_engine.cli_tools.teclaw_port import (
     TeclawCliToolPort,
 )
 

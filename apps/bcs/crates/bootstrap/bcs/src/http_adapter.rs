@@ -93,7 +93,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .filter_map(|name| HeaderName::try_from(name.trim()).ok())
         .collect();
 
-    HttpAppState::new(services_with_secret)
+    let http_state = HttpAppState::new(services_with_secret)
         .with_group_application(group_application)
         .with_session_application(session_application)
         .with_register_application(state.openapi_v1.register_service.clone())
@@ -119,14 +119,6 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
             bots_base_dir: config.bots_base_dir.clone(),
             registry: state.services.registry.clone(),
         }))
-        .with_group_request_config(
-            config.bcs_endpoint.clone(),
-            config.bind.clone(),
-            config.port,
-            config.max_groups_as_driver,
-            config.max_group_members,
-            config.max_groups_as_member,
-        )
         .with_strict_container_validation(config.strict_container_validation)
         .with_onboard_policy(
             config.onboard_binding_enabled,
@@ -166,7 +158,12 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_user_identity(Arc::new(
             ChainUserIdentityPort::new(state.auth_chain.clone()),
         ))
-        .with_internal_bot_attributes_service(internal_bot_attributes_service)
+        .with_caller_ingress_source(Arc::new(
+            ChainUserIdentityPort::new(state.auth_chain.clone()),
+        ))
+        .with_internal_bot_attributes_service(internal_bot_attributes_service);
+
+    http_state
 }
 
 async fn build_secret_service(config: &crate::config::BcsConfig) -> crate::Result<Arc<dyn SecretService>> {
@@ -333,8 +330,11 @@ impl ChatRunEventPort for BootstrapRunChannelPort {
             parent_span_id = %parent_span_id,
             "Chat run trace context registration evaluated"
         );
+        // The internal HTTP Run port registers an INTERNAL
+        // sink only: the public Workbench writer can never
+        // consume this String sender.
         self.run_channels
-            .register_with_trace_parent(
+            .register_internal_with_trace_parent(
                 run_id,
                 session_key,
                 sender,
@@ -748,13 +748,27 @@ mod tests {
         let credentials: Arc<dyn ProviderCredentialRepoPort> =
             Arc::new(MemoryProviderStore::new());
         let bot_ws_admission = config.bot_ws_admission.build();
+        let http_output_permits = Arc::new(bcs_ws::shared::OutputPermitStore::new());
+        let http_frontend_connections = Arc::new(
+            WorkbenchConnectionRegistry::new()
+                .with_output_permits(http_output_permits.clone()),
+        );
+        http_frontend_connections
+            .set_delivery_admission(v1_state.delivery_admission.clone());
         Arc::new(BcsServerState {
             config,
             services: Services::noop(),
+            speaking_leases: None,
             run_channels: Arc::new(RunChannelManager::new()),
             bot_connections: Arc::new(BotConnectionRegistry::new()),
-            frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
-            frontend_run_channels: Arc::new(RunChannelManager::new()),
+            frontend_connections: http_frontend_connections.clone(),
+            frontend_run_channels: Arc::new(
+                RunChannelManager::new()
+                    .with_output_permits(http_output_permits)
+                    .with_connection_retirement(http_frontend_connections),
+            ),
+            session_authorization_core: v1_state.session_authorization_core.clone(),
+            delivery_admission: v1_state.delivery_admission.clone(),
             coordination_processed: Arc::new(Mutex::new(HashMap::new())),
             leader_election: Arc::new(StandaloneLeaderElection::local()),
             lifecycle: Arc::new(Mutex::new(crate::lifecycle::LifecycleOrchestrator::new())),

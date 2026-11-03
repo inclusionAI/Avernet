@@ -2,6 +2,7 @@ import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import type { ConversationBotSection, ConversationBotView, ConversationSessionListState } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { conversationFavoriteService } from '@/services/workspace/conversationFavoriteService';
+import { getCapabilities } from '@/capabilities';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -84,12 +85,39 @@ export function useConversationFavorites(options: {
       requests.current.set(key, request);
       setPending((state) => ({ ...state, [key]: true }));
       try {
-        const result = await conversationFavoriteService.toggle(view.bot, userId, sessionId, !current.favorite);
-        if (!isCurrent()) return false;
-        if (!result.ok) {
-          toast.error(result.error.friendlyMessage);
-          return false;
+        let favoriteState = !current.favorite;
+        const codingHost = view.bot.isAgentCodingBot
+          ? getCapabilities().getCodingBotConversationHost().value
+          : null;
+
+        if (view.bot.isAgentCodingBot && codingHost?.runSessionAction) {
+          const result = await codingHost.runSessionAction({
+            botId: view.bot.realBotId,
+            userId,
+            ownerId: view.bot.ownerId,
+            action: { type: 'favorite', sessionId, favorite: favoriteState },
+          });
+          if (!isCurrent()) return false;
+          if (!result.ok) {
+            toast.error(result.message);
+            return false;
+          }
+          favoriteState = result.favorite ?? favoriteState;
+        } else {
+          const result = await conversationFavoriteService.toggle(
+            view.bot,
+            userId,
+            sessionId,
+            favoriteState,
+          );
+          if (!isCurrent()) return false;
+          if (!result.ok) {
+            toast.error(result.error.friendlyMessage);
+            return false;
+          }
+          favoriteState = result.data;
         }
+
         const store = useConversationStore.getState();
         const list = currentList(botId, section);
         if (!list?.items.some((item) => item.sessionId === sessionId)) return true;
@@ -98,12 +126,12 @@ export function useConversationFavorites(options: {
         const favoriteScope = isManagedConversationSection(section)
           ? cache?.scope === 'favorite'
           : (store.scopeByFriendBotId[botId] ?? 'all') === 'favorite';
-        const remove = favoriteScope && !result.data;
+        const remove = favoriteScope && !favoriteState;
         const next = {
           ...list,
           items: remove
             ? list.items.filter((item) => item.sessionId !== sessionId)
-            : list.items.map((item) => (item.sessionId === sessionId ? { ...item, favorite: result.data } : item)),
+            : list.items.map((item) => (item.sessionId === sessionId ? { ...item, favorite: favoriteState } : item)),
           total: remove ? Math.max(0, list.total - 1) : list.total,
         };
         if (isManagedConversationSection(section)) store.setManagedBotCache(botId, { ...cache, sessions: next });

@@ -79,6 +79,7 @@ async fn cancel_latest_queued_selects_the_calling_humans_latest_im_message() {
                     kind: DeliveryType::Send,
                     max_queued: 10,
                     semantic_projection_json: json!({"version": 1}),
+                    run_id: None,
                 }],
             })
             .await
@@ -177,7 +178,7 @@ async fn queue_status_respects_participant_message_audience() {
                 content: json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None,
                 created_at: 100, run_id: id.into(), visibility_domain: MessageVisibilityDomain::ManagerWorker, audience: Some(audience) },
             targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Inject,
-                max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+                max_queued: 10, semantic_projection_json: json!({"version":1}), run_id: None,}],
         }).await.unwrap();
         let result = flow.query_message_deliveries(DeliveryStatusQuery {
             caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
@@ -210,6 +211,9 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     policy.defaults.max_queued = 1;
     flow.replace_delivery_policy(admin(), 0, policy.clone()).await.unwrap();
     let command = WebSendCommand {
+        caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
         group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "live defaults".into(), mentions: vec!["bot-driver".into()], attachments: None,
@@ -242,6 +246,9 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     let send = service.snapshot(None).await.unwrap().into_iter()
         .find(|row| row.state.kind == bcs_domain::DeliveryType::Send).unwrap();
     service.transition(bcs_service_api::DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: send.delivery_id, expected_state_version: send.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -250,6 +257,15 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     assert!(!support.bot_delivery.frames().await.is_empty());
     assert!(service.snapshot(None).await.unwrap().iter().any(|row|
         row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext), "unbound history survives for the observer's next Send");
+}
+
+/// Real authority chain for the manual-resolution
+/// ownership leg: the fixture regsitry `created_by`
+/// ("1") is mirrored as a live owner edge.
+fn authority() -> Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort> {
+    let chain = bcs_test_support::lazy_authority_chain();
+    chain.hook.seed_owner("bot-driver", "1");
+    chain.hook
 }
 
 #[tokio::test]
@@ -264,9 +280,13 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
     let flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
         .with_message_repo(repo).with_managed_deliveries(service.clone())
         .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 10)]))
-        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
+        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))))
+        .with_bot_authority_hook(Some(authority()));
     let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
     let admitted = flow.handle_web_send(WebSendCommand {
+        caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: human.clone(), group_id: "group-1".into(), session_id: Some("group-1:resolve".into()), from_actor_id: "human_1".into(),
         from_name: None, message: "resolve test".into(), mentions: vec!["bot-driver".into()], attachments: None,
         thinking: None, idempotency_key: Some("resolve".into()), source_im_message_id: None, channel_sender_identity: None,
@@ -274,6 +294,9 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
     }).await.unwrap().queue_admission.unwrap();
     let row = service.snapshot(None).await.unwrap().into_iter().find(|r| r.state.kind == bcs_domain::DeliveryType::Send).unwrap();
     let transition = |row: &bcs_domain::message_delivery::PersistedMessageDelivery, event| DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: None, deadline_at_ms: None,
@@ -343,6 +366,9 @@ async fn conformance_queued_group_preparation_and_ingress() {
     );
     Arc::get_mut(&mut flow).unwrap().delivery_queue_ttl_ms = Some(60000);
     let command = WebSendCommand {
+        caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".into(),
             staff_no: "1".into(),
@@ -403,8 +429,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
                 target_bot_id: "bot-driver".into(),
                 kind: DeliveryType::Send,
                 max_queued: 10,
-                semantic_projection_json: projection,
-            }],
+                semantic_projection_json: projection, run_id: None,}],
             message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None,
                 group_id: command.group_id.clone(),
                 session_id: command.session_id.clone().unwrap(),
@@ -471,6 +496,9 @@ async fn conformance_queued_group_preparation_and_ingress() {
     );
     let started = service
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            caller_cancel: None,
+            caller_terminal: None,
             delivery_id: row.delivery_id.clone(),
             expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
@@ -588,6 +616,9 @@ async fn conformance_queued_group_preparation_and_ingress() {
     let mut reply_frame = preparer.prepare(reply_delivery).await.unwrap();
     let active_reply = service
         .transition(DeliveryTransitionCommand {
+            caller_dispatch_commit: None,
+            caller_cancel: None,
+            caller_terminal: None,
             delivery_id: reply_delivery.delivery_id.clone(),
             expected_state_version: reply_delivery.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,

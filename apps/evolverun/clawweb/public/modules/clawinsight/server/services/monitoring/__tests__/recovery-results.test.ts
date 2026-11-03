@@ -119,3 +119,39 @@ describe("existing sender/receiver compatibility", () => {
     expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
   });
 });
+
+
+it.each(["none", "performed", "unknown"] as const)("stores normal user handoff with actual intervention_status=%s and keeps legacy history", async intervention_status => {
+  await repo.appendRecoveryResult(result);
+  const input = { ...result, result_version: 4, status: "completed" as const, waiting_reason: null,
+    completion_reason: "user_continued" as const, intervention_status, result_text: "用户已接手，本次自愈已让路" };
+  expect(parseRecoveryResult(input)).toEqual(input);
+  expect(await repo.appendRecoveryResult(input)).toBe(true);
+  expect(await history()).toEqual([result, input]);
+  expect(await repo.appendRecoveryResult(input)).toBe(false);
+});
+
+it("stores confirmed target unavailability as normal completion without claiming recovery", async () => {
+  const input = { ...result, result_version: 7, status: "completed" as const, waiting_reason: null,
+    completion_reason: "target_unavailable" as const, effect: "unknown" as const, intervention_status: "none" as const,
+    result_text: "目标沙箱已销毁，本次自愈结束" };
+  expect(parseRecoveryResult(input)).toEqual(input);
+  expect(await repo.appendRecoveryResult(input)).toBe(true);
+  expect(await history()).toEqual([input]);
+});
+
+it.each([{ completion_reason: "other", status: "completed", waiting_reason: null },
+  { completion_reason: null, status: "completed", waiting_reason: null },
+  { completion_reason: "user_continued" }])("rejects an invalid normal completion reason: %j", patch => {
+  expect(() => parseRecoveryResult({ ...result, ...patch })).toThrowError(expect.objectContaining({ code: "INVALID_RESULT" }));
+});
+
+
+it.each(["owner_handoff", "mcp_permission_required"].flatMap(reason => ["recovered", "not_recovered", "unknown"].map(effect => ({ reason, effect }))))("persists $reason with $effect independently from intervention", async ({ reason, effect }) => {
+  const input = { ...result, result_version: 8, status: "completed" as const, waiting_reason: null,
+    completion_reason: reason as "owner_handoff" | "mcp_permission_required", effect: effect as "recovered" | "not_recovered" | "unknown", intervention_status: "none" as const,
+    result_text: "MCP 权限需 Owner 自行处理，本次自愈已结束" };
+  expect(parseRecoveryResult(input)).toEqual(input);
+  expect(await repo.appendRecoveryResult(input)).toBe(true);
+  expect(await history()).toEqual([input]);
+});

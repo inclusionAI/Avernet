@@ -19,6 +19,8 @@ import { EvolutionSettings } from './EvolutionSettings';
 import PackForm from './PackForm';
 import { Choice, ErrorBox, Field, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 function CreateTaskContent() {
   const rawType = new URLSearchParams(useLocation().search).get('type') ?? '';
@@ -84,6 +86,7 @@ function CreateTaskContent() {
   const sources =
     diagnoses.data?.tasks.filter((task) => completedDiagnosis(task) && matchesDiagnosisTarget(task, draft)) ?? [];
   const submit = async (event: React.FormEvent) => {
+    Tracert.click(Points.evolution.createSubmit);
     event.preventDefault();
     if (submitting.current) return;
     setError('');
@@ -242,7 +245,7 @@ function CreateTaskContent() {
         <p className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs leading-relaxed text-muted-foreground">
           运行前维护：沿用现有行为，清理历史进化会话并重启目标 Bot 的 OpenClaw Gateway，可能影响正在运行的会话和任务。
         </p>
-        <footer className="sticky bottom-0 flex justify-center gap-3 border-t border-border bg-background py-4">
+        <footer className="sticky bottom-0 flex justify-center gap-3 border-t border-divider bg-background py-4">
           <Button type="button" variant="outline" disabled={busy} onClick={() => history.push('/evolution-factory')}>
             取消
           </Button>

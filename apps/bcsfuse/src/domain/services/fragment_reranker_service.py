@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -72,14 +73,6 @@ class FragmentRerankerService:
     - 失败退化机制
     """
 
-    # Reranker 文本模板
-    PROFILE_SUMMARY_TEMPLATE = """Profile: {profile_key}
-Skills: {skills}
-Description: {description}
-Matched Fragments: {fragment_types}
-Original Score: {score:.3f}
-"""
-
     def __init__(
         self,
         reranker_model: str | None = None,
@@ -104,7 +97,7 @@ Original Score: {score:.3f}
         elif reranker_model:
             try:
                 from src.infra.reranker import get_reranker
-                self._reranker = get_reranker()
+                self._reranker = get_reranker(model=reranker_model)
                 logger.debug("[FragmentReranker] Created reranker with model: %s", reranker_model)
             except Exception as e:
                 logger.error(f"[FragmentReranker] Failed to create reranker: {e}")
@@ -114,6 +107,13 @@ Original Score: {score:.3f}
 
         if self._reranker is None and fail_action != RerankFailAction.DEGRADE:
             raise ValueError("Reranker creation failed and fail_action is not DEGRADE")
+
+    @property
+    def model(self) -> str | None:
+        """Report the adapter's resolved model, including canonicalized aliases."""
+        if self._reranker is None:
+            return None
+        return getattr(self._reranker, "model", self._reranker_model)
 
     # 32K token 上下文限制估算（留足余量）
     MAX_CONTEXT_CHARS = 24000  # 约 6K tokens，20K给system，6K给candidates
@@ -168,6 +168,7 @@ Original Score: {score:.3f}
                 results = self._single_rerank(request.query, reranker_candidates, request.candidates, request.top_k)
 
             log_stage(logger, "reranker", input_count=num_candidates, output_count=len(results),
+                      reranker_model=self.model, input_chars=total_chars,
                       duration_ms=round((perf_counter() - started) * 1000, 2),
                       degraded_count=sum(bool(r.rerank_metadata.get("degraded")) for r in results))
             log_candidates(logger, "reranker_output", ((r.profile_key, r.final_score) for r in results))
@@ -366,79 +367,40 @@ Original Score: {score:.3f}
         self,
         candidates: list[ProfileCandidate],
     ) -> list[dict]:
-        """
-        将 ProfileCandidate 转换为 Reranker 输入格式
-
-        构造丰富的文本表示，帮助 Reranker 理解 Profile。
-        """
-        reranker_candidates = []
-
-        for cand in candidates:
-            # 提取 fragment 类型
-            fragment_types = [f.fragment_type for f in cand.fragments]
-
-            # 提取 skills
-            skills = cand.metadata.get("active_skills", [])
-            skills_text = ", ".join(skills[:10]) if skills else "N/A"
-
-            # 构造描述文本（使用完整内容）
-            description = self._extract_description(cand)
-
-            # 构造完整文本（不再截断 description，由分批逻辑控制）
-            text = self.PROFILE_SUMMARY_TEMPLATE.format(
-                profile_key=cand.profile_key,
-                skills=skills_text,
-                description=description,
-                fragment_types=", ".join(fragment_types),
-                score=cand.aggregated_score,
-            )
-
-            reranker_candidates.append({
-                "id": cand.profile_key,
-                "text": text,
-            })
-
-            logger.debug(
-                "[RERANKER-INPUT] profile_key=%r text_length=%d fragment_types=%r",
-                cand.profile_key, len(text), fragment_types,
-            )
-
-        return reranker_candidates
+        """Keep identity in the candidate ID; rank only name and profile content."""
+        return [
+            {"id": cand.profile_key, "text": self._extract_description(cand)}
+            for cand in candidates
+        ]
 
     # 32K token 上下文限制，按字符估算（1 token ≈ 4 chars）
     MAX_RERANK_TEXT_CHARS = 8000  # 约 2K tokens，留足余量给系统和 query
 
     def _extract_description(self, candidate: ProfileCandidate) -> str:
-        """从 candidate 中提取描述性文本（使用完整内容，优先 full 类型）"""
-        parts = []
-
-        # 1. 优先使用 full 类型的 fragment 完整内容
-        found_full = False
-        for frag in candidate.fragments:
-            if frag.fragment_type == "full" and frag.content:
-                parts.append(frag.content)
-                found_full = True
-                break
-
-        # 2. 如果没有 full，拼接所有其他 fragment 的完整内容
-        if not found_full:
-            for frag in candidate.fragments:
-                if frag.content:
-                    parts.append(f"[{frag.fragment_type}] {frag.content}")
-
-        # 3. 如果都没有完整内容，降级使用 content_preview
-        if not parts:
-            for frag in candidate.fragments:
-                if frag.content_preview:
-                    parts.append(f"[{frag.fragment_type}] {frag.content_preview}")
-
-        full_text = " | ".join(parts)
-
-        # 4. 如果超过单批次限制，截断（分批逻辑在 rerank 方法中处理）
-        if len(full_text) > self.MAX_RERANK_TEXT_CHARS:
-            full_text = full_text[:self.MAX_RERANK_TEXT_CHARS]
-
-        return full_text
+        """Use profile fragments only; never substitute default skills or full."""
+        profile = candidate.metadata.get("profile", "")
+        if not profile:
+            profile = "\n".join(
+                frag.content or frag.content_preview
+                for frag in candidate.fragments if frag.fragment_type == "profile"
+            )
+        lines = []
+        for line in profile.splitlines():
+            line = line.strip()
+            if not line or line.startswith("worker_id:") or re.fullmatch(r"【[^】]+】", line):
+                continue
+            # Strip known empty fields, not meaningful statements about failures.
+            value = re.split(r"[:：]", line, maxsplit=1)[-1].strip().rstrip("。.")
+            if value.lower() in {"", "无", "无配置", "未配置", "未提供", "暂无", "none", "null", "n/a"}:
+                continue
+            if re.fullmatch(r"无配置[，,]\s*无法提供(?:身份|目标|能力|技能)", value):
+                continue
+            if line not in lines:
+                lines.append(line)
+        name = (candidate.metadata.get("display_name") or "").strip()
+        if name and not any(name in line for line in lines):
+            lines.insert(0, f"名称: {name}")
+        return "\n".join(lines)[:self.MAX_RERANK_TEXT_CHARS]
 
     def _convert_results(
         self,
@@ -507,7 +469,7 @@ Original Score: {score:.3f}
                     original_score=original.aggregated_score,
                     rank=rank,
                     rerank_metadata={
-                        "reranker_model": self._reranker_model or "unknown",
+                        "reranker_model": self.model or "unknown",
                         "fragment_count": len(original.fragments),
                         "degraded": False,
                     },

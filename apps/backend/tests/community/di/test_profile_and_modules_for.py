@@ -45,6 +45,16 @@ from agentclaw.community.di.profile import DeployProfile, validate_deploy_enviro
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants
+from agentclaw.community.core.task.forum.poll_statistics.scheduler import (
+    PollStatisticsScheduler,
+)
+from agentclaw.community.core.task.forum.topic_tag.scheduler import TopicTagScheduler
+from agentclaw.community.di.bbs_digest_config import (
+    BbsContentImportTaskConfig,
+    BbsDigestTaskConfig,
+    BbsPollStatisticsTaskConfig,
+    BbsTopicTagTaskConfig,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
@@ -218,6 +228,7 @@ def test_modules_for_community_is_isolated():
         "CommunitySecretModule",
         "CommunityDatabaseModule",
         "CommunityObjectStorageModule",
+        "CommunityTaskArtifactObjectStorageModule",
         "CommunityIdentityModule",
         "CommunityHealthModule",
         "CommunityHarnessModule",
@@ -255,6 +266,8 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
     assert legacy_access_module not in test_names
 
     assert "SingleboxAccessModule" in singlebox_names
+    assert "TestBotManagerSyncModule" in test_names
+    assert "TestBotManagerSyncModule" not in singlebox_names
     assert "TestHttpClientModule" not in singlebox_names
     assert "SingleboxDevicesModule" in singlebox_names
     assert "CommunityDeviceSyncModule" in singlebox_names
@@ -266,6 +279,7 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
         "CommunityDeviceSyncModule",
         "TestHttpClientModule",
         "TestDevicesModule",
+        "TestBotManagerSyncModule",
     } == (
         singlebox_names
         - {
@@ -345,6 +359,20 @@ async def test_community_profile_returns_placeholder_iam_token_without_cookie():
     assert result.error is None
     assert result.iam_token == "caller_mode_unsupported"
     assert result.iam_token != "oauth-session-must-not-be-returned"
+
+
+def test_community_profile_enables_only_poll_and_topic_tag_bbs_tasks():
+    injector = build_injector(profile=DeployProfile.COMMUNITY)
+
+    poll_scheduler = injector.get(PollStatisticsScheduler)
+    topic_tag_scheduler = injector.get(TopicTagScheduler)
+
+    assert injector.get(BbsPollStatisticsTaskConfig).enabled
+    assert injector.get(BbsTopicTagTaskConfig).enabled
+    assert not injector.get(BbsDigestTaskConfig).enabled
+    assert not injector.get(BbsContentImportTaskConfig).enabled
+    assert poll_scheduler.lock_key == "bbs:poll_statistics"
+    assert topic_tag_scheduler.lock_key == "bbs:topic_tags"
 
 
 def test_singlebox_profile_resolves_baas_only_device_runtime():

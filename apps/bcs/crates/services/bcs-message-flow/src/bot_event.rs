@@ -41,7 +41,7 @@ use bcs_service_api::{
     TaskMessageCommand, backfill_bot_names, backfill_participant_names, message_log_json,
 };
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::BcsMessageFlow;
 use crate::MSG_LOG_TARGET;
@@ -57,6 +57,16 @@ pub async fn handle_bot_event(
     cmd: BotEventCommand,
 ) -> ServiceResult<BotEventOutcome> {
     let mut cmd = cmd;
+    // Resolve only aliases installed by authenticated acceptance. Everything
+    // below (locks, producer facts, persistence and terminal) uses ONE identity.
+    let scope = bcs_service_api::BotRunScope {
+        group_id: cmd.group_id.clone(), bot_id: cmd.bot_id.clone(),
+        session_id: cmd.bcs_session_id.clone().unwrap_or_else(|| cmd.group_id.clone()),
+    };
+    if let Some(canonical) = flow.message_tracker.canonical_output_run(&cmd.run_id, &scope).await? {
+        cmd.run_id = canonical;
+    }
+    flow.task_store.record_activity(&cmd.run_id, &cmd.bot_id).await;
     let task_intent_eligible = cmd
         .event_payload
         .as_object_mut()
@@ -73,17 +83,30 @@ pub async fn handle_bot_event(
         let lock_id = task_lock_id.map(|id| format!("task:{id}"))
             .or_else(|| managed.as_ref().map(|row| row.delivery_id.clone()))
             .unwrap_or_else(|| format!("run:{}", crate::run_reply::chat_key(&cmd)));
-        let lock = {
-            let mut locks = flow.delivery_event_locks.lock().await;
-            locks.retain(|_, lock| lock.strong_count() > 0);
-            let lock = locks.get(&lock_id).and_then(std::sync::Weak::upgrade)
-                .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
-            locks.insert(lock_id, std::sync::Arc::downgrade(&lock));
-            lock
-        };
-        lock.lock_owned().await
+        lock_event(flow, lock_id).await
     };
     let managed = if managed.is_some() { crate::queued_admission::find_managed_run(flow, &cmd).await? } else { None };
+    // Stop confirmation and terminal callbacks arbitrate under the same lock.
+    // Once stop won, a late Final cannot publish a contradictory completed result.
+    if managed.is_none() && cmd.state != ChatEventState::Aborted {
+        if let Some(id) = flow.task_store.resolve_task_id(&cmd.run_id).await {
+            if flow.task_store.get(&id).await.is_some_and(|task| task.stopped_confirmed) {
+                return Ok(BotEventOutcome { bot_deliveries:Vec::new(), frontend_deliveries:Vec::new(),
+                    unregistered_run_ids:Vec::new(), mentions:Vec::new(), delivered_count:0,
+                    failed_count:0, delivery_results:Vec::new() });
+            }
+        }
+    }
+    // Admission at the whole event boundary, not just frontend publication.
+    // Recheck under the per-Run lock: a concurrent final may have retired this
+    // canonical Run while we waited. A cleaned alias has no binding either.
+    // Managed callbacks retain their durable terminal/recovery contract below.
+    if managed.is_none() && flow.output_admission.is_some()
+        && flow.message_tracker.output_binding(&cmd.run_id).await.is_none() {
+        return Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
+            unregistered_run_ids: Vec::new(), mentions: Vec::new(), delivered_count: 0,
+            failed_count: 0, delivery_results: Vec::new() });
+    }
     if let Some(row) = managed.as_ref().filter(|row| row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) {
         return flow.direct_chat.as_ref().ok_or_else(|| ServiceError::InternalError("direct queue projection unavailable".into()))?.direct_event(flow, row, &cmd).await;
     }
@@ -258,6 +281,34 @@ pub async fn handle_bot_event(
     }
     let mut bot_deliveries = Vec::new();
 
+    // Chat-final coordination claim (provider manager bots have no
+    // tool_call_end agent-event echo): scan the terminal final's reply
+    // text for the v2 stored-receipt frame the MCP tool printed — the
+    // ecosystem contract already mandates masters echo the full raw output
+    // ("…否则 BCS 无法识别 MCP 调用结果"). Gated on a live owner→caller
+    // session capture inside; groups without one keep the exact
+    // pre-feature silent-orphan behavior. This runs BEFORE the terminal
+    // settlement below so the shared claim core still sees the run alive.
+    if managed_terminal {
+        let final_text = extract_message_text(&cmd.event_payload);
+        match maybe_handle_coordination_chat_final(flow, &cmd, &final_text).await {
+            Ok(Some(coordination)) => {
+                bot_deliveries.extend(coordination.bot_deliveries);
+                frontend_deliveries.extend(coordination.frontend_deliveries);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                debug!(
+                    bot_id = %cmd.bot_id,
+                    group_id = %cmd.group_id,
+                    run_id = %cmd.run_id,
+                    error = %error,
+                    "chat-final coordination claim settled as no-op"
+                );
+            }
+        }
+    }
+
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
     if let Some((data, phase)) = tool_event_phase(&cmd.event_payload) {
         match phase {
@@ -377,6 +428,14 @@ pub async fn handle_bot_event(
             try_channel_outbound(flow, &cmd).await;
             flow.complete_send_context(&cmd.run_id).await?;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+        }
+        // The task terminal must retain its producer binding until its final
+        // frontend publication; cleanup inside task handling loses that lineage.
+        if is_terminal_state(&cmd.state) && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+            && flow.task_store.get(&task_id).await.is_some_and(|entry|
+                entry.target_bot == cmd.bot_id && entry.status != TaskLedgerStatus::Dispatched) {
+            flow.message_tracker.cleanup_run(&cmd.run_id).await;
+            flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
         }
         notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
@@ -766,4 +825,18 @@ async fn persist_task_final_chat(
     response_text: String,
 ) -> ServiceResult<()> {
     persist_final_chat(flow, cmd, response_text).await
+}
+
+/// Shared by callbacks and reliable legacy stop confirmation. Never hold this
+/// guard while calling handle_bot_event again (terminal publication reacquires it).
+pub(crate) async fn lock_event(flow: &BcsMessageFlow, id: String) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = flow.delivery_event_locks.lock().await;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        let lock = locks.get(&id).and_then(std::sync::Weak::upgrade)
+            .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+        locks.insert(id, std::sync::Arc::downgrade(&lock));
+        lock
+    };
+    lock.lock_owned().await
 }

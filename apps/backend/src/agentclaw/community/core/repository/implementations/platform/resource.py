@@ -21,7 +21,7 @@ Notable column quirks (preserved verbatim):
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 from injector import inject
 from sqlalchemy import func
@@ -114,27 +114,41 @@ class ResourceRepository(
                 ]
             return results
 
+    def _new_row(self, resource_data: dict):
+        return self.Model(
+            name=resource_data["name"],
+            resource_type=resource_data["resource_type"],
+            status=resource_data.get("status", "active"),
+            attributes=json.dumps(resource_data.get("attributes", {})),
+            meta=(
+                json.dumps(resource_data.get("metadata"))
+                if resource_data.get("metadata")
+                else None
+            ),
+            user_id=self._optional_str(resource_data.get("user_id")),
+            created_by=self._optional_str(resource_data.get("created_by")),
+            source=resource_data.get("source"),
+            bolt_id=resource_data.get("bolt_id") or "default",
+            env=get_current_env(),
+        )
+
     def create(self, resource_data: dict) -> dict:
         with self._db.orm_session() as db:
-            row = self.Model(
-                name=resource_data["name"],
-                resource_type=resource_data["resource_type"],
-                status=resource_data.get("status", "active"),
-                attributes=json.dumps(resource_data.get("attributes", {})),
-                meta=(
-                    json.dumps(resource_data.get("metadata"))
-                    if resource_data.get("metadata")
-                    else None
-                ),
-                user_id=self._optional_str(resource_data.get("user_id")),
-                created_by=self._optional_str(resource_data.get("created_by")),
-                source=resource_data.get("source"),
-                bolt_id=resource_data.get("bolt_id") or "default",
-                env=get_current_env(),
-            )
+            row = self._new_row(resource_data)
             db.add(row)
             db.flush()
             return row.to_dict()
+
+    def create_many(self, rows: Sequence[dict]) -> List[dict]:
+        # One session, one flush: the apply's row replacement writes a bot's
+        # whole file set at once, and a row per round trip is what made it slow.
+        if not rows:
+            return []
+        with self._db.orm_session() as db:
+            models = [self._new_row(data) for data in rows]
+            db.add_all(models)
+            db.flush()
+            return [model.to_dict() for model in models]
 
     def update(
         self, resource_id: str, resource_data: dict
@@ -178,6 +192,25 @@ class ResourceRepository(
                 )
             )
             return rowcount > 0
+
+    def delete_many(self, resource_ids: Sequence[str]) -> int:
+        # One blind UPDATE over ``id IN (...)``: the same soft delete as
+        # ``delete``, for every row at once.
+        ids = [int(resource_id) for resource_id in resource_ids]
+        if not ids:
+            return 0
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.Model)
+                .filter(self.Model.id.in_(ids))
+                .update(
+                    {
+                        self.Model.status: "deleted",
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
 
     def hard_delete(self, resource_id: str) -> bool:
         # Single blind DELETE — prod parity (prod twin: one DELETE,

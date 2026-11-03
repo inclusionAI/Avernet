@@ -3,6 +3,10 @@
 import hashlib
 import hmac
 import json
+from types import SimpleNamespace
+from injector import InstanceProvider
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 
 import pytest
 
@@ -17,13 +21,60 @@ from .conftest import BOT, OWNER, fails, ok
 KEY = b"offline-test-management-key-32-bytes"
 
 
+def test_eligibility_uses_composed_identity_policy(client, relay):
+    class AliasIdentity(DwsRolloutIdentity):
+        def key(self, value):
+            return OWNER if value == "alias" else value
+
+    client.app.state.injector.binder.bind(DwsRolloutIdentity, to=AliasIdentity())
+    client.app.state.injector.binder.bind(SystemConfigServiceProtocol, to=InstanceProvider(
+        SimpleNamespace(get_config=lambda **_: {"mode": "allowlist", "staff_ids": ["alias"]})
+    ))
+    assert ok(client.get(f"/openapi/v1/bots/{BOT}/dws-hosting/eligibility")) == {"available": True}
+    assert not relay.attempts
+
+
 @pytest.fixture
 def client(make_client):
     client = make_client(router)
+    client.app.state.injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": "all"})),
+    )
     client.app.dependency_overrides[get_dws_management_config] = lambda: (
         DwsManagementConfig(KEY)
     )
     return client
+
+
+@pytest.mark.parametrize(
+    "policy,allowed",
+    [
+        (None, False),
+        ({"mode": "disabled"}, False),
+        ({"mode": "all"}, True),
+        ({"mode": "allowlist", "staff_ids": [OWNER]}, True),
+    ],
+)
+def test_eligibility_does_not_contact_adapter(client, relay, policy, allowed):
+    client.app.state.injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: policy)),
+    )
+    assert ok(client.get(f"/openapi/v1/bots/{BOT}/dws-hosting/eligibility")) == {
+        "available": allowed
+    }
+    assert not relay.attempts
+    if not allowed:
+        fails(client.get(f"/openapi/v1/bots/{BOT}/dws-hosting"), 403)
+        assert not relay.attempts
+        assert (
+            client.put(
+                f"/openapi/v1/bots/{BOT}/dws-hosting/enabled",
+                json={"expected_version": 1, "enabled": False},
+            ).status_code
+            == 200
+        )
 
 
 @pytest.mark.parametrize(
@@ -95,6 +146,10 @@ def test_app_only_principal_refused(make_client, relay):
 def test_collaborator_cannot_manage_even_with_owner_hint(make_client, relay):
     relay.add_operator("editor")
     client = make_client(router, caller="editor")
+    client.app.state.injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": "all"})),
+    )
     fails(
         client.get(f"/openapi/v1/bots/{BOT}/dws-hosting", params={"owner_id": OWNER}),
         404,

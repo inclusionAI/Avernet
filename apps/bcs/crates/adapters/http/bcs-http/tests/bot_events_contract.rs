@@ -2798,7 +2798,8 @@ impl MessageFlowService for RecordingMessageFlow {
             status: "dispatched".to_string(),
             bot_deliveries: Vec::new(),
             frontend_deliveries: Vec::new(),
-        })
+            real_run_id: None,
+})
     }
 
     async fn handle_task_message(

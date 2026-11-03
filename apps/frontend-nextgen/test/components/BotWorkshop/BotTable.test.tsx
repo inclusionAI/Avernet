@@ -693,7 +693,7 @@ describe('BotTable bot 标签列', () => {
     expect(within(containersCell()).getByText('—')).toBeInTheDocument();
   });
 
-  test('标签列按引擎、部署方式和服务化枚举展示语义色', () => {
+  test('标签列统一中性底色,不再按引擎/部署/服务化涂装彩色', () => {
     const bot = mapBotDto({
       bot_id: 'tone-tag',
       bot_name: '配色 Bot',
@@ -704,9 +704,9 @@ describe('BotTable bot 标签列', () => {
 
     renderTable(bot);
 
-    expect(within(tagsCell()).getByText('openclaw')).toHaveClass('bg-primary/10', 'text-primary');
-    expect(within(tagsCell()).getByText('云端')).toHaveClass('bg-primary/10', 'text-primary');
-    expect(within(tagsCell()).getByText('服务化')).toHaveClass('bg-success/10', 'text-success');
+    expect(within(tagsCell()).getByText('openclaw')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(within(tagsCell()).getByText('云端')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(within(tagsCell()).getByText('服务化')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 });
 
@@ -733,7 +733,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
-  test('generalCC 服务 Bot 草稿态展示发布与阶段推进', () => {
+  test('服务 Bot 从状态下拉进入发布管理，更多菜单不再重复入口', () => {
     const bot = mapBotDto({
       bot_id: 'general-service-draft',
       bot_name: 'GeneralCC 服务 Bot',
@@ -745,15 +745,21 @@ describe('Agent Coding Bot row actions', () => {
       actions: ['chat', 'restart', 'delete'],
     }).item;
 
+    const onManagePublication = jest.fn();
     renderTable(bot, {
       onConversation: noop,
       onAction: jest.fn().mockResolvedValue(undefined),
-      onManagePublication: noop,
+      onManagePublication,
       getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
     });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
-    expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
+    expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'GeneralCC 服务 Bot 发布状态' }));
+    expect(onManagePublication).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '发布与阶段推进' }));
+    expect(onManagePublication).toHaveBeenCalledWith(bot);
   });
 
   test('Bot 成员点击 Coding Bot 去使用时进入 Coding Chat', () => {

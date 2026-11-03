@@ -28,7 +28,72 @@ async fn missing_config_explains_which_file_is_required() {
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.contains("--config"), "{error}");
     assert!(error.contains("bridge.toml"), "{error}");
+    assert!(error.contains("onboarding"), "{error}");
     assert!(!home.path().join(".bcn-bridge").exists());
+}
+
+fn write_profile(home: &Path, name: &str) -> std::path::PathBuf {
+    let directory = home.join(".bcn-bridge/profiles").join(name);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("bridge.toml");
+    std::fs::write(&path, r#"
+provider_id = "plugin-provider"
+mode = "plugin"
+state_path = "profile.sqlite3"
+bot = []
+[plugin]
+url = "ws://127.0.0.1:21000/ws/bot"
+"#).unwrap();
+    path
+}
+
+#[tokio::test]
+async fn implicit_start_discovers_the_only_profile_and_resolves_its_state_path() {
+    let home = tempfile::tempdir().unwrap();
+    let config = write_profile(home.path(), "codex-prod");
+    std::fs::create_dir_all(home.path().join(".bcn-bridge/profiles/empty")).unwrap();
+    let output = timeout(Duration::from_secs(5), command(home.path()).arg("start").output()).await.unwrap().unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{error}");
+    assert!(error.contains("Using bridge profile: codex-prod"), "{error}");
+    assert!(config.parent().unwrap().join("profile.sqlite3").exists());
+    assert!(!home.path().join(".bcn-bridge/bridge.toml").exists());
+}
+
+#[tokio::test]
+async fn ambiguous_profiles_list_sorted_start_commands_without_starting_a_daemon() {
+    let home = tempfile::tempdir().unwrap();
+    write_profile(home.path(), "codex-prod");
+    write_profile(home.path(), "codex-pre");
+    let output = command(home.path()).args(["start", "--daemon"]).output().await.unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    let pre = error.find("bcs-bridge --profile codex-pre start --daemon").expect("pre choice");
+    let prod = error.find("bcs-bridge --profile codex-prod start --daemon").expect("prod choice");
+    assert!(pre < prod, "{error}");
+    assert!(!home.path().join(".bcn-bridge/bridge.log").exists());
+}
+
+#[tokio::test]
+async fn default_and_explicit_selectors_never_fall_back_to_discovered_profiles() {
+    for selector in ["default", "profile", "config", "environment"] {
+        let home = tempfile::tempdir().unwrap();
+        write_profile(home.path(), "codex-prod");
+        let mut cmd = command(home.path());
+        cmd.arg("start");
+        match selector {
+            "default" => std::fs::write(home.path().join(".bcn-bridge/bridge.toml"), "invalid TOML").unwrap(),
+            "profile" => { cmd.args(["--profile", "missing"]); },
+            "config" => { cmd.arg("--config").arg(home.path().join("missing.toml")); },
+            "environment" => { cmd.env("BRIDGE_CONFIG", home.path().join("missing.toml")); },
+            _ => unreachable!(),
+        }
+        let output = cmd.output().await.unwrap();
+        assert!(!output.status.success(), "{selector}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(!error.contains("Using bridge profile"), "{selector}: {error}");
+        assert!(!home.path().join(".bcn-bridge/profiles/codex-prod/profile.sqlite3").exists());
+    }
 }
 
 #[cfg(unix)]

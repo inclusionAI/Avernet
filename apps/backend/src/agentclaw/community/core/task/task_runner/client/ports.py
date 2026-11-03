@@ -71,7 +71,9 @@ class OpenApiBotPort(Protocol):
 
 @runtime_checkable
 class BcsBotIdentityResolver(Protocol):
-    """把任务领域的产品 Bot ID 解析为 BCS 使用的 ``bot_id:owner_id`` UUID。"""
+    """把任务领域的产品 Bot ID 解析为 BCS 使用的稳定 ``bot_id:entity_id`` 身份。
+
+    已限定的外部身份保持不变；裸产品 ID 必须先解析唯一 Bot。"""
 
     def resolve_many(self, product_bot_ids: list[str]) -> dict[str, str]: ...
 
@@ -152,6 +154,23 @@ class BcsClientPort(Protocol):
     def task_callback_url(self) -> str:
         """Return the callback origin used by task event subscriptions."""
         ...
+
+
+@runtime_checkable
+class BcsSessionFilesPort(Protocol):
+    """Read ready file metadata from a BCS session workspace."""
+
+    async def list_files(
+        self,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        caller_bearer: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

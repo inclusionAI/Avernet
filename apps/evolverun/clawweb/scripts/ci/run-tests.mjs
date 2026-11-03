@@ -115,6 +115,8 @@ export function main(args = process.argv.slice(2)) {
       // Existing scripts only have --config and --passWithNoTests; do not evaluate shell text.
       if (scriptArgs.some(arg => !/^[a-zA-Z0-9._/-]+$/.test(arg))) throw new Error('Unsupported test script arguments');
       const child = spawnSync(process.execPath, [vitestCli, 'run', ...scriptArgs,
+        // Keep passing logs in JUnit instead of streaming them twice through CI.
+        '--silent=passed-only',
         '--maxWorkers=2', '--minWorkers=1', '--reporter=default', '--reporter=json', '--reporter=junit',
         `--outputFile.json=${join(dir, 'results.json')}`, `--outputFile.junit=${join(dir, 'junit.xml')}`,
         '--coverage.enabled', '--coverage.provider=v8', '--coverage.all', '--coverage.reportOnFailure',

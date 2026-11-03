@@ -3,6 +3,7 @@ import { runMigrations, type IDatabase } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
 import { migrations } from '../schema.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
+import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -47,6 +48,7 @@ const tagAlter = 'ALTER TABLE `workflow_deploy_history`';
 function createDb(dbType: 'mysql' | 'zdas', options: {
   canDdl: boolean;
   current?: number;
+  linkMaxLength?: number;
   failure?: { sqlPrefix: string; error: Error };
 }) {
   const exec = vi.fn<IDatabase['exec']>(async sql => {
@@ -55,6 +57,15 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
     }
     if (options.failure && sql.startsWith(options.failure.sqlPrefix)) {
       throw options.failure.error;
+    }
+    const allowed = [
+      ...migrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
+      ...workflowSnapshotMigrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
+      probes.ordinaryCallback, probes.healingCallback, tagAlter, flowRunLinkMysqlUpgradeDdl,
+    ];
+    if (!/^CREATE TABLE IF NOT EXISTS schema_version\b/.test(sql)
+      && sql !== ledgerInsert && !allowed.some(value => sql === value || (value === tagAlter && sql.startsWith(value)))) {
+      throw new Error(`Unexpected exec: ${sql}`);
     }
     return { affectedRows: 1 };
   });
@@ -65,8 +76,15 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       if (!options.canDdl) throw new Error('Unexpected schema_version read');
       return [{ v: options.current ?? 0 }] as T[];
     }
-    if (sql.includes('information_schema.TABLES')) return [] as T[];
-    if (sql.includes('information_schema.COLUMNS')) return [{ IS_NULLABLE: 'NO' }] as T[];
+    if (sql.includes("TABLE_NAME = 'workflow_evolution_analysis_runs'") && sql.includes('information_schema.TABLES')) return [] as T[];
+    if (sql.includes("TABLE_NAME = 'workflow_deploy_history'") && sql.includes("COLUMN_NAME = 'tag_name'") && sql.includes('information_schema.COLUMNS')) return [{ IS_NULLABLE: 'NO' }] as T[];
+    if (sql.includes('information_schema.COLUMNS') && sql.includes("'flow_run_links'")) {
+      return ['child_flow_id', 'parent_flow_id', 'parent_node_id', 'child_workflow_id'].map(column_name => ({ column_name, max_length: options.linkMaxLength ?? 255 })) as T[];
+    }
+    if (sql.includes('information_schema.STATISTICS') && sql.includes("'flow_run_links'")) {
+      return [{ index_name: 'PRIMARY', column_name: 'child_flow_id', sub_part: null, non_unique: 0, seq: 1 },
+        { index_name: 'idx_flow_run_links_parent', column_name: 'parent_flow_id', sub_part: null, non_unique: 1, seq: 1 }] as T[];
+    }
     throw new Error(`Unexpected query: ${sql}`);
   }
   const db: IDatabase = {
@@ -97,8 +115,11 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
       probes.healingCallback,
       probes.healingSql,
     ]);
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining('information_schema.COLUMNS'));
+    // A missing pack table is never read or inspected at startup.
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      expect.stringContaining("COLUMN_NAME = 'tag_name'"),
+    ]);
+    expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
   it('continues after the real v144 ALTER is denied, without recording progress', async () => {
@@ -117,7 +138,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
-  it.each([0, 1, 2, 145, 146, 200])('preserves version gating at %i when DDL is available', async current => {
+  it.each([0, 1, 2, 145, 146, 147, 148, 149, 200])('preserves version gating at %i when DDL is available', async current => {
     const { db, exec, query } = createDb(dbType, { canDdl: true, current });
 
     await runMigrations(db, dbType);
@@ -126,6 +147,8 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual(
       [...migrations, ...workflowSnapshotMigrations].filter(m => m.selfHealing || m.version > current).map(m => [m.version, m.description]),
     );
+    expect([...exec.mock.calls, ...query.mock.calls].some(([sql]) => sql.includes('clawweb_pack_operations'))).toBe(false);
+    expect(exec.mock.calls.some(([sql, params]) => sql === ledgerInsert && params?.[0] === 149)).toBe(false);
     const firstDdl = db.dialect.renderDdl(migrations[0].sql[0]);
     expect(exec.mock.calls.some(([sql]) => sql === firstDdl)).toBe(current < 1);
     expect(ordinary.migrate).toHaveBeenCalledTimes(current < 2 ? 1 : 0);
@@ -135,7 +158,15 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(exec).toHaveBeenCalledWith(probes.healingSql);
   });
 
+  it('does not record v148 when the post-DDL schema remains too narrow', async () => {
+    const { db, exec } = createDb(dbType, { canDdl: true, current: 147, linkMaxLength: 190 });
+    await expect(runMigrations(db, dbType)).rejects.toThrow('identifier columns are not fully provisioned');
+    expect(exec).toHaveBeenCalledWith(expect.stringContaining('ALTER TABLE flow_run_links'));
+    expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [148, expect.any(String)]);
+  });
+
   it.each([
+    { canDdl: true, sqlPrefix: 'ALTER TABLE flow_run_links', version: 148 },
     { canDdl: true, sqlPrefix: probes.ordinaryCallback, version: 2 },
     { canDdl: true, sqlPrefix: probes.ordinarySql, version: 2 },
     { canDdl: false, sqlPrefix: probes.healingCallback, version: 145 },
@@ -148,7 +179,7 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
 
     await expect(runMigrations(db, dbType)).rejects.toBe(error);
 
-    expect(exec).toHaveBeenCalledWith(sqlPrefix);
+    expect(exec).toHaveBeenCalledWith(expect.stringContaining(sqlPrefix));
     expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [version, expect.any(String)]);
   });
 });

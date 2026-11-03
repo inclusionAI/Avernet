@@ -3,6 +3,112 @@
 use super::*;
 
 impl GroupServiceImpl {
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    pub(crate) fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// The CURRENT Human→Bot control judgment (row 8,
+    /// bot-authority plan Task 6.3): a live `can_manage`
+    /// edge for the verified User id. The legacy
+    /// `created_by` fact and the legacy creator relation
+    /// edge are history (spec §3.2) and no longer
+    /// authorize anything here.
+    pub(crate) async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        self.authority()?
+            .can_manage(user_id, bot_id)
+            .await
+            .map_err(map_authority_error)
+    }
+
+    /// Spec §8.3: the Group's authorization-fact
+    /// participants, read through the strict snapshot
+    /// Core against the MASTER data source. This
+    /// instance's display cache (`try_get`) is never
+    /// authoritative for a resource-role decision: a
+    /// membership or scope change committed by another
+    /// instance must invalidate a cached pass. An
+    /// absent snapshot row grants no roles (the
+    /// caller-side loaders refuse a missing row, and a
+    /// live row always projects).
+    pub(crate) async fn group_snapshot_participants(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<bcs_service_api::types::authorization_snapshot::ParticipantAuthorizationSnapshot>, ApplicationError>
+    {
+        match self
+            .groups
+            .read_authorization_snapshot(group_id)
+            .await
+            .map_err(map_service_error)?
+        {
+            Some(snapshot) => Ok(snapshot.participants),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Spec §8.3: the Group's management-role actors
+    /// (driver/originator/strategy-gated Manager),
+    /// from the strict snapshot Core — the same
+    /// freshness contract as
+    /// [`Self::group_snapshot_participants`].
+    pub(crate) async fn group_snapshot_management_actor_ids(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<String>, ApplicationError> {
+        match self
+            .groups
+            .read_authorization_snapshot(group_id)
+            .await
+            .map_err(map_service_error)?
+        {
+            Some(snapshot) => Ok(snapshot
+                .management_actor_ids()
+                .into_iter()
+                .map(str::to_string)
+                .collect()),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Hybrid identity resolution (row 10): the claim-local
+    /// `HumanOrOwnedBot` selection is replaced by
+    /// `resolve_authorized_principal` with the authenticated
+    /// Bot as the requested `bot_id`. For hybrid User+Bot
+    /// credentials the live management edge must pass BEFORE
+    /// the Bot becomes the principal; pure Bot / pure Human
+    /// credentials keep their existing selection (the
+    /// resolver consults the hook only for the hybrid leg).
+    pub(crate) async fn resolve_principal(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<Principal, ApplicationError> {
+        match &caller.bot {
+            Some(bot) => {
+                resolve_authorized_principal(
+                    caller,
+                    IdentityPolicy::HumanOrAuthorizedBot {
+                        bot_id: bot.bot_uuid.clone(),
+                    },
+                    self.authority()?,
+                )
+                .await
+            }
+            None => select_principal(caller, IdentityPolicy::HumanOrOwnedBot),
+        }
+    }
+
     pub(crate) async fn load_bot(
         &self,
         bot_uuid: &str,
@@ -44,7 +150,7 @@ impl GroupServiceImpl {
             other => other,
         })?;
         if bot.actor_kind == ActorKind::Bot
-            && bot.created_by.as_deref() == Some(user.id.as_str())
+            && self.human_controls_bot(&user.id, requested).await?
         {
             Ok(requested.to_string())
         } else {
@@ -77,18 +183,16 @@ impl GroupServiceImpl {
             return Ok(());
         }
 
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
-                return Ok(());
-            }
+        // Human sponsorship of a controlled, non-hidden Bot
+        // (spec §8.1): a private/protected Group admits the
+        // Bot when the Human's CURRENT management edge
+        // (`can_manage`) authorizes it — friendship is not
+        // required for this leg. The legacy `created_by`
+        // fact and creator relation edge no longer sponsor.
+        if let Principal::Human(human) = principal
+            && self.human_controls_bot(&human.subject.id, bot_uuid).await?
+        {
+            return Ok(());
         }
 
         if self
@@ -105,22 +209,50 @@ impl GroupServiceImpl {
         )))
     }
 
+    /// Bot actor ids participating in current Sessions of the Group —
+    /// the candidate pool for the session-membership read fallback.
+    /// Bounded to the first page (100 Sessions), consistent with the
+    /// provisioning reconciler's fan-out budget.
+    pub(crate) async fn group_session_bot_ids(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<String>, ApplicationError> {
+        let sessions = self
+            .sessions
+            .list_by_group(group_id, None, 0, 100, None, None)
+            .await
+            .map_err(|error| ApplicationError::internal(error.to_string()))?;
+        Ok(sessions
+            .iter()
+            .flat_map(|session| session.participants.iter())
+            .filter(|participant| participant.actor_kind == ActorKind::Bot)
+            .map(|participant| participant.bot_uuid.clone())
+            .collect())
+    }
+
     pub(crate) async fn can_read_group_detail(
         &self,
         principal: &Principal,
         group: &DomainGroup,
     ) -> Result<bool, ApplicationError> {
         let principal_actor_id = principal.actor_id();
-        if group
-            .participants
+        // Spec §8.3: the resource roles come from the
+        // strict snapshot read, never this instance's
+        // display cache.
+        let participants = self
+            .group_snapshot_participants(&group.id)
+            .await?;
+        if participants
             .iter()
-            .any(|participant| participant.bot_uuid == principal_actor_id)
+            .any(|participant| participant.actor_id == principal_actor_id)
         {
             return Ok(true);
         }
         let mut session_actor_ids = match principal {
             Principal::Bot(_) => {
-                if Self::group_management_actor_ids(group)
+                if self
+                    .group_snapshot_management_actor_ids(&group.id)
+                    .await?
                     .iter()
                     .any(|actor_id| actor_id == &principal_actor_id)
                 {
@@ -129,22 +261,29 @@ impl GroupServiceImpl {
                 Vec::new()
             }
             Principal::Human(human) => {
-                let owned_bot_ids = self
-                    .registry
-                    .try_list_bots_by_creator(&human.subject.id)
-                    .await
-                    .map_err(map_service_error)?
-                    .into_iter()
-                    .filter(|bot| bot.actor_kind == ActorKind::Bot)
-                    .map(|bot| bot.bot_uuid)
-                    .collect::<HashSet<_>>();
-                if group.participants.iter().any(|participant| {
-                    participant.actor_kind == ActorKind::Bot
-                        && owned_bot_ids.contains(&participant.bot_uuid)
-                }) {
-                    return Ok(true);
+                // Row 8 view leg: a Human reads through a participant Bot it
+                // CURRENTLY controls (live `can_manage` per participant, never
+                // a creator-list whitelist).
+                for participant in participants
+                    .iter()
+                    .filter(|participant| participant.actor_kind == ActorKind::Bot)
+                {
+                    if self.human_controls_bot(&human.subject.id, &participant.actor_id).await? {
+                        return Ok(true);
+                    }
                 }
-                owned_bot_ids.into_iter().collect::<Vec<_>>()
+                // Session fallback candidates: the caller itself (pushed below)
+                // plus Session-only Bots it currently controls. A controlled
+                // Group participant would already have read through the leg
+                // above, and the authority cutover deliberately does not
+                // consult the legacy creator list for this fallback.
+                let mut controlled_session_bots = Vec::new();
+                for bot_id in self.group_session_bot_ids(&group.id).await? {
+                    if self.human_controls_bot(&human.subject.id, &bot_id).await? {
+                        controlled_session_bots.push(bot_id);
+                    }
+                }
+                controlled_session_bots
             }
         };
         session_actor_ids.push(principal_actor_id);
@@ -154,11 +293,12 @@ impl GroupServiceImpl {
             .map_err(|error| ApplicationError::internal(error.to_string()))
     }
 
-    /// The effective Human principal may act as itself or as an owned Bot
-    /// originator. The effective Bot principal may act only as itself. Anything
-    /// else is forbidden. This is stricter than legacy `authorize_originator`
-    /// (which lets any human designate any originator); it is a V1 gate and
-    /// legacy `POST /groups` is unaffected.
+    /// The effective Human principal may act as itself or as a
+    /// currently-controlled Bot originator. The effective Bot principal
+    /// may act only as itself. Anything else is forbidden. This is stricter
+    /// than legacy `authorize_originator` (which lets any human designate
+    /// any originator); it is a V1 gate and legacy `POST /groups` is
+    /// unaffected.
     pub(crate) async fn authorize_originator(
         &self,
         principal: &Principal,
@@ -179,10 +319,10 @@ impl GroupServiceImpl {
                 "originator must be a Bot Actor",
             ));
         }
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
-            }
+        if let Principal::Human(human) = principal
+            && self.human_controls_bot(&human.subject.id, originator).await?
+        {
+            return Ok(());
         }
         Err(ApplicationError::forbidden(format!(
             "Authenticated Principal cannot act as originator '{originator}'"
@@ -212,14 +352,21 @@ impl GroupServiceImpl {
         group: &DomainGroup,
     ) -> Result<bool, ApplicationError> {
         let principal_actor_id = principal.actor_id();
-        if group
-            .participants
+        // Spec §8.3: the resource roles (participants and
+        // management anchors) come from the strict
+        // snapshot read, not the display cache.
+        let participants = self
+            .group_snapshot_participants(&group.id)
+            .await?;
+        if participants
             .iter()
-            .any(|participant| participant.bot_uuid == principal_actor_id)
+            .any(|participant| participant.actor_id == principal_actor_id)
         {
             return Ok(true);
         }
-        let management_actor_ids = Self::group_management_actor_ids(group);
+        let management_actor_ids = self
+            .group_snapshot_management_actor_ids(&group.id)
+            .await?;
         if management_actor_ids
             .iter()
             .any(|actor_id| actor_id == &principal_actor_id)
@@ -227,10 +374,9 @@ impl GroupServiceImpl {
             return Ok(true);
         }
         if let Principal::Human(human) = principal {
-            let mut actor_ids = group
-                .participants
+            let mut actor_ids = participants
                 .iter()
-                .map(|participant| participant.bot_uuid.clone())
+                .map(|participant| participant.actor_id.clone())
                 .collect::<Vec<_>>();
             actor_ids.extend(management_actor_ids);
             if self.human_can_act_as_any(human, actor_ids).await? {
@@ -243,20 +389,6 @@ impl GroupServiceImpl {
             .await
             .map_err(|error| ApplicationError::internal(error.to_string()))?;
         Ok(session_group_ids.iter().any(|id| id == &group.id))
-    }
-
-    pub(crate) fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
-        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
-        if group.group_strategy == GroupStrategy::ManagerWorker {
-            actor_ids.extend(
-                group
-                    .participants
-                    .iter()
-                    .filter(|participant| participant.role == bcs_service_api::ParticipantRole::Manager)
-                    .map(|participant| participant.bot_uuid.clone()),
-            );
-        }
-        actor_ids
     }
 
     pub(crate) async fn human_actable_actor_id(
@@ -287,15 +419,11 @@ impl GroupServiceImpl {
             if bot.actor_kind != ActorKind::Bot {
                 continue;
             }
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(Some(actor_id));
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
+            // Row 8 Human→Bot control leg: the CURRENT
+            // `can_manage` edge decides; the historical
+            // `created_by` and the creator relation edge
+            // no longer authorize (spec §3.2).
+            if self.human_controls_bot(&human.subject.id, &actor_id).await? {
                 return Ok(Some(actor_id));
             }
         }
@@ -332,7 +460,12 @@ impl GroupServiceImpl {
         group: &DomainGroup,
     ) -> Result<Option<String>, ApplicationError> {
         let principal_actor_id = principal.actor_id();
-        let candidates = Self::group_management_actor_ids(group);
+        // Spec §8.3: the management anchors are
+        // snapshot facts, re-read at the decision —
+        // a cached `try_get` copy never elevates.
+        let candidates = self
+            .group_snapshot_management_actor_ids(&group.id)
+            .await?;
         if candidates.iter().any(|actor_id| actor_id == &principal_actor_id) {
             return Ok(Some(principal_actor_id));
         }
@@ -388,7 +521,7 @@ impl GroupServiceImpl {
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(caller).await?;
         let group = self
             .groups
             .try_get(group_id)

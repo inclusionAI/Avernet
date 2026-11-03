@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from secbaas.community.logger import get_logger
+from ._async_chat_client_transport import (
+    AsyncChatTransportBase,
+    AsyncChatTransportOwner,
+)
+from ._bot_websocket_client import BotWebSocketClient
 
-from ._async_chat_client_transport import AsyncChatTransportBase
 
-logger = get_logger("core-bot-run")
+def make_ws_client(owner: AsyncChatTransportOwner) -> BotWebSocketClient:
+    """Construct a WS endpoint; A2A may reuse it only for its explicit fallback."""
+    return BotWebSocketClient(
+        uri=owner.uri,
+        client_id=owner.client_id,
+        client_version=owner.client_version,
+        headers=owner.headers,
+    )
 
 
 class WebSocketChatTransport(AsyncChatTransportBase):
@@ -23,7 +33,8 @@ class WebSocketChatTransport(AsyncChatTransportBase):
         return "v3-ws"
 
     async def create(self) -> tuple[Any, dict[str, Any]]:
-        client = self.owner._make_ws_client()
+        client = make_ws_client(self.owner)
+        self.owner._bind_client_events(client)
         hello = await client.connect()
         return client, hello
 

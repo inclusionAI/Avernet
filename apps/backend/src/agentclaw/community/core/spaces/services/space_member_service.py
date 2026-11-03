@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.api.bot_manager_sync import BotManagerSyncProtocol
+from agentclaw.community.core.bot_collaborator.manager_sync.notifications import (
+    notify_space_manager_sync,
+)
 from agentclaw.community.core.work_orders.protocols import WorkOrderEventServiceProtocol
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
@@ -15,6 +19,7 @@ from agentclaw.community.core.spaces.errors import (
 )
 from agentclaw.community.core.spaces.models import (
     SpaceMemberRecord,
+    SpaceRecord,  # noqa: F401 — annotation-only reference (SAST F821)
     SpaceMemberSummaryRecord,
     SpaceRole,
     SpaceType,
@@ -29,11 +34,13 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderMessageTitle,
     notification_title_for,
 )
+from agentclaw.community.kernel.bot_manager_sync import SpaceChange
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
     StaffDeptPlugin,
     StaffProfileLookupError,
 )
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
 from agentclaw.community.core.spaces.space_service_protocol import SpaceMemberServiceProtocol
@@ -57,11 +64,38 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
         access: SpaceAccessService,
         staff_dept: StaffDeptPlugin,
         work_orders: WorkOrderEventServiceProtocol,
+        manager_sync: BotManagerSyncProtocol,
     ) -> None:
         self._repository = repository
         self._access = access
         self._staff_dept = staff_dept
         self._work_orders = work_orders
+        self._manager_sync = manager_sync
+
+    def _submit_manager_sync_hint(
+        self, *, space: SpaceRecord, env: str, user_ids: tuple[str, ...]
+    ) -> None:
+        """Best-effort BCS manager-set refresh hint after a committed write.
+
+        Only small refs derived from the Space this operation already
+        resolved are carried — never a Bot enumeration. The submit is
+        strictly local: it never propagates, so a failed hint cannot change
+        the committed business result; its return value is opaque.
+        """
+        notify_space_manager_sync(
+            self._manager_sync,
+            change=SpaceChange(
+                avernet_tenant=get_current_avernet_tenant(),
+                env=env,
+                space_refs=(
+                    str(space.id),
+                    f"team:{space.id}",
+                    space.space_code,
+                ),
+                user_ids=user_ids,
+            ),
+            space_id=space.id,
+        )
 
     def _resolve_member_user_name(self, *, user_id: str) -> str:
         try:
@@ -117,7 +151,7 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
         ):
             raise SpaceMemberAlreadyExistsError("space member already exists")
         resolved_user_name = self._resolve_member_user_name(user_id=normalized)
-        return self._repository.add_member(
+        record = self._repository.add_member(
             space_id=space_id,
             user_id=normalized,
             user_name=resolved_user_name,
@@ -125,6 +159,12 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
             creator_id=actor_id,
             env=get_current_env(),
         )
+        # Membership grew — submit the in-memory hint before returning; a
+        # failed submit never changes the committed result.
+        self._submit_manager_sync_hint(
+            space=space, env=get_current_env(), user_ids=(normalized,)
+        )
+        return record
 
     def delete_member(self, *, space_id: int, actor_id: str, user_id: str) -> bool:
         space, _ = self._access.require_space_owner(space_id=space_id, user_id=actor_id)
@@ -136,6 +176,12 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
         )
         if not deleted:
             raise SpaceMemberNotFoundError("space member not found")
+        # Membership shrank — submit the in-memory hint BEFORE the existing
+        # post-operation notification, so an exception there cannot lose the
+        # BCS hint (and a failed hint still allows the notification below).
+        self._submit_manager_sync_hint(
+            space=space, env=get_current_env(), user_ids=(normalized,)
+        )
         self._work_orders.create_work_order_event(
             event_category=NotificationCategory.NOTICE,
             biz_type="SPACE",

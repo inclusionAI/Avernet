@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator
 
 import httpx
@@ -60,6 +61,14 @@ def app_with_testing_modules(request) -> FastAPI:
     that need the injector outside a request reach for it via this
     fixture's return value or the ``world`` fixture.
     """
+    # Endpoint seeds must never write or unlink the developer's ~/.openclaw.
+    # Keep the real JSON file loader, but give this test its own local root.
+    from agentclaw.community.core.channel import json_config_utils
+
+    monkeypatch = request.getfixturevalue("monkeypatch")
+    tmp_path = request.getfixturevalue("tmp_path")
+    monkeypatch.setattr(json_config_utils, "_get_local_base_dir", lambda: tmp_path / "openclaw")
+
     # Lazy imports so this module stays import-light: pulling in
     # ``agentclaw.community.adapters.http.app`` triggers the whole router graph + model
     # registration, which we want done exactly once per test session,
@@ -124,6 +133,29 @@ def app_with_testing_modules(request) -> FastAPI:
         if not poller_stopped:
             raise RuntimeError(
                 "BaasPublishPoller threads did not stop before test database disposal"
+            )
+        # Same ordering rule for the manager-sync worker loop: its rounds
+        # read collaborators through this SQLite engine from a dedicated
+        # thread loop, so the lifecycle must be shut down (and prove it
+        # stopped) BEFORE the engine is disposed — an in-flight round would
+        # otherwise race a disposed StaticPool connection. The default
+        # (feature-off) binding is the zero-resource disabled twin and this
+        # is a no-op stop; only a case that actually enabled the syncer
+        # owns anything here.
+        from agentclaw.community.core.bot_collaborator.manager_sync.lifecycle import (
+            BotManagerSyncLifecycle,
+        )
+
+        syncer_lifecycle = injector.get(BotManagerSyncLifecycle)
+        asyncio.run(syncer_lifecycle.shutdown())
+        lingering_syncers = [
+            thread for thread in threading.enumerate()
+            if thread.name.startswith("manager-sync")
+        ]
+        if lingering_syncers:
+            raise RuntimeError(
+                "manager-sync worker threads did not stop before test database"
+                " disposal"
             )
         # StaticPool shares one SQLite connection with background sessions.
         # Use their lock so disposal cannot race an in-flight query/transaction.

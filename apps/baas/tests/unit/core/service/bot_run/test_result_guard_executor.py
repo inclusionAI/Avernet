@@ -128,7 +128,7 @@ async def test_requeue_signal_is_propagated_and_not_marked_failed(
     assert repo.get_by_run_id(run_id).status == "PENDING"
 
 
-async def test_pre_execute_timeout_marks_failed_without_running_inner(
+async def test_pre_execute_timeout_marks_timeout_without_running_inner(
     repo: OrmBotRunRepository,
 ):
     run_id = _insert_run(repo)
@@ -140,17 +140,17 @@ async def test_pre_execute_timeout_marks_failed_without_running_inner(
     await ex.execute(rec)
 
     assert inner.executed == []
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "TIME_OUT"
 
 
-async def test_timeout_error_inner_marks_failed(repo: OrmBotRunRepository):
+async def test_timeout_error_inner_marks_timeout(repo: OrmBotRunRepository):
     run_id = _insert_run(repo)
     ex = ResultGuardExecutor(_TimeoutInner(), repo)
 
     await ex.execute(_record(run_id))
 
     rec = repo.get_by_run_id(run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     assert "Task execution timeout" in (rec.error or "")
 
 
@@ -164,6 +164,36 @@ async def test_cancelled_error_marks_failed_and_reraises(repo: OrmBotRunReposito
     rec = repo.get_by_run_id(run_id)
     assert rec.status == "FAILED"
     assert "execution cancelled" in (rec.error or "")
+
+
+async def test_cancelled_by_deadline_marks_timeout(
+    repo: OrmBotRunRepository,
+):
+    """Timeout-driven cancellation writes TIME_OUT instead of FAILED.
+
+    This mirrors the local guardian deadline: the inner work is already running
+    when the queue record becomes expired, so pre-execute timeout handling no
+    longer applies and CanceledError must preserve timeout semantics.
+    """
+    run_id = _insert_run(repo)
+
+    class _BlockingInner:
+        async def execute(self, record):
+            await asyncio.sleep(999)
+
+    ex = ResultGuardExecutor(_BlockingInner(), repo)
+    record = _record(run_id, meta={"timeout": 10})
+
+    task = asyncio.create_task(ex.execute(record))
+    await asyncio.sleep(0)
+    record.gmt_create = datetime.now() - timedelta(seconds=20)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "TIME_OUT"
+    assert "execution cancelled (timeout)" in (rec.error or "")
 
 
 async def test_cancelled_by_abort_reuses_failed_status(repo: OrmBotRunRepository):

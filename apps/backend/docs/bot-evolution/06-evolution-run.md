@@ -630,9 +630,10 @@ At submission the service:
 2. **Checks for drift and freezes** the strategy version, params, parent,
    allowed genes, verification profile, and budget. Before the parent ref
    (`active`) is resolved, the Genome Registry checks whether the bot has
-   drifted (`GenomeRegistry.applied_revision` differs from `active`): its last applied Manifest document digest differs from the
-   digest `active` compiles to, usually after a direct
-   `PUT /config-manifest` ([01-genome.md](01-genome.md) §5.5). If it has,
+   drifted (`GenomeRegistry.drift(bot)`): it reads the bot's current state,
+   and the revision id that state would record differs from `active`,
+   usually after a direct `PUT /config-manifest` or a hand edit on the
+   device ([01-genome.md](01-genome.md) §5.5). If it has,
    the run does not start: it is recorded and ended at once as `cancelled`
    with end reason `out_of_band_change` (proposed), and no budget is
    reserved and no job is created. Runs are refused this way until the owner

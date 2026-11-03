@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import Mock
 
+from tests.community.bot_address_fakes import support_legacy_locator
 import pytest
 
 from agentclaw.community.core.bot_collaborator.errors import (
@@ -21,6 +22,9 @@ from agentclaw.community.core.bot_collaborator.models import (
 )
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
+)
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
 )
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceType
@@ -64,7 +68,7 @@ def _record(**overrides) -> CollaboratorRecord:
 def dependencies():
     collaborator_repo = Mock()
     collaborator_repo.get_by_bot_and_user.return_value = None
-    bot_repo = Mock()
+    bot_repo = support_legacy_locator(Mock())
     bot_repo.get_by_id_and_owner.return_value = _bot()
     space_access = Mock()
     service = CollaboratorService(
@@ -73,6 +77,7 @@ def dependencies():
         passport_plugin=Mock(),
         credentials_admins_writer=Mock(),
         space_access_service=space_access,
+        manager_sync=DisabledBotManagerSync(),
     )
     service.on_collaboration_changed = Mock()
     return service, collaborator_repo, bot_repo, space_access
@@ -199,7 +204,6 @@ def test_the_five_editor_rows_declare_the_same_bars():
     [
         {"bot_pk": 999},
         {"bot_id": "other-bot"},
-        {"owner_id": "other-owner"},
         {"env": "pre"},
     ],
 )
@@ -480,3 +484,10 @@ def test_batch_grants_space_members_their_page_members(dependencies):
     collaborator_repo.list_by_user.assert_called_once_with(MEMBER, "dev")
     assert space_access.require_space_reference.call_count == 1
     assert space_access.get_space_role.call_count == 1
+
+
+def test_editor_mutation_accepts_historical_owner_snapshot(dependencies):
+    service, collaborator_repo, _, _ = dependencies
+    collaborator_repo.get_by_id.return_value = _record(owner_id="previous-owner")
+    service.update_editor("bot-1", OWNER, 7, OWNER, CollaboratorRole.ADMIN, env="dev")
+    collaborator_repo.update.assert_called_once()

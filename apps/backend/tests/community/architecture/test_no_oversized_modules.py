@@ -65,10 +65,6 @@ _ALLOWLIST: dict[str, str] = {
     "core/bot_management/services/data_init_service.py": "~1111 lines — bot data initialization service.",
     # ── skill_center cluster ─────────────────────────────────────────
     "core/skill_center/services/skill_service.py": "~2444 lines — central skill service; CRUD, market, install, parameters, members.",
-    "core/skill_center/services/skill_set_service.py": "~2412 lines — skill-set service; default, sync, active management.",
-    "core/skill_center/services/git_sync.py": "~1012 lines — git-sync orchestration for skills repo.",
-    "adapters/http/skill_center/skills.py": "~2176 lines — skill router; CRUD + market + members + versions.",
-    "adapters/http/skill_center/skillsets.py": "~1443 lines — skill-set router; CRUD + skills + mcps + default-skill admin.",
     # ── service_bot cluster ──────────────────────────────────────────
     "core/service_bot/services/baas_service.py": "~2608 lines — single BaasService: BaaS API client + payload builders "
     "+ sandbox/mount-point shaping + dataclasses. Demoted from the Rule 20 "
@@ -96,7 +92,6 @@ _ALLOWLIST: dict[str, str] = {
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
-    "adapters/http/app.py": "~1002 lines — FastAPI app mounting all routers.",
     "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer inherited from origin/dev.",
 }
 

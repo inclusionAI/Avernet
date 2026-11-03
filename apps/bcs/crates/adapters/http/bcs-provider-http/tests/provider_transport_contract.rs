@@ -2078,3 +2078,6 @@ async fn interaction_provider_mux_routes_http_provider_target_to_http_impl() {
     let _ = mux.resolve_interaction(command).await;
     assert_eq!(websocket.calls.lock().unwrap().len(), 0);
 }
+
+#[path = "contracts/caller_execution.rs"]
+mod caller_execution;

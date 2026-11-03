@@ -7,6 +7,8 @@ import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotDeployment, BotServiceMode } from '@/services/botWorkshop';
 import { Cloud, Plus, Search } from 'lucide-react';
 import React from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 interface BotWorkshopToolbarProps {
   keyword: string;
@@ -120,7 +122,13 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
         {/* 创建入口合并为「创建Bot」主按钮（dmore 稿 artboard-059）：点击弹出气泡选择云端/本地。
           item 悬停底色按稿取 --selected（#EBEBEB 胶囊）；本地不可创建时置灰并悬停展示原因。 */}
         {onCreateLocal ? (
-          <Popover open={createOpen} onOpenChange={setCreateOpen}>
+          <Popover
+            open={createOpen}
+            onOpenChange={(next) => {
+              setCreateOpen(next);
+              if (next) Tracert.click(Points.botWorkshop.createEntry);
+            }}
+          >
             <PopoverTrigger asChild>
               <Button className="w-full sm:w-auto" leftIcon={<Plus aria-hidden className="size-3.5" />}>
                 创建Bot

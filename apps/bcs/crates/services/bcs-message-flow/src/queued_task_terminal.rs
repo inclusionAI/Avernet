@@ -34,7 +34,8 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         flow_kind:bcs_domain::message_delivery::DeliveryFlowKind::Task,
         targets:vec![bcs_service_api::port::repo::message_delivery::DeliveryAdmissionTarget {
             rejection:None, target_bot_id:task.manager.clone(), kind:bcs_domain::DeliveryType::Send,
-            max_queued:100, semantic_projection_json:serde_json::to_value(projection)? }],
+            max_queued:100, semantic_projection_json:serde_json::to_value(projection)?, run_id: None,
+}],
         now_ms:now, expire_at_ms:None,
     };
     let mut terminal = cmd.clone();
@@ -48,9 +49,9 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?;
     let mut current = row.clone();
     for _ in 0..3 {
-        let transition = DeliveryTransitionCommand { delivery_id:current.delivery_id.clone(), expected_state_version:current.state.state_version,
+        let transition = DeliveryTransitionCommand { caller_dispatch_commit:None, caller_cancel:None, delivery_id:current.delivery_id.clone(), expected_state_version:current.state.state_version,
             event:match cmd.state { ChatEventState::Final => Event::Completed, ChatEventState::Aborted => Event::Aborted, _ => Event::Failed },
-            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None };
+            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None, caller_terminal:None };
         match crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "task_terminal_commit",
             crate::storage_retry::managed_storage, || service.transition(transition.clone())).await {
             Ok(committed) => { queued_task::restore(flow, &committed).await?; return Ok(()); }
@@ -110,8 +111,9 @@ fn normalize_result(flow: &BcsMessageFlow,
     // body is retained in the same source so recovery never relies on final alone.
     let result_text = match cmd.state {
         ChatEventState::Final => result_text.to_string(),
-        _ => crate::task_failure::callback_text_with_timeout(task, cmd, !normalized.display.is_empty(), timed_out),
+        _ => crate::task_failure::callback_body(cmd, !normalized.display.is_empty()),
     };
+    let timed_out = timed_out || crate::task_failure::is_timeout_callback(cmd);
     reply.message.run_id = cmd.run_id.clone();
     reply.message_id = result_message_id(&task.task_id);
     reply.message.content = serde_json::json!({
@@ -145,14 +147,12 @@ pub(crate) async fn admit_legacy_result(flow: &BcsMessageFlow, entry: &crate::ta
     let Some(drain) = queued_task::admission_mode(flow, group, session, &entry.driver_bot).await? else { return Ok(false); };
     let task = TaskIntent { leg:TaskLeg::Result, task_id:entry.task_id.clone(), manager:entry.driver_bot.clone(),
         worker:entry.target_bot.clone(), worker_name:entry.target_bot_name.clone().unwrap_or_else(|| entry.target_bot.clone()),
-        response_mode:entry.response_mode, assignment_intent_id:entry.assignment_intent_id.clone(), summary:entry.summary.clone() };
+        response_mode:entry.response_mode, assignment_intent_id:entry.assignment_intent_id.clone(), summary:entry.summary.clone(), timeout_s:None };
     let reply = result_admission(flow, group, session, task, cmd, result_text, drain).await?;
     // Capacity rejection is itself durable. The Worker has finished even if
     // the Manager result cannot be admitted; never re-execute the Worker.
     flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?
         .admit(reply).await.map_err(|e| queued_task::error(&format!("task result admission failed: {e}")))?;
-    if cmd.state == ChatEventState::Final { flow.task_store.mark_replied(&entry.task_id).await; }
-    else if cmd.state == ChatEventState::Aborted { flow.task_store.mark_cancelled(&entry.task_id).await; }
-    else { flow.task_store.mark_failed(&entry.task_id).await; }
+    crate::task_failure::mark_terminal(flow, &entry.task_id, &cmd.state).await;
     Ok(true)
 }

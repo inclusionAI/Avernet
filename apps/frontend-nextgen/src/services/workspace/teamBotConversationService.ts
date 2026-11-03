@@ -87,7 +87,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
     ...permissions,
-    runtimeStage: 'draft',
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
@@ -105,7 +105,10 @@ export const teamBotConversationService = {
       const bots = new Map<string, ChatBotView>();
       for (let page = 1; ; page += 1) {
         if (signal?.aborted) throw new Error('请求已取消');
-        const response = await listCollaboratingBots({ user_id: requester, page, page_size: PAGE_SIZE }, signal);
+        const response = await listCollaboratingBots(
+          { user_id: requester, page, page_size: PAGE_SIZE, stage: 'online' },
+          signal,
+        );
         const data = response.data;
         if (
           response.code !== 200000 ||

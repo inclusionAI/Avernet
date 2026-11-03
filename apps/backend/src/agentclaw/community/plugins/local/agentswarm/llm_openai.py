@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import email.utils
 import json
 import random
+import time
 from typing import Any
 
 import httpx
@@ -22,6 +24,42 @@ from agentclaw.community.core.agentswarm.domain.models import (
 # timeout / too-early markers. Every other 4xx is a permanent client error
 # (bad auth, bad request) and must fail immediately without burning retries.
 _TRANSIENT_STATUSES = frozenset({408, 425, 429})
+
+# 429 rides its own budget: an upstream throttle window must not fail a
+# long durable run that only waited 1-2-4s. Honor the server's Retry-After
+# when present (capped — a hostile value must not park a worker slice);
+# without a header, back off in ~20s steps, since quota windows are
+# typically tens of seconds.
+_THROTTLE_MAX_ATTEMPTS = 8
+_THROTTLE_MAX_SLEEP = 120.0
+
+# Corp deployments patch httpx through the ant_baselib tracer, whose send
+# hook re-raises EVERY transport failure as its own wrapper type — the
+# narrow httpx exception classes never reach the caller there, so one
+# transient TLS blip would bypass the whole retry ladder and fail the run.
+# Resolve the wrapper when present; never depend on it.
+try:  # pragma: no cover - corp-only dependency
+    from ant_baselib.tracer.patches.httpx_client import (
+        HttpxCallingException as _HttpxCallingException,
+    )
+    _TRANSPORT_WRAP_EXCS: tuple[type[BaseException], ...] = (_HttpxCallingException,)
+except Exception:  # pragma: no cover - community deployments
+    _TRANSPORT_WRAP_EXCS = ()
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After")
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        target = email.utils.parsedate_to_datetime(value).timestamp()
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, target - time.time())
 
 
 class OpenAICompatibleClient:
@@ -69,35 +107,51 @@ class OpenAICompatibleClient:
             "temperature": request.temperature,
         }
         last_exc: Exception | None = None
-        for attempt in range(self._max_retries + 1):
-            last_attempt = attempt == self._max_retries
-
+        attempt = 0
+        throttle_attempts = 0
+        while True:
+            attempt += 1
             try:
                 response = await self._client.post("/chat/completions", json=body)
                 response.raise_for_status()
                 parsed = self._parse_response(response.json(), model)
                 return parsed
             except httpx.HTTPStatusError as exc:
-                if (400 <= exc.response.status_code < 500
-                        and exc.response.status_code not in _TRANSIENT_STATUSES):
+                status = exc.response.status_code
+                if (400 <= status < 500
+                        and status not in _TRANSIENT_STATUSES):
                     raise RuntimeError(
-                        f"chat completion failed (client error): {exc.response.status_code}"
+                        f"chat completion failed (client error): {status}"
                     ) from exc
                 last_exc = exc
+                if status == 429:
+                    # Own budget + Retry-After: see _THROTTLE_* constants.
+                    throttle_attempts += 1
+                    if throttle_attempts > _THROTTLE_MAX_ATTEMPTS:
+                        raise RuntimeError(
+                            "chat completion throttled (429) after "
+                            f"{throttle_attempts} attempts"
+                        ) from last_exc
+                    wait = _retry_after_seconds(exc.response)
+                    if wait is None:
+                        wait = min(20.0 * throttle_attempts, 60.0)
+                    await asyncio.sleep(min(wait, _THROTTLE_MAX_SLEEP))
+                    continue
             except httpx.TimeoutException as exc:
                 last_exc = exc
-            except (httpx.ConnectError, httpx.ReadError) as exc:
+            except (httpx.HTTPError, *_TRANSPORT_WRAP_EXCS) as exc:
+                # Connect/Read/TLS failures — or their corp tracer wrapper —
+                # retry on the generic ladder like a timeout.
                 last_exc = exc
 
-            if attempt < self._max_retries:
-                jitter = random.uniform(0.0, 0.4 * (2 ** attempt))
-                await asyncio.sleep(min(2 ** attempt + jitter, 30.0))
-            else:
+            if attempt > self._max_retries:
                 raise RuntimeError(
-                    f"chat completion failed after {self._max_retries + 1} attempts"
+                    f"chat completion failed after {attempt} attempts"
                 ) from last_exc
-
-        raise RuntimeError("unreachable")
+            # attempt is 1-based here; the ladder is 2**0, 2**1, … capped
+            # at 30s (the historical 1-2-4s backoff).
+            jitter = random.uniform(0.0, 0.4 * (2 ** (attempt - 1)))
+            await asyncio.sleep(min(2 ** (attempt - 1) + jitter, 30.0))
 
     def stream_complete(self, request: CompletionRequest):
         # Streaming twin of complete(): stream_options.include_usage makes

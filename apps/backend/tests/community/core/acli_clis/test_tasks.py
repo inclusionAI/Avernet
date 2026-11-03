@@ -128,6 +128,19 @@ async def test_an_uninstall_needs_no_grant(world) -> None:
     assert engine.calls[0][:3] == ("submit", "draft", "uninstall")
 
 
+@pytest.mark.asyncio
+async def test_an_engine_without_the_endpoints_fails_the_operation_at_once(world) -> None:
+    """A missing endpoint does not come back: no retry holds the stage's slot."""
+    store, engine, _, operation, _ = world
+    store.create(_row())
+    engine.errors["submit"] = [AcliPortError("engine_outdated", "no acli endpoints")]
+
+    outcome = await operation._step(_payload())
+
+    assert isinstance(outcome, Fail) and outcome.error.startswith("engine_outdated:")
+    assert store.get(OP_ID).engine_operation_id is None
+
+
 def _cancel_world(world, *, target_engine_id: str | None = "e" * 32, own_engine_id=None):
     store, engine, queue, _, cancel = world
     task = queue.enqueue("acli_clis.operation", {}, 60, idempotency_key="k")

@@ -56,7 +56,7 @@ export function loadSessionPage(
   const botId = view.bot.botId;
   const sectionOf: ConversationBotSection = view.section;
   const userIdNow = ctx.userId.current;
-  if (!userIdNow || !view.bot.chatable || view.bot.isAgentCodingBot || isPending(botId, sectionOf)) return;
+  if (!userIdNow || !view.bot.chatable || isPending(botId, sectionOf)) return;
   // 多实例服务 Bot 实例范围(capability 缺省 null → 零行为):首拉幂等触发实例清单加载
   // (服务 Bot 专用,其余 no-op);多实例解析后自动选中写入 Store(过滤代次+1)经既有
   // scopeSignature 触发重拉,此间在途的未带范围响应由 revision 写回校验自动丢弃。

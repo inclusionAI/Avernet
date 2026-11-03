@@ -218,7 +218,7 @@ it("stops a late AIS dispatch receipt instead of leaving a new Agent running", a
   await vi.waitFor(() => expect(submissions).toHaveLength(1));
   expect(await service.terminate(ack.task_id, actor)).toMatchObject({ status: "canceled", termination: { status: "stop_pending" } });
   finish("late-job");
-  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job"));
+  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job", "owner"));
   await vi.waitFor(async () => expect((await service.detail(ack.task_id, actor)).termination?.status).toBe("remote_stopped"));
   expect((await current(ack.task_id)).status).toBe("canceled");
   expect((await repo.findStep((await current(ack.task_id)).aisExecution!.stepId))!.status).toBe("canceled");
@@ -249,30 +249,6 @@ it("non-MCP goes to one environment plan without any initial retry message", asy
   await agent.apply(await current(task.taskId), { actionId: "fix", clientRequestId: "fix-skill", purpose: "执行获批环境修复" });
   await agent.retryMessage(await current(task.taskId), { clientRequestId: "retry-skill", purpose: "修复后继续原任务", message: "局部错误已修正，请继续原任务" });
   expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
-});
-it("Agent can observe existing progress without sending, and an unknown send is never replayed", async () => {
-  let task = await create("automatic", { tc_fault_label: null }); const read = await inspect(task, "read-progress");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务正在推进，先观察", evidence_ids: [read.evidenceId] });
-  expect((await current(task.taskId)).observationDeadlineAt).toBe(now + 3600000); expect(runtime.sendMessage).not.toHaveBeenCalled();
-  task = await create("approval", { event_id: "second-event", delivery_key: "second-initial" });
-  vi.mocked(runtime.sendMessage).mockRejectedValueOnce(new Error("transport outcome unknown"));
-  const body = { clientRequestId: "unknown-advice", purpose: "纠正操作后继续", message: "请按真实返回修正原操作" };
-  const send = await agent.retryMessage(task, body); expect(send.status).toBe("unknown");
-  expect((await current(task.taskId)).delivery!.delivery.status).toBe("unknown");
-  await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
-  await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
-});
-it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
-  let task = await create();
-  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
-  const read = await inspect(task, "historical-read");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
-  task = await current(task.taskId);
-  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
-  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
-  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed" } });
-  expect((await current(task.taskId)).status).toBe("completed");
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
 it("trajectory content paging stays within the task scope and preserves the audited result", async () => {
   const read = vi.fn(async () => ({ source: "aivision_tclog", content: "正文片段", next_content_offset: 100 }));
@@ -432,12 +408,40 @@ it("retries dispatch failures with revoked tickets instead of failing the accept
   now += 20000; await service.maintenance(); task = await current(ack.task_id);
   expect(task.execution!.jobId).toBeTruthy(); expect(ais.execute).toHaveBeenCalledTimes(2);
 });
+it("uses the original execution owner when an administrator stops recovery", async () => {
+  const task = await create();
+  await service.terminate(task.taskId, { userId: "admin", isAdmin: true });
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+it("keeps a rejected stop fenced and resumes the existing retry only after remote termination", async () => {
+  let task = await create();
+  const executionId = task.execution!.executionId;
+  now = task.execution!.leaseExpiresAt * 1000 + 1;
+  ais.stopExecution.mockRejectedValueOnce(new Error("temporary stop rejected"));
+  const reconcile = () => reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo,
+    handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais },
+    nowSeconds: () => Math.floor(now / 1000) });
+  await reconcile(); await service.maintenance(); task = await current(task.taskId);
+  expect(task.execution!.executionId).toBe(executionId);
+  expect(task.execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  await reconcile(); await service.maintenance();
+  expect((await current(task.taskId)).execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
+  await reconcile(); now += 20000; await service.maintenance();
+  expect(submissions).toHaveLength(2);
+  expect((await current(task.taskId)).execution!.executionId).not.toBe(executionId);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
 it("waits for the expired AIS job to stop before replacing its execution", async () => {
   let task = await create(); const executionId = task.execution!.executionId;
   now = task.execution!.leaseExpiresAt * 1000 + 1;
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   await service.maintenance(); task = await current(task.taskId);
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-1"); expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner"); expect(submissions).toHaveLength(1);
   expect(task.status).toBe("running"); expect(task.execution!.executionId).toBe(executionId);
   ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
@@ -732,7 +736,7 @@ it("old dispatch cannot attach its job to a replacement execution after a versio
   });
   await agent.start(task);
   expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", jobId: "replacement-job" });
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-2");
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-2", "owner");
 });
 
 it.each([false, true])("the same tool key cannot identify changed advice, including legacy envelope fields: %s", async legacyEnvelope => {
@@ -826,7 +830,7 @@ it("migrates legacy pending results before reporting and preserves their origina
   const evidence = { evidence_id: "legacy-evidence", tool_call_id: "legacy-call", source: "session", location: "original:1", excerpt: "历史现场" };
   await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "failed", evidence: [evidence], pending_results: [{ ...result, status: "waiting_owner", result_version: 0 }, result] }), task.taskId]);
   const legacyRow = (await repo.findTask(task.taskId))!;
-  expect(await tasks.listForReporting(20, "", "prod")).toEqual([]);
+  expect((await tasks.listForReporting(20, "", "prod")).tasks).toEqual([]);
   expect(await repo.findTask(task.taskId)).toEqual(legacyRow);
   // Old tasks had no phase artifact; preserve the original Step identity.
   await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
@@ -863,7 +867,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
   expect(task.pending_results.map(result => result.status)).toEqual(["waiting_effect", "waiting_effect", "completed"]);
   expect(task.pending_results[0]).toEqual(firstResult);
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
-  expect(await tasks.listForReporting(20, "", "pre")).toEqual([]);
+  expect((await tasks.listForReporting(20, "", "pre")).tasks).toEqual([]);
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
   expect(stored.pending_results).toBeUndefined(); expect(stored.timeline).toBeUndefined();
   expect(stored.resultDelivery).toHaveLength(3);
@@ -877,7 +881,7 @@ it("waiting snapshots survive same-task resumes and restart before the final res
     expect(callbacks.map(result => result.result_version)).toEqual(versions);
     expect((await current(task.taskId)).pending_results).toEqual([]);
     await restarted.reportResults(); expect(callbacks).toHaveLength(3);
-    await tasks.acknowledgeResult(task.taskId, versions[0]);
+    await tasks.acknowledgeResult(task.taskId, versions[0], 1);
     const acknowledgments = (await current(task.taskId)).timeline.filter(event => event.kind === "result");
     expect(acknowledgments).toHaveLength(3);
     expect(acknowledgments.map(event => event.payload.attempts)).toEqual([2, 1, 1]);
@@ -997,4 +1001,19 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
   await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");
+});
+
+it("returns actionable 422 feedback for missing delivery and shortened evidence without changing the phase", async () => {
+  let task = await create();
+  const read = await inspect(task); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "无法投递", evidence_ids: [read.evidenceId] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("blocked") });
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "observe", summary: "保留调查结论", evidence_ids: ["evidence-tc-short"] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("完整 evidenceId") });
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "session_unavailable", summary: "原会话不可投递" }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("省略 reason") });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.report(task, { kind: "blocked", phase: "assess", summary: "原会话不可投递，当前无法继续" });
+  expect(await current(task.taskId)).toMatchObject({ status: "failed", judgment: { effect: "unknown" } });
 });

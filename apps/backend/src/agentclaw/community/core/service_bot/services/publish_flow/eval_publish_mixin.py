@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from agentclaw.community.kernel.device_dto import ResourceSpecification
+
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishStatus,
@@ -10,6 +12,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
     service_publish_template_config,
@@ -41,6 +44,8 @@ class EvalPublishMixin:
         migration_path: str | None = None,
         config_artifact: str | None = None,
         docker_image: str | None = None,
+        resource_spec: ResourceSpecification | None = None,
+        device_count: int = 1,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -64,6 +69,8 @@ class EvalPublishMixin:
                 publish_record.ext 中的值，用于 Eval DRAFT 构建路径。
             config_artifact: 外部传入的 config_artifact（可选）。优先级高于
                 publish_record.ext 中的值。
+            resource_spec: 本次发布的资源覆盖；None 保持原配置，不修改源 Bot。
+            device_count: 本次发布的 BaaS 设备/实例数量。小于 1 视为调用方错误发失败。
             docker_image: 外部传入的镜像 pin（可选）。非空时跳过
                 resolve_publish_image_pin，用于 Eval DRAFT 构建路径。
         """
@@ -84,12 +91,16 @@ class EvalPublishMixin:
         if not mp and not ca:
             raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
+
+        if device_count < 1:
+            raise PublishFlowServiceError("device_count must be at least 1")
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # config_artifact read above is only the build-artifact presence guard. Eval
@@ -129,18 +140,25 @@ class EvalPublishMixin:
             if default_tag:
                 eval_envs[DYNAMIC_ENV_TAG_KEY] = default_tag
 
+            template_config = service_publish_template_config(bot)
+            if resource_spec is not None:
+                template_config = {
+                    **(template_config or {}),
+                    "resource_spec": resource_spec.to_dict(),
+                }
+
             release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
                 migration_path=mp,
-                device_count=1,
+                device_count=device_count,
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
                 ext_info=ext_info,
                 extra_envs=eval_envs,
                 docker_image=image_pin_docker_image,
-                template_config=service_publish_template_config(bot),
+                template_config=template_config,
             )
             if template_uuid:
                 release_kwargs["template_uuid"] = template_uuid
@@ -266,9 +284,19 @@ class EvalPublishMixin:
 
         # acquire_workflow exceptions propagate (durable retry resumes the same
         # non-terminal op → adopt-by-query), mirroring execute_restart.
-        op = await self._operation_runner.acquire_workflow(op, _issue)
+        try:
+            op = await self._operation_runner.acquire_workflow(op, _issue)
+        except BaasBotNotFoundError:
+            # Teardown's postcondition already holds. Complete the same ledger
+            # operation so the durable task does not retry an absent target.
+            logger.info(
+                "[PublishFlowService.execute_eval_teardown] Target already absent: bot_uuid=%s",
+                bot_uuid,
+            )
+            self._operation_runner.complete_without_workflow(op)
+        else:
+            self._operation_runner.complete_operation(op)
         destroy_publish_id = op.baas_publish_id
-        self._operation_runner.complete_operation(op)
 
         result = {
             "success": True,

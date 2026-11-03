@@ -25,6 +25,6 @@
 /apps/evolverun/ @archer910517-ctrl @wienyang @fudp @3h-william @ZhaosenLin @XIEAN99
 
 # Task goal-driven execution framework — dedicated owners.
-/apps/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627
-/apps/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627
-/apps/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627
+/apps/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot
+/apps/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot
+/apps/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot

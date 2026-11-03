@@ -48,6 +48,7 @@ export function GroupWorkspaceArea({
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({
     session: sessions.selectedSession,
+    userId: userIdentityId ?? null,
     messages: filterVisibleGroupMessages(chat.chat.messages ?? []),
     panelRef: chat.panelRef,
     toggleFavorite: sessions.toggleFavorite,
@@ -156,6 +157,7 @@ export function GroupWorkspaceArea({
           connectionStatus={chat.connectionStatus}
           questions={chat.questions}
           execApprovals={chat.execApprovals}
+          speakingLease={chat.speakingLease}
           groupBootstrapProcessing={chat.groupBootstrapProcessing}
           send={chat.send}
           submitPanelMessage={chat.submitPanelMessage}
@@ -220,7 +222,7 @@ export function GroupWorkspaceArea({
           onLeaveGroup={handleLeaveGroup}
           onAddGroupMember={groupManage.addMember}
           onRemoveGroupMember={groupManage.removeMember}
-          onShareGroup={groupManage.createShare}
+          onShareGroup={handleShareGroup}
           onSaveDingTalk={groupManage.saveDingTalk}
           onToggleDingTalkActive={groupManage.toggleDingTalkActive}
           onDeleteDingTalk={groupManage.deleteDingTalk}
@@ -231,7 +233,7 @@ export function GroupWorkspaceArea({
           onLeaveSession={handleLeaveSession}
           onAddSessionMember={sessionManage.addMember}
           onRemoveSessionMember={sessionManage.removeMember}
-          onShareSession={sessionManage.createShare}
+          onShareSession={handleShareSession}
         />
         {activePanel === 'resources' && sessions.selectedSession && (
           /* 会话局部覆盖层：资源管理与单聊侧共用容器。 */

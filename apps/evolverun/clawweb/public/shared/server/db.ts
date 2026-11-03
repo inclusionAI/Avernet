@@ -187,7 +187,7 @@ async function ensureSchemaVersionTable(db: IDatabase): Promise<boolean> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("denied") || msg.includes("CREATE") || msg.includes("DDL")) {
-      console.warn(`[clawweb] DDL denied (assumes schema exists in managed DB): ${msg}`);
+      console.warn(`[clawweb] DDL capability unavailable for managed DB: ${msg}`);
       return false;
     }
     throw err;
@@ -201,12 +201,12 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     // migration ledger exists or contains rows. Do not read or write the
     // ledger or replay ordinary migrations here; only explicitly marked,
     // idempotent self-healing repairs are attempted.
-    console.warn("[clawweb] DDL denied — assuming schema exists in managed DB");
+    console.warn("[clawweb] DDL denied — ordinary migrations skipped");
   }
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
 
-  // v146 automation-history DDL is retired; reserve that version and keep existing schemas untouched.
+  // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
   for (const migration of [...migrations, ...workflowSnapshotMigrations]) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.
@@ -225,9 +225,10 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
         // Also tolerate the occasional "already exists" / "key column ... does not exist".
         // MySQL error 1091: "Can't DROP column" — column doesn't exist (fresh install).
         // MySQL rendering strips CREATE INDEX IF NOT EXISTS; retain its idempotency.
+        // ALTER TABLE ADD INDEX reports the same ER_DUP_KEYNAME ("Duplicate key
+        // name") when the index already exists — also an idempotent no-op.
         if (
-          (/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s/i.test(ddl) &&
-            lower.includes("duplicate key name")) ||
+          lower.includes("duplicate key name") ||
           lower.includes("duplicate column name") ||
           lower.includes("no such column") ||
           lower.includes("already exists") ||
@@ -269,9 +270,25 @@ export type Repositories = {
 };
 
 let repos: Repositories | null = null;
+let initializedSchema: "migrate" | "external" | null = null;
 
-export async function initDatabase(configPath?: string): Promise<Repositories> {
-  if (repos) return repos;
+/** External schemas are provisioned by the caller; connection failures remain fatal. */
+export type DatabaseInitOptions = { schema?: "migrate" | "external" };
+
+export async function initDatabase(
+  configPath?: string,
+  options: DatabaseInitOptions = {},
+): Promise<Repositories> {
+  const schema = options.schema ?? "migrate";
+  if (schema !== "migrate" && schema !== "external") {
+    throw new Error(`Unsupported database schema initialization: ${schema}`);
+  }
+  if (repos) {
+    if (initializedSchema !== schema) {
+      throw new Error("Database already initialized with a different schema strategy");
+    }
+    return repos;
+  }
 
   const config = resolveDbConfig(configPath);
 
@@ -289,8 +306,9 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
       db = initSqlite(config.sqlitePath);
     }
 
-    await runMigrations(db, db.dbType as DbType);
+    if (schema === "migrate") await runMigrations(db, db.dbType as DbType);
   } catch (err) {
+    if (schema === "external") throw err;
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`[clawweb] Database init failed (mode=${config.mode}): ${msg}`);
     console.warn("[clawweb] Falling back to NoOp database — API will return 503");
@@ -298,6 +316,7 @@ export async function initDatabase(configPath?: string): Promise<Repositories> {
   }
 
   repos = { db };
+  initializedSchema = schema;
   console.log(`[clawweb] Database ready (type=${db.dbType})`);
   return repos;
 }
@@ -928,6 +947,7 @@ export async function closeDatabase(): Promise<void> {
   if (repos) {
     await repos.db.close();
     repos = null;
+    initializedSchema = null;
   }
 }
 

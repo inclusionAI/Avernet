@@ -6,7 +6,16 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    ValidationError,
+)
+from agentclaw.community.core.task.forum.interaction.models import (
+    ForumActorRef,
+    ForumActorType,
+)
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
@@ -23,10 +32,12 @@ from agentclaw.community.core.task.forum.services.forum_service import ForumServ
 
 
 class FakeForumRepository:
-    def __init__(self, topic=None) -> None:
+    def __init__(self, topic=None, post=None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.topic = topic
+        self.post = post
         self._default_topic = _topic_record()
+        self._default_post = _post_record()
 
     def create_topic(self, **kwargs):
         now = datetime(2026, 9, 20, tzinfo=timezone.utc)
@@ -66,6 +77,46 @@ class FakeForumRepository:
         self.calls.append({"operation": "get_topic", "topic_id": topic_id})
         return self._default_topic if self.topic is None else self.topic
 
+    def get_post(self, *, topic_id: str, post_id: str):
+        self.calls.append(
+            {"operation": "get_post", "topic_id": topic_id, "post_id": post_id}
+        )
+        return self._default_post if self.post is None else self.post
+
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ):
+        self.calls.append(
+            {
+                "operation": "update_post_helpful_with_accept",
+                "topic_id": topic_id,
+                "post_id": post_id,
+                "helpful": helpful,
+                "actor_type": actor_type,
+                "actor_id": actor_id,
+            }
+        )
+        post = self._default_post if self.post is None else self.post
+        return None if post is None else dataclasses.replace(post, helpful=helpful)
+
+    def update_post_helpful(self, *, topic_id: str, post_id: str, helpful: bool):
+        self.calls.append(
+            {
+                "operation": "update_post_helpful",
+                "topic_id": topic_id,
+                "post_id": post_id,
+                "helpful": helpful,
+            }
+        )
+        post = self._default_post if self.post is None else self.post
+        return None if post is None else dataclasses.replace(post, helpful=helpful)
+
     def get_topic_viewer_state(
         self, *, topic_id: str, author_type: str, author_id: str
     ):
@@ -87,20 +138,39 @@ class FakeForumRepository:
 def _topic_record(
     topic_type="DISCUSSION",
     topic_config=None,
+    *,
+    author_type="BOT",
+    author_id="bot-a",
+    status="OPEN",
 ):
     now = datetime(2026, 9, 20, tzinfo=timezone.utc)
     return ForumTopicRecord(
         topic_id="topic-1",
-        author_type="BOT",
-        author_id="bot-a",
+        author_type=author_type,
+        author_id=author_id,
         title="Topic title",
         body="Topic description",
-        status="OPEN",
+        status=status,
         analysis=ForumTopicAnalysisRecord(),
         created_at=now,
         updated_at=now,
         topic_type=topic_type,
         topic_config=topic_config,
+    )
+
+
+def _post_record(*, reply_to_post_id=None, helpful=False):
+    now = datetime(2026, 9, 20, 1, tzinfo=timezone.utc)
+    return ForumPostRecord(
+        post_id="post-1",
+        topic_id="topic-1",
+        author_type="HUMAN",
+        author_id="user-b",
+        body="Useful reply",
+        reply_to_post_id=reply_to_post_id,
+        helpful=helpful,
+        created_at=now,
+        updated_at=now,
     )
 
 
@@ -174,6 +244,45 @@ def test_create_topic_normalizes_and_forwards_topic_config():
             deadline_at=deadline,
         )
     )
+
+
+def test_create_share_topic_without_configuration():
+    repo = FakeForumRepository()
+
+    ForumService(repo).create_topic(
+        author_type="HUMAN",
+        author_id="user-a",
+        client_request_id="req-share",
+        title="Share",
+        body="Experience",
+        topic_type="SHARE",
+        topic_config=None,
+    )
+
+    assert repo.calls[0]["topic_config"] is None
+
+
+def test_create_share_topic_rejects_topic_config():
+    repo = FakeForumRepository()
+    config = ForumTopicConfig(
+        poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="topic_config is not allowed when topic_type is SHARE",
+    ):
+        ForumService(repo).create_topic(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-share-config",
+            title="Share",
+            body="Experience",
+            topic_type="SHARE",
+            topic_config=config,
+        )
+
+    assert repo.calls == []
 
 
 def test_create_topic_requires_topic_config_for_poll_topic():
@@ -283,171 +392,6 @@ def test_create_topic_rejects_naive_poll_deadline():
     assert repo.calls == []
 
 
-def test_create_reply_supports_human_author():
-    repo = FakeForumRepository()
-
-    ForumService(repo).create_reply(
-        topic_id=" topic-1 ",
-        author_type="human",
-        author_id=" user-1 ",
-        client_request_id=" req-2 ",
-        body=" Reply ",
-    )
-
-    assert repo.calls == [
-        {"operation": "get_topic", "topic_id": "topic-1"},
-        {
-            "operation": "create_reply",
-            "topic_id": "topic-1",
-            "author_type": "HUMAN",
-            "author_id": "user-1",
-            "client_request_id": "req-2",
-            "body": "Reply",
-            "reply_to_post_id": None,
-            "poll_selection": None,
-            "author_display_name": None,
-            "author_avatar_url": None,
-        },
-    ]
-
-
-def test_create_reply_forwards_structured_poll_selection():
-    repo = FakeForumRepository(
-        topic=_topic_record(
-            topic_type="POLL",
-            topic_config=ForumTopicConfig(
-                poll=ForumPollConfig(selection="MULTI", options=("A", "B"))
-            ),
-        )
-    )
-    selection = ForumPollSelection(option_indices=(0, 1))
-
-    ForumService(repo).create_reply(
-        topic_id="topic-1",
-        author_type="BOT",
-        author_id="bot-a",
-        client_request_id="req-vote",
-        body="I choose both options.",
-        poll_selection=selection,
-    )
-
-    assert repo.calls[-1]["poll_selection"] == selection
-
-
-def test_create_reply_rejects_floor_reply_for_poll_topic():
-    repo = FakeForumRepository(
-        topic=_topic_record(
-            topic_type="POLL",
-            topic_config=ForumTopicConfig(
-                poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
-            ),
-        )
-    )
-
-    with pytest.raises(ValidationError, match="POLL replies must target the Topic"):
-        ForumService(repo).create_reply(
-            topic_id="topic-1",
-            author_type="BOT",
-            author_id="bot-a",
-            client_request_id="req-vote",
-            body="Floor votes are unsupported",
-            reply_to_post_id="post-1",
-            poll_selection=ForumPollSelection(option_indices=(0,)),
-        )
-
-    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
-
-
-@pytest.mark.parametrize(
-    ("selection_rule", "option_indices", "message"),
-    [
-        ("SINGLE", (0, 1), "exactly one option"),
-        ("SINGLE", (2,), "invalid option index"),
-        ("MULTI", (0, 0), "must not contain duplicates"),
-        ("MULTI", (), "at least one option"),
-    ],
-)
-def test_create_reply_rejects_invalid_poll_selection(
-    selection_rule, option_indices, message
-):
-    repo = FakeForumRepository(
-        topic=_topic_record(
-            topic_type="POLL",
-            topic_config=ForumTopicConfig(
-                poll=ForumPollConfig(
-                    selection=selection_rule,
-                    options=("A", "B"),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(ValidationError, match=message):
-        ForumService(repo).create_reply(
-            topic_id="topic-1",
-            author_type="BOT",
-            author_id="bot-a",
-            client_request_id="req-vote",
-            body="Vote",
-            poll_selection=ForumPollSelection(option_indices=option_indices),
-        )
-
-    assert repo.calls[-1] == {"operation": "get_topic", "topic_id": "topic-1"}
-
-
-def test_create_reply_rejects_poll_selection_for_non_poll_topic():
-    repo = FakeForumRepository(topic=_topic_record(topic_type="DISCUSSION"))
-
-    with pytest.raises(ValidationError, match="poll_selection is only allowed"):
-        ForumService(repo).create_reply(
-            topic_id="topic-1",
-            author_type="BOT",
-            author_id="bot-a",
-            client_request_id="req-vote",
-            body="Discussion reply",
-            poll_selection=ForumPollSelection(option_indices=(0,)),
-        )
-
-    assert repo.calls[-1] == {"operation": "get_topic", "topic_id": "topic-1"}
-
-
-def test_create_reply_requires_selection_for_poll_topic():
-    repo = FakeForumRepository(
-        topic=_topic_record(
-            topic_type="POLL",
-            topic_config=ForumTopicConfig(
-                poll=ForumPollConfig(selection="SINGLE", options=("A", "B"))
-            ),
-        )
-    )
-
-    with pytest.raises(ValidationError, match="poll_selection is required"):
-        ForumService(repo).create_reply(
-            topic_id="topic-1",
-            author_type="BOT",
-            author_id="bot-a",
-            client_request_id="req-vote",
-            body="Choose one",
-        )
-
-    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
-
-
-def test_create_reply_normalizes_optional_reference():
-    repo = FakeForumRepository()
-
-    ForumService(repo).create_reply(
-        topic_id="topic-1",
-        author_type="HUMAN",
-        author_id="user-1",
-        client_request_id="req-referenced",
-        body="Reply",
-        reply_to_post_id=" post-1 ",
-    )
-
-    assert repo.calls[-1]["reply_to_post_id"] == "post-1"
-
-
 @pytest.mark.parametrize(
     ("kwargs", "field"),
     [
@@ -531,10 +475,67 @@ def test_list_topics_normalizes_filters_and_converts_page_to_offset():
             "status": "CLOSED",
             "topic_type": None,
             "author_id": None,
+            "followed_authors": None,
             "offset": 20,
             "limit": 10,
         }
     ]
+
+
+def test_list_topics_resolves_followed_authors_before_topic_query():
+    repo = FakeForumRepository()
+    followed_authors = (
+        ForumActorRef(type=ForumActorType.BOT, id="bot-a"),
+        ForumActorRef(type=ForumActorType.HUMAN, id="user-b"),
+    )
+    repo.list_followed_authors = lambda **kwargs: (
+        repo.calls.append({"operation": "list_followed_authors", **kwargs})
+        or followed_authors
+    )
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    ForumService(repo).list_topics(
+        keyword=None,
+        status=None,
+        topic_type=None,
+        following_owner_id=" user-a ",
+        page=1,
+        page_size=20,
+    )
+
+    assert [call["operation"] for call in repo.calls] == [
+        "list_followed_authors",
+        "list_topics",
+    ]
+    assert repo.calls[0]["owner_user_id"] == "user-a"
+    assert repo.calls[1]["followed_authors"] == followed_authors
+
+
+def test_list_topics_returns_empty_without_a_topic_query_when_no_follows():
+    repo = FakeForumRepository()
+    repo.list_followed_authors = lambda **kwargs: (
+        repo.calls.append({"operation": "list_followed_authors", **kwargs})
+        or ()
+    )
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    result = ForumService(repo).list_topics(
+        keyword=None,
+        status=None,
+        topic_type=None,
+        following_owner_id=" user-a ",
+        page=1,
+        page_size=20,
+    )
+
+    assert result.total == 0
+    assert [call["operation"] for call in repo.calls] == ["list_followed_authors"]
 
 
 def test_list_topics_normalizes_optional_topic_type_filter():
@@ -600,7 +601,9 @@ def test_get_topic_attaches_viewer_state_when_viewer_is_declared():
 def test_get_topic_requires_viewer_type_and_viewer_id_to_be_declared_together():
     repo = FakeForumRepository()
 
-    with pytest.raises(ValidationError, match="viewer_author_type and viewer_author_id"):
+    with pytest.raises(
+        ValidationError, match="viewer_author_type and viewer_author_id"
+    ):
         ForumService(repo).get_topic(
             topic_id="topic-1", viewer_author_type="HUMAN", viewer_author_id=None
         )
@@ -613,6 +616,149 @@ def test_list_posts_validates_pagination_before_repository_call():
 
     with pytest.raises(ValidationError, match="page_size"):
         ForumService(repo).list_posts(topic_id="topic-1", page=1, page_size=101)
+
+    assert repo.calls == []
+
+
+# ---------------------------------------------------------------------------
+# set_post_helpful
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("author_type", "author_id"),
+    [("HUMAN", "user-a"), ("BOT", "bot-a")],
+)
+def test_set_post_helpful_allows_help_topic_author_and_normalizes_identity(
+    author_type, author_id
+):
+    topic = _topic_record(
+        topic_type="HELP", author_type=author_type, author_id=author_id
+    )
+    repo = FakeForumRepository(topic=topic)
+
+    result = ForumService(repo).set_post_helpful(
+        topic_id=" topic-1 ",
+        post_id=" post-1 ",
+        author_type=f" {author_type.lower()} ",
+        author_id=f" {author_id} ",
+        helpful=True,
+    )
+
+    assert result.helpful is True
+    assert repo.calls == [
+        {"operation": "get_topic", "topic_id": "topic-1"},
+        {"operation": "get_post", "topic_id": "topic-1", "post_id": "post-1"},
+        {
+            "operation": "update_post_helpful_with_accept",
+            "topic_id": "topic-1",
+            "post_id": "post-1",
+            "helpful": True,
+            "actor_type": author_type,
+            "actor_id": author_id,
+        },
+    ]
+
+
+def test_set_post_helpful_allows_closed_help_without_closing_topic():
+    repo = FakeForumRepository(
+        topic=_topic_record(
+            topic_type="HELP",
+            author_type="HUMAN",
+            author_id="user-a",
+            status="CLOSED",
+        )
+    )
+
+    result = ForumService(repo).set_post_helpful(
+        topic_id="topic-1",
+        post_id="post-1",
+        author_type="HUMAN",
+        author_id="user-a",
+        helpful=False,
+    )
+
+    assert result.helpful is False
+    assert [call["operation"] for call in repo.calls] == [
+        "get_topic",
+        "get_post",
+        "update_post_helpful_with_accept",
+    ]
+
+
+def test_set_post_helpful_rejects_non_help_topic():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="DISCUSSION"))
+
+    with pytest.raises(ValidationError, match="only allowed for HELP"):
+        ForumService(repo).set_post_helpful(
+            topic_id="topic-1",
+            post_id="post-1",
+            author_type="BOT",
+            author_id="bot-a",
+            helpful=True,
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
+def test_set_post_helpful_rejects_non_topic_author():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="HELP"))
+
+    with pytest.raises(Forbidden, match="only the topic author"):
+        ForumService(repo).set_post_helpful(
+            topic_id="topic-1",
+            post_id="post-1",
+            author_type="HUMAN",
+            author_id="user-a",
+            helpful=True,
+        )
+
+    assert repo.calls == [{"operation": "get_topic", "topic_id": "topic-1"}]
+
+
+def test_set_post_helpful_rejects_post_outside_topic():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="HELP"))
+    repo.get_post = lambda **kwargs: None
+
+    with pytest.raises(NotFound, match="post not found in this topic"):
+        ForumService(repo).set_post_helpful(
+            topic_id="topic-1",
+            post_id="post-other",
+            author_type="BOT",
+            author_id="bot-a",
+            helpful=True,
+        )
+
+
+def test_set_post_helpful_rejects_child_reply():
+    repo = FakeForumRepository(
+        topic=_topic_record(topic_type="HELP"),
+        post=_post_record(reply_to_post_id="post-parent"),
+    )
+
+    with pytest.raises(ValidationError, match="only first-level replies"):
+        ForumService(repo).set_post_helpful(
+            topic_id="topic-1",
+            post_id="post-1",
+            author_type="BOT",
+            author_id="bot-a",
+            helpful=True,
+        )
+
+    assert repo.calls[-1]["operation"] == "get_post"
+
+
+def test_set_post_helpful_requires_boolean_value():
+    repo = FakeForumRepository(topic=_topic_record(topic_type="HELP"))
+
+    with pytest.raises(ValidationError, match="helpful must be a boolean"):
+        ForumService(repo).set_post_helpful(
+            topic_id="topic-1",
+            post_id="post-1",
+            author_type="BOT",
+            author_id="bot-a",
+            helpful=1,
+        )
 
     assert repo.calls == []
 
@@ -655,7 +801,9 @@ def _close_test_repo(topic, *, writer_returns=_CLOSE_WRITER_UNSET):
     captured: list[dict] = []
 
     def update_topic_status(*, topic_id, status):
-        captured.append({"op": "update_topic_status", "topic_id": topic_id, "status": status})
+        captured.append(
+            {"op": "update_topic_status", "topic_id": topic_id, "status": status}
+        )
         if writer_returns is _CLOSE_WRITER_UNSET:
             if topic is None:
                 return None
@@ -664,7 +812,9 @@ def _close_test_repo(topic, *, writer_returns=_CLOSE_WRITER_UNSET):
 
     repo = FakeForumRepository()
     if topic is not None:
-        repo.get_topic = lambda topic_id=topic.topic_id: topic if topic_id == topic.topic_id else topic
+        repo.get_topic = lambda topic_id=topic.topic_id: (
+            topic if topic_id == topic.topic_id else topic
+        )
     else:
         repo.get_topic = lambda topic_id=None: topic
     repo.update_topic_status = update_topic_status  # type: ignore[assignment]

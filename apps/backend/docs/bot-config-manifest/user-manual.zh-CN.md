@@ -777,9 +777,10 @@ identity:
   `BOOTSTRAP` / `KNOWLEDGE` / `CLAUDE` / `GREETING` / `README`（物理文件为
   `<type>.md`）。**claude_code 引擎的 bot 只允许 `CLAUDE.md`**，写别的在 `PUT`
   时就报错，而不是 apply 时静默跳过。
-- **`MEMORY.md` 与 `IDENTITY.md` 声明不了**：它们是引擎生成的运行期状态，被列入
-  保留名单——apply 永不写、永不删。清单里写了会在 `PUT` 时被拒绝（否则你会得到
-  一份「被接受但永远收敛不了」的文档）。
+- **`MEMORY.md` 声明不了**：apply 永不写、永不删，`PUT` 明确拒绝。
+- **`IDENTITY.md` 可显式写入**：仅限目标 engine 原本允许该文件时，内容沿原身份
+  写入路径；显式空内容可清空。省略 identity 类目不操作；`identity: []` 清空可管理
+  集合，非空列表完整替换，未列出的 IDENTITY.md 同样移除。
 - **优先取源、少用内联。**内联内容游离于版本控制之外，久了会变成「藏在配置里的
   第二份人设」，排查「这句话哪来的」要看两个地方。
 - apply 走的是现有 IdentityService，所以现有派生行为原样生效（例如
@@ -854,6 +855,9 @@ resources:
   写在 git 源上会被 `PUT` **拒绝**而不是忽略。
 - **一个 git 源可以服务多个条目**：源上的 `subpath` 与条目上的 `subpath` 拼接
   （源在前），一次 apply 只 clone 一次。上面两条目录/文件条目引用的就是同一个源。
+- **Git 中的软链接和 submodule**：仓库中未选中的链接不影响取源；所选文件、目录内成员
+  或路径父级包含软链接或 submodule 时拒绝读取。目录条目没有限定子路径时，整个来源
+  属于选中范围。Git 仍会 checkout 整仓，并检查整仓成员数量和大小限制。
 - **`strip_components` 不做魔法**：只按你写的层数剥，**不会**自动探测单一顶层目录
   ——同一份声明的行为不取决于归档内部长什么样。业务习惯 `zip -r kb.zip kb/` 打出
   的那层壳目录，就用 `strip_components: 1` 消掉。
@@ -895,10 +899,14 @@ mcp:
   容器级 mcporter `headerPolicies` 仍会按 host 动态生效，当前不能由单个 Manifest
   条目关闭。
 - LOCAL/stdio MCP 可以只写 `server_code`，但不能携带非空远程 `config`。
-- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
-  server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
-  在界面上手工开的），配置改变记 `updated`，已经一致的记 `unchanged`。安装关系与
-  Bot override 同事务保存，随后按既有 best-effort 语义投影。
+- 条目省略 `config` 时保留该 Bot 当前保存的 override，显式 `config: {}` 清除它，
+  非空 `config` 完整替换它。旧版本的 bare entry 曾清配置；需要重置的调用方应改为
+  显式空对象。没有保存 override 时使用继承配置；保存配置本身不启用 MCP。
+- apply 校验注册表、权限及实际保留/替换后的配置，再收敛 **Direct MCP 供应**。
+  当前 active 普通集、Default（扣除 exclusion）及对应平台默认供应不在范围内；
+  省略它们不操作，显式声明冲突项则整次 Apply 拒绝。管理范围内父条目被省略时，
+  撤销供应并清 override，包含无 Direct Installation 的暂存配置；整个 `mcp` 类别
+  缺席仍不操作。配置变化记 `updated`，一致记 `unchanged`，提交后仍 best-effort 投影。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
@@ -1156,14 +1164,13 @@ apply 一次**，让平台副本落上文件——否则第一份带 `platform` 
 1. **通过界面安装的 skill 会被移除**——当一份声明了 `skills` 的清单被应用时。
    对一个被声明的类目，清单是唯一的所有者：在那个类目上，**清单与界面互斥**。
 2. **被声明类目内、由 bot 自己创建的文件会被移除**，除非它在保留名单里。
-   保留名单**只有两个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
+   保留名单**只有一个名字**，永不被 apply 写入、也永不被删除，无论清单声明与否：
 
    ```text
    MEMORY.md
-   IDENTITY.md
    ```
 
-   它们是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
+   它是引擎生成的运行期状态。名单是有限、可枚举的——正因为如此，两个引擎系才
    能对它达成同一份契约。
 3. **首启有一段 ACTIVE-but-unconfigured 窗口**（§7），期间启动的扩容实例会看到
    只下发了一部分的内容。（之后实例不会发散：它们共享同一份挂载。）
@@ -1196,7 +1203,7 @@ teclaw 收下整包 artifact 并替换，ARCA 现在对被声明的类目做同�
 | `on_fetch_failure: skip` | 该取值已删除 | 改 `keep_last` 或 `fail` |
 | 未知的 `mode` 取值 | 拼错 | 只有 `strict` / `non_strict` |
 | `identity.type` 非法 | 不在白名单，或 bot 是 claude_code 引擎（只允许 `CLAUDE.md`） | 见 §5.1 |
-| `identity.type` 是 `MEMORY.md` / `IDENTITY.md` | 保留名单 | 删掉这条 |
+| `identity.type` 是 `MEMORY.md` | 保留名单 | 删掉这条 |
 | `resources.path` 绝对路径或含 `../` | 路径穿越 | 改成 workspace 相对路径 |
 | `resources` 条目嵌套在另一个目录条目之下 | 所有权无法定义 | 拆开或收缩目录条目 |
 | `skills` 非 git 源缺 `digest` | 该形态强制 | 补 `digest` |
@@ -2357,7 +2364,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 类目 | 键字段 | 约束 | 被覆盖的区域 |
 | --- | --- | --- | --- |
-| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
+| `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` 写入即拒；`IDENTITY.md` 与其他文件统一按集合替换** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |
@@ -2379,7 +2386,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 写了下面任何一条，提交时就会被拒绝（不是静默忽略）：
 
 - `${OCB_*}`、`on_fetch_failure: skip`、`apply_once`；
-- `identity.type` 是 `MEMORY.md` / `IDENTITY.md`；
+- `identity.type` 是 `MEMORY.md`；
 - 一个条目上同时有两个来源，或 `content` 条目上写了 `auth`/`digest`/`on_fetch_failure`；
 - git 源条目上写了 `digest`；用了 `from` 的条目上写了 `auth`；
 - `source` URL 里带 `user:token@`；

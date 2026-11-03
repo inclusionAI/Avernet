@@ -141,14 +141,14 @@ def test_no_rerank_or_failure_keeps_weighted_descending_order(pipeline, caplog, 
         assert all(r.score_source == "vector_weighted" for r in records)
 
 
-def test_info_logs_explain_ranks_admission_and_elimination_without_content(pipeline, caplog):
+def test_debug_logs_explain_ranks_admission_and_elimination_without_content(pipeline, caplog):
     service, model = pipeline([
         ("strong", "full", .99), ("second", "full", .98),
         ("weighted1", "profile", .90), ("weighted2", "profile", .85),
         ("weighted3", "profile", .8), ("excluded", "profile", 1.0),
     ])
     service._fragment_config.reranker_model = "controlled"
-    caplog.set_level(logging.INFO, logger="src.application.services.worker_vector_match_service")
+    caplog.set_level(logging.DEBUG, logger="src.application.services.worker_vector_match_service")
     run(service, excluded_profile_keys=["excluded:default"])
     chunks = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "candidate_decisions"]
     entries = [entry for record in chunks for entry in record.entries]
@@ -164,13 +164,13 @@ def test_info_logs_explain_ranks_admission_and_elimination_without_content(pipel
     assert "private-content-sentinel" not in caplog.text
     assert "private-query-sentinel" not in caplog.text
     assert "excluded:default" not in model.inputs
-    assert all(record.levelno == logging.INFO for record in chunks)
+    assert all(record.levelno == logging.DEBUG for record in chunks)
 
 
-def test_info_candidate_decisions_are_chunked_without_losing_tail(pipeline, caplog):
+def test_debug_candidate_decisions_are_chunked_without_losing_tail(pipeline, caplog):
     service, _ = pipeline([(f"worker{i:03}", "full", .99 - i * .001) for i in range(61)])
     service._fragment_config.reranker_model = "controlled"
-    caplog.set_level(logging.INFO, logger="src.application.services.worker_vector_match_service")
+    caplog.set_level(logging.DEBUG, logger="src.application.services.worker_vector_match_service")
     run(service, top_k=2)
     chunks = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "candidate_decisions"]
     assert [len(r.entries) for r in chunks] == [25, 25, 11]

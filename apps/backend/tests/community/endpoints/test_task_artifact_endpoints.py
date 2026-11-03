@@ -10,6 +10,7 @@ from agentclaw.community.core.task.domain.models import (
     Goal,
     Status,
     TaskInfo,
+    TaskNodePatch,
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
@@ -140,4 +141,58 @@ def add_artifact_happy():
     expect=ExpectError(status=401),
 )
 def add_artifact_unauthenticated():
+    pass
+
+
+# ------------------------------------------------------------------ relay 分支(spec §14)
+
+
+# relay 夹具用短字面量而非 12+ 位变量名:pre-push 凭证扫描会把高熵裸标识符当疑似凭证。
+
+
+def _seed_relay_claim(world) -> None:
+    _seed_artifact_graph(world)
+    world.get(TaskGraphService).update_task_node_info(
+        TaskNodePatch(
+            task_id=_TASK_ID,
+            node_id=_TASK_ID,
+            assignee="bot-relay",
+            extend_props_patch={"relay_token": "gen-1"},
+        )
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=_BASE,
+    scenario="relay_register_happy",
+    seed=_seed_relay_claim,
+    input=CaseInput(
+        headers={"X-Relay-Token": "gen-1"},
+        json_body=_ARTIFACT_BODY,
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"kind": "file", "attempt": 0},
+        },
+    ),
+)
+def add_artifact_relay_token_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=_BASE,
+    scenario="relay_register_stale",
+    seed=_seed_relay_claim,
+    input=CaseInput(
+        headers={"X-Relay-Token": "gen-wrong"},
+        json_body=_ARTIFACT_BODY,
+    ),
+    expect=ExpectError(status=409),
+)
+def add_artifact_relay_token_stale():
     pass

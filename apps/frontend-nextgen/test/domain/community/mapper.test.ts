@@ -1,4 +1,10 @@
-import { mapCommunityReplyDto, mapCommunityTopicDto } from '@/domain/community/mapper';
+import {
+  mapCommunityReplyDto,
+  mapCommunityTopicDto,
+  mapPersonalCenterActivityDto,
+  personalCenterActivityToTopic,
+} from '@/domain/community/mapper';
+import { enrichOwnership } from '@/domain/community/ownership';
 
 describe('community mapper', () => {
   test('maps topic metadata and page totals for the BBS list item', () => {
@@ -9,7 +15,9 @@ describe('community mapper', () => {
       status: 'OPEN',
       author: { actor_type: 'HUMAN', actor_id: 'user-1', display_name: '顾客' },
       reply_count: 2,
+      like_count: 5,
       latest_activity_at: '2026-10-06T10:00:00Z',
+      is_hot: true,
       created_at: '2026-10-05T09:00:00Z',
       is_mine: true,
       can_close: true,
@@ -23,14 +31,26 @@ describe('community mapper', () => {
       status: 'open',
       author: { type: 'human', id: 'user-1', displayName: '顾客', avatarUrl: undefined },
       replyCount: 2,
+      likeCount: 5,
       latestActivityAt: '2026-10-06T10:00:00Z',
+      isHot: true,
       createdAt: '2026-10-05T09:00:00Z',
       isMine: true,
       canClose: true,
+      canEdit: false,
+      canDelete: false,
       topicType: 'poll',
     });
     expect(topic.topicConfig).toBeUndefined();
-  expect(topic.analysis).toBeUndefined();
+    expect(topic.analysis).toBeUndefined();
+
+    const owned = enrichOwnership(topic, 'user-1');
+    expect(owned).toMatchObject({
+      isMine: true,
+      canClose: true,
+      canEdit: true,
+      canDelete: true,
+    });
   });
 
   test('maps bot replies and normalizes unknown topic status to closed', () => {
@@ -161,6 +181,7 @@ test('maps the real backend flattened BBS DTO (no nested author, no reply count/
   expect(topic.analysis).toBeUndefined();
   expect(topic.author).toEqual({ type: 'human', id: '900003', displayName: '900003', avatarUrl: undefined });
   expect(topic.replyCount).toBeUndefined();
+  expect(topic.likeCount).toBeUndefined();
   expect(topic.isMine).toBe(false);
   expect(topic.canClose).toBe(false);
 });
@@ -179,6 +200,7 @@ test('maps a real backend reply with flattened author', () => {
     id: 'post-real',
     topicId: 'real-1',
     author: { type: 'bot', id: 'product-helper', displayName: 'product-helper' },
+    helpful: false,
   });
 });
 
@@ -187,6 +209,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
     post_id: 'post-2',
     topic_id: 'topic-1',
     body: '继续讨论',
+    floor_no: 3,
+    helpful: true,
     reply_to_post_id: 'post-1',
     reply_to_floor_no: 1,
     author_type: 'HUMAN',
@@ -197,6 +221,8 @@ test('maps flat reply reference fields without adding a tree edge', () => {
 
   expect(reply.replyToPostId).toBe('post-1');
   expect(reply.replyToFloorNo).toBe(1);
+  expect(reply.floorNo).toBe(3);
+  expect(reply.helpful).toBe(true);
   expect(reply).not.toHaveProperty('children');
   expect(reply).not.toHaveProperty('replies');
 });
@@ -245,6 +271,7 @@ test('maps first-level replies with their two-level child reply group', () => {
     id: 'post-2',
     replyToPostId: 'post-1',
     replyToFloorNo: 1,
+    helpful: false,
     author: { type: 'bot', displayName: '协作助手' },
   });
   expect(reply.childReplies?.[0]).not.toHaveProperty('children');
@@ -254,4 +281,138 @@ test('falls back to anonymous when author has neither display_name nor actor_id'
   expect(mapCommunityTopicDto({ topic_id: 't', title: 'T', body: 'b', status: 'OPEN' }).author.displayName).toBe(
     '匿名',
   );
+});
+
+
+test('maps SHARE type without topic configuration', () => {
+  const topic = mapCommunityTopicDto({
+    topic_id: 'share-1',
+    title: '分享经验',
+    body: '正文',
+    status: 'OPEN',
+    topic_type: 'SHARE',
+  });
+
+  expect(topic.topicType).toBe('share');
+  expect(topic.topicConfig).toBeUndefined();
+});
+
+test('maps HELP topics while ignoring legacy expected-time config', () => {
+  const mapped = mapCommunityTopicDto({
+    topic_id: 'help-1',
+    title: '求助',
+    status: 'OPEN',
+    topic_type: 'HELP',
+    topic_config: { help: { expected_time: ' 希望本周内 ' } },
+  });
+
+  expect(mapped.topicType).toBe('help');
+  expect(mapped.topicConfig).toBeUndefined();
+});
+
+
+test('maps personal-center topic and nested-reply contexts', () => {
+  const activity = mapPersonalCenterActivityDto({
+    activity_type: 'REPLIED',
+    actor_type: 'HUMAN',
+    actor_id: 'user-1',
+    target_type: 'POST',
+    target_id: 'post-parent',
+    topic_id: 'topic-1',
+    post_id: 'post-child',
+    happened_at: '2026-10-29T08:00:00Z',
+    body_preview: '我的楼中楼回复',
+    topic_context: {
+      title: '讨论主题',
+      body_preview: '正文预览',
+      topic_type: 'DISCUSSION',
+      status: 'OPEN',
+      author_type: 'BOT',
+      author_id: 'bot-1',
+      author_display_name: '协作助手',
+      author_avatar_url: 'https://example.test/bot.png',
+      reply_count: 3,
+      like_count: 4,
+      view_count: 5,
+      favorite_count: 6,
+      is_hot: true,
+      created_at: '2026-10-20T08:00:00Z',
+      latest_reply_at: '2026-10-29T09:00:00Z',
+    },
+    replied_to_post: {
+      post_id: 'post-parent',
+      author_type: 'BOT',
+      author_id: 'bot-2',
+      author_display_name: '风控分析 Bot',
+      body_preview: '原始回复',
+    },
+  });
+
+  expect(activity?.topicContext).toMatchObject({
+    title: '讨论主题',
+    bodyPreview: '正文预览',
+    topicType: 'discussion',
+    status: 'open',
+    author: { actorType: 'BOT', id: 'bot-1' },
+    authorDisplayName: '协作助手',
+    authorAvatarUrl: 'https://example.test/bot.png',
+    replyCount: 3,
+    likeCount: 4,
+    viewCount: 5,
+    favoriteCount: 6,
+    isHot: true,
+    createdAt: '2026-10-20T08:00:00Z',
+    latestReplyAt: '2026-10-29T09:00:00Z',
+  });
+  expect(activity?.repliedToPost).toMatchObject({
+    postId: 'post-parent',
+    author: { actorType: 'BOT', id: 'bot-2' },
+    authorDisplayName: '风控分析 Bot',
+    bodyPreview: '原始回复',
+  });
+});
+
+
+test('maps a personal-center activity into the shared community topic row', () => {
+  const activity = mapPersonalCenterActivityDto({
+    activity_type: 'FAVORITED',
+    actor_type: 'HUMAN',
+    actor_id: 'user-1',
+    target_type: 'TOPIC',
+    target_id: 'topic-1',
+    topic_id: 'topic-1',
+    happened_at: '2026-10-29T10:00:00Z',
+    body_preview: '主题标题',
+    topic_context: {
+      title: '主题标题',
+      body_preview: '正文预览',
+      topic_type: 'HELP',
+      status: 'OPEN',
+      author_type: 'HUMAN',
+      author_id: 'user-2',
+      author_display_name: '顾客',
+      reply_count: 2,
+      like_count: 1,
+      view_count: 3,
+      favorite_count: 4,
+      is_hot: true,
+      created_at: '2026-10-28T08:00:00Z',
+    },
+  });
+
+  expect(personalCenterActivityToTopic(activity!)).toMatchObject({
+    id: 'topic-1',
+    title: '主题标题',
+    body: '正文预览',
+    status: 'open',
+    topicType: 'help',
+    author: { type: 'human', id: 'user-2', displayName: '顾客' },
+    replyCount: 2,
+    likeCount: 1,
+    viewCount: 3,
+    favoriteCount: 4,
+    latestActivityAt: '2026-10-28T08:00:00Z',
+    isHot: true,
+    createdAt: '2026-10-28T08:00:00Z',
+  });
 });

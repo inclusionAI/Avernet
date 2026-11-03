@@ -17,10 +17,12 @@ import type {
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
+import { botSkillService } from '@/services/workspace/botSkillService';
+import { splitBotId } from '@/services/workspace/botSessionService';
 import { useTaskStore } from '@/stores/taskStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useWorkflowList } from './useWorkflowList';
 
@@ -38,6 +40,9 @@ export type { ComposerSelection, WorkflowSelection } from '@/services/tasks/task
 export interface UseTaskExecutionResult {
   submitting: boolean;
   error: string | null;
+  /** 当前 Bot/协作群 Driver Bot 是否已安装可用的 task-intent-recognition。 */
+  dynamicTaskEnabled: boolean;
+  dynamicTaskChecking: boolean;
   lastTaskId: string | null;
   workflows: WorkflowListItem[];
   workflowsLoading: boolean;
@@ -66,6 +71,31 @@ export function useTaskExecution({
   const [error, setError] = useState<string | null>(null);
   const lastTaskId = useTaskStore((s) => s.lastTaskId);
   const { workflows, workflowsLoading, loadWorkflows } = useWorkflowList(context);
+  const [dynamicTaskEnabled, setDynamicTaskEnabled] = useState(false);
+  const [dynamicTaskChecking, setDynamicTaskChecking] = useState(Boolean(context));
+
+  useEffect(() => {
+    if (!context?.ownerBotId || !context.ownerUserId) {
+      setDynamicTaskEnabled(false);
+      setDynamicTaskChecking(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setDynamicTaskChecking(true);
+    const { realBotId, ownerId } = splitBotId(context.ownerBotId);
+    void botSkillService
+      .listSkillsForBotId(realBotId, context.ownerUserId, ownerId, 1, 100)
+      .then((result) => {
+        if (cancelled) return;
+        setDynamicTaskEnabled(result.ok && botSkillService.hasTaskIntentSkill(result.data));
+      })
+      .finally(() => {
+        if (!cancelled) setDynamicTaskChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [context]);
 
   const validate = useCallback(
     (form: TaskComposerForm): string | null => {
@@ -121,7 +151,9 @@ export function useTaskExecution({
           submitPanelMessage(launchMessage.content);
         }
         // V2 多任务切换(spec §3.2):发起任务即自动切换活跃任务(AixUI 面板消息落库后自动开该任务 tab)
-        useTaskSidePanelStore.getState().setActiveTask(record.task_id);
+        const taskStore = useTaskSidePanelStore.getState();
+        taskStore.setActiveTask(record.task_id);
+        taskStore.markTaskPanelOpenIntent(record.task_id);
         return { ok: true, taskId: record.task_id } as const;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '任务提交失败';
@@ -159,9 +191,10 @@ export function useTaskExecution({
     });
   }, []);
   const selectDynamic = useCallback(() => {
+    if (!dynamicTaskEnabled) return;
     // 动态任务全场至多一个：已有则忽略。
     setSelections((prev) => (prev.some((s) => s.kind === 'dynamic') ? prev : [...prev, { kind: 'dynamic' }]));
-  }, []);
+  }, [dynamicTaskEnabled]);
   const removeSelection = useCallback((key: string) => {
     setSelections((prev) => prev.filter((s) => composerSelectionKey(s) !== key));
   }, []);
@@ -181,6 +214,8 @@ export function useTaskExecution({
     selectDynamic,
     removeSelection,
     clearSelection,
+    dynamicTaskEnabled,
+    dynamicTaskChecking,
     submit,
     validate,
   };

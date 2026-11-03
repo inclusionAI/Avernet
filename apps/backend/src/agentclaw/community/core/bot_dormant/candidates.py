@@ -98,7 +98,7 @@ def filter_candidates(session: Session, N: int, env: str) -> list[Candidate]:
     rows = [
         r
         for r in rows
-        if (r.bot_id, r.owner_id) not in whitelist
+        if (r.bot_id, r.entity_id) not in whitelist
     ]
 
     # ac_bots can contain multiple active rows for the same logical personal

@@ -13,6 +13,7 @@ Covers:
 
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import ANY as _MOCK_ANY
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1949,6 +1950,7 @@ class TestSendMessageExtended:
                 conn_info.target,
                 conn_info.ws_url,
                 {"x-proxypass-token": conn_info.token},
+                token_minter=_MOCK_ANY,
             )
 
 
@@ -3313,6 +3315,51 @@ class TestCreateSessionClientEvalIdHeader:
         conn_info = _make_conn_info()
         client = service._create_session_client(conn_info, engine_type="openclaw")
         assert "X-Eval-Id" not in client.headers
+
+
+class TestGetSessionContextBinding:
+    """Regression coverage for get_session context argument binding."""
+
+    @pytest.mark.asyncio
+    async def test_get_session_passes_context_as_keyword(self, service):
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.get_session = AsyncMock(
+            return_value=MagicMock(
+                id=SESSION_ID,
+                title="session",
+                created_at="2026-11-03T00:00:00+00:00",
+                updated_at=None,
+            )
+        )
+        context = _make_context(tenant=TENANT)
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                AsyncMock(return_value=_make_conn_info()),
+            ) as resolve_connection,
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            result = await service.get_session(
+                session_id=SESSION_ID,
+                binding_info=binding,
+                context=context,
+            )
+
+        resolve_connection.assert_awaited_once_with(
+            binding, session_id=SESSION_ID, context=context
+        )
+        session_client.get_session.assert_awaited_once_with(
+            SESSION_ID, engine=binding.engine_type
+        )
+        assert result.session_id == SESSION_ID
+        assert result.bot_id == BOT_UUID
 
 
 # ==================== TestMaterializeSession ====================

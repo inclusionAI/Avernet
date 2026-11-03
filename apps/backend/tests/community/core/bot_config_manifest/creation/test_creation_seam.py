@@ -7,6 +7,8 @@ type checker runs on this tree to do it.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
+
 import inspect
 
 import pytest
@@ -14,7 +16,7 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.apply_engine.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
@@ -30,12 +32,12 @@ class _Applies:
         self._fail = fail
 
     def materialised_constructs(self):
-        from agentclaw.community.core.bot_config_manifest.capabilities import (
-            ManifestCategory,
-            ManifestSection,
+        from agentclaw.community.core.apply_engine.capabilities import (
+            Category,
+            Section,
         )
 
-        return frozenset({ManifestSection.SCRIPT, ManifestCategory.MCP})
+        return frozenset({Section.SCRIPT, Category.MCP})
 
     def start_apply(self, **kwargs):
         self.calls.append(kwargs)
@@ -93,6 +95,7 @@ def _seam(applies=None, manifests=None, scripts=None, jobs=None,
           purge_cli_tools=None):
     jobs = jobs or _Jobs()
     return BotCreationManifestSeam(
+        validate_creation_spec=validate_creation_source,
         manifest_service=manifests or _Manifests(),
         apply_service=applies or _Applies(),
         script_service_provider=lambda: scripts or _Scripts(),
@@ -246,6 +249,7 @@ def test_the_contract_names_the_whole_seam():
         "persist",
         "preflight",
         "start_job",
+        "verify_binding",
     ]
 
 
@@ -284,3 +288,14 @@ def test_every_declared_operation_keeps_the_contract_signature(operation):
             f"{operation} requires {name!r}, which no caller holding the "
             "Protocol can pass"
         )
+
+
+def test_bound_document_mismatch_stops_without_overwriting_user_document():
+    from types import SimpleNamespace
+    manifests = _Manifests()
+    manifests.get = lambda **kwargs: SimpleNamespace(document='{"schema_version": 1, "manifest": {"identity": []}}')
+    seam = _seam(manifests=manifests)
+    with pytest.raises(ValueError, match="bound Manifest"):
+        seam.verify_binding(entity_id="e", bot_id="b", manifest_digest="0" * 64)
+    assert manifests.puts == []
+    assert manifests.deletes == []

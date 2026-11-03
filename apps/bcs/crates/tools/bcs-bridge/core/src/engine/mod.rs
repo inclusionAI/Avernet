@@ -27,6 +27,8 @@ pub mod cli;
 pub mod codex_app_server;
 pub mod codex_desktop;
 mod codex_transport;
+mod codex_factory;
+mod codex_owned;
 mod codex_persistent;
 pub mod trace;
 

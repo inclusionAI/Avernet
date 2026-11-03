@@ -28,6 +28,7 @@ it("reads the exact CC SDK file through Shell without using a session API or cha
     expect(result).toMatchObject({ session_id: "original", source: await realpath(file), delivery_confirmed: true, delivery: { message_id: "actual" } });
     expect(request).not.toHaveBeenCalled();
     expect(await readFile(file, "utf8")).toBe(contents);
+    await expect(reader.read({ target, sessionKey: "agent:main:session:original:user:owner", expectedSessionId: "different", deliveryKey: "send" })).rejects.toMatchObject({ code: "original_session_unavailable" });
     await expect(reader.read({ target, sessionKey: "agent:main:session:unmapped:user:owner", deliveryKey: "send" })).rejects.toMatchObject({ code: "original_session_unavailable", message: expect.stringContaining("CC session mapping unavailable or ambiguous") });
   } finally { await rm(home, { recursive: true, force: true }); }
 });

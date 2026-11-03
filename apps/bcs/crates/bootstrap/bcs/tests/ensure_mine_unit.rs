@@ -695,3 +695,107 @@ async fn full_flow_idempotent() {
     assert_eq!(total_created, 0, "second pass should create no new edges");
     assert_eq!(total_upgraded, 0, "second pass should upgrade no edges");
 }
+
+// ============================================================================
+// Section 2: ensure-human name repair (self-service heal of fallback names)
+// ============================================================================
+
+#[tokio::test]
+async fn ensure_human_repairs_fallback_name_with_verified_nick() {
+    // A pre-existing actor row whose name is the staff_no placeholder
+    // (as trusted-registration / admin / backfill paths seed it) gets
+    // healed by the caller's own verified login nick on ensure.
+    let registry = std::sync::Arc::new(BotCore::new());
+    let service = bcs_bot::application::HumanActor::new(
+        registry.clone(),
+        std::sync::Arc::new(MemoryRelationStore::new()),
+    );
+    registry
+        .ensure_human_actor("12345", "12345")
+        .await
+        .expect("seed a fallback-named actor row");
+
+    let result = bcs_service_api::HumanActorService::ensure_current_human_actor(
+        &service,
+        bcs_service_api::CurrentHumanActorCommand {
+            staff_no: Some("12345".to_string()),
+            nick_name: Some(" Alice ".to_string()),
+        },
+    )
+    .await
+    .expect("ensure succeeds");
+
+    assert!(!result.human_created);
+    assert!(result.name_repaired);
+    assert!(result.errors.is_empty());
+    let stored = registry
+        .get("human_12345")
+        .await
+        .expect("actor row remains");
+    assert_eq!(stored.capabilities.name.as_deref(), Some("Alice"));
+}
+
+#[tokio::test]
+async fn ensure_human_keeps_a_real_stored_name() {
+    // A real stored name always wins — the ensure call never rewrites
+    // it, even with a different verified nick in the session.
+    let registry = std::sync::Arc::new(BotCore::new());
+    let service = bcs_bot::application::HumanActor::new(
+        registry.clone(),
+        std::sync::Arc::new(MemoryRelationStore::new()),
+    );
+    registry
+        .ensure_human_actor("12345", "Alice")
+        .await
+        .expect("seed a real-named actor row");
+
+    let result = bcs_service_api::HumanActorService::ensure_current_human_actor(
+        &service,
+        bcs_service_api::CurrentHumanActorCommand {
+            staff_no: Some("12345".to_string()),
+            nick_name: Some("Bob".to_string()),
+        },
+    )
+    .await
+    .expect("ensure succeeds");
+
+    assert!(!result.name_repaired);
+    let stored = registry
+        .get("human_12345")
+        .await
+        .expect("actor row remains");
+    assert_eq!(stored.capabilities.name.as_deref(), Some("Alice"));
+}
+
+#[tokio::test]
+async fn ensure_human_skips_repair_without_a_usable_nick() {
+    // No nick in the session (or a nick echoing the staff_no) leaves
+    // the fallback name untouched — nothing better is at hand.
+    let registry = std::sync::Arc::new(BotCore::new());
+    let service = bcs_bot::application::HumanActor::new(
+        registry.clone(),
+        std::sync::Arc::new(MemoryRelationStore::new()),
+    );
+    registry
+        .ensure_human_actor("12345", "12345")
+        .await
+        .expect("seed a fallback-named actor row");
+
+    for nick in [None, Some("12345".to_string()), Some("  ".to_string())] {
+        let result = bcs_service_api::HumanActorService::ensure_current_human_actor(
+            &service,
+            bcs_service_api::CurrentHumanActorCommand {
+                staff_no: Some("12345".to_string()),
+                nick_name: nick.clone(),
+            },
+        )
+        .await
+        .expect("ensure succeeds");
+        assert!(!result.name_repaired, "nick {nick:?} must not repair");
+    }
+    let stored = registry
+        .get("human_12345")
+        .await
+        .expect("actor row remains");
+    assert_eq!(stored.capabilities.name.as_deref(), Some("12345"));
+}

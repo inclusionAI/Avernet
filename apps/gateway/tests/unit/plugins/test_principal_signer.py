@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import time as _time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 
 import jwt
 import pytest
@@ -27,10 +27,19 @@ from gateway.community.spi.authn import AppPrincipal, ThirdPartyApp
 from gateway.community.spi.secret_resolver import SecretResolver
 
 _PRINCIPAL_HEADER = "X-Avernet-Principal"  # noqa: F841  (documented contract)
-# Use the real wall clock so PyJWT's ``iat``/``exp`` validation (which checks
-# against the actual current time, not the injected signer clock) accepts the
-# token. The signer itself still uses this fixed value via its injected clock.
-_FIXED_NOW = int(_time.time())
+# Both the injected signer clock and PyJWT validation use the same fixed time,
+# independent of how long collection or earlier tests take.
+_FIXED_NOW = 1_700_000_000
+
+
+@pytest.fixture(autouse=True)
+def _freeze_jwt_validation_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(_FIXED_NOW, tz=tz)
+
+    monkeypatch.setattr(jwt.api_jwt, "datetime", FixedDatetime)
 
 
 def _cfg(key: str = "k") -> PrincipalSignerConfig:
@@ -91,6 +100,22 @@ async def test_empty_principals_still_signs() -> None:
         token, "k", algorithms=["HS256"], audience="secbaas", issuer="gateway"
     )
     assert decoded["principals"] == []
+
+
+@pytest.mark.parametrize("age_seconds", [59, 60])
+async def test_signed_token_expiry_boundary(age_seconds: int) -> None:
+    signer = BarePrincipalSigner(_cfg(), clock=lambda: _FIXED_NOW - age_seconds)
+    token = await signer.sign({}, audience="secbaas")
+    if age_seconds == 60:
+        with pytest.raises(jwt.ExpiredSignatureError):
+            jwt.decode(
+                token, "k", algorithms=["HS256"], audience="secbaas", issuer="gateway"
+            )
+    else:
+        decoded = jwt.decode(
+            token, "k", algorithms=["HS256"], audience="secbaas", issuer="gateway"
+        )
+        assert decoded["exp"] == _FIXED_NOW + 1
 
 
 @dataclass(frozen=True)

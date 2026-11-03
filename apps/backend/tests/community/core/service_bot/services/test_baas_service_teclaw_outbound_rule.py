@@ -201,5 +201,6 @@ class TestUpdateTeclawOutboundRuleTriState:
             "/api/v1/paas/devices/TECLAW_1@4/outbound-rule",
             "/api/v1/paas/devices/TECLAW_2@4/outbound-rule",
         ]
+        assert all("params" not in call.kwargs for call in puts)
         # The token the caller handed in is what lands in the delivered rule.
         assert puts[0].kwargs["json"]["header_operation_rules"][0]["value"] == "tok"

@@ -116,12 +116,15 @@ def legacy_local_locator_roots(
 
     AICoding superseded the historical Claude Code filesystem namespace while
     existing ``local://`` identities remained stable.  Both Host/NAS and
-    Engine address views therefore remain readable for that runtime only.
-    Other runtimes retain their single canonical root.
+    Engine address views therefore remain readable for that runtime. Legacy
+    OpenClaw records may likewise retain their container-local address while
+    the current canonical root is a per-Bot Host/NAS path.
     """
 
     roots = [canonical_root]
-    if runtime_engine == "aicoding":
+    if runtime_engine == "openclaw":
+        roots.append(Path(OpenClawPoolPaths().legacy_local))
+    elif runtime_engine == "aicoding":
         roots.extend(
             (
                 current_address_root,

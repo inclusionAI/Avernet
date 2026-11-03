@@ -219,6 +219,22 @@ class TaskRuntimeProfile:
             allowed_run_modes=normalized or cls.allowed_run_modes,
         )
 
+    @classmethod
+    def run_modes_from_graph(cls, graph: Any) -> tuple[str, ...]:
+        """Return the frozen successor-mode policy stored on a runtime graph."""
+        extend_props = getattr(graph, "extend_props", None) or {}
+        if not isinstance(extend_props, dict):
+            return cls.allowed_run_modes
+        profile = extend_props.get("runtime_profile") or {}
+        if not isinstance(profile, dict):
+            return cls.allowed_run_modes
+        modes = profile.get("allowed_run_modes")
+        if not isinstance(modes, (list, tuple)) or not modes:
+            return cls.allowed_run_modes
+        return tuple(
+            dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
+        ) or cls.allowed_run_modes
+
     def to_dict(self) -> dict[str, Any]:
         profile = {
             "dispatcher_strategy": self.dispatcher_strategy,
@@ -268,6 +284,9 @@ class TaskContext:
     gaps: list[str]
     task_id: str | None = None
     node_id: str | None = None
+    # Current node execution attempt. S1 projects this value from the authoritative
+    # ``harness_retries`` snapshot so artifact reports can align with the server.
+    attempt: int = 0
     root_task_spec: TaskSpec | None = None
     current_task_spec: TaskSpec | None = None
     # Runtime-only S3 outputs. S1 projects them as empty on a fresh attempt
@@ -276,6 +295,9 @@ class TaskContext:
     capability_failure_reason: str | None = None
     accepted_execution_patch: TaskNodePatch | None = None
     accepted_plan_report: TaskReportResult | None = None
+    # S5D must exclude every executor already used on this relay chain, even
+    # when the repeat is not consecutive.
+    used_executor_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -483,10 +483,11 @@ class BotRunner:
 
         logger.info(
             "[runner.deliver_message_stream] message_id=%s, bot_id=%s, "
-            "metadata_keys=%s",
+            "metadata_keys=%s, timeout=%s",
             message_id,
             bot_id,
             sorted(metadata.keys()),
+            timeout,
         )
 
         # 流式模式不做幂等：重复 run_id 直接拒绝
@@ -922,6 +923,7 @@ class BotRunner:
         if method:
             keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}:{method}")
         keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}")
+        keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{engine_type}")
         keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.default")
         for key in keys:
             try:
@@ -1320,6 +1322,10 @@ class BotRunner:
             (actual_session_id, session_pending)
             session_pending=True 表示 session_id 为计划值，尚未在 adapter 侧物化。
         """
+        # An empty identifier cannot refer to an existing engine session.
+        # Treat it like an omitted identifier and use the normal planning path.
+        if session_id == "":
+            session_id = None
         if session_id is not None and route.binding_info.engine_type != "teclaw":
             self._run_repository.update_session_id(run_id, session_id)
             logger.info(

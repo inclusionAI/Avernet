@@ -84,18 +84,4 @@ impl GroupQueryService for GroupManagement {
         })
     }
 
-    async fn get_workspace(
-        &self,
-        cmd: GroupWorkspaceQueryCommand,
-    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-        Ok(GroupWorkspaceResult {
-            group_id: cmd.group_id,
-            workspace: group.workspace,
-        })
-    }
 }

@@ -35,6 +35,9 @@ async fn frontend_delivery_publishes_to_group_connection() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -64,6 +67,9 @@ async fn frontend_delivery_returns_zero_when_group_has_no_connection() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -78,7 +84,7 @@ async fn frontend_delivery_falls_back_to_run_channel_when_group_has_no_bound_cha
     let delivery = WorkbenchFrontendDelivery::new(connections, run_channels.clone());
     let (run_tx, mut run_rx) = mpsc::channel(2);
     run_channels
-        .register(
+        .register_internal(
             "run-1".to_string(),
             "chat:session-1".to_string(),
             run_tx,
@@ -102,6 +108,9 @@ async fn frontend_delivery_falls_back_to_run_channel_when_group_has_no_bound_cha
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -141,7 +150,7 @@ async fn frontend_delivery_does_not_run_fallback_when_group_channel_is_bound() {
         .await
         .unwrap();
     run_channels
-        .register(
+        .register_internal(
             "run-1".to_string(),
             "group-1".to_string(),
             run_tx,
@@ -165,6 +174,9 @@ async fn frontend_delivery_does_not_run_fallback_when_group_channel_is_bound() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -221,6 +233,9 @@ async fn frontend_delivery_excludes_sender_conn_id_from_broadcast() {
             exclude_conn_id: Some(conn_id_sender),
             visibility_domain: MessageVisibilityDomain::Chat,
             audience: Some(MessageAudience::Public),
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .unwrap();
@@ -278,6 +293,9 @@ async fn frontend_delivery_filters_each_human_connection_by_persisted_view() {
         exclude_conn_id: None,
         visibility_domain: MessageVisibilityDomain::StateMachine,
         audience: Some(audience),
+        operation_id: None,
+        terminal: false,
+        run_id: None,
     };
 
     assert_eq!(
@@ -376,6 +394,9 @@ async fn frontend_delivery_keeps_unclassified_scoped_events_for_full_only() {
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::StateMachine,
             audience: None,
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await
         .expect("unclassified legacy event remains compatible");
@@ -390,7 +411,7 @@ async fn frontend_delivery_keeps_unclassified_scoped_events_for_full_only() {
 }
 
 #[tokio::test]
-async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished() {
+async fn scope_change_notifies_without_closing_and_blocks_new_subscriptions_until_finished() {
     let connections = WorkbenchConnectionRegistry::new();
     let (tx, mut rx) = mpsc::channel(2);
     let shutdown = CancellationToken::new();
@@ -413,10 +434,21 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
         .begin_scope_change("session-scoped", "human_target")
         .await
         .unwrap();
-    let close = rx.recv().await.expect("scope change close event");
-    assert!(close.contains("view_scope_changed"));
-    assert!(shutdown.is_cancelled());
-    assert_eq!(connections.connection_count("session-scoped").await, 0);
+    // Soft notice only (spec §8.1): the client may refresh its
+    // view, but the connection is NOT cancelled — cancellation would
+    // retroactively interrupt already-admitted operation output on
+    // this connection, which is exactly what F1 forbids.
+    let notice = rx.recv().await.expect("scope change notice event");
+    assert!(notice.contains("view_scope_changed"));
+    assert!(
+        !notice.contains(r#""event":"close""#),
+        "the notice is not the close protocol: {notice}"
+    );
+    assert!(
+        !shutdown.is_cancelled(),
+        "a scope change never cancels the connection"
+    );
+    assert_eq!(connections.connection_count("session-scoped").await, 1);
 
     let (blocked_tx, _blocked_rx) = mpsc::channel(1);
     let blocked = connections
@@ -451,7 +483,7 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
 }
 
 #[tokio::test]
-async fn scope_change_cancels_socket_when_close_queue_is_full() {
+async fn scope_change_with_a_full_notice_queue_still_never_cancels_the_socket() {
     let connections = WorkbenchConnectionRegistry::new();
     let (tx, _rx) = mpsc::channel(1);
     tx.try_send("queued event".to_string()).unwrap();
@@ -476,8 +508,10 @@ async fn scope_change_cancels_socket_when_close_queue_is_full() {
         .await
         .unwrap();
 
-    assert!(shutdown.is_cancelled());
-    assert_eq!(connections.connection_count("session-scoped").await, 0);
+    // The notice is best-effort (dropped when the control queue is
+    // full) and the socket/subscription always survive.
+    assert!(!shutdown.is_cancelled());
+    assert_eq!(connections.connection_count("session-scoped").await, 1);
 }
 
 #[tokio::test]

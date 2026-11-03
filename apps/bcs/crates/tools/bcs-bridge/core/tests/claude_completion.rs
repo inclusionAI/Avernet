@@ -1,6 +1,6 @@
 //! The real driver against a deterministic native SDK protocol peer.
 use std::sync::Arc;
-use bcs_bridge_core::engine::{claude_code::ClaudeCodeFactory, EngineFactory, SessionObserver, TurnRequest};
+use bcs_bridge_core::engine::{claude_code::{ClaudeCode, ClaudeCodeFactory}, Engine, EngineFactory, SessionObserver, TurnRequest};
 use tokio_util::sync::CancellationToken;
 
 struct Observer;
@@ -10,14 +10,22 @@ impl SessionObserver for Observer {
 }
 
 async fn run_case(case: &str, mode: &str) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
-    run_case_traced(case, mode, None).await
+    run_case_traced(case, Some(mode), None).await
 }
-async fn run_case_traced(case: &str, mode: &str, trace: Option<bcs_bridge_core::engine::trace::TraceContext>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
+async fn run_case_traced(case: &str, mode: Option<&str>, trace: Option<bcs_bridge_core::engine::trace::TraceContext>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
+    run_case_with_init(case, mode, trace, None).await
+}
+async fn run_case_with_init(case: &str, mode: Option<&str>, trace: Option<bcs_bridge_core::engine::trace::TraceContext>, init: Option<serde_json::Value>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_cc_hook_idle.py");
-    let factory = ClaudeCodeFactory::custom("fixture", "python3", vec![script.into(), case.into()]);
+    let mut args = vec![script.into(), case.into()];
+    if let Some(init) = init { args.extend(["--init-fields".into(), init.to_string()]); }
+    let factory = ClaudeCodeFactory::custom("fixture", "python3", args);
     let mut options = toml::Table::new();
-    options.insert("completion_mode".into(), mode.into());
+    if let Some(mode) = mode { options.insert("completion_mode".into(), mode.into()); }
     let engine = factory.build("python3".into(), &options)?;
+    run_engine_case(case, engine, trace).await
+}
+async fn run_engine_case(case: &str, engine: Arc<dyn Engine>, trace: Option<bcs_bridge_core::engine::trace::TraceContext>) -> Result<bcs_bridge_core::engine::TurnOutcome, String> {
     let cwd = tempfile::tempdir().unwrap();
     let mut req = TurnRequest::new("run-completion", "test", cwd.path(), Arc::new(Observer));
     req.trace = trace;
@@ -34,6 +42,97 @@ async fn run_case_traced(case: &str, mode: &str, trace: Option<bcs_bridge_core::
         .expect("driver must not hang").map_err(|e| e.to_string());
     drain.await.unwrap();
     result
+}
+
+#[tokio::test]
+async fn omitted_completion_mode_uses_hook_idle() {
+    let result = run_case_traced("midturn", None, None).await.unwrap();
+    assert_eq!(result.final_text.as_deref(), Some("DONE"));
+}
+
+#[tokio::test]
+async fn native_versions_at_or_above_minimum_accept_correct_completion() {
+    for version in ["2.1.199", "2.1.200", "2.1.248", "2.1.258", "2.1.1000", "2.2.0", "2.10.0", "3.0.0", "10.0.0", "2.1.199+build.1", "2.1.200-rc.1"] {
+        for mode in [None, Some("hook_idle")] {
+            let result = run_case_with_init("basic", mode, None,
+                Some(serde_json::json!({"claude_code_version": version}))).await.expect(version);
+            assert_eq!(result.final_text.as_deref(), Some("DONE"), "{version} {mode:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn older_or_invalid_native_versions_are_rejected() {
+    let mut inputs: Vec<serde_json::Value> = ["0.0.0", "1.99.999", "2.0.9999", "2.1.9", "2.1.198", "2.1.199-rc.1", "", "unknown", "2.1", "2.1.199.1", "v2.1.258", "2.01.258", " 2.1.258", "18446744073709551616.1.199"]
+        .into_iter().map(|version| serde_json::json!({"claude_code_version": version})).collect();
+    inputs.extend([
+        serde_json::json!({}), serde_json::json!({"claude_code_version": null}),
+        serde_json::json!({"claude_code_version": 258}), serde_json::json!({"claude_code_version": true}),
+        serde_json::json!({"claude_code_version": [2, 1, 258]}),
+    ]);
+    for init in inputs {
+        for mode in [None, Some("hook_idle")] {
+            let error = run_case_with_init("basic", mode, None, Some(init.clone())).await.expect_err("must reject native version");
+            assert_eq!(error, "engine protocol error: completion_capability_unavailable", "{init} {mode:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn newer_native_versions_preserve_completion_order() {
+    for case in ["alive", "queued", "blocked", "midturn"] {
+        let result = run_case_with_init(case, None, None,
+            Some(serde_json::json!({"claude_code_version": "2.1.258"}))).await.expect(case);
+        assert_eq!(result.final_text.as_deref(), Some("DONE"), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn newer_native_versions_do_not_bypass_evidence_checks() {
+    for (case, expected) in [
+        ("missing_hook", "completion_evidence_unavailable"),
+        ("missing_tasks", "completion_evidence_unavailable"),
+        ("wrong_session", "completion_evidence_conflict"),
+        ("duplicate_result", "completion_evidence_conflict"),
+        ("unknown_task", "completion_capability_unavailable"),
+        ("scheduled", "completion_capability_unavailable"),
+        ("no_idle", "completion_evidence_unavailable"),
+    ] {
+        let error = run_case_with_init(case, None, None,
+            Some(serde_json::json!({"claude_code_version": "2.1.258"}))).await.expect_err(case);
+        assert_eq!(error, format!("engine protocol error: {expected}"), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn default_mode_native_auth_failure_does_not_wait_for_completion_hooks() {
+    let error = run_case_traced("authentication_error", None, None).await
+        .expect_err("native authentication failure must terminate without Stop/idle");
+    assert_eq!(error,
+        "engine exited: upstream authentication_error (HTTP 401): model provider authentication failed; check credentials");
+}
+
+#[tokio::test]
+async fn direct_constructor_uses_hook_idle() {
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mock_cc_hook_idle.py");
+    let engine = Arc::new(ClaudeCode::new("python3".into(), vec![script.into(), "alive".into()]));
+    let result = run_engine_case("alive", engine, None).await.unwrap();
+    assert_eq!(result.final_text.as_deref(), Some("DONE"));
+}
+
+#[tokio::test]
+async fn default_mode_never_falls_back_to_legacy() {
+    for (case, expected) in [("missing_hook", "completion_evidence_unavailable"),
+        ("unknown_version", "completion_capability_unavailable"),
+        ("observe_init_failure", "completion_capability_unavailable")] {
+        let error = run_case_traced(case, None, None).await.expect_err(case);
+        assert!(error.contains(expected), "{case}: {error}");
+    }
+}
+
+#[tokio::test]
+async fn explicit_legacy_skips_hook_initialization() {
+    assert_eq!(run_case("legacy", "legacy").await.unwrap().final_text.as_deref(), Some("DONE"));
 }
 
 #[tokio::test]
@@ -80,9 +179,14 @@ async fn observe_preserves_the_legacy_completion_point() {
 }
 
 #[test]
-fn completion_configuration_is_explicit_and_validated() {
+fn completion_configuration_is_optional_and_validated() {
     let factory = ClaudeCodeFactory::default();
     assert!(factory.build("unused".into(), &toml::Table::new()).is_ok());
+    for mode in ["legacy", "observe", "hook_idle"] {
+        let mut options = toml::Table::new(); options.insert("completion_mode".into(), mode.into());
+        assert!(factory.build("unused".into(), &options).is_ok());
+    }
+    assert!(factory.build("unused".into(), &toml::toml! { unknown = true }).is_err());
     for value in [toml::Value::Boolean(true), toml::Value::String("auto".into())] {
         let mut options = toml::Table::new(); options.insert("completion_mode".into(), value);
         assert!(factory.build("unused".into(), &options).is_err());
@@ -107,7 +211,7 @@ async fn callback_private_fields_and_malformed_lines_never_enter_trace() {
     for case in ["midturn", "malformed"] {
         let dir = tempfile::tempdir().unwrap();
         let trace = TraceContext::new(TraceStore::open(dir.path()).unwrap(), "fixture", "run");
-        let result = run_case_traced(case, "hook_idle", Some(trace)).await;
+        let result = run_case_traced(case, Some("hook_idle"), Some(trace)).await;
         if case == "midturn" { assert!(result.is_ok()); } else { assert!(result.is_err()); }
         let text = std::fs::read_to_string(dir.path().join("engine.raw.ndjson")).unwrap();
         assert!(!text.contains("PRIVATE"), "hook fields must be redacted before raw tracing");

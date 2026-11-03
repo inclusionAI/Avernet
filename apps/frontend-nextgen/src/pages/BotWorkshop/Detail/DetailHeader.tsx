@@ -3,6 +3,7 @@ import { BotBasicInfoDialog } from '@/components/BotWorkshop/BotBasicInfoDialog'
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
+import { cn } from '@/utils/cn';
 import { ArrowLeft, ChevronRight, Pencil, Save, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
 export function DetailHeader({
@@ -30,7 +31,13 @@ export function DetailHeader({
   const canEditBasic = editable && isOwner;
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-4 sm:px-6">
+    // 对话区可见(lg+)时补右描边,与下方面板区的 border-r 接成一条竖线。
+    <header
+      className={cn(
+        'flex h-14 shrink-0 items-center gap-2 border-b border-divider bg-card px-4 sm:px-6',
+        debugOpen && 'lg:border-r lg:border-divider',
+      )}
+    >
       <Button
         variant="ghost"
         size="icon"

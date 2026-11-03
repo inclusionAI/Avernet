@@ -39,6 +39,13 @@ export function useExternalAuthGuard({
     void auth.checkAuth();
   }, [enabled, auth.checkAuth]);
 
+  // 登录回调回流后，只要有有效 session，就立即清除此前 401 引发的旧提示信号。
+  // 这避免外层页面在登录完成后仍保留了 SPA 内存中的 stale prompt。
+  useEffect(() => {
+    if (!enabled || auth.status !== 'authenticated') return;
+    useLoginRedirectStore.getState().reset();
+  }, [enabled, auth.status]);
+
   useEffect(() => {
     if (!enabled || auth.status !== 'unauthenticated') return;
     if (mode === 'force') {

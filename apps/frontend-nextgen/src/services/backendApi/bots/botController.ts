@@ -48,7 +48,7 @@ export interface BotMetadataQueryBody {
   bots: BotMetadataQueryItem[];
 }
 
-/** GET /openapi/v1/bots/metadata/queries 单条返回结构。 */
+/** POST /openapi/v1/bots/metadata/queries 单条返回结构。 */
 export interface BotMetadataDto {
   bot_id: string;
   owner_id: string;
@@ -58,6 +58,8 @@ export interface BotMetadataDto {
   template_type?: string;
   template_name?: string;
   bot_type?: string;
+  /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
+  online_available?: boolean | null;
   status?: string;
 }
 
@@ -105,6 +107,7 @@ export const BOT_ENDPOINTS = {
   restartLocal: (bot_id: string) => `/openapi/v1/bots/${bot_id}/local/restart`,
   space: (bot_id: string) => `/openapi/v1/bots/${bot_id}/space`,
   authStatus: (bot_id: string) => `/openapi/v1/bots/${bot_id}/auth-status`,
+  copy: '/openapi/v1/bots/copy',
 };
 
 export function changeBotSpace(bot_id: string, space_id: number, user_id?: string) {
@@ -145,6 +148,15 @@ export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQ
 // 创建 Bot。
 export function createBot(body: MutateBotRequest) {
   return backendRequest<BackendApiEnvelope<BotDto | BotAuthPendingDto>>(BOT_ENDPOINTS.list, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: body,
+  });
+}
+
+// 复制 Bot();响应同构:成功返回 BotDto,需 AgentPass 授权时返回 BotAuthPendingDto。
+export function copyBot(body: MutateBotRequest) {
+  return backendRequest<BackendApiEnvelope<BotDto | BotAuthPendingDto>>(BOT_ENDPOINTS.copy, {
     method: 'POST',
     params: userScopedParams(),
     data: body,
@@ -210,7 +222,7 @@ function engineRuntimeParams(target?: BotEngineRuntimeRequestOptions): BackendUn
   return userScopedParams({
     user_id: target.userId,
     ...(target.ownerId ? { entity_id: target.ownerId } : {}),
-    stage: target.stage ?? 'draft',
+    // Engine inspection/restart only supports draft; omit it and use the Backend default.
     ...(target.deviceUuid ? { device_uuid: target.deviceUuid } : {}),
   });
 }

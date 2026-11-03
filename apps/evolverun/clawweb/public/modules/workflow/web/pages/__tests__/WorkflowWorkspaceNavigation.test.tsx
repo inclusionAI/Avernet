@@ -1,7 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const queryHooks = vi.hoisted(() => ({
   diagnoses: vi.fn(() => ({ data: { diagnoses: [] } })),
@@ -24,14 +24,18 @@ vi.mock('../../api/hooks', () => ({
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
   useEvolveLessons: queryHooks.lessons,
 }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } }, fetchJson: vi.fn() }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'admin-1', isAdmin: true }) }))
 vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () => <div>运行概览内容</div> }))
 vi.mock('../../components/workflow-workspace/EditorTab', () => ({ default: () => <div>编辑器内容</div> }))
 vi.mock('../../components/workflow-workspace/ManagementTab', () => ({ default: () => <div>管理内容</div> }))
 vi.mock('../../components/workflow-workspace/EvolutionTab', () => ({ default: () => <div>护航内容</div> }))
+vi.mock('../../components/workflow-workspace/ApprovalWorkbench', () => ({ default: () => <div>审批工作台内容</div> }))
 vi.mock('../Dashboard', () => ({ default: () => <div>管理员大盘内容</div> }))
 
 import WorkflowWorkspace from '../WorkflowWorkspace'
+import { useEditorStore } from '../../editor/store'
+afterEach(() => { vi.restoreAllMocks(); useEditorStore.setState(useEditorStore.getInitialState(), true) })
 
 function LocationProbe() {
   const location = useLocation()
@@ -67,7 +71,7 @@ describe('unified task escort navigation', () => {
     await userEvent.click(within(header).getByRole('button', { name: /切换工作流.*示例工作流/ }))
     await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
 
-    expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2')
+    await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2'))
     expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('baseline=')
     expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('current=')
     expect(within(header).getByRole('button', { name: /切换工作流.*备用工作流/ })).toBeInTheDocument()
@@ -117,11 +121,62 @@ it('clears the displayed workflow versions after browser Back leaves a different
     await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
   }
   await chooseSecond()
+  await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2'))
   await userEvent.click(screen.getByRole('button', { name: '浏览器后退' }))
   expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-1')
   expect(screen.getByLabelText('workspace-location')).toHaveTextContent('baseline=159')
   await chooseSecond()
-  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2')
+  await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('workflowId=wf-2'))
   expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('baseline=')
   expect(screen.getByLabelText('workspace-location')).not.toHaveTextContent('current=')
+})
+
+it('drops workflow-specific deep links when switching and preserves the original link on browser Back', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=evolution&repairTaskId=FIX-A&runId=RUN-A&analysisId=AN-A&issueSignature=timeout&baseline=1&current=2')
+  await userEvent.click(screen.getByRole('button', { name: /切换工作流.*示例工作流/ }))
+  await userEvent.click(screen.getByRole('button', { name: /备用工作流.*wf-2/ }))
+  const location = screen.getByLabelText('workspace-location')
+  await waitFor(() => expect(location).toHaveTextContent('workflowId=wf-2'))
+  expect(location).toHaveTextContent('tab=evolution')
+  for (const name of ['repairTaskId', 'runId', 'analysisId', 'issueSignature', 'baseline', 'current']) {
+    expect(location).not.toHaveTextContent(`${name}=`)
+  }
+  await userEvent.click(screen.getByRole('button', { name: '浏览器后退' }))
+  expect(location).toHaveTextContent('workflowId=wf-1')
+  expect(location).toHaveTextContent('repairTaskId=FIX-A')
+})
+
+
+it('does not discard the draft before a cancelled workspace route change', async () => {
+  const state = useEditorStore.getState()
+  state.loadSpec({ id: 'wf-1', title: 'Original', version: '1', nodes: [] })
+  useEditorStore.getState().updateSpecField('title', 'Unsaved')
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=editor')
+  await userEvent.click(screen.getByRole('button', { name: '运行概览' }))
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('编辑器内容')).toBeInTheDocument()
+  expect(useEditorStore.getState().spec?.title).toBe('Unsaved')
+  expect(useEditorStore.getState().isDirty).toBe(true)
+})
+
+it('retains the in-memory draft after an approved workspace route change', async () => {
+  useEditorStore.getState().loadSpec({ id: 'wf-1', title: 'Original', version: '1', nodes: [] })
+  useEditorStore.getState().updateSpecField('title', 'Unsaved')
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=editor')
+  await userEvent.click(screen.getByRole('button', { name: '运行概览' }))
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('运行概览内容')).toBeInTheDocument()
+  expect(useEditorStore.getState().spec?.title).toBe('Unsaved')
+  const unload = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(unload)
+  expect(unload.defaultPrevented).toBe(true)
+})
+
+ it('navigates to a global workbench independent of the selected workflow', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=overview')
+  await userEvent.click(screen.getByRole('button', { name: '工作台' }))
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=workbench')
+  expect(screen.getByText('审批工作台内容')).toBeInTheDocument()
 })

@@ -44,6 +44,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     getCollaborationMode,
     getGeneralConfigAvailability,
     onGeneralConfig,
+    getCopyAvailability,
+    onCopy,
     onOpenEngineInfo,
     onUpdateEngineVersion,
   } = options;
@@ -79,6 +81,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
+            onManagePublication={onAction ? onManagePublication : undefined}
           />
         ),
       },
@@ -148,7 +151,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 entry.enabled
                   ? collaborationAllowsConversation
                     ? undefined
-                    : '申请协作权限后才可对话'
+                    : bot.disabledActions?.chat || '申请协作权限后才可对话'
                   : entry.disabledReason
               }
               onOpenLogs={onOpenLogs}
@@ -161,6 +164,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
           if (!onAction) return primaryCell;
           const menuKey = botTableEngineVersionKey(bot);
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
+          const copyAvailability = getCopyAvailability?.(bot);
           return (
             <div className="flex items-center justify-end gap-0.5" onClick={(event) => event.stopPropagation()}>
               {primaryCell}
@@ -173,7 +177,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
-                onManagePublication={onManagePublication}
                 onHealthCheck={onHealthCheck}
                 healthCheckAvailability={getHealthCheckAvailability?.(bot)}
                 onOpenTaskInstances={onOpenTaskInstances}
@@ -183,6 +186,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                copyAvailability={copyAvailability}
+                onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
                 onOpenEngineInfo={onOpenEngineInfo}
                 onUpdateEngineVersion={onUpdateEngineVersion}
@@ -220,6 +225,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       toggleProgress,
       getGeneralConfigAvailability,
       onGeneralConfig,
+      getCopyAvailability,
+      onCopy,
       onOpenEngineInfo,
       onUpdateEngineVersion,
       engineVersionStates,

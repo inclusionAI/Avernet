@@ -74,7 +74,10 @@ class CallerIdentityRepositoryProtocol(Protocol):
         lock_epoch: int | None,
         effective_server_codes: set[str] | None = None,
         effective_cli_codes: set[str] | None = None,
-    ) -> CliCallTypeMutationResult: ...
+        allow_owner_transition: bool = False,
+    ) -> CliCallTypeMutationResult:
+        """Allow a final Owner aggregate only with trusted service authorization."""
+        ...
 
     @abstractmethod
     def compensate_draft_cli_call_type(
@@ -114,7 +117,10 @@ class CallerIdentityRepositoryProtocol(Protocol):
         lock_key: str,
         lock_holder_user_id: str,
         lock_epoch: int | None,
-    ) -> DraftCallTypeMutationResult: ...
+        allow_owner_transition: bool = False,
+    ) -> DraftCallTypeMutationResult:
+        """Persist MCP mode; final Caller-to-Owner defaults to denied."""
+        ...
 
     @abstractmethod
     def compensate_draft_call_type(
@@ -143,7 +149,9 @@ class CallerIdentityRepositoryProtocol(Protocol):
 @runtime_checkable
 class ExecutionIdentityRepositoryProtocol(Protocol):
     @abstractmethod
-    def get_active(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...
+    def get_active(self, *, bot_pk: int, env: str | None = None) -> ExecutionIdentityBinding | None:
+        """Read an ACTIVE binding in the server's env, or an explicit maintenance target env."""
+        ...
 
     @abstractmethod
     def get_pending(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...
@@ -192,6 +200,8 @@ class UserListRepositoryProtocol(Protocol):
         entity_id: str,
         user_list_type: str,
         env: str | None = None,
+        subject_type: str = "user",
+        bot_type: str = "all",
     ) -> bool: ...
 
     @abstractmethod
@@ -202,4 +212,19 @@ class UserListRepositoryProtocol(Protocol):
         user_list_type: str,
         in_whitelist: bool,
         env: str | None = None,
+        subject_type: str = "user",
+        bot_type: str = "all",
     ) -> None: ...
+
+
+    @abstractmethod
+    def has_rules(
+        self, *, subject_type: str, user_list_type: str, env: str,
+        bot_types: tuple[str, ...],
+    ) -> bool: ...
+
+    @abstractmethod
+    def exists_any(
+        self, *, entity_ids: tuple[str, ...], subject_type: str,
+        user_list_type: str, env: str, bot_types: tuple[str, ...],
+    ) -> bool: ...

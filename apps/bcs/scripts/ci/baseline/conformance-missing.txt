@@ -7,7 +7,6 @@ BotRegistryService	偏离 #6: 待补 conformance test
 GroupService	偏离 #6: 待补 conformance test
 RoutingService	偏离 #6: 待补 conformance test
 FusionService	偏离 #6: 待补 conformance test
-ProposalService	偏离 #6: 待补 conformance test
 FriendService	偏离 #6: 待补 conformance test
 FriendRequestService	偏离 #6: 待补 conformance test
 RelationService	偏离 #6: 待补 conformance test

@@ -1,5 +1,6 @@
 mod actor_directory;
 mod bot;
+pub mod caller_delivery_gate;
 mod human_actor;
 mod onboarding;
 mod provider;
@@ -11,3 +12,4 @@ pub use human_actor::HumanActor;
 pub use onboarding::BotOnboarding;
 pub use provider::ProviderManagement;
 pub use provider_events::ProviderBotEvents;
+pub use caller_delivery_gate::{CallerConfigurationDeliveryGate, CALLER_EXECUTION_UNAVAILABLE};

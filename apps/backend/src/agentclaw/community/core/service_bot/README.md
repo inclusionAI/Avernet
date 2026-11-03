@@ -1,5 +1,13 @@
 # `agentclaw.community.core.service_bot`
 
+Publication resource lookups pass the record's `source_bot_pk` to the common
+Bot address resolver. This covers build, verify/online/eval release, scale,
+restart, restore, rollback, approval and deletion: a legacy publish Owner can
+differ from both the current Owner and entity. Config coordinates and engine
+selection use the same source-PK rule. Historical publish fields and per-record
+stage bindings are not rewritten. Only orphaned default metadata retains the
+legacy owner/entity lookup; service-source mismatches fail closed.
+
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
 
 ## Context Boundary
@@ -51,7 +59,7 @@ internal_dependencies:
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.plugin_api.publish_ignore_runtime
   - agentclaw.community.core.digital_employee
-  - agentclaw.community.core.bot_config_manifest.cli_tools.store    # W9: a teclaw promotion copies the bot's CLI-tool objects into the new stage's prefix from the platform's own copy, rather than reading them back out of the engine
+  - agentclaw.community.core.apply_engine.cli_tools.store    # W9: a teclaw promotion copies the bot's CLI-tool objects into the new stage's prefix from the platform's own copy, rather than reading them back out of the engine
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
@@ -115,6 +123,34 @@ The existing `owner_id` column remains a compatibility resource locator: new
 rows store the source Bot's immutable `entity_id` while the field name and
 response shape stay unchanged. This stage does not change SecBaaS code.
 
+Legacy publish requests may contain only `publish_id`. The shared permission
+interceptor resolves the source Bot from the extracted resource locator for both
+reads and writes, then checks permissions and edit locks against its current Owner.
+Historical publish `owner_id` values do not grant Owner privileges after a
+handoff. Request payloads and immutable publication resource addresses remain
+unchanged; the handoff maintenance fence still applies to writes before authorization.
+
+Publishing resolves internal Bot reads through `BotService.get_bot_by_address`:
+legacy entity/current-Owner locators select the Bot, then its current Owner is
+used for the enriched detail read. `get_bot` itself keeps strict ownership
+semantics. Build/release/restart/retry/scale/rollback/restore retain the publish
+record's stable entity for resource paths. New approval auditors and approval
+Owner snapshots use the current Owner; existing approval history is not rewritten.
+Deletion resolves and validates the current Bot before destroying version
+resources. The Bot row is deleted under current ownership while Passport, App
+Grant and capability/asset cleanup retain the stable entity. Personal/default
+cleanup and earliest-Bot/employee deletion protections retain existing behavior.
+BaaS binding lookup and outbound Bot-type selection accept legacy/current-Owner
+locators and query service publication resources by entity. Managed read-only
+rules also resolve the stable Bot before reading its policy. Passport hot-update
+checks current ownership first, then locates draft/verify/online/Caller targets
+by entity, including repeated A→B→C handoff.
+
+The existing oversized central Bot/Publish services remain under the repository's
+pre-existing architecture allowlist; this compatibility fix does not extend it.
+Their remaining decomposition is a separate lifecycle/service refactor so this
+fix can be reviewed without moving unrelated creation and restart behavior.
+
 ## Publish operation ledger (#197)
 
 Every BaaS mutation in the publish pipeline (verify/online release, upgrade,
@@ -165,7 +201,7 @@ or changing either source or target; any existing versioned snapshot is retained
 Disabled `.local/bin` retries still clear existing versioned bin snapshots without
 reading draft CLI directories or creating missing snapshots.
 
-The `PUT /api/v1/user-lists/correct` API requires operator authorization for all
+The `PUT /api/v1/user-lists/correct` API requires `admin.super_admin` authorization for all
 list types. Operators can add or remove this rollout type for an owner or `*`,
 with `env` selecting the environment. Ordinary authenticated users receive
 HTTP 403 without changing membership. Membership checks still require only login.
@@ -215,3 +251,56 @@ Response parsing lives in `services/baas_api_response.py`; the existing oversize
 `BaasService` keeps its current size-gate exemption and delegates this parsing.
 The broader service split remains a separate refactor, as recorded by the
 existing architecture allowlist; this fix reduces the service file size.
+## Fastdisk artifact transfer
+
+`BotBuildService` receives the neutral `ArtifactTransferRegistry` and resolves
+an `ArtifactTransferStrategy` using each build plan's engine, at both `publish`
+and `restore` hooks. DI registers `AicodingArtifactTransferStrategy` only for
+`aicoding` and `claude_code`. Every other engine resolves to
+`DefaultArtifactTransferStrategy`, which returns False / None without runtime
+access, preserving the caller's existing NAS build/restore flow. A no-op never
+means transfer success. Coding errors propagate without NAS fallback.
+
+The interface, default implementation and registry live in the neutral
+`core/bot_management/engines/artifact_transfer.py`; that module imports no
+coding implementation or configuration. Detection, draft-device/version checks,
+runtime path resolution, restore-result assembly, command execution and the
+pure configuration parser remain under `engines/aicoding/`. The caller neither
+checks `supports` nor assembles a container-script request. Path resolution is
+passed lazily, and the restore hook receives the existing migration-error type.
+
+The existing `ServiceBotModule` has a separate registry provider that assembles
+the coding implementation. Its `bot_build_service` provider only injects that
+registry. API, version paths, configuration keys, schema 6 and timeouts are
+unchanged by this selection refactor.
+
+The AICoding strategy consumes the existing build plan and a command executor. It
+embeds only read-only mount detection so legacy containers need no detector
+installation. Non-fastdisk bots retain host-side NAS transfer. Detector failure
+is not a non-fastdisk result. Fastdisk bots require schema-6
+`/home/admin/bin/service_publish.py`; missing/incompatible scripts fail with a
+logged error, without uploading a fallback implementation.
+
+Publication passes the existing version prefix and per-bot dynamic exclusions
+for direct OSS upload. Fixed file selection and extra-root mappings are owned by
+the installed container policy, not expanded into Backend requests. Draft restore passes the identity/version-derived OSS prefix, logical artifact
+path, Mist credential name (not keys), ownership and remaining operation budget.
+The container downloads directly into mapped runtime paths, without whole-tree
+staging or a second local rsync. Exclusions and CLI merge behavior are retained;
+engine/Claude stale-file cleanup starts only after required downloads succeed.
+Completed file replacements remain on failure; there is no transactional rollback. The startup tar merge is
+not substituted for restore's delete semantics.
+
+Command transport stages only invocation parameters and execution control in
+bounded chunks, then waits for an atomic exit-status result. The container scripts
+repository owns transfer implementation. Consumers retain publication-state and
+error handling; no independent Backend post-upload object validation is added.
+
+
+Draft device resolution is AICoding-owned: after engine eligibility is established,
+the strategy queries the existing binding repository by `bot.binding_id` and
+requires an ACTIVE binding with a device ID. It does not trust `bot.device_id`,
+mutate the Bot context, or fall back on lookup failure. Other engines never make
+this strategy-specific query; the shared draft flow retains its original context.
+Optional command-timeout forwarding remains infrastructure-only: omitted timeout
+arguments retain the existing provider call/default behavior.

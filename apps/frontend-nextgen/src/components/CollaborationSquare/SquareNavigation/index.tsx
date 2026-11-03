@@ -1,8 +1,9 @@
 import { Link } from '@umijs/max';
 
-export type SquareNavigationResource = 'bot' | 'group';
+export type SquareNavigationResource = 'bot' | 'group' | 'expert';
 
 const ITEMS: Array<{ resource: SquareNavigationResource; label: string; path: string }> = [
+  { resource: 'expert', label: '专家市场', path: '/collaboration-square/experts' },
   { resource: 'bot', label: '公开Bot', path: '/collaboration-square/bots' },
   { resource: 'group', label: '公开协作群', path: '/collaboration-square/groups' },
 ];

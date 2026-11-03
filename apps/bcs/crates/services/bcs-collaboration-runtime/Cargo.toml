@@ -19,12 +19,11 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 bcs-config-api = { workspace = true }
+bcs-config = { workspace = true }
 
 bcs-domain = { workspace = true }
 bcs-protocol = { workspace = true }
 bcs-service-api = { workspace = true }
-bcs-callback = { workspace = true }
-bcs-route-security = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]

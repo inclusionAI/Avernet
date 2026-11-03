@@ -7,6 +7,9 @@ import type { LucideIcon } from 'lucide-react';
 import { ArrowRight, MessagesSquare, Target } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
+import { TrackExpo } from '@/tracking/TrackExpo';
 
 /** 实验室功能卡内容（社区 + 任务）。文案对齐原型 TeamClaw-demo …/Lab(最新任务产品 PRD)。 */
 interface LabFeature {
@@ -61,11 +64,15 @@ function LabFeatureCard({
         </div>
         {feature.headerExtra ? <div className="flex items-center gap-2">{feature.headerExtra}</div> : null}
       </div>
-      <p className="m-0 text-sm leading-6 text-muted-foreground">{feature.description}</p>
+      <p className="m-0 min-h-12 text-sm leading-6 text-muted-foreground">{feature.description}</p>
       <div className="flex items-center justify-between">
         <Button
           className="h-9 px-4 text-xs"
-          onClick={() => history.push(feature.href)}
+          onClick={() => {
+            if (feature.id === 'tasks') Tracert.click(Points.lab.openTasks);
+            if (feature.id === 'community') Tracert.click(Points.lab.openCommunity);
+            history.push(feature.href);
+          }}
           rightIcon={<ArrowRight className="size-3.5" aria-hidden />}
         >
           开始体验
@@ -102,6 +109,7 @@ export default function LabLandingPage() {
             aria-label="实验室功能"
             className="grid grid-cols-1 gap-4 xl:grid-cols-[repeat(auto-fill,minmax(420px,1fr))]"
           >
+            <TrackExpo point={Points.lab.cardsExpo} />
             {FEATURES.map((feature) => (
               <LabFeatureCard key={feature.id} feature={feature} setFeedbackOpen={setFeedbackOpen} />
             ))}

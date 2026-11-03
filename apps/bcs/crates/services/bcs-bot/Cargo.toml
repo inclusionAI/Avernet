@@ -33,6 +33,7 @@ bcs-bot-store = { workspace = true }
 bcs-user-directory-api = { workspace = true }
 
 [dev-dependencies]
+bcs-group-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-db-api = { workspace = true }

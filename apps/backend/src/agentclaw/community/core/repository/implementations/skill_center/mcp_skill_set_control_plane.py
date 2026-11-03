@@ -183,10 +183,6 @@ class McpSkillSetControlPlaneCommands:
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
-                bot_mcp_configs.delete(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
             session.flush()
             return DesiredStateMutation(
                 self._as_item(row), True, old,
@@ -234,8 +230,8 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), server_code=server_code,
             )
-            # An active ordinary Set can supply the same MCP after Default
-            # exclusion. Its Installation and configuration belong to that Set.
+            # An active ordinary Set can still supply the MCP after Default
+            # exclusion. Bot overrides are independent of either supply source.
             active_ordinary_claim = any(
                 old.set_active[set_id]
                 and any(member[0] == server_code for member in members)
@@ -244,10 +240,6 @@ class McpSkillSetControlPlaneCommands:
             removed_installation = 0
             if not active_ordinary_claim:
                 removed_installation = mcp_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
-                bot_mcp_configs.delete(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
@@ -477,29 +469,3 @@ class McpSkillSetControlPlaneCommands:
         with self._db.orm_session() as session:
             return self._mcp_installations(session, bot_id, owner_id)
 
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        server_codes: set[str],
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> set[str]:
-        managed: set[str] = set()
-        with self._db.orm_session() as session:
-            for server_code in sorted(server_codes):
-                try:
-                    self._require_not_set_managed(
-                        session,
-                        set_ids=self._mcp_referencing_set_ids(
-                            session, server_code=server_code
-                        ),
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        engine_type=engine_type,
-                        default_engine_types=default_engine_types,
-                    )
-                except SkillSetControlPlaneConflictError:
-                    managed.add(server_code)
-        return managed

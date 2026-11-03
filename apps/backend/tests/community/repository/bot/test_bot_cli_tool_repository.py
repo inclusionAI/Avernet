@@ -16,7 +16,7 @@ from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 # Imported for side effect: registers BotCliToolModel on Base.metadata so
 # create_all() builds the ac_bot_cli_tool table.
-from agentclaw.community.core.bot_config_manifest.cli_tools import (  # noqa: F401
+from agentclaw.community.core.apply_engine.cli_tools import (  # noqa: F401
     INSTALLED_BY_MANIFEST,
     BotCliToolModel,
 )

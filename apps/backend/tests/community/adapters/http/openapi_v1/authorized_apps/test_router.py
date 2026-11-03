@@ -12,6 +12,8 @@ confirm the handler calls itself the way it was written.
 
 from __future__ import annotations
 
+from agentclaw.community.plugin_api.models import BotModel
+
 from contextlib import contextmanager
 
 import pytest
@@ -34,6 +36,7 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -137,7 +140,7 @@ def sessions():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(
-        engine, tables=[BotAppGrantModel.__table__, BotAppGrantLogModel.__table__]
+        engine, tables=[BotModel.__table__, BotAppGrantModel.__table__, BotAppGrantLogModel.__table__]
     )
     yield sessionmaker(bind=engine)
     engine.dispose()
@@ -172,6 +175,12 @@ def grants(sessions):
         ) -> set[tuple[str, str]]:
             return set(pairs)
 
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            return [{"id": 1, "bot_id": bot_id, "entity_id": locator, "owner_id": locator}]
+
+        def get_live_bot_owners_by_entity(self, pairs):
+            return {pair: pair[1] for pair in self.filter_live_bots(pairs)}
+
     return BotAppGrantService(BotAppGrantRepository(_Db()), _LiveBots())
 
 
@@ -200,7 +209,13 @@ def bots():
             bot_pk = self.rows.get((bot_id, user_id))
             if bot_pk is None:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
-            return {"id": bot_pk, "bot_id": bot_id, "owner_id": user_id}
+            return {"id": bot_pk, "bot_id": bot_id, "owner_id": user_id, "entity_id": user_id}
+
+        def list_matches_by_legacy_locator(self, bot_id, locator):
+            try:
+                return [self.get_bot(bot_id, locator)]
+            except BotNotFoundError:
+                return []
 
     return _Bots()
 
@@ -257,6 +272,7 @@ def _build(grants, bots, collaborators, caller):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bots)
+            binder.bind(BotRepository, to=bots)
             binder.bind(CollaboratorServiceProtocol, to=collaborators)
             binder.bind(BotAppGrantServiceProtocol, to=grants)
 

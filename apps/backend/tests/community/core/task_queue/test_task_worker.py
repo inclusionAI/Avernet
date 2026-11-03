@@ -239,6 +239,40 @@ def test_raising_handler_retries_with_backoff_within_deadline():
     assert "kaboom" in stored.last_error
 
 
+@pytest.mark.parametrize('attempts', [1024, 1025, 1129, 10**100])
+@pytest.mark.parametrize('floor,cap', [(1.0, 60.0), (0.25, 3.0), (0.0, 60.0)])
+def test_backoff_remains_capped_at_large_attempt_counts(attempts, floor, cap):
+    worker = object.__new__(TaskWorker)
+    worker._config = TaskQueueWorkerConfig(
+        retry_backoff_min_seconds=floor, retry_backoff_max_seconds=cap
+    )
+    assert worker._backoff(attempts) == (0.0 if floor == 0 else cap)
+
+
+@pytest.mark.parametrize('attempts,delay', [(0, 0.25), (1, 0.25), (2, 0.5), (3, 1.0), (5, 3.0)])
+def test_backoff_preserves_initial_exponential_delays(attempts, delay):
+    worker = object.__new__(TaskWorker)
+    worker._config = TaskQueueWorkerConfig(
+        retry_backoff_min_seconds=0.25, retry_backoff_max_seconds=3.0
+    )
+    assert worker._backoff(attempts) == delay
+
+
+def test_retry_after_many_polls_persists_outcome_instead_of_losing_lease():
+    w = _world()
+    w.registry.register(_BoomHandler())
+    rec = w.enqueue('boom', deadline_seconds=3600)
+    with w.repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == rec.id).update(
+            {TaskQueueModel.attempts: 1128}, synchronize_session=False
+        )
+    assert asyncio.run(w.worker.run_once()) == 1
+    stored = w.repo.get_by_id(rec.id)
+    assert stored.attempts == 1129
+    assert stored.status == TaskStatus.PENDING
+    assert 'kaboom' in stored.last_error
+
+
 def test_raising_handler_times_out_when_backoff_exceeds_deadline():
     # Deadline 1s but backoff floor 100s → the retry would land past the
     # deadline, so the repository marks it TIMED_OUT instead of rescheduling.
@@ -541,3 +575,24 @@ def test_idle_worker_loop_wakes_on_an_opted_in_enqueue(monkeypatch):
 
     elapsed = asyncio.run(drive())
     assert elapsed < 1.0
+
+
+def test_risk_advance_and_replay_are_dispatched_by_real_queue_worker():
+    from agentclaw.community.core.bot_public_risk.advance import RiskAdvanceHandler, RiskPendingHandler
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    world = _world()
+    advance = MagicMock()
+    seen = []
+    advance.advance.side_effect = lambda env, risk_id: seen.append((get_current_avernet_tenant(), env, risk_id))
+    repo = MagicMock()
+    repo.get.return_value = None
+    world.registry.register(RiskAdvanceHandler(advance, lambda: "dev"))
+    world.registry.register(RiskPendingHandler(repo, MagicMock(), MagicMock(), MagicMock(), lambda: "dev"))
+    payload = {"tenant": "example", "env": "dev", "risk_check_id": "risk-a"}
+    first = world.enqueue("bot_public_risk_advance", payload)
+    second = world.enqueue("bot_public_risk_callback_replay", payload)
+    assert asyncio.run(world.worker.run_once()) == 2
+    assert world.status_of(first.id) == TaskStatus.SUCCEEDED
+    assert world.status_of(second.id) == TaskStatus.SUCCEEDED
+    assert seen == [("example", "dev", "risk-a")]

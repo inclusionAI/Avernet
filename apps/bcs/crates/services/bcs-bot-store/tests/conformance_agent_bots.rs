@@ -7,7 +7,7 @@ use bcs_service_api::{BotRepoPort, types::agent_registration::AgentBotQuery};
 
 async fn fixture() -> (Arc<bcs_db_local::LocalSqliteDbPlugin>, PersistentBotRepo) {
     let db = database::sqlite().await;
-    db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN config TEXT DEFAULT '{\"downlink\":{\"auth_mode\":\"agentpass-subbots\"}}'" )).await.unwrap();
+    db.execute(DbStatement::with_params("UPDATE bcs_providers SET config = ?", vec![r#"{"downlink":{"auth_mode":"agentpass-subbots"}}"#.into()])).await.unwrap();
     db.execute(DbStatement::new("ALTER TABLE bcs_providers ADD COLUMN disabled INTEGER DEFAULT 0")).await.unwrap();
     let env = bcs_config::resolve_env_str();
     for (id, token) in [("bot_A", "token_A"), ("bot_B", "token_B")] {

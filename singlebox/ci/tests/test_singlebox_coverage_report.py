@@ -109,16 +109,18 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
 
     assert module_names == [
         "bot_dormant",
+        "tc_file_upload_integrations",
         "auth",
         "devices",
         "access",
         "bot_chat",
         "bot_collaborator",
+        "manager_sync",
+        "ownership_sync",
         "cron",
         "expert_chat",
         "files",
         "harness",
-        "resources",
     ]
     for module_name in module_names:
         module = manifest["modules"][module_name]

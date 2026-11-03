@@ -3,7 +3,7 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use async_trait::async_trait;
 use axum::{body::{Body, to_bytes}, http::{HeaderMap, Request, StatusCode, Uri}, Router};
 use bcs_api_http::{ApiState, PrincipalVerifier, PrincipalVerificationError};
-use bcs_app_session::{SessionServiceImpl, SessionServiceConfig};
+use bcs_app_session::SessionServiceImpl;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_domain::MessageViewScope;
 use bcs_db_api::{DbPlugin, DbStatement, DbResult, DbRow, DbExecuteResult, DbTransactionStep, DbTransactionStepResult, DbHealth};
@@ -79,22 +79,38 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         messages, Arc::new(UnusedPorts), session_repo.clone(), services.group.clone(), services.registry.clone(),
         services.session_files.clone(), Arc::new(UnusedPorts), 0, 0, 100, 50, 100, 600,
     ).with_persisted_state_machine_history(true, cutoff));
+    // These read-only history routes exercise Session
+    // reads and Group views; the facades still get a
+    // REAL (empty) authority chain so the
+    // control-owned entries fail closed if they are
+    // ever consulted from these routes.
+    let authority: Arc<
+        dyn bcs_service_api::port::bot_authority::BotAuthorityPort,
+    > = bcs_test_support::authority_hook_for(Arc::new(
+        bcs_bot_store::MemoryBotRepo::new(),
+    ));
     let facade = Arc::new(SessionServiceImpl::new(services.session_launch.clone(), services.session_management.clone(),
-        services.group.clone(), services.registry.clone(), services.friend.clone(), services.relation.clone(), session_repo,
+        services.group.clone(), services.registry.clone(), services.friend.clone(), session_repo.clone(),
         services.group_message_history.clone(), services.collaboration_runtime.clone(), services.system_message.clone(),
-        SessionServiceConfig { relation_env: env.into() }));
-    let group = Arc::new(bcs_app_group::GroupServiceImpl::new(services.group.clone(), services.registry.clone(),
-        services.friend.clone(), services.relation.clone(), services.session_management.clone(), services.group_management.clone(),
-        bcs_app_group::GroupServiceConfig { relation_env: env.into() }));
+    ).with_bot_authority_hook(authority.clone()).with_session_authorization_core(
+        Arc::new(bcs_session::SessionAuthorizationCoreImpl::new(session_repo))));
+    let group = Arc::new(
+        bcs_app_group::GroupServiceImpl::new(services.group.clone(), services.registry.clone(),
+        services.friend.clone(), services.session_management.clone(), services.group_management.clone(),
+        )
+        .with_bot_authority_hook(authority.clone()),
+    );
     let invite = Arc::new(bcs_group::application::invite::InviteServiceImpl {
         registry: services.registry.clone(), group: services.group.clone(), session: services.session_management.clone(),
         system_message: services.system_message.clone(), token_secret: Vec::new(), default_ttl_seconds: 60,
         base_url: None, group_link_url: None, session_link_url: None,
+        bot_authority: None,
     });
     let invitations = Arc::new(bcs_app_invitation::InvitationFriendshipServiceImpl::new(services.friend.clone(),
         Arc::new(bcs_test_support::NoopFriendRequestCoreService), services.group.clone(), services.session_management.clone(),
-        services.registry.clone(), invite, Vec::new(), bcs_app_invitation::InvitationFriendshipServiceConfig { default_ttl_seconds: 60 }));
-    let register = Arc::new(bcs_app_register::RegisterServiceImpl::new(services.bot_management.clone(), services.bot_onboarding.clone(), Vec::new()));
+        services.registry.clone(), invite, Vec::new(), bcs_app_invitation::InvitationFriendshipServiceConfig { default_ttl_seconds: 60 })
+    .with_bot_authority_hook(authority));
+    let register = Arc::new(bcs_app_register::RegisterServiceImpl::new(Vec::new()));
     let identity = Arc::new(Identity(user.into()));
     let api = bcs_api_http::router(ApiState::new(group, facade.clone(), facade, invitations.clone(), register, invitations, identity.clone()));
     let legacy = bcs_http::router::build_router(HttpAppState::new(services).with_user_identity(identity));

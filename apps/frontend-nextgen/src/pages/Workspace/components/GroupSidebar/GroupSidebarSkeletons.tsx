@@ -15,7 +15,7 @@ const GROUP_ROW_LAYOUTS: Array<{ name: string; tag: string }> = [
   { name: 'w-[48%]', tag: 'w-12' },
 ];
 
-/** 群一级行骨架：与 GroupItem 的固定头像槽、双行名称和块间分隔线一致。 */
+/** 群一级行骨架：与 GroupItem 的固定头像槽、双行名称一致；块间无分隔线（2026-10-22 与实装行同构）。 */
 export function GroupRowsSkeleton({ rows = 5 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="overflow-hidden">
@@ -28,11 +28,10 @@ export function GroupRowsSkeleton({ rows = 5 }: { rows?: number }) {
                 <Skeleton.Block className="h-5 w-5 rounded-full" />
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <Skeleton.Block className={cn('h-4 rounded-full', layout.name)} />
+                <Skeleton.Block className={cn('h-3.5 rounded-full', layout.name)} />
                 <Skeleton.Block className={cn('h-4 rounded', layout.tag)} />
               </div>
             </div>
-            <div className="mx-4 mt-1 border-b border-border/60" />
           </div>
         );
       })}
@@ -42,7 +41,7 @@ export function GroupRowsSkeleton({ rows = 5 }: { rows?: number }) {
 
 const SESSION_TITLE_WIDTHS = ['w-[62%]', 'w-[46%]', 'w-[54%]'];
 
-/** 会话二级行骨架：回声 SessionItem 的行槽与标题起点（真会话行相邻无 gap，同构保留）。 */
+/** 会话二级行骨架：回声 SessionItem 的行槽、标题起点与右缘相对时间轻提示。 */
 export function GroupSessionRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div aria-hidden="true" className="py-1">
@@ -51,6 +50,7 @@ export function GroupSessionRowsSkeleton({ rows = 3 }: { rows?: number }) {
           <Skeleton.Block
             className={cn('ml-[61px] h-3.5 rounded-full', SESSION_TITLE_WIDTHS[index % SESSION_TITLE_WIDTHS.length])}
           />
+          <Skeleton.Block className="ml-auto mr-6 h-2.5 w-8 shrink-0 rounded-full" />
         </div>
       ))}
     </div>

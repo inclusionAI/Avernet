@@ -53,7 +53,7 @@ def fake_bot_repo():
     """默认 Step 1 命中,返 active_engine='openclaw'。"""
     repo = MagicMock()
     repo.get_by_binding_id.return_value = {"active_engine": "openclaw"}
-    repo.get_by_id_and_owner.return_value = None
+    repo.get_by_id_and_entity.return_value = None
     return repo
 
 
@@ -157,7 +157,7 @@ def test_step1_hit_engine_type_claude_code(
     assert conn_info["engine_type"] == "claude_code"
     fake_bot_repo.get_by_binding_id.assert_called_once_with(42)
     # Step 1 命中后不应触发 Step 2 fallback
-    fake_bot_repo.get_by_id_and_owner.assert_not_called()
+    fake_bot_repo.get_by_id_and_entity.assert_not_called()
 
 
 def test_step1_hit_engine_type_openclaw_regression_guard(
@@ -222,7 +222,7 @@ def test_step2_fallback_resolves_service_bot_via_bolt_id(
     # Step 1 查不到(service bot baas publish_ext binding 经典场景)
     fake_bot_repo.get_by_binding_id.return_value = None
     # Step 2:by (bolt_id, entity_id) 查到 bot
-    fake_bot_repo.get_by_id_and_owner.return_value = {
+    fake_bot_repo.get_by_id_and_entity.return_value = {
         "active_engine": "openclaw",
         "bot_type": "service",
     }
@@ -233,7 +233,7 @@ def test_step2_fallback_resolves_service_bot_via_bolt_id(
     assert conn_info["engine_type"] == "openclaw"
     fake_bot_repo.get_by_binding_id.assert_called_once_with(42)
     # bolt_id="20260527_lqk6d4og"(fake_binding fixture), entity_id="100019"
-    fake_bot_repo.get_by_id_and_owner.assert_called_once_with(
+    fake_bot_repo.get_by_id_and_entity.assert_called_once_with(
         "20260527_lqk6d4og", "100019"
     )
 
@@ -243,7 +243,7 @@ def test_step2_fallback_claude_code_service_bot(
 ):
     """Step 2 反查,claude_code service bot 拿到正确 engine。修复目标 case。"""
     fake_bot_repo.get_by_binding_id.return_value = None
-    fake_bot_repo.get_by_id_and_owner.return_value = {
+    fake_bot_repo.get_by_id_and_entity.return_value = {
         "active_engine": "claude_code",
         "bot_type": "service",
     }
@@ -262,7 +262,7 @@ def test_fallback_to_default_engine_when_both_steps_miss(
 ):
     """两步反查全部 miss → 返默认 'openclaw'(REL610 等价),不再 raise。"""
     fake_bot_repo.get_by_binding_id.return_value = None
-    fake_bot_repo.get_by_id_and_owner.return_value = None
+    fake_bot_repo.get_by_id_and_entity.return_value = None
     builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
 
     conn_info = builder.build(fake_binding, user_id="user-1")
@@ -283,7 +283,7 @@ def test_fallback_when_device_props_has_no_bolt_id(
 
     assert conn_info["engine_type"] == "openclaw"
     # 没 bolt_id 不应触发 Step 2
-    fake_bot_repo.get_by_id_and_owner.assert_not_called()
+    fake_bot_repo.get_by_id_and_entity.assert_not_called()
 
 
 def test_fallback_when_device_props_is_none(

@@ -1,3 +1,4 @@
+import { CANCEL_UI_TEXT, SEND_BAN_UI_TEXT } from '@/adapters/a2a/bootstrap';
 import { clearBotCdnConfig, queryAndRegisterBotLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { listTaskPreflightMessages, mergeTaskPreflightMessages } from '@/services/tasks/taskPreflightMessageStore';
 import { createBotChatProvider, type BotChatState } from '@/services/workspace/botChatProvider';
@@ -7,6 +8,7 @@ import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
+import { enrichFileRefContent } from './botChatMessagePrefill';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
@@ -14,28 +16,6 @@ export interface SendFileRefs {
   resourceReferences?: ResourceReference[];
   promptFileRefs?: PromptFileRef[];
   fileRefDisplay?: Array<{ insert_id: string; name: string }>;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** 仅富化本地乐观消息:把 `<file-ref insert_id="X">` 补上 name,供气泡渲染文件名胶囊。 */
-function enrichFileRefContent(content: string, fileRefDisplay?: Array<{ insert_id: string; name: string }>): string {
-  if (!fileRefDisplay || fileRefDisplay.length === 0) return content;
-  let out = content;
-  for (const ref of fileRefDisplay) {
-    if (!ref.insert_id || !ref.name) continue;
-    const escName = ref.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const openTag = new RegExp(
-      `(<file-ref\\b[^>]*?\\binsert_id=["']${escapeRegExp(ref.insert_id)}["'][^>]*?)(\\s*/?>)`,
-      'i',
-    );
-    out = out.replace(openTag, (match, pre, tail) =>
-      /\bname\s*=/i.test(pre) ? match : `${pre} name="${escName}"${tail}`,
-    );
-  }
-  return out;
 }
 export type BotLibraryCdnLoader = (botId: string) => Promise<number>;
 
@@ -142,6 +122,15 @@ export function useBotChat(
     };
   }, [provider]);
 
+  // A2A M2 bootstrap seam：B12 取消四态播报（单行 toast；文案单源 CANCEL_UI_TEXT，
+  // 与 v3 路径互不干扰——A2A 未启用时 provider 永不触发该订阅源）。
+  useEffect(() => {
+    if (!provider) return;
+    return provider.subscribeToCancelOutcome?.((outcome) => {
+      toast(CANCEL_UI_TEXT[outcome.kind]);
+    });
+  }, [provider]);
+
   useEffect(() => {
     if (!provider || !sessionId) return;
     let cancelled = false;
@@ -175,6 +164,12 @@ export function useBotChat(
 
   const send = (text: string, options?: SendFileRefs) => {
     if (!sessionId || !text.trim() || chat.isRequesting) return;
+    // A2A M2 bootstrap seam：§3.1 context 级发送禁令门——CancelTask 落地"停止未确认"
+    // 期间禁发同 context 新消息（文案单源 SEND_BAN_UI_TEXT）；非 A2A 面恒放行。
+    if (provider?.isSendBanned?.()) {
+      toast.error(SEND_BAN_UI_TEXT);
+      return;
+    }
     const trimmed = text.trim();
     const displayContent = enrichFileRefContent(trimmed, options?.fileRefDisplay);
     chat.onRequest({

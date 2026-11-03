@@ -71,3 +71,20 @@ export async function listTasks(
     params: params as unknown as Record<string, unknown>,
   });
 }
+
+/**
+ * 下载任务级 OBJECT_FILE 产物内容。
+ *
+ * 端点为任务产物内容代理接口（内部部署路径为 /api/v1/collaboration/tasks/artifacts/{id}/content）。
+ * 后端代理对象存储读写并发回原始字节；不携带 X-Relay-Token。
+ */
+export function downloadTaskArtifactContent(artifactId: string, baseUrl: string = DEFAULT_BASE): Promise<Blob> {
+  const path = `${taskApiBase()}/artifacts/${encodeURIComponent(artifactId)}/content`;
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
+  return backendRequest<Blob>(url, {
+    method: 'GET',
+    responseType: 'blob',
+    injectUserId: false,
+    operation: 'download-task-artifact-content',
+  });
+}

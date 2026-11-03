@@ -12,7 +12,7 @@ fn admission(id: &str, text: serde_json::Value, kind: DeliveryType) -> AdmitMess
         display_message: None,
         message_id: id.into(), flow_kind: DeliveryFlowKind::Group, now_ms: 1,
         expire_at_ms: None, event: None,
-        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 100, semantic_projection_json: serde_json::json!({"version":1}) }],
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 100, semantic_projection_json: serde_json::json!({"version":1}), run_id: None }],
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "g".into(), session_id: "s".into(), sender_id: "human".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new(),
             content: serde_json::json!({"text":text,"attachments":[{"attachment_id":id,"type":"image","file_name":"image.png","url":"https://example.invalid/image"}]}) },
@@ -20,8 +20,11 @@ fn admission(id: &str, text: serde_json::Value, kind: DeliveryType) -> AdmitMess
 }
 
 fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
-    DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
-        event, now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None }
+    DeliveryTransitionCommand {
+        caller_dispatch_commit: None, caller_cancel: None, caller_terminal: None,
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event, now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }
 }
 
 async fn fixture(texts: Vec<serde_json::Value>) -> (Arc<MemoryMessageRepo>, ManagedMessageDelivery, PersistedMessageDelivery) {

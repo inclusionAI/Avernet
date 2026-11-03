@@ -16,6 +16,7 @@ from injector import inject
 from sqlalchemy import func
 
 from agentclaw.community.core.quality.models import QualityTaskRecord
+from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator, resource_owner_filter
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -77,6 +78,8 @@ class QualityTaskRepository(
     ) -> tuple[list[QualityTaskRecord], int]:
         """List quality tasks by conditions with pagination."""
         with self._db.orm_session() as session:
+            if bot_id and owner_id:
+                owner_id = resource_locator(session, bot_id, owner_id)
             query = session.query(self._Model).filter(
                 self._Model.env == get_current_env(),
                 self._Model.task_type == task_type,
@@ -85,7 +88,10 @@ class QualityTaskRepository(
             if bot_id:
                 query = query.filter(self._Model.bot_id == bot_id)
             if owner_id:
-                query = query.filter(self._Model.owner_id == owner_id)
+                query = query.filter(
+                    self._Model.owner_id == owner_id if bot_id else
+                    resource_owner_filter(self._Model.bot_id, self._Model.owner_id, owner_id)
+                )
 
             total = query.count()
             rows = (
@@ -135,6 +141,8 @@ class QualityTaskRepository(
     ) -> QualityTaskRecord:
         """Create a new quality task."""
         with self._db.orm_session() as session:
+            if bot_id and owner_id:
+                owner_id = resource_locator(session, bot_id, owner_id)
             row = self._Model(
                 uuid=uuid,
                 task_type=task_type,

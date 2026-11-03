@@ -46,3 +46,25 @@ test('释放后同步状态并留在列表', async () => {
   expect(load).toHaveBeenCalledWith({ silent: true });
   expect(history.push).not.toHaveBeenCalled();
 });
+
+test.each(['running', 'prestable', 'failed'] as const)('%s 态获取锁后仅刷新，不跳转编辑页', async (lifecycle) => {
+  (botEditLockService.claim as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const target = { ...bot, lifecycle };
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+  await act(async () => result.current.claimLock(target));
+  expect(botEditLockService.claim).toHaveBeenCalledWith(target);
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).not.toHaveBeenCalled();
+});
+
+test('运行态释放锁后刷新列表，不跳转编辑页', async () => {
+  (botEditLockService.release as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const target = { ...bot, lifecycle: 'running' as const, lock: { status: 'mine' as const } };
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+  await act(async () => result.current.releaseLock(target));
+  expect(botEditLockService.release).toHaveBeenCalledWith(target);
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).not.toHaveBeenCalled();
+});

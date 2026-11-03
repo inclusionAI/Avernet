@@ -70,6 +70,27 @@ impl ProcessManager {
     }
 
     pub(crate) async fn start_bcs_with_port(&mut self, data_dir: &PathBuf, port: u16) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        self.start_bcs_with_port_and_extra_config(data_dir, port, None).await
+    }
+
+    /// Start BCS server with extra top-level `bcs-config.json`
+    /// keys (bot-authority Task 8: the `[bot_authority]`
+    /// trusted-app scope section). `None` keeps the exact
+    /// base config used by `start_bcs`.
+    pub async fn start_bcs_with_extra_config(
+        &mut self,
+        data_dir: &PathBuf,
+        extra_config: Option<serde_json::Value>,
+    ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
+        self.start_bcs_with_port_and_extra_config(data_dir, 0, extra_config).await
+    }
+
+    async fn start_bcs_with_port_and_extra_config(
+        &mut self,
+        data_dir: &PathBuf,
+        port: u16,
+        extra_config: Option<serde_json::Value>,
+    ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
 
         // Build BCS binary path
         let bcs_bin = std::env::current_exe()?
@@ -83,10 +104,14 @@ impl ProcessManager {
         let configs_dir = data_dir.join("configs");
         std::fs::create_dir_all(&configs_dir)?;
 
-        let config_content = serde_json::json!({
+        let mut config_content = serde_json::json!({
             "bind": "127.0.0.1",
             "port": port,
             "bots_base_dir": data_dir.to_str().unwrap_or(""),
+            // Same strict-posture default as the in-process test
+            // servers (helpers/mod.rs): suites keep proving strict
+            // denies; the migration-window shim opts in per-suite.
+            "bot_authority": { "legacy_created_by_fallback": false },
             "dingtalk_accounts": [],
             "secret": {
                 "provider": "env",
@@ -97,6 +122,15 @@ impl ProcessManager {
                 }
             }
         });
+        if let Some(extra) = extra_config {
+            if let (Some(base), Some(extra_obj)) =
+                (config_content.as_object_mut(), extra.as_object())
+            {
+                for (key, value) in extra_obj {
+                    base.insert(key.clone(), value.clone());
+                }
+            }
+        }
         let config_file = configs_dir.join("bcs-config.json");
         std::fs::write(&config_file, serde_json::to_string_pretty(&config_content)?)?;
 

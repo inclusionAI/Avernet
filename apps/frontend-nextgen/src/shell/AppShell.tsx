@@ -1,17 +1,22 @@
 import { Drawer, DrawerContent, DrawerTitle, IconButton } from '@/components/ui';
+import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
 import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { workspaceService } from '@/services/workspace/workspaceService';
+import { isTaskNavigationAtCurrentRoute } from '@/services/tasks/taskConversationNavigation';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { history, useLocation } from '@umijs/max';
 import { Menu } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
 import { getMergedNavigationItems, getNavigationItem } from './navigation';
 import { getRouteMeta } from './routeMeta';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /**
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
@@ -47,6 +52,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 被形态开关隐藏（spaceSwitcher=false）时 Bot 页面对 spaceContextStore 的消费；
   // 切换器自身的挂载/打开触发由 SpaceSwitcher 承担（幂等+并发单飞，同帧不重复请求）。
   const activeSection = activeItem?.section;
+  // 任务副屏的保活 lease 只覆盖「源会话 → 导航目标会话」这一次 handoff。
+  // 如果路由实际离开目标（退出会话页/普通路由切换），必须通知持久副屏宿主强制关闭；
+  // 否则旧任务 tab 会跨路由悬挂，并在后续会话里把别的会话任务继续展示出来。
+  const previousTaskRouteKeyRef = useRef<string | null>(null);
+  const taskRouteKey = `${location.pathname}${location.search ?? ''}${location.hash ?? ''}`;
+  useEffect(() => {
+    const previousTaskRouteKey = previousTaskRouteKeyRef.current;
+    previousTaskRouteKeyRef.current = taskRouteKey;
+    if (previousTaskRouteKey === null) return;
+    const { navigation, requestStaleRouteRelease } = useTaskConversationNavigationStore.getState();
+    if (navigation?.routeCommitted && !isTaskNavigationAtCurrentRoute(navigation)) {
+      requestStaleRouteRelease();
+    }
+  }, [taskRouteKey]);
   useEffect(() => {
     if (activeSection === 'bot') void initSpaceContext();
   }, [activeSection]);
@@ -56,6 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isDesktop, hideNavigation]);
   // <lg 抽屉内点导航：跳转并收起抽屉。
   const handleMobileNavigate = (path: string) => {
+    Tracert.click(Points.shell.navClick, { nav_target: path });
     history.push(path);
     setMobileNavOpen(false);
   };
@@ -93,7 +113,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               activePath={location.pathname}
               collapsed={sidebarCollapsed}
               items={mergedItems}
-              onNavigate={(path) => history.push(path)}
+              onNavigate={(path) => {
+                Tracert.click(Points.shell.navClick, { nav_target: path });
+                history.push(path);
+              }}
               onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
               currentUser={currentUser}
             />
@@ -105,12 +128,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {!hideNavigation && inlineNavEntries === 0 && (
               <div
                 data-testid="primary-nav-fallback-strip"
-                className="flex h-12 shrink-0 items-center border-b border-border bg-card px-2 lg:hidden"
+                className="flex h-12 shrink-0 items-center border-b border-divider bg-card px-2 lg:hidden"
               >
                 <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={openNav} />
               </div>
             )}
-            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+              {children}
+              <PersistentChatLayoutPanelViewport />
+            </main>
           </div>
         </div>
         {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。 */}

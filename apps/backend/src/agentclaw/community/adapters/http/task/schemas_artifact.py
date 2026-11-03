@@ -37,8 +37,10 @@ class TaskArtifactAddRequestDTO(BaseModel):
     )
     file_content: dict | str | None = Field(
         None,
-        description="file 分支内容对象:storage_type(bot_workspace|session_file)/storage_id"
-        "(bot_workspace=工作区相对路径,拒绝绝对路径与 .. 逃逸)/file_type/file_name/file_id(session_file 必填)",
+        description="file 分支内容对象:storage_type(bot_workspace|session_file|object_file)/storage_id"
+        "(bot_workspace=工作区相对路径,拒绝绝对路径与 .. 逃逸;object_file=稳定对象 key,"
+        "经 POST /artifacts/object-file 上传后由服务端派生)/file_type/file_name/file_id"
+        "(session_file 必填;bot_workspace 与 object_file 恒 None)",
     )
     url_link_content: dict | str | None = Field(
         None, description="url_link 分支内容对象:url(http s)+type(业务类型)"

@@ -9,6 +9,7 @@ def test_dws_management_routes_and_strict_inputs_are_published():
     document = json.loads(path.read_text())
     prefix = "/openapi/v1/bots/{bot_id}/dws-hosting"
     expected = {
+        "/eligibility": {"get"},
         "": {"get"},
         "/settings": {"get", "put"},
         "/enabled": {"put"},

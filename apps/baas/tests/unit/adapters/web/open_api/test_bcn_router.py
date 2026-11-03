@@ -137,7 +137,7 @@ def _chat_send_body():
                 "format": "jwt",
                 "token": "caller-secret",
                 "expires_at_ms": 1_800_000_000_000,
-                "type": "agentpaas",
+                "type": "agentpass",
             },
         },
     }
@@ -150,7 +150,7 @@ def test_chat_send_request_parses_caller_identity_extensions() -> None:
     assert request.extensions.caller_context is not None
     assert request.extensions.caller_context.subject.ref == "workno-agent"
     assert request.extensions.caller_execution_token is not None
-    assert request.extensions.caller_execution_token.type == "agentpaas"
+    assert request.extensions.caller_execution_token.type == "agentpass"
     assert request.extensions.caller_execution_token.version == "1.0"
     assert request.extensions.caller_execution_token.expires_at_ms == 1_800_000_000_000
 

@@ -86,8 +86,7 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         now_ms: 100, expire_at_ms: None, event: None,
         targets: ["bot-driver", "bot-observer"].into_iter().map(|target| DeliveryAdmissionTarget {
             rejection: None, target_bot_id: target.into(), kind, max_queued: 10,
-            semantic_projection_json: json!({"version":1}),
-        }).collect(),
+            semantic_projection_json: json!({"version":1}), run_id: None,}).collect(),
         message: NewMessage {
             group_id: "group-1".into(), session_id: "group-1:failure".into(), sender_id: "system".into(),
             sender_type: SenderType::System, message_type: "system".into(), content: json!({"text":"initial context"}),
@@ -97,6 +96,9 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         },
     }).await.unwrap();
     let command = |row: &bcs_domain::message_delivery::PersistedMessageDelivery, event| DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: 200, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     };

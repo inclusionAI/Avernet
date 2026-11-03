@@ -113,9 +113,10 @@ class PublishDraftRestoreMixin:
         if target.source_bot_pk != draft.source_bot_pk or target.env != draft.env:
             return draft, None, "上一版本与当前草稿不属于同一个 Bot 或环境"
 
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=draft.source_bot_id,
             user_id=draft.owner_id,
+            source_bot_pk=draft.source_bot_pk,
         )
         if bot is None:
             return draft, target, f"Bot不存在: {draft.source_bot_id}"
@@ -272,9 +273,10 @@ class PublishDraftRestoreMixin:
         if not draft or not target or reason != "可以恢复草稿":
             raise BotPublishServiceError(f"无法恢复草稿: {reason}")
 
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=draft.source_bot_id,
             user_id=draft.owner_id,
+            source_bot_pk=draft.source_bot_pk,
         )
         if not bot or not bot.get("binding_id"):
             raise BotPublishServiceError("草稿 Bot 缺少有效的设备绑定")

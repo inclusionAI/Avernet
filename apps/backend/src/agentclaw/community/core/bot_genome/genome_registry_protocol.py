@@ -1,0 +1,151 @@
+"""Service API of the Genome Registry (RSI-03), re-exported by ``api/bot_genome_registry_service.py``.
+
+Every call names the bot (:class:`BotRef`); a revision id, sequence number
+or ref name from another bot resolves to :class:`RevisionNotFound`.
+``capture`` and ``commit_patch`` are ``async`` because the state reader and
+the delivery-side checks are.
+"""
+
+from __future__ import annotations
+
+from abc import abstractmethod
+from typing import Protocol, runtime_checkable
+
+from agentclaw.community.core.apply_engine.desired_state import DesiredState
+from agentclaw.community.core.bot_genome.models import (
+    BotRef,
+    Drift,
+    ContentReceipt,
+    GenomeDiff,
+    GenomeRef,
+    GenomeRevision,
+    Provenance,
+    RecordedRevision,
+    RefMover,
+    RefUpdate,
+    RevisionPage,
+    RevisionStatus,
+    RunScope,
+)
+from agentclaw.community.core.bot_genome.patch_models import GenomePatch
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
+
+
+@runtime_checkable
+class GenomeRegistryProtocol(Protocol):
+    """Revisions, refs, patches, diffs, content and the compiled document of one bot."""
+
+    @abstractmethod
+    def get_revision(self, bot: BotRef, rev: str) -> GenomeRevision:
+        """``rev`` is a revision id, ``r<seq>`` or a ref name. Raises ``RevisionNotFound``."""
+        ...
+
+    @abstractmethod
+    def list_revisions(
+        self,
+        bot: BotRef,
+        *,
+        status: RevisionStatus | None = None,
+        parent: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> RevisionPage:
+        """Metadata only, newest ``seq`` first."""
+        ...
+
+    @abstractmethod
+    async def capture(self, bot: BotRef, *, created_by: Provenance) -> RecordedRevision:
+        """Record the bot's current state; parent ``active`` or none; policy copied from ``active``.
+
+        Idempotent: unchanged state returns the existing revision with
+        ``created=False``. Raises ``CaptureRefused`` naming what cannot be
+        recorded.
+        """
+        ...
+
+    @abstractmethod
+    async def commit_patch(
+        self,
+        bot: BotRef,
+        patch: GenomePatch,
+        *,
+        created_by: Provenance,
+        status: RevisionStatus,
+        run: RunScope | None = None,
+    ) -> RecordedRevision:
+        """Apply ``patch`` to its base revision and record the result as a new revision (README §6.4).
+
+        ``patch.base`` is the id of this bot's revision the ops apply to; it
+        becomes the new revision's parent. There is no separate base
+        argument. The ops must apply exactly, the result must pass the
+        policy, the limits and the apply-time checks, and the patch is
+        stored by its digest with the revision. ``status`` is ``DRAFT`` (an
+        owner's patch) or ``CANDIDATE`` (a run's, which also names
+        ``candidate/<run>/<n>`` and needs ``run``). Idempotent for the
+        recorder: the same patch retried by the same run (or an owner's
+        draft reproducing a revision) returns the revision with
+        ``created=False``; a candidate whose result another run, a draft, a
+        capture, or this run with a different patch recorded is refused
+        (``already_recorded``). Raises
+        ``RevisionNotFound`` for a base that is not this bot's,
+        ``PatchRejected`` with every reason, ``LimitExceeded``,
+        ``ContentNotReachable``.
+        """
+        ...
+
+    @abstractmethod
+    def set_policy(self, bot: BotRef, policy: GenomePolicy, *, created_by: Provenance) -> RecordedRevision:
+        """Record a revision with ``active``'s spec and the new policy; an owner's operation (never a run's).
+
+        The spec is re-checked against what apply accepts now; ``PolicyRejected``
+        carries the policy's own reasons or the spec's.
+        """
+        ...
+
+    @abstractmethod
+    def set_status(
+        self, bot: BotRef, revision_id: str, status: RevisionStatus, *, actor: Provenance, reason: str
+    ) -> None:
+        """Metadata only; the content never changes."""
+        ...
+
+    @abstractmethod
+    def diff(self, bot: BotRef, rev: str, against: str) -> GenomeDiff: ...
+
+    @abstractmethod
+    def list_refs(self, bot: BotRef) -> list[GenomeRef]: ...
+
+    @abstractmethod
+    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance, mover: RefMover) -> GenomeRef:
+        """Compare-and-swap one ref. Raises ``MoverNotAllowed``, ``RevisionNotFound``, ``RefConflict``."""
+        ...
+
+    @abstractmethod
+    def read_content(self, bot: BotRef, digest: str) -> bytes:
+        """Bytes the bot can reach, hash-verified. Raises ``ContentNotReachable``."""
+        ...
+
+    @abstractmethod
+    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> ContentReceipt:
+        """Store uploaded bytes for a later patch. Raises ``LimitExceeded``."""
+        ...
+
+    @abstractmethod
+    def compile(self, bot: BotRef, rev: str) -> DesiredState:
+        """The revision rendered as the apply engine's desired state (``bot_genome/compile``).
+
+        Raises ``RevisionNotFound``, and ``NotAppliable`` for a revision the
+        state model refuses as recorded (one recorded before a rule the model
+        now enforces, such as a resource outside the resources root).
+        """
+        ...
+
+    @abstractmethod
+    async def drift(self, bot: BotRef) -> Drift | None:
+        """Whether the bot holds something other than ``active``, found by reading the bot.
+
+        ``None`` when the bot has no ``active`` or its captured state records
+        as ``active``'s revision id; otherwise the two ids. Raises
+        ``CaptureRefused`` when the bot's state cannot be read.
+        """
+        ...

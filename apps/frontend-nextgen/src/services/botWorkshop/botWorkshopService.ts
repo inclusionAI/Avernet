@@ -1,6 +1,7 @@
 import type { LocalBotAuthorizationRequest } from '@/domain/botWorkshop';
 import { restartPublishStageOf } from '@/domain/botWorkshop';
 import {
+  copyBot,
   createBot,
   deleteBot,
   deleteLocalBot,
@@ -27,6 +28,8 @@ import { mapBotDto, mapBotList } from './botMapper';
 import { localBotService } from './localBotService';
 import type {
   AvernetBotCreateRequest,
+  BotCopyInput,
+  BotCopyResult,
   BotCreateAuthorizationPollResult,
   BotCreateInput,
   BotCreateResult,
@@ -258,6 +261,53 @@ export const botWorkshopService = {
     }
     return { status: dto.status, message: dto.message, bot };
   },
+  /**
+   * 复制 Bot:名称/描述由用户编辑,其余字段(引擎/空间/服务模式/头像)从源 Bot 只读透传;
+   * 复制结果与创建同构 —— 需 AgentPass 授权时返回 `authorization_required`,由列表 Hook 复用
+   * `useBotCreateAuthorization` 轮询。源 Bot 的协作者/外部渠道/工具授权/密钥不继承。
+   */
+  async copyBot(input: BotCopyInput): Promise<BotCopyResult> {
+    const name = input.name.trim();
+    if (!name) throw new Error('请输入 Bot 名称');
+    if (name.includes('@')) throw new Error('Bot 名称不能包含 @');
+    if (name.length > 40) throw new Error('Bot 名称不能超过 40 个字符');
+    const description = input.description.trim();
+    const response = await copyBot({
+      source_bot_id: input.sourceBotId,
+      bot_name: name,
+      bot_desc: description,
+      excludes: input.excludes,
+      ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}),
+    });
+    const dto = response.data;
+    if (!dto) throw new Error('复制接口未返回 Bot 数据');
+    if ('iframe_url' in dto || 'redirect_url' in dto) {
+      const botId = typeof dto.bot_id === 'string' ? dto.bot_id : '';
+      const iframeUrl = typeof dto.iframe_url === 'string' ? dto.iframe_url : '';
+      const redirectUrl = typeof dto.redirect_url === 'string' ? dto.redirect_url : '';
+      if (!botId || (!iframeUrl && !redirectUrl)) throw new Error('授权信息不完整,请稍后重试复制');
+      return {
+        type: 'authorization_required',
+        botId,
+        iframeUrl,
+        redirectUrl,
+        request: {
+          bot_name: name,
+          bot_desc: description,
+          engine: input.engine ?? 'openclaw',
+          cluster_name: 'ACRA',
+          bot_type: input.serviceMode === 'service' ? 'service' : 'personal',
+        },
+        ...(input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
+      };
+    }
+    const bot = mapBotDto(dto).item;
+    const avatar = await persistCreatedAvatar(bot, input.avatarUrl);
+    if (avatar.failure) {
+      return { type: 'created_with_pending_after_create', bot: avatar.bot, afterCreateFailures: [avatar.failure] };
+    }
+    return { type: 'created', bot: avatar.bot };
+  },
   async update(id: string, values: { name?: string; description?: string }) {
     const response = await updateBot(id, { bot_name: values.name, bot_desc: values.description });
     if (!response.data) throw new Error('更新接口未返回 Bot 数据');
@@ -286,7 +336,7 @@ export const botWorkshopService = {
   async restartPublish(bot: BotDomain) {
     const stage = restartPublishStageOf(bot.lifecycle);
     if (!stage) throw new Error('当前发布状态不支持重启发布');
-    await botEditorService.restartLifecycle(bot.id, stage);
+    await botEditorService.restartLifecycle(bot.id, stage, bot.ownerId);
   },
   async enableService(id: string) {
     await upgradeBotToService(id);

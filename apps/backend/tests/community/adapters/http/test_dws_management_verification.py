@@ -9,11 +9,31 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Injector, InstanceProvider
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 
 from agentclaw.community.adapters.http.dws_hosting.router import router
 from agentclaw.community.di import dws_management_config as config
 
 KEY = "existing-principal-signing-key-for-offline-tests"
+
+
+def test_verifier_and_runtime_share_identity_policy_without_rewriting_proof(client):
+    class AliasIdentity(DwsRolloutIdentity):
+        def key(self, value):
+            return "owner" if value in {"owner", "alias"} else value
+
+    client.app.state.injector.binder.bind(DwsRolloutIdentity, to=AliasIdentity())
+    client.app.state.injector.binder.bind(SystemConfigServiceProtocol, to=InstanceProvider(
+        SimpleNamespace(get_config=lambda **_: {"mode": "allowlist", "staff_ids": ["alias"]})
+    ))
+    body = proof(operation="enabled", data={"enabled": True})
+    assert client.post("/internal/dws-hosting/verify-command", json=body).json() == {"verified": True}
+    assert client.post("/internal/dws-hosting/runtime-eligibility", json=body).json() == {"allowed": True}
+    tampered = dict(body, payload=body["payload"].replace('"owner"', '"alias"'))
+    assert client.post("/internal/dws-hosting/verify-command", json=tampered).status_code == 403
 
 
 @pytest.fixture
@@ -26,7 +46,43 @@ def client(monkeypatch):
     )
     app = FastAPI()
     app.include_router(router)
+    injector = Injector()
+    injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": "all"})),
+    )
+    attach_injector(app, injector)
     return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    "mode,allowed", [("all", True), ("disabled", False), ("allowlist", False)]
+)
+def test_runtime_proof_rechecks_current_policy(client, mode, allowed):
+    client.app.state.injector.binder.bind(
+        SystemConfigServiceProtocol,
+        to=InstanceProvider(SimpleNamespace(get_config=lambda **_: {"mode": mode})),
+    )
+    body = proof(operation="enabled", data={"enabled": True}, timestamp_ms=0)
+    assert client.post(
+        "/internal/dws-hosting/runtime-eligibility", json=body
+    ).json() == {"allowed": allowed}
+    assert (
+        client.post("/internal/dws-hosting/verify-command", json=body).status_code
+        == 403
+    )
+
+
+@pytest.mark.parametrize(
+    "changes", [{}, {"operation": "enabled", "data": {"enabled": False}}]
+)
+def test_runtime_proof_requires_enable(client, changes):
+    assert (
+        client.post(
+            "/internal/dws-hosting/runtime-eligibility", json=proof(**changes)
+        ).status_code
+        == 403
+    )
 
 
 def proof(**changes):

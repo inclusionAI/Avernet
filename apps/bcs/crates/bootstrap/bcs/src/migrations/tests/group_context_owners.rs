@@ -69,7 +69,10 @@ VALUES ('ctx-owners-upgrade', 'owner_upgrade', 'session', 'sess-upgrade', 'v1', 
     );
 
     let expected_checksum = sqlite_migration_checksum(
-        SQLITE_VERSIONED_MIGRATIONS.iter().find(|migration| migration.version == 35).unwrap()
+        SQLITE_VERSIONED_MIGRATIONS
+            .iter()
+            .find(|migration| migration.version == 35)
+            .expect("group_context_owners migration listed"),
     );
     let record = applied_sqlite_migration(&db, 35)
         .await?

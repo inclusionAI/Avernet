@@ -590,9 +590,9 @@ queued → running → completed | failed | cancelled | budget_exhausted
    （[§11.3](#113-紧急停止开关)）。
 2. **检查漂移并冻结**策略版本、参数、父版本、允许的基因、验证配置和预算。在
    解析父引用（`active`）之前，基因组注册表会检查 Bot 是否发生了漂移
-   （`GenomeRegistry.applied_revision` 与 `active` 不同）：其最近一次应用的
-   Manifest 文档摘要与 `active` 编译出的摘要不同，通常发生在直接
-   `PUT /config-manifest` 之后（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+   （`GenomeRegistry.drift(bot)`）：它读取 Bot 的当前状态，而该状态会记录成的
+   修订版 id 与 `active` 不同，通常发生在直接 `PUT /config-manifest` 或设备上的
+   手工编辑之后（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
    如果已漂移，运行不会启动：它被记录并立即以 `cancelled` 结束，结束原因为
    `out_of_band_change`（提议），不预留预算，也不创建作业。在所有者完成调和之前，
    运行都会以这种方式被拒绝。否则，父引用此时被解析为修订版 id，因此运行期间的

@@ -701,7 +701,7 @@ async def test_real_backup_failure_keeps_durable_restart_running_without_failed_
     # Redelivery observes the existing workflow instead of retrying backup/restart.
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
     s.service.restart_bot.assert_called_once()
-    runtime.post_bots_api.assert_called_once()
+    assert runtime.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
 
 
 @pytest.mark.asyncio

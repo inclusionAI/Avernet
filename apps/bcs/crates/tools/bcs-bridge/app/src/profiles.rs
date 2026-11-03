@@ -1,6 +1,45 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::bail;
+use anyhow::{Context, bail};
+
+/// Resolve an implicit start without reading credentials or configuration contents.
+pub fn start_configuration(home: &Path) -> anyhow::Result<PathBuf> {
+    let default = home.join(".bcn-bridge/bridge.toml");
+    if default.try_exists().context("Cannot inspect default bridge configuration")? { return Ok(default); }
+    let root = home.join(".bcn-bridge/profiles");
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).context("Cannot list bridge profiles"),
+    };
+    let mut profiles = Vec::new();
+    if let Some(entries) = entries {
+        for entry in entries {
+            let entry = entry.context("Cannot inspect bridge profile directory")?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue; };
+            let Ok(path) = configuration(home, name) else { continue; };
+            match std::fs::metadata(&path) {
+                Ok(metadata) if metadata.is_file() => profiles.push((name.to_owned(), path)),
+                Ok(_) => {},
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error).context("Cannot inspect bridge profile configuration"),
+            }
+        }
+    }
+    profiles.sort_by(|a, b| a.0.cmp(&b.0));
+    match profiles.as_slice() {
+        [(name, path)] => {
+            eprintln!("Using bridge profile: {name}");
+            Ok(path.clone())
+        }
+        [] => bail!("No bridge configuration found at {} or in {}. Complete Bot onboarding first, or pass --profile <name> or --config <path>.", default.display(), root.display()),
+        _ => {
+            let choices = profiles.iter().map(|(name, _)| format!("  bcs-bridge --profile {name} start --daemon")).collect::<Vec<_>>().join("\n");
+            bail!("Multiple bridge profiles found; choose one with --profile:\n{choices}")
+        }
+    }
+}
 
 pub fn configuration(home: &Path, name: &str) -> anyhow::Result<PathBuf> {
     if name.is_empty() || name.len() > 64

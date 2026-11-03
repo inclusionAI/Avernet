@@ -4,6 +4,7 @@
  *   轮询 getMaterializeStatus 到 ready/failed。列表/删除/下载走 controller。
  * 复用 sessionFileUtils 白名单与格式化。
  */
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import {
   buildBotSessionFileContentUrl,
   completeUpload,
@@ -71,7 +72,7 @@ function mapIntent(dto: UploadIntentDto): UploadIntentView {
   };
 }
 
-function buildParams(userId: string, ownerId?: string, stage?: 'draft' | 'verify' | 'online'): BotRequestParams {
+function buildParams(userId: string, ownerId?: string, stage?: BotRuntimeStage): BotRequestParams {
   return {
     user_id: resolveUserId(userId),
     ...(ownerId ? { owner_id: ownerId } : {}),
@@ -114,7 +115,7 @@ export const botSessionFileService = {
     file: File,
     opts: {
       ownerId?: string;
-      stage?: 'draft' | 'verify' | 'online';
+      stage?: BotRuntimeStage;
       signal?: AbortSignal;
       onProgress?: (loaded: number, total: number) => void;
     },
@@ -169,9 +170,14 @@ export const botSessionFileService = {
     sessionId: string,
     userId: string,
     ownerId?: string,
+    friendUserId?: string,
+    stage?: BotRuntimeStage,
   ): Promise<DomainResult<BotSessionFileListResult>> {
     try {
-      const data = await listReadyApi(botId, sessionId, buildParams(userId, ownerId));
+      const data = await listReadyApi(botId, sessionId, {
+        ...buildParams(userId, ownerId, stage),
+        ...(friendUserId ? { f_user_id: resolveUserId(friendUserId) } : {}),
+      });
       const items = (data.files ?? []).map(mapView);
       return { ok: true, data: { items, total: items.length } };
     } catch (err) {
@@ -187,8 +193,15 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
+    stage?: BotRuntimeStage,
   ): string {
-    const path = buildBotSessionFileContentUrl(botId, sessionId, resourceId, buildParams(userId, ownerId), disposition);
+    const path = buildBotSessionFileContentUrl(
+      botId,
+      sessionId,
+      resourceId,
+      buildParams(userId, ownerId, stage),
+      disposition,
+    );
     const origin = resolveGroupGatewayOrigin();
     return origin ? `${origin}${path}` : path;
   },
@@ -200,12 +213,13 @@ export const botSessionFileService = {
     resourceId: string,
     userId: string,
     ownerId?: string,
+    stage?: BotRuntimeStage,
   ): Promise<string> {
     const contentUrl = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId),
+      buildParams(userId, ownerId, stage),
       'attachment',
     );
     return fetchExternalDownloadUrl(contentUrl);
@@ -217,9 +231,10 @@ export const botSessionFileService = {
     resourceId: string,
     userId: string,
     ownerId?: string,
+    stage?: BotRuntimeStage,
   ): Promise<DomainResult<boolean>> {
     try {
-      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId));
+      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId, stage));
       return { ok: true, data: true };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '删除失败') };
@@ -233,9 +248,10 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
+    stage?: BotRuntimeStage,
   ): Promise<DomainResult<Blob>> {
     try {
-      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId), disposition);
+      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId, stage), disposition);
       return { ok: true, data: blob };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '下载失败') };

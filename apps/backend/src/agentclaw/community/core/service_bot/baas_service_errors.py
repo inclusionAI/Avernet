@@ -7,6 +7,10 @@ class BaasServiceError(Exception):
     """Base error for BaaS Service failures."""
 
 
+class BaasBotNotFoundError(BaasServiceError):
+    """BaaS confirms that the target Bot no longer exists."""
+
+
 class BaasNoActiveDevicesError(BaasServiceError):
     """BaaS confirms that the Bot currently has no active device."""
 
@@ -25,6 +29,7 @@ class BaasTransientServiceError(BaasServiceError):
 
 
 __all__ = [
+    "BaasBotNotFoundError",
     "BaasNoActiveDevicesError",
     "BaasServiceError",
     "BaasTransientServiceError",

@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
     from secbaas.community.api.device_manage import ArcaCredentials
 
+    from ._a2a_discovery import A2aUrlDiscoveryState
+
 logger = get_logger("plugin-sandbox")
 
 _SIDECAR_ADMIN_PORT = 38081
@@ -124,6 +126,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         sidecar_container_name: str | None = None,
         pvc_name: str | None = None,
         storage: Storage | None = None,
+        discovery_state: A2aUrlDiscoveryState | None = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._pod_name = pod_name
@@ -137,6 +140,9 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         self._sidecar_container_name = sidecar_container_name
         self._pvc_name = pvc_name
         self._storage = storage
+        # A2A 发现的共享状态（review P2 回收）：destroy() 是该设备发现记录
+        # 的生命周期终点。默认 None（历史构造方行为不变）。
+        self._discovery_state = discovery_state
 
     @property
     def sandbox_id(self) -> str:
@@ -218,6 +224,11 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 logger.info(
                     "local_k8s: %s %s/%s already gone", kind, self._namespace, name
                 )
+        # Service 已销毁——该设备的应用级 A2A 发现记录同步失效（review P2 回收：
+        # 共享状态按活跃设备量受控，不随历史设备总量累积；销毁窗口内在途的
+        # 发现任务其迟到回写由 state 的 in-flight 门控拒收）
+        if self._discovery_state is not None:
+            self._discovery_state.invalidate((self._namespace, service_name))
         return True
 
     def _exec_in_container(

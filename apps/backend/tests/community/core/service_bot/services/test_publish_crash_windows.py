@@ -334,7 +334,7 @@ async def _run_online_upgrade(svc, record, bot_uuid="BOT-live"):
     last.ext = {"binding": {"online": 88}}
     svc._publish_service.get_publish_by_id = _M(return_value=last)
     svc._publish_service.get_device_binding_by_id = _M(return_value=_M(device_id=bot_uuid))
-    svc._bot_service.get_bot = _M(return_value={"bot_id": "b2", "entity_id": "u1"})
+    svc._bot_service.get_bot_by_address = _M(return_value={"bot_id": "b2", "entity_id": "u1"})
     return await svc._execute_upgrade_release(
         publish_record=record, operator="op", migration_path="/m",
         bot={"bot_id": "b2", "entity_id": "u1"},
@@ -692,7 +692,7 @@ def _restart_flow(ledger, baas, build_service, record, bot_uuid="BOT-live"):
     svc._publish_service.get_device_binding_by_id = Mock(
         return_value=Mock(device_id=bot_uuid)
     )
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._mutate_and_update_ext = Mock()
     svc.refresh_publish_handle = Mock()
     return svc
@@ -736,7 +736,7 @@ def _scale_flow(ledger, baas, record, bot_uuid="BOT-live"):
     svc._publish_service.get_device_binding_by_id = Mock(
         return_value=Mock(device_id=bot_uuid)
     )
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._ext_state.get_latest_ext = Mock(return_value={"binding": {"online": 42}})
     svc._resolve_scale_target_count = Mock(return_value=3)
     svc._mutate_and_update_ext = Mock()
@@ -779,7 +779,7 @@ def _eval_flow(ledger, baas, build_service, record):
     svc = _flow(ledger=ledger, baas=baas, build_service=build_service,
                 publish_service=Mock())
     svc._publish_service.get_publish_by_id = Mock(return_value=record)
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     return svc
 
 
@@ -875,7 +875,7 @@ async def test_rollback_deploy_crash_after_issue_resume_adopts():
     svc._publish_service.get_device_binding_by_id = Mock(
         return_value=Mock(device_id="BOT-live")
     )
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._update_publish_status = Mock()
 
     _crash_before_record(ledger)
@@ -969,7 +969,7 @@ def _recreate_restart_flow(ledger, baas, build_service, *, record, bot_uuid="BOT
     svc._publish_service.mutate_publish_ext = Mock(
         side_effect=lambda _publish_id, mutator: Mock(ext=_apply_ext_mutation(record.ext, mutator))
     )
-    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b2", "entity_id": "u1"})
+    svc._bot_service.get_bot_by_address = Mock(return_value={"bot_id": "b2", "entity_id": "u1"})
     svc.refresh_publish_handle = Mock()
     return svc
 

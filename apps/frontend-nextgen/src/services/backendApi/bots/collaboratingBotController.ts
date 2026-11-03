@@ -22,7 +22,7 @@ export interface CollaboratingBotDto {
 }
 
 export function listCollaboratingBots(
-  params: { user_id: string; page: number; page_size: number },
+  params: { user_id: string; page: number; page_size: number; stage?: 'draft' | 'verify' | 'online' },
   signal?: AbortSignal,
 ) {
   return backendRequest<BackendApiEnvelope<{ items: CollaboratingBotDto[]; total: number }>>(

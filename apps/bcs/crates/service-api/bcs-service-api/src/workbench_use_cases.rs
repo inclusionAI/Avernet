@@ -40,6 +40,15 @@ pub struct WorkbenchChatAbortAuthorizationCommand {
     pub target_bot_id: String,
 }
 
+/// Advisory speaking-semantics projection input for transport-scoped
+/// connects (V1 session-bound Workbench): the group the token is bound to
+/// and, when the scope names one, the canonical session.
+#[derive(Debug, Clone)]
+pub struct WorkbenchSpeakingModeCommand {
+    pub group_id: String,
+    pub session_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkbenchParticipantView {
     pub bot_uuid: String,
@@ -55,10 +64,19 @@ pub struct WorkbenchParticipantView {
 pub struct WorkbenchConnectOutcome {
     pub group_id: String,
     pub participants: Vec<WorkbenchParticipantView>,
+    /// Session-level speaking semantics the server resolves over the
+    /// CURRENT membership and the CURRENT per-bot caller configuration
+    /// (`resolve_speaking_mode`): `lease_required` when the connect scope
+    /// has a Human member and a caller-enabled member Bot. Advisory for
+    /// session UI; message admission always re-resolves authoritatively.
+    #[serde(default)]
+    pub speaking_mode: bcs_domain::speaking_lease::SessionSpeakingMode,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkbenchUseCaseError {
+    #[error("Provider collaboration requires the same owner")]
+    ForbiddenCollaborationScope,
     #[error("valid Human cookie is required for this Workbench request")]
     Unauthorized,
     #[error("current Human is not a participant and owns no Bot in this group")]
@@ -101,6 +119,7 @@ impl WorkbenchUseCaseError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "unauthorized",
+            Self::ForbiddenCollaborationScope => "forbidden_collaboration_scope",
             Self::ForbiddenGroupAccess => "forbidden_group_access",
             Self::ForbiddenViewActor => "forbidden_view_actor",
             Self::ForbiddenSender => "forbidden_sender",
@@ -123,6 +142,21 @@ pub trait WorkbenchSessionService: Send + Sync {
         &self,
         command: WorkbenchConnectCommand,
     ) -> Result<WorkbenchConnectOutcome, WorkbenchUseCaseError>;
+
+    /// Advisory session speaking semantics for transport-scoped connects
+    /// (the V1 session-bound Workbench connect, whose handshake does not
+    /// run the full `connect` use case): the same `resolve_speaking_mode`
+    /// reduction `connect` performs, read over the CURRENT membership and
+    /// the CURRENT per-bot caller configuration. Advisory session-UI
+    /// metadata only — message admission re-resolves authoritatively per
+    /// submission. Infallible by design: a lookup failure keeps the
+    /// projection `Plain` instead of failing the connect handshake.
+    async fn resolve_speaking_mode_projection(
+        &self,
+        _command: WorkbenchSpeakingModeCommand,
+    ) -> bcs_domain::speaking_lease::SessionSpeakingMode {
+        bcs_domain::speaking_lease::SessionSpeakingMode::Plain
+    }
 
     async fn authorize_chat_send(
         &self,

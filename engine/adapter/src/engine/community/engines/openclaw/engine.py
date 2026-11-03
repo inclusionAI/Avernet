@@ -144,6 +144,7 @@ class OpenClawEngine(BaseEngine):
             Capability.CRON_HISTORY,
             # Model
             Capability.MODEL_LIST,
+            Capability.MODEL_DEFAULT_GET,
             Capability.MODEL_SWITCH,
             # Default config
             Capability.DEFAULT_CONFIG_GET,

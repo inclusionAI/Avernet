@@ -17,9 +17,13 @@ use bcs_domain::{
 use bcs_domain::provider_registration_token::{
     self, ProviderRegisterTokenPayload, ProviderRegistrationMode,
 };
+use bcs_domain::BotCapabilities;
 use bcs_service_api::{
-    AdminBotOnboardCommand, BotConnectCommand, BotManagementService,
-    BotOnboardingService, OnboardActorIdentity, ServiceError,
+    ServiceError,
+    types::bot_authority::{
+        AuthorityActor, AuthorityMutation, OwnershipInitialization,
+    },
+    core::registry::{BotRegistryCoreService, TrustedBotRegistration},
 };
 use bcs_service_api::application::v1::{
     ApplicationError, BotRegistration, BotRegistrationScope,
@@ -34,23 +38,55 @@ pub const REGISTER_TOKEN_TTL_SECONDS: u64 = 21600; // 6 hours
 const REGISTER_TOKEN_NOTE: &str = "Use this token for bot registration within 6 hours";
 
 pub struct RegisterServiceImpl {
-    bot_management: Arc<dyn BotManagementService>,
-    bot_onboarding: Arc<dyn BotOnboardingService>,
+    /// Registry core of the trusted (ownership-initialized)
+    /// registration chain. Its Bot Store performs the atomic
+    /// lifecycle transaction; the application never touches
+    /// a repo.
+    registry: Option<Arc<dyn BotRegistryCoreService>>,
     token_secret: Vec<u8>,
+    a2a_cards: Option<Arc<dyn bcs_service_api::port::a2a_card::A2aCardPort>>,
     provider_registration: Option<Arc<dyn ProviderRegistrationCoreService>>,
 }
 
 impl RegisterServiceImpl {
-    pub fn new(
-        bot_management: Arc<dyn BotManagementService>,
-        bot_onboarding: Arc<dyn BotOnboardingService>,
-        token_secret: Vec<u8>,
-    ) -> Self {
+    pub fn new(token_secret: Vec<u8>) -> Self {
         Self {
-            bot_management,
-            bot_onboarding,
+            registry: None,
             token_secret,
+            a2a_cards: None,
             provider_registration: None,
+        }
+    }
+
+    pub fn with_a2a_cards(mut self, cards: Arc<dyn bcs_service_api::port::a2a_card::A2aCardPort>) -> Self {
+        self.a2a_cards = Some(cards); self
+    }
+
+    /// Wire the trusted registration chain (required for
+    /// v1/v2 trusted registration; fail-closed otherwise).
+    pub fn with_registry(mut self, core: Arc<dyn BotRegistryCoreService>) -> Self {
+        self.registry = Some(core);
+        self
+    }
+
+    fn registry(&self) -> Result<&dyn BotRegistryCoreService, ApplicationError> {
+        self.registry.as_deref().ok_or_else(|| {
+            ApplicationError::internal("trusted bot registration is not configured")
+        })
+    }
+
+    /// The real initiator is the verified registration-token
+    /// Human; the mutation id is a fresh server-side
+    /// idempotence key, never client data.
+    fn ownership_initialization(staff_no: &str) -> OwnershipInitialization {
+        OwnershipInitialization {
+            owner_user_id: staff_no.to_string(),
+            mutation: AuthorityMutation {
+                mutation_id: uuid::Uuid::new_v4().to_string(),
+                actor: AuthorityActor::Human {
+                    user_id: staff_no.to_string(),
+                },
+            },
         }
     }
 
@@ -74,6 +110,7 @@ impl RegisterServiceImpl {
         command: &RegisterBot,
         bot_name: &str,
         payload: ProviderRegisterTokenPayload,
+        source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>,
     ) -> Result<BotRegistration, ApplicationError> {
         let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
         if !payload.allowed_modes.contains(&mode) {
@@ -86,15 +123,40 @@ impl RegisterServiceImpl {
             ))?;
         let owner = payload.id.strip_prefix("human_")
             .ok_or(ApplicationError::Unauthenticated)?;
-        let result = self.provider_registration()?.register(RegisterProviderBot {
-            token_auth_mode: payload.auth_mode,
-            provider_id: payload.provider_id,
-            provider_bot_ref: provider_bot_ref.to_string(),
-            owner: owner.to_string(),
-            mode,
-            bot_name: bot_name.to_string(),
-            webhook_url: command.webhook_url.clone(),
-        }).await.map_err(provider_registration_error)?;
+        let initialization = Self::ownership_initialization(owner);
+        let core = self.provider_registration()?;
+        let mut registration = RegisterProviderBot {
+            token_auth_mode:payload.auth_mode,provider_id:payload.provider_id,
+            provider_bot_ref:provider_bot_ref.to_string(),owner:owner.to_string(),
+            mode,bot_name:bot_name.to_string(),webhook_url:command.webhook_url.clone(),
+        };
+        let result = if let Some(source) = source {
+            if mode != ProviderRegistrationMode::Gateway || command.webhook_url.is_some() {
+                return Err(ApplicationError::invalid("invalid_request", "A2A requires gateway mode without webhook_url"));
+            }
+            // Reauthorize before any outbound access. Core repeats admission
+            // before the transaction; no database lock covers this fetch.
+            core.authorize_a2a_registration(&registration.provider_id, owner).await.map_err(provider_registration_error)?;
+            let cards = self.a2a_cards.as_ref().ok_or_else(||ApplicationError::internal("A2A registration is not configured"))?;
+            use bcs_service_api::types::a2a_bot::A2aCardSource;
+            let (url,fetched)=match source {
+                A2aCardSource::Url(url)=>{let fetched=cards.fetch(&url,true).await.map_err(provider_registration_error)?;(Some(url),fetched)},
+                A2aCardSource::Inline(raw)=>(None,cards.validate(raw,true).await.map_err(provider_registration_error)?),
+            };
+            if registration.bot_name.is_empty() {registration.bot_name=fetched.raw.get("name").and_then(|value|value.as_str()).unwrap_or("").into();}
+            if !(2..=64).contains(&registration.bot_name.chars().count()) || registration.bot_name!=registration.bot_name.trim() {
+                return Err(ApplicationError::invalid("invalid_request","Card name requires a 2..64 character BCS display alias"));
+            }
+            let now_ms = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)
+                .map_err(|_|ApplicationError::internal("registration clock unavailable"))?.as_millis())
+                .map_err(|_|ApplicationError::internal("registration clock overflow"))?;
+            let card = bcs_service_api::types::a2a_bot::A2aRegistrationCard {
+                agent_card_url:url,
+                agent_card:fetched.raw,interface:fetched.interface,
+                registered_at_ms:now_ms,};
+            core.register_a2a_with_ownership(registration,initialization,card).await
+        } else { core.register_with_ownership(registration,initialization).await }
+            .map_err(provider_registration_error)?;
         let record = result.record;
         Ok(BotRegistration {
             bot_name: record.bot_name,
@@ -111,6 +173,25 @@ impl RegisterServiceImpl {
                 effective_webhook_url: result.effective_webhook_url,
             }),
         })
+    }
+}
+
+/// Public error mapping of the trusted chain: storage
+/// failures map to Internal; business conflicts map to
+/// their typed application errors; no SQL text and no
+/// credential content is echoed.
+fn core_registration_error(error: ServiceError) -> ApplicationError {
+    match &error {
+        ServiceError::Conflict(message) => {
+            ApplicationError::conflict("registration_conflict", message.clone())
+        }
+        ServiceError::InvalidOperation { message, .. } => {
+            ApplicationError::invalid("invalid_request", message.clone())
+        }
+        ServiceError::Forbidden(message) => {
+            ApplicationError::forbidden(message.clone())
+        }
+        _ => ApplicationError::internal("trusted registration failed"),
     }
 }
 
@@ -194,9 +275,23 @@ impl RegisterService for RegisterServiceImpl {
         &self,
         command: RegisterBot,
     ) -> Result<BotRegistration, ApplicationError> {
+        self.register_impl(command, None).await
+    }
+
+    async fn register_a2a_card(&self, command:RegisterBot, source:bcs_service_api::types::a2a_bot::A2aCardSource)->Result<BotRegistration,ApplicationError> {
+        self.register_impl(command,Some(source)).await
+    }
+
+    async fn register_a2a_bot(&self, command: RegisterBot, card_url: String) -> Result<BotRegistration, ApplicationError> {
+        self.register_impl(command, Some(bcs_service_api::types::a2a_bot::A2aCardSource::Url(card_url))).await
+    }
+}
+
+impl RegisterServiceImpl {
+    async fn register_impl(&self, command: RegisterBot, source: Option<bcs_service_api::types::a2a_bot::A2aCardSource>) -> Result<BotRegistration, ApplicationError> {
         let bot_name = command.bot_name.trim();
         let name_len = bot_name.chars().count();
-        if name_len < 2 || name_len > 64 {
+        if (source.is_none() || !command.bot_name.is_empty()) && (name_len < 2 || name_len > 64) {
             return Err(ApplicationError::invalid(
                 "invalid_request",
                 format!("bot-name must be 2-64 characters, got {name_len}"),
@@ -207,61 +302,53 @@ impl RegisterService for RegisterServiceImpl {
             Err(RegisterTokenError::UnsupportedVersion) => {
                 let payload = provider_registration_token::decode_and_verify(&command.token, &self.token_secret)
                     .map_err(|_| ApplicationError::Unauthenticated)?;
-                return self.register_provider_bot(&command, bot_name, payload).await;
+                return self.register_provider_bot(&command, bot_name, payload, source).await;
             }
             Err(_) => return Err(ApplicationError::Unauthenticated),
         };
+        // OpenAPI contract (spec §10.1): strict parsing stays;
+        // a v1 token never carries Provider/scoped fields.
         if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
             || command.provider_bot_ref.is_some()
             || command.webhook_url.is_some()
+            || source.is_some()
         {
             return Err(ApplicationError::invalid(
                 "invalid_request", "legacy register tokens only support ordinary upstream registration",
             ));
         }
         let staff_no = payload.id.trim_start_matches("human_").to_string();
-        let connect = self
-            .bot_management
-            .connect_bot(BotConnectCommand {
-                caller_actor_id: None,
-                token: None,
-                bot_id: None,
-                protocol_version: None,
+        // Trusted v1 registration (spec §10.1/§10.2): no
+        // connect→onboard orchestration and no warn-and-succeed
+        // any more. The Bot Store commits Bot, Human, owner,
+        // version, default profile and the initialization audit
+        // in ONE transaction; persistence failure returns no
+        // credential (removed legacy behavior: swallowed onboard
+        // failure followed by success).
+        let committed = self
+            .registry()?
+            .register_with_ownership(TrustedBotRegistration {
+                capabilities: BotCapabilities {
+                    name: Some(bot_name.to_string()),
+                    visibility: "protected".to_string(),
+                    ..BotCapabilities::default()
+                },
+                initialization: Self::ownership_initialization(&staff_no),
             })
             .await
-            .map_err(|_| ApplicationError::internal("bot connect failed"))?;
-        if let Err(error) = self
-            .bot_onboarding
-            .admin_onboard_bot(AdminBotOnboardCommand {
-                bot_uuid: connect.bot_uuid.clone(),
-                name: Some(bot_name.to_string()),
-                summary: None,
-                domains: vec![],
-                skills: vec![],
-                scopes: vec![],
-                binding_channels: None,
-                actor_identity: Some(OnboardActorIdentity {
-                    staff_no,
-                    nick_name: None,
-                }),
-            })
-            .await
-        {
-            tracing::warn!(
-                bot_uuid = %connect.bot_uuid,
-                error = %error,
-                "register: admin_onboard_bot failed after connect"
-            );
-        }
+            .map_err(core_registration_error)?;
+        tracing::info!(
+            bot_uuid = %committed.bot_uuid,
+            "register: trusted registration committed"
+        );
         Ok(BotRegistration {
-            bot_name: bot_name.to_string(),
-            bot_uuid: connect.bot_uuid,
-            bot_token: connect.token,
+            bot_name: committed.bot_name,
+            bot_uuid: committed.bot_uuid,
+            bot_token: committed.bot_token,
             registration: None,
         })
     }
 }
-
 // ---------------------------------------------------------------------------
 // Tests.
 // ---------------------------------------------------------------------------
@@ -271,134 +358,21 @@ mod tests {
     mod http;
     mod provider_registration;
     use super::*;
-    use std::collections::HashMap;
 
-    use bcs_service_api::ActorKind;
-    use bcs_service_api::{
-        BotConnectResult, BotLeaveCommand, BotLeaveResult, BotStatusUpdateCommand,
-        BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand, BotVisibilityResult,
-        ServiceError, SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
+    use bcs_bot::BotCore;
+    use bcs_bot_store::MemoryBotRepo;
+    use bcs_service_api::application::v1::{
+        AuthenticatedCaller, AuthenticatedUserIdentity,
     };
-    use bcs_service_api::application::v1::{AuthenticatedCaller, AuthenticatedUserIdentity};
-
-    struct FakeBotManagement {
-        fail_connect: bool,
-        connected: std::sync::Mutex<Vec<BotConnectCommand>>,
-    }
-
-    impl FakeBotManagement {
-        fn new(fail_connect: bool) -> Self {
-            Self {
-                fail_connect,
-                connected: std::sync::Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl BotManagementService for FakeBotManagement {
-        async fn connect_bot(
-            &self,
-            command: BotConnectCommand,
-        ) -> Result<BotConnectResult, BotUseCaseError> {
-            if self.fail_connect {
-                return Err(BotUseCaseError::Unauthorized("connect refused".into()));
-            }
-            self.connected
-                .lock()
-                .expect("connect lock")
-                .push(command);
-            Ok(BotConnectResult {
-                is_new: true,
-                bot_uuid: "bot-1".to_string(),
-                token: "bot-token-1".to_string(),
-            })
-        }
-
-        async fn update_status(
-            &self,
-            _command: BotStatusUpdateCommand,
-        ) -> Result<BotStatusUpdateResult, BotUseCaseError> {
-            unreachable!("register flow never calls update_status")
-        }
-
-        async fn set_visibility(
-            &self,
-            _command: BotVisibilityCommand,
-        ) -> Result<BotVisibilityResult, BotUseCaseError> {
-            unreachable!("register flow never calls set_visibility")
-        }
-
-        async fn leave_bot(
-            &self,
-            _command: BotLeaveCommand,
-        ) -> Result<BotLeaveResult, BotUseCaseError> {
-            unreachable!("register flow never calls leave_bot")
-        }
-
-        async fn switch_delivery_to_provider(
-            &self,
-            _command: SwitchDeliveryToProviderCommand,
-        ) -> Result<SwitchDeliveryToProviderResult, BotUseCaseError> {
-            unreachable!("register flow never calls switch_delivery_to_provider")
-        }
-    }
-
-    struct FakeBotOnboarding {
-        fail: bool,
-        onboarded: std::sync::Mutex<Vec<AdminBotOnboardCommand>>,
-    }
-
-    impl FakeBotOnboarding {
-        fn new(fail: bool) -> Self {
-            Self {
-                fail,
-                onboarded: std::sync::Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl BotOnboardingService for FakeBotOnboarding {
-        async fn onboard_bot(
-            &self,
-            _command: bcs_service_api::BotOnboardCommand,
-        ) -> Result<bcs_service_api::BotOnboardResult, ServiceError> {
-            unreachable!("register flow never calls onboard_bot")
-        }
-
-        async fn admin_onboard_bot(
-            &self,
-            command: AdminBotOnboardCommand,
-        ) -> Result<bcs_service_api::BotOnboardResult, ServiceError> {
-            if self.fail {
-                return Err(ServiceError::BotNotRegistered("bot-1".into()));
-            }
-            let bot_uuid = command.bot_uuid.clone();
-            let name = command.name.clone();
-            self.onboarded
-                .lock()
-                .expect("onboard lock")
-                .push(command);
-            Ok(bcs_service_api::BotOnboardResult {
-                bot_uuid,
-                onboarded: true,
-                name,
-                message: None,
-                binding_results: HashMap::new(),
-                unbound: Vec::new(),
-                capabilities: None,
-                actor_kind: ActorKind::Bot,
-            })
-        }
-
-        async fn ensure_bot(
-            &self,
-            _command: bcs_service_api::EnsureBotCommand,
-        ) -> Result<bcs_service_api::EnsureBotResult, ServiceError> {
-            unreachable!("register flow never calls ensure_bot")
-        }
-    }
+    use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotRepoPort};
+    use bcs_service_api::core::provider_registration::{
+        ProviderRegistrationCoreService, ProviderRegistrationRecord,
+        ProviderRegistrationResult, RegisterProviderBot,
+    };
+    use bcs_service_api::types::bot_authority::{
+        BotAccessRelation,
+        OwnershipInitialization,
+    };
 
     const SECRET: &[u8] = b"test-secret-key-32-bytes-long!!!";
 
@@ -417,26 +391,171 @@ mod tests {
         }
     }
 
-    fn service(
-        fail_connect: bool,
-        fail_onboard: bool,
-    ) -> (RegisterServiceImpl, Arc<FakeBotManagement>, Arc<FakeBotOnboarding>) {
-        let management = Arc::new(FakeBotManagement::new(fail_connect));
-        let onboarding = Arc::new(FakeBotOnboarding::new(fail_onboard));
-        (
-            RegisterServiceImpl::new(
-                management.clone() as Arc<dyn BotManagementService>,
-                onboarding.clone() as Arc<dyn BotOnboardingService>,
-                SECRET.to_vec(),
-            ),
-            management,
-            onboarding,
-        )
+    /// The REAL trusted chain (memory projection): one
+    /// bot repo behind the real `BotCore`; fixtures seed
+    /// the Human registry the way the Backend-synced SQL
+    /// paths provide it.
+    fn memory_chain() -> (RegisterServiceImpl, Arc<MemoryBotRepo>) {
+        // Isolated durability directory: the memory repo
+        // persists bot-info files and must not leak into
+        // the crate working directory.
+        let dir: &'static tempfile::TempDir =
+            Box::leak(Box::new(
+                tempfile::tempdir().expect("tempdir"),
+            ));
+        let repo = Arc::new(MemoryBotRepo::with_base_dir(
+            dir.path().to_path_buf(),
+        ));
+        let core: Arc<BotCore> = Arc::new(BotCore::with_repo(repo.clone()));
+        let svc =
+            RegisterServiceImpl::new(SECRET.to_vec()).with_registry(core);
+        (svc, repo)
+    }
+
+    async fn seed_human(repo: &MemoryBotRepo, user_id: &str) {
+        // A live Human ACTOR row on the shared registry —
+        // the authority guards' Human existence source.
+        use bcs_service_api::port::repo::BotRepoPort;
+
+        repo.ensure_human_actor(user_id, user_id)
+            .await
+            .expect("ensure fixture Human actor row");
+    }
+
+    /// Whether the user's Human ACTOR row exists and is a
+    /// live Human on the shared registry.
+    async fn known_human_actor_row(
+        repo: &MemoryBotRepo,
+        user_id: &str,
+    ) -> bool {
+        use bcs_service_api::ActorKind;
+        use bcs_service_api::port::repo::BotRepoPort;
+
+        repo.get(&format!("human_{user_id}"))
+            .await
+            .map(|row| row.actor_kind == ActorKind::Human)
+            .unwrap_or(false)
+    }
+
+    async fn owner_relation(
+        repo: &MemoryBotRepo,
+        bot_id: &str,
+    ) -> Option<BotAccessRelation> {
+        repo.role("human_staff-9", bot_id).await.expect("role read")
+    }
+
+    pub(super) struct FakeProviderRegistration {
+        pub authorized: std::sync::Mutex<Vec<(String, String)>>,
+        pub registered: std::sync::Mutex<Vec<RegisterProviderBot>>,
+        pub initializations:
+            std::sync::Mutex<Vec<OwnershipInitialization>>,
+        pub issue_error: std::sync::Mutex<Option<ServiceError>>,
+        pub register_error: std::sync::Mutex<Option<ServiceError>>,
+    }
+
+    impl FakeProviderRegistration {
+        pub(super) fn new() -> Self {
+            Self {
+                authorized: std::sync::Mutex::new(Vec::new()),
+                registered: std::sync::Mutex::new(Vec::new()),
+                initializations: std::sync::Mutex::new(Vec::new()),
+                issue_error: std::sync::Mutex::new(None),
+                register_error: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ProviderRegistrationCoreService for FakeProviderRegistration {
+        async fn authorize(
+            &self,
+            provider: &str,
+            owner: &str,
+        ) -> Result<
+            bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization,
+            ServiceError,
+        > {
+            self.authorized
+                .lock()
+                .unwrap()
+                .push((provider.into(), owner.into()));
+            if let Some(error) = self.issue_error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(
+                bcs_service_api::core::provider_registration::ProviderRegistrationAuthorization {
+                    allowed_modes: vec![
+                        ProviderRegistrationMode::Plugin,
+                        ProviderRegistrationMode::Gateway,
+                    ],
+                    auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+                },
+            )
+        }
+
+        /// The legacy `register` surface must no longer be a
+        /// facade path; trusted registration always carries a
+        /// real initialization.
+        async fn register(
+            &self,
+            _command: RegisterProviderBot,
+        ) -> Result<ProviderRegistrationResult, ServiceError> {
+            Err(ServiceError::InternalError(
+                "legacy provider register surface must not be used \
+                 by trusted registration"
+                    .into(),
+            ))
+        }
+
+        async fn register_with_ownership(
+            &self,
+            command: RegisterProviderBot,
+            initialization: OwnershipInitialization,
+        ) -> Result<ProviderRegistrationResult, ServiceError> {
+            self.registered.lock().unwrap().push(command.clone());
+            self.initializations.lock().unwrap().push(initialization);
+            if let Some(error) = self.register_error.lock().unwrap().take()
+            {
+                return Err(error);
+            }
+            let identity =
+                bcs_service_api::types::provider_identity::ProviderBotIdentity {
+                    agent_code: None,
+                    provider_bot_ref: command.provider_bot_ref.clone(),
+                    bot_slug: None,
+                };
+            Ok(ProviderRegistrationResult {
+                effective_webhook_url: if command.mode
+                    == ProviderRegistrationMode::Gateway
+                {
+                    Some(
+                        command
+                            .webhook_url
+                            .clone()
+                            .unwrap_or_else(|| "https://example.test/default".into()),
+                    )
+                } else {
+                    None
+                },
+                record: ProviderRegistrationRecord {
+                    provider_id: command.provider_id.clone(),
+                    provider_bot_ref: command.provider_bot_ref.clone(),
+                    owner: command.owner,
+                    mode: command.mode,
+                    bot_name: command.bot_name,
+                    bot_uuid: "scoped-bot".into(),
+                    bot_token: "runtime-token".into(),
+                    webhook_url: command.webhook_url,
+                },
+                identity,
+                auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
+            })
+        }
     }
 
     #[tokio::test]
     async fn issuance_round_trips_through_verification() {
-        let (svc, _, _) = service(false, false);
+        let (svc, _) = memory_chain();
         let view = svc
             .issue_register_token(IssueRegisterToken {
                 provider_id: None,
@@ -445,7 +564,9 @@ mod tests {
             .await
             .expect("issue");
         assert_eq!(view.note, REGISTER_TOKEN_NOTE);
-        let payload = register_token_decode_and_verify(&view.token, SECRET).expect("verify");
+        let payload =
+            register_token_decode_and_verify(&view.token, SECRET)
+                .expect("verify");
         assert_eq!(payload.id, "human_staff-1");
         assert_eq!(payload.v, 1);
         assert!(payload.exp >= now_secs() + REGISTER_TOKEN_TTL_SECONDS - 5);
@@ -454,7 +575,7 @@ mod tests {
 
     #[tokio::test]
     async fn issuance_rejects_non_human_principals() {
-        let (svc, _, _) = service(false, false);
+        let (svc, _) = memory_chain();
         let error = svc
             .issue_register_token(IssueRegisterToken {
                 provider_id: None,
@@ -471,9 +592,14 @@ mod tests {
         assert!(matches!(error, ApplicationError::Forbidden(_)));
     }
 
+    /// The v1 trusted path: the verified token owner is the
+    /// true initiator, the chain commits through the real
+    /// core, and NO connect→onboard orchestration exists
+    /// any more (the legacy warn-and-succeed is removed).
     #[tokio::test]
-    async fn registration_connects_and_onboards_with_staff_no() {
-        let (svc, management, onboarding) = service(false, false);
+    async fn trusted_registration_commits_owner_with_verified_token() {
+        let (svc, repo) = memory_chain();
+        seed_human(&repo, "staff-9").await;
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
                 provider_id: None,
@@ -492,29 +618,90 @@ mod tests {
             .await
             .expect("register");
         assert_eq!(registration.bot_name, "测试机器人");
-        assert_eq!(registration.bot_uuid, "bot-1");
-        assert_eq!(registration.bot_token, "bot-token-1");
+        assert!(matches!(
+            owner_relation(&repo, &registration.bot_uuid).await,
+            Some(BotAccessRelation::Owner)
+        ));
+        let bot = repo
+            .get(&registration.bot_uuid)
+            .await
+            .expect("committed bot");
+        assert_eq!(bot.created_by.as_deref(), Some("staff-9"));
+        assert_eq!(bot.bot_uuid, registration.bot_uuid);
+        // The returned credential is exactly the persisted
+        // runtime token of the committed Bot.
         assert_eq!(
-            onboarding
-                .onboarded
-                .lock()
-                .expect("onboard lock")
-                .last()
-                .as_ref()
-                .and_then(|cmd| cmd.actor_identity.as_ref())
-                .map(|identity| identity.staff_no.as_str()),
-            Some("staff-9")
+            repo.load_token(&registration.bot_uuid).await.as_deref(),
+            Some(registration.bot_token.as_str())
         );
-        assert_eq!(
-            management.connected.lock().expect("connect lock").len(),
-            1
+    }
+
+    #[tokio::test]
+    async fn trusted_registration_fails_closed_without_wired_registry() {
+        let svc = RegisterServiceImpl::new(SECRET.to_vec());
+        let token = register_token_encode(
+            &RegisterTokenPayload {
+                v: 1,
+                id: "human_staff-1".to_string(),
+                exp: now_secs() + 60,
+            },
+            SECRET,
+        );
+        let error = svc
+            .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
+                token,
+                bot_name: "ok-name".to_string(),
+            })
+            .await
+            .expect_err("unset chain is fail-closed");
+        assert!(matches!(error, ApplicationError::Internal(_)));
+    }
+
+    #[tokio::test]
+    async fn registration_creates_the_owner_actor_row() {
+        // Spec §10.2 literal (ruling T4-1): the trusted
+        // registration ensures the owner's Human ACTOR row
+        // in the SAME commit (memory mirror: the shared
+        // bots registry — no OAuth identity row involved).
+        let (svc, repo) = memory_chain();
+        assert!(
+            !known_human_actor_row(&repo, "staff-1").await,
+            "no Human actor row before the registration"
+        );
+        let token_view = svc
+            .issue_register_token(IssueRegisterToken {
+                provider_id: None,
+                caller: human_caller("staff-1"),
+            })
+            .await
+            .expect("issue");
+        let registration = svc
+            .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
+                token: token_view.token,
+                bot_name: "ok-name".to_string(),
+            })
+            .await
+            .expect("token-verified human registers");
+        assert!(
+            repo.get(&registration.bot_uuid).await.is_some()
+        );
+        assert!(
+            known_human_actor_row(&repo, "staff-1").await,
+            "the registration must leave a live Human actor row"
         );
     }
 
     #[tokio::test]
     async fn token_verification_failures_map_to_unauthenticated() {
-        let (svc, _, _) = service(false, false);
-        svc.issue_register_token(IssueRegisterToken {
+        let (svc, _) = memory_chain();
+        let _ignored = svc
+            .issue_register_token(IssueRegisterToken {
                 provider_id: None,
                 caller: human_caller("staff-1"),
             })
@@ -523,9 +710,9 @@ mod tests {
         for bad in ["not-a-token"] {
             let error = svc
                 .register_bot(RegisterBot {
-                mode: None,
-                provider_bot_ref: None,
-                webhook_url: None,
+                    mode: None,
+                    provider_bot_ref: None,
+                    webhook_url: None,
                     token: bad.to_string(),
                     bot_name: "ok-name".to_string(),
                 })
@@ -557,14 +744,14 @@ mod tests {
 
     #[tokio::test]
     async fn registration_rejects_invalid_name_lengths() {
-        let (svc, _, _) = service(false, false);
+        let (svc, _) = memory_chain();
         let too_long = "x".repeat(65);
         for bad in ["a", too_long.as_str()] {
             let error = svc
                 .register_bot(RegisterBot {
-                mode: None,
-                provider_bot_ref: None,
-                webhook_url: None,
+                    mode: None,
+                    provider_bot_ref: None,
+                    webhook_url: None,
                     token: "unused".to_string(),
                     bot_name: bad.to_string(),
                 })
@@ -572,52 +759,5 @@ mod tests {
                 .expect_err("bad name length is rejected");
             assert!(matches!(error, ApplicationError::InvalidInput { .. }));
         }
-    }
-
-    #[tokio::test]
-    async fn connect_failure_maps_to_internal() {
-        let (svc, _, _) = service(true, false);
-        let token_view = svc
-            .issue_register_token(IssueRegisterToken {
-                provider_id: None,
-                caller: human_caller("staff-1"),
-            })
-            .await
-            .expect("issue");
-        let error = svc
-            .register_bot(RegisterBot {
-                mode: None,
-                provider_bot_ref: None,
-                webhook_url: None,
-                token: token_view.token,
-                bot_name: "ok-name".to_string(),
-            })
-            .await
-            .expect_err("connect failure surfaces");
-        assert!(matches!(error, ApplicationError::Internal(_)));
-    }
-
-    #[tokio::test]
-    async fn onboard_failure_is_swallowed() {
-        let (svc, _, onboarding) = service(false, true);
-        let token_view = svc
-            .issue_register_token(IssueRegisterToken {
-                provider_id: None,
-                caller: human_caller("staff-1"),
-            })
-            .await
-            .expect("issue");
-        let registration = svc
-            .register_bot(RegisterBot {
-                mode: None,
-                provider_bot_ref: None,
-                webhook_url: None,
-                token: token_view.token,
-                bot_name: "ok-name".to_string(),
-            })
-            .await
-            .expect("onboard failure must not fail registration");
-        assert_eq!(registration.bot_uuid, "bot-1");
-        assert!(onboarding.onboarded.lock().expect("onboard lock").is_empty());
     }
 }

@@ -41,7 +41,7 @@
 <text x="875.0" y="132.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">canary · draft</text>
 <text x="875.0" y="149.0" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">candidate/run_7f3/1</text>
 <rect x="780" y="260" width="190" height="100" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
-<text x="875.0" y="284.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">CompiledManifest</text>
+<text x="875.0" y="284.5" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">DesiredState</text>
 <text x="875.0" y="301.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Manifest document</text>
 <text x="875.0" y="318.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">+ memory projection</text>
 <text x="875.0" y="335.5" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">→ apply, eval bots</text>

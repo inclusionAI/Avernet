@@ -1,7 +1,7 @@
 """Access control & user management — Pydantic Request/Response models."""
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 T = TypeVar("T")
 
@@ -52,6 +52,15 @@ class UserListCorrectionRequest(BaseModel):
         pattern=r"^[a-z][a-z0-9_.-]*$",
     )
     in_whitelist: bool
+    subject_type: Literal["user", "department"] = "user"
+    bot_type: Literal["service", "personal", "all"] = "all"
+
+    @model_validator(mode="after")
+    def validate_department_path(self):
+        if self.subject_type == "department":
+            from agentclaw.community.core.user_list.rules import normalize_department_path
+            self.entity_id = normalize_department_path(self.entity_id)
+        return self
 
 
 # ==================== Response Data Models ====================

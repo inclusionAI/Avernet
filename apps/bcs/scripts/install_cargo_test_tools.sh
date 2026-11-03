@@ -1,135 +1,95 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install the cargo subcommands the BCS test gates need, from prebuilt release
-# binaries instead of `cargo install`.
-#
-# Owner: 章梧
-#
-# Why this exists: `cargo install cargo-nextest --locked` plus
-# `cargo install cargo-llvm-cov --locked` builds ~380 crates from source. On a
-# 4-core `ubuntu-latest` runner that is ~215s per job — a third of the whole
-# `BCS unit tests` wall clock — spent producing two binaries that upstream
-# already publishes for this exact target. Downloading them takes a few seconds.
-#
-# Both projects publish per-target release tarballs on GitHub:
-#   cargo-nextest   https://github.com/nextest-rs/nextest/releases
-#   cargo-llvm-cov  https://github.com/taiki-e/cargo-llvm-cov/releases
-#
-# Usage:
-#   bash scripts/install_cargo_test_tools.sh                # nextest + llvm-cov
-#   bash scripts/install_cargo_test_tools.sh nextest        # just nextest
-#   bash scripts/install_cargo_test_tools.sh llvm-cov       # just llvm-cov
-#
-# Versions are pinned so CI is reproducible; bump them here deliberately. If a
-# download fails for any reason — release-asset outage, a renamed asset, an
-# unrecognised platform — the script falls back to `cargo install --locked` at
-# the same pinned version. A failed download therefore costs the time it used
-# to cost, and never breaks the gate.
-
-NEXTEST_VERSION="${BCS_NEXTEST_VERSION:-0.9.143}"
-LLVM_COV_VERSION="${BCS_LLVM_COV_VERSION:-0.8.7}"
-
+# Install the BCS test tools from pinned, SHA-256 verified release archives.
+# Usage: bash scripts/install_cargo_test_tools.sh [nextest|llvm-cov ...]
+# Network/unsupported-platform failures fall back to the same source version;
+# checksum mismatches fail closed before extraction or execution.
+NEXTEST_VERSION="${BCS_NEXTEST_VERSION:-0.9.150}"
+LLVM_COV_VERSION="${BCS_LLVM_COV_VERSION:-0.9.1}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cargo_bin_dir="${CARGO_HOME:-$HOME/.cargo}/bin"
 mkdir -p "$cargo_bin_dir"
+export PATH="$cargo_bin_dir:$PATH"
 
-# Both projects name their assets by target triple, but not always with the same
-# libc flavour available, so each host maps to the triples to try in order.
-# An unrecognised host leaves the lists empty and takes the cargo-install path.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
 host_targets=()
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64)
-    host_targets=(x86_64-unknown-linux-musl x86_64-unknown-linux-gnu)
-    ;;
-  Linux-aarch64 | Linux-arm64)
-    host_targets=(aarch64-unknown-linux-musl aarch64-unknown-linux-gnu)
-    ;;
-  Darwin-x86_64)
-    host_targets=(x86_64-apple-darwin)
-    ;;
-  Darwin-arm64)
-    host_targets=(aarch64-apple-darwin)
-    ;;
+  Linux-x86_64) host_targets=(x86_64-unknown-linux-musl x86_64-unknown-linux-gnu) ;;
+  Linux-aarch64 | Linux-arm64) host_targets=(aarch64-unknown-linux-musl aarch64-unknown-linux-gnu) ;;
+  Darwin-x86_64) host_targets=(x86_64-apple-darwin) ;;
+  Darwin-arm64) host_targets=(aarch64-apple-darwin) ;;
 esac
 
-# Download $1, extract it, and move the binary named $2 into the cargo bin dir.
-# Returns non-zero on any failure so callers can fall back to cargo install.
-fetch_tarball() {
-  local url="$1"
-  local binary="$2"
-  local tmp
-  tmp="$(mktemp -d)"
-  # shellcheck disable=SC2064  # expand $tmp now, not at trap time
-  trap "rm -rf '$tmp'" RETURN
-
+fetch_verified() {
+  local url="$1" version="$2" binary="$3"
+  local asset="${url##*/}" expected actual extracted
+  expected="$(awk -v key="$version/$asset" '$2 == key { print $1 }' "$script_dir/cargo_test_tools.sha256")"
+  if [[ -z "$expected" ]]; then
+    echo "  ! no pinned checksum for $version/$asset; using source fallback" >&2
+    return 1
+  fi
   curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 2 \
-    -o "$tmp/tool.tar.gz" "$url" || return 1
-  tar -xzf "$tmp/tool.tar.gz" -C "$tmp" || return 1
-
-  # Tarball layouts differ (flat vs nested), so locate the binary rather than
-  # assuming a path.
-  local extracted
-  extracted="$(find "$tmp" -type f -name "$binary" -print -quit)"
+    --connect-timeout 10 --max-time 120 -o "$tmp/tool.tar.gz" "$url" || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$tmp/tool.tar.gz")"
+  else
+    actual="$(shasum -a 256 "$tmp/tool.tar.gz")"
+  fi
+  if [[ "${actual%% *}" != "$expected" ]]; then
+    echo "checksum mismatch for $asset; refusing installation" >&2
+    return 2
+  fi
+  rm -rf "$tmp/extracted"
+  mkdir -p "$tmp/extracted"
+  tar -xzf "$tmp/tool.tar.gz" -C "$tmp/extracted" || return 1
+  extracted="$(find "$tmp/extracted" -type f -name "$binary" -print -quit)"
   [[ -n "$extracted" ]] || return 1
   chmod +x "$extracted"
   mv -f "$extracted" "$cargo_bin_dir/$binary"
 }
 
-# install_prebuilt <binary> <version> <url-template-with-{target}-placeholder>
-# Tries each host target in turn; returns non-zero if none produced a binary.
-install_prebuilt() {
-  local binary="$1"
-  local version="$2"
-  local url_template="$3"
-  local target
-  for target in ${host_targets[@]+"${host_targets[@]}"}; do
-    if fetch_tarball "${url_template//\{target\}/$target}" "$binary"; then
-      echo "  ✓ ${binary} ${version} installed from prebuilt binary (${target})"
+install_tool() {
+  local binary="$1" version="$2" target asset url status
+  local targets=("${host_targets[@]+"${host_targets[@]}"}")
+  if command -v "$binary" >/dev/null 2>&1 &&
+     [[ "$("$binary" --version 2>/dev/null | awk 'NR == 1 { print $2 }')" == "$version" ]]; then
+    echo "  ✓ $binary $version already installed"
+    return 0
+  fi
+  # nextest publishes one universal Darwin archive, not per-architecture assets.
+  if [[ "$binary" == cargo-nextest && "$(uname -s)" == Darwin ]]; then
+    targets=(universal-apple-darwin)
+  fi
+  for target in ${targets[@]+"${targets[@]}"}; do
+    if [[ "$binary" == cargo-nextest ]]; then
+      asset="cargo-nextest-${version}-${target}.tar.gz"
+      url="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${version}/$asset"
+    else
+      asset="cargo-llvm-cov-${target}.tar.gz"
+      url="https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${version}/$asset"
+    fi
+    if fetch_verified "$url" "$version" "$binary"; then
+      echo "  ✓ $binary $version installed from verified archive ($target)"
       return 0
+    else
+      status=$?
+      [[ "$status" -ne 2 ]] || return "$status"
     fi
   done
-  return 1
+  echo "  ! prebuilt $binary unavailable; falling back to cargo install" >&2
+  cargo install "$binary" --locked --version "$version"
 }
 
-install_nextest() {
-  if command -v cargo-nextest >/dev/null 2>&1; then
-    echo "  ✓ cargo-nextest already present -> $(command -v cargo-nextest)"
-    return 0
-  fi
-  if install_prebuilt cargo-nextest "$NEXTEST_VERSION" \
-       "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-{target}.tar.gz"; then
-    return 0
-  fi
-  echo "  ! prebuilt cargo-nextest unavailable; falling back to cargo install" >&2
-  cargo install cargo-nextest --locked --version "$NEXTEST_VERSION"
-}
-
-install_llvm_cov() {
-  if command -v cargo-llvm-cov >/dev/null 2>&1; then
-    echo "  ✓ cargo-llvm-cov already present -> $(command -v cargo-llvm-cov)"
-    return 0
-  fi
-  if install_prebuilt cargo-llvm-cov "$LLVM_COV_VERSION" \
-       "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-{target}.tar.gz"; then
-    return 0
-  fi
-  echo "  ! prebuilt cargo-llvm-cov unavailable; falling back to cargo install" >&2
-  cargo install cargo-llvm-cov --locked --version "$LLVM_COV_VERSION"
-}
-
-targets=("$@")
-if [[ "${#targets[@]}" -eq 0 ]]; then
-  targets=(nextest llvm-cov)
-fi
-
+tools=("$@")
+[[ "${#tools[@]}" -gt 0 ]] || tools=(nextest llvm-cov)
 echo "--- installing cargo test tools ---"
-for target in "${targets[@]}"; do
-  case "$target" in
-    nextest) install_nextest ;;
-    llvm-cov) install_llvm_cov ;;
-    *)
-      echo "unknown tool: $target (expected 'nextest' or 'llvm-cov')" >&2
-      exit 2
-      ;;
+for tool in "${tools[@]}"; do
+  case "$tool" in
+    nextest) install_tool cargo-nextest "$NEXTEST_VERSION" ;;
+    llvm-cov) install_tool cargo-llvm-cov "$LLVM_COV_VERSION" ;;
+    *) echo "unknown tool: $tool (expected nextest or llvm-cov)" >&2; exit 2 ;;
   esac
 done

@@ -157,8 +157,10 @@ class CliToolRef:
 class FileRef:
     """A user/platform-authored workspace file (e.g. RULES.md), by ``{store, path}``.
 
-    Engine-*generated* files (MEMORY.md, IDENTITY.md, …) are NOT listed here —
-    the engine references those via :attr:`BotConfigArtifact.engine_ext`.
+    Runtime memory (MEMORY.md) is NOT listed here; the engine references it via
+    :attr:`BotConfigArtifact.engine_ext`. An explicitly configured IDENTITY.md
+    may be listed on engines that accept it. Omission must preserve the existing
+    identity profile, including with platform-owned identity replacement.
     """
 
     name: str

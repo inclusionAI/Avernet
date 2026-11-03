@@ -39,6 +39,7 @@ class AcceptedPlanReportDTO(BaseModel):
 class NodeTaskContextDTO(BaseModel):
     task_id: str
     node_id: str
+    attempt: int
     root_task_spec: TaskSpecDTO
     current_task_spec: TaskSpecDTO
     actual_goal: GoalDTO | None = None
@@ -46,6 +47,7 @@ class NodeTaskContextDTO(BaseModel):
     all_done_output: list[DoneOutputDTO] = Field(default_factory=list)
     accepted_execution_patch: AcceptedExecutionPatchDTO | None = None
     accepted_plan_report: AcceptedPlanReportDTO | None = None
+    used_executor_ids: list[str] = Field(default_factory=list)
 
 
 def _goal_to_dto(goal: Goal) -> GoalDTO:
@@ -103,12 +105,14 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
     return NodeTaskContextDTO(
         task_id=context.task_id,
         node_id=context.node_id,
+        attempt=context.attempt,
         root_task_spec=_spec_to_dto(context.root_task_spec),
         current_task_spec=_spec_to_dto(context.current_task_spec),
         actual_goal=_goal_to_dto(context.actual_goal) if context.actual_goal else None,
         capability_failure_reason=context.capability_failure_reason,
         all_done_output=task_context_to_dto(context).all_done_output,
         accepted_execution_patch=patch_dto,
+        used_executor_ids=list(context.used_executor_ids),
         accepted_plan_report=(
             AcceptedPlanReportDTO(
                 status=context.accepted_plan_report.status.value,

@@ -26,6 +26,10 @@ from pydantic import BaseModel, Field
 from agentclaw.community.plugin_api.base import Plugin
 
 
+class DeptLookupError(Exception):
+    """The staff directory is unavailable; missing department data is not an error."""
+
+
 @dataclass(frozen=True)
 class StaffProfileInfo:
     """Basic employee profile data returned by the staff directory."""

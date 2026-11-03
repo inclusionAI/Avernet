@@ -1,27 +1,22 @@
-# agentclaw-community
+# `agentclaw.community`
 
-The open-source (community) distribution of the **agentclaw** backend — bot
-lifecycle, sessions, chat, and workspace management, built on a microkernel
-plugin architecture.
+The public Backend namespace. Start with the [Backend development guide](../../../README.md)
+for architecture authority, dependencies, development commands and integration boundaries.
+This package is the shared implementation; an enterprise host adds `agentclaw.corp`
+through the PEP 420 `agentclaw` namespace and its own composition root.
 
-This is the community subset of the agentclaw monorepo: the `agentclaw.community`
-namespace package plus its own `pyproject.toml` / `uv.lock`. It builds, boots, and
-tests with **no** company-internal (`agentclaw.corp`) code present.
+| Layer | Read when changing |
+| --- | --- |
+| [api](api/README.md) | Service API Protocol ownership and exports |
+| [core](core/README.md) | domain policy, persistence and cross-domain dependencies |
+| [plugin_api](plugin_api/README.md) | outbound capability contracts and compatibility |
+| [plugins](plugins/README.md) | profile-selected capability implementations |
+| `adapters/http/` | HTTP/WS routes, schemas and delivery translation |
+| `di/` | bindings, profile selection and bootstrap |
+| `kernel/` | cross-layer pure contracts/data |
+| `configs/` | base and profile configuration overlays |
 
-## Layout
-
-```
-src/agentclaw/community/   # the community namespace package (api → core → plugin_api → plugins)
-configs/                   # neutral base application.yaml + community/singlebox/test overlays
-tests/community/           # the community test suite
-```
-
-## Quick start
-
-```bash
-uv sync
-DEPLOY_PROFILE=community uv run python -m agentclaw.community.main
-```
-
-See `configs/application.yaml` (neutral base) and `configs/application-community.yaml`
-(community overlay) for configuration.
+Boot and worker assembly are in `main.py`, `adapters/http/app.py`,
+`adapters/http/boot.py` and `di/container.py`. Read `di/profile.py` before changing
+profile behavior. Domain code receives dependencies rather than selecting a
+runtime profile or concrete infrastructure implementation.

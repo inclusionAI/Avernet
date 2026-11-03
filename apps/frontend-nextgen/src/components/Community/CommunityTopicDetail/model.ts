@@ -50,7 +50,7 @@ export function buildReplyGroups(
   if (replies.some((reply) => reply.childReplies?.length)) {
     return replies.map((reply, index) => ({
       reply,
-      floorNo: firstFloorNo + index,
+      floorNo: reply.floorNo ?? firstFloorNo + index,
       children: (reply.childReplies ?? []).map((child) => ({
         reply: child,
         targetAuthorName: targetName(child.replyToPostId),
@@ -78,7 +78,7 @@ export function buildReplyGroups(
 
     const group: CommunityFloorReplyGroup = {
       reply,
-      floorNo: firstFloorNo + index,
+      floorNo: reply.floorNo ?? firstFloorNo + index,
       children: [],
     };
     groups.push(group);

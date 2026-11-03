@@ -95,11 +95,13 @@ def test_node_context_dto_does_not_expose_task_level_gaps() -> None:
             gaps=["legacy graph gap"],
             task_id="t1",
             node_id="n1",
+            attempt=1,
             root_task_spec=spec,
             current_task_spec=spec,
         )
     )
     assert dto.task_id == "t1" and dto.node_id == "n1"
+    assert dto.attempt == 1
     assert "gaps" not in dto.model_dump()
 
 
@@ -123,6 +125,24 @@ def test_node_context_dto_projects_runtime_actual_goal() -> None:
     assert dto.actual_goal is not None
     assert dto.actual_goal.objective == actual_goal.objective
     assert dto.capability_failure_reason is None
+
+def test_node_context_dto_projects_used_executor_ids() -> None:
+    spec = TaskSpec(
+        context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[])
+    )
+    dto = node_context_to_dto(
+        TaskContext(
+            spec=spec,
+            all_done_output=[],
+            gaps=[],
+            task_id="t1",
+            node_id="n1",
+            root_task_spec=spec,
+            current_task_spec=spec,
+            used_executor_ids=["bot-1", "bot-2"],
+        )
+    )
+    assert dto.used_executor_ids == ["bot-1", "bot-2"]
 
 
 

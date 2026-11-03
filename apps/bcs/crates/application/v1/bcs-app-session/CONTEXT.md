@@ -2,6 +2,11 @@
 
 ## Provides
 
+- Delivery admission shares one Group/Session snapshot across candidates and
+  resolves all distinct Bot-view (User, Bot) pairs through `BotAuthorityPort::roles_for`
+  once. Scalar `can_manage` is not used for fanout. Errors or malformed batch
+  lengths fail the entire admission closed; no partial permits are returned.
+
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
 - Human owners may change an existing owned Bot participant's auto/muted mode
   without Session management authority. This exception does not grant scope

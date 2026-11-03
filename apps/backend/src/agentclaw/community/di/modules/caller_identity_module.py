@@ -27,6 +27,13 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
 )
+from agentclaw.community.core.caller_identity.protocols import (
+    BcsCallerConfigSyncProtocol,
+)
+from agentclaw.community.core.caller_identity.contracts import CallerBcsSyncError
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError
+from agentclaw.community.log import get_logger
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -41,6 +48,64 @@ from agentclaw.community.core.repository.implementations.identity.caller_identit
 from agentclaw.community.core.token_exchange import NoopTokenPluginPipeline, TokenExchangeOrchestrator, TokenPluginPipeline
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+
+
+class BcnBackedCallerConfigSync:
+    """Adapt BcnService transport outcomes onto the caller sync port.
+
+    transport 的 BcnServiceError 在端口层折叠为域错误 CallerBcsSyncError,
+    交由调用方(更新操作)整体失败传播;skipped 是 env 门降级,静默成功。
+    """
+
+    def __init__(self, bcn_service: BcnService) -> None:
+        self._bcn_service = bcn_service
+
+    def sync_caller_config(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        enabled: bool,
+        source_revision: int,
+    ) -> None:
+        logger = get_logger()
+        try:
+            result = self._bcn_service.sync_bot_caller_config(
+                teamclaw_bot_uuid=bot_id,
+                owner_workno=owner_id,
+                enabled=enabled,
+                source_revision=source_revision,
+            )
+        except BcnServiceError as exc:
+            logger.warning(
+                "caller_config_bcs_sync_failed bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s error=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+                exc,
+            )
+            raise CallerBcsSyncError from exc
+        if result.get("skipped"):
+            logger.info(
+                "caller_config_bcs_sync_skipped bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+            )
+        else:
+            logger.info(
+                "caller_config_bcs_sync_succeeded bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s sync_status=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+                result.get("sync_status"),
+            )
 
 
 class CallerIdentityModule(Module):
@@ -70,6 +135,16 @@ class CallerIdentityModule(Module):
     @singleton
     @provider
     @inject
+    def bcs_caller_config_sync(
+        self,
+        bcn_service: BcnService,
+    ) -> BcsCallerConfigSyncProtocol:
+        """Bind the BcnService-backed adapter to the caller sync port."""
+        return BcnBackedCallerConfigSync(bcn_service)
+
+    @singleton
+    @provider
+    @inject
     def caller_identity_service(
         self,
         bot_repository: BotRepository,
@@ -81,6 +156,7 @@ class CallerIdentityModule(Module):
         passport_plugin: PassportPlugin,
         collaborator_service: CoreCollaboratorServiceProtocol,
         session_validator: CallerSessionValidator,
+        bcs_caller_sync: BcsCallerConfigSyncProtocol,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -93,6 +169,7 @@ class CallerIdentityModule(Module):
             passport_plugin=passport_plugin,
             collaborator_service=collaborator_service,
             session_validator=session_validator,
+            bcs_caller_sync=bcs_caller_sync,
         )
 
     @singleton

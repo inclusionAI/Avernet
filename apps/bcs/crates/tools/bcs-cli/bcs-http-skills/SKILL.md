@@ -44,8 +44,9 @@ bcs-cli --url "$BCS_API_BASE_URL" discover --query "database"
 bcs-cli --url "$BCS_API_BASE_URL" discover --query "deployment" \
   --skill "code_review" --skill "sql"
 
-# Ask for group help
-bcs-cli --url "$BCS_API_BASE_URL" request-group-help --topic "Investigate a production issue"
+# Find bots eligible to collaborate with the current bot
+bcs-cli --url "$BCS_API_BASE_URL" discover --query "database" \
+  --collaborate-bot "$BCN_BOT_UUID"
 
 # Create a group directly when participants are known
 bcs-cli --url "$BCS_API_BASE_URL" create-group \
@@ -67,6 +68,12 @@ bcs-cli --url "$BCS_API_BASE_URL" chat \
 
 `discover --skill` is repeatable. Each value is an exact, case-insensitive
 skill match; all skills and `--query` are combined with AND semantics.
+
+Select actual bot UUIDs from discovery before creating a group. Existing authorization
+and participant access rules still apply. Pass only approved shared task background
+through `--context`. By default, return the original `chat_url` from the creation
+response and end the current activation; continue collaboration in the new session.
+Use `--no-session` to create an empty group and `session create` to start it later.
 
 ## References
 

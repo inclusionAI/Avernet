@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import secrets
 import time
+import zlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,7 +16,10 @@ MAX_RUNS = 16
 MAX_EVENTS_PER_RUN = 20_000
 MAX_BYTES_PER_RUN = 16 * 1024 * 1024
 MAX_BYTES_TOTAL = 64 * 1024 * 1024
+MAX_REPLAY_BYTES_PER_RUN = 128 * 1024 * 1024
 SUBSCRIBER_QUEUE_SIZE = 256
+SUBSCRIBER_QUEUE_TIMEOUT_SECONDS = 2
+SUBSCRIBER_CLOSE_TIMEOUT_SECONDS = 2
 TERMINAL_TTL_SECONDS = 180
 
 
@@ -23,6 +27,7 @@ TERMINAL_TTL_SECONDS = 180
 class _Subscriber:
     queue: asyncio.Queue[str | None]
     task: asyncio.Task[None]
+    websocket: Any
 
 
 class OpenClawResumeRun:
@@ -39,12 +44,14 @@ class OpenClawResumeRun:
         self.run_id = run_id
         self.ticket_digest = ticket_digest
         self.state = "starting"
+        self.started_at_ms = int(time.time() * 1000)
         self.reason: str | None = None
         self.finished_at: float | None = None
         self.task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
-        self._events: list[str] = []
+        self._events: list[str | bytes] = []
         self._bytes = 0
+        self._replay_bytes = 0
         self._seq = 0
         self._subscribers: dict[str, _Subscriber] = {}
 
@@ -76,28 +83,35 @@ class OpenClawResumeRun:
                 payload=outbound,
                 seq=outbound.get("seq"),
             ).to_json()
-            size = len(frame.encode("utf-8"))
+            encoded = frame.encode("utf-8")
+            # Cumulative text snapshots repeat the entire answer on each delta.
+            # Compress cache storage only; live and replay wire frames stay identical.
+            cached: str | bytes = frame
+            if len(encoded) > 1024:
+                compressed = zlib.compress(encoded, level=1)
+                if len(compressed) < len(encoded):
+                    cached = compressed
+            size = len(cached) if isinstance(cached, bytes) else len(encoded)
             if self.resumable:
                 if (
                     len(self._events) >= MAX_EVENTS_PER_RUN
                     or self._bytes + size > MAX_BYTES_PER_RUN
                     or self._registry.buffered_bytes + size > MAX_BYTES_TOTAL
+                    or self._replay_bytes + len(encoded) > MAX_REPLAY_BYTES_PER_RUN
                 ):
                     self.reason = "CACHE_LIMIT"
                     self._registry.buffered_bytes -= self._bytes
                     self._bytes = 0
+                    self._replay_bytes = 0
                     self._events.clear()
                 else:
-                    self._events.append(frame)
+                    self._events.append(cached)
                     self._bytes += size
+                    self._replay_bytes += len(encoded)
                     self._registry.buffered_bytes += size
 
             for conn_id, subscriber in list(self._subscribers.items()):
-                try:
-                    subscriber.queue.put_nowait(frame)
-                except asyncio.QueueFull:
-                    self._subscribers.pop(conn_id, None)
-                    subscriber.task.cancel()
+                await self._enqueue(conn_id, subscriber, frame)
 
             state = outbound.get("state")
             run_id = outbound.get("runId")
@@ -119,6 +133,7 @@ class OpenClawResumeRun:
                 queue.put_nowait(None)
             subscriber = _Subscriber(
                 queue=queue,
+                websocket=websocket,
                 task=asyncio.create_task(
                     self._send_to_subscriber(conn_id, websocket, replay, queue)
                 ),
@@ -129,6 +144,7 @@ class OpenClawResumeRun:
                 "state": self.state,
                 "replayCount": len(replay),
                 "lastResumeSeq": self._seq,
+                "startedAt": self.started_at_ms,
             }
 
     async def detach(self, conn_id: str) -> None:
@@ -142,31 +158,53 @@ class OpenClawResumeRun:
             if self.state not in ("final", "error", "aborted"):
                 self.state = "error"
             self.finished_at = time.monotonic()
-            for subscriber in self._subscribers.values():
-                try:
-                    subscriber.queue.put_nowait(None)
-                except asyncio.QueueFull:
-                    subscriber.task.cancel()
+            for conn_id, subscriber in list(self._subscribers.items()):
+                await self._enqueue(conn_id, subscriber, None)
         asyncio.get_running_loop().call_later(
             TERMINAL_TTL_SECONDS, self._registry.discard, self
         )
+
+    async def _enqueue(self, conn_id: str, subscriber: _Subscriber, frame: str | None) -> None:
+        try:
+            subscriber.queue.put_nowait(frame)
+        except asyncio.QueueFull:
+            try:
+                # Let a short burst drain without dropping a frame or the EOF.
+                await asyncio.wait_for(
+                    subscriber.queue.put(frame), timeout=SUBSCRIBER_QUEUE_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                self._subscribers.pop(conn_id, None)
+                subscriber.task.cancel()
+                # A silently detached socket would leave the UI waiting forever.
+                await self._close_subscriber(subscriber.websocket, 1013)
+
+    async def _close_subscriber(self, websocket: Any, code: int) -> None:
+        try:
+            await asyncio.wait_for(
+                websocket.close(code=code), timeout=SUBSCRIBER_CLOSE_TIMEOUT_SECONDS
+            )
+        except Exception:
+            pass  # The peer may already have disconnected.
 
     async def _send_to_subscriber(
         self,
         conn_id: str,
         websocket: Any,
-        replay: list[str],
+        replay: list[str | bytes],
         queue: asyncio.Queue[str | None],
     ) -> None:
         try:
             for frame in replay:
-                await websocket.send_text(frame)
+                await websocket.send_text(
+                    zlib.decompress(frame).decode("utf-8") if isinstance(frame, bytes) else frame
+                )
             while (frame := await queue.get()) is not None:
                 await websocket.send_text(frame)
         except asyncio.CancelledError:
             raise
         except Exception:
-            pass
+            await self._close_subscriber(websocket, 1011)
         finally:
             subscriber = self._subscribers.get(conn_id)
             if subscriber is not None and subscriber.queue is queue:
@@ -217,6 +255,17 @@ class OpenClawResumeRegistry:
             if run.finished_at is None or now - run.finished_at < TERMINAL_TTL_SECONDS:
                 continue
             self.discard(run)
+
+    def lookup_session(self, session_key: str) -> OpenClawResumeRun | None:
+        """Select a run only after the caller has checked session read access."""
+        self.prune()
+        matches = [run for run in self._runs.values() if run.session_key == session_key]
+        active = [run for run in matches if run.finished_at is None]
+        if len(active) > 1:
+            raise ValueError("Multiple active runs; use a resumeTicket to select a run")
+        if active:
+            return active[0]
+        return max(matches, key=lambda run: run.finished_at or 0, default=None)
 
     def discard(self, run: OpenClawResumeRun) -> None:
         if self._runs.pop(run.ticket_digest, None) is run:

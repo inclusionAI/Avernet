@@ -136,6 +136,38 @@ describe('collaborationCandidateService', () => {
     });
   });
 
+  it.each([true, false, null, undefined])(
+    'preserves online_available=%p from friend metadata',
+    async (onlineAvailable) => {
+      connections.listFriendConnections.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ actor: { type: 'bot', id: 'service:900003' } }], total: 1 },
+      });
+      bots.listBotMetadata.mockResolvedValue({
+        code: 200000,
+        data: {
+          items: [
+            {
+              bot_id: 'service',
+              owner_id: '900003',
+              bot_name: '服务 Bot',
+              bot_type: 'service',
+              online_available: onlineAvailable,
+            },
+          ],
+          total: 1,
+        },
+      });
+
+      const res = await collaborationCandidateService.listFriends('human_900003', { actorType: 'human' });
+
+      expect(res).toMatchObject({
+        ok: true,
+        data: { items: [{ id: 'service:900003', botType: 'service', onlineAvailable }] },
+      });
+    },
+  );
+
   it('listFriends sends the Human staff id without the human_ prefix', async () => {
     connections.listFriendConnections.mockResolvedValue({
       code: 20000,

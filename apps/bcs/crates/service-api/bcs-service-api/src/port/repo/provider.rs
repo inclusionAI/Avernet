@@ -1,5 +1,9 @@
 use async_trait::async_trait;
 use bcs_domain::{BotCapabilities, ProviderBotBinding, ProviderCredential, ProviderRecord};
+// Re-exported for repo implementors and consumers, which consume the caller
+// capability types through this port and do not depend on the contracts
+// crate directly.
+pub use bcs_domain::caller_identity::{CallerTokenVisibility, ProviderCallerCapabilities};
 
 use crate::ServiceResult;
 
@@ -59,6 +63,22 @@ pub trait ProviderRepoPort: Send + Sync {
         disabled: bool,
         updated_at: u64,
     ) -> ServiceResult<Option<ProviderRecord>>;
+
+    /// Read the Provider's declared caller technical capabilities
+    /// (spec §10.7.3, persisted at `bcs_providers.config.$.caller_capabilities`).
+    /// `Ok(None)` means the Provider is present but has never declared this
+    /// sub-object; it never means "supports caller". The default explicitly
+    /// refuses so an unsupporting repository cannot fabricate capabilities.
+    async fn get_caller_capabilities(
+        &self,
+        provider_id: &str,
+    ) -> ServiceResult<Option<ProviderCallerCapabilities>> {
+        let _ = provider_id;
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "ProviderRepoPort::get_caller_capabilities is not supported by this repository".to_string(),
+            request_id: None,
+        })
+    }
 }
 
 #[async_trait]

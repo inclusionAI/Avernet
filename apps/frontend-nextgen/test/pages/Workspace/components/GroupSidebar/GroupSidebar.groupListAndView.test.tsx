@@ -99,8 +99,11 @@ describe('GroupSidebar', () => {
     const collapsedTrigger = screen.getByRole('button', { name: '主站群' });
     expect(collapsedTrigger.querySelector('[aria-label="成员 8 人"]')).toBeInTheDocument();
     expect(collapsedTrigger.querySelector('svg.lucide-folder')).not.toBeInTheDocument();
-    // 收起态无 chevron（设计稿：仅展开态行内展示 chevron-down）。
-    expect(collapsedTrigger.querySelector('svg.lucide-chevron-down')).not.toBeInTheDocument();
+    // 收起态箭头常驻 + -rotate-90（2026-10-22 对话侧同语言）：替代原「仅展开态显示」，
+    // 收起行也有「可展开」的可点暗示，过渡由 rotate 承载而非显隐硬切换。
+    const collapsedArrow = collapsedTrigger.querySelector('svg.lucide-chevron-down') as HTMLElement;
+    expect(collapsedArrow).toBeInTheDocument();
+    expect(collapsedArrow).toHaveClass('-rotate-90');
     second.unmount();
 
     // participants 未回填（列表补拉未完成/失败）：不渲染任何行首占位，也不用文件夹兜底。
@@ -143,8 +146,12 @@ describe('GroupSidebar', () => {
     );
     const dots = screen.getByRole('button', { name: '协作群操作' });
     expect(dots).toHaveClass('h-6', 'w-6', 'rounded-md');
-    // 展开态行内展示 chevron-down（v2 设计稿）；收起态无箭头（上一用例断言）。
-    expect(screen.getByRole('button', { name: '主站群' }).querySelector('svg.lucide-chevron-down')).toBeInTheDocument();
+    // 展开态行内 chevron 归零（旋转语言，非显隐切换）。
+    const expandedArrow = screen.getByRole('button', { name: '主站群' }).querySelector(
+      'svg.lucide-chevron-down',
+    ) as HTMLElement;
+    expect(expandedArrow).toBeInTheDocument();
+    expect(expandedArrow).not.toHaveClass('-rotate-90');
     fireEvent.click(dots);
     fireEvent.click(screen.getByRole('button', { name: '管理协作群' }));
     expect(onManageGroup).toHaveBeenCalledWith('g1');
@@ -168,6 +175,8 @@ describe('GroupSidebar', () => {
     expect(groupList).not.toHaveClass('divide-y', 'divide-border/70', 'bg-muted/10', 'border-b');
     expect(sessionList).not.toHaveClass('border-t', 'border-b', 'ml-[60px]', 'border-l', 'pl-2');
     expect(sessionList.firstElementChild).not.toHaveClass('border-b');
+    // 2026-10-22 对话侧同语言：一级行行尾的逐行分割线一并移除，行间只靠留白分隔。
+    expect(sessionList.parentElement?.querySelectorAll('.border-b')).toHaveLength(0);
   });
 
   it('clicking a session does not collapse its group (no bubble to card)', () => {
@@ -211,6 +220,9 @@ describe('GroupSidebar', () => {
     const groupRow = screen.getByRole('button', { name: /主站群/ }).closest('.group\\/row');
     expect(groupRow).toHaveClass('relative', 'flex', 'min-h-13');
     expect(screen.getByRole('button', { name: /主站群/ })).toHaveClass('min-h-13');
+    // 群名规格与会话标题一致（2026-10-22，对齐对话侧 Bot 名同轮裁决）：13px 常规字重，
+    // 一级/二级只靠头像堆与缩进分层，目录不靠加粗强调。
+    expect(screen.getByText('主站群')).toHaveClass('text-[13px]', 'font-normal');
   });
 
   it('v2.1：群行无选中态（用户反馈移除）——选中群胶囊恒为 hover 弱底，不再落 bg-selected', () => {

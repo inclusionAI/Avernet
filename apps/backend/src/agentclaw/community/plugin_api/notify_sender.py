@@ -16,6 +16,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
+#: DI qualifier for the BBS digest sender. The bare ``NotifySenderPlugin``
+#: remains the task-discovery/governance sender; this key names the separate,
+#: BBS-owned DingTalk application instance.
+QUALIFIER_BBS_DIGEST = "bbs_digest"
+
 
 @dataclass(frozen=True)
 class NotifyMessage:

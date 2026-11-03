@@ -5,6 +5,8 @@ import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import { useState } from 'react';
 import { AccountBadge, type AccountUser } from './AccountBadge';
 import { GlobalSearchDialog } from './GlobalSearch';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { HelpMenu } from './HelpMenu';
 import type { NavigationItem } from './navigation';
 import { LegacyVersionSwitch } from './LegacyVersionSwitch';
@@ -59,7 +61,10 @@ export function AppSidebar({
             className="text-muted-foreground"
             label="搜索"
             icon={<Search className="h-4 w-4" />}
-            onClick={() => setSearchOpen(true)}
+            onClick={() => {
+              Tracert.click(Points.shell.globalSearchOpen);
+              setSearchOpen(true);
+            }}
           />
           {notificationBell && <NotificationBell size="sm" className="text-muted-foreground" />}
           {onToggleCollapsed && (
@@ -76,7 +81,10 @@ export function AppSidebar({
         <div className="flex h-[52px] items-center px-3">
           <brand.Logo compact />
           <span className="ml-auto flex shrink-0 items-center gap-0">
-            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => setSearchOpen(true)} />
+            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => {
+              Tracert.click(Points.shell.globalSearchOpen);
+              setSearchOpen(true);
+            }} />
             {notificationBell && <NotificationBell />}
             {onToggleCollapsed && (
               <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />
@@ -115,13 +123,14 @@ export function AppSidebar({
 
   if (collapsed)
     return (
-      <aside className="relative hidden w-14 shrink-0 flex-col border-r border-border bg-background py-1 lg:flex">
+      // 右缘分割线按稿走 0.5px 发丝线 + 浅色（#EEE ≈ border-border/60），与 Bot 列表右缘 1px 分割线拉开层级
+      <aside className="relative hidden w-14 shrink-0 flex-col border-r border-divider bg-background py-1 lg:flex">
         {shell}
       </aside>
     );
 
   return (
-    <aside className="relative hidden w-[var(--shell-sidebar-width)] shrink-0 flex-col border-r border-border bg-background py-1 lg:flex">
+    <aside className="relative hidden w-[var(--shell-sidebar-width)] shrink-0 flex-col border-r border-divider bg-background py-1 lg:flex">
       {shell}
     </aside>
   );

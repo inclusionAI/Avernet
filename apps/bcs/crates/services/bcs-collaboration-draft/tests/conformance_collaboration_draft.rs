@@ -1,10 +1,10 @@
 use bcs_app_collaboration_draft::CollaborationDraftApplication;
-use bcs_collaboration_draft::{CollaborationDraftCore, DraftSigningKeys};
+use bcs_collaboration_draft::CollaborationDraftCore;
 use bcs_collaboration_store::{MemoryCollaborationStore, draft::DbCollaborationDraftStore};
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ServiceResult};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 struct UnusedJudge;
 #[async_trait::async_trait]
@@ -23,20 +23,12 @@ async fn conformance_draft_sql_core_and_application() {
     {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
-    let repo = Arc::new(DbCollaborationDraftStore::new(db, "conformance".into()));
+    let repo = Arc::new(DbCollaborationDraftStore::new(db));
     bcs_test_support::contract::collaboration_draft::collaboration_draft_repo_port_contract_tests(
         repo.as_ref(),
     )
     .await;
-    let core = Arc::new(CollaborationDraftCore::new(
-        repo,
-        DraftSigningKeys::new(
-            "conformance".into(),
-            "key".into(),
-            BTreeMap::from([("key".into(), vec![4; 32])]),
-        )
-        .unwrap(),
-    ));
+    let core = Arc::new(CollaborationDraftCore::new(repo));
     bcs_test_support::contract::collaboration_draft::collaboration_draft_core_service_contract_tests(core.as_ref()).await;
     let services = bcs_services_container::Services::builder().build_for_test();
     let memory = Arc::new(MemoryCollaborationStore::new());

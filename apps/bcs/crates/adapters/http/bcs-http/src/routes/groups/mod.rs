@@ -12,7 +12,6 @@ use bcs_protocol::{
     CreateGroupRequest, InlineEventPayloadMode, InlineEventSinkInfo,
     InlineGroupEventSubscriptionInfo,
 };
-use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::application::v1::{
     ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup as V1CreateGroup,
@@ -23,17 +22,17 @@ use bcs_service_api::application::v1::{
     StateMachineDefinitionContent, StateMachineParticipantBinding, UpdateGroup,
 };
 use bcs_service_api::{
-    BotDetailCommand, BotGroupListCommand, CallbackChannelConfig, CollaborationRuntimeError,
+    BotDetailCommand, BotGroupListCommand, CollaborationRuntimeError,
     ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, GroupAddMemberCommand,
     GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupDetailCommand,
     GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry, GroupParticipantModeCommand,
-    GroupPatchSettingsCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
+    GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
-    GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
+    GroupUpdateVisibilityCommand, GroupUseCaseError,
+    MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
     PatchGroupCollaborationDefinitionCommand, RoutingMode, RoutingPolicy, ServiceError,
-    ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
-    UpgradeGroupCollaborationDefinitionCommand, Workspace,
+    SessionKind, SessionStatus, StartStateMachineRunCommand,
+    UpgradeGroupCollaborationDefinitionCommand,
 };
 use bcs_service_api::types::MessageViewScope;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -47,7 +46,7 @@ use crate::routes::group_messages::{
 use crate::state::HttpAppState;
 
 use super::{
-    authenticated_bot_from_headers, bots::bot_use_case_error_to_http,
+    authenticated_bot_from_headers,
     reject_judge_definition_when_unavailable, reject_judge_yaml_when_unavailable,
     validate_container_header,
 };
@@ -61,5 +60,5 @@ mod translation;
 pub use create::*;
 pub use dto::*;
 pub use handlers::*;
-pub use projections::*;
-pub use translation::*;
+pub(crate) use projections::*;
+pub(crate) use translation::*;

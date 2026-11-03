@@ -3,7 +3,7 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-export function useServicePublications(botId?: string) {
+export function useServicePublications(botId?: string, ownerId?: string) {
   const [items, setItems] = useState<ServicePublication[]>([]);
   const [loading, setLoading] = useState(Boolean(botId));
   const load = useCallback(async () => {
@@ -14,13 +14,13 @@ export function useServicePublications(botId?: string) {
     }
     setLoading(true);
     try {
-      setItems(await botEditorService.listLifecycle(botId));
+      setItems(await botEditorService.listLifecycle(botId, ownerId));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '发布状态加载失败');
     } finally {
       setLoading(false);
     }
-  }, [botId]);
+  }, [botId, ownerId]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -48,16 +48,16 @@ export function useServicePublications(botId?: string) {
     reload: load,
     advance: (stage: 'prestable' | 'online') =>
       act(
-        () => botEditorService.advanceLifecycle(botId!, stage),
+        () => botEditorService.advanceLifecycle(botId!, stage, ownerId),
         stage === 'prestable' ? '预发发布已提交' : '上线请求已提交',
       ),
     restart: (stage: 'prestable' | 'online') =>
-      act(() => botEditorService.restartLifecycle(botId!, stage), '重启发布已提交'),
-    cancel: () => act(() => botEditorService.cancelStaging(botId!), '预发发布已取消'),
-    offline: () => act(() => botEditorService.offlineLifecycle(botId!), '下线请求已提交'),
-    retry: () => act(() => botEditorService.retryLifecycle(botId!), '重试请求已提交'),
+      act(() => botEditorService.restartLifecycle(botId!, stage, ownerId), '重启发布已提交'),
+    cancel: () => act(() => botEditorService.cancelStaging(botId!, ownerId), '预发发布已取消'),
+    offline: () => act(() => botEditorService.offlineLifecycle(botId!, ownerId), '下线请求已提交'),
+    retry: () => act(() => botEditorService.retryLifecycle(botId!, ownerId), '重试请求已提交'),
     upgrade: (publicationId: number) =>
-      act(() => botEditorService.upgradeLifecycle(botId!, publicationId), '升级草稿已创建'),
-    deleteDraft: () => act(() => botEditorService.deleteLifecycleDraft(botId!), '服务 Bot 草稿已删除'),
+      act(() => botEditorService.upgradeLifecycle(botId!, publicationId, ownerId), '升级草稿已创建'),
+    deleteDraft: () => act(() => botEditorService.deleteLifecycleDraft(botId!, ownerId), '服务 Bot 草稿已删除'),
   };
 }

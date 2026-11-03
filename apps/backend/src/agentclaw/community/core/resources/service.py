@@ -8,8 +8,9 @@ are migrated.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
+from agentclaw.community.core.ports.resource_rows_port import WrittenFile
 from agentclaw.community.core.resources.models import (
     Resource,
     ResourceType,
@@ -18,6 +19,7 @@ from agentclaw.community.core.resources.models import (
     create_node_resource,
     create_url_resource,
 )
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.log import get_logger
 
@@ -61,7 +63,7 @@ class InvalidResourcePathError(ValueError):
     """
 
 
-class ResourceService:
+class ResourceService(ResourceRowsPort):
     """Manage resources backed by `ResourceRepositoryProtocol`."""
 
     def __init__(self, *, bot_id: str, repository: ResourceRepositoryProtocol) -> None:
@@ -409,6 +411,43 @@ class ResourceService:
                 removed = self._repo.delete(str(item.get("id"))) or removed
         return removed
 
+    async def replace_rows(
+        self,
+        *,
+        files: Sequence[WrittenFile],
+        owner_id: str,
+        created_by: Optional[str],
+    ) -> None:
+        """Replace this bot's file rows with the apply's written set.
+
+        The rows are the console listing's and the publish pipeline's view of
+        the workspace, so after an apply has rewritten the workspace's resources
+        in full they must say exactly that: every file row goes, and one row per
+        written file comes back with ``source="manifest"``, owned by the
+        bot's owner so the console's per-user listing and duplicate check see
+        it, and stamped with the actor who applied. The repository offers no
+        transaction, so this is delete-then-insert through its own calls;
+        nothing is caught, so a write that did not land raises to the
+        materialiser, which reports the category partially written and the
+        next apply converges it.
+        """
+        # Every file row of the bot: the workspace root is the resources root.
+        # Two statements, not one per row: the repository's batch delete and insert.
+        stale = self._repo.list_resources(
+            resource_type=ResourceType.FILE.value, parent_path=None, user_id=None, bolt_id=self._bot_id
+        )
+        if stale:
+            self._repo.delete_many([str(item.get("id")) for item in stale])
+        if files:
+            self._repo.create_many(
+                [
+                    self._uploaded_file_record(
+                        path=file.path, size=file.size, user_id=owner_id, created_by=created_by, source="manifest"
+                    ).to_dict()
+                    for file in files
+                ]
+            )
+
     async def record_uploaded_file(
         self,
         *,
@@ -436,9 +475,20 @@ class ResourceService:
         filters rows by ``parent_path``. Both are a ``basename``/``dirname`` off
         the single path the caller gave.
         """
+        record = self._uploaded_file_record(
+            path=path, size=size, user_id=user_id, created_by=created_by, source=source
+        )
+        stored = self._repo.create(record.to_dict())
+        record.id = stored.get("id")
+        return record
+
+    def _uploaded_file_record(
+        self, *, path: str, size: int, user_id: Optional[str], created_by: Optional[str], source: str
+    ) -> Resource:
+        """The row for a file already in the workspace, ``name`` and ``parent_path`` derived from ``path``."""
         leaf = path.rsplit("/", 1)[-1]
         parent = path.rsplit("/", 1)[0] if "/" in path else ""
-        record = create_file_resource(
+        return create_file_resource(
             name=leaf,
             path=path,
             parent_path=parent,
@@ -448,9 +498,6 @@ class ResourceService:
             source=source,
             bolt_id=self._bot_id,
         )
-        stored = self._repo.create(record.to_dict())
-        record.id = stored.get("id")
-        return record
 
     async def upload_file(
         self,

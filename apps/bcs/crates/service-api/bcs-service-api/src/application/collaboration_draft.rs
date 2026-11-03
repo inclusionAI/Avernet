@@ -1,6 +1,6 @@
 use super::collaboration_runtime::CollaborationDefinitionValidationOutcome;
 pub use crate::types::collaboration_draft::{
-    DraftAccess, DraftContent, DraftMetadata, DraftReference, DraftRevision, SavedDraftRevision,
+    DraftContent, DraftMetadata, DraftReference, DraftRevision, SavedDraftRevision,
 };
 use async_trait::async_trait;
 use serde::Serialize;
@@ -47,13 +47,11 @@ pub trait CollaborationDraftService: Send + Sync {
     async fn metadata(&self, owner: &str, id: &str) -> Result<DraftMetadata, DraftError>;
     async fn read(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftRevision, DraftError>;
     async fn validate(
         &self,
-        access: DraftAccess,
         id: &str,
         revision: u64,
     ) -> Result<DraftValidation, DraftError>;

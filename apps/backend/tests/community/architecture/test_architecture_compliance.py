@@ -114,6 +114,75 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/service_bot/services/publish_approval_service.py",
         "agentclaw.community.api.publish_approval",
     ),
+    # CollaboratorService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/bot_collaborator/services/collaborator_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # Shared post-commit helpers consume the same transport-free Service API
+    # as their business callers; this is not an HTTP adapter dependency.
+    (
+        "core/bot_collaborator/manager_sync/notifications.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # WorkOrderService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/work_orders/services/work_order_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # execution.py's post-commit space-membership hint types against the
+    # manager-sync Service API Protocol (same pattern as publish_approval).
+    (
+        "core/work_orders/execution.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # OwnerHandoffService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/bot_management/owner_handoff/service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # Owner post-commit consumers use only the transport-free ownership Service API.
+    (
+        "core/bot_management/owner_handoff/service.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
+    (
+        "core/bot_management/ownership_sync/notifications.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
+    # Repair consumes the transport-free notification Service API just like
+    # handoff/helper (Rule 3); this permits no arbitrary core-to-API imports.
+    (
+        "core/bot_management/ownership_sync/repair.py",
+        "agentclaw.community.api.bot_ownership_sync",
+    ),
+    # BotSpaceService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/bot_management/services/bot_space_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # SpaceManagementService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/spaces/services/space_management_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # SpaceMemberService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as publish_approval).
+    (
+        "core/spaces/services/space_member_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
+    # Extracted Passport/credentials side-effect segment from collaborator_service.py;
+    # annotation-only usage.
+    (
+        "core/bot_collaborator/services/collaboration_effects.py",
+        "agentclaw.community.plugins.passport",
+    ),
 })
 
 

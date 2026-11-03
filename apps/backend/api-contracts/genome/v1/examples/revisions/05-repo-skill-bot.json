@@ -1,0 +1,56 @@
+{
+  "genome_schema": 1,
+  "revision": {
+    "id": "sha256:426c9286f615a458f5c1b3b613c9a28acc5108fc94d99af85e502fae781caca5",
+    "seq": 1,
+    "bot": {
+      "owner_id": "user_owner_9",
+      "bot_id": "bot_weather"
+    },
+    "parent": null,
+    "created_by": {
+      "kind": "user",
+      "actor": "user_owner_9"
+    },
+    "created_at": "2026-10-20T08:00:00Z",
+    "status": "draft",
+    "patch_digest": null,
+    "evidence": [],
+    "evaluations": [],
+    "annotations": {}
+  },
+  "spec": {
+    "persona": [
+      {
+        "type": "SOUL.md",
+        "digest": "sha256:5013aec5c223f8e4feaebd88d4607fec71e7cb6c18f5bd0e2aa235b8d05d6fa7"
+      }
+    ],
+    "skills": [
+      {
+        "name": "weather",
+        "origin": "repo",
+        "repo_path": "team/weather"
+      }
+    ],
+    "memory": null,
+    "resources": [],
+    "tools": {
+      "mcp": []
+    },
+    "engine_config": {},
+    "script": null
+  },
+  "policy": {
+    "mutable_genes": [
+      "memory",
+      "persona",
+      "resources",
+      "skills"
+    ],
+    "pins": [
+      "persona/SAFETY.md"
+    ],
+    "risk_overrides": {}
+  }
+}

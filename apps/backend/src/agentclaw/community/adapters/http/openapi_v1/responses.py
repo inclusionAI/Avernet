@@ -58,13 +58,14 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestBindingMismatchError,
     MAX_DOCUMENT_BYTES,
     ManifestNotEncodableError,
     ManifestTooLargeError,
     ManifestValidationError,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    ManifestApplyInProgressError,
+from agentclaw.community.api.apply_run_service import (
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -89,8 +90,13 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
+    BotAccessCheckForbiddenError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
+    GENOME_ENVELOPE_ERROR_CODES,
+    GENOME_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -297,6 +303,10 @@ from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
     TaskError,
     TaskArtifactContentError,
+    TaskArtifactObjectNotFoundError,
+    TaskArtifactStorageError,
+    TaskArtifactStorageNotConfiguredError,
+    TaskArtifactUploadTooLargeError,
     TaskNotFoundError,
     TaskStateError,
     TrajectoryAnalysisError,
@@ -374,7 +384,11 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
+
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    ExpertNotFoundError: (404, "Not found"),
+    ExpertCreationError: (422, "Expert cannot be created"),
     EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
     EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
@@ -401,7 +415,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     AcliEngineUnsupportedError: (501, "This bot's engine does not support acli CLIs"),
     AcliBotNotRunningError: (409, "The bot has no running container"),
     AcliEngineOutdatedError: (
-        409, "This bot's engine version does not support acli CLIs yet; update or restart the bot"
+        409, "This bot's engine does not support CLI management yet; update its engine"
     ),
     AcliRequestRejectedError: (422, "acli rejected the request"),
     AcliOperationFailedError: (502, "The acli operation failed"),
@@ -423,6 +437,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # two have different fixes. The message says nothing about which user was
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
+    BotAccessCheckForbiddenError: (403, "Forbidden"),
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
@@ -635,6 +650,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
+    **GENOME_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
@@ -673,7 +689,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
-    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
+    ManifestBindingMismatchError: (409, "Bound Manifest changed"),
+    ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
     # platform refused what it *named* — an unmatched digest, an absent archive
@@ -822,6 +839,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # relay 回调解析/发布路径抛给客户端的是请求问题,落 422 而非 TaskError 500 兜底
     # (列在 TaskError 基类之前,同上 trajectory leaves)。
     TaskArtifactContentError: (422, "Invalid artifact report"),
+    # OBJECT_FILE 上传/下载(spec 2026-10-26 修订):四个状态对应四个不同的运维
+    # 动作——413 调大 task_artifact_storage.max_upload_mb / 分块通道;502 查对象存储
+    # 本身;503 修列绑定(task_artifact_storage 块);404 行未知或对象已被清理。列在
+    # ``TaskError`` 基类之前(同上 trajectory leaves;ENVELOPE_ERRORS 首个 isinstance
+    # 命中即返回)。
+    TaskArtifactUploadTooLargeError: (413, "Artifact upload exceeds configured size cap"),
+    TaskArtifactObjectNotFoundError: (404, "Artifact object not found"),
+    TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
+    TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
@@ -841,7 +867,9 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
-    ManifestApplyInProgressError: 409109,
+    ApplyInProgressError: 409109,
+    ManifestBindingMismatchError: 409112,
+    **GENOME_ENVELOPE_ERROR_CODES,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,

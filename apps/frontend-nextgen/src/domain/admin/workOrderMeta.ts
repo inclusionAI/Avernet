@@ -36,6 +36,8 @@ export const WORK_ORDER_TYPE_META: Record<string, WorkOrderTypeMeta> = {
   HUMAN2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
+  // bot-public-risk-check：Bot 公开风险前置检测结果通知（失败/需关注），携带检测工单外链。
+  BOT_PUBLIC_RISK: { label: 'Bot公开风险检测', tone: 'purple', category: 'NOTICE' },
 };
 
 /** 工单状态 → 中文 label（admin 视觉交互指南 §2.3）。 */

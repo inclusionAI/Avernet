@@ -81,6 +81,10 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_api_servi
     TaskArtifactApiService,
     TaskArtifactApiServiceProtocol,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_file_service import (
+    TaskArtifactObjectFileService,
+    TaskArtifactObjectFileServiceProtocol,
+)
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
@@ -91,12 +95,24 @@ from agentclaw.community.core.task.repository.task_intake_repository import (
 from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
     BcsBotTokenProvider,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
+    BcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.client.session_files.bcs_session_files_client import (
+    BcsSessionFilesClient,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage_config import (
+    TaskArtifactStorageConfig,
+)
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
+    TaskArtifactObjectStoragePlugin,
+)
 
 logger = logging.getLogger("task.persistence")
 
@@ -153,14 +169,97 @@ class TaskPersistenceModule(Module):
             to=TaskArtifactRepository,
             scope=singleton,
         )
-        # Artifact manual-registration API service (POST/GET /tasks/artifacts):
-        # consumes the graph repo (归属/attempt 交叉校验) + the artifact repo
-        # appended just above; co-located with them the way the trajectory
-        # assembler is, so the artifact wiring lives in one place.
-        binder.bind(
-            TaskArtifactApiServiceProtocol,
-            to=TaskArtifactApiService,
-            scope=singleton,
+        # Artifact API service is built by ``task_artifact_api_service`` below:
+        # required graph/artifact repositories plus optional configured BCS
+        # session-file collaborators all meet in this composition root.
+
+    @singleton
+    @provider
+    def task_artifact_api_service(
+        self, injector: Injector
+    ) -> TaskArtifactApiServiceProtocol:
+        """Construct artifact registration + dashboard session-file reconciliation.
+
+        The manifest repositories are required. BCS HMAC/session-token providers are
+        optional so lightweight test/local injectors preserve the historical DB-only
+        artifact behavior. Empty BCS credentials disable discovery rather than
+        constructing a client that can only fail every dashboard request.
+        """
+        graph_repo = injector.get(TaskGraphRepositoryProtocol)
+        artifact_repo = injector.get(TaskArtifactRepositoryProtocol)
+        task_info_repo = injector.get(TaskInfoRepositoryProtocol)
+
+        session_files = None
+        try:
+            bcs_token = injector.get(BcsTokenProvider)
+            configured = all(
+                str(getattr(bcs_token, name, "") or "").strip()
+                for name in ("base_url", "token", "secret")
+            )
+            if configured:
+                session_files = BcsSessionFilesClient(bcs_token)
+            else:
+                logger.info(
+                    "[task-persistence] BCS session-file client disabled: "
+                    "base_url/token/secret not fully configured"
+                )
+        except Exception as exc:  # noqa: BLE001 optional integration is unbound
+            logger.info(
+                "[task-persistence] BcsTokenProvider 未绑定 → session-file 同步关闭:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+        try:
+            bcs_bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001 optional caller identity is unbound
+            logger.info(
+                "[task-persistence] BcsBotTokenProvider 未绑定 → session-file 使用 HMAC-only:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            bcs_bot_tokens = None
+
+        return TaskArtifactApiService(
+            graph_repo=graph_repo,
+            artifact_repo=artifact_repo,
+            session_files=session_files,
+            bcs_bot_tokens=bcs_bot_tokens,
+            task_info_repo=task_info_repo,
+        )
+
+    @singleton
+    @provider
+    def task_artifact_object_file_service(
+        self, injector: Injector
+    ) -> TaskArtifactObjectFileServiceProtocol:
+        """Construct the OBJECT_FILE upload/download proxy service.
+
+        The artifact object-store plugin is optional (try/except → None) so
+        lightweight test/local injectors stay constructible — an unbound store
+        surfaces per-request as ``TaskArtifactStorageNotConfiguredError``
+        (503), matching the analyzer's optional-port posture above.
+        """
+        graph_repo = injector.get(TaskGraphRepositoryProtocol)
+        artifact_repo = injector.get(TaskArtifactRepositoryProtocol)
+        config = injector.get(TaskArtifactStorageConfig)
+
+        object_storage: TaskArtifactObjectStoragePlugin | None = None
+        try:
+            object_storage = injector.get(TaskArtifactObjectStoragePlugin)
+        except Exception as exc:  # noqa: BLE001 optional seam is unbound
+            logger.info(
+                "[task-persistence] TaskArtifactObjectStoragePlugin 未绑定 → "
+                "OBJECT_FILE 上传/下载将 503:%s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+        return TaskArtifactObjectFileService(
+            graph_repo=graph_repo,
+            artifact_repo=artifact_repo,
+            object_storage=object_storage,
+            config=config,
         )
 
     @singleton

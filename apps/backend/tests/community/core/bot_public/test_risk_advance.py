@@ -1,0 +1,333 @@
+import json
+from datetime import datetime
+from dataclasses import replace
+from unittest.mock import MagicMock
+
+import pytest
+
+from agentclaw.community.core.bot_public_risk.advance import RiskAdvance
+from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+
+
+def row(**kwargs):
+    return replace(RiskCheck(risk_check_id="a", env="dev", bot_pk=1, owner_id="owner", operator_id="actor",
+        client_scope="openapi:actor", client_request_id="request", public_scope="user", target_json="{}",
+        request_hash="request", input_json="{}", input_hash="hash", approval_biz_id="biz-a",
+        phase="ADVANCING", security_status="PASS", current_target_key="current"), **kwargs)
+
+
+def test_existing_approval_intent_never_blindly_resubmits():
+    repo = MagicMock()
+    repo.get.return_value = row(workflow_json='{"approval_intent":true}')
+    repo.update_current.return_value = True
+    submit = MagicMock()
+    RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    submit.assert_not_called()
+    assert repo.update_current.call_args.kwargs["changes"]["phase"] == "NEEDS_ATTENTION"
+
+
+def test_h2_failure_never_submits():
+    repo = MagicMock()
+    repo.get.return_value = row()
+    repo.update_current.return_value = True
+    submit = MagicMock()
+    RiskAdvance(repo, lambda _: False, submit, lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    submit.assert_not_called()
+    assert repo.update_current.call_args.kwargs["changes"]["phase"] == "NEEDS_ATTENTION"
+
+
+class MemoryRepository:
+    def __init__(self, initial):
+        self.row = initial
+
+    def get(self, *, env, risk_check_id):
+        return self.row if (self.row.env, self.row.risk_check_id) == (env, risk_check_id) else None
+
+    def update_current(self, *, env, risk_check_id, row_version, changes):
+        if self.row.current_target_key is None or self.row.row_version != row_version:
+            return False
+        self.row = replace(self.row, **changes, row_version=row_version + 1)
+        return True
+
+
+def test_inline_approval_is_associated_before_callback():
+    repo = MemoryRepository(row())
+    def submit(record, on_started):
+        assert json.loads(record.workflow_json)["approval_intent"] is True
+        on_started({"puid": "p1"})
+        assert repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
+        return "approval"
+    RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    assert repo.row.phase == "APPROVING"
+
+
+def test_external_creation_exception_does_not_trigger_second_submission():
+    repo = MemoryRepository(row())
+    submit = MagicMock(side_effect=TimeoutError("unknown"))
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_OUTCOME_UNKNOWN"
+    assert submit.call_count == 1
+
+
+def test_early_callback_keeps_recovery_due_until_replayed():
+    repo = MemoryRepository(row())
+    now = datetime(2026, 1, 1)
+    def submit(record, on_started):
+        workflow = json.loads(repo.row.workflow_json)
+        workflow["pending_approval"] = {"puid": "p1", "decision": "AGREE"}
+        repo.update_current(env="dev", risk_check_id="a", row_version=repo.row.row_version,
+                            changes={"workflow_json": json.dumps(workflow)})
+        on_started({"puid": "p1"})
+        return "approval"
+    RiskAdvance(repo, lambda _: True, submit, lambda: now).advance("dev", "a")
+    assert repo.row.phase == "APPROVING"
+    from datetime import timedelta
+    assert repo.row.next_action_at == now + timedelta(minutes=2)
+
+
+def test_advance_handler_binds_tenant_and_rejects_wrong_environment():
+    from agentclaw.community.core.bot_public_risk.advance import RiskAdvanceHandler
+    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
+    advance = MagicMock()
+    observed = []
+    advance.advance.side_effect = lambda env, risk_id: observed.append((get_current_avernet_tenant(), env, risk_id))
+    handler = RiskAdvanceHandler(advance, lambda: "dev")
+    handler.handle({"tenant": "tenant-x", "env": "dev", "risk_check_id": "a"})
+    assert observed == [("tenant-x", "dev", "a")]
+    with pytest.raises(ValueError):
+        handler.handle({"tenant": "tenant-x", "env": "prod", "risk_check_id": "a"})
+
+
+def test_recovery_enqueues_pending_approval_callback():
+    from agentclaw.community.core.bot_public_risk.tasks import REPLAY, RiskTasks
+    repo = MagicMock()
+    pending = row(phase="APPROVING", approval_puid="p1", next_action_at=datetime(2026, 1, 1),
+                  workflow_json='{"pending_approval":{"puid":"p1","decision":"AGREE"}}')
+    repo.list_due.return_value = (pending,)
+    queue = MagicMock()
+    tasks = RiskTasks(repo, queue, MagicMock(), lambda: datetime(2026, 1, 1))
+    tasks.recover(env="dev", now=datetime(2026, 1, 1))
+    assert queue.enqueue.call_args.args[0] == REPLAY
+
+
+def test_pending_handler_replays_against_original_bot_and_applicant():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    repo = MagicMock()
+    repo.get.return_value = row(phase="APPROVING", approval_puid="p1", workflow_json='{"approval_target_ready":true,"pending_approval":{}}')
+    bots = MagicMock()
+    bots.get_by_pk.return_value = {"bot_id": "b", "entity_id": "e"}
+    guard = MagicMock()
+    def replay(env, risk_id, callback):
+        callback("p1", "AGREE")
+        return True
+    guard.replay.side_effect = replay
+    public = MagicMock()
+    handler = RiskPendingHandler(repo, bots, public, guard, lambda: "dev")
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    kwargs = public.handle_public_approval_callback.call_args.kwargs
+    assert kwargs["bot_id"] == "b:e" and kwargs["owner_id"] == "owner"
+    assert kwargs["risk_check_id"] == "a" and kwargs["puid"] == "p1"
+
+
+def test_h2_invalidation_stages_notice_for_actual_openapi_applicant():
+    repo = MemoryRepository(row())
+    RiskAdvance(repo, lambda _: False, MagicMock(), lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["notices"]["INPUT_INVALID"]["status"] == "pending"
+    assert repo.row.notification_due_at == datetime(2026, 1, 1)
+
+
+def test_concurrent_reclaimed_worker_does_not_lose_first_approval_puid():
+    from threading import Event, Thread
+    repo = MemoryRepository(row())
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        on_started({"puid": "p1"})
+        return "approval"
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
+
+
+def test_approval_target_write_failure_is_recorded_without_restarting_approval():
+    repo = MemoryRepository(row())
+    def submit(record, on_started):
+        on_started({"puid": "p1"})
+        raise RuntimeError("target write failed")
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    advance.advance("dev", "a")
+    assert repo.row.approval_puid == "p1"
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+
+
+def test_recovery_marks_interrupted_callback_unknown_without_reapplying():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    state = {"approval_target_ready": True, "callback_claim": {
+        "event": {"puid": "p1", "decision": "AGREE"}, "status": "processing"}}
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", workflow_json=json.dumps(state)))
+    public, guard = MagicMock(), MagicMock()
+    handler = RiskPendingHandler(repo, MagicMock(), public, guard, lambda: "dev")
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "CALLBACK_OUTCOME_UNKNOWN"
+    public.handle_public_approval_callback.assert_not_called()
+    guard.replay.assert_not_called()
+
+
+def test_recovery_waits_for_live_callback_claim_before_marking_unknown():
+    from datetime import timedelta
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    from agentclaw.community.core.task_queue.types import Reschedule
+    now = datetime(2026, 1, 1)
+    state = {"approval_target_ready": True, "callback_claim": {
+        "event": {"puid": "p1", "decision": "AGREE"}, "status": "processing"}}
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", next_action_at=now + timedelta(seconds=30), workflow_json=json.dumps(state)))
+    handler = RiskPendingHandler(repo, MagicMock(), MagicMock(), MagicMock(), lambda: "dev", clock=lambda: now)
+    outcome = handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert isinstance(outcome, Reschedule) and outcome.delay_seconds == 30
+    assert repo.row.phase == "APPROVING"
+
+
+def test_target_not_ready_without_pending_event_is_recovered_without_new_approval():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    now = datetime(2026, 1, 1)
+    repo = MemoryRepository(row(phase="APPROVING", approval_puid="p1", next_action_at=now,
+                                workflow_json='{"approval_intent":true}'))
+    public, guard = MagicMock(), MagicMock()
+    handler = RiskPendingHandler(repo, MagicMock(), public, guard, lambda: "dev", clock=lambda: now)
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+    public.public_bcs_bot.assert_not_called()
+
+
+def test_concurrent_reclaimed_worker_preserves_direct_publication_result():
+    from threading import Event, Thread
+    repo = MemoryRepository(row(public_scope="legacy"))
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        return "published"
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1))
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert repo.row.phase == "PUBLISHED"
+
+
+def test_unknown_approval_uses_one_bounded_lookup_without_resubmission():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    lookup = MagicMock(return_value="puid-verified")
+    submit = MagicMock()
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    lookup.assert_called_once()
+    submit.assert_not_called()
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert repo.row.approval_puid == "puid-verified"
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_TARGET_NOT_READY"
+
+
+def test_inconclusive_approval_lookup_never_retries_submission():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    lookup = MagicMock(return_value=None)
+    submit = MagicMock()
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.approval_puid is None
+    assert lookup.call_count == 1 and submit.call_count == 0
+
+
+def test_late_original_worker_can_finish_after_lookup_finds_same_puid():
+    from threading import Event, Thread
+    repo = MemoryRepository(row())
+    sent, resume = Event(), Event()
+    def submit(record, on_started):
+        sent.set()
+        assert resume.wait(5)
+        on_started({"puid": "p1"})
+        return "approval"
+    lookup = MagicMock(return_value="p1")
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    thread = Thread(target=advance.advance, args=("dev", "a"))
+    thread.start()
+    assert sent.wait(5)
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.approval_puid == "p1"
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive() and repo.row.phase == "APPROVING" and repo.row.approval_puid == "p1"
+    lookup.assert_called_once()
+
+
+def test_timeout_persistently_schedules_one_bounded_recovery_without_reposting():
+    now = datetime(2026, 1, 1)
+    repo = MemoryRepository(row())
+    submit = MagicMock(side_effect=TimeoutError("response lost"))
+    recovery = MagicMock(return_value=None)
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: now, recovery=recovery)
+    advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at == now
+    advance.advance("dev", "a")
+    advance.advance("dev", "a")
+    assert recovery.call_count == 1
+    assert submit.call_count == 1
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at is None
+
+
+def test_recovery_scanner_enqueues_unknown_approval_lookup():
+    from agentclaw.community.core.bot_public_risk.tasks import ADVANCE, RiskTasks
+    now = datetime(2026, 1, 1)
+    pending = row(phase="NEEDS_ATTENTION", next_action_at=now,
+                  workflow_json='{"approval_intent":true,"error":"APPROVAL_OUTCOME_UNKNOWN"}')
+    repo, queue = MagicMock(), MagicMock()
+    repo.list_due.return_value = (pending,)
+    RiskTasks(repo, queue, MagicMock(), lambda: now).recover(env="dev", now=now)
+    assert queue.enqueue.call_args.args[0] == ADVANCE
+
+
+def test_crash_during_lookup_keeps_explicit_unknown_without_reposting():
+    repo = MemoryRepository(row(workflow_json='{"approval_intent":true}'))
+    submit = MagicMock()
+    lookup = MagicMock(side_effect=SystemExit())
+    advance = RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1), recovery=lookup)
+    with pytest.raises(SystemExit):
+        advance.advance("dev", "a")
+    assert repo.row.phase == "NEEDS_ATTENTION" and repo.row.next_action_at is None
+    assert json.loads(repo.row.workflow_json)["error"] == "APPROVAL_OUTCOME_UNKNOWN"
+    advance.advance("dev", "a")
+    assert lookup.call_count == 1 and submit.call_count == 0
+
+
+def test_authoritative_approval_association_discards_wrong_early_puid():
+    repo = MemoryRepository(row())
+    def submit(record, on_started):
+        workflow = json.loads(repo.row.workflow_json)
+        workflow['pending_approval'] = {'puid': 'wrong', 'decision': 'AGREE'}
+        repo.update_current(env='dev', risk_check_id='a', row_version=repo.row.row_version,
+                            changes={'workflow_json': json.dumps(workflow)})
+        on_started({'puid': 'correct'})
+        return 'approval'
+    RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1)).advance('dev', 'a')
+    assert repo.row.approval_puid == 'correct'
+    assert 'pending_approval' not in json.loads(repo.row.workflow_json)

@@ -48,16 +48,19 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
   const qwenWorkEnabled =
     getCapabilities().getQwenWorkBotRegistrationConfig(resolveBcsEndpoint() ?? '').status === 'available';
   const deepSeekHarnessEnabled = getCapabilities().getDeepSeekHarnessRegistrationEnabled().value;
+  const openClawCapability = getCapabilities().getOpenClawRegistrationEnabled();
+  const openClawEnabled = openClawCapability.status === 'available' && openClawCapability.value;
   const poolabEnabled = getCapabilities().getPoolabBridgeInstallation().value !== null;
   const engineOptions = [
     ...(poolabEnabled ? [{ value: 'poolab' as const, label: 'Poolab' }] : []),
     ...additionalPanels.map(({ id, label }) => ({ value: id, label })),
     ...(deepSeekHarnessEnabled ? [{ value: 'deepseek-harness', label: 'DeepSeek Harness' }] : []),
     ...(qwenWorkEnabled ? [{ value: 'qwenwork', label: '千问办公' }] : []),
-    { value: 'openclaw', label: 'OpenClaw' },
+    ...(openClawEnabled ? [{ value: 'openclaw', label: 'OpenClaw' }] : []),
   ];
-  const defaultEngine = engineOptions[0].value;
-  const [engine, setEngine] = useState<RegistrationEngine>(defaultEngine);
+  const defaultEngine = engineOptions[0]?.value ?? '';
+  const [selectedEngine, setEngine] = useState<RegistrationEngine>(defaultEngine);
+  const engine = engineOptions.some(({ value }) => value === selectedEngine) ? selectedEngine : defaultEngine;
   const AdditionalPanel = additionalPanels.find((panel) => panel.id === engine)?.Panel;
   const [mode, setMode] = useState<AccessMode>('self');
   const { identity } = useHumanIdentity();
@@ -117,13 +120,17 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <ModalDescription className="leading-5">选择 Bot 类型，按对应指南完成接入。</ModalDescription>
         </ModalHeader>
 
-        <Segmented<RegistrationEngine>
-          aria-label="Bot 类型"
-          value={engine}
-          onChange={setEngine}
-          className="w-full overflow-x-auto"
-          options={engineOptions}
-        />
+        {engineOptions.length > 0 ? (
+          <Segmented<RegistrationEngine>
+            aria-label="Bot 类型"
+            value={engine}
+            onChange={setEngine}
+            className="w-full overflow-x-auto"
+            options={engineOptions}
+          />
+        ) : (
+          <Empty compact title="暂无可用的接入方式" description="当前未启用 Bot 接入方式，请联系管理员。" />
+        )}
         {AdditionalPanel ? (
           <Suspense fallback={<p role="status">正在加载接入指南…</p>}>
             <AdditionalPanel open={open} />
@@ -134,7 +141,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
           <QwenWorkRegistrationPanel open={open} />
         ) : engine === 'poolab' ? (
           <PoolabRegistrationPanel open={open} />
-        ) : (
+        ) : engine === 'openclaw' && openClawEnabled ? (
           <>
             <label className="block space-y-2 text-xs font-medium">
               <span>Bot 名称</span>
@@ -208,7 +215,7 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
               />
             ) : (
               <div className="min-w-0 rounded-lg border border-border bg-muted/40">
-                <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                <div className="flex items-center justify-between gap-3 border-b border-divider px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">
                       {mode === 'self' ? '终端安装命令' : '发送给 Bot 的接入指引'}
@@ -231,13 +238,13 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
                 <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
                   {botName.trim() ? command : '请输入 Bot 名称'}
                 </pre>
-                <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                <p className="border-t border-divider px-3 py-2 text-xs text-muted-foreground">
                   Token 有效期至：{formatExpiresAt(expiresAt)}。
                 </p>
               </div>
             )}
           </>
-        )}
+        ) : null}
       </ModalContent>
     </Modal>
   );

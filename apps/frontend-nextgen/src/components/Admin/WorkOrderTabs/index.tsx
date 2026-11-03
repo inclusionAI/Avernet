@@ -2,6 +2,7 @@
 // 视觉对齐 admin 视觉交互指南 §7.2/§7.4/§8。切视图/分类回第 1 页；详情用 typeLabel/statusLabel 本地化。
 import { Button, Card, Empty, Pagination, Skeleton } from '@/components/ui';
 import type { WorkOrder, WorkOrderCategory, WorkOrderView } from '@/domain/admin/models';
+import { isSameWorkOrderItem, markNotificationReadInList } from '@/domain/admin/workOrderRead';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWorkOrders } from '@/hooks/useWorkOrders';
 import { useWorkOrderStore } from '@/stores/workOrderStore';
@@ -90,11 +91,10 @@ export function WorkOrderTabs() {
         setDetail(r.data);
         void refreshUnread(true);
         setDetail((prev) => (prev ? { ...prev, isRead: true } : prev));
-        // 同步列表项 isRead（待我处理视图内该条变 opacity-75 + 已查看，刷新后归到已处理）
-        useWorkOrderStore.getState().setList(
-          items.map((it) => (it.workOrderId === wo.workOrderId ? { ...it, isRead: true } : it)),
-          total,
-        );
+        // 同步列表项 isRead（待我处理视图内该条变 opacity-75 + 已查看，刷新后归到已处理）。
+        // 通知类行的 workOrderId 恒为 0（List VO 契约），必须按 notificationId 定位本条，
+        // 否则一次查看会把同列表所有通知一起点亮成已查看。
+        useWorkOrderStore.getState().setList(markNotificationReadInList(items, wo.notificationId), total);
       }
       if (r.error) toast.error(extractFriendlyErrorMessage(r.error));
       setDetailLoading(false);
@@ -102,8 +102,9 @@ export function WorkOrderTabs() {
   };
 
   // 下一条未读通知（当前视图内、非当前、未读的通知类）—Drawer「下一条未读」导航用。
+  // 同一性走 isSameWorkOrderItem（通知类按 notificationId）：通知类 workOrderId 恒为 0 不能用来排除当前条。
   const nextUnread = detail
-    ? items.find((wo) => wo.itemType === 'NOTIFICATION' && !wo.isRead && wo.workOrderId !== detail.workOrderId)
+    ? items.find((wo) => wo.itemType === 'NOTIFICATION' && !wo.isRead && !isSameWorkOrderItem(wo, detail))
     : undefined;
 
   const openNextUnread = () => {
@@ -182,7 +183,7 @@ export function WorkOrderTabs() {
         {loading ? (
           <div className="px-5 pb-2">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 border-b border-border py-4 last:border-b-0">
+              <div key={i} className="flex items-center gap-4 border-b border-divider py-4 last:border-b-0">
                 <div className="flex-1 space-y-2">
                   <Skeleton.Line className="w-2/5" />
                   <Skeleton.Line className="w-4/5" />
@@ -233,7 +234,7 @@ export function WorkOrderTabs() {
               ))}
             </div>
             {/* 分页：接入统一 Pagination 组件（计数 + 上/下一页图标按钮，右对齐） */}
-            <div className="flex items-center justify-end border-t border-border px-5 py-4">
+            <div className="flex items-center justify-end border-t border-divider px-5 py-4">
               <Pagination
                 current={pageNo}
                 pageSize={pageSize}

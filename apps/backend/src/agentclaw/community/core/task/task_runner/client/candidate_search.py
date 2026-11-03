@@ -114,8 +114,26 @@ async def search_candidates(
     filters: dict[str, Any] | None = None,
 ) -> CandidateSearchResult:
     """Search the same tokenized catalog candidate set for every task mode."""
+    if discover is None:
+        tokens = search_tokens(query, max_tokens=max_tokens)
+        return CandidateSearchResult([], tokens, 0, [])
+
+    # A hybrid discover may retrieve candidates with the full candidate query before
+    # tokenizing. Keep this duck-typed hook private to task candidate retrieval;
+    # ordinary adapters continue through the established token path below.
+    full_query_search = getattr(discover, "search_full_query", None)
+    if callable(full_query_search):
+        return await full_query_search(
+            query=query,
+            user_id=user_id,
+            per_keyword_limit=per_keyword_limit,
+            max_tokens=max_tokens,
+            min_score=min_score,
+            filters=filters,
+        )
+
     tokens = search_tokens(query, max_tokens=max_tokens)
-    if not tokens or discover is None:
+    if not tokens:
         return CandidateSearchResult([], tokens, 0, [])
 
     search_filters = filters if filters is not None else DEFAULT_FILTERS

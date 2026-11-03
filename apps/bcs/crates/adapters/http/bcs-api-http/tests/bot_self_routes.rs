@@ -7,7 +7,10 @@ use tower::ServiceExt;
 
 #[allow(dead_code)]
 mod register_support;
-use register_support::{bare_request, response_json, test_router, test_state};
+use register_support::{test_router, test_state};
+#[path = "register_support/requests.rs"]
+mod requests;
+use requests::{bare_request, response_json};
 
 struct UnusedRegisterService;
 

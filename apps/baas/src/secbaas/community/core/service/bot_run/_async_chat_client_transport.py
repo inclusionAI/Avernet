@@ -7,6 +7,7 @@ each other's internals.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal, Protocol, cast
 
 ChatTransportMode = Literal["off", "grey", "on"]
@@ -22,7 +23,10 @@ def normalize_chat_transport_mode(
 
 
 def build_chat_transport(
-    owner: AsyncChatTransportOwner, mode: ChatTransportMode
+    owner: AsyncChatTransportOwner,
+    mode: ChatTransportMode,
+    *,
+    proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
 ) -> AsyncChatTransportBase:
     """Construct the transport selected by ``mode`` without leaking policy branches
     into ``AsyncChatClient``.
@@ -37,7 +41,9 @@ def build_chat_transport(
     if mode in {"grey", "on"}:
         from ._async_chat_client_a2a import A2aChatTransport
 
-        return A2aChatTransport(owner, mode)
+        return A2aChatTransport(
+            owner, mode, proxypass_token_minter=proxypass_token_minter
+        )
     raise ValueError(f"invalid transport_mode: {mode!r}")
 
 
@@ -53,7 +59,7 @@ class AsyncChatTransportOwner(Protocol):
     def _client(self) -> Any | None:  # noqa: SLF001
         raise NotImplementedError
 
-    def _make_ws_client(self) -> Any:  # noqa: SLF001
+    def _bind_client_events(self, client: Any) -> None:  # noqa: SLF001
         raise NotImplementedError
 
     def _event_bridge_snapshot(self) -> dict[str, Any]:  # noqa: SLF001
@@ -89,8 +95,18 @@ class AsyncChatTransportBase:
         """Actual transport selected by the last successful ``connect``."""
         raise NotImplementedError
 
+    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
+        """Keep the latest nonempty proxy credential for future handshakes.
+
+        WS uses it only when reconnecting. HTTP implementations additionally
+        refresh their per-request credentials in their own override.
+        """
+        token = (headers or {}).get("x-proxypass-token", "")
+        if token:
+            self.owner.headers["x-proxypass-token"] = token
+
     async def create(self) -> tuple[Any, dict[str, Any]]:
-        """Create and connect a transport-specific client."""
+        """Create a client, bind callbacks BEFORE connecting, and return hello."""
         raise NotImplementedError
 
     async def send_target(

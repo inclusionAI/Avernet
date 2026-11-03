@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
+    ManifestBindingMismatchError,
+    bound_manifest_state,
+    MANIFEST_STATE,
     MAX_DOCUMENT_BYTES,
-    ManifestCapabilities,
+    Capabilities,
     ManifestNotEncodableError,
     ManifestTooLargeError,
     ManifestValidationError,
@@ -21,9 +24,12 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
 )
 
 __all__ = [
+    "ManifestBindingMismatchError",
+    "bound_manifest_state",
     "BotConfigManifestServiceProtocol",
+    "MANIFEST_STATE",
     "MAX_DOCUMENT_BYTES",
-    "ManifestCapabilities",
+    "Capabilities",
     "ManifestNotEncodableError",
     "ManifestTooLargeError",
     "ManifestValidationError",

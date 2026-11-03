@@ -12,6 +12,8 @@ yet, which ``grant`` refuses.
 
 from __future__ import annotations
 
+from agentclaw.community.plugin_api.models import BotModel
+
 from contextlib import contextmanager
 
 import pytest
@@ -58,7 +60,7 @@ def sessions():
         tables=[
             UserAppGrantModel.__table__,
             UserAppGrantLogModel.__table__,
-            BotAppGrantModel.__table__,
+            BotModel.__table__, BotAppGrantModel.__table__,
             BotAppGrantLogModel.__table__,
         ],
     )
@@ -184,8 +186,14 @@ class _NoLiveBots:
     """A bot repository double under which no bot is live — the state a
     creation is in when its grant is written."""
 
+    def list_matches_by_legacy_locator(self, bot_id, locator):
+        return []
+
     def filter_live_bots(self, pairs):
         return set()
+
+    def get_live_bot_owners_by_entity(self, pairs):
+        return {}
 
 
 @pytest.fixture

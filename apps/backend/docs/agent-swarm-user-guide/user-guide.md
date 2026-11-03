@@ -128,19 +128,35 @@ Each `agents[]` entry (`AgentSpecDTO`, strict):
 | `metadata` | object | — | ≤ 32 entries; key ≤ 200 chars, value ≤ 2,000 chars |
 | `config_manifest` | string | — | **≤ 200,000 chars.** A full bot config manifest YAML document — see §8 |
 
-`options` (`RunOptionsDTO`, strict) — every value is upper-bounded by the
-deployment's `agentswarm.orchestration.*` configuration (you can tighten a
-budget, never loosen it past deployment maxima):
+`options` (`RunOptionsDTO`, strict) — every value falls back to the
+deployment's `agentswarm.orchestration.*` configuration when omitted, and
+the deployment stays the authority in one of three ways:
+
+- **fallback** — `model_name` names the model for agents that don't set
+  their own; the deployment default serves when omitted.
+- **tighten-only** — `max_width`, `max_attempts`, `slice_max_seconds`, and
+  `per_attempt_timeout_seconds` are honored but clamped by the
+  deployment's configured value.
+- **raise-to-slice-room** — `setup_timeout_seconds` re-budgets one
+  agent's provisioning phase (spawn + authorization park + READY): the
+  deployment's `setup_timeout` is the fallback while a requested value
+  wins **up to the slice room the deployment leaves**
+  (`slice_max_seconds − per_attempt_timeout`). Parked time waiting on
+  human consent never counts against it.
+
+`max_turns` and `max_total_agents` are persisted with the run but do not
+override the deployment's orchestrator budgets.
 
 | Field | Range | Meaning |
 | --- | --- | --- |
 | `model_name` | ≤ 128 chars | Model for agents that don't set their own |
-| `slice_max_seconds` | (0, 3600] | Orchestrator deadline per slice |
-| `per_attempt_timeout_seconds` | (0, 600] | Upper bound for one agent attempt |
-| `max_turns` | [1, 50] | Orchestrator decision-turn budget |
-| `max_total_agents` | [1, 64] | Total spawn ceiling for the run |
-| `max_width` | [1, 16] | Max in-flight agents at once |
-| `max_attempts` | [1, 3] | Per-agent fresh-context retry cap |
+| `slice_max_seconds` | (0, 3600] | Slice deadline per-run (tighten-only) |
+| `per_attempt_timeout_seconds` | (0, 600] | One agent-attempt bound (tighten-only) |
+| `setup_timeout_seconds` | (0, 900] | Agent provisioning budget (raise up to the deployment's slice room) |
+| `max_turns` | [1, 50] | Persisted only — deployment budget governs |
+| `max_total_agents` | [1, 64] | Persisted only — deployment budget governs |
+| `max_width` | [1, 16] | Max in-flight agents at once (tighten-only) |
+| `max_attempts` | [1, 3] | Per-agent fresh-context retry cap (tighten-only) |
 
 Responses:
 

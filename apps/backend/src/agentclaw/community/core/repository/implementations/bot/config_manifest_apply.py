@@ -21,7 +21,7 @@ from injector import inject
 from sqlalchemy import DateTime, func, select, type_coerce
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.bot_config_manifest.repository.apply_models import (
+from agentclaw.community.core.apply_engine.repository.apply_models import (
     BotConfigManifestApplyLockModel,
     BotConfigManifestApplyLockRecord,
     BotConfigManifestApplyModel,
@@ -188,19 +188,17 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
             return row.to_record() if row is not None else None
 
     def latest(
-        self, *, env: str, entity_id: str, bot_id: str
+        self, *, env: str, entity_id: str, bot_id: str, trigger: str | None = None
     ) -> Optional[BotConfigManifestApplyRecord]:
         """The newest apply for this bot, or ``None`` if it never applied.
 
         ``None`` is an ordinary answer here, not an error.
         """
         with self._db.orm_session() as db:
-            row = (
-                db.query(self._Apply)
-                .filter(*self._match(env=env, entity_id=entity_id, bot_id=bot_id))
-                .order_by(self._Apply.id.desc())
-                .first()
-            )
+            filters = self._match(env=env, entity_id=entity_id, bot_id=bot_id)
+            if trigger is not None:
+                filters.append(self._Apply.trigger == trigger)
+            row = db.query(self._Apply).filter(*filters).order_by(self._Apply.id.desc()).first()
             return row.to_record() if row is not None else None
 
     def recent(

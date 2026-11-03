@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
@@ -11,10 +12,14 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicConfig,
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_HELP,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
+    TOPIC_TYPE_SHARE,
 )
 from agentclaw.community.core.task.forum.repository.models import (
+    ForumInteractionModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -23,6 +28,7 @@ from agentclaw.community.core.repository.implementations.task.forum.forum_reposi
     _is_post_request_idempotency_conflict,
     _is_topic_request_idempotency_conflict,
 )
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
 def _create_topic(
@@ -119,6 +125,18 @@ def test_create_topic_persists_and_returns_poll_configuration(db):
                 "deadline_at": deadline.isoformat(),
             }
         }
+
+
+def test_create_share_topic_without_configuration(db):
+    result = _create_topic(
+        ForumRepository(db),
+        request_id="req-share",
+        topic_type=TOPIC_TYPE_SHARE,
+        topic_config=None,
+    )
+
+    assert result.created is True
+    assert result.topic.topic_config is None
 
 
 def test_create_topic_poll_replay_returns_original_configuration(db):
@@ -549,3 +567,194 @@ def test_update_topic_status_transitions_closed_back_to_open(db):
 
     assert locked is not None
     assert locked.status == TOPIC_STATUS_LOCKED
+
+
+# ---------------------------------------------------------------------------
+# update_topic_content / delete_topic
+# ---------------------------------------------------------------------------
+
+
+def test_update_topic_content_persists_only_open_topic_content(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    updated = repo.update_topic_content(
+        topic_id=topic.topic_id,
+        title="Edited title",
+        body="Edited description",
+        expected_status=TOPIC_STATUS_OPEN,
+    )
+
+    assert updated is not None
+    assert updated.title == "Edited title"
+    assert updated.body == "Edited description"
+    reread = repo.get_topic(topic.topic_id)
+    assert reread is not None
+    assert (reread.title, reread.body) == ("Edited title", "Edited description")
+
+
+def test_update_topic_content_returns_none_when_status_no_longer_matches(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    repo.update_topic_status(topic_id=topic.topic_id, status=TOPIC_STATUS_CLOSED)
+
+    assert repo.update_topic_content(
+        topic_id=topic.topic_id,
+        title="Edited title",
+        body="Edited description",
+        expected_status=TOPIC_STATUS_OPEN,
+    ) is None
+
+
+def test_delete_topic_removes_topic_posts_and_direct_interactions(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    post = _create_reply(repo, topic.topic_id).post
+    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="VIEW",
+                    target_type="TOPIC",
+                    target_id=topic.topic_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="LIKE",
+                    target_type="POST",
+                    target_id=post.post_id,
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+                ForumInteractionModel(
+                    actor_type="HUMAN",
+                    actor_id="user-a",
+                    action_type="FOLLOW",
+                    target_type="HUMAN",
+                    target_id="user-keep",
+                    env="dev",
+                    gmt_create=now,
+                    gmt_modified=now,
+                ),
+            ]
+        )
+
+    assert repo.delete_topic(topic.topic_id) is True
+
+    with db.orm_session() as session:
+        assert session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).count() == 0
+        assert session.query(ForumPostModel).filter_by(topic_id=topic.topic_id).count() == 0
+        assert session.query(ForumInteractionModel).count() == 1
+
+
+def test_delete_topic_refuses_locked_topic_and_returns_false(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+    post = _create_reply(repo, topic.topic_id).post
+    repo.update_topic_status(topic_id=topic.topic_id, status=TOPIC_STATUS_LOCKED)
+
+    assert repo.delete_topic(topic.topic_id) is False
+
+    with db.orm_session() as session:
+        assert session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).count() == 1
+        assert session.query(ForumPostModel).filter_by(post_id=post.post_id).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# HELP reply helpful marker
+# ---------------------------------------------------------------------------
+
+
+def test_update_post_helpful_persists_marker_and_clear_idempotently(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo, topic_type=TOPIC_TYPE_HELP).topic
+    post = _create_reply(repo, topic.topic_id).post
+
+    marked = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=True
+    )
+    marked_again = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=True
+    )
+
+    assert marked is not None and marked.helpful is True
+    assert marked_again is not None and marked_again.helpful is True
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=post.post_id).one()
+        assert row.post_config == {"helpful": {"marked": True}}
+
+    cleared = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=False
+    )
+    cleared_again = repo.update_post_helpful(
+        topic_id=topic.topic_id, post_id=post.post_id, helpful=False
+    )
+
+    assert cleared is not None and cleared.helpful is False
+    assert cleared_again is not None and cleared_again.helpful is False
+    with db.orm_session() as session:
+        row = session.query(ForumPostModel).filter_by(post_id=post.post_id).one()
+        assert row.post_config is None
+        sql_null_count = session.execute(
+            text(
+                "SELECT COUNT(*) FROM ac_forum_post "
+                "WHERE post_id = :post_id AND post_config IS NULL"
+            ),
+            {"post_id": post.post_id},
+        ).scalar_one()
+        assert sql_null_count == 1
+
+
+def test_get_and_update_post_are_scoped_by_topic_tenant_and_environment(db, monkeypatch):
+    repo = ForumRepository(db)
+    with avernet_tenant_scope("tenant-a"):
+        first_topic = _create_topic(repo, request_id="help-topic-a", topic_type=TOPIC_TYPE_HELP).topic
+        second_topic = _create_topic(repo, request_id="help-topic-b", topic_type=TOPIC_TYPE_HELP).topic
+        post = _create_reply(repo, first_topic.topic_id).post
+
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is not None
+        assert repo.get_post(topic_id=second_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=second_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    with avernet_tenant_scope("tenant-b"):
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=first_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    with avernet_tenant_scope("tenant-a"):
+        assert repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id) is None
+        assert (
+            repo.update_post_helpful(
+                topic_id=first_topic.topic_id,
+                post_id=post.post_id,
+                helpful=True,
+            )
+            is None
+        )
+
+    monkeypatch.delenv("SERVER_ENV", raising=False)
+    with avernet_tenant_scope("tenant-a"):
+        reread = repo.get_post(topic_id=first_topic.topic_id, post_id=post.post_id)
+        assert reread is not None and reread.helpful is False

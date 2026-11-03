@@ -163,6 +163,38 @@ async fn reject_connect(peer: &BridgePeer, code: &str) {
 }
 
 #[tokio::test]
+async fn default_hook_idle_result_error_preserves_safe_cause_on_bcn_uplink() {
+    for version in [2, 3] {
+        let mut peer = BridgePeer::with_version(version).await;
+        peer.config.bots[0].engine_bin = Some("python3".into());
+        assert!(peer.config.bots[0].engine_options.is_empty(), "exercise the default completion mode");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_cc_hook_idle.py");
+        let mut engines = EngineRegistry::builtin();
+        engines.register(bcs_bridge_core::engine::claude_code::ClaudeCodeFactory::custom(
+            "claude-code", "python3", vec![fixture.to_string_lossy().into_owned(), "rate_limit_error".into()]));
+        let state = Arc::new(AppState::new(peer.config.clone(), &engines).unwrap());
+        let (_, shutdown, task) = peer.start_state(state);
+        let mut socket = peer.accept("bot-a", None).await;
+        send_json(&mut socket, chat_send("error-request", "error-run", "group-a:session-a", "test failure")).await;
+        let ack = recv_application(&mut socket, |frame| frame["id"] == "error-request").await;
+        assert_eq!(ack["ok"], true);
+        let terminal = recv_application(&mut socket, |frame| {
+            matches!(frame["event"].as_str(), Some("chat" | "chat.event"))
+                && matches!(frame["payload"]["state"].as_str(), Some("error" | "final"))
+        }).await;
+        let payload = &terminal["payload"];
+        assert_eq!(payload["state"], "error");
+        assert_eq!(payload["errorKind"], "runtime_error");
+        assert_eq!(payload["errorMessage"],
+            "engine exited: upstream rate_limit_error (HTTP 429): model provider rate limit exceeded; retry later");
+        assert_eq!(payload[if version == 3 { "runId" } else { "run_id" }], "error-run");
+        if version == 3 { assert_eq!(payload["sessionId"], "group-a:session-a"); }
+        assert!(!terminal.to_string().contains("PRIVATE"));
+        stop(shutdown, task).await;
+    }
+}
+
+#[tokio::test]
 async fn reconnect_delivers_offline_final_without_restarting_engine() {
     let peer = BridgePeer::one_bot().await;
     let (_, shutdown, task) = peer.start().await;
