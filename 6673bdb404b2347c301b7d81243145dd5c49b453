@@ -1,0 +1,19 @@
+.gitmodules
+  s_f34bddef00d9b0::t_86998d03b740d4 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6673bdb404b2347c301b7d81243145dd5c49b453",
+  "prompts": {},
+  "sessions": {
+    "s_f34bddef00d9b0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0146ab22-33c9-4afb-a36f-26c1d576d45a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
