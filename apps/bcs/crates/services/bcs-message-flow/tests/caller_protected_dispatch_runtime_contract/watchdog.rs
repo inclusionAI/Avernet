@@ -25,6 +25,16 @@ impl CallerExecutionSendPort for PendingSender {
 }
 
 async fn hanging_fixture() -> (DeliveryRuntime, Arc<ManagedMessageDelivery>, Arc<tokio::sync::Notify>, Arc<std::sync::atomic::AtomicBool>) {
+    hanging_fixture_with_stage_timeout(30_000).await
+}
+
+/// Build the hanging-send fixture with the SEND stage's own liveness budget
+/// (spec 2026-11-03): the outer window is gone, so the stage budget —
+/// mirroring what the production wiring derives from io_timeout — is the
+/// only wall-clock bound the hanging send future faces.
+async fn hanging_fixture_with_stage_timeout(
+    budget_ms: u64,
+) -> (DeliveryRuntime, Arc<ManagedMessageDelivery>, Arc<tokio::sync::Notify>, Arc<std::sync::atomic::AtomicBool>) {
     let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
     let entered = Arc::new(tokio::sync::Notify::new());
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -34,14 +44,15 @@ async fn hanging_fixture() -> (DeliveryRuntime, Arc<ManagedMessageDelivery>, Arc
         Arc::new(StubIdentity),
         Arc::new(PendingSender { entered: entered.clone(), dropped: dropped.clone() }),
         600_000,
-    ));
+    )
+    .with_stage_timeout(Duration::from_millis(budget_ms)));
     service.admit(admission("caller-ok", builder_projection(true, true, true))).await.unwrap();
     (runtime(service.clone(), Arc::new(RecordingIo::default()), Some(pipeline)), service, entered, dropped)
 }
 
 #[tokio::test]
 async fn protected_send_timeout_converges_unknown_without_retry() {
-    let (mut worker, service, entered, dropped) = hanging_fixture().await;
+    let (mut worker, service, entered, dropped) = hanging_fixture_with_stage_timeout(40).await;
     worker.config.io_timeout = Duration::from_millis(40);
     let (stop, task) = start(worker);
     tokio::time::timeout(Duration::from_secs(1), entered.notified()).await.unwrap();
@@ -124,6 +135,10 @@ async fn lapsed_run_deadline_converts_uncertain_caller_row_to_cancel_intent() {
 
 #[tokio::test]
 async fn timeout_before_start_send_fails_without_possible_send() {
+    // The resolve stage keeps the ordinary io_timeout (spec §3.2: it runs
+    // pre-StartSend and converges PreparationFailed exactly like the
+    // non-caller prepare budget) — the stage_timeout default stays large so
+    // this asserts the RESOLVE bound, not a pipeline stage.
     let (mut worker, service, _, _) = hanging_fixture().await;
     worker.config.io_timeout = Duration::from_millis(40);
     worker.preparation = Arc::new(RecordingIo { hang_caller_target: true, ..Default::default() });
