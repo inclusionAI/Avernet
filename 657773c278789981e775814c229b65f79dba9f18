@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-mount.test.ts
+  h_5f06d4d8b4bdd5 1-57
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-workbench-mount.ts
+  h_5f06d4d8b4bdd5 1-31
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 85,525-526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "657773c278789981e775814c229b65f79dba9f18",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+docs/designs/bcn-distributed/bcn-distributed-design.md
+  s_ae779de10e764a::t_f3bd00dd0b5ee0 7-33
+docs/designs/bcn-distributed/README.md
+  s_ae779de10e764a::t_ea681f81559385 7-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b39e3b98734849eee69a5e89e51b9739114a63f5",
+  "prompts": {},
+  "sessions": {
+    "s_ae779de10e764a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19844-2a00-7a03-ac17-a1a451636220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
