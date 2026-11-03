@@ -244,6 +244,11 @@ class CardUpdates(CardManagementService):
                     self._eligibility = {**self._eligibility, source: entry}
                 self._restore_auxiliary(main)
                 self._operations_observed[source] = revision
+                # Readiness need not wait for preparation, but saved deletion must
+                # already hide an older artifact when restoration makes it visible.
+                current = self.repository.read_card(source)
+                if current is not None:
+                    self._observe_pending(current)
                 if main.is_deleted:
                     self._active = self._active - {source}
                 current_ids = {d.id for d in documents if not d.is_deleted}
@@ -289,7 +294,7 @@ class CardUpdates(CardManagementService):
                 if source_id(d) == source and d.id not in current_ids:
                     self._document_versions[d.id] = d.version
             self._errors.pop(source, None)
-            if not main.is_deleted:
+            if not main.is_deleted and not self._eligibility[source][1]:
                 self._active = self._active | {source}
 
     def _advance(self, value):
@@ -406,12 +411,13 @@ class CardUpdates(CardManagementService):
                     if not self._loaded:
                         self._restore()
                     self._sync()
+                    # Restored artifacts can serve while pending Cards are prepared.
+                    self.ready = self._loaded and not self._errors
                 except _IndexApplyFailure:
                     self.ready = False
-                source, after = [], ""
+                after = ""
                 while True:
                     rows = self.repository.page(after, 100)
-                    source.extend(rows)
                     for key, revision in rows:
                         if self._applied.get(key) == revision:
                             continue
@@ -444,12 +450,7 @@ class CardUpdates(CardManagementService):
                 except _IndexApplyFailure:
                     self.ready = False
                     return
-                complete = all(
-                    self._applied.get(key) == revision for key, revision in source
-                )
-                self.ready = (
-                    self._loaded and not self._errors and (self.ready or complete)
-                )
+                self.ready = self._loaded and not self._errors
             except Exception:
                 self.ready = False
                 raise

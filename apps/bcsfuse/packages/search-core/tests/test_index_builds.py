@@ -180,3 +180,28 @@ def test_shared_management_http_preserves_auth_status_and_conflicts(tmp_path):
             ).status_code
             == 409
         )
+
+
+def test_default_freezes_configuration_without_scheduling_build(tmp_path):
+    source, repo, service = world(tmp_path)
+    cfg = service.default("model", 2)
+    assert repo.get("default").status == "configured"
+    assert not repo.candidates()
+    service.run_once()
+    assert not source.calls
+    assert service.default("changed-deployment", 3) == cfg
+    # An explicit request still schedules a build using the frozen configuration.
+    assert service.create("default", "model", 2).status == "pending"
+    service.run_once()
+    assert repo.get("default").status == "completed"
+    assert len(source.calls) == 2
+
+
+def test_default_selection_does_not_retry_failed_explicit_build(tmp_path):
+    source, repo, service = world(tmp_path)
+    cfg = service.create("default", "model", 2).config
+    source.fail = "document-1"
+    service.run_once()
+    assert repo.get("default").status == "failed"
+    assert service.default("model", 2) == cfg
+    assert repo.get("default").status == "failed"

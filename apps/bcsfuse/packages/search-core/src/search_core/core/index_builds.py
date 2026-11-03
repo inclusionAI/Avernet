@@ -72,17 +72,25 @@ class IndexBuildService:
             raise ValueError("selected build requires a different source converter")
 
     def default(self, model, dimension):
-        """Freeze defaults once; normal source sync can populate this initial index.
+        """Freeze default configuration without enqueueing or retrying a build.
 
-        Existing configuration wins over later deployment defaults. Unlike an
-        explicitly selected build, the initial default need not be completed:
-        the serving host must gate readiness on restoring/preparing its sources.
+        Normal source sync fills missing/stale artifacts independently of startup
+        restoration. Existing configuration wins over changed deployment defaults.
         """
         row = self.builds.get("default")
         if row is None:
-            row = self.create("default", model, dimension)
+            row = self.builds.create(
+                IndexBuildConfig(
+                    build_id="default",
+                    embedding_model=model,
+                    embedding_dimension=dimension,
+                    conversion_version=self.conversion_version,
+                    filter_fields=tuple(self.filter_fields),
+                ),
+                enqueue=False,
+            )
         self._check_converter(row.config)
-        return self.builds.create(row.config).config
+        return row.config
 
     def _sources(self, check=lambda: None):
         after = ""

@@ -12,7 +12,17 @@ if TYPE_CHECKING:
 
 
 class IndexBuildRepository(Protocol):
-    def create(self, config: IndexBuildConfig) -> IndexBuildRecord: ...
+    def create(
+        self, config: IndexBuildConfig, *, enqueue: bool = True
+    ) -> IndexBuildRecord:
+        """Freeze configuration; enqueue=False only registers it as configured.
+
+        Registration never resets existing task state. Explicit enqueue schedules
+        configured/failed records; pending/running/completed records are unchanged.
+        Configuration conflicts and persistence failures must propagate.
+        """
+        ...
+
     def get(self, build_id: str) -> IndexBuildRecord | None: ...
     def candidates(self) -> list[IndexBuildRecord]: ...
     def claim(self, build_id: str, token: str, seconds: float) -> bool: ...
