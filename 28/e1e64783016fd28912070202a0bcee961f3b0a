@@ -1,0 +1,21 @@
+apps/bcsfuse/scripts/sql/init_bcsfuse_index_builds.sql
+  s_89ee1c722ef961::t_430d61bf707ed1 8
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_430d61bf707ed1 72,75,120,122-124,136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28e1e64783016fd28912070202a0bcee961f3b0a",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
