@@ -111,7 +111,14 @@ export function normalizeUndercoverGameViewModel(
   messages: SessionMessage[] = [],
   resolvedEvents: PublicOutputEvent[] = [],
 ): UndercoverGameViewModel {
-  const pendingHumanNode = pendingNodes.find((node) => Boolean(params.nodeActorMap[node.node_id]));
+  // 多人类：优先选取“自己”那条待办节点。server 在 per-caller 鉴权生效前会把所有
+  // 无 assignee 的前台 human_input 节点对每个 Present 人类整体返回，面板据此只激活
+  // 与 currentViewerActorId 匹配的那一席（防御纵深；真正的隔离在服务端 apply）。
+  const viewerNodes = pendingNodes.filter((node) => params.nodeActorMap[node.node_id]
+    && (!params.currentViewerActorId || params.nodeActorMap[node.node_id] === params.currentViewerActorId));
+  const mine = viewerNodes[0]
+    ?? pendingNodes.find((node) => Boolean(params.nodeActorMap[node.node_id]));
+  const pendingHumanNode = mine;
   const pendingActorId = pendingHumanNode ? params.nodeActorMap[pendingHumanNode.node_id] : undefined;
   const events = latestAttemptEvents(mergePublicOutputEvents(mapPublicOutputEvents(messages, params), resolvedEvents));
   const byActor = new Map<string, PublicOutputEvent[]>();
