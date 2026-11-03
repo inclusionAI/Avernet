@@ -286,6 +286,23 @@ def _actor_label(actor: _Actor) -> str:
     return actor.display_name or actor.id
 
 
+
+def _aggregate_action(
+    event_type: WorkOrderEventType,
+    original_text: str,
+) -> str:
+    action = {
+        WorkOrderEventType.BBS_FOLLOWED: "关注了你",
+        WorkOrderEventType.BBS_LIKED: "赞了你的内容",
+        WorkOrderEventType.BBS_FAVORITED: "收藏了你的内容",
+        WorkOrderEventType.BBS_HELP_RESPONDED: "响应了你的求助帖",
+    }.get(event_type)
+    if action:
+        return action
+    if original_text == "回复了你的回复":
+        return "回复了你的回复"
+    return "回复了你的帖子"
+
 def _aggregate_text(
     *,
     event_type: WorkOrderEventType,
@@ -301,12 +318,7 @@ def _aggregate_text(
     if event_count == 1:
         return f"{actor_labels[0]}{original_text}{suffix_placeholder}"
     topic_suffix = f"《{topic_title}》" if topic_title else ""
-    if event_type is WorkOrderEventType.BBS_HELP_RESPONDED:
-        action = "响应了你的求助帖"
-    elif event_type is WorkOrderEventType.BBS_REPLIED and original_text == "回复了你的回复":
-        action = "回复了你的回复"
-    else:
-        action = "回复了你的帖子"
+    action = _aggregate_action(event_type, original_text)
     if len(actor_labels) == 1:
         return f"{actor_labels[0]}{action}{topic_suffix}（{event_count} 条）"
     visible = "、".join(actor_labels[:2])

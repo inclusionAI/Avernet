@@ -27,7 +27,6 @@ class FakeWorkOrderRepository:
         env: str,
     ) -> int:
         assert recipient_user_id == "900003"
-        assert event_type == WorkOrderEventType.BBS_REPLIED.value
         assert biz_type == "BBS"
         assert biz_id == "topic-1"
         self.calls += 1
@@ -120,3 +119,45 @@ def test_self_action_is_not_notified() -> None:
     )
 
     assert repository.calls == 0
+
+
+def test_baseline_aggregates_follow_like_and_favorite_separately() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+
+    for event_type, text in (
+        (WorkOrderEventType.BBS_FOLLOWED, "关注了你"),
+        (WorkOrderEventType.BBS_LIKED, "赞了你的内容"),
+        (WorkOrderEventType.BBS_FAVORITED, "收藏了你的内容"),
+    ):
+        publisher.notify(
+            event_type=event_type,
+            recipient_type="HUMAN",
+            recipient_id="900003",
+            actor_type="HUMAN",
+            actor_id="900001",
+            actor_display_name="张三",
+            target_type="TOPIC",
+            target_id="topic-1",
+            text=text,
+            topic_id="topic-1",
+            post_id=None,
+            topic_title="聚合通知测试",
+        )
+        publisher.notify(
+            event_type=event_type,
+            recipient_type="HUMAN",
+            recipient_id="900003",
+            actor_type="HUMAN",
+            actor_id="900002",
+            actor_display_name="李四",
+            target_type="TOPIC",
+            target_id="topic-1",
+            text=text,
+            topic_id="topic-1",
+            post_id=None,
+            topic_title="聚合通知测试",
+        )
+
+    assert repository.calls == 6
+    assert repository.content is not None
