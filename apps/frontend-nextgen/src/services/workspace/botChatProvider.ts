@@ -26,9 +26,48 @@ export interface BotChatRequest {
   resourceReferences?: ResourceReference[];
   promptFileRefs?: PromptFileRef[];
 }
+/**
+ * 好友 Coding Bot 的 AICoding 兼容连接路径。
+ *
+ * connection 是实际运行时的权威结果。好友分组的 AICoding socket 临时复用
+ * Claude Code 兼容入口，同时保留原网关前缀、routing target 与连接 token。
+ */
+const FRIEND_AICODING_CHAT_PATH = '/api/aicoding/ws';
+const FRIEND_CLAUDE_CODE_CHAT_PATH = '/api/claude_code/ws';
+
+export function isAicodingConnectionEngine(engine: string | null | undefined): boolean {
+  const normalized = engine?.trim().toLowerCase().replace(/[\s_-]/g, '') || '';
+  return normalized === 'aicoding' || normalized === 'applicationcoding';
+}
+
+export function resolveFriendCodingBotChatSocketUrl(
+  bot: ChatBotView,
+  connectionEngine: string | undefined,
+  url: string,
+): string {
+  if (!bot.isFriendBot) return url;
+  if (!isAicodingConnectionEngine(connectionEngine)) return url;
+
+  let socket: URL;
+  try {
+    socket = new URL(url);
+  } catch {
+    return url;
+  }
+  if (!socket.pathname.endsWith(FRIEND_AICODING_CHAT_PATH)) return url;
+  socket.pathname = `${socket.pathname.slice(0, -FRIEND_AICODING_CHAT_PATH.length)}${FRIEND_CLAUDE_CODE_CHAT_PATH}`;
+  return socket.toString();
+}
+
 export interface BotChatState {
   phase: 'idle' | 'preparing' | 'loading-history' | 'ready' | 'error';
   error: string | null;
+}
+
+/** /connection 返回的会话运行时；好友 Bot 展示能力以该结果为最终依据。 */
+export interface BotConnectionRuntime {
+  resolved: boolean;
+  engine: string | null;
 }
 
 interface BotChatProviderOptions {
@@ -92,6 +131,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private manuallyDisconnected = false;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: BotChatState) => void>();
+  private connectionRuntimeListeners = new Set<(runtime: BotConnectionRuntime) => void>();
+  private connectionRuntimeState: BotConnectionRuntime = { resolved: false, engine: null };
   /** A2A M2 bootstrap seam：最近一次连接信息里的 ws url——§3.1 发送禁令门按它派生 A2A endpointBase */
   private wsUrl: string | null = null;
   /** B17 服务端签发面：连接响应 sockets kind='a2a' 的 base（无则 null——旧后端
@@ -130,6 +171,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   get supportState(): BotChatState {
     return this.state;
   }
+  get connectionRuntime(): BotConnectionRuntime {
+    return this.connectionRuntimeState;
+  }
   get hasMoreHistory(): boolean {
     return this.loadedHistoryRawCount < this.historyTotal;
   }
@@ -148,6 +192,13 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.connectionListeners.add(listener);
     return () => {
       this.connectionListeners.delete(listener);
+    };
+  }
+  subscribeToConnectionRuntime(listener: (runtime: BotConnectionRuntime) => void): () => void {
+    this.connectionRuntimeListeners.add(listener);
+    listener(this.connectionRuntimeState);
+    return () => {
+      this.connectionRuntimeListeners.delete(listener);
     };
   }
 
@@ -207,8 +258,18 @@ private fetchIamToken(): Promise<string> {
         ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
       }),
     );
+    const connectionEngine = resp.data?.engine?.trim().toLowerCase() || null;
+    this.setConnectionRuntime({
+      resolved: connectionEngine !== null,
+      engine: connectionEngine,
+    });
     const socket = resp.data?.sockets?.find((s) => s.kind === 'chat');
     if (!socket?.url) throw new Error('Bot 连接信息为空,请稍后重试');
+    const socketUrl = resolveFriendCodingBotChatSocketUrl(
+      this.options.bot,
+      resp.data?.engine,
+      socket.url,
+    );
     this.directDesktop = resp.data?.transport_mode === 'direct';
     // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
     // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
@@ -217,7 +278,7 @@ private fetchIamToken(): Promise<string> {
     // 明确拒绝禁止推导/探测/缓存命中构造，见 A2aBootstrapConfig.a2aWithheld。
     const a2aWithheld = resp.data?.a2a_withheld === true;
     return {
-      url: socket.url,
+      url: socketUrl,
       a2aBaseUrl: a2aBase ? String(a2aBase) : null,
       a2aWithheld,
     };
@@ -235,6 +296,7 @@ private fetchIamToken(): Promise<string> {
 
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
+    this.setConnectionRuntime({ resolved: false, engine: null });
     const { url, a2aBaseUrl, a2aWithheld } = await this.getChatUrl();
     this.wsUrl = url;
     this.a2aBaseUrl = a2aBaseUrl;
@@ -615,6 +677,14 @@ private fetchIamToken(): Promise<string> {
   private setState(patch: Partial<BotChatState>): void {
     this.state = { ...this.state, ...patch };
     this.stateListeners.forEach((l) => l(this.state));
+  }
+  private setConnectionRuntime(runtime: BotConnectionRuntime): void {
+    if (
+      this.connectionRuntimeState.resolved === runtime.resolved
+      && this.connectionRuntimeState.engine === runtime.engine
+    ) return;
+    this.connectionRuntimeState = runtime;
+    this.connectionRuntimeListeners.forEach((listener) => listener(runtime));
   }
   private emitConnection(event: ConnectionStatusEvent): void {
     this.connectionListeners.forEach((l) => l(event));
