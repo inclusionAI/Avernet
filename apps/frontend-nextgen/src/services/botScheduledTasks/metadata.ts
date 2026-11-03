@@ -31,7 +31,6 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
   const engine = string(bot.engine).toLowerCase();
   const environments: RoutineEnvironment[] = (['draft', 'verify', 'online'] as const).map((stage) => ({
     runtime_stage: stage,
-    requires_instance: !(engine === 'teclaw' && stage === 'online'),
     instances: [],
     reason: caller && stage !== 'online' ? 'Caller 模式仅支持生产态' : '当前尚未取得该环境的可信实例清单',
   }));

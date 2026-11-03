@@ -37,13 +37,15 @@ export function useScheduledTasks(
   const requestId = useRef(0);
   const contextRequestId = useRef(0);
   const currentClient = useRef(client);
+  const loadedContextClient = useRef<typeof client>();
   currentClient.current = client;
   const rowsRef = useRef<ManagedRoutine[]>([]);
-  const stage = target.runtime_stage;
-  const device = target.device_uuid;
-  const operator = target.operator_id;
+  const botType = loadedContextClient.current === client ? context?.bot_type : undefined;
+  const stage = botType === 'service' ? target.runtime_stage : undefined;
+  const device = botType === 'service' ? target.device_uuid : undefined;
+  const operator = botType === 'service' ? target.operator_id : undefined;
   const load = useCallback(async () => {
-    if (!identity.ready || !botId) return;
+    if (!identity.ready || !botId || !botType) return;
     const id = ++requestId.current;
     setLoading(true);
     setError('');
@@ -64,14 +66,17 @@ export function useScheduledTasks(
     } finally {
       if (id === requestId.current) setLoading(false);
     }
-  }, [botId, client, identity.ready, stage, device, operator, page, pageSize]);
+  }, [botId, botType, client, identity.ready, stage, device, operator, page, pageSize]);
   const refreshContext = useCallback(async () => {
     if (!identity.ready || !botId) return;
     const id = ++contextRequestId.current;
     setContextError('');
     try {
       const next = await client.context();
-      if (id === contextRequestId.current) setContext(addReportedTargets(next, rowsRef.current, identity.userId));
+      if (id === contextRequestId.current) {
+        loadedContextClient.current = client;
+        setContext(addReportedTargets(next, rowsRef.current, identity.userId));
+      }
     } catch (reason) {
       if (id === contextRequestId.current) {
         setContext(undefined);
@@ -152,10 +157,11 @@ export function useScheduledTasks(
     try {
       const [next, currentLock] = await Promise.all([client.context(), refreshLock()]);
       if (currentClient.current !== client) throw new Error('Bot 或登录身份已切换，请重新操作');
-      setContext(addReportedTargets(next, rowsRef.current, identity.userId));
-      if (!next.can_manage) throw new Error('当前账号没有定时任务管理权限');
+      const current = addReportedTargets(next, rowsRef.current, identity.userId);
+      setContext(current);
+      if (!current.can_manage) throw new Error('当前账号没有定时任务管理权限');
       if (!ownsLock(currentLock)) throw new Error('当前未持有 Bot 编辑锁，请到 Bot 列表获取后重试。输入已保留');
-      const result = await work(next);
+      const result = await work(current);
       await load();
       return result;
     } catch (reason) {
@@ -177,7 +183,7 @@ export function useScheduledTasks(
     lockError,
     editable,
     error: contextError || error,
-    loading: identity.loading || (identity.ready && loading),
+    loading: identity.loading || (identity.ready && loading && !contextError),
     busy,
     client,
     load: async () => {

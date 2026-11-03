@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { addressFromKey, isStage, type OperationResult, type ManagedRoutine } from '@/services/botScheduledTasks/types';
 import { history, useLocation } from '@umijs/max';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { RoutineActions } from './RoutineActions';
 import { RoutineList } from './RoutineList';
@@ -25,6 +25,14 @@ const ScheduledTasksPage = () => {
     : undefined;
   const state = useScheduledTasks(botId, ownerId, { runtime_stage: stage }, page, pageSize);
   const { context, lock } = state;
+  useEffect(() => {
+    if (context?.bot_type !== 'personal') return;
+    const next = new URLSearchParams(location.search);
+    if (!next.has('runtime_stage')) return;
+    next.delete('runtime_stage');
+    next.set('page', '1');
+    history.replace(`${location.pathname}?${next.toString()}`);
+  }, [context?.bot_type, location.pathname, location.search]);
   const [editing, setEditing] = useState<ManagedRoutine | null | undefined>();
   const [revision, setRevision] = useState(0);
   const keyword = query.get('keyword') || '';
@@ -149,6 +157,7 @@ const ScheduledTasksPage = () => {
               page={page}
               pageSize={pageSize}
               stage={stage}
+              showStageFilter={context.bot_type === 'service'}
               keyword={keyword}
               canManage={context.can_manage}
               editable={state.editable}
