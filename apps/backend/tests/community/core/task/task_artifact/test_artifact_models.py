@@ -42,6 +42,26 @@ def _artifact(content, *, scope: ArtifactScope, kind: ArtifactKind | None = None
 # ---------------------------------------------------------------- 构造校验
 
 
+class TestFinalArtifactFlag:
+    @pytest.mark.parametrize("value", ["true", "false"])
+    def test_string_flag_accepted(self, value):
+        content = TextContent(text="分析完成", is_final_artifact=value)
+        assert content.is_final_artifact == value
+
+    @pytest.mark.parametrize("value", [True, False, 1, "1", "TRUE", "yes", None])
+    def test_non_contract_string_fails_loud(self, value):
+        with pytest.raises(TaskArtifactContentError):
+            TextContent(text="分析完成", is_final_artifact=value)
+
+    def test_missing_defaults_to_false(self):
+        content = TextContent(text="分析完成")
+        assert content.is_final_artifact == "false"
+
+    def test_legacy_content_json_defaults_to_false(self):
+        content = content_from_json('{"kind":"text","text":"分析完成"}')
+        assert content.is_final_artifact == "false"
+
+
 class TestFileContentValidation:
     def test_bot_workspace_requires_storage_id(self):
         with pytest.raises(TaskArtifactContentError):
@@ -288,7 +308,7 @@ class TestContentSerialization:
 
     def test_json_is_kind_tagged_canonical(self):
         payload = content_to_json(TextContent(text="hi"))
-        assert payload == '{"kind":"text","text":"hi"}'
+        assert payload == '{"is_final_artifact":"false","kind":"text","text":"hi"}'
 
     def test_json_has_no_newlines(self):
         payload = content_to_json(
@@ -309,6 +329,13 @@ class TestContentHash:
     def test_stable_for_same_content(self):
         a = TextContent(text="done")
         assert artifact_content_hash(a) == artifact_content_hash(TextContent(text="done"))
+
+    def test_final_artifact_flag_participates_in_hash(self):
+        base = TextContent(text="done")
+        final = TextContent(text="done", is_final_artifact="true")
+        explicit_false = TextContent(text="done", is_final_artifact="false")
+        assert artifact_content_hash(base) == artifact_content_hash(explicit_false)
+        assert artifact_content_hash(base) != artifact_content_hash(final)
 
     def test_insensitive_to_field_order(self):
         direct = FileContent(

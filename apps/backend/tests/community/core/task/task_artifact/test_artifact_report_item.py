@@ -66,6 +66,31 @@ class TestValidParses:
             file_id=None,
         )
 
+    def test_final_artifact_string_flag(self):
+        item = parse_artifact_report_item(
+            _item(
+                file_content=json.dumps(
+                    {
+                        "storage_type": "bot_workspace",
+                        "storage_id": "reports/analysis-report.md",
+                        "file_type": "text/markdown",
+                        "file_name": "analysis-report.md",
+                        "file_id": None,
+                        "is_final_artifact": "true",
+                    }
+                )
+            ),
+            report_task_id="t-a1b2",
+            report_node_id="relay-ab12cd34",
+        )
+        assert item.content.is_final_artifact == "true"
+
+    def test_final_artifact_missing_defaults_to_false(self):
+        item = parse_artifact_report_item(
+            _item(), report_task_id="t-a1b2", report_node_id="relay-ab12cd34"
+        )
+        assert item.content.is_final_artifact == "false"
+
     def test_file_session_file(self):
         item = parse_artifact_report_item(
             _item(
@@ -165,6 +190,23 @@ class TestValidParses:
                         "file_type": "text/markdown",
                         "file_name": "analysis-report.md",
                         "file_id": None,
+                    }
+                ),
+                report_task_id="t-a1b2",
+                report_node_id="relay-ab12cd34",
+            )
+
+    def test_final_artifact_non_contract_string_rejected(self):
+        with pytest.raises(ValueError):
+            parse_artifact_report_item(
+                _item(
+                    file_content={
+                        "storage_type": "bot_workspace",
+                        "storage_id": "x",
+                        "file_type": "t",
+                        "file_name": "x.md",
+                        "file_id": None,
+                        "is_final_artifact": True,
                     }
                 ),
                 report_task_id="t-a1b2",

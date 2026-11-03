@@ -157,9 +157,31 @@ def test_upload_happy_path_registers_object_file_row():
     assert content.storage_id == expected_key
     assert content.file_id is None
     assert content.file_type == "application/pdf"
+    assert content.is_final_artifact == "false"
     assert record.creator == "user-123"
     # 字节确实经插件落库。
     assert storage.objects[expected_key] == _PAYLOAD
+
+
+def test_upload_final_artifact_flag_persists_in_content():
+    repo = _StubArtifactRepo()
+    svc = _service(_StubObjectStorage(), repo=repo)
+    record = svc.upload_object_file(
+        task_id="t-1", node_id="n-1", attempt=2,
+        file_name="a.pdf", payload=_PAYLOAD, creator="u",
+        is_final_artifact="true",
+    )
+    assert record.content.is_final_artifact == "true"
+
+
+def test_upload_rejects_non_contract_final_artifact_string():
+    svc = _service(_StubObjectStorage())
+    with pytest.raises(TaskArtifactContentError):
+        svc.upload_object_file(
+            task_id="t-1", node_id="n-1", attempt=2,
+            file_name="a.pdf", payload=_PAYLOAD, creator="u",
+            is_final_artifact="TRUE",
+        )
 
 
 def test_upload_same_bytes_derives_same_key_same_content():

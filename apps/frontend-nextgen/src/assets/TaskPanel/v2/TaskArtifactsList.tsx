@@ -19,14 +19,13 @@ export interface TaskArtifactsListProps {
 export function collectTaskArtifacts(task: TaskView): TaskArtifactView[] {
   const merged = new Map<string, TaskArtifactView>();
   const stageByNodeId = new Map(task.nodes.map((node, index) => [node.id, index + 1]));
-  const finalNodeId = task.nodes.length > 0 ? task.nodes[task.nodes.length - 1]!.id : null;
   const withStage = (artifact: TaskArtifactView, nodeId: string | null): TaskArtifactView => {
     const stage = nodeId === null ? null : stageByNodeId.get(nodeId) ?? null;
     return {
       ...artifact,
       nodeId,
       stage,
-      isFinalStage: stage !== null && nodeId === finalNodeId,
+      isFinalArtifact: artifact.isFinalArtifact === true,
     };
   };
 

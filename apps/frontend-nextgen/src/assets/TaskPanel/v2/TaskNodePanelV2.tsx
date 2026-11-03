@@ -90,11 +90,9 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
   const groupEmbedEnabled = node.drillable === true && !!bcsBaseUrl;
   const goal = node.taskSpec?.instruction || node.taskSpec?.target || '';
   const stage = task.nodes.findIndex((taskNode) => taskNode.id === node.id) + 1;
-  const finalNodeId = task.nodes.length > 0 ? task.nodes[task.nodes.length - 1]!.id : null;
   const stagedArtifacts = node.artifacts.map((artifact) => ({
     ...artifact,
     stage,
-    isFinalStage: stage > 0 && node.id === finalNodeId,
   }));
 
   return (

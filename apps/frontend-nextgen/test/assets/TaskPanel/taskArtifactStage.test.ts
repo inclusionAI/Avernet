@@ -33,7 +33,7 @@ describe('Task artifact relay stage', () => {
             artifact_id: 'artifact-first',
             artifact_name: '第一棒产物',
             kind: 'text',
-            content: { text: '第一棒结论' },
+            content: { text: '第一棒结论', is_final_artifact: 'true' },
             creator: 'bot-first',
             created_at: 1729400000000,
           },
@@ -63,13 +63,13 @@ describe('Task artifact relay stage', () => {
     expect(task.artifacts[0]?.nodeId).toBe('n-second');
   });
 
-  it('产物聚合时按节点展示顺序标记棒次并标出最后一棒', () => {
+  it('产物聚合时按节点展示顺序标记棒次,并以 is_final_artifact 标记最终产物', () => {
     const task = mapDashboard(relayTask);
     const artifacts = collectTaskArtifacts(task);
     const summary = artifacts.map(
-      (artifact: Pick<TaskArtifactView, 'id' | 'stage' | 'isFinalStage'>) =>
-        [artifact.id, artifact.stage, artifact.isFinalStage].join(':'),
+      (artifact: Pick<TaskArtifactView, 'id' | 'stage' | 'isFinalArtifact'>) =>
+        [artifact.id, artifact.stage, artifact.isFinalArtifact].join(':'),
     );
-    expect(summary).toEqual(['artifact-first:1:false', 'artifact-second:2:true']);
+    expect(summary).toEqual(['artifact-first:1:true', 'artifact-second:2:false']);
   });
 });
