@@ -578,3 +578,16 @@ describe('owned directory engine context stays deferred', () => {
     expect(ownedMocked.listBotInventory).not.toHaveBeenCalled();
   });
 });
+
+it('managed handoff Bot separates BCN address, resource entity and personnel Owner', async () => {
+  ownedMocked.listBots.mockResolvedValue({ data: { items: [{
+    bot_id: 'service', bot_name: 'Transferred', bot_type: 'service',
+    bcn_bot_id: 'service:original', entity_id: 'staff_original',
+    owner_entity_id: 'new-owner', status: 'ACTIVE', engine: 'openclaw',
+  }], total: 1 } });
+  const result = await botSessionService.listOwnedBots('new-owner');
+  expect(result).toMatchObject({ ok: true, data: [{
+    botId: 'service:original', realBotId: 'service', ownerId: 'staff_original',
+    engineOwnerId: 'new-owner',
+  }] });
+});

@@ -157,6 +157,9 @@ class CodeContent(ArtifactContent):
     code_base_address: str   # 代码库地址(http(s))
     pr_link: str             # PR 链接(http(s))
     pr_desc: str             # PR 描述(允许空串)
+
+# 2026-11-03 增补:四个分支均继承 ArtifactContent 的通用内容字段
+is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付产物
 ```
 
 内容分支类**不带 `kind` 字段**——形态的单一事实源是 `TaskArtifact.kind`(3.1)与分支类本身;tagged union 只存在于**序列化形**:content 落库为 `{"kind": "text"|"file"|"url_link"|"code", ...}` 的 tag 前缀 JSON,tag 由序列化器负责——写入时按分支类派发(isinstance),读取时按 tag 选构造类。这样领域模型无重复字段,type 也不靠 `Literal["text"]` 兜护。
@@ -166,6 +169,7 @@ class CodeContent(ArtifactContent):
 - `FileContent` 互斥性在领域构造器校验:`BOT_WORKSPACE` → `file_id` 必须为 None、`storage_id` 做相对路径校验(拒绝绝对路径与 `..` 逃逸,长度上限 512);`SESSION_FILE` → `file_id` 必填,`file_id`/`file_name`/`storage_id` 长度与字符校验;`OBJECT_FILE` → `file_id` 必须为 None,`storage_id` 做对象 key 结构校验(拒绝对 `\`、绝对/`~` 开头、空段/`.`/`..` 段、控制字符;长度沿用 512 上限)——**前缀域归属校验在服务层**(配置依赖,模型层只见结构);
 - `UrlLinkContent`/`CodeContent` 校验:`url`/`code_base_address`/`pr_link` 必须是 http(s) 前缀且长度上限 2048;`type` 为开放字符串(不建受治枚举,业务类型词汇由调用方生态演进;非空,长度上限 64);`code_base_name` 非空;`pr_desc` 允许空串、长度上限 8KB;
 - **信任边界(方案取舍,已显式声明)**:回调上报的引用**只做结构校验,不做归属交叉核验**——上报人(已鉴权的回调发送方)可信,`storage_id`/`file_id` 原样进产物与读侧 Descriptor。风险敞口 = 看板读者可见到上报者提供的会话标识与文件元数据;**字节不因此泄露**(两处读口均为参与者级 ACL)。有限归属核验(如"上报 session 须与节点 assignee/relay 会话相关")列为后续加固项,本期不建;
+- `is_final_artifact` 是四个分支的通用内容字段:**字符串枚举 `"true"|"false"`**(不使用 boolean),报文缺省按 `"false"` 处理;该值随 canonical content 序列化参与 `content_hash`,用于读侧/前端标记最终产物,而非按最后一棒节点推断;
 - 字段里**不出现**:**文件字节的临时访问凭证**——presign、带 token 的下载 URL、object handle、宿主机绝对路径;`file_type` 是引用元数据(供前端挑下载/预览行为),不是字节承诺;文本分支连格式元数据也不带,text 即全部内容。**边界澄清(方案取舍)**:`UrlLinkContent.url` 与 `CodeContent.pr_link`/`code_base_address` 是**产物内容本身**——bot 交付的稳定业务链接(需求条目、语雀文档、PR),不是"文件字节怎么取"的临时能力,不受上述禁令约束,原样入库入 Descriptor。
 
 ### 3.5 血缘 ——(方案取舍)本期只到"作用域 + 创建者"
@@ -199,7 +203,8 @@ class CodeContent(ArtifactContent):
         "storage_id": "reports/analysis-report.md",
         "file_type": "text/markdown",
         "file_name": "analysis-report.md",
-        "file_id": null
+        "file_id": null,
+        "is_final_artifact": "false"
       },                                   // BOT_WORKSPACE:storage_id=工作区相对路径(拒绝对路径/~/.. 逃逸),file_id 恒 null
       "url_link_content": null,             // url_link 分支内容对象,如 {"url": "https://…", "type": "dima需求"}
       "code_content": null                  // code 分支内容对象,如 {"code_base_name": "avernet", …}
@@ -217,7 +222,8 @@ class CodeContent(ArtifactContent):
         "storage_id": "sess-xxx",
         "file_type": "application/pdf",
         "file_name": "analysis-report.pdf",
-        "file_id": "f-987"
+        "file_id": "f-987",
+        "is_final_artifact": "false"
       },                                   // SESSION_FILE:storage_id=群聊会话 id,file_id 必填
       "url_link_content": null,
       "code_content": null
@@ -380,7 +386,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 (**2026-10-27 修订:此 BCS session-file 协调从 dashboard 三个读口移除,改回纯收数据库 manifest——见下文 §7 末注**):
 
 - `TaskNodeDTO`(`adapters/http/task/schemas.py:305`)新增 optional `artifacts: list[TaskArtifactDescriptorDTO]`,由 dashboard 读路径按 `(task_id, node_id)` 读时富化(取该节点全部 attempt 的产物,attempt 倒序)——协议仍是"只转协议",富化在 service 层;
-- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / creator / created_at`;
+- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc;所有分支含 is_final_artifact 字符串枚举)/ attempt / creator / created_at`;
 - 轨迹 HTML(`trajectory_html.py`)的「产物」块按 Descriptor 渲染文件名,不渲染任何 URL/下载链接(前端自拼);
 - **OpenAPI v1 面的精确口径(方案取舍)**:共享的 `graph_to_dto` 同时供内部看板路由与 `GET /openapi/v1/collaboration/tasks/dashboard`(`openapi_v1/task/router.py:111/:135`)使用,`TaskNodeDTO` 加字段即**自动**出现在公开 OpenAPI 响应模型中——本方案接受这一**附加可选字段**的公开可见(与"看板产物清单可见"是同一诉求),不加新端点、不改任何既有字段的语义;OpenAPI 导出快照与相关导出测试在**同一变更内**更新。若评审认为公开面必须零变更,则替代方案是给 openapi_v1 路由派生独立 DTO——本期不选,理由:使读侧工作量翻倍且两条演化路径在阶段二必然合流。
 - **dashboard session-file 协调**:公开
@@ -392,7 +398,8 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
   caller Bearer 的持有者取值与轨迹会话读取一致:`driver_bot_id` 优先、`assignee`
   兜底。
 - 每条 Ready session file 映射成 `FileContent(storage_type=session_file,
-  storage_id=session_id,file_type=mime_type,file_name,file_id)`;
+  storage_id=session_id,file_type=mime_type,file_name,file_id,
+  is_final_artifact="false")`;
   `mime_type` 缺失时使用 `application/octet-stream`,缺 `file_id`/`file_name` 或非
   Ready 行跳过。以**完整 `FileContent` 值**与该 task 的完整数据库 manifest 做
   task-wide 比较:任一字段不同均视为新增;完整相同表示已识别,忽略。单次请求内不同
@@ -535,7 +542,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 
 ### 13.2 上传/下载/列(list 复用)
 
-- `POST /api/v1/collaboration/tasks/artifacts/object-file`(multipart:task_id/node_id/attempt/artifact_name?/file;`get_current_user`,creator=登录 user.id):**一步原子**——图/节点/attempt 交叉校验(与 `add_artifact` 同口径)→ 派生 key → put(失败 502,**无行**)→ `compose_artifact_record`+`append` 登记(幂等)。
+- `POST /api/v1/collaboration/tasks/artifacts/object-file`(multipart:task_id/node_id/attempt/artifact_name?/is_final_artifact?/file,后者的合法值为字符串 ``"true"``/``"false"`` 且缺省 ``"false"``;`get_current_user`,creator=登录 user.id):**一步原子**——图/节点/attempt 交叉校验(与 `add_artifact` 同口径)→ 派生 key → put(失败 502,**无行**)→ `compose_artifact_record`+`append` 登记(幂等)。
 - `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`(同鉴权口径):按 artifact_id 查行 → 非 object_file 行 422 → key 前缀域校验(`{key_prefix}/{row.task_id}/`,跨任务伪造拒绝 422)→ 读对象(FOUND 200 回发字节 + Content-Disposition 文件名;NOT_FOUND 404;FAILED 502)。插件未绑定整个口 503。
 - **list 不新增路由**:OBJECT_FILE 产物天然出现在既有 `GET /artifacts` 与三处 dashboard Descriptor 中;协议层不留 bucket 级浏览(按需再加)。
 - 错误映射(ENVELOPE_ERRORS,列于 TaskError 基类前):413 超上限 / 404 行未知或对象缺失 / 502 存储失败 / 503 未接线;结构/内容失配沿用 `TaskArtifactContentError` 422。

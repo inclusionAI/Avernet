@@ -17,7 +17,7 @@ class BotMetadataQuery(BaseModel):
 
     bot_id: BotMetadataId = Field(description="Bot identifier.")
     owner_id: BotMetadataId = Field(
-        description="Owner identifier paired with bot_id to identify one Bot."
+        description="Compatibility locator: current Owner, stable entity, or retained BCN reference suffix."
     )
 
 
@@ -40,7 +40,10 @@ class BotMetadata(BaseModel):
     """Display-safe Bot metadata, without ownership or runtime internals."""
 
     bot_id: str = Field(description="Unique Bot identifier.")
-    owner_id: str = Field(description="Owner identifier paired with the Bot identifier.")
+    owner_id: str = Field(description="Current personnel Owner; not the stable BCN address.")
+    bcn_bot_id: str = Field(
+        default="", description="Established BCN reference; unchanged by Owner handoff."
+    )
     bot_name: str = Field(description="Display name.")
     bot_desc: str = Field(description="Display description; may be empty.")
     engine: str = Field(description="Engine that powers the Bot.")

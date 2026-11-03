@@ -55,6 +55,9 @@ async def upload_task_artifact_object_file(
     artifact_name: str | None = Form(
         None, description="业务展示名(可选;缺省回落上传文件名)", max_length=255
     ),
+    is_final_artifact: str = Form(
+        "false", description="是否最终产物(字符串枚举:true|false)"
+    ),
     file: UploadFile = File(..., description="产物文件字节"),
     actor: ArtifactWriteActor = Depends(resolve_artifact_write_actor),
     service: TaskArtifactObjectFileServiceProtocol = Injected(TaskArtifactObjectFileServiceProtocol),  # noqa: B008
@@ -71,6 +74,7 @@ async def upload_task_artifact_object_file(
         node_id=node_id,
         attempt=attempt,
         artifact_name=artifact_name,
+        is_final_artifact=is_final_artifact,
         file_name=file.filename or _DEFAULT_FILE_NAME,
         content_type=file.content_type,
         payload=payload,

@@ -122,9 +122,9 @@ export function useCollaborationPrivacy({
   }, [activeIdentity, fixedBotId, store.overview]);
 
   // Bot 公开风险前置检测（bot-public-risk-check，design D3/D4）：仅「对用户」维度启用。
-  // 通用配置弹窗（fixedBotId 模式）打开期常开（行状态需要）；页面模式只在编辑器打开期活跃。
+  // 外部 Bot 无对用户公开审批；仅普通 Bot 的通用配置弹窗/公开编辑器启用查询和轮询。
   const riskBotId = publicationBot?.id ?? visibleBots[0]?.id;
-  const riskEnabled = Boolean(riskBotId && userId && (fixedBotId || publicationEditor));
+  const riskEnabled = !isExternalBot && Boolean(riskBotId && userId && (fixedBotId || publicationEditor));
   const risk = useBotPublicRisk({ botId: riskBotId, userId, publicScope: 'user', enabled: riskEnabled });
   useEffect(() => {
     if (riskEnabled) void risk.queryCurrent();

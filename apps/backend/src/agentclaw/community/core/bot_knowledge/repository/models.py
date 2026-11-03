@@ -56,6 +56,10 @@ class BotKnowledgeBindingModel(Base):
         server_default=false(),
         comment="是否启用该知识库",
     )
+    online_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false(),
+        comment="线上发布版本的知识库启用投影",
+    )
     revision = Column(
         BigInteger,
         nullable=False,

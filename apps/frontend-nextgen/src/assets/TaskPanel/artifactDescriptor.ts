@@ -44,6 +44,7 @@ export function normalizeDescriptor(
   const c: Record<string, unknown> = d.content ?? {};
   const name =
     d.artifact_name ?? (d.kind === 'file' ? str(c.file_name) : null) ?? d.artifact_id;
+  const isFinalArtifact = c.is_final_artifact === 'true';
   const storageType = normalizeStorageType(c.storage_type);
   const storageId = str(c.storage_id);
   const linkUrl = d.kind === 'url_link' ? str(c.url) : null;
@@ -77,6 +78,7 @@ export function normalizeDescriptor(
           }
         : null,
     nodeId: fallbackNodeId,
+    isFinalArtifact,
     owner: d.creator ?? null,
     updatedAt: msToIso(d.created_at),
     fileRef,

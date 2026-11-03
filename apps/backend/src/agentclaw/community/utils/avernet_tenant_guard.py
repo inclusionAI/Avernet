@@ -100,10 +100,11 @@ def _insert_guard(_mapper: Any, _connection: Any, target: Any) -> None:
     """Stamp the current tenant on a new row; reject a conflicting one.
 
     ``before_insert`` covers ORM unit-of-work inserts (``session.add`` + flush),
-    which is the only insert path today across the guarded models. Core/bulk
-    inserts (``session.execute(insert(Model))``, ``bulk_insert_mappings``)
-    bypass this event and would fall to the column's ``server_default``; none
-    exist now — add an equivalent stamp if one is ever introduced.
+    including normal repository writes. Core/bulk inserts
+    (``session.execute(insert(Model))``, ``bulk_insert_mappings``) bypass this
+    event and must explicitly stamp a trusted current tenant. The bounded
+    knowledge online projection does so from its tenant-guarded source Bot;
+    its external-tenant regression covers that separate insertion boundary.
     """
     current = get_current_avernet_tenant()
     declared = getattr(target, AVERNET_TENANT_COLUMN, None)

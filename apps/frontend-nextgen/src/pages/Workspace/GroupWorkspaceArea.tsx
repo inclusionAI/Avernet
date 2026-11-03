@@ -17,6 +17,7 @@ import { useGroupChat } from './hooks/useGroupChat';
 import { useGroupCreateDialog } from './hooks/useGroupCreateDialog';
 import { useGroupManagement } from './hooks/useGroupManagement';
 import { useGroupChatHeaderPanels } from './hooks/useGroupChatHeaderPanels';
+import { useGroupSessionLocation } from './hooks/useGroupSessionLocation';
 import { useGroupSessions } from './hooks/useGroupSessions';
 import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useGroupSidebarProps } from './hooks/useGroupSidebarProps';
@@ -34,8 +35,9 @@ export function GroupWorkspaceArea({
 }: GroupWorkspaceAreaProps) {
   const ws = useGroupWorkspace(scope?.group);
   const expandedGroupIds = React.useMemo(
-    () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
-    [ws.groups, ws.expandedGroupIds],
+    // 数据加载只跟随显式展开意图，不把搜索/类型筛选的显隐当成重新展开。
+    () => Object.keys(ws.expandedGroupIds).filter((id) => !scope || id === scope.group.groupId),
+    [ws.expandedGroupIds, scope],
   );
   const sessions = useGroupSessions(
     scope && ws.selectedGroupId !== scope.group.groupId ? null : ws.selectedGroupId,
@@ -44,6 +46,7 @@ export function GroupWorkspaceArea({
   );
   const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession, userIdentityId);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
+  const sessionLocation = useGroupSessionLocation(ws.selectedGroup, sessions.selectedSession, onOpenMobileList);
   // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({
@@ -139,7 +142,11 @@ export function GroupWorkspaceArea({
   return (
     <>
       {!sessionOnly && (
-        <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
+        <GroupWorkspaceSidebar
+          sidebar={{ ...groupSidebarProps, location: sessionLocation.location, onDismissLocation: sessionLocation.dismissLocation }}
+          open={mobileListOpen}
+          onClose={onCloseMobileList}
+        />
       )}
       <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
         <GroupChatPane
@@ -172,6 +179,7 @@ export function GroupWorkspaceArea({
           cancelDelivery={chat.cancelDelivery}
           reconnect={chat.reconnect}
           onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
+          onLocateSession={sessionOnly ? undefined : sessionLocation.locate}
           reloadHistory={chat.reloadHistory}
           hasMoreHistory={chat.hasMoreHistory}
           isLoadingMoreHistory={chat.isLoadingMoreHistory}

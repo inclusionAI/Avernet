@@ -187,17 +187,16 @@ let manifestLoadPromise: Promise<number> | null = null;
  * 查询并注册 BCS manifest 声明的 CDN 库映射（协作群场景，对应 ocb queryAndRegisterManifestCdnPanels）。
  *
  * manifest 来源于 BCS 后端，是协作页资源清单，不依赖单 bot；调用点：协作群/协作页打开副屏场景。
- * 请求去重：进行中的 manifest 拉取复用同一 Promise；失败也要清空旧 manifest CDN（不复用上次）。
+ * 请求去重：进行中的 manifest 拉取复用同一 Promise。
+ * 刷新期间与请求失败时保留上次成功映射，避免已有消息重渲染时生成缺 CDN 的副屏 tab。
+ * 成功响应（包括空清单）整体替换旧映射，仍能移除已下线的库。
  */
 export function queryAndRegisterManifestLibraryCdn(): Promise<number> {
   if (manifestLoadPromise) return manifestLoadPromise;
   manifestLoadPromise = (async () => {
     try {
-      clearManifestCdnConfig();
       const manifest = await getManifest();
-      const bundles = manifest?.bundles ?? [];
-      if (bundles.length === 0) return 0;
-      storeManifestBundles(bundles);
+      storeManifestBundles(manifest?.bundles ?? []);
       return libraryCdnMap.size;
     } catch {
       return 0;

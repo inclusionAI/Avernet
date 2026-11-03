@@ -15,7 +15,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -92,11 +92,10 @@ def _scrub_sensitive(value: Any) -> Any:
 
 
 def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
-    """构造架构 Bot 公开详情，不暴露模板配置或 token 等敏感信息。"""
+    """构造架构 Bot 公开详情，递归去除 token 等敏感信息。"""
     scrubbed = _scrub_sensitive(bot)
     if not isinstance(scrubbed, dict):
         return {}
-    scrubbed.pop("template_config", None)
     for field in ("device_id", "binding_id"):
         if field in bot:
             scrubbed[field] = bot[field]
@@ -110,12 +109,13 @@ def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
 async def get_bot_binding_public(
     bot_id: str = Path(..., description="Bot ID"),
     bot_repo: BotRepository = Injected(BotRepository),
+    template_repo: TemplateRepository = Injected(TemplateRepository),
 ) -> ApiResponse:
-    """获取架构师 bot 绑定详情。
+    """获取架构师 bot 绑定详情.
 
     GET /api/public/bots/{bot_id}/binding
 
-    返回架构师 Bot 详情，不包含 template_config；保留 device_id 和 binding_id，
+    返回架构师 Bot 详情，包含 template_config；保留 device_id 和 binding_id，
     并递归去除 token 类敏感字段。
     """
     try:
@@ -130,7 +130,14 @@ async def get_bot_binding_public(
                 data=None,
             )
 
-        scrubbed = _public_bot_detail(items[0])
+        bot = dict(items[0])
+        if bot.get("template_config") is None:
+            bot.pop("template_config", None)
+            template = template_repo.get_by_bot_id(bot_id)
+            if template is not None:
+                bot["template_config"] = template.get("ext")
+
+        scrubbed = _public_bot_detail(bot)
         logger.info("[public_noauth.get_bot_binding] bot_id=%s", bot_id)
         return ApiResponse(success=True, data=scrubbed)
     except BotServiceError as e:

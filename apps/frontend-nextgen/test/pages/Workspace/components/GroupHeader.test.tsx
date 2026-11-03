@@ -263,3 +263,16 @@ it('会话 ID 为空时复制静默不写剪贴板（抽取前原守卫原样保
   fireEvent.click(screen.getByRole('button', { name: '复制会话 ID' }));
   return Promise.resolve().then(() => expect(writeText).not.toHaveBeenCalled());
 });
+
+it('选中会话右上角提供定位图标，不代替会话设置或重新选中会话', () => {
+  const onLocateSession = jest.fn();
+  const onTogglePanel = jest.fn();
+  const view = render(<GroupHeader {...buildProps({ onLocateSession, onTogglePanel })} />);
+  const locate = screen.getByRole('button', { name: '定位当前会话' });
+  expect(locate.querySelector('svg')).toHaveClass('lucide-locate-fixed');
+  fireEvent.click(locate);
+  expect(onLocateSession).toHaveBeenCalledTimes(1);
+  expect(onTogglePanel).not.toHaveBeenCalled();
+  view.rerender(<GroupHeader {...buildProps({ onLocateSession, selectedSession: null })} />);
+  expect(screen.queryByRole('button', { name: '定位当前会话' })).not.toBeInTheDocument();
+});
