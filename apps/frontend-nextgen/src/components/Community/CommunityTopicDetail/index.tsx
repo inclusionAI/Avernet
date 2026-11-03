@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { TopicFirstFloor } from './TopicFirstFloor';
 import type {
   CommunityAuthor,
+  CommunityPostLocation,
   CommunityReply,
   CommunityTopic,
   ForumTargetRef,
@@ -54,6 +55,9 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
+  /** Initial navigation target resolved by the backend for personal-center links. */
+  pendingPostLocation?: CommunityPostLocation | null;
+  onClearPendingPostLocation?: () => void;
 }
 
 export function CommunityTopicDetail({
@@ -93,6 +97,8 @@ export function CommunityTopicDetail({
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
+  pendingPostLocation = null,
+  onClearPendingPostLocation,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
@@ -141,6 +147,27 @@ export function CommunityTopicDetail({
   useEffect(() => {
     setExpandedReplyIds({});
   }, [replyPage]);
+  useEffect(() => {
+    if (!pendingPostLocation) return;
+    if (pendingPostLocation.postId === pendingPostLocation.rootPostId) return;
+    setExpandedReplyIds((previous) => ({
+      ...previous,
+      [pendingPostLocation.rootPostId]: true,
+    }));
+  }, [pendingPostLocation]);
+
+  useEffect(() => {
+    if (!pendingPostLocation) return;
+    const element = replyElementsRef.current.get(pendingPostLocation.postId);
+    if (!element) return;
+    locateTargetReply(pendingPostLocation.postId);
+    onClearPendingPostLocation?.();
+  }, [
+    locateTargetReply,
+    onClearPendingPostLocation,
+    pendingPostLocation,
+    replies,
+  ]);
 
   return (
     <div className="flex h-full flex-col bg-background">
