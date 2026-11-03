@@ -85,7 +85,6 @@ class BotDeployContext:
     storage_type: StorageType | None = None
     env: str = ""
     in_place: bool = False
-    new_bot_model_policy: bool = False
 
 
 class DeployConfigComposer(abc.ABC):

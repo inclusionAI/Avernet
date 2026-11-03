@@ -205,22 +205,3 @@ class TestServiceCreatePublishRecordGuard:
         )
 
         publish_service.create_first_publish_for_bot.assert_not_called()
-
-
-@pytest.mark.parametrize("bot_type", ["personal", "service"])
-def test_only_logical_openclaw_creation_authorizes_initial_model_policy(bot_type):
-    svc, _ = _make_service()
-    device_service = svc._device_service_provider()
-    svc.create_bot(user_id="u1", nick_name="nick", bot_id="new-model-bot",
-                   engine_type="openclaw", bot_type=bot_type)
-    kwargs = device_service.apply_device.call_args.kwargs
-    assert kwargs["extra_envs"]["AGENTCLAW_NEW_BOT_MODEL_POLICY"] == "pending"
-    assert kwargs["device_props_extra"]["new_bot_model_policy"] == "pending"
-    # This fixture's repository update is a mock; persist the returned binding.
-    svc._repository.get_by_id_and_owner.return_value["binding_id"] = 1
-    svc._repository.get_by_id_and_owner.return_value["status"] = "ACTIVE"
-    # Idempotent create on the now-bound logical Bot only retries confirmation.
-    device_service.apply_device.reset_mock()
-    svc.create_bot(user_id="u1", nick_name="nick", bot_id="new-model-bot",
-                   engine_type="openclaw", bot_type=bot_type)
-    device_service.apply_device.assert_not_called()

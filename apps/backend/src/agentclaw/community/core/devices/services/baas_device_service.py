@@ -391,9 +391,7 @@ class BaasDeviceService(DeviceService):
                 "migration_path": "",
                 "template_uuid": template_uuid,
                 "auto_approve_publish": True,
-                "extra_envs": {k: v for k, v in (extra_envs or {}).items()
-                               if k != "AGENTCLAW_NEW_BOT_MODEL_POLICY"},
-                "new_bot_model_policy": (extra_envs or {}).get("AGENTCLAW_NEW_BOT_MODEL_POLICY") == "pending",
+                "extra_envs": extra_envs,
                 "template_config": template_config,
                 # 个人 Bot / 服务 Bot 草稿共用 home 挂载路径，类型由存储策略选择。
                 "mount_home_dir_storage": True,
@@ -457,8 +455,7 @@ class BaasDeviceService(DeviceService):
                 # request_id 留底排障用,update 时复用同一个保持幂等不在本期范围
                 "create_request_id": request_id,
                 # passthrough envs for diagnostics
-                "envs": {k: v for k, v in (extra_envs or {}).items()
-                         if k != "AGENTCLAW_NEW_BOT_MODEL_POLICY"},
+                "envs": dict(extra_envs) if extra_envs else {},
                 "template_uid": template_uid,
                 "template_uuid": template_uuid,
             },

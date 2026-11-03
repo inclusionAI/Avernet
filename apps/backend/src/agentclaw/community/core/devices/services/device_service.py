@@ -622,17 +622,6 @@ class DeviceService:
             bot_id=resolved_bot_id,
         )
 
-        # Released bindings carry an existing Bot home; never reinitialize it.
-        new_bot_model_policy = (
-            "pending" if released_binding is None and resolved_engine == "openclaw"
-            and (device_props_extra or {}).get("new_bot_model_policy") == "pending"
-            else "off"
-        )
-        if new_bot_model_policy == "pending":
-            extra_envs = {**(extra_envs or {}), "AGENTCLAW_NEW_BOT_MODEL_POLICY": "pending"}
-        elif extra_envs and "AGENTCLAW_NEW_BOT_MODEL_POLICY" in extra_envs:
-            extra_envs = {k: v for k, v in extra_envs.items() if k != "AGENTCLAW_NEW_BOT_MODEL_POLICY"}
-
         # 1. Directory setup + device allocation (storage_mode 分支)
         if force_nas or storage_mode == "nas":
             # NAS 流程：跳过 _setup_directory（不需要 OSS 目录初始化）
@@ -699,7 +688,7 @@ class DeviceService:
             "symbol": json.dumps(symbol_json, ensure_ascii=False) if symbol else "[]",
             "entity_id": resolved_entity_id,
             "entity_type": resolved_entity_type,
-            **{k: v for k, v in (device_props_extra or {}).items() if k != "new_bot_model_policy"},
+            **(device_props_extra or {}),
         }
         # 4. Process database record
         status = DeviceBindingStatus.PENDING.value
@@ -792,9 +781,7 @@ class DeviceService:
                     device=AllocatedDevice(
                         device_id=allocated.device_id,
                         device_provider=allocated.device_provider,
-                        # Creation intent belongs to this allocation call, not
-                        # to the retained binding used by later restarts.
-                        device_props={**device_props, "new_bot_model_policy": new_bot_model_policy},
+                        device_props=device_props,
                     ),
                     nas_mappings=nas_mappings,
                     engine=resolved_engine,

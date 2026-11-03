@@ -113,7 +113,6 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             ctx.mount_home_dir_storage,
             ctx.ext_info,
             ctx.in_place,
-            ctx.new_bot_model_policy,
         )
 
         # 4、 Start watchdog
@@ -197,18 +196,12 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         mount_home_dir_storage: bool = False,
         ext_info: Optional[Dict[str, Any]] = None,
         in_place: bool = False,
-        new_bot_model_policy: bool = False,
     ):
         """启动沙箱服务。"""
         # 保留 {token} 和 {client_id} 占位符，供后续替换
         start_service_cmd = (
             f"/home/admin/bin/start_service.sh --token {{token}} --client_id {{client_id}} --bot_type {bot_type} --engine {engine}"
         )
-
-        policy = "pending" if new_bot_model_policy is True and not in_place else "off"
-        if policy == "pending":
-            start_service_cmd += " --new_bot_model_policy pending"
-        logger.info("[initial_model_policy] compose bot_id=%s stage=%s policy=%s", bot_id, stage, policy)
 
         # 个人 Bot 和服务 Bot 草稿没有迁移目录；此时不传 --source_dir，
         # 避免 start_service.sh 把后面的 --bot_id 当成 source_dir 的值。
