@@ -19,9 +19,16 @@ export function ConversationBotRuntimeBadge({ bot, className }: ConversationBotR
   if (!label) return null;
 
   return (
+    /*
+      标签宽度契约:
+      - 不再使用固定比例上限,优先按自然宽度展示完整类型文案;
+      - 名称与 tag 总宽超出标题内容盒时,tag 以更高 flex-shrink 权重优先收缩并省略;
+      - Bot 名称是主信息,仍由同级 min-w-12 保留最小可视宽;
+      - 操作按钮出现时可由调用方通过 className 进一步隐藏,优先保障 Bot 名称。
+    */
     <Badge
       className={cn(
-        'block max-w-full shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3',
+        'block min-w-0 max-w-full shrink-[4] truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3 @max-[8.5rem]/conversation-bot-title:hidden',
         className,
       )}
     >
