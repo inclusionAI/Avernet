@@ -43,8 +43,8 @@ use bcs_service_api::port::secret::SecretAccessPort;
 
 use crate::api_auth_provider_configs as provider_configs;
 use crate::api_auth_registry::{
-    ApiAuthBuildContext, ApiAuthCapabilities, ApiAuthSourceRegistration, OAuthSourceContext,
-    validate_api_auth,
+    ApiAuthBuildContext, ApiAuthCapabilities, ApiAuthSourceRegistration,
+    ApiAuthSourceRegistrationFactory, OAuthSourceContext, validate_api_auth,
 };
 
 /// The explicit `[api.auth]` assembly result handed to the server
@@ -87,11 +87,15 @@ pub enum ApiAuthSelection {
     Explicit(Box<BuiltApiAuth>),
 }
 
-/// The registered production inventory (spec §4.2/§5): the Gateway header
-/// source plus the supported OAuth provider instances. Registration names
-/// are code-owned; the chain still decides order and enablement.
+/// The registered production inventory (spec §4.2/§5): the code-owned
+/// Gateway header source plus the supported OAuth provider instances, THEN
+/// any registrations downstream crates submitted via `inventory::submit!`
+/// (the same discovery pattern the other plugin factories use). The chain
+/// still decides order and enablement; an external name that is illegal,
+/// reserved, or collides with an existing registration stays startup-fatal
+/// via `index_registrations` during assembly.
 pub fn production_registrations() -> Vec<ApiAuthSourceRegistration> {
-    vec![
+    let mut registrations = vec![
         ApiAuthSourceRegistration {
             name: "gateway".to_string(),
             capabilities: ApiAuthCapabilities {
@@ -137,7 +141,13 @@ pub fn production_registrations() -> Vec<ApiAuthSourceRegistration> {
             validate: |table| provider_configs::validate_oauth_client_table("wechat", table),
             build: build_oauth_session_source,
         },
-    ]
+    ];
+    registrations.extend(
+        inventory::iter::<ApiAuthSourceRegistrationFactory>
+            .into_iter()
+            .map(|factory| (factory.0)()),
+    );
+    registrations
 }
 
 /// Gateway source build: REUSES the existing signed-principal verifier with
