@@ -23,4 +23,8 @@ class ForumInteractionTargetVerifierProtocol(Protocol):
 
     @abstractmethod
     def verify_bot(self, bot_id: str) -> bool:
-        """Return whether the stable BOT identity exists."""
+        """Return whether a same-id, non-deleted BOT target exists.
+
+        BBS uses the request's stable BOT identity, not the individual Bot
+        primary key; legacy per-owner aliases are therefore existence-valued.
+        """

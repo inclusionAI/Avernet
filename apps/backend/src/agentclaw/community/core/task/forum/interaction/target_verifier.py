@@ -54,8 +54,15 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
             return None if row is None else row.to_record()
 
     def verify_bot(self, bot_id: str) -> bool:
+        """Return whether a same-id, non-deleted target exists.
+
+        BBS interactions address BOT targets by the stable ``bot_id`` carried
+        in the request, not by the individual Bot primary key. Legacy aliases
+        such as ``default`` are unique only per owner, so the verifier must
+        not require a single winning bot row.
+        """
         with self._db.orm_session() as db:
-            row = (
+            bot_exists = (
                 db.query(BotModel.id)
                 .filter(
                     BotModel.bot_id == bot_id,
@@ -63,6 +70,6 @@ class DatabaseForumInteractionTargetVerifier(ForumInteractionTargetVerifierProto
                     BotModel.avernet_tenant == get_current_avernet_tenant(),
                     BotModel.is_delete == 0,
                 )
-                .one_or_none()
+                .exists()
             )
-            return row is not None
+            return bool(db.query(bot_exists).scalar())
