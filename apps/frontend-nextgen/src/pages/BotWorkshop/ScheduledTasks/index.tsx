@@ -2,15 +2,15 @@ import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
-import { Pagination } from '@/components/ui/Pagination';
-import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
-import { stageNames, type ManagedRoutine } from '@/services/botScheduledTasks/types';
+import { addressFromKey, isStage, type OperationResult, type ManagedRoutine } from '@/services/botScheduledTasks/types';
 import { history, useLocation } from '@umijs/max';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { RoutineActions } from './RoutineActions';
-import { RoutineDetail, formatTime } from './RoutineDetail';
+import { RoutineList } from './RoutineList';
+import { RoutineOperationResult } from './RoutineOperationResult';
+import { describeFailure } from '@/services/botScheduledTasks/results';
+import { RoutineDetail } from './RoutineDetail';
 import { RoutineFormDialog } from './RoutineFormDialog';
 import { useScheduledTasks } from './useScheduledTasks';
 
@@ -18,34 +18,32 @@ const ScheduledTasksPage = () => {
   const location = useLocation();
   const query = new URLSearchParams(location.search);
   const botId = query.get('bot_id')?.trim() || '';
-  const ownerId = query.get('owner_id') || undefined;
-  const state = useScheduledTasks(botId, ownerId);
+  const ownerId = query.get('entity_id') || query.get('owner_id') || undefined;
+  const pageSize = [10, 20, 50].includes(Number(query.get('page_size'))) ? Number(query.get('page_size')) : 20;
+  const page = Math.max(1, Math.floor(Number(query.get('page'))) || 1);
+  const stage = isStage(query.get('runtime_stage'))
+    ? (query.get('runtime_stage') as 'draft' | 'verify' | 'online')
+    : undefined;
+  const state = useScheduledTasks(botId, ownerId, { runtime_stage: stage }, page, pageSize);
   const { context, lock } = state;
   const [editing, setEditing] = useState<ManagedRoutine | null | undefined>();
   const [revision, setRevision] = useState(0);
   const keyword = query.get('keyword') || '';
-  const pageSize = [10, 20, 50].includes(Number(query.get('page_size'))) ? Number(query.get('page_size')) : 10;
   const selectedKey = query.get('task');
-  const selected = state.tasks.find((task) => task.key === selectedKey);
-  const filtered = state.tasks.filter((task) =>
-    `${task.name} ${task.command} ${task.cron} ${task.device_uuid || ''}`
-      .toLowerCase()
-      .includes(keyword.trim().toLowerCase()),
-  );
-  const page = Math.min(
-    Math.max(1, Number(query.get('page')) || 1),
-    Math.max(1, Math.ceil(filtered.length / pageSize)),
-  );
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const selected =
+    state.tasks.find((task) => task.key === selectedKey) ||
+    addressFromKey(selectedKey, { ...state.client.scope, entityId: ownerId || context?.owner_id || undefined });
   function navigate(values: Record<string, string | undefined>, detail = false, replace = false) {
     const next = new URLSearchParams(location.search);
     Object.entries(values).forEach(([key, value]) => (value === undefined ? next.delete(key) : next.set(key, value)));
     history[replace ? 'replace' : 'push'](`/bot-workshop/scheduled-tasks${detail ? '/detail' : ''}?${next.toString()}`);
   }
-  async function operate(work: () => Promise<unknown>, message: string) {
+  async function operate(work: () => Promise<OperationResult>, _message: string) {
     try {
-      await work();
-      toast.success(message);
+      const result = await work();
+      if (result.level === 'success') toast.success(result.message);
+      else if (result.level === 'warning') toast.warning(result.message);
+      else toast.error(result.message);
       setRevision((value) => value + 1);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : '操作失败');
@@ -87,6 +85,12 @@ const ScheduledTasksPage = () => {
       }
     >
       <div className="space-y-5">
+        <RoutineOperationResult result={state.lastResult} />
+        {context?.warning && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {context.warning}
+          </p>
+        )}
         {state.identity.error && <Empty title="身份加载失败" description={state.identity.error} />}
         {context?.can_manage && (
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
@@ -133,13 +137,14 @@ const ScheduledTasksPage = () => {
         {state.error && (
           <Empty
             title="任务加载失败"
-            description={state.error}
+            description={`${state.error}${state.tasks.length ? '；刷新未成功，下面显示上次查询结果' : ''}`}
             action={<Button onClick={() => void state.load()}>重试</Button>}
           />
         )}
         {state.failures.length > 0 && (
           <div role="status" className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-            部分运行环境暂不可用，已展示可读取的任务。{state.failures.join('；')}
+            {state.tasks.length ? '部分实例查询失败，已保留取得的任务。' : '未获取到任务，存在查询失败的实例。'}
+            {state.failures.map(describeFailure).join('；')}
           </div>
         )}
         {state.loading && (
@@ -151,13 +156,13 @@ const ScheduledTasksPage = () => {
           !state.loading &&
           (selectedKey ? (
             selected ? (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="m-0 text-lg font-semibold">{selected.name}</h2>
-                  {actions(selected)}
-                </div>
-                <RoutineDetail task={selected} context={context} client={state.client} revision={revision} />
-              </>
+              <RoutineDetail
+                task={selected}
+                context={context}
+                client={state.client}
+                revision={revision}
+                actions={actions}
+              />
             ) : (
               <Empty
                 title="任务不存在或当前运行环境不可用"
@@ -166,98 +171,31 @@ const ScheduledTasksPage = () => {
               />
             )
           ) : (
-            <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <Input
-                  aria-label="搜索定时任务"
-                  className="max-w-sm"
-                  placeholder="搜索任务名称、指令、频率或实例"
-                  value={keyword}
-                  onChange={(event) => navigate({ keyword: event.target.value, page: '1' }, false, true)}
-                />
-                {context.can_manage && (
-                  <Button disabled={!state.editable || state.busy} onClick={() => setEditing(null)}>
-                    创建定时任务
-                  </Button>
-                )}
-              </div>
-              {visible.length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="text-xs text-muted-foreground">
-                      <tr>
-                        {['任务', '执行目标', '频率 / 时区', '调度状态', '最近 / 下次执行', '操作'].map((title) => (
-                          <th key={title} className="px-3 py-3 font-medium">
-                            {title}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visible.map((task) => (
-                        <tr
-                          key={task.key}
-                          className="cursor-pointer border-t border-border hover:bg-muted/40"
-                          onClick={() => navigate({ task: task.key }, true)}
-                        >
-                          <td className="max-w-xs px-3 py-4">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-auto p-0 text-left font-medium text-primary"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                navigate({ task: task.key }, true);
-                              }}
-                            >
-                              {task.name}
-                            </Button>
-                            <p className="mb-0 mt-1 line-clamp-2 text-xs text-muted-foreground">{task.command}</p>
-                          </td>
-                          <td className="max-w-xs break-all px-3 py-4 text-xs">
-                            {task.runtime_stage ? stageNames[task.runtime_stage] : '默认环境'}
-                            <p className="mt-1 text-muted-foreground">{task.device_uuid || '无独立实例'}</p>
-                          </td>
-                          <td className="px-3 py-4 text-xs">
-                            {getRoutineScheduleLabel(task.cron)}
-                            <p className="mt-1 text-muted-foreground">{task.timezone}</p>
-                          </td>
-                          <td className="px-3 py-4">
-                            {task.enabled ? '已启用' : '已停用'}
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {context.environments.find(
-                                (item) => item.runtime_stage === (task.runtime_stage || 'draft'),
-                              )?.available
-                                ? '环境可用'
-                                : '环境暂不可用'}
-                            </p>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs">
-                            {formatTime(task.lastRunAt)}
-                            <p className="mt-1 text-muted-foreground">{formatTime(task.nextRunAt)}</p>
-                          </td>
-                          <td className="px-3 py-4">{actions(task)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <Empty
-                  title={keyword ? '暂无符合条件的任务' : '暂无定时任务'}
-                  description="创建任务后，可在这里管理配置并查看历史执行实例。"
-                />
-              )}
-              <Pagination
-                current={page}
-                pageSize={pageSize}
-                total={filtered.length}
-                onChange={(next) => navigate({ page: String(next) }, false, true)}
-                onPageSizeChange={(size) => navigate({ page_size: String(size), page: '1' }, false, true)}
-                pageSizeOptions={[10, 20, 50]}
-                className="mt-5 justify-end"
-              />
-            </section>
+            <RoutineList
+              tasks={state.tasks}
+              total={state.total}
+              page={page}
+              pageSize={pageSize}
+              stage={stage}
+              keyword={keyword}
+              canManage={context.can_manage}
+              editable={state.editable}
+              busy={state.busy}
+              incomplete={state.failures.length > 0}
+              actions={actions}
+              onKeyword={(value) => navigate({ keyword: value }, false, true)}
+              onStage={(value) =>
+                navigate(
+                  { runtime_stage: value === 'all' ? undefined : value, page: '1', keyword: undefined },
+                  false,
+                  true,
+                )
+              }
+              onPage={(value) => navigate({ page: String(value) }, false, true)}
+              onPageSize={(value) => navigate({ page_size: String(value), page: '1' }, false, true)}
+              onCreate={() => setEditing(null)}
+              onSelect={(task) => navigate({ task: task.key }, true)}
+            />
           ))}
       </div>
       {editing !== undefined && context && (
@@ -284,8 +222,14 @@ const ScheduledTasksPage = () => {
           onClose={() => setEditing(undefined)}
           onLoadModels={state.loadModels}
           onSave={async (form) => {
-            await state.save(form, editing || undefined);
-            toast.success(editing ? '任务已更新' : '任务已创建');
+            const result = await state.save(form, editing || undefined);
+            if (result.level !== 'success') throw new Error(result.message);
+            toast.success(result.message);
+            if (!editing && result.routine)
+              navigate(
+                { task: result.routine.key, runtime_stage: result.routine.runtime_stage || undefined, page: '1' },
+                true,
+              );
           }}
         />
       )}
