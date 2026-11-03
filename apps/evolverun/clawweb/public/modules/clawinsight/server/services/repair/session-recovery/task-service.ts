@@ -166,8 +166,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
         .map(event => event.payload.tool_call_id));
-      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued"].includes(input.decision)
-        || value.phase === "plan" && !["insufficient_evidence", "user_continued"].includes(input.decision)
+      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
+        || value.phase === "plan" && !["insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
         || typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
         || !Array.isArray(input.evidence_ids) || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id && simulationReadTools.has(item.source)
           && (input.decision !== "user_continued" || ["session_read", "trajectory_read"].includes(item.source))
