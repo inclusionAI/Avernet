@@ -41,6 +41,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+import httpx
+
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.apply_engine.cli_tools.store import (
     BOT_DATA_STORE,
@@ -189,7 +191,21 @@ class TeclawFilePromotion:
                 if _has_excluded_segment(engine_path):
                     continue
                 logical = engine_path.lstrip("/")  # "workspace/sub/x.csv"
-                content = await device_fs.read_file(logical)
+                content: bytes | None = None
+                try:
+                    content = await device_fs.read_file(
+                        logical, preserve_read_errors=True,
+                    )
+                except httpx.HTTPStatusError as exc:
+                    raise TeclawFilePromotionError(
+                        "teclaw promotion: source file unreadable: "
+                        f"{engine_path} (HTTP {exc.response.status_code})",
+                    ) from exc
+                except Exception as exc:
+                    raise TeclawFilePromotionError(
+                        "teclaw promotion: source file unreadable: "
+                        f"{engine_path} ({type(exc).__name__}: {exc})",
+                    ) from exc
                 if content is None:
                     raise TeclawFilePromotionError(
                         f"teclaw promotion: source file unreadable: {engine_path}"

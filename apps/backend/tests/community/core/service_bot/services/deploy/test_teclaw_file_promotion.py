@@ -8,6 +8,8 @@ from tests.community.core.apply_engine.cli_tools._fakes import (
     FakeCliToolRepo,
 )
 
+import httpx
+
 import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
@@ -261,3 +263,53 @@ async def test_reads_use_logical_namespace_relative_paths():
     # read_file is called with the logical (no leading slash) form so the teclaw
     # mapper maps it back to /workspace/... rather than mis-treating it as a host path.
     assert fs.read_calls == ["workspace/sub/a.md"]
+
+
+# ── HTTP error propagation ────────────────────────────────────────────────
+
+
+class _FailingReadDeviceFs:
+    """Device FS whose read_file raises the given exception (per file path)."""
+
+    def __init__(self, *, listings: dict, read_errors: dict):
+        self._listings = listings
+        self._read_errors = read_errors
+        self.read_calls: list[str] = []
+
+    async def list_dir(self, dir_path, *, recursive=False):
+        return self._listings.get(dir_path, [])
+
+    async def read_file(self, file_path, **kwargs):
+        self.read_calls.append(file_path)
+        exc = self._read_errors.get(file_path)
+        if exc is not None:
+            raise exc
+        return None
+
+
+@pytest.mark.asyncio
+async def test_unreadable_source_file_http_error():
+    """HTTP 503 from engine → error message includes status code."""
+    fs = _FailingReadDeviceFs(
+        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
+        read_errors={"workspace/x": httpx.HTTPStatusError(
+            "Service Unavailable",
+            request=MagicMock(),
+            response=MagicMock(status_code=503),
+        )},
+    )
+    with pytest.raises(TeclawFilePromotionError) as exc_info:
+        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    assert "(HTTP 503)" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_unreadable_source_file_network_error():
+    """Network timeout from engine → error message includes exception type."""
+    fs = _FailingReadDeviceFs(
+        listings={"workspace": [{"path": "/workspace/x", "is_dir": False}], "identity": []},
+        read_errors={"workspace/x": OSError("Connection refused")},
+    )
+    with pytest.raises(TeclawFilePromotionError) as exc_info:
+        await _promo(_oss_ok()).stage_files(device_fs=fs, **_ARGS)
+    assert "(OSError:" in str(exc_info.value)
