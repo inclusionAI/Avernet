@@ -1,0 +1,21 @@
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_89ee1c722ef961::t_8c097770bd9b2a 114
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_89ee1c722ef961::t_216fc9459df8c0 85-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1b864adad4446515b2994ce2d7f3459c6d8da875",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
