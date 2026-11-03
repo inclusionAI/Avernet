@@ -218,12 +218,10 @@ pub fn validate_api_auth(
             config.session_signing_key_secret.as_deref(),
             "api.auth.session_signing_key_secret",
         )?;
-        let success_redirect_path = required_oauth_field(
-            config.success_redirect_path.as_deref(),
-            "api.auth.success_redirect_path",
+        let success_redirect_path = validate_success_redirect_path(
+            config.success_redirect_path.as_deref().unwrap_or("/"),
+            &base_url,
         )?;
-        let success_redirect_path =
-            validate_success_redirect_path(&success_redirect_path, &base_url)?;
         let idle_secs =
             validate_idle_timeout_minutes(config.session_idle_timeout_minutes.unwrap_or(30))?;
         Some(ValidatedOAuthSettings {
@@ -326,8 +324,7 @@ fn validate_public_base_url(raw: &str) -> Result<(String, url::Url), String> {
     if url.query().is_some() || url.fragment().is_some() {
         return Err(format!("{PATH}: must not contain a query or fragment"));
     }
-    let host = url.host_str().unwrap_or_default();
-    if url.scheme() == "http" && !is_declared_local_host(host) {
+    if url.scheme() == "http" && !url.host().is_some_and(is_declared_local_host) {
         return Err(format!(
             "{PATH}: plain http is only allowed for loopback hosts in the declared local-deployment rule; non-local deployments must use https"
         ));
@@ -345,9 +342,12 @@ fn validate_public_base_url(raw: &str) -> Result<(String, url::Url), String> {
 }
 
 /// The declared local deployment rule: loopback hosts (and `localhost`).
-fn is_declared_local_host(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<std::net::IpAddr>().is_ok_and(|addr| addr.is_loopback())
+fn is_declared_local_host(host: url::Host<&str>) -> bool {
+    match host {
+        url::Host::Domain(name) => name.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(address) => address.is_loopback(),
+        url::Host::Ipv6(address) => address.is_loopback(),
+    }
 }
 
 /// Validates the post-login redirect path. It must be an in-site relative

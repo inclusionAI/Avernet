@@ -348,6 +348,8 @@ fn public_base_url_accepts_absolute_https_and_local_loopback_http() {
             "http://127.0.0.1:21000/openapi/v1/auth",
         ),
         ("http://localhost:8443/auth", "http://localhost:8443/auth"),
+        ("http://[::1]:21000/auth", "http://[::1]:21000/auth"),
+        ("http://[0:0:0:0:0:0:0:1]/auth", "http://[::1]/auth"),
     ] {
         let content = oauth_body(raw, "");
         let validated = expect_ok(
@@ -370,6 +372,7 @@ fn public_base_url_rejects_relative_non_http_userinfo_query_fragment_remote_http
         ("query", "https://bcs.example.com/auth?token=1"),
         ("fragment", "https://bcs.example.com/auth#top"),
         ("remote plain http", "http://bcs.example.com/auth"),
+        ("remote IPv6 plain http", "http://[2001:db8::1]/auth"),
     ] {
         let err = expect_rejected(
             &full_config_with(&oauth_body(raw, "")),
@@ -507,11 +510,6 @@ fn oauth_enabled_requires_all_public_params() {
             "missing session_signing_key_secret",
             "chain = [\"github\"]\npublic_base_url = \"https://bcs.example.com\"\n\
              success_redirect_path = \"/\"\n",
-        ),
-        (
-            "missing success_redirect_path",
-            "chain = [\"github\"]\npublic_base_url = \"https://bcs.example.com\"\n\
-             session_signing_key_secret = \"sk\"\n",
         ),
     ] {
         let err =
@@ -848,4 +846,20 @@ fn unknown_extension_value_domain_failure_is_not_retried_as_toml() {
         err.contains("floating-point"),
         "value-domain category must surface: {err}"
     );
+}
+
+#[test]
+fn omitted_success_redirect_defaults_to_root_only_when_oauth_is_enabled() {
+    let content = "chain = [\"github\"]\n\
+        public_base_url = \"https://bcs.example.com/openapi/v1/auth\"\n\
+        session_signing_key_secret = \"sk\"\n";
+    let validated = expect_ok(
+        &full_config_with(content), &test_registrations(), "default redirect",
+    );
+    assert_eq!(validated.oauth.expect("OAuth enabled").success_redirect_path, "/");
+    let gateway = expect_ok(
+        &full_config_with("chain = [\"gateway\"]"),
+        &test_registrations(), "no OAuth defaults on gateway-only chains",
+    );
+    assert!(gateway.oauth.is_none());
 }

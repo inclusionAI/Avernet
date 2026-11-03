@@ -97,7 +97,7 @@ pub(super) fn encode_cookie_change(change: &BrowserCookieChange, secure: bool) -
 /// `Cache-Control: no-store` — credentials never live in a shared cache.
 fn apply_flow_reply<T>(
     reply: AuthFlowReply<T>,
-    secure: bool,
+    config: &bcs_auth_api::OAuthConfig,
     on_success: impl FnOnce(T) -> axum::response::Response,
     on_error: impl FnOnce(ApplicationError) -> axum::response::Response,
 ) -> axum::response::Response {
@@ -107,6 +107,17 @@ fn apply_flow_reply<T>(
         Err(error) => on_error(error),
     };
     for change in &reply.cookie_changes {
+        // The session override must never downgrade an HTTPS challenge.
+        // Apply the same public-URL mode for both challenge set and clear.
+        let secure = match change {
+            BrowserCookieChange::SetLoginChallenge { .. }
+            | BrowserCookieChange::ClearLoginChallenge => {
+                bcs_auth_api::OAuthConfig::default_cookie_secure(&config.base_url)
+            }
+            BrowserCookieChange::SetSession { .. } | BrowserCookieChange::ClearSession => {
+                config.cookie_secure
+            }
+        };
         response.headers_mut().append(
             axum::http::header::SET_COOKIE,
             encode_cookie_change(change, secure),
@@ -247,10 +258,9 @@ pub async fn auth_url_handler(
     };
     let callback_base_url = format!("{}/auth/callback", state.config.base_url.trim_end_matches('/'));
     let reply = service.login_urls(BuildLoginUrls { callback_base_url }).await;
-    let secure = state.config.cookie_secure;
     apply_flow_reply(
         reply,
-        secure,
+        &state.config,
         |result| {
             let providers = result
                 .providers
@@ -276,7 +286,7 @@ pub async fn callback_handler(
     // The temporary cookie binding comes FIRST: the callback GET is
     // protected by this binding plus the one-time state, never by the
     // write-CSRF path.
-    let nonce = match extract_login_challenge(&headers, state.config.cookie_secure) {
+    let nonce = match extract_login_challenge(&headers, state.challenge_cookie_secure()) {
         Ok(nonce) => nonce,
         Err(()) => {
             warn!(request_id = %bcs_observability::CurrentRequestId, category = "invalid_state", "OAuth callback: browser challenge cookie missing or invalid");
@@ -295,10 +305,9 @@ pub async fn callback_handler(
             browser_binding: BrowserLoginBinding { nonce },
         })
         .await;
-    let secure = state.config.cookie_secure;
     apply_flow_reply(
         reply,
-        secure,
+        &state.config,
         |location| (StatusCode::FOUND, [("location", location.location)]).into_response(),
         legacy_error,
     )
@@ -339,7 +348,7 @@ pub async fn logout_handler(
     let reply = service.logout(session).await;
     apply_flow_reply(
         reply,
-        state.config.cookie_secure,
+        &state.config,
         |_| StatusCode::OK.into_response(),
         legacy_error,
     )
@@ -373,7 +382,7 @@ pub async fn refresh_handler(
     let reply = service.refresh_session(PresentedSession { token }).await;
     apply_flow_reply(
         reply,
-        state.config.cookie_secure,
+        &state.config,
         |_| StatusCode::OK.into_response(),
         legacy_error,
     )

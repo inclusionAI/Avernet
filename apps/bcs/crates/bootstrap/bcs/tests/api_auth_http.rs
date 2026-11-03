@@ -268,3 +268,24 @@ fn unauthenticated_envelope(body: &Value) {
     assert_eq!(body["code"], 40_100);
     assert_eq!(body["data"]["error_code"], "unauthenticated");
 }
+
+#[tokio::test]
+async fn current_user_preserves_the_stored_avatar_with_one_strict_select() {
+    let fixture = ApiChainFixture::assemble(FixtureSpec::standard()).await;
+    let seeded = fixture.seed_session("avatar-user").await;
+    for avatar in [Some("/avatars/user.png"), None] {
+        fixture.identity.ensure_identity(
+            "github", "avatar-user", Some("Avatar User"), avatar, api_chain::ENV,
+        ).await.expect("update identity display data");
+        fixture.db.reset_counts();
+        let response = drive(
+            &fixture.v1_router, "GET", "/openapi/v1/auth/user",
+            &session_cookie_only(&seeded.token),
+        ).await;
+        assert_eq!(response.status, StatusCode::OK, "{:?}", response.body);
+        assert_eq!(response.body["data"]["user_id"], seeded.user_id);
+        assert_eq!(response.body["data"]["avatar"], serde_json::json!(avatar));
+        assert_eq!(fixture.db.control.strict_selects.load(Ordering::SeqCst), 1,
+            "display projection must not perform a second credential lookup");
+    }
+}

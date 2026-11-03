@@ -208,7 +208,12 @@ client_secret_secret = "wechat-secret"
         .expect("oauth chain assembles");
         let (headers, _user_id) =
             session_cookie_headers(&identities, "github", TEST_ENV, None).await;
+        identities.ensure_identity(
+            "github", "ext-login-1", None, Some("/avatars/cached.png"), TEST_ENV,
+        ).await.expect("update display avatar");
         let verified = built.verifier.verify(&headers).await.expect("github matches");
+        assert_eq!(verified.avatar.as_deref(), Some("/avatars/cached.png"),
+            "the later matching source retains display data from the cached snapshot");
         assert_eq!(verified.authentication_context.source, "github");
         assert_eq!(
             verified.authentication_context.credential_kind,

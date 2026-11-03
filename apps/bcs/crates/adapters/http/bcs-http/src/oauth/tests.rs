@@ -532,10 +532,11 @@ async fn url_handler_appends_the_challenge_cookie_and_keeps_the_legacy_json_shap
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cookies.len(), 1, "one SetLoginChallenge => one header");
     assert!(
-        cookies[0].starts_with("bcs_oauth_login="),
-        "plain-HTTP base uses the non-__Host name: {}",
+        cookies[0].starts_with("__Host-bcs_oauth_login="),
+        "HTTPS base keeps the host-only challenge despite cookie_secure=false: {}",
         cookies[0]
     );
+    assert!(cookies[0].contains("Secure"));
     assert!(cookies[0].contains("Max-Age=300"));
     assert!(cookies[0].contains("HttpOnly"));
     assert_eq!(cache, "no-store");
@@ -546,7 +547,7 @@ async fn url_handler_appends_the_challenge_cookie_and_keeps_the_legacy_json_shap
 async fn callback_success_sets_session_and_clears_challenge_as_separate_headers() {
     let service = ScriptedAuthService::new();
     let state = legacy_state(service.clone());
-    let headers = cookie_header("bcs_oauth_login=challenge-nonce");
+    let headers = cookie_header("__Host-bcs_oauth_login=challenge-nonce");
     let resp = callback_handler(
         State(state),
         axum::extract::Path("google".to_string()),
@@ -570,9 +571,12 @@ async fn callback_success_sets_session_and_clears_challenge_as_separate_headers(
     assert!(
         cookies
             .iter()
-            .any(|cookie| cookie.starts_with("bcs_oauth_login=;") && cookie.contains("Max-Age=0")),
+            .any(|cookie| cookie.starts_with("__Host-bcs_oauth_login=;")
+                && cookie.contains("Secure") && cookie.contains("Max-Age=0")),
         "the challenge clear arrives as its own header: {cookies:?}"
     );
+    assert!(!cookies.iter().find(|cookie| cookie.starts_with("bcs_session="))
+        .unwrap().contains("Secure"), "session cookie override is preserved");
     assert_eq!(cache, "no-store");
     assert_eq!(service.calls.lock().unwrap().as_slice(), ["complete_login"]);
 }
@@ -581,8 +585,7 @@ async fn callback_success_sets_session_and_clears_challenge_as_separate_headers(
 /// name (a subdomain-planted Domain cookie must not satisfy binding).
 #[tokio::test]
 async fn callback_rejects_the_wrong_transport_mode_cookie_name() {
-    // Production config: cookie_secure = true, but the attacker only got a
-    // Domain-scoped local-name cookie planted.
+    // HTTPS challenge mode is independent of the session cookie override.
     let service = ScriptedAuthService::new();
     let state = Arc::new(OAuthRouteState::new(
         service.clone(),
@@ -591,7 +594,7 @@ async fn callback_rejects_the_wrong_transport_mode_cookie_name() {
             jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
             idle_timeout_minutes: 30,
             base_url: "https://bcs.example.com".to_string(),
-            cookie_secure: true,
+            cookie_secure: false,
             env: "test".to_string(),
             success_redirect_path: "/".to_string(),
         },
@@ -743,4 +746,35 @@ async fn identity_only_state_has_no_injected_login_service() {
     assert!(state.require_auth_service().is_none());
     let (status, body) = run_current_user(chain_with(Some("u-1".into()))).await;
     assert_eq!(status, StatusCode::OK, "identity-only /auth/user still works, got {body}");
+}
+
+#[tokio::test]
+async fn local_http_challenge_does_not_inherit_a_secure_session_override() {
+    let service = ScriptedAuthService::new();
+    let mut state = legacy_state(service.clone());
+    let config = &mut Arc::get_mut(&mut state).expect("unshared state").config;
+    config.base_url = "http://127.0.0.1:21000".to_string();
+    config.cookie_secure = true;
+    let (_, cookies, _, _) =
+        response_parts(auth_url_handler(State(state.clone())).await.into_response()).await;
+    assert!(cookies[0].starts_with("bcs_oauth_login="));
+    assert!(!cookies[0].contains("Secure"));
+
+    let response = callback_handler(
+        State(state),
+        axum::extract::Path("google".to_string()),
+        axum::extract::Query(CallbackParams {
+            code: Some("code-1".to_string()),
+            auth_code: None,
+            state: "state-1".to_string(),
+        }),
+        cookie_header("bcs_oauth_login=challenge-nonce"),
+    ).await.into_response();
+    let (status, cookies, _, _) = response_parts(response).await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(cookies.iter().any(|cookie| cookie.starts_with("bcs_oauth_login=;")
+        && !cookie.contains("Secure") && cookie.contains("Max-Age=0")));
+    assert!(cookies.iter().any(|cookie| cookie.starts_with("bcs_session=")
+        && cookie.contains("Secure")));
+    assert_eq!(service.calls.lock().unwrap().as_slice(), ["login_urls", "complete_login"]);
 }

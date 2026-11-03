@@ -44,3 +44,15 @@ plus the strict-session `conformance_auth_session_{memory,sqlite,mysql}.rs`
 drivers over the shared central harness); mysql and sqlite share one code
 path apart from the timestamp SQL flavor. Schema changes require a migration
 + the SQLite test DDL update.
+
+
+### MySQL session conformance in CI
+
+The BCS unit workflow explicitly executes the ignored
+`conformance_auth_session_mysql::auth_session_mysql_contract_and_two_connection_race`
+test through `scripts/ci_contract_test.py`. Its dedicated `mysql_auth_session`
+service starts an empty disposable `bcs_auth_session` database, separate from
+migration and Bot Authority gates. The runner requires exactly one passed,
+non-skipped contract result and propagates database/test failures. A local run
+requires an isolated empty database via `BCS_TEST_MYSQL_URL` and
+`cargo test -p bcs-user-identity --test conformance_auth_session_mysql -- --ignored --nocapture`.

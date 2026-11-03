@@ -144,3 +144,12 @@ returns the registered source Card, or 404 for a legacy Bot. It does not adverti
 BCS as an A2A server. Detail, discovery, search and batched query views carry the
 full optional `agent_card` alongside existing fields; legacy responses omit it.
 Legacy Bot JSON projections are isolated in routes/bot_views.rs.
+
+
+## OAuth challenge transport
+
+Legacy login challenge issuance, callback extraction and cleanup derive their
+mode from the configured OAuth public base URL scheme. The legacy
+`cookie_secure` override controls session cookies only; it cannot downgrade
+an HTTPS challenge or turn an HTTP challenge into a Secure `__Host-` cookie.
+Application cookie instructions and response shapes are unchanged.

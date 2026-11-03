@@ -106,6 +106,12 @@ impl OAuthRouteState {
         }
     }
 
+    /// Login-challenge transport is pinned to the public URL, not the
+    /// independent legacy session-cookie Secure override.
+    pub(super) fn challenge_cookie_secure(&self) -> bool {
+        OAuthConfig::default_cookie_secure(&self.config.base_url)
+    }
+
     /// The injected secure service for the mounted login family routes.
     pub fn require_auth_service(&self) -> Option<&Arc<dyn AuthService>> {
         self.auth_service.as_ref()

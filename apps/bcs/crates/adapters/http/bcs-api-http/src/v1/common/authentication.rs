@@ -58,6 +58,9 @@ pub struct AuthenticationContext {
 pub struct VerifiedRequestIdentity {
     pub caller: AuthenticatedCaller,
     pub authentication_context: AuthenticationContext,
+    /// Optional verified-source display data, never authorization input.
+    /// OAuth sources copy it from the existing session snapshot.
+    pub avatar: Option<String>,
 }
 
 impl VerifiedRequestIdentity {
@@ -70,7 +73,15 @@ impl VerifiedRequestIdentity {
                 source: source.into(),
                 credential_kind,
             },
+            avatar: None,
         }
+    }
+
+    /// Attach display data from the same verification result as the caller.
+    /// This must not trigger another credential lookup or change provenance.
+    pub fn with_avatar(mut self, avatar: Option<String>) -> Self {
+        self.avatar = avatar;
+        self
     }
 }
 

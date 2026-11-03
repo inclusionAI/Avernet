@@ -216,7 +216,7 @@ async fn current_user(
     let query = AuthenticatedUserQuery {
         caller: verified.caller,
         provider_label: verified.authentication_context.source,
-        avatar: None,
+        avatar: verified.avatar,
     };
     let result = match state.auth_service.as_ref() {
         Some(auth_service) => auth_service.current_user(query).await,

@@ -31,6 +31,15 @@ def reject(env, config, root, expected, overrides=None, raw=None, suffix='json')
 
 
 def invalid_configs(env):
+    config, data, base = env.config()
+    del config['api']['auth']['success_redirect_path']
+    with env.server(config, data, base):
+        browser = env.browser()
+        urls = browser.urls(base)
+        callback = browser.authorize(next(item['url'] for item in urls if item['name'] == 'github'))
+        _, headers, _ = browser.request('GET', callback, 302)
+        assert headers['Location'] == '/', 'omitted success redirect must default to root'
+
     baseline, root, _ = env.config()
     cases = []
 
@@ -75,7 +84,7 @@ def invalid_configs(env):
 
     # Required public fields and per-source table presence are startup-fatal.
     for name in ('chain', 'public_base_url', 'session_signing_key_secret',
-                 'success_redirect_path', 'github', 'gateway'):
+                 'github', 'gateway'):
         config = copy.deepcopy(baseline)
         del config['api']['auth'][name]
         reject(env, config, root, name)

@@ -135,11 +135,12 @@ class State:
         if user == 'info-error':
             return 502, {'error': 'userinfo_unavailable'}, {}
         name = None if user == 'nameless' else 'OAuth ' + user
+        avatar = f'/avatars/{provider}/{user}.png'
         body = {'id': int.from_bytes(user.encode(), 'little') % 100000000,
                 'sub': user, 'login': user, 'name': name, 'email': None,
-                'picture': None, 'avatar_url': None, 'openid': user,
-                'nickname': name, 'headimgurl': None, 'open_id': user,
-                'nick_name': name, 'avatar': None}
+                'picture': avatar, 'avatar_url': avatar, 'openid': user,
+                'nickname': name, 'headimgurl': avatar, 'open_id': user,
+                'nick_name': name, 'avatar': avatar}
         return self.reply(provider, 'alipay_user_info_share_response', body)
 
     def reply(self, provider, key, body):

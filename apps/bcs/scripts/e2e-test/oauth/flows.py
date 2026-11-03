@@ -20,8 +20,10 @@ def lifecycle(env, base):
         token = a.login(base, provider)
         identity = user(a, base)
         assert identity['provider'] == provider
+        assert identity['avatar'] == f'/avatars/{provider}/alice.png'
         legacy = user(a, base, family=LEGACY)
         assert identity['user_id'] == legacy['user_id']
+        assert identity['avatar'] == legacy['avatar']
         # Both facades share one session; refresh in either invalidates the old token.
         for family in (V1, LEGACY):
             _, headers, _ = a.request('POST', base + family + '/refresh', headers={'Origin': base})

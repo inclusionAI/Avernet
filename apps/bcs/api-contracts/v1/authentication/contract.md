@@ -131,6 +131,12 @@ Cookies:
   accepted per transport (the OTHER mode's cookie never satisfies the
   binding, so a hostile-subdomain `Domain`-scoped cookie planted over
   production HTTPS cannot be replayed).
+- Both entries derive the challenge mode from the configured public base
+  URL scheme, independently of the legacy session-only `cookie_secure`
+  override. HTTPS challenges always use the secure `__Host-` form, even
+  when that session override is false; HTTP challenges keep the local name
+  even when the session override is true. Issue, consume and cleanup use
+  the same challenge mode.
 - The completing `302` carries TWO separate `Set-Cookie` headers — install
   `bcs_session`, clear the challenge (Max-Age=0) — appended, never a merged
   comma form; a matched-but-failed completion still clears the challenge and
@@ -146,6 +152,12 @@ Cookies:
   nonce and invalidates the earlier batch in that browser; a callback from
   another browser is rejected WITHOUT consuming the initiating browser's
   pending state.
+
+`/openapi/v1/auth/user` preserves the verified identity's optional avatar
+as display-only data. The delivery verification result carries it from the
+same strict session snapshot as the caller; projection does not rerun the
+credential chain or add another session SELECT. Header sources without an
+avatar keep returning null.
 
 ## 4. Shared-writer safety and deployment constraints
 
@@ -188,6 +200,8 @@ to seconds), `success_redirect_path` (in-site relative path only, default
 forbidden otherwise: exact `scheme://host[:port]` matches, no wildcards/paths/
 userinfo). Callbacks are always `{public_base_url}/callback/{provider}`,
 never appended `/auth`, never inferred from Host/Forwarded headers.
+Plain HTTP public bases are restricted to loopback hosts (`localhost`,
+IPv4 loopback, or IPv6 `::1`, including bracketed IPv6 URL notation).
 
 Per-source tables under `[api.auth.<name>]`:
 

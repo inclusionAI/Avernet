@@ -65,6 +65,7 @@ pub struct ApiAuthConfig {
     #[serde(default)]
     pub session_signing_key_secret: Option<String>,
     /// In-site relative path redirected to after a successful login.
+    /// Defaults to `/` during registry validation when OAuth is enabled.
     /// Open-redirect shapes (absolute or protocol-relative URLs, backslashes,
     /// control characters) are rejected by the bootstrap registry.
     #[serde(default)]

@@ -304,7 +304,7 @@ impl PrincipalVerifier for OAuthSessionSourceVerifier {
             caller_from_snapshot(&snapshot),
             provider.clone(),
             CredentialKind::OAuthSessionCookie,
-        );
+        ).with_avatar(snapshot.avatar.clone());
         attempt.store_oauth_session(Ok(identity.clone()));
         if provider != self.source_name {
             // Valid, allowed, but a different source's credential: continue
