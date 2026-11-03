@@ -206,6 +206,9 @@
     "mock_tcauth": true,
     "nas_mount_root": "~/.bot_shared_nas/arca/arcaagentclaw",
     "openapi": {
+      "bot_access_check": {
+        "allowed_app_names": []
+      },
       "user_id_bypass": []
     },
     "openapi_bot": {

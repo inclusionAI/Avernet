@@ -83,6 +83,9 @@
       "bcs_url": "http://localhost:21000"
     },
     "openapi": {
+      "bot_access_check": {
+        "allowed_app_names": []
+      },
       "user_id_bypass": []
     },
     "openclaw": {

@@ -178,6 +178,7 @@ from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .bots.classification import router as classification_router
+from .bot_access_check import router as bot_access_check_router
 from .collaboration_bots import public_router as collaboration_public_router
 from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
@@ -311,6 +312,8 @@ _MIXED_GROUPS = [
 # precede `bots`.
 _OPEN_SUBGROUPS = [
     classification_router,
+    # Transitional, undocumented (include_in_schema=False) app-only access check.
+    bot_access_check_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
