@@ -410,7 +410,6 @@ if [[ "$no_stop" -eq 0 ]]; then
   # re-includes). api_auth_wiring.rs is deliberately NOT listed: boot wiring
   # shows 8 E2E hits, so the warn-and-re-include rule would fire on it.
   e2e_unreachable_oauth=(
-    crates/bootstrap/bcs/src/api_auth_config_values.rs
     crates/bootstrap/bcs/src/api_auth_ports.rs
     crates/bootstrap/bcs/src/api_auth_provider_configs.rs
     crates/bootstrap/bcs/src/api_auth_registry.rs
