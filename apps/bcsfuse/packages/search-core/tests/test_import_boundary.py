@@ -21,7 +21,10 @@ def test_core_and_contracts_import_only_the_standard_library_and_contracts():
                     names = [node.module or ""]
                 for name in names:
                     assert name.split(".")[0] in allowed, (path, name)
-                    assert not name.startswith("search_core.adapters.http"), (path, name)
+                    assert not name.startswith("search_core.adapters.http"), (
+                        path,
+                        name,
+                    )
                 if isinstance(node, ast.Attribute):
                     assert not (
                         isinstance(node.value, ast.Name)
@@ -39,6 +42,9 @@ def test_import_does_not_load_tc_framework_or_model_clients():
 import sys
 from search_core.api.models import SearchCommand
 from search_core.core.ranking import reciprocal_rank_fusion
+from search_core.core.index_builds import IndexBuildService
+from search_core.core.source_rebuild import rebuild_source
+from search_core.providers.sql_index_builds import SqlIndexBuildRepository
 assert not any(name.split('.')[0] in {'src', 'app', 'bcsfuse_internal', 'zbcsfuse_internal', 'fastapi', 'qdrant_client', 'numpy'} for name in sys.modules)
 """,
         ],
@@ -58,6 +64,16 @@ def test_shared_providers_do_not_import_applications_or_read_execution_environme
             elif isinstance(node, ast.ImportFrom):
                 names = [node.module or ""]
             for name in names:
-                assert name.split(".")[0] not in {"app", "bcsfuse_internal", "zbcsfuse_internal"}, (path, name)
-            if "config" not in path.relative_to(ROOT).parts and isinstance(node, ast.Attribute):
-                assert not (isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in {"environ", "getenv"}), path
+                assert name.split(".")[0] not in {
+                    "app",
+                    "bcsfuse_internal",
+                    "zbcsfuse_internal",
+                }, (path, name)
+            if "config" not in path.relative_to(ROOT).parts and isinstance(
+                node, ast.Attribute
+            ):
+                assert not (
+                    isinstance(node.value, ast.Name)
+                    and node.value.id == "os"
+                    and node.attr in {"environ", "getenv"}
+                ), path

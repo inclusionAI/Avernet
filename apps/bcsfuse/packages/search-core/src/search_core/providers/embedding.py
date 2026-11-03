@@ -42,10 +42,13 @@ class AsyncHttpEmbedding:
         return self._settings.dimension
 
     async def embed(self, text: str) -> list[float]:
+        payload = {"input": [text], "model": self._settings.model}
+        if self._settings.request_dimensions:
+            payload["dimensions"] = self.dimension
         response = await self._client.post_json(
             f"{self._settings.base_url}/embeddings",
             headers={"Authorization": f"Bearer {self._settings.auth_token}"},
-            json={"input": [text], "model": self._settings.model},
+            json=payload,
         )
         data = response.get("data", [])
         if len(data) != 1:
@@ -337,11 +340,8 @@ class RealEmbeddingProvider(EmbeddingProvider):
             self._settings.timeout_ms,
         )
 
-        # 注意：不是所有 embedding 模型都支持 dimensions 参数
-        # 只有支持 matryoshka representation 的模型才支持
-        # 如果需要自定义维度，请确保模型支持
-        # if self._settings.dimension:
-        #     payload["dimensions"] = self._settings.dimension
+        if self._settings.request_dimensions:
+            payload["dimensions"] = self._settings.dimension
 
         try:
             client = self._get_client()
