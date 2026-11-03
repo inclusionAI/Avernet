@@ -45,18 +45,17 @@ class ExecutionEventDTO(BaseModel):
 
 
 class ArtifactReportItemDTO(BaseModel):
-    """一条上报产物 item:恰一个 content 字段(互斥)承载对应分支的 **JSON 对象**。
+    """一条 relay 回调产物 item:恰一个非文件 content 字段承载分支 JSON 对象。
 
-    content 对象不含 kind tag——判别由字段名承载;结构性校验(互斥/交叉校验/上限)
-    在核心 ``parse_artifact_report_item`` 收口,HTTP 层只转协议(Rule 22)。
-    content 对象形态为线上契约(2026-10-22 用户定稿);核心解析对 JSON 字符串
-    仍容忍(手动 API 兼容),但本 DTO(线上口)只收对象。四个分支均支持字符串枚举
-    ``is_final_artifact``(``"true"``/``"false"``,缺省 ``"false"``)标记最终产物。
+    本线上口只承载 text/url_link/code 等非文件交付产物;file 交付产物必须先经
+    object-file 上传接口登记,不得在回调 artifacts 中重复上报。content 对象不含
+    kind tag,``artifact_name`` 必须是业务用户可读标题。结构性校验、互斥、归属/attempt
+    交叉校验和上限仍在核心 ``parse_artifact_report_item`` 收口。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    artifact_name: str | None = None
+    artifact_name: str = Field(min_length=1, max_length=255, description="业务语义名")
     artifact_kind: str
     session_id: str | None = None
     task_id: str
@@ -263,6 +262,7 @@ class TaskReportCommandDTO(BaseModel):
                     [item.model_dump() for item in self.artifacts],
                     report_task_id=self.task_id,
                     report_node_id=self.node_id,
+                    allow_file=False,
                 )
                 if self.artifacts is not None
                 else terminal_artifact_patch
@@ -283,6 +283,7 @@ class TaskReportCommandDTO(BaseModel):
                     [item.model_dump() for item in self.artifacts],
                     report_task_id=self.task_id,
                     report_node_id=self.node_id,
+                    allow_file=False,
                 )
                 if self.artifacts is not None
                 else None

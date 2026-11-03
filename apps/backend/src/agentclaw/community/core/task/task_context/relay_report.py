@@ -265,6 +265,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=getattr(patch, "artifact_patch", None),
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
             elif (
                 patch.actual_goal is not None
@@ -348,6 +349,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=command.artifact_patch,
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
@@ -380,6 +382,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=command.artifact_patch,
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
