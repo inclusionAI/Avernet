@@ -400,7 +400,31 @@ if [[ "$no_stop" -eq 0 ]]; then
     "${e2e_unreachable_memory_repos[@]}"
     "${e2e_unreachable_p2_caller_delivery[@]}"
   )
-  changed_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable[*]}" | sed 's/\./\\./g'))"
+  # OAuth login/session + [api.auth] assembly surface: the singlebox e2e stack
+  # boots the compat assembly (never sets [api.auth]) and OAuth providers bind
+  # third-party endpoints that are compile-time constants, so the login flow
+  # cannot complete in e2e by construction (the provider-endpoint injection
+  # seam is deferred to a later round). These files had 0 E2E hits in the
+  # 2026-11-03 measurement; covering them needs the stub seam first. A listed
+  # file that shows any E2E hit is counted again (the gate warns and
+  # re-includes). api_auth_wiring.rs is deliberately NOT listed: boot wiring
+  # shows 8 E2E hits, so the warn-and-re-include rule would fire on it.
+  e2e_unreachable_oauth=(
+    crates/bootstrap/bcs/src/api_auth_config_values.rs
+    crates/bootstrap/bcs/src/api_auth_ports.rs
+    crates/bootstrap/bcs/src/api_auth_provider_configs.rs
+    crates/bootstrap/bcs/src/api_auth_registry.rs
+    crates/application/v1/bcs-app-auth/src/login.rs
+    crates/application/v1/bcs-app-auth/src/session.rs
+    crates/plugins/bcs-auth-oauth/src/strict.rs
+    crates/plugins/bcs-auth-oauth/src/session_lifecycle.rs
+    crates/plugins/bcs-auth-oauth/src/login_state.rs
+    crates/services/bcs-jwt/src/oauth_session.rs
+    crates/services/bcs-user-identity/src/session_memory.rs
+  )
+  services_skip_regex="^crates/services/($(IFS='|'; printf '%s' "${e2e_unreachable[*]}" | sed 's/\./\\./g'))"
+  oauth_skip_regex="^($(IFS='|'; printf '%s' "${e2e_unreachable_oauth[*]}" | sed 's/\./\\./g'))$"
+  changed_skip_regex="(${services_skip_regex})|(${oauth_skip_regex})"
   changed_args=(--changed-line-min "$changed_line_min"
     --changed-line-min-lines "$changed_line_min_lines"
     --changed-skip-regex "$changed_skip_regex")
