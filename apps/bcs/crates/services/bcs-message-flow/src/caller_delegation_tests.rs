@@ -17,6 +17,73 @@ use std::sync::Arc;
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
+/// Stub control plane for the session-capture fallback fixture: the
+/// fallback's gates only require the admission deps to be wired — no
+/// control-plane read happens on the minting path, so every method
+/// beyond wiring can stay `unimplemented!` like the contract-test stubs.
+struct AdmissionWiredControlPlane;
+
+#[async_trait::async_trait]
+impl bcs_service_api::BotControlPlaneCoreService for AdmissionWiredControlPlane {
+    async fn get_caller_configuration(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<bcs_service_api::BotCallerConfiguration>> {
+        Ok(Some(bcs_service_api::BotCallerConfiguration { snapshot: None }))
+    }
+
+    async fn get_record(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneRecord>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn get_by_ids(
+        &self,
+        _: &[String],
+        _: &str,
+    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_candidates(
+        &self,
+        _: bcs_service_api::BotCandidateReadQuery,
+    ) -> ServiceResult<(
+        Vec<bcs_service_api::BotControlPlaneCandidate>,
+        u64,
+    )> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn list_by_creator(
+        &self,
+        _: bcs_service_api::BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+
+    async fn patch(
+        &self,
+        _: &str,
+        _: &str,
+        _: bcs_service_api::BotControlPlanePatch,
+    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+        unimplemented!("not needed by this test")
+    }
+}
+
 async fn fixture(
     caller: bool,
     live: bool,
@@ -301,7 +368,7 @@ async fn relay_fallback_fixture(
         })
         .await;
     }
-    let flow = crate::BcsMessageFlow::new(
+    let mut flow = crate::BcsMessageFlow::new(
         support.group,
         support.routing,
         support.registry,
@@ -310,6 +377,15 @@ async fn relay_fallback_fixture(
     )
     .with_bot_run_context(runs.clone())
     .with_caller_relay(relay);
+    // Gate 1 of the fallback (spec L62): the delegation is only minted
+    // when the composition can actually redeem the capture at dispatch
+    // time — wire the caller admission deps like the runtime does.
+    flow.caller_admission = Some(Arc::new(crate::caller_admission::CallerAdmissionDeps {
+        handoff: Arc::new(crate::caller_delivery_handoff::HumanCallerDeliveryHandoff::new(16)),
+        admission: Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new()))),
+        control_plane: Arc::new(AdmissionWiredControlPlane),
+        reserve_ttl_ms: 30_000,
+    }));
     let event = BotEventCommand {
         bot_id: "bot-driver".into(),
         run_id: "master-run".into(),
