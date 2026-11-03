@@ -475,6 +475,39 @@ class TestUpdateBot:
         assert "mcp_codes" not in kwargs
         assert "cli_items" not in kwargs
 
+    def test_malformed_json_rejected(self, client):
+        tc, svc, passport = client
+        resp = tc.put("/api/bots/default", content=b'{"bot_name": "NewName"', json=None)
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert body["message"] == "请求体 JSON 解析失败"
+        svc.update_bot.assert_not_called()
+        passport.update_passport.assert_not_called()
+
+    def test_non_utf8_body_rejected(self, client):
+        tc, svc, passport = client
+        resp = tc.put("/api/bots/default", content=b'{"bot_name":"NewName\xc3"}', json=None)
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert body["message"] == "请求体 JSON 解析失败"
+        svc.update_bot.assert_not_called()
+        passport.update_passport.assert_not_called()
+
+    def test_non_object_json_rejected(self, client):
+        tc, svc, passport = client
+        resp = tc.put("/api/bots/default", json=[1, 2])
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert body["message"] == "请求体必须是 JSON 对象"
+        svc.update_bot.assert_not_called()
+        passport.update_passport.assert_not_called()
+
     def test_bot_not_found(self, client):
         tc, svc, _ = client
         svc.update_bot.side_effect = BotNotFoundError("nope")
