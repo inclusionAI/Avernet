@@ -192,6 +192,7 @@ from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.copy import router as bot_copy_router
 from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -675,6 +676,13 @@ def build_public_router() -> APIRouter:
     from .dws_hosting.router import router as dws_hosting_router
     public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
 
+    # bot-copy routes (`POST /copy`, `POST /copy/{operation_id}/retry`):
+    # top-level literals under `/openapi/v1/bots`, mounted before the `bots`
+    # `/{bot_id}` wildcard for the same reason `with-manifest` is — otherwise
+    # `/{bot_id}` would capture "copy" as a bot id.
+    public.include_router(
+        bot_copy_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
