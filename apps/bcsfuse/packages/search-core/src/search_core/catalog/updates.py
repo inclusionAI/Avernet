@@ -38,13 +38,16 @@ def configuration_index_key(
     *,
     conversion_version="",
 ):
+    """Legacy implicit identity, retained for existing library consumers only."""
     conversion_version = conversion_version or (
         converter.version if converter is not None else CONVERSION_VERSION
     )
+    if converter is not None and (
+        not isinstance(converter.version, str) or not converter.version.strip()
+    ):
+        raise ValueError("custom document converter requires an explicit version")
     key = f"{conversion_version}|{embedding_key}|{','.join(sorted(filter_fields))}"
     if converter is not None:
-        if not isinstance(converter.version, str) or not converter.version.strip():
-            raise ValueError("custom document converter requires an explicit version")
         key += "|converter:" + converter.version
     return hashlib.sha256(key.encode()).hexdigest()
 
@@ -80,6 +83,7 @@ class CardUpdates(CardManagementService):
                 "search_text",
                 "rerank_text",
                 "source_version",
+                "index_key",
             }:
                 raise ValueError(f"unsupported filter field: {field}")
         super().__init__(repository)
@@ -89,18 +93,19 @@ class CardUpdates(CardManagementService):
         self.conversion_version = conversion_version or (
             document_converter.version if document_converter else CONVERSION_VERSION
         )
-        key = configuration_index_key(
+        self.document_converter = document_converter or DefaultCardDocumentConverter(
+            filter_fields=filter_fields
+        )
+        if index_key and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", index_key
+        ):
+            raise ValueError("invalid index key")
+        self.index_key = index_key or configuration_index_key(
             embedding_key,
             filter_fields,
             document_converter,
             conversion_version=self.conversion_version,
         )
-        self.document_converter = document_converter or DefaultCardDocumentConverter(
-            filter_fields=filter_fields
-        )
-        if index_key and not re.fullmatch(r"[0-9a-f]{64}", index_key):
-            raise ValueError("invalid index key")
-        self.index_key = index_key or key
         self.documents = repository.index_documents(self.index_key)
         self.lease_seconds = lease_seconds
         self._applied, self._errors, self._operations_observed = {}, {}, {}
@@ -154,7 +159,9 @@ class CardUpdates(CardManagementService):
         )
 
     def _previous_documents(self, key, previous):
-        return load_group(self.documents, key) if previous is not None else []
+        if previous is not None:
+            return load_group(self.documents, key)
+        return self.documents.load_vector_candidates(key, self.embedding_key)
 
     def _restore_auxiliary(self, document):
         """Applications may restore prepared business state without model calls."""
@@ -252,11 +259,21 @@ class CardUpdates(CardManagementService):
                 filter_fields = set(self.filter_fields) | set(
                     main.metadata.get("filters", {})
                 )
-                points = [
-                    d.to_index_point(filter_fields)
-                    for d in documents
-                    if not d.is_deleted
-                ]
+                points = []
+                for document in documents:
+                    if document.is_deleted:
+                        continue
+                    point = document.to_index_point(filter_fields)
+                    points.append(
+                        point.model_copy(
+                            update={
+                                "payload": {
+                                    **point.payload,
+                                    "index_key": self.index_key,
+                                }
+                            }
+                        )
+                    )
                 if points:
                     self.index.upsert(points)
                 if removed:

@@ -1,7 +1,6 @@
 """Immutable index generation configuration; independent of any business source."""
 
-import hashlib
-import json
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,6 +12,20 @@ class IndexBuildConfig(BaseModel):
     embedding_dimension: int = Field(strict=True, ge=1, le=8192)
     conversion_version: str = Field(min_length=1, max_length=256)
     filter_fields: tuple[str, ...] = ()
+
+    @field_validator("filter_fields")
+    @classmethod
+    def canonical_filters(cls, value):
+        for name in value:
+            if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", name) or name in {
+                "index_key",
+                "source_id",
+                "source_version",
+                "search_text",
+                "rerank_text",
+            }:
+                raise ValueError("unsupported filter field")
+        return tuple(sorted(set(value)))
 
     @field_validator("embedding_model")
     @classmethod
@@ -27,8 +40,7 @@ class IndexBuildConfig(BaseModel):
 
     @property
     def index_key(self):
-        value = json.dumps(self.model_dump(mode="json"), sort_keys=True)
-        return hashlib.sha256(value.encode()).hexdigest()
+        return self.build_id
 
 
 class IndexVersionConfig(BaseModel):

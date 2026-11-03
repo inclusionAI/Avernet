@@ -114,7 +114,7 @@ def test_sql_execution_ownership_and_environment_are_preserved(tmp_path):
     assert other_repo.get("job").status == "pending"
 
 
-def test_index_key_matches_existing_serialization():
+def test_build_config_roundtrips_with_shared_identity():
     from search_core.config.index_builds import IndexBuildConfig
 
     cfg = IndexBuildConfig(
@@ -124,7 +124,6 @@ def test_index_key_matches_existing_serialization():
         conversion_version="agent-card-v3",
         filter_fields=("resource_type",),
     )
-    # Exact configuration wire representation is part of existing persisted identities.
     assert cfg.model_dump(mode="json") == {
         "build_id": "same-version",
         "embedding_model": "model",
@@ -132,10 +131,22 @@ def test_index_key_matches_existing_serialization():
         "conversion_version": "agent-card-v3",
         "filter_fields": ["resource_type"],
     }
-    assert (
-        cfg.index_key
-        == "0fb9adb589514f58e1fc296961346858f6beb96307cfdab4a2849f28d1d52bf8"
-    )
+    assert cfg.index_key == "same-version"
+    assert IndexBuildConfig.model_validate_json(cfg.model_dump_json()) == cfg
+
+
+def test_build_freezes_requested_filters_and_retry_uses_saved_defaults(tmp_path):
+    from search_core.api.index_builds import IndexBuildConflict
+
+    _, _, service = world(tmp_path)
+    cfg = service.create("labels", "model", 2, filter_fields={"category"}).config
+    service.filter_fields = {"region"}
+    assert service.create("labels", "model", 2).config == cfg
+    assert cfg.filter_fields == ("category",)
+    with pytest.raises(IndexBuildConflict):
+        service.create("labels", "model", 2, filter_fields={"region"})
+    with pytest.raises(ValueError):
+        service.create("invalid", "model", 2, filter_fields={"index_key"})
 
 
 def test_shared_management_http_preserves_auth_status_and_conflicts(tmp_path):

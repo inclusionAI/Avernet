@@ -187,6 +187,23 @@ class SqlIndexDocuments:
             )
             return self.decode(cur.fetchone())
 
+    def load_vector_candidates(self, source_id, embedding_key):
+        """Reuse candidates, not a snapshot: no source revision or index selection."""
+        with self._cursor() as cur:
+            self._execute(
+                cur,
+                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND source_id=? AND is_deleted=0 ORDER BY gmt_modify DESC, index_key",
+                (self.environment, source_id),
+            )
+            candidates = []
+            for row in cur.fetchall():
+                document = self.decode(row)
+                if document.metadata.get(
+                    "embedding_key"
+                ) == embedding_key and document.metadata.get("text_hash"):
+                    candidates.append(document)
+            return candidates
+
     def save_in_transaction(self, cur, document):
         """Caller owns the transaction and source-version/lease fence.
 

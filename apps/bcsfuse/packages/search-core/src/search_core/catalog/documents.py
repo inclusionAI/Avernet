@@ -10,9 +10,33 @@ from search_core.plugin_api.index_documents import IndexDocument
 from search_core.plugin_api.vector_point import VectorPoint
 
 
+def valid_embedding(vector, model):
+    """Invalid cached vectors are misses; freshly generated vectors must validate."""
+    return (
+        bool(vector)
+        and len(vector) == getattr(model, "dimension", len(vector))
+        and all(math.isfinite(v) for v in vector)
+    )
+
+
+def reusable_document(previous, key, embedding_key, text_hash, model):
+    """Find an exact input match even when a newer generation has different text."""
+    return next(
+        (
+            d
+            for d in previous
+            if d.id == key
+            and not d.is_deleted
+            and d.metadata.get("embedding_key") == embedding_key
+            and d.metadata.get("text_hash") == text_hash
+            and valid_embedding(d.point.vector, model)
+        ),
+        None,
+    )
+
+
 def build_documents(row, model, embedding_key, filter_fields, converter, previous):
     """Project business text once, then materialize it without interpreting the Card."""
-    old = next((d for d in previous if d.id == row.card.agent_id), None)
     if row.card.deleted:
         point = VectorPoint(
             id=row.card.agent_id, vector=[], payload={"source_id": row.card.agent_id}
@@ -32,14 +56,8 @@ def build_documents(row, model, embedding_key, filter_fields, converter, previou
     validate_labels(projection.filters, filter_fields)
     text = expressions[0].search_text
     digest = hashlib.sha256(text.encode()).hexdigest()
-    reuse = (
-        old is not None
-        and not old.is_deleted
-        and bool(old.point.vector)
-        and old.metadata.get("embedding_key") == embedding_key
-        and old.metadata.get("text_hash") == digest
-    )
-    vector = list(old.point.vector) if reuse else list(model.embed(text))
+    old = reusable_document(previous, row.card.agent_id, embedding_key, digest, model)
+    vector = list(old.point.vector) if old is not None else list(model.embed(text))
     point = VectorPoint(
         id=row.card.agent_id,
         vector=vector,
@@ -108,18 +126,12 @@ def retired_documents(previous, current):
 
 
 def complete_document_group(main, expressions, previous, model, embedding_key):
-    by_id = {d.id: d for d in previous}
     documents = [main]
     for expression in expressions[1:]:
         key = "doc:" + str(uuid5(NAMESPACE_URL, repr((main.source_id, expression.key))))
         digest = hashlib.sha256(expression.search_text.encode()).hexdigest()
-        old = by_id.get(key)
-        reusable = (
-            old is not None
-            and bool(old.point.vector)
-            and old.metadata.get("embedding_key") == embedding_key
-            and old.metadata.get("text_hash") == digest
-        )
+        old = reusable_document(previous, key, embedding_key, digest, model)
+        reusable = old is not None
         vector = old.point.vector if reusable else []
         if not main.is_deleted and not reusable:
             vector = list(model.embed(expression.search_text))
@@ -148,11 +160,9 @@ def complete_document_group(main, expressions, previous, model, embedding_key):
     if not main.is_deleted:
         dimension = getattr(model, "dimension", len(main.point.vector))
         for document in documents:
-            vector = document.point.vector
             if (
-                not vector
-                or len(vector) != dimension
-                or any(not math.isfinite(v) for v in vector)
+                not valid_embedding(document.point.vector, model)
+                or len(document.point.vector) != dimension
             ):
                 raise ValueError("invalid document embedding")
     main.metadata["document_ids"] = [d.id for d in documents]
