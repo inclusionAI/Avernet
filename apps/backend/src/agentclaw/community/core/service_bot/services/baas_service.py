@@ -417,6 +417,10 @@ class BaasService:  # pragma: no cover
     behavior-level unit / injection tests still run (respx-mocked) for
     regression — they just don't count toward CI line coverage.
     """
+    #: Maximum retry attempts for transient BaaS API failures (5xx / transport).
+    _outbound_rule_max_retries: int = 3
+    #: Base backoff in seconds; doubled on each retry (1s, 2s, 4s).
+    _outbound_rule_retry_backoff_base: float = 1.0
 
     def __init__(
         self,
@@ -515,12 +519,6 @@ class BaasService:  # pragma: no cover
         # feature guards against elsewhere. Required, that mistake is a
         # TypeError naming the argument at construction.
         self._startup_script_reader = startup_script_reader
-
-        #: Maximum retry attempts for transient BaaS API failures (5xx / transport).
-        self._outbound_rule_max_retries: int = 3
-        #: Base backoff in seconds; doubled on each retry (1s, 2s, 4s).
-        self._outbound_rule_retry_backoff_base: float = 1.0
-
     def post_bots_api(
         self,
         path: str,
