@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-
 class _InstallationReader:
     """Reader fake answering from the same Installation seed the tests set."""
 
@@ -150,9 +149,7 @@ class TestGetSymlinkMappings:
     def test_cutover_finalizing_rewrites_legacy_locator_to_pool_source(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
-        pool_local = (
-            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
-        )
+        pool_local = "/home/admin/.openclaw/workspace/skills-pool/skills-local"
         skill_set_service.engine_type = "openclaw"
         skill_set_service.entity_id = "100015"
         skill_set_service._pool_layout_paths = lambda *_: (
@@ -184,9 +181,7 @@ class TestGetSymlinkMappings:
             )
 
         assert mappings[0].source == f"{pool_local}/handmade"
-        assert mappings[0].target == (
-            "/home/admin/.openclaw/workspace/skills/handmade"
-        )
+        assert mappings[0].target == ("/home/admin/.openclaw/workspace/skills/handmade")
 
     def test_claude_pool_locators_drive_restart_mappings(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
@@ -236,9 +231,7 @@ class TestGetSymlinkMappings:
     def test_aicoding_pool_locators_drive_restart_mappings(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
-        pool_local = (
-            "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
-        )
+        pool_local = "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
         skill_set_service.engine_type = "aicoding"
         skill_set_service.entity_id = "100015"
         skill_set_service._pool_layout_paths = lambda *_: (
@@ -281,9 +274,7 @@ class TestGetSymlinkMappings:
     def test_hermes_pool_locators_drive_restart_mappings(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):
-        pool_local = (
-            "/home/admin/.hermes/workspace/skills-pool/skills-local/handmade"
-        )
+        pool_local = "/home/admin/.hermes/workspace/skills-pool/skills-local/handmade"
         skill_set_service.engine_type = "hermes"
         skill_set_service.entity_id = "100015"
         skill_set_service._pool_layout_paths = lambda *_: (
@@ -364,9 +355,7 @@ class TestGetSymlinkMappings:
         mappings = skill_set_service.get_symlink_mappings(
             user_id="100015",
             bolt_id="desktop-bot",
-            additional_skill_paths=[
-                f"local://{pool_dir}/skills-local/direct-local"
-            ],
+            additional_skill_paths=[f"local://{pool_dir}/skills-local/direct-local"],
         )
 
         assert [mapping.to_dict() for mapping in mappings] == [
@@ -415,6 +404,95 @@ class TestGetSymlinkMappings:
         with pytest.raises(ValueError, match="Conflicting Skill mappings"):
             skill_set_service.get_symlink_mappings(
                 additional_skill_paths=["git://business/two/same"]
+            )
+
+    def test_active_mapping_without_direct_paths_collapses_exact_repeats(
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo, caplog
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_repo.list_bot_installed_skills.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/same",
+            },
+            {
+                "id": "2",
+                "name": "same",
+                "git_path": "git://business/same",
+            },
+        ]
+
+        with caplog.at_level("WARNING"):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015", bolt_id="default"
+            )
+
+        assert len(mappings) == 1
+        assert mappings[0].target.endswith("/same")
+        assert mappings[0].source.endswith("/skills-repo/business/same")
+        assert "runtime target conflicts without requested direct paths" not in caplog.text
+
+    def test_active_mapping_without_direct_paths_preserves_first_source(
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo, caplog
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_repo.list_bot_installed_skills.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/direct/same",
+            },
+            {
+                "id": "2",
+                "name": "same",
+                "git_path": "git://business/repository/same",
+            },
+        ]
+
+        with caplog.at_level("WARNING"):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015", bolt_id="default"
+            )
+
+        assert mappings[0].source.endswith("/skills-repo/business/direct/same")
+        assert len(mappings) == 1
+        suppress_warnings = [
+            record for record in caplog.records
+            if "runtime target conflicts without requested direct paths" in record.message
+        ]
+        assert len(suppress_warnings) == 1
+        assert "/skills-repo/business/direct/same" in suppress_warnings[0].message
+        assert "/skills-repo/business/repository/same" in suppress_warnings[0].message
+
+    def test_direct_path_collision_between_active_rows_still_raises(
+        self, skill_set_service, mock_skill_set_repo, mock_skill_repo
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_repo.list_bot_installed_skills.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/direct/same",
+            },
+            {
+                "id": "2",
+                "name": "same",
+                "git_path": "git://business/repository/same",
+            },
+        ]
+
+        with pytest.raises(ValueError, match="Conflicting Skill mappings"):
+            skill_set_service.get_symlink_mappings(
+                user_id="100015",
+                bolt_id="default",
+                additional_skill_paths=["git://business/other/distinct"],
             )
 
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
