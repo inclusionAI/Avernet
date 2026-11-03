@@ -89,6 +89,13 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
   const presentTone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
   const groupEmbedEnabled = node.drillable === true && !!bcsBaseUrl;
   const goal = node.taskSpec?.instruction || node.taskSpec?.target || '';
+  const stage = task.nodes.findIndex((taskNode) => taskNode.id === node.id) + 1;
+  const finalNodeId = task.nodes.length > 0 ? task.nodes[task.nodes.length - 1]!.id : null;
+  const stagedArtifacts = node.artifacts.map((artifact) => ({
+    ...artifact,
+    stage,
+    isFinalStage: stage > 0 && node.id === finalNodeId,
+  }));
 
   return (
     <div data-testid="task-node-panel-v2">
@@ -169,7 +176,7 @@ export const TaskNodePanelV2: React.FC<TaskNodePanelV2Props> = ({
 
       {/* ③ 节点产物(nodes[].artifacts 已按节点圈定,无需过滤) */}
       <ArtifactsSection
-        artifacts={node.artifacts}
+        artifacts={stagedArtifacts}
         apiBaseUrl={apiBaseUrl}
         context={{ taskId: task.id, ownerBotId: task.ownerBotId, ownerUserId: task.ownerUserId }}
       />

@@ -32,6 +32,10 @@ export interface TaskArtifactView {
   } | null;
   /** 归属节点(产物区按 node 过滤用);legacy 回落入参 nodeId */
   nodeId?: string | null;
+  /** 产物归属棒次;按 TaskView.nodes 展示顺序派生,仅产物列表展示层使用。 */
+  stage?: number | null;
+  /** 是否由最后一棒产出;最后一棒产物列表卡片边框高亮使用。 */
+  isFinalStage?: boolean;
   /** 产出者(Descriptor.creator);legacy 为 null */
   owner?: string | null;
   /** 产出者可读名：单 Bot 名或协作群成员名列表；缺省回落 owner ID。 */
