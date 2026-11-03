@@ -186,6 +186,7 @@ class TestUpdateDeviceHeaders:
                 "bolt_id": "bot-1",
                 "entity_id": "u1",
                 "device_uuid": "DEVICE-1",
+                "engine_type": "openclaw",
             },
         )
 
@@ -208,6 +209,7 @@ class TestUpdateDeviceHeaders:
             owner_id="u1",
             agent_pass_token="passport-token",
             agent_code="agent-code",
+            engine_type="openclaw",
             extra_properties=envelope,
         )
         baas._build_teclaw_outbound_operation_rule.assert_not_called()
@@ -223,7 +225,12 @@ class TestUpdateDeviceHeaders:
         device = AllocatedDevice(
             device_id="BOT-baas",
             device_provider=BAAS_DEVICE_PROVIDER,
-            device_props={"bolt_id": "bot-1", "entity_id": "u1", "device_uuid": "DEVICE-1"},
+            device_props={
+                "bolt_id": "bot-1",
+                "entity_id": "u1",
+                "device_uuid": "DEVICE-1",
+                "engine_type": "openclaw",
+            },
         )
         with patch(
             "agentclaw.community.core.bot_management.engines"
@@ -233,6 +240,7 @@ class TestUpdateDeviceHeaders:
             svc.update_device_headers(device=device, agent_pass_token="t", agent_code="a")
         baas._build_outbound_operation_rule.assert_called_once_with(
             bot_id="bot-1", owner_id="u1", agent_pass_token="t", agent_code="a",
+            engine_type="openclaw",
             extra_properties=None,
         )
 
