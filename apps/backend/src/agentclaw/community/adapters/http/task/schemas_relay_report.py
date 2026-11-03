@@ -191,6 +191,9 @@ def _step_contains_relay_token(step: TaskReportTraceStepDTO, relay_token: str) -
     )
 
 
+_MAX_FINAL_CONCLUSION_CHARS = 300
+
+
 class TaskReportCommandDTO(BaseModel):
     """Two-event Relay report command; ``trace`` is optional on the wire.
 
