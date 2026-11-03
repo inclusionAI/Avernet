@@ -172,6 +172,28 @@ async def test_subdir_listing_preserves_hidden_names():
     assert [i["name"] for i in items] == [".cache", "state"]
 
 
+@pytest.mark.asyncio
+async def test_list_dir_marks_the_nested_readonly_prefix_and_visible_dots():
+    """``readonly`` is policy metadata, not a filter flag.
+
+    Path rules are computed by ``is_readonly`` *after* the engine's own entries
+    are known; the top-level adapter decides whether a public listing should
+    expose those paths at all.
+    """
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": ".env", "is_dir": False, "relative_path": ".env"},
+        {"name": "skill", "is_dir": False, "relative_path": "business/skill"},
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+    items = await svc.list_dir(**_COORDS, path="skills-pool/skills-repo")
+    assert [item["path"] for item in items] == [
+        "skills-pool/skills-repo/.env",
+        "skills-pool/skills-repo/business/skill",
+    ]
+    assert [item["readonly"] for item in items] == [True, True]
+
+
 # ── read / download-limit forwarding ─────────────────────────────────────────
 
 
@@ -506,6 +528,35 @@ def test_is_readonly_rules():
     assert is_readonly("AGENTS.md") is True       # identity file at root
     assert is_readonly("sub/AGENTS.md") is False  # only at root
     assert is_readonly("data/report.csv") is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-repo",
+        "skills-pool/skills-repo/business/content",
+    ],
+)
+def test_is_readonly_rules_protect_the_shared_repo_subtree(path):
+    # The shared repo is a read-only engine mount; the resource API must reject
+    # its exact subtree rather than forwarding the delete and exposing the
+    # engine's underlying read-only error.
+    assert is_readonly(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "skills-pool/skills-local",
+        "skills-pool/skills-local/notes.md",
+        "skills-pool/skills-repository",
+        "skills-pool/skills-repo-example",
+    ],
+)
+def test_is_readonly_rules_keeps_sibling_paths_writable(path):
+    # Safeguards against a too-broad string match: user-owned and distinct
+    # directories near the shared repo remain governed by their own policy.
+    assert is_readonly(path) is False
 
 
 def test_resolves_from_di(test_injector):

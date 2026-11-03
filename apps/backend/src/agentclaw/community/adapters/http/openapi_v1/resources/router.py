@@ -130,13 +130,15 @@ _DIR_TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
 # assembly and a route-level 403 *replaces* that entry rather than adding to it.
 # Delete can answer 403 for either reason, so the description has to name both —
 # stating only the new one would silently drop the meaning every other route
-# here documents.
+# here documents. The readonly policy is not limited to root-level identities;
+# protected workspace subtrees (currently ``skills-pool/skills-repo``) are
+# intentionally excluded from delete and write guards too.
 _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
     403: {
         "model": ErrorEnvelope,
-        "description": "The path is read-only — a dotfile, or a workspace-root "
-        "identity file — or the user_id names a user the authenticated caller "
-        "may not act for.",
+        "description": "The path is read-only — a dotfile, workspace-root "
+        "identity file, protected workspace subtree, or the user_id names a "
+        "user the authenticated caller may not act for.",
         **error_example(403, "Forbidden"),
     },
 }

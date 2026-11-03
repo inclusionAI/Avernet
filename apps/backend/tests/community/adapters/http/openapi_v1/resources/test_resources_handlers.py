@@ -232,14 +232,14 @@ class _StubListFileService:
         return self._entries
 
 
-def _listed(name: str, *, rel: str, is_dir: bool = False, size: int | None = 1) -> dict:
+def _listed(name: str, *, rel: str, is_dir: bool = False, size: int | None = 1, readonly: bool = False) -> dict:
     """One entry as ``ResourceFileService.list_dir`` returns it."""
     return {
         "name": name,
         "path": rel,
         "absolute_path": f"/home/admin/.aicoding/workspace/{rel}",
         "is_dir": is_dir,
-        "readonly": False,
+        "readonly": readonly,
         "size": None if is_dir else size,
         "size_human": None,
         "modified_at": None,
@@ -329,14 +329,15 @@ def test_the_resource_type_enum_is_files_and_folders_only():
 
 
 @pytest.mark.asyncio
-async def test_list_returns_workspace_entries():
+@pytest.mark.parametrize("readonly", [False, True])
+async def test_list_returns_workspace_entries(readonly):
     """Entries come from the workspace. A record-backed listing could not see a
     file the bot produced itself — it has no record and never will."""
     file_svc = _StubListFileService([
-        _listed(".env", rel=".env", size=3),
-        _listed("state", rel="state", is_dir=True),
-        _listed("notes.md", rel="notes.md", size=12),
-        _listed("docs", rel="docs", is_dir=True),
+        _listed(".env", rel=".env", size=3, readonly=readonly),
+        _listed("state", rel="state", is_dir=True, readonly=readonly),
+        _listed("notes.md", rel="notes.md", size=12, readonly=readonly),
+        _listed("docs", rel="docs", is_dir=True, readonly=readonly),
     ])
 
     env = await list_resources(
@@ -1479,7 +1480,10 @@ async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", [".env", "AGENTS.md", "docs/.hidden"])
+@pytest.mark.parametrize(
+    "path",
+    [".env", "AGENTS.md", "docs/.hidden", "skills-pool/skills-repo/business/content"],
+)
 async def test_delete_file_403s_a_read_only_path(path):
     """Same policy the console's delete enforces. Addressing by path is what
     makes these reachable at all — they never had a resource record, so the old
