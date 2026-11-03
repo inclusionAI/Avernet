@@ -155,8 +155,25 @@ export type DeliveryFlowKind = 'group' | 'direct_a2a' | 'task' | 'system' | 'sta
 /** 投递类型（与后端 DeliveryType 对齐）。 */
 export type DeliveryType = 'send' | 'inject';
 
+/** 服务端白名单任务投影；仅任务派发投递携带，时间均为 epoch 毫秒。 */
+export interface TaskDeliveryView {
+  /** Complete admitted assignment identity; absent for legacy deliveries. */
+  intent_id?: string;
+  task_ref: string;
+  summary: string;
+  manager_id: string;
+  worker_id: string;
+  worker_name: string;
+  queued_at: number;
+  started_at: number | null;
+  last_activity_at: number;
+  finished_at: number | null;
+  timed_out: boolean;
+}
+
 /** 后端推送的投递状态视图（message.delivery.updated 载荷）。 */
 export interface DeliveryStatusView {
+  task?: TaskDeliveryView;
   delivery_id: string;
   message_id: string;
   target_bot_id: string;

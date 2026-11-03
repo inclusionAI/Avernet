@@ -30,8 +30,8 @@ impl MessageFlowService for Flow {
 #[tokio::test]
 async fn task_http_contract_is_minimal_and_does_not_treat_absence_as_stop() {
     for (path, input, expected) in [
-        ("/tasks/status", serde_json::json!({"task_refs":["T-1234abcd"]}), serde_json::json!({"tasks":[{"ref":"T-1234abcd","status":"not_found"}]})),
-        ("/tasks/cancel", serde_json::json!({"task_ref":"T-1234abcd","reason":"please stop"}), serde_json::json!({"ref":"T-1234abcd","status":"unknown"})),
+        ("/tasks/status", serde_json::json!({"intent_ids":["T-1234abcd"]}), serde_json::json!({"tasks":[{"ref":"T-1234abcd","status":"not_found"}]})),
+        ("/tasks/cancel", serde_json::json!({"intent_id":"T-1234abcd","reason":"please stop"}), serde_json::json!({"ref":"T-1234abcd","status":"unknown"})),
     ] {
         let mut services = bcs_services_container::Services::noop();
         services.message_flow = Arc::new(Flow { cancel_storage_failure:false });

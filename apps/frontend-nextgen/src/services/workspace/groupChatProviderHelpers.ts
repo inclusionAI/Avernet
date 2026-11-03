@@ -75,6 +75,9 @@ export function buildGroupWsUrl({
  * - 部署态：根据公开的 `TEAMCLAW_DEV_ENV` 构建变量选取 PRE/PROD 网关，不依赖宿主域名规则。
  */
 export function resolveGroupGatewayOrigin(hostname?: string): string | undefined {
+  // Dev servers may use an SSO-compatible custom hostname; all dev traffic
+  // must still use the same-origin proxy (including WebSocket Upgrade).
+  if (process.env.NODE_ENV === 'development') return undefined;
   const host = hostname ?? (typeof window !== 'undefined' ? window.location.hostname : '');
   // 本地开发：dev-server proxy（ws:true）处理 WebSocket Upgrade，保持同源
   if (!host || host === 'localhost' || host === '127.0.0.1') return undefined;
@@ -120,6 +123,18 @@ export function isDeliveryUpdatedFrame(message: unknown): boolean {
   );
 }
 
+/** Old servers omit task; malformed projections never block chat or delivery rendering. */
+export function parseTaskDeliveryView(value: unknown): import('@/domain/collaboration/types').TaskDeliveryView | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const task = value as Record<string, unknown>;
+  if (!['task_ref', 'summary', 'manager_id', 'worker_id', 'worker_name'].every((key) => typeof task[key] === 'string') ||
+      !task.task_ref || !task.worker_id ||
+      !['queued_at', 'last_activity_at'].every((key) => typeof task[key] === 'number' && Number.isFinite(task[key])) ||
+      !['started_at', 'finished_at'].every((key) => task[key] === null || (typeof task[key] === 'number' && Number.isFinite(task[key]))) ||
+      typeof task.timed_out !== 'boolean') return undefined;
+  return task as unknown as import('@/domain/collaboration/types').TaskDeliveryView;
+}
+
 /**
  * 从 message.delivery.updated 事件帧中安全提取 DeliveryStatusView 载荷。
  * 帧形为 { method/event/type: 'message.delivery.updated', params/payload: DeliveryStatusView }。
@@ -142,6 +157,7 @@ export function parseDeliveryStatusView(
     return null;
   }
   return {
+    task: parseTaskDeliveryView(payload.task),
     delivery_id: payload.delivery_id,
     message_id: payload.message_id,
     target_bot_id: payload.target_bot_id,

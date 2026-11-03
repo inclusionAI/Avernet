@@ -61,9 +61,9 @@ fn app(storage_failure: bool) -> axum::Router {
 }
 fn request(action: &str, auth: bool) -> Request<Body> {
     let input = if action == "status" {
-        serde_json::json!({"task_refs":["T-1234abcd"]})
+        serde_json::json!({"intent_ids":["T-1234abcd"]})
     } else {
-        serde_json::json!({"task_ref":"T-1234abcd","reason":"please stop"})
+        serde_json::json!({"intent_id":"T-1234abcd","reason":"please stop"})
     };
     let mut builder = Request::builder()
         .method("POST")

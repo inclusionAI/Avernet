@@ -1,5 +1,7 @@
+import { queryWorkerTaskStatuses } from '@/services/backendApi/collaboration/workerTaskController';
 import {
   cancelDelivery as cancelDeliveryApi,
+  querySessionDeliveries,
   type CancelDeliveryResult,
 } from '@/services/backendApi/collaboration/deliveryController';
 
@@ -39,3 +41,26 @@ export async function cancelQueuedDelivery(
     ))),
   };
 }
+
+/** Bounded recovery for task panels; ordinary group rendering does not poll this surface. */
+export async function queryTaskDeliveries(sessionId: string, sourceMessageIds: string[]) {
+  const deliveries: import('@/domain/collaboration').DeliveryStatusView[] = [];
+  for (let index = 0; index < sourceMessageIds.length; index += 100) {
+    const batch = await querySessionDeliveries(sessionId, sourceMessageIds.slice(index, index + 100));
+    deliveries.push(...batch.filter((delivery) => delivery.task));
+  }
+  return deliveries;
+}
+
+/** One bounded indexed lookup per batch of 20 complete assignment selectors. */
+export async function queryWorkerTasks(taskRefs: string[]) {
+  const rows: import('@/domain/groupTasks/statusProjection').WorkerTaskStatusView[] = [];
+  const refs = [...new Set(taskRefs)];
+  for (let index = 0; index < refs.length; index += 20) {
+    const result = await queryWorkerTaskStatuses(refs.slice(index, index + 20));
+    rows.push(...result.tasks);
+  }
+  return rows;
+}
+
+export { cancelWorkerTask } from '@/services/backendApi/collaboration/workerTaskController';
