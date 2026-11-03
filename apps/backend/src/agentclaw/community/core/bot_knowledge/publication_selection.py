@@ -149,7 +149,7 @@ class BotKnowledgePublicationSelection:
             self.configs.put(**selection_coordinates(identity), config_value=payload)
             return True
         except Exception:
-            logger.exception(
+            logger.warning(
                 "Knowledge observation not recorded: publication_id=%s", publication_id
             )
             return False
@@ -206,7 +206,7 @@ class BotKnowledgePublicationSelection:
         try:
             raw = self._read_record(identity)
         except Exception:
-            logger.exception(
+            logger.warning(
                 "Knowledge observation unavailable: publication_id=%s", publication_id
             )
             return {**result, "observation_status": "unavailable"}

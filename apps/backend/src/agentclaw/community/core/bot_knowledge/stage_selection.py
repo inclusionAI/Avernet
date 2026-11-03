@@ -194,7 +194,7 @@ class BotKnowledgeStageSelection:
         except (ValueError, KeyError, TypeError, AttributeError):
             return result
         except Exception:
-            logger.exception(
+            logger.warning(
                 "Knowledge stage selection unavailable: bot_pk=%s", bot["id"]
             )
             return {**result, "selection_status": "unavailable"}
@@ -213,7 +213,7 @@ class BotKnowledgeStageSelection:
                     rollback_token=_rollback_token(session, publication),
                 )
         except Exception:
-            logger.exception("Knowledge deployment identity unavailable: publication_id=%s", publication_id)
+            logger.warning("Knowledge deployment identity unavailable: publication_id=%s", publication_id)
             return None
 
     def project_online(self, *, publication_id: int, observed: dict) -> bool:
@@ -384,7 +384,7 @@ class BotKnowledgeStageSelection:
                         raise ValueError("concurrent knowledge projection changed")
             return True
         except Exception:
-            logger.exception(
+            logger.warning(
                 "Knowledge online projection not saved: publication_id=%s",
                 publication_id,
             )
