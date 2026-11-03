@@ -14,11 +14,22 @@ logger = logging.getLogger(__name__)
 class VectorIndexStartupProvider:
     """Initialize dependencies, rebuild the index, and close it on shutdown."""
 
-    def __init__(self, delegate: StartupProvider, vector_store: Any) -> None:
+    def __init__(
+        self,
+        delegate: StartupProvider,
+        vector_store: Any,
+        *,
+        recovery_interval_seconds: float = 5.0,
+    ) -> None:
         self._delegate = delegate
+        if recovery_interval_seconds <= 0:
+            raise ValueError("recovery_interval_seconds must be positive")
         self._vector_store = vector_store
+        self._recovery_interval_seconds = recovery_interval_seconds
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
+        self._recovery_stop = threading.Event()
+        self._recovery_thread: threading.Thread | None = None
 
     async def initialize(self) -> None:
         await self._delegate.initialize()
@@ -30,10 +41,11 @@ class VectorIndexStartupProvider:
             if rebuild is None:
                 raise TypeError("durable vector store does not support rebuild")
             result = rebuild()
+            self._mark_startup_rebuild_recovered(self._vector_store)
             logger.info("[VectorIndexStartup] Rebuild completed: %s", result)
         except Exception as error:
-            self._stop_owner_lease_heartbeat()
             self._mark_startup_rebuild_failed(self._vector_store, error)
+            self._start_rebuild_recovery()
             logger.exception(
                 "[VectorIndexStartup] Rebuild failed; starting degraded with local fallback"
             )
@@ -44,7 +56,57 @@ class VectorIndexStartupProvider:
         setattr(vector_store, "startup_rebuild_failed", True)
         setattr(vector_store, "startup_rebuild_error_type", type(error).__name__)
 
+    @staticmethod
+    def _mark_startup_rebuild_recovered(vector_store: Any) -> None:
+        """Clear a historical startup failure once rebuild succeeds again."""
+        setattr(vector_store, "startup_rebuild_failed", False)
+        setattr(vector_store, "startup_rebuild_error_type", None)
+
+    def _start_rebuild_recovery(self) -> None:
+        """Retry the durable rebuild without blocking the serving loop."""
+        if self._recovery_thread is not None:
+            return
+        rebuild = getattr(self._vector_store, "rebuild_from_backend", None)
+        if rebuild is None:
+            rebuild = getattr(self._vector_store, "rebuild_from_mysql", None)
+        if rebuild is None:
+            return
+        self._recovery_stop.clear()
+        self._recovery_thread = threading.Thread(
+            target=self._run_rebuild_recovery,
+            args=(rebuild,),
+            daemon=True,
+            name="index-startup-rebuild-recovery",
+        )
+        self._recovery_thread.start()
+
+    def _run_rebuild_recovery(self, rebuild: Any) -> None:
+        while not self._recovery_stop.wait(self._recovery_interval_seconds):
+            try:
+                result = rebuild()
+            except Exception as error:
+                logger.debug(
+                    "[VectorIndexStartup] Rebuild recovery attempt failed: %s",
+                    type(error).__name__,
+                )
+                continue
+            self._mark_startup_rebuild_recovered(self._vector_store)
+            logger.info(
+                "[VectorIndexStartup] Rebuild recovery completed: %s",
+                result,
+            )
+            return
+
+    def _stop_rebuild_recovery(self) -> None:
+        thread = self._recovery_thread
+        if thread is None:
+            return
+        self._recovery_stop.set()
+        thread.join()
+        self._recovery_thread = None
+
     async def shutdown(self) -> None:
+        self._stop_rebuild_recovery()
         try:
             self._stop_owner_lease_heartbeat()
             close = getattr(self._vector_store, "close", None)

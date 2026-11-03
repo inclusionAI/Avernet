@@ -220,3 +220,25 @@ def test_recommend_route_uses_composition_dependencies(monkeypatch) -> None:
     assert kwargs["resilience_cache"] is app.state.agent_search_resilience_cache
     assert kwargs["execution_budget"] is app.state.agent_search_execution_budget
     assert kwargs["local_snapshot"] is app.state.local_retrieval_snapshot
+
+
+def test_capacity_and_health_monitor_share_the_retrieval_circuit() -> None:
+    from app.bootstrap.app_factory import create_bcsfuse_app
+    from app.bootstrap.search_capacity import SearchCapacityMiddleware
+    from tests.unit.bootstrap.test_app_factory import disable_background_index
+
+    app = create_bcsfuse_app(_context(VectorStoreWithSnapshot()))
+    middleware = next(
+        item
+        for item in app.user_middleware
+        if item.cls is SearchCapacityMiddleware
+    )
+
+    assert (
+        middleware.kwargs["retrieval_dependency_circuit"]
+        is app.state.retrieval_dependency_circuit
+    )
+    assert (
+        app.state.retrieval_dependency_health_monitor.circuit
+        is app.state.retrieval_dependency_circuit
+    )

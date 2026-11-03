@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.application.services.query_normalizer import normalize_query_text
@@ -16,12 +16,33 @@ from app.domain.models.candidate_recommendation import (
     CandidateRecommendationResponse,
 )
 from app.domain.models.retrieval_mode import RetrievalMode
-
-
-MAX_RECOMMEND_EXPAND_FACTOR = 3
 from app.infra.public.observability.search_dependency_metrics import (
     record_search_fallback_unavailable,
 )
+
+
+MAX_RECOMMEND_EXPAND_FACTOR = 3
+
+
+async def execute_final_outcome_offloaded(
+    *,
+    final_outcome: Callable[..., Any],
+    run: Callable[[Callable[[], Any], float | None], Awaitable[Any]],
+    command: Any,
+    error_type: str,
+    timeout_seconds: float | None,
+    local_snapshot: Any | None,
+) -> Any:
+    """Run terminal fallback work away from the serving event loop."""
+
+    return await run(
+        lambda: final_outcome(
+            command,
+            error_type=error_type,
+            local_snapshot=local_snapshot,
+        ),
+        timeout_seconds,
+    )
 
 
 def build_final_search_outcome(

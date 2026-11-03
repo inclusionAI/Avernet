@@ -104,8 +104,11 @@ def test_first_slow_dependency_probe_times_out_quickly_and_explicitly() -> None:
 def test_cached_readiness_is_served_without_a_second_dependency_probe() -> None:
     store = ReadinessVectorStore()
     app = create_bcsfuse_app(_build_context(store))
-
     with TestClient(app) as client:
+        # Startup owns one independent retrieval-health observation. The
+        # readiness route contract below counts only route probes, so its cached
+        # second call must not add another dependency probe.
+        startup_dependency_probes = store.dependency_calls
         first = client.get("/ready")
         assert first.status_code == 200
         assert first.json()["readiness_result_cached"] is False
@@ -118,7 +121,7 @@ def test_cached_readiness_is_served_without_a_second_dependency_probe() -> None:
     assert second.json()["ready"] is True
     assert second.json()["readiness_result_cached"] is True
     assert elapsed < 0.20
-    assert store.dependency_calls == 1
+    assert store.dependency_calls == startup_dependency_probes + 1
 
 
 def test_slow_index_size_probe_does_not_block_the_event_loop() -> None:

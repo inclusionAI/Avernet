@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Any
@@ -226,3 +227,75 @@ def test_dual_outage_is_recorded_after_normal_retrieval_path() -> None:
         }
     )
     assert circuit.should_fail_fast() is True
+
+
+def test_dual_outage_terminal_fallback_search_is_offloaded() -> None:
+    class RecordingOffload:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def __call__(self, operation):
+            self.called = True
+            return operation()
+
+    offload = RecordingOffload()
+    service = AgentSearchService(
+        local_snapshot=_snapshot(),
+        retrieval_dependency_circuit=_outage_circuit(),
+        offload=offload,
+    )
+
+    outcome = asyncio.run(service.search(_search_command()))
+
+    assert outcome.results
+    assert outcome.metadata["retrieval_dependency_failfast"] is True
+    assert offload.called is True
+
+
+def test_dual_outage_terminal_fallback_recommendation_is_offloaded() -> None:
+    class RecordingOffload:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def __call__(self, operation):
+            self.called = True
+            return operation()
+
+    offload = RecordingOffload()
+    service = AgentSearchService(
+        candidate_recommendation_service=MustNotRunRecommendation(),
+        local_snapshot=_snapshot(),
+        retrieval_dependency_circuit=_outage_circuit(),
+        offload=offload,
+    )
+
+    outcome = asyncio.run(service.recommend(_recommend_command()))
+
+    assert outcome.response.recommendations
+    assert outcome.response.metadata["retrieval_dependency_failfast"] is True
+    assert offload.called is True
+
+
+def test_partial_or_unknown_observation_does_not_close_terminal_outage() -> None:
+    circuit = RetrievalDependencyCircuit(outage_probe_seconds=30.0)
+    circuit.record_outage()
+
+    circuit.observe_retrieval({"semantic_unavailable": True})
+    assert circuit.outaged is True
+
+    circuit.observe_retrieval(
+        {
+            "semantic_unavailable": True,
+            "keyword_unavailable": True,
+            "dense_qdrant_available": False,
+        }
+    )
+    assert circuit.outaged is True
+
+    circuit.observe_retrieval(
+        {
+            "dense_qdrant_available": True,
+            "keyword_qdrant_available": True,
+        }
+    )
+    assert circuit.outaged is False

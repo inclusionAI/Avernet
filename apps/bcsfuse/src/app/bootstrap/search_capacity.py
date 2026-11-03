@@ -40,6 +40,9 @@ class SearchCapacitySettings:
         direct_keyword_max_inflight: int = 128,
         direct_keyword_max_queue: int = 128,
         direct_keyword_queue_wait_seconds: float = 2.0,
+        local_fallback_max_inflight: int = 512,
+        local_fallback_max_queue: int = 512,
+        local_fallback_queue_wait_seconds: float = 0.25,
     ):
         if max_inflight <= 0:
             raise ValueError("search capacity max_inflight must be positive")
@@ -61,6 +64,18 @@ class SearchCapacitySettings:
             raise ValueError(
                 "direct keyword capacity queue_wait_seconds must be positive"
             )
+        if local_fallback_max_inflight <= 0:
+            raise ValueError(
+                "local fallback capacity max_inflight must be positive"
+            )
+        if local_fallback_max_queue < 0:
+            raise ValueError(
+                "local fallback capacity max_queue must not be negative"
+            )
+        if local_fallback_queue_wait_seconds <= 0:
+            raise ValueError(
+                "local fallback capacity queue_wait_seconds must be positive"
+            )
         self.max_inflight = max_inflight
         self.retry_after_seconds = retry_after_seconds
         self.max_queue = max_queue
@@ -68,6 +83,9 @@ class SearchCapacitySettings:
         self.direct_keyword_max_inflight = direct_keyword_max_inflight
         self.direct_keyword_max_queue = direct_keyword_max_queue
         self.direct_keyword_queue_wait_seconds = direct_keyword_queue_wait_seconds
+        self.local_fallback_max_inflight = local_fallback_max_inflight
+        self.local_fallback_max_queue = local_fallback_max_queue
+        self.local_fallback_queue_wait_seconds = local_fallback_queue_wait_seconds
 
     @classmethod
     def from_context(cls, context: Any) -> "SearchCapacitySettings":
@@ -117,6 +135,30 @@ class SearchCapacitySettings:
                 "get_float",
             )
         )
+        local_fallback_max_inflight = int(
+            _config_get(
+                context,
+                "search.capacity.local_fallback_max_inflight",
+                512,
+                "get_int",
+            )
+        )
+        local_fallback_max_queue = int(
+            _config_get(
+                context,
+                "search.capacity.local_fallback_max_queue",
+                512,
+                "get_int",
+            )
+        )
+        local_fallback_queue_wait_seconds = float(
+            _config_get(
+                context,
+                "search.capacity.local_fallback_queue_wait_seconds",
+                0.25,
+                "get_float",
+            )
+        )
         return cls(
             max_inflight=max_inflight,
             retry_after_seconds=retry_after_seconds,
@@ -125,6 +167,9 @@ class SearchCapacitySettings:
             direct_keyword_max_inflight=direct_keyword_max_inflight,
             direct_keyword_max_queue=direct_keyword_max_queue,
             direct_keyword_queue_wait_seconds=direct_keyword_queue_wait_seconds,
+            local_fallback_max_inflight=local_fallback_max_inflight,
+            local_fallback_max_queue=local_fallback_max_queue,
+            local_fallback_queue_wait_seconds=local_fallback_queue_wait_seconds,
         )
 
 
@@ -169,6 +214,16 @@ def _get_search_metrics() -> dict[str, Any]:
         "rejections": Counter(
             "bcsfuse_search_capacity_rejections_total",
             "Requests rejected before admission because search capacity was occupied",
+            operation_labels,
+        ),
+        "route_rejections": Counter(
+            "bcsfuse_search_capacity_route_rejections_total",
+            "Capacity rejections split by execution route",
+            [*operation_labels, "route"],
+        ),
+        "outage_admissions": Counter(
+            "bcsfuse_search_outage_admissions_total",
+            "Requests admitted to the process-local terminal fallback pool",
             operation_labels,
         ),
         "inflight": Gauge(
@@ -230,9 +285,11 @@ class SearchCapacityMiddleware:
         app: ASGIApp,
         settings: SearchCapacitySettings,
         metrics: dict[str, Any] | None = None,
+        retrieval_dependency_circuit: Any | None = None,
     ) -> None:
         self.app = app
         self.settings = settings
+        self.retrieval_dependency_circuit = retrieval_dependency_circuit
         self._metrics = metrics or _get_search_metrics()
         self._pools = {
             "semantic": _AdmissionPool(
@@ -244,6 +301,11 @@ class SearchCapacityMiddleware:
                 max_inflight=settings.direct_keyword_max_inflight,
                 max_queue=settings.direct_keyword_max_queue,
                 queue_wait_seconds=settings.direct_keyword_queue_wait_seconds,
+            ),
+            "local_fallback": _AdmissionPool(
+                max_inflight=settings.local_fallback_max_inflight,
+                max_queue=settings.local_fallback_max_queue,
+                queue_wait_seconds=settings.local_fallback_queue_wait_seconds,
             ),
         }
         self._metrics["capacity"].set(settings.max_inflight)
@@ -288,7 +350,10 @@ class SearchCapacityMiddleware:
         app_receive = _replayed_receive(messages)
         request_route = _request_route(messages)
 
-        pool = self._pools[request_route]
+        execution_route = self._execution_route(request_route)
+        pool = self._pools[execution_route]
+        if execution_route == "local_fallback":
+            self._metrics["outage_admissions"].labels(**labels).inc()
         with search_stage_metrics(operation, "queue"):
             admitted = await self._admit(pool, operation, api_version, labels)
         if not admitted:
@@ -296,6 +361,7 @@ class SearchCapacityMiddleware:
                 operation, api_version, labels,
                 started_at=started_at,
                 receive=receive, send=send,
+                execution_route=execution_route,
             )
             await response(scope, receive, send)
             return
@@ -316,6 +382,17 @@ class SearchCapacityMiddleware:
             self._record(operation, api_version, outcome, time.perf_counter() - started_at)
             inflight.dec()
             self._release(pool)
+
+    def _execution_route(self, request_route: str) -> str:
+        """Send terminal fallback traffic to its own bounded execution budget."""
+
+        if (
+            request_route == "semantic"
+            and self.retrieval_dependency_circuit is not None
+            and self.retrieval_dependency_circuit.outaged
+        ):
+            return "local_fallback"
+        return request_route
 
     async def _admit(
         self,
@@ -406,8 +483,12 @@ class SearchCapacityMiddleware:
         started_at: float,
         receive: Receive,
         send: Send,
+        execution_route: str,
     ) -> JSONResponse:
         self._metrics["rejections"].labels(**labels).inc()
+        route_rejections = self._metrics.get("route_rejections")
+        if route_rejections is not None:
+            route_rejections.labels(**labels, route=execution_route).inc()
         self._record(
             operation, api_version, "429", time.perf_counter() - started_at
         )

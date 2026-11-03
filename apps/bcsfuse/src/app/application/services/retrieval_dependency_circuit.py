@@ -79,7 +79,16 @@ class RetrievalDependencyCircuit:
         )
         if dual_outage:
             self.record_outage()
-        else:
+            return
+        dense_healthy = (
+            diagnostics.get("dense_qdrant_available") is True
+            or diagnostics.get("dense_qdrant_ready") is True
+        )
+        keyword_healthy = (
+            diagnostics.get("keyword_qdrant_available") is True
+            or diagnostics.get("keyword_qdrant_ready") is True
+        )
+        if dense_healthy and keyword_healthy:
             self.record_healthy()
 
 

@@ -32,10 +32,7 @@ from app.application.services.local_retrieval_snapshot import (
     snapshot_hits,
     snapshot_metadata,
 )
-from app.application.services.agent_search_terminal_fallback import (
-    build_final_recommendation_outcome,
-    build_final_search_outcome,
-)
+from app.application.services import agent_search_terminal_fallback
 from app.application.services.local_snapshot_router import LocalSnapshotRouter
 from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
@@ -534,7 +531,7 @@ class AgentSearchService:
         error_type: str,
         local_snapshot: Any | None = None,
     ) -> AgentSearchOutcome:
-        return build_final_search_outcome(
+        return agent_search_terminal_fallback.build_final_search_outcome(
             command,
             error_type=error_type,
             local_snapshot=local_snapshot,
@@ -656,9 +653,12 @@ class AgentSearchService:
                     )
             circuit = self._retrieval_dependency_circuit
             if circuit is not None and circuit.should_fail_fast():
-                outcome = self.final_search_outcome(
-                    command,
+                outcome = await agent_search_terminal_fallback.execute_final_outcome_offloaded(
+                    final_outcome=self.final_search_outcome,
+                    run=self._run,
+                    command=command,
                     error_type="RetrievalDependencyOutage",
+                    timeout_seconds=self._stage_timeout("local_snapshot"),
                     local_snapshot=self._local_snapshot,
                 )
                 mark_dual_retrieval_dependency_outage(outcome.metadata)
@@ -776,7 +776,7 @@ class AgentSearchService:
         error_type: str,
         local_snapshot: Any | None = None,
     ) -> AgentRecommendationOutcome:
-        return build_final_recommendation_outcome(
+        return agent_search_terminal_fallback.build_final_recommendation_outcome(
             command,
             error_type=error_type,
             local_snapshot=local_snapshot,
@@ -867,9 +867,12 @@ class AgentSearchService:
                     )
             circuit = self._retrieval_dependency_circuit
             if circuit is not None and circuit.should_fail_fast():
-                outcome = self.final_recommendation_outcome(
-                    command,
+                outcome = await agent_search_terminal_fallback.execute_final_outcome_offloaded(
+                    final_outcome=self.final_recommendation_outcome,
+                    run=self._run,
+                    command=command,
                     error_type="RetrievalDependencyOutage",
+                    timeout_seconds=self._stage_timeout("local_snapshot"),
                     local_snapshot=self._local_snapshot,
                 )
                 mark_dual_retrieval_dependency_outage(

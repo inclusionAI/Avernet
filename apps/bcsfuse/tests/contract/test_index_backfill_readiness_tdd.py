@@ -174,12 +174,13 @@ def test_background_build_exception_is_not_reported_as_completed(monkeypatch) ->
             assert name == "bg-index-build"
 
         def start(self) -> None:
-            try:
-                self.target()
-            except Exception:
-                # A daemon thread exception is intentional in this contract:
-                # the process stays alive while /ready records the failure.
-                pass
+            # Synchronous test execution must also emulate the shutdown signal
+            # that a real OS thread can observe before the worker retries.
+            worker = getattr(self.target, "__self__", None)
+            stop_event = getattr(worker, "_stop_event", None)
+            if stop_event is not None:
+                stop_event.set()
+            self.target()
 
         def join(self) -> None:
             return None
@@ -254,10 +255,13 @@ def test_partial_index_failure_makes_the_pod_unready(monkeypatch) -> None:
             assert name == "bg-index-build"
 
         def start(self) -> None:
-            try:
-                self.target()
-            except Exception:
-                pass
+            # Synchronous test execution must provide the shutdown signal that
+            # a real OS thread could observe before a retry is scheduled.
+            worker = getattr(self.target, "__self__", None)
+            stop_event = getattr(worker, "_stop_event", None)
+            if stop_event is not None:
+                stop_event.set()
+            self.target()
 
         def join(self) -> None:
             return None

@@ -1,6 +1,8 @@
 """Transport composition for a fully assembled BCSFuse application context."""
 
+import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -391,6 +393,7 @@ def create_bcsfuse_app(
             ensure_profile_route_compatibility(profile_store),
         )
     background_index_target = None
+    background_index_stop = threading.Event()
     shared_cache_reader = None
     backfill_status = context.registry.get("index_backfill_status")
     if backfill_status is None:
@@ -401,8 +404,23 @@ def create_bcsfuse_app(
     async def lifespan(_: FastAPI):
         background_thread = None
         background_thread_started = False
+        retrieval_health_task = None
         await startup_provider.initialize()
         try:
+            # Do an initial health observation before the server accepts search
+            # traffic. A pod started into a terminal dual-Qdrant outage must use
+            # local fallback immediately rather than spending the first burst on
+            # dead remote retrieval slots.
+            try:
+                await retrieval_dependency_health_monitor.observe_once()
+            except Exception as error:
+                logger.warning(
+                    "[RetrievalHealth] initial readiness observation failed: %s",
+                    type(error).__name__,
+                )
+            retrieval_health_task = asyncio.create_task(
+                retrieval_dependency_health_monitor.run()
+            )
             # A hosting SDK may reconfigure logging during provider startup.
             configure_business_logging(business_log_level)
             logger.info(
@@ -410,20 +428,18 @@ def create_bcsfuse_app(
                 logging.getLevelName(business_log_level),
             )
             if background_index_target is not None:
-                import threading
+                from app.bootstrap.index_backfill_worker import (
+                    IndexBackfillWorker,
+                )
 
-                def run_background_index_target() -> None:
-                    try:
-                        background_index_target()
-                    except Exception as error:
-                        backfill_status.mark_failed(type(error).__name__)
-                        raise
-                    else:
-                        backfill_status.mark_completed()
-
-                backfill_status.mark_started()
+                backfill_worker = IndexBackfillWorker(
+                    target=background_index_target,
+                    status=backfill_status,
+                    stop_event=background_index_stop,
+                    retry_interval_seconds=5.0,
+                )
                 background_thread = threading.Thread(
-                    target=run_background_index_target,
+                    target=backfill_worker.run,
                     daemon=True,
                     name="bg-index-build",
                 )
@@ -436,18 +452,26 @@ def create_bcsfuse_app(
             yield
         finally:
             try:
-                if background_thread_started:
-                    background_thread.join()
+                if retrieval_health_task is not None:
+                    retrieval_health_task.cancel()
+                    await asyncio.gather(
+                        retrieval_health_task, return_exceptions=True
+                    )
             finally:
+                background_index_stop.set()
                 try:
-                    if shared_cache_reader is not None:
-                        await shared_cache_reader.close()
+                    if background_thread_started:
+                        background_thread.join()
                 finally:
                     try:
-                        for shared_cache_writer in shared_cache_writers:
-                            await shared_cache_writer.close()
+                        if shared_cache_reader is not None:
+                            await shared_cache_reader.close()
                     finally:
-                        await startup_provider.shutdown()
+                        try:
+                            for shared_cache_writer in shared_cache_writers:
+                                await shared_cache_writer.close()
+                        finally:
+                            await startup_provider.shutdown()
 
     # CRITICAL: Share application context with fusion_dependencies to avoid
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
@@ -475,6 +499,31 @@ def create_bcsfuse_app(
     )
     from app.infra.public.observability.trace_middleware import TraceIdMiddleware
 
+    from app.application.services.retrieval_dependency_circuit import (
+        RetrievalDependencyCircuit,
+    )
+    retrieval_dependency_circuit = RetrievalDependencyCircuit(
+        outage_probe_seconds=1.0
+    )
+    from app.bootstrap.retrieval_dependency_health import (
+        RetrievalDependencyHealthMonitor,
+    )
+
+    config = getattr(context, "config", None)
+    health_config = getattr(config, "get_float", None)
+    retrieval_health_interval = (
+        health_config(
+            "search.retrieval_health_probe_interval_seconds",
+            1.25,
+        )
+        if health_config is not None
+        else 1.25
+    )
+    retrieval_dependency_health_monitor = RetrievalDependencyHealthMonitor(
+        readiness_probe=lambda: _index_readiness(context),
+        circuit=retrieval_dependency_circuit,
+        probe_interval_seconds=float(retrieval_health_interval),
+    )
     capacity_settings = SearchCapacitySettings.from_context(context)
     from app.adapters.http.search_threadpool import (
         configure_search_thread_capacity,
@@ -484,8 +533,15 @@ def create_bcsfuse_app(
     app.add_middleware(
         SearchCapacityMiddleware,
         settings=capacity_settings,
+        retrieval_dependency_circuit=retrieval_dependency_circuit,
     )
     app.state.search_capacity_max_inflight = capacity_settings.max_inflight
+    app.state.local_fallback_capacity_max_inflight = (
+        capacity_settings.local_fallback_max_inflight
+    )
+    app.state.retrieval_dependency_health_monitor = (
+        retrieval_dependency_health_monitor
+    )
 
     from app.adapters.http.shared_response_cache_reader import (
         BoundedSharedResponseCacheReader,
@@ -516,13 +572,6 @@ def create_bcsfuse_app(
 
     resilience_cache = AgentSearchResilienceCache.from_context(context)
     execution_budget = AgentSearchExecutionBudget.from_context(context)
-    from app.application.services.retrieval_dependency_circuit import (
-        RetrievalDependencyCircuit,
-    )
-
-    retrieval_dependency_circuit = RetrievalDependencyCircuit(
-        outage_probe_seconds=1.0
-    )
     shared_response_cache = context.registry.get("shared_response_cache")
     shared_cache_reader = None
     shared_cache_writers: list[Any] = []

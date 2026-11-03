@@ -314,7 +314,12 @@ embedding and backend candidate calls and consume the process-local snapshot.
 Responses retain ``retrieval_dependency_failfast=true`` plus the dependency and
 local-fallback fields, and the circuit admits one bounded recovery probe per
 interval instead of repeatedly filling the admission queue behind dead
-backends.
+backends. Runtime composition also observes the same bounded readiness contract
+at startup and periodically; an explicit dual false observation, or a hard
+bounded health-probe timeout, preopens the circuit before the first search burst
+is admitted, while healthy and partial observations do not invent an outage. The terminal local snapshot lookup
+itself is executed through the bounded search worker pool, not directly in the
+serving event loop.
 
 The process-local literal index normalizes each published profile's searchable
 text once when the snapshot is rebuilt. Search-time queries reuse that immutable
@@ -455,9 +460,15 @@ explicit lookup requests are admitted through an independent low-latency
 keyword pool configured by
 `search.capacity.direct_keyword_max_inflight` (default 128),
 `search.capacity.direct_keyword_max_queue` (default 128), and
-`search.capacity.direct_keyword_queue_wait_seconds` (default 2.0). This prevents
-a semantic embedding burst from starving zero-embedding direct lookups while
-still bounding keyword and Qdrant concurrency. Both pools serve
+`search.capacity.direct_keyword_queue_wait_seconds` (default 2.0). While the
+terminal dual-Qdrant circuit is open, semantic search and recommendation calls
+move to a third bounded local-fallback pool configured by
+`search.capacity.local_fallback_max_inflight` (default 512),
+`search.capacity.local_fallback_max_queue` (default 512), and
+`search.capacity.local_fallback_queue_wait_seconds` (default 0.25). This
+prevents a semantic embedding burst from starving zero-embedding direct lookups,
+keeps dead-backend traffic from consuming the semantic pool, and still bounds
+local CPU work. The pools serve
 `/api/v1/search`, `/api/v1/recommend`, `/api/v2/search`, and
 `/api/v2/recommend`. A request beyond both the execution and queue budgets, or
 one that waits longer than its route's `queue_wait_seconds`, returns HTTP 429,
@@ -503,8 +514,11 @@ while synchronous work is actually running, including after HTTP cancellation
 or timeout.
 
 Prometheus exposes request count, rejection count, inflight, configured
-capacity and request duration. The labels identify operation, API version and
-HTTP outcome. These metrics describe admission health, not dependency health.
+capacity and request duration. Rejections are additionally split by execution
+route, and terminal fallback admissions increment
+`bcsfuse_search_outage_admissions_total`. The labels identify operation, API
+version and HTTP outcome. These metrics describe admission health, while
+dependency-state metrics remain separate.
 
 ### V1 search response cache
 
@@ -731,7 +745,10 @@ When startup reconciliation/backfill is enabled, its status is a hard readiness
 condition: `/ready` returns 503 with `index_backfill_running=true` until
 reconciliation finishes, and a failed reconciliation remains 503 with
 `index_backfill_failed=true` and `index_backfill_error_type` instead of being
-logged as completed and admitted by the load balancer.
+logged as completed and admitted by the load balancer. The backfill worker
+retries a failed reconciliation on a bounded interval and clears the historical
+failure only when a later attempt actually completes; readiness cannot stay
+sticky after the dependencies recover.
 The `bcsfuse_index_degraded` gauge is one when dense or keyword Qdrant is
 unavailable.
 

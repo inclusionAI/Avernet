@@ -82,11 +82,17 @@ Worker-ID lookup; the TC adapter retains its existing exact Worker-ID priority.
 - A startup rebuild failure no longer terminates the application. The process stays
   alive, records `startup_rebuild_failed=true` and
   `startup_rebuild_error_type=<ExceptionName>` on the vector-store view, and
-  `/ready` returns 503 with `degraded=true`. The durable vector backend can also
-  supply the process-local literal snapshot without probing either Qdrant index.
+  `/ready` returns 503 with `degraded=true`. The composed startup provider keeps
+  retrying the durable rebuild in a bounded background cycle; a successful retry
+  clears both failure fields instead of leaving a sticky readiness failure. The
+  durable vector backend can also supply the process-local literal snapshot without
+  probing either Qdrant index.
   The snapshot precomputes normalized profile text once per published index
   version so the bounded literal path does not repeat NFKC normalization for
-  every query.
+  every query. Runtime composition probes dense and keyword readiness before
+  accepting search traffic; an explicit dual outage preopens the terminal
+  circuit so its admission slots cannot be consumed by dead or hanging Server
+  calls.
   If both dense and lexical retrieval fail, the bounded literal path first serves
   token-overlap results; when none overlap, it returns a stable default profile
   set that still honors filters, exclusions, registry state and trusted allowed
