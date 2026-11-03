@@ -190,9 +190,11 @@ def submit_copy(
 
     # Validate the document before anything is spent (manifest-creation's rule:
     # an invalid doc never reaches Passport). Raises ManifestValidationError.
+    # engine_type is the source's live engine (validated ∈ _COPYABLE_ENGINES
+    # above), not a hardcoded literal — copy preserves whatever the source runs.
     manifest_seam.preflight(
         document=manifest_document,
-        engine_type="openclaw",
+        engine_type=engine,
         bot_type=source.get("bot_type") or "personal",
     )
     # Persist under the dst bot's key — ManifestCompiler reads this at apply time.
@@ -201,7 +203,7 @@ def submit_copy(
         bot_id=dst_bot_id,
         document=manifest_document,
         modifier=owner_id,
-        engine_type="openclaw",
+        engine_type=engine,
         bot_type=source.get("bot_type") or "personal",
     )
 
@@ -224,8 +226,8 @@ def submit_copy(
 
     payload_spec: dict[str, Any] = {
         "entity_id": owner_id,
-        "entity_type": "staff",
-        "engine_type": "openclaw",
+        "entity_type": source.get("entity_type") or "staff",
+        "engine_type": engine,
         "bot_type": source.get("bot_type") or "personal",
         "bot_name": body.bot_name,
         "bot_desc": body.bot_desc,
@@ -240,7 +242,7 @@ def submit_copy(
         mcp_codes=[],
         bot_name=body.bot_name,
         bot_desc=body.bot_desc,
-        engine_type="openclaw",
+        engine_type=engine,
     )
     iframe_url = (passport_result or {}).get("iframe_url")
     redirect_url = (passport_result or {}).get("redirect_url")
@@ -291,7 +293,7 @@ class RetryResponse(BaseModel):
 
 def retry_copy(
     *,
-    operation_id: str,
+    bot_id: str,
     operator_id: str,
     bot_copy_repo: BotCopyRepositoryProtocol,
     apply_repo: BotConfigManifestApplyRepositoryProtocol,
@@ -299,7 +301,7 @@ def retry_copy(
     manifest_seam: ManifestCreationSeam,
     now: datetime,
 ) -> RetryResult:
-    """Operator-triggered retry of one copy operation (Route B re-hand-off).
+    """Operator-triggered retry of the copy operation whose dst is ``bot_id``.
 
     The manifest document was persisted at first submission under the dst bot's
     key; retry re-hands-off to ``create_job`` via ``manifest_seam.start_job``
@@ -309,12 +311,10 @@ def retry_copy(
     task). FE shows retry for every ``copy_state`` except CONVERGED.
     """
     del operator_id
-    row = bot_copy_repo.get_by_operation_id(
-        env=get_current_env(), operation_id=operation_id
-    )
+    row = bot_copy_repo.get_by_dst_bot_id(env=get_current_env(), dst_bot_id=bot_id)
     if row is None:
         raise HTTPException(
-            status_code=404, detail=f"copy operation {operation_id} not found"
+            status_code=404, detail=f"copy operation for bot {bot_id} not found"
         )
 
     applies = apply_repo.recent(
@@ -330,20 +330,25 @@ def retry_copy(
 
     if not bot_copy_repo.cas_retry(
         env=row.env,
-        operation_id=operation_id,
+        operation_id=row.operation_id,
         now=now,
         throttle_seconds=_RETRY_THROTTLE_SECONDS,
     ):
         return RetryResult.STILL_RUNNING
 
+    # Re-derive the payload spec from the dst bot's own record — copy preserves
+    # the source's engine/type at create time, so the dst already carries them.
+    # No hardcoded literals; if the dst record is partial (first submit failed
+    # before persist), the missing fields stay None until a later stage fills them.
+    dst = bot or {}
     payload_spec: dict[str, Any] = {
         "entity_id": row.dst_owner_id,
-        "entity_type": "staff",
-        "engine_type": "openclaw",
-        "bot_type": "personal",
-        "bot_name": None,
-        "bot_desc": None,
-        "space_id": None,
+        "entity_type": dst.get("entity_type") or "staff",
+        "engine_type": dst.get("active_engine") or dst.get("engine_type"),
+        "bot_type": dst.get("bot_type") or "personal",
+        "bot_name": dst.get("bot_name"),
+        "bot_desc": dst.get("bot_desc"),
+        "space_id": dst.get("space_id"),
         "request_detail": row.request_detail,
         "source_bot_id": row.source_bot_id,
     }
@@ -401,14 +406,14 @@ async def copy_bot(
 
 
 @router.post(
-    "/copy/{operation_id}/retry",
+    "/copy/{bot_id}/retry",
     status_code=200,
     response_model=Envelope[RetryResponse],
-    responses={404: {"description": "Unknown operation_id"}},
+    responses={404: {"description": "No copy operation for this bot"}},
 )
 @envelope_errors
 async def retry_copy_bot(
-    operation_id: str,
+    bot_id: str,
     request: Request,
     owner_id: UserIdDep,
     bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
@@ -418,10 +423,14 @@ async def retry_copy_bot(
     bot_repo: BotRepository = Injected(BotRepository),
     manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
 ) -> Envelope[RetryResponse]:
-    """Re-hand-off a copy operation to create_job (operator-triggered retry)."""
+    """Re-hand-off a copy operation to create_job (operator-triggered retry).
+
+    ``bot_id`` is the dst bot (the one FE is polling ``copy_state`` on); the
+    backend resolves it to the operation ledger row.
+    """
     del request
     result = retry_copy(
-        operation_id=operation_id,
+        bot_id=bot_id,
         operator_id=owner_id,
         bot_copy_repo=bot_copy_repo,
         apply_repo=apply_repo,
@@ -429,7 +438,14 @@ async def retry_copy_bot(
         manifest_seam=manifest_seam,
         now=datetime.now(),
     )
-    return Envelope(data=RetryResponse(operation_id=operation_id, result=result))
+    # Re-fetch the row to surface the operation_id in the response (retry_copy
+    # returned the result enum only, not the row).
+    row = bot_copy_repo.get_by_dst_bot_id(env=get_current_env(), dst_bot_id=bot_id)
+    return Envelope(
+        data=RetryResponse(
+            operation_id=row.operation_id if row else "", result=result
+        )
+    )
 
 
 __all__ = [

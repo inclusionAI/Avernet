@@ -66,7 +66,11 @@ def test_build_copy_state_summary_returns_none_when_no_copy_row():
     apply_repo.recent.assert_not_called()
 
 
-def test_build_copy_state_summary_returns_summary_with_operation_id_and_derived_status():
+def test_build_copy_state_summary_returns_none_when_converged():
+    # Once the copy has converged the dst is an ordinary bot — copy_state is
+    # dropped to null so FE stops showing copy progress / the retry button.
+    # (compute_copy_status itself still returns CONVERGED; the null collapse is
+    # build_copy_state_summary's job.)
     bot_copy_repo = MagicMock()
     apply_repo = MagicMock()
     bot_copy_repo.get_by_dst_bot_id.return_value = _copy_row()
@@ -82,9 +86,29 @@ def test_build_copy_state_summary_returns_summary_with_operation_id_and_derived_
         bot_id="d1",
         bot_status="ACTIVE",
     )
+    assert summary is None
+
+
+def test_build_copy_state_summary_returns_summary_with_operation_id_and_derived_status():
+    bot_copy_repo = MagicMock()
+    apply_repo = MagicMock()
+    bot_copy_repo.get_by_dst_bot_id.return_value = _copy_row()
+    # on_container RUNNING → BOT_STARTED (non-terminal, so summary is kept).
+    apply_repo.recent.return_value = [
+        _apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED.value),
+        _apply(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.RUNNING.value),
+    ]
+    summary = build_copy_state_summary(
+        bot_copy_repo=bot_copy_repo,
+        apply_repo=apply_repo,
+        env=ENV,
+        entity_id="u1",
+        bot_id="d1",
+        bot_status="ACTIVE",
+    )
     assert isinstance(summary, BotCopyStateSummary)
     assert summary.operation_id == "op_1"
-    assert summary.status is BotCopyStatus.CONVERGED
+    assert summary.status is BotCopyStatus.BOT_STARTED
     assert summary.source_bot_id == "src_1"
     apply_repo.recent.assert_called_once_with(
         env=ENV, entity_id="u1", bot_id="d1", limit=10

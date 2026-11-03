@@ -1,15 +1,14 @@
-"""Handler-unit tests for POST /openapi/v1/bots/copy/{op_id}/retry.
+"""Handler-unit tests for POST /openapi/v1/bots/copy/{bot_id}/retry.
 
 Idempotency contract: FE shows the retry button for every copy_state except
 CONVERGED, and may click it freely. The service throttles (60s CAS), refuses
 CONVERGED, and otherwise re-hands-off to create_job via manifest_seam.start_job
-with state_ref=copy_state(op_id). The create_job idempotency key (UNIQUE on
-active_idempotency_key) dedupes if a task is still live, so retry is safe to
-fire freely — the 60s CAS is the spam guard.
+(Route B: manifest document, no state_ref). The create_job idempotency key
+(UNIQUE on active_idempotency_key) dedupes if a task is still live, so retry is
+safe to fire freely — the 60s CAS is the spam guard.
 
-No authorization window: retry is FE-manual and the bot was authorized at first
-submission (license already ISSUED), so manifest_seam.start_job's configured
-window is moot — the create_job task's first step sees ISSUED and proceeds.
+The path's ``bot_id`` is the dst bot (the one FE is polling copy_state on); the
+backend resolves it to the operation ledger row via get_by_dst_bot_id.
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ def _row(**over) -> BotCopyRow:
 
 def _mocks(applies=None, bot_status="PENDING", cas_retry_ok=True):
     bot_copy_repo = MagicMock()
-    bot_copy_repo.get_by_operation_id.return_value = _row()
+    bot_copy_repo.get_by_dst_bot_id.return_value = _row()
     bot_copy_repo.cas_retry.return_value = cas_retry_ok
     apply_repo = MagicMock()
     apply_repo.recent.return_value = applies or []
@@ -68,10 +67,10 @@ def _mocks(applies=None, bot_status="PENDING", cas_retry_ok=True):
     return bot_copy_repo, apply_repo, bot_repo, manifest_seam
 
 
-def _retry(mocks, now=datetime(2026, 11, 2, 10, 0, 0), operation_id="op_1"):
+def _retry(mocks, now=datetime(2026, 11, 2, 10, 0, 0), bot_id="dst_1"):
     bot_copy_repo, apply_repo, bot_repo, manifest_seam = mocks
     return retry_copy(
-        operation_id=operation_id,
+        bot_id=bot_id,
         operator_id="u1",
         bot_copy_repo=bot_copy_repo,
         apply_repo=apply_repo,
@@ -86,6 +85,7 @@ def test_retry_first_call_re_hands_off_to_create_job():
     _, _, _, manifest_seam = mocks
     result = _retry(mocks)
     assert result is RetryResult.RE_ENQUEUED
+    mocks[0].get_by_dst_bot_id.assert_called_once()
     mocks[0].cas_retry.assert_called_once()
     start_kwargs = manifest_seam.start_job.call_args.kwargs
     assert start_kwargs["bot_id"] == "dst_1"
@@ -120,12 +120,12 @@ def test_retry_converged_returns_terminal_no_enqueue():
     mocks[0].cas_retry.assert_not_called()
 
 
-def test_retry_unknown_operation_raises_404():
+def test_retry_unknown_bot_raises_404():
     bot_copy_repo = MagicMock()
-    bot_copy_repo.get_by_operation_id.return_value = None
+    bot_copy_repo.get_by_dst_bot_id.return_value = None
     with pytest.raises(HTTPException) as exc_info:
         retry_copy(
-            operation_id="missing",
+            bot_id="missing",
             operator_id="u1",
             bot_copy_repo=bot_copy_repo,
             apply_repo=MagicMock(),
