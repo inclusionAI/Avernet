@@ -26,7 +26,7 @@ import { buildRunnerGraph, type RunnerGraphLayout } from './workflowLayout';
  *  child component reads the active flavor palette without a ThemeProvider.
  * ------------------------------------------------------------------ */
 interface ThemeTone {
-  left?: string;
+  $left?: string;
 }
 
 
@@ -95,14 +95,14 @@ const toneColor = (tone: string | undefined, fallback: string) => {
 
 const Notice = styled.div<ThemeTone>`
   padding: 8px 10px; border: 1px solid var(--bd);
-  border-left: 3px solid ${(p) => toneColor(p.left, 'var(--run)')};
+  border-left: 3px solid ${(p) => toneColor(p.$left, 'var(--run)')};
   background: var(--panel); color: var(--muted);
   font-size: 11px; line-height: 1.6; overflow-wrap: anywhere;
 `;
 
 const Panel = styled.div<ThemeTone>`
   border: 1px solid var(--bd);
-  border-left: 3px solid ${(p) => toneColor(p.left, 'var(--bd)')};
+  border-left: 3px solid ${(p) => toneColor(p.$left, 'var(--bd)')};
   background: var(--panel); border-radius: 6px;
   padding: var(--pad); overflow: hidden;
 `;
@@ -350,7 +350,7 @@ function VoteTally({ model, palette }: { model: UndercoverGameViewModel; palette
   const history = model.params.voteHistory;
   if (!history?.length) return null;
   return (
-    <Panel left="accent">
+    <Panel $left="accent">
       <PanelTitle>已公布票面</PanelTitle>
       {history.map((r) => (
         <div key={`${r.round}-${r.stage}`} style={{ marginBottom: 8 }}>
@@ -389,7 +389,7 @@ function errorText(e: unknown): string { return e instanceof Error ? e.message :
 function InvalidParams({ message, className, style }: { message: string; className?: string; style?: CSSProperties }) {
   return (
     <RootShell $palette={OPS_PALETTE.obsidian} className={className} style={style} data-ops-panel="true">
-      <Scene><Notice left="bad" style={{ borderLeftColor: '#ff6b6b' }}><b>面板参数无效</b><br />{message}</Notice></Scene>
+      <Scene><Notice $left="bad" style={{ borderLeftColor: '#ff6b6b' }}><b>面板参数无效</b><br />{message}</Notice></Scene>
     </RootShell>
   );
 }
@@ -636,7 +636,7 @@ function OpsPanel({
   if (loading && !fallback) {
     return (
       <RootShell $palette={palette} className={className} style={style} data-ops-panel="true" data-layout={narrow ? 'narrow' : 'wide'}>
-        <Scene><Notice left="running">正在加载游戏房间…</Notice></Scene>
+        <Scene><Notice $left="running">正在加载游戏房间…</Notice></Scene>
       </RootShell>
     );
   }
@@ -672,11 +672,11 @@ function OpsPanel({
       </TopBar>
 
       <Scene>
-        {error && <Notice left="bad" role="alert">刷新失败：{error}。已保留最近一次成功的房间状态。</Notice>}
-        {resultError && <Notice left="bad" role="alert">{resultError.message}。请刷新重试。</Notice>}
-        {terminalCopy && <Notice left="running">{terminalCopy}</Notice>}
+        {error && <Notice $left="bad" role="alert">刷新失败：{error}。已保留最近一次成功的房间状态。</Notice>}
+        {resultError && <Notice $left="bad" role="alert">{resultError.message}。请刷新重试。</Notice>}
+        {terminalCopy && <Notice $left="running">{terminalCopy}</Notice>}
 
-        <Panel left="running">
+        <Panel $left="running">
           <PanelTitle>本轮实际运行的 workflow</PanelTitle>
           {graph ? (
             <WorkflowGraph layout={workflow} palette={palette} compact={narrow} />
@@ -694,9 +694,9 @@ function OpsPanel({
         <VoteTally model={shown} palette={palette} />
 
         {pendingHumanNode && (
-          <Panel left={actionKind === 'vote' ? 'good' : 'accent'}>
+          <Panel $left={actionKind === 'vote' ? 'good' : 'accent'}>
             <PanelTitle>{actionKind === 'vote' ? (isPk ? 'PK 投票' : '投票') : '你的发言'} · 请求输入</PanelTitle>
-            {parsed.error && <Notice left="bad" role="alert">{parsed.error}</Notice>}
+            {parsed.error && <Notice $left="bad" role="alert">{parsed.error}</Notice>}
             {!parsed.error && canAct && (
               <form onSubmit={submit}>
                 {actionKind === 'speech' ? (
@@ -780,7 +780,7 @@ function OpsPanel({
         )}
 
         {result && (
-          <Panel left="accent">
+          <Panel $left="accent">
             <PanelTitle>终局</PanelTitle>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, lineHeight: 1.7 }}>{result.title}</div>
             <div style={{ marginTop: 8 }}>
