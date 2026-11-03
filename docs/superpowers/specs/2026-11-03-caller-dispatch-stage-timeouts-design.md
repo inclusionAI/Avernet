@@ -77,8 +77,12 @@ pipeline 自身不读全局配置。
   `target_agent_code` 查找）、`managed.commit_caller_dispatch`；
 - delegate：对应物（lineage 查找、issue、commit）。
 
-**不另加包的 stage**：ensure 容器（自限 10s）、send（自限 30s）——与 non-caller 的
-`deliver` 由 transport 自限一致。
+**同样加包的 stage（计划期修订 2026-11-03）**：ensure 容器与 send——普通路径自身就在
+`delivery_runtime.rs:660` 给 `io.deliver` 包 `io_timeout`（超时 → TransportUnknown），watchdog
+契约测试 `protected_send_timeout_converges_unknown_without_retry` 也正是以"挂起的 send 端口
+在有界窗口内收敛 Unknown"为契约的。故二者在 pipeline 内同样适用 stage_timeout：
+ensure 超时 → `StageTimeout{stage:"container_ensure"}`（保守 Failed）；send 超时 →
+`OutcomeUnknown`（走 send adapter 自超时完全相同的证据路径）。adapter 自限保留不变。
 
 超时返回新错误变体：
 
