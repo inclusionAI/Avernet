@@ -16,6 +16,7 @@ from search_core.api.models import (
     EffectiveSearch,
     ScoreDetails,
     SearchCommand,
+    SearchResult,
     VerifiedIdentity,
 )
 from search_core.api.services import SearchApplication
@@ -32,6 +33,16 @@ class SearchBody(BaseModel):
     filters: dict[str, list[str]] = Field(default_factory=dict)
     scene: str = Field(default="default", min_length=1, max_length=128)
     extensions: dict[str, Any] = Field(default_factory=dict)
+
+    def command(self, operation: str) -> SearchCommand:
+        return SearchCommand(
+            self.query,
+            self.limit,
+            operation,
+            {key: tuple(values) for key, values in self.filters.items()},
+            self.scene,
+            self.extensions,
+        )
 
     @field_validator("query")
     @classmethod
@@ -70,6 +81,8 @@ def create_search_router(
     *,
     timeout_seconds: float = 2.0,
     request_model: type[SearchBody] = BoundedSearchBody,
+    result_mapper: Callable[[SearchResult], BaseModel] | None = None,
+    response_model: type[BaseModel] = ResultBody,
 ) -> APIRouter:
     """The host owns provider lifecycle; no permissive auth default exists.
 
@@ -85,14 +98,7 @@ def create_search_router(
             body: request_model,
             identity: Annotated[VerifiedIdentity, Depends(authenticate)],
         ):
-            command = SearchCommand(
-                body.query,
-                body.limit,
-                operation,
-                {key: tuple(values) for key, values in body.filters.items()},
-                body.scene,
-                body.extensions,
-            )
+            command = body.command(operation)
             try:
                 result = await asyncio.wait_for(
                     application.execute(command, identity),
@@ -112,6 +118,8 @@ def create_search_router(
                     timeout_ms=timeout_seconds * 1000,
                 )
                 raise HTTPException(504, "search deadline exceeded") from error
+            if result_mapper is not None:
+                return result_mapper(result)
             return ResultBody(
                 items=[
                     ItemBody(
@@ -137,7 +145,7 @@ def create_search_router(
             f"/{operation}",
             endpoint(operation),
             methods=["POST"],
-            response_model=ResultBody,
+            response_model=response_model,
             response_model_exclude_none=True,
             name=f"{operation}_v2",
         )
