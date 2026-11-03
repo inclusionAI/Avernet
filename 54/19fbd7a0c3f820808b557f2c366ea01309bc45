@@ -1,0 +1,26 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_45822537b9a93b::t_3b20afda9e0e39 19,2028,2030-2031
+  s_45822537b9a93b::t_9e787a71dc898d 2029
+  s_45822537b9a93b::t_b620fe2fe37d80 2027
+  s_45822537b9a93b::t_7dd597ebe48dda 2032
+apps/backend/tests/community/api/bot_management/test_router_search_disconnect.py
+  s_45822537b9a93b::t_2c0f2d7ee320e2 21,97-98
+  s_45822537b9a93b::t_adbe015564853b 4-20,22-96
+  s_45822537b9a93b::t_291d9936acbe8c 1-3,99-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5419fbd7a0c3f820808b557f2c366ea01309bc45",
+  "prompts": {},
+  "sessions": {
+    "s_45822537b9a93b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c37-a32e-72a1-802a-3e9df98b3597",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

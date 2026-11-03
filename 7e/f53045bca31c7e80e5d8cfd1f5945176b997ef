@@ -1,0 +1,26 @@
+apps/bcsfuse/configs/application.yaml
+  h_5686002b4ce7b9 169-172
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 372-375
+apps/bcsfuse/src/app/application/services/agent_search_execution_budget.py
+  h_5686002b4ce7b9 8-11,23-26
+apps/bcsfuse/src/app/infra/public/observability/search_dependency_metrics.py
+  h_5686002b4ce7b9 5-6,8,14,18,23-28,30-171
+apps/bcsfuse/tests/contract/test_embedding_batching_contract_tdd.py
+  h_5686002b4ce7b9 1-35
+apps/bcsfuse/tests/contract/test_search_dependency_metrics_thread_tdd.py
+  h_5686002b4ce7b9 1-57
+apps/bcsfuse/tests/contract/test_search_execution_budget_real_model_tdd.py
+  h_5686002b4ce7b9 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7ef53045bca31c7e80e5d8cfd1f5945176b997ef",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

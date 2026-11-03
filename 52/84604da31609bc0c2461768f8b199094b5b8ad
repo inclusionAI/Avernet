@@ -1,0 +1,16 @@
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  h_059e888e5e4e82 6,47,126,278
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  h_059e888e5e4e82 58,100,102,125,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5284604da31609bc0c2461768f8b199094b5b8ad",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

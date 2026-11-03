@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/resources/test_resource_file_service.py
+  s_bdf80807c21964::t_119ab071019529 511-539
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_resources_handlers.py
+  s_bdf80807c21964::t_119ab071019529 1482-1485
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_bdf80807c21964::t_119ab071019529 90-104,106-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e487d4e165882f35e14e3cf383eafdb8aede5f7",
+  "prompts": {},
+  "sessions": {
+    "s_bdf80807c21964": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c11-4707-71f2-b518-e2853e1b2f81",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

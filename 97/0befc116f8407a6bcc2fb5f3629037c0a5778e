@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/task-start.ts
+  s_413b6633e8b715::t_82acb77f833577 14-15,63-64,75-78,80-84,92-93,99
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/evolve.ts
+  s_413b6633e8b715::t_82acb77f833577 23,960,965,1050,1101,1195,1239,1279,1392,1434,1454,1467,2195-2214,2387-2388,2396,2794-2799,2801-2815,2817-2818,2821,2862
+apps/evolverun/docs/clawweb/specs/clawevolve-task-reference-materials.md
+  s_413b6633e8b715::t_82acb77f833577 102
+  s_413b6633e8b715::t_099793777cf307 121,136
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/evolve-repository.ts
+  s_413b6633e8b715::t_82acb77f833577 358-370
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "970befc116f8407a6bcc2fb5f3629037c0a5778e",
+  "prompts": {},
+  "sessions": {
+    "s_413b6633e8b715": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c2b-9482-7110-82bf-7c8dff86cc5c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

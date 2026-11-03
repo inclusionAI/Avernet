@@ -1,0 +1,83 @@
+apps/bcs/scripts/e2e-runner/tests/test_authority_run.py
+  s_cecdc98e721f4b::t_64351102df1ce4 1-472
+apps/bcs/scripts/e2e-runner/README.md
+  s_cecdc98e721f4b::t_9d0876778b5fac 2222-2225
+apps/bcs/scripts/e2e-runner/tests/test_authority_dual_case_run.py
+  s_cecdc98e721f4b::t_112c20486244b7 1-785
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/reporting.py
+  s_cecdc98e721f4b::t_f6e8311ef0079d 1-176
+apps/bcs/scripts/e2e-runner/tests/test_authority_checks.py
+  s_cecdc98e721f4b::t_f425bd2e7031bb 1-306
+apps/bcs/scripts/e2e-runner/tests/test_retained_file_remote.py
+  s_cecdc98e721f4b::t_d1eed99ec44139 381
+apps/bcs/scripts/e2e-runner/authority-migration-contract.json
+  s_cecdc98e721f4b::t_18e3346f37a044 1-505
+apps/bcs/scripts/e2e-runner/tests/test_response_correlation.py
+  s_cecdc98e721f4b::t_1381f109914d45 4,25-30,177,200-202,256-258
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/__init__.py
+  s_cecdc98e721f4b::t_14bcdca5c04a33 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_95ae5193d4a5da 392-459,613
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/dual_case_run.py
+  s_cecdc98e721f4b::t_22194ca32d90b2 1-714
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/contract.py
+  s_cecdc98e721f4b::t_36fbb0230b85be 1-344
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_d9bd9616e7f812 321
+apps/bcs/scripts/e2e-runner/bcs_e2e/file_transport.py
+  s_cecdc98e721f4b::t_28f470cb5e73fb 603-605,644-646,666-668
+apps/bcs/scripts/e2e-runner/tests/test_file_transport.py
+  s_cecdc98e721f4b::t_a674088f46588b 324,344,348-382,431
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_55a37a8840b2a7 17-19,52,332
+apps/bcs/scripts/e2e-runner/tests/test_case_adapters.py
+  s_cecdc98e721f4b::t_c3c7428338f900 70,75-84,93-95
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_45ec0d5bbd46fc 95-101
+apps/bcs/scripts/e2e-runner/authority-dual-migration-contract.json
+  s_cecdc98e721f4b::t_d99e5adb6f364c 1-1347
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/checks.py
+  s_cecdc98e721f4b::t_9d2f72f479a5c5 1-582
+apps/bcs/scripts/e2e-runner/tests/test_failure_evidence.py
+  s_cecdc98e721f4b::t_b0519f6497c768 201
+apps/bcs/scripts/e2e-runner/tests/test_authority_contract.py
+  s_cecdc98e721f4b::t_f94717015c71f6 1-333
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_2ce70d33330682 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/story.py
+  s_cecdc98e721f4b::t_01c22df73f03c5 1-596
+apps/bcs/scripts/e2e-runner/tests/test_browser_context.py
+  s_cecdc98e721f4b::t_1905153be96d09 54,58-68
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_143f3cb5b4446e 617-618,662-663
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_c88ec578ba8b32 45,748-760
+apps/bcs/scripts/e2e-runner/tests/test_storage_targets.py
+  s_cecdc98e721f4b::t_d864836c4823ae 26,44,69,84,97,142,145,169-170
+apps/bcs/scripts/e2e-runner/tests/test_authority_story.py
+  s_cecdc98e721f4b::t_77dae7f034ac74 1-776
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/run.py
+  s_cecdc98e721f4b::t_6763b5e6f994aa 1-366
+apps/bcs/scripts/e2e-runner/tests/download.yaml
+  s_cecdc98e721f4b::t_2623ad11623362 1-74
+apps/bcs/scripts/e2e-runner/tests/original.yaml
+  s_cecdc98e721f4b::t_d8d0288a86d269 1-74
+apps/bcs/scripts/e2e-runner/tests/updated.yaml
+  s_cecdc98e721f4b::t_5095c30ae4fea2 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8e933d793fd52fba6166eb348fd147e56fe7bed0",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

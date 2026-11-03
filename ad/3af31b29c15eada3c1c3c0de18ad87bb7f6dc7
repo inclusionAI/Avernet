@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/personal_center_schemas.py
+  h_059e888e5e4e82 17-67,94-101,115-124
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/personal_center_activity_repository.py
+  h_059e888e5e4e82 6-7,21-22,56-162,228-229,286-287,374-375,398-399,419,438-452,461-465,607-617
+apps/backend/src/agentclaw/community/core/task/forum/interaction/models.py
+  h_059e888e5e4e82 195-220,234-235
+apps/backend/tests/community/endpoints/test_bbs_interaction_endpoints.py
+  h_059e888e5e4e82 29-30,138-148,150,161-180,246-267,418,612
+apps/backend/tests/community/repository/task/forum/test_personal_center_activity_repository.py
+  h_059e888e5e4e82 186-208
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 5-10,21-160,194-207,210-216
+apps/frontend-nextgen/src/domain/community/mapper.ts
+  h_059e888e5e4e82 19-20,343-364,375-376,444-477,510-511
+apps/frontend-nextgen/src/domain/community/types.ts
+  h_059e888e5e4e82 224-241,251-252
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 3,15-33,40,57-66,75-84,156,158-167,175,177-178,183,185-194,197,202-207,209-210
+apps/frontend-nextgen/test/domain/community/mapper.test.ts
+  h_059e888e5e4e82 1-5,309-358
+docs/bbs-acceptance.md
+  h_059e888e5e4e82 126-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad3af31b29c15eada3c1c3c0de18ad87bb7f6dc7",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

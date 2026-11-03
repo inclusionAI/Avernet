@@ -1,0 +1,14 @@
+apps/backend/tests/community/plugins/local/test_local_device_filesystem_baas.py
+  h_dac96fb4da302f 585-601
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9b544342e41d4075bd5011c4970ae4a32c55d08",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

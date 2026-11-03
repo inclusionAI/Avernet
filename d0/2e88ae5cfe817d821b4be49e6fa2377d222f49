@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_6f610611e205ad::t_6b361839a36940 3085-3087,3098-3101,3110,3128-3135,3137-3140,3142-3145,3147-3175,3179-3202
+apps/backend/tests/community/core/service_bot/services/test_baas_service_http_methods.py
+  s_6f610611e205ad::t_222503a66d9b5a 14,358-457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d02e88ae5cfe817d821b4be49e6fa2377d222f49",
+  "prompts": {},
+  "sessions": {
+    "s_6f610611e205ad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b7-4aa7-70f3-84de-a07af6295b52",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

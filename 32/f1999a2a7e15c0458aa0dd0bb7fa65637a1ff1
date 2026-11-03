@@ -1,0 +1,22 @@
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_16462c91ec5d93::t_22b8d24bad4be5 3875-3877,3879,4554-4574,4576-4625,4628-4635,4646,4648-4656
+  s_16462c91ec5d93::t_ab7a54b8bb0552 4575
+  s_16462c91ec5d93::t_846fbaab004777 3874,3878,4626-4627,4636-4645,4647
+  s_16462c91ec5d93::t_6c7dc81fb44b94 4657-4658
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32f1999a2a7e15c0458aa0dd0bb7fa65637a1ff1",
+  "prompts": {},
+  "sessions": {
+    "s_16462c91ec5d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d51-5517-7430-b6d2-f4ced4c931de",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

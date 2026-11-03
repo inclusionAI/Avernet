@@ -1,0 +1,1381 @@
+apps/bcs/scripts/e2e-runner/.gitignore
+  s_cecdc98e721f4b::t_45c0ad78e1fa49 1-3
+apps/bcs/scripts/e2e-runner/README.md
+  s_cecdc98e721f4b::t_1d2de78c5b26df 1-3652
+apps/bcs/scripts/e2e-runner/aliyun-docker-binding.example.json
+  s_cecdc98e721f4b::t_32193f4fe5d73b 1-56
+apps/bcs/scripts/e2e-runner/bcs_e2e/__init__.py
+  s_cecdc98e721f4b::t_032c746a2cfcb5 1-4
+apps/bcs/scripts/e2e-runner/bcs_e2e/adapters.py
+  s_cecdc98e721f4b::t_e23e4cf6e8e07e 1-913
+apps/bcs/scripts/e2e-runner/bcs_e2e/alisd_wire.py
+  s_cecdc98e721f4b::t_087c0d10772e7d 1-168
+apps/bcs/scripts/e2e-runner/bcs_e2e/alisddbquery.py
+  s_cecdc98e721f4b::t_69f871faebe9bb 1-273
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_1b855ce0e70147 1-132
+apps/bcs/scripts/e2e-runner/bcs_e2e/bounded_process.py
+  s_cecdc98e721f4b::t_2478c015e86e2b 1-93
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_adapters.py
+  s_cecdc98e721f4b::t_6a9295c16a64ef 1-136
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_27f92d6dc456e5 1-298
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_executor.py
+  s_cecdc98e721f4b::t_3383ddd798f3b4 1-148
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_rewrite.py
+  s_cecdc98e721f4b::t_414db11ffcfd27 1-242
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_scope.py
+  s_cecdc98e721f4b::t_865ee628d67481 1-381
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_bindings_case_run.py
+  s_cecdc98e721f4b::t_a766a663bb2371 1-150
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_case_run.py
+  s_cecdc98e721f4b::t_6f32860859978b 1-122
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_profile.py
+  s_cecdc98e721f4b::t_c572b0d26d90f8 1-180
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_runner.py
+  s_cecdc98e721f4b::t_2d66a41bdc0134 1-373
+apps/bcs/scripts/e2e-runner/bcs_e2e/cleanup.py
+  s_cecdc98e721f4b::t_9eff257c1799de 1-154
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_401215f738d5b4 1-972
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_adapter.py
+  s_cecdc98e721f4b::t_5407782a40e8e1 1-222
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_case_run.py
+  s_cecdc98e721f4b::t_d52fd2eef993a1 1-141
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_contract.py
+  s_cecdc98e721f4b::t_c0b978752ecc9c 1-137
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_http.py
+  s_cecdc98e721f4b::t_e2a8eac4f4d230 1-137
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_profile.py
+  s_cecdc98e721f4b::t_445c800ff99932 1-128
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_runner.py
+  s_cecdc98e721f4b::t_9f2d9b7c36b906 1-461
+apps/bcs/scripts/e2e-runner/bcs_e2e/context.py
+  s_cecdc98e721f4b::t_ae1f21e24d1fee 1-170
+apps/bcs/scripts/e2e-runner/bcs_e2e/control_steps.py
+  s_cecdc98e721f4b::t_5ceaf4138bbf14 1-222
+apps/bcs/scripts/e2e-runner/bcs_e2e/correlation.py
+  s_cecdc98e721f4b::t_867767aa946c02 1-140
+apps/bcs/scripts/e2e-runner/bcs_e2e/custom_collaboration_cli_case_run.py
+  s_cecdc98e721f4b::t_397dfe68c00a98 1-740
+apps/bcs/scripts/e2e-runner/bcs_e2e/custom_collaboration_cli_leaf.py
+  s_cecdc98e721f4b::t_1869738896a54c 1-787
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_observation.py
+  s_cecdc98e721f4b::t_0a1831c1b0c753 1-472
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_pagination.py
+  s_cecdc98e721f4b::t_11017779e9c480 1-84
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_policy_check.py
+  s_cecdc98e721f4b::t_4f078dce755190 1-98
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_policy_cli_case_run.py
+  s_cecdc98e721f4b::t_8efc7a78f6eb89 1-812
+apps/bcs/scripts/e2e-runner/bcs_e2e/delivery_policy_projection.py
+  s_cecdc98e721f4b::t_6e1522afc2c74f 1-78
+apps/bcs/scripts/e2e-runner/bcs_e2e/diagnostics.py
+  s_cecdc98e721f4b::t_bfd929cfab39fb 1-102
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_leaf.py
+  s_cecdc98e721f4b::t_a2dd372e8b02d9 1-612
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_run.py
+  s_cecdc98e721f4b::t_e33aaa52296094 1-890
+apps/bcs/scripts/e2e-runner/bcs_e2e/docker_binding.py
+  s_cecdc98e721f4b::t_221d77bc1a844c 1-251
+apps/bcs/scripts/e2e-runner/bcs_e2e/downstream_observation.py
+  s_cecdc98e721f4b::t_b5b206b229ac59 1-75
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_friend_mutation_case.py
+  s_cecdc98e721f4b::t_7f7036dc009db4 1-339
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_friend_mutation_case_run.py
+  s_cecdc98e721f4b::t_173b0defeedfc9 1-335
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_read_case.py
+  s_cecdc98e721f4b::t_f4c4d6adb747ef 1-288
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_read_case_run.py
+  s_cecdc98e721f4b::t_d623d11b3ab5ae 1-192
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_read_contract.py
+  s_cecdc98e721f4b::t_049a7ec9ebfabc 1-149
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_search_case.py
+  s_cecdc98e721f4b::t_b8adc904f5838e 1-507
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_search_contract.py
+  s_cecdc98e721f4b::t_fb832cca8fc30e 1-82
+apps/bcs/scripts/e2e-runner/bcs_e2e/effect_policy.py
+  s_cecdc98e721f4b::t_1345d761f62f5f 1-79
+apps/bcs/scripts/e2e-runner/bcs_e2e/errors.py
+  s_cecdc98e721f4b::t_7ac693d42c206a 1-32
+apps/bcs/scripts/e2e-runner/bcs_e2e/evidence.py
+  s_cecdc98e721f4b::t_584576e0632513 1-176
+apps/bcs/scripts/e2e-runner/bcs_e2e/execution_control.py
+  s_cecdc98e721f4b::t_1d6350c8a4a782 1-183
+apps/bcs/scripts/e2e-runner/bcs_e2e/execution_ledger.py
+  s_cecdc98e721f4b::t_d053a097c688e4 1-193
+apps/bcs/scripts/e2e-runner/bcs_e2e/execution_safety.py
+  s_cecdc98e721f4b::t_ce68e3c6d1e626 1-87
+apps/bcs/scripts/e2e-runner/bcs_e2e/file_assertions.py
+  s_cecdc98e721f4b::t_a0ab45e063990e 1-48
+apps/bcs/scripts/e2e-runner/bcs_e2e/file_steps.py
+  s_cecdc98e721f4b::t_aea223fc299c08 1-139
+apps/bcs/scripts/e2e-runner/bcs_e2e/file_transport.py
+  s_cecdc98e721f4b::t_d2e36f159222e7 1-561
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixture_cron.py
+  s_cecdc98e721f4b::t_462e1432c7e2e3 1-69
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixture_cron_check.py
+  s_cecdc98e721f4b::t_d19a8f33a4f374 1-131
+apps/bcs/scripts/e2e-runner/bcs_e2e/fixtures.py
+  s_cecdc98e721f4b::t_6a33498561da25 1-96
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_case_run.py
+  s_cecdc98e721f4b::t_b777350438f627 1-122
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_profile.py
+  s_cecdc98e721f4b::t_bf351e7b5dda74 1-119
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_runner.py
+  s_cecdc98e721f4b::t_1c3b4c0c85ba77 1-210
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_connection_decision_case_run.py
+  s_cecdc98e721f4b::t_97c3df3feabdd8 1-152
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_b7750a267d86b9 1-152
+apps/bcs/scripts/e2e-runner/bcs_e2e/global_policy_scope.py
+  s_cecdc98e721f4b::t_cabe6470080a22 1-183
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_adapter.py
+  s_cecdc98e721f4b::t_fe42e4896f07a5 1-126
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_case_run.py
+  s_cecdc98e721f4b::t_d6fa36c104527f 1-121
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_context_contract.py
+  s_cecdc98e721f4b::t_e62ccb8af669ed 1-184
+apps/bcs/scripts/e2e-runner/bcs_e2e/identity_binding.py
+  s_cecdc98e721f4b::t_670665eaf30103 1-116
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_9f1d5972411e4b 1-219
+apps/bcs/scripts/e2e-runner/bcs_e2e/ledger.py
+  s_cecdc98e721f4b::t_d32c6a4bc46ec7 1-422
+apps/bcs/scripts/e2e-runner/bcs_e2e/legacy_file_assertions.py
+  s_cecdc98e721f4b::t_33926b6cceea80 1-70
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_adapter.py
+  s_cecdc98e721f4b::t_2fefa8fa63a3e5 1-77
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_auth.py
+  s_cecdc98e721f4b::t_c6dbfa564133b2 1-120
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_bot_receiver.py
+  s_cecdc98e721f4b::t_d6a9e85ee07026 1-380
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_bot_ws.py
+  s_cecdc98e721f4b::t_c3b145613fe12b 1-224
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_contract.py
+  s_cecdc98e721f4b::t_17513e120439b7 1-158
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_reporting.py
+  s_cecdc98e721f4b::t_f7075185141104 1-228
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_run.py
+  s_cecdc98e721f4b::t_bb3592cb6c484d 1-221
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli.py
+  s_cecdc98e721f4b::t_dc1fba19d8bd3b 1-450
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_contract.py
+  s_cecdc98e721f4b::t_262168248a132c 1-66
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_driver.py
+  s_cecdc98e721f4b::t_645776ebc37d8e 1-239
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_reporting.py
+  s_cecdc98e721f4b::t_ed273381ee906a 1-302
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_run.py
+  s_cecdc98e721f4b::t_2a19961a7db94f 1-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_storage.py
+  s_cecdc98e721f4b::t_18e4a0eb4e59bf 1-151
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_contract.py
+  s_cecdc98e721f4b::t_b5a786f49927ee 1-44
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_http.py
+  s_cecdc98e721f4b::t_fea2fcd30cb2dd 1-186
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_public_contract.py
+  s_cecdc98e721f4b::t_a2ce6975fe8f92 1-238
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_reporting.py
+  s_cecdc98e721f4b::t_8e781e64b1cd15 1-225
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_run.py
+  s_cecdc98e721f4b::t_0229db845c0b08 1-90
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_cli.py
+  s_cecdc98e721f4b::t_695d6f79b192ed 1-787
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_cli_check.py
+  s_cecdc98e721f4b::t_c324d76c196f6c 1-148
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_cli_exchange.py
+  s_cecdc98e721f4b::t_2494ab9129c010 1-283
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_collaboration_team_reporting.py
+  s_cecdc98e721f4b::t_4b0f7c00118a16 1-324
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_collaboration_team_run.py
+  s_cecdc98e721f4b::t_dca6329c20eea4 1-232
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_config.py
+  s_cecdc98e721f4b::t_517927fea66f55 1-181
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_custom_collaboration_case.py
+  s_cecdc98e721f4b::t_53bf5d8ed279fd 1-150
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_custom_collaboration_reporting.py
+  s_cecdc98e721f4b::t_aec531e22c6c46 1-384
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_custom_collaboration_run.py
+  s_cecdc98e721f4b::t_e7b69cbdb5a5b9 1-322
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy.py
+  s_cecdc98e721f4b::t_af9099b6289631 1-312
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy_contract.py
+  s_cecdc98e721f4b::t_25ef633c966763 1-78
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy_reporting.py
+  s_cecdc98e721f4b::t_e4d3968d52b562 1-254
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy_run.py
+  s_cecdc98e721f4b::t_2d7d14773cb21c 1-101
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat.py
+  s_cecdc98e721f4b::t_cfd9a8ad236e50 1-748
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_contract.py
+  s_cecdc98e721f4b::t_0b1a137ae9d5e0 1-45
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_reporting.py
+  s_cecdc98e721f4b::t_0cb765a3e44ccd 1-286
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_run.py
+  s_cecdc98e721f4b::t_e872d5c4c545a3 1-90
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_storage.py
+  s_cecdc98e721f4b::t_a29e24175e9f1f 1-118
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_receiver.py
+  s_cecdc98e721f4b::t_d28ba854760d19 1-82
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_contract.py
+  s_cecdc98e721f4b::t_6507336c275849 1-233
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_reporting.py
+  s_cecdc98e721f4b::t_a077efa0c605d7 1-267
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_run.py
+  s_cecdc98e721f4b::t_32ac30ff847453 1-390
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_fixture_admission.py
+  s_cecdc98e721f4b::t_e1e505bc0af86c 1-203
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutation_extras.py
+  s_cecdc98e721f4b::t_42a57be5ec9af4 1-280
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_case.py
+  s_cecdc98e721f4b::t_277b03bd790bb6 1-885
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_reporting.py
+  s_cecdc98e721f4b::t_cea60bae53de39 1-304
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_run.py
+  s_cecdc98e721f4b::t_b57f84e8df85cd 1-389
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_read_reporting.py
+  s_cecdc98e721f4b::t_98ca8fb1827fb7 1-273
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_read_run.py
+  s_cecdc98e721f4b::t_b833efe2b97a1e 1-165
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_entry_switch.py
+  s_cecdc98e721f4b::t_5a9ab914d0dab3 1-186
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event.py
+  s_cecdc98e721f4b::t_1f1ecec7c591a1 1-276
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_contract.py
+  s_cecdc98e721f4b::t_bf6c6b25ec365d 1-74
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_reporting.py
+  s_cecdc98e721f4b::t_6d22073d43b9db 1-288
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_run.py
+  s_cecdc98e721f4b::t_cfb4cf292f22f4 1-98
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_sink.py
+  s_cecdc98e721f4b::t_4ebff08855e78f 1-522
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_storage.py
+  s_cecdc98e721f4b::t_122ba9cc03ed03 1-249
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_exchange.py
+  s_cecdc98e721f4b::t_184e2daa82a744 1-513
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_reporting.py
+  s_cecdc98e721f4b::t_cd0c85b8d1c28f 1-273
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_setup.py
+  s_cecdc98e721f4b::t_8b11151fd22e4f 1-539
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_story.py
+  s_cecdc98e721f4b::t_6401a255b18cff 1-348
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_case.py
+  s_cecdc98e721f4b::t_3caa309db75e02 1-998
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_2e1a6cc94584ae 1-113
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_569502ac75076d 1-216
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_run.py
+  s_cecdc98e721f4b::t_148653e7307738 1-122
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_sandbox.py
+  s_cecdc98e721f4b::t_6dadce71049db5 1-285
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixtures.py
+  s_cecdc98e721f4b::t_03c650d0e09da2 1-252
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_cli_accept_contract.py
+  s_cecdc98e721f4b::t_4cae02f6e7454d 1-252
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_connection_decision_contract.py
+  s_cecdc98e721f4b::t_d57bd21d36ec00 1-194
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_public_accept_contract.py
+  s_cecdc98e721f4b::t_c23cb2ecd458a0 1-199
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_judge_contract.py
+  s_cecdc98e721f4b::t_927d4813c68af6 1-80
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_judge_sandbox.py
+  s_cecdc98e721f4b::t_c82c89c670cdd9 1-810
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_logs.py
+  s_cecdc98e721f4b::t_80af7606d178c7 1-167
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_e59f594bd9592f 1-233
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_70dd02c94a0e95 1-280
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_24fa8763da00b1 1-411
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_actor_status_contract.py
+  s_cecdc98e721f4b::t_720a07c349f209 1-171
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_api.py
+  s_cecdc98e721f4b::t_062ae9b47b5a27 1-836
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_contract.py
+  s_cecdc98e721f4b::t_b2546b32c4ad88 1-986
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_register_contract.py
+  s_cecdc98e721f4b::t_76ec4eee09b3b0 1-237
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_reporting.py
+  s_cecdc98e721f4b::t_5a9b8bae29a363 1-244
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_run.py
+  s_cecdc98e721f4b::t_e38f550d4e412f 1-93
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli.py
+  s_cecdc98e721f4b::t_dbcb2e0d59c068 1-855
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli_contract.py
+  s_cecdc98e721f4b::t_237eeacc96bff0 1-367
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli_reporting.py
+  s_cecdc98e721f4b::t_51a0d9c9809ac6 1-440
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli_run.py
+  s_cecdc98e721f4b::t_af3394cf2be06f 1-104
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_panel_asset.py
+  s_cecdc98e721f4b::t_b32e5ecccc2afc 1-213
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_panel_probe.py
+  s_cecdc98e721f4b::t_60553516902b23 1-67
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_api.py
+  s_cecdc98e721f4b::t_202972f3dc3445 1-626
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_contract.py
+  s_cecdc98e721f4b::t_dce8b0a200b1e2 1-62
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_reporting.py
+  s_cecdc98e721f4b::t_12f7a2e317e1db 1-321
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_run.py
+  s_cecdc98e721f4b::t_929f5a58f3e156 1-97
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_sink.py
+  s_cecdc98e721f4b::t_8d4b100daf0bca 1-385
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_storage.py
+  s_cecdc98e721f4b::t_dba2c25f83ef1f 1-134
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_contract.py
+  s_cecdc98e721f4b::t_200330d9b10c14 1-223
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_reporting.py
+  s_cecdc98e721f4b::t_bc94691505a938 1-268
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_run.py
+  s_cecdc98e721f4b::t_32f35e85f6d94d 1-388
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_role_identity.py
+  s_cecdc98e721f4b::t_5c1b6ee766b336 1-295
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_run.py
+  s_cecdc98e721f4b::t_ab895dec409253 1-252
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_completion.py
+  s_cecdc98e721f4b::t_c2d3c2d9ddb35f 1-482
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_completion_cli.py
+  s_cecdc98e721f4b::t_f8007f43d13f49 1-128
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_completion_storage.py
+  s_cecdc98e721f4b::t_660765f47d06d7 1-145
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_contract.py
+  s_cecdc98e721f4b::t_84406c6bec4f77 1-52
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_flow_reporting.py
+  s_cecdc98e721f4b::t_084d283e266f06 1-292
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_public.py
+  s_cecdc98e721f4b::t_87860936136191 1-957
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_public_case.py
+  s_cecdc98e721f4b::t_9783b1c066c6cb 1-135
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_reporting.py
+  s_cecdc98e721f4b::t_f1e5013668d58a 1-280
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_run.py
+  s_cecdc98e721f4b::t_ff12860364a353 1-190
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_cli.py
+  s_cecdc98e721f4b::t_76687e7cb35b49 1-634
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_completion.py
+  s_cecdc98e721f4b::t_e059b47647d19e 1-520
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_case.py
+  s_cecdc98e721f4b::t_d56ed934228fd4 1-132
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_reporting.py
+  s_cecdc98e721f4b::t_486ac6ce47d5f0 1-457
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_run.py
+  s_cecdc98e721f4b::t_7a272b6c702eea 1-542
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing.py
+  s_cecdc98e721f4b::t_40714fd5778b66 1-958
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_cli.py
+  s_cecdc98e721f4b::t_be9b1dae7b9557 1-203
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_reporting.py
+  s_cecdc98e721f4b::t_07b083c205b6f7 1-237
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_storage.py
+  s_cecdc98e721f4b::t_9532655bd9933e 1-289
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_storage.py
+  s_cecdc98e721f4b::t_79aa3cf83da3a6 1-90
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_slow_judge_reporting.py
+  s_cecdc98e721f4b::t_c38eedec2da8d3 1-212
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_slow_judge_run.py
+  s_cecdc98e721f4b::t_c8eb5d4699be9e 1-113
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_sqlite.py
+  s_cecdc98e721f4b::t_9b43fcab94737f 1-168
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_story_commands.py
+  s_cecdc98e721f4b::t_00b4f96dfb4f36 1-1121
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured.py
+  s_cecdc98e721f4b::t_d3e13ff2743975 1-329
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_contract.py
+  s_cecdc98e721f4b::t_be8d8b9bb12495 1-64
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_core_contract.py
+  s_cecdc98e721f4b::t_d7c1cca74fe211 1-316
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_public_contract.py
+  s_cecdc98e721f4b::t_7e3010ecfb51df 1-203
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_receiver.py
+  s_cecdc98e721f4b::t_b515157faa964e 1-145
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_reporting.py
+  s_cecdc98e721f4b::t_64095ebda1e5df 1-305
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_run.py
+  s_cecdc98e721f4b::t_023b644e6624a3 1-94
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_storage.py
+  s_cecdc98e721f4b::t_861bf194c2a816 1-174
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_template_asset.py
+  s_cecdc98e721f4b::t_ac5453769be0ae 1-330
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_template_probe.py
+  s_cecdc98e721f4b::t_c0117d50de5bdd 1-117
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_trust_api.py
+  s_cecdc98e721f4b::t_686016fa6becac 1-354
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_trust_cli.py
+  s_cecdc98e721f4b::t_91795def1aa107 1-143
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_trust_store.py
+  s_cecdc98e721f4b::t_bc0735dbae4fc4 1-58
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_webhook_subscription_contract.py
+  s_cecdc98e721f4b::t_304518cbfd17e3 1-315
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_api.py
+  s_cecdc98e721f4b::t_eaa05fc01ffe27 1-674
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_cli.py
+  s_cecdc98e721f4b::t_7387f787254a81 1-622
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_context.py
+  s_cecdc98e721f4b::t_40e7a30b2d0a0c 1-103
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_delete.py
+  s_cecdc98e721f4b::t_e593d095816a2f 1-240
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_incident.py
+  s_cecdc98e721f4b::t_deebc87d00a9db 1-485
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_messages.py
+  s_cecdc98e721f4b::t_40e0a9ef42cbe7 1-257
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_reporting.py
+  s_cecdc98e721f4b::t_7e8edfd793b913 1-289
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_run.py
+  s_cecdc98e721f4b::t_811e500b8369e0 1-255
+apps/bcs/scripts/e2e-runner/bcs_e2e/log_observer.py
+  s_cecdc98e721f4b::t_a27f7c4150d86c 1-164
+apps/bcs/scripts/e2e-runner/bcs_e2e/mapping_confirmation.py
+  s_cecdc98e721f4b::t_772e899e17d3ea 1-71
+apps/bcs/scripts/e2e-runner/bcs_e2e/mapping_recheck.py
+  s_cecdc98e721f4b::t_68a4c6d8be287b 1-72
+apps/bcs/scripts/e2e-runner/bcs_e2e/metadata_probe.py
+  s_cecdc98e721f4b::t_434eb8d601e164 1-175
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_900fe405fce14e 1-624
+apps/bcs/scripts/e2e-runner/bcs_e2e/mock_cleanup.py
+  s_cecdc98e721f4b::t_34c2df4625ba88 1-57
+apps/bcs/scripts/e2e-runner/bcs_e2e/mock_state.py
+  s_cecdc98e721f4b::t_ec2e925ec80a1b 1-143
+apps/bcs/scripts/e2e-runner/bcs_e2e/network_read_case_run.py
+  s_cecdc98e721f4b::t_fe06b941b0a6cc 1-240
+apps/bcs/scripts/e2e-runner/bcs_e2e/network_register_case_run.py
+  s_cecdc98e721f4b::t_3ee310c453fc53 1-150
+apps/bcs/scripts/e2e-runner/bcs_e2e/network_status_case_run.py
+  s_cecdc98e721f4b::t_95dbf7a0f83582 1-150
+apps/bcs/scripts/e2e-runner/bcs_e2e/observ_transport.py
+  s_cecdc98e721f4b::t_e94da574fc779a 1-178
+apps/bcs/scripts/e2e-runner/bcs_e2e/observ_wire.py
+  s_cecdc98e721f4b::t_9f5758aff572c6 1-158
+apps/bcs/scripts/e2e-runner/bcs_e2e/observation_budget.py
+  s_cecdc98e721f4b::t_44fca68740795e 1-36
+apps/bcs/scripts/e2e-runner/bcs_e2e/observation_gate.py
+  s_cecdc98e721f4b::t_fe2fa01586c158 1-225
+apps/bcs/scripts/e2e-runner/bcs_e2e/operation_authority.py
+  s_cecdc98e721f4b::t_2634826ad7893b 1-80
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_case_run.py
+  s_cecdc98e721f4b::t_41e216e5229ff2 1-128
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_runner.py
+  s_cecdc98e721f4b::t_63cf4e4bcce1b3 1-998
+apps/bcs/scripts/e2e-runner/bcs_e2e/owned_bcs.py
+  s_cecdc98e721f4b::t_5a5291e8aa3ebb 1-343
+apps/bcs/scripts/e2e-runner/bcs_e2e/owned_edge_read_adapter.py
+  s_cecdc98e721f4b::t_48ef1c43ed909b 1-622
+apps/bcs/scripts/e2e-runner/bcs_e2e/owned_local_case_adapter.py
+  s_cecdc98e721f4b::t_705796fcd80d1a 1-932
+apps/bcs/scripts/e2e-runner/bcs_e2e/persistent_mock.py
+  s_cecdc98e721f4b::t_0c92b562f6acab 1-169
+apps/bcs/scripts/e2e-runner/bcs_e2e/pilot.py
+  s_cecdc98e721f4b::t_2235afdeff3cd4 1-534
+apps/bcs/scripts/e2e-runner/bcs_e2e/pool.py
+  s_cecdc98e721f4b::t_75e6462ec47c03 1-249
+apps/bcs/scripts/e2e-runner/bcs_e2e/preflight.py
+  s_cecdc98e721f4b::t_6341933ff48d22 1-84
+apps/bcs/scripts/e2e-runner/bcs_e2e/prepare.py
+  s_cecdc98e721f4b::t_6a06173e34b847 1-77
+apps/bcs/scripts/e2e-runner/bcs_e2e/probe.py
+  s_cecdc98e721f4b::t_c34b71b53f6c97 1-163
+apps/bcs/scripts/e2e-runner/bcs_e2e/producer_inventory.py
+  s_cecdc98e721f4b::t_edff3849311efe 1-54
+apps/bcs/scripts/e2e-runner/bcs_e2e/profile.py
+  s_cecdc98e721f4b::t_0cc489b6960101 1-389
+apps/bcs/scripts/e2e-runner/bcs_e2e/profile_transition.py
+  s_cecdc98e721f4b::t_110625b7c7f2c3 1-90
+apps/bcs/scripts/e2e-runner/bcs_e2e/recheck_review.py
+  s_cecdc98e721f4b::t_c46652f61eab7a 1-181
+apps/bcs/scripts/e2e-runner/bcs_e2e/recovery.py
+  s_cecdc98e721f4b::t_e333b72ecf1909 1-113
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_channel_cli_adapter.py
+  s_cecdc98e721f4b::t_464580af86705d 1-399
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_check.py
+  s_cecdc98e721f4b::t_de99fce1bee3f6 1-77
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_admission_adapter.py
+  s_cecdc98e721f4b::t_ccd8d94c6ddeef 1-105
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_a54757e6239fc9 1-700
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_search_adapter.py
+  s_cecdc98e721f4b::t_7e25b1a226d10d 1-105
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_effects.py
+  s_cecdc98e721f4b::t_ff2cdbcf55a771 1-46
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_friend_cli_accept_adapter.py
+  s_cecdc98e721f4b::t_fbe55938ead77f 1-70
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_friend_connection_decision_adapter.py
+  s_cecdc98e721f4b::t_34e4a9fafdf555 1-172
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_friend_public_accept_adapter.py
+  s_cecdc98e721f4b::t_ba863c2f07b47d 1-141
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_network_adapters.py
+  s_cecdc98e721f4b::t_14b766683c4d65 1-724
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_network_register_adapter.py
+  s_cecdc98e721f4b::t_bec1602d92c8b1 1-190
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_observer.py
+  s_cecdc98e721f4b::t_5e6d5ba8f6a70b 1-481
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_operator_cli_adapter.py
+  s_cecdc98e721f4b::t_d31e06e43af749 1-669
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_reconcile.py
+  s_cecdc98e721f4b::t_f81fd4e0f1a142 1-396
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_run.py
+  s_cecdc98e721f4b::t_07716bdca64c56 1-185
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_structured_core_adapter.py
+  s_cecdc98e721f4b::t_d75f078ac9acb2 1-504
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_webhook_subscription_adapter.py
+  s_cecdc98e721f4b::t_178cd5a7145b54 1-458
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_workspace_cli_status_adapter.py
+  s_cecdc98e721f4b::t_5b27f1fd84ed7d 1-101
+apps/bcs/scripts/e2e-runner/bcs_e2e/reporting.py
+  s_cecdc98e721f4b::t_6d75a3c032f70f 1-675
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained.py
+  s_cecdc98e721f4b::t_146d38431590e9 1-520
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_contract.py
+  s_cecdc98e721f4b::t_b1da1afd3d5e52 1-81
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_file_remote.py
+  s_cecdc98e721f4b::t_4b180066df3bdf 1-339
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_recheck.py
+  s_cecdc98e721f4b::t_35393b60fca105 1-143
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_remote.py
+  s_cecdc98e721f4b::t_54d159ebdda83b 1-361
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_reporting.py
+  s_cecdc98e721f4b::t_d3980a97ab3174 1-311
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_serial.py
+  s_cecdc98e721f4b::t_12c8f531f74298 1-252
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_session_ws.py
+  s_cecdc98e721f4b::t_e24f87e8af4018 1-405
+apps/bcs/scripts/e2e-runner/bcs_e2e/retention_audit.py
+  s_cecdc98e721f4b::t_2b3544e72623d5 1-219
+apps/bcs/scripts/e2e-runner/bcs_e2e/retention_quota.py
+  s_cecdc98e721f4b::t_3daac75e48cc57 1-156
+apps/bcs/scripts/e2e-runner/bcs_e2e/retention_quota_v2.py
+  s_cecdc98e721f4b::t_b89b5039d083b6 1-334
+apps/bcs/scripts/e2e-runner/bcs_e2e/route_bindings.py
+  s_cecdc98e721f4b::t_0aaa48c930f3ee 1-854
+apps/bcs/scripts/e2e-runner/bcs_e2e/run_state.py
+  s_cecdc98e721f4b::t_0d1681b48301d0 1-77
+apps/bcs/scripts/e2e-runner/bcs_e2e/runtime.py
+  s_cecdc98e721f4b::t_14d4c12ed05a54 1-75
+apps/bcs/scripts/e2e-runner/bcs_e2e/scope_observation.py
+  s_cecdc98e721f4b::t_9b667e09147af9 1-100
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_case_run.py
+  s_cecdc98e721f4b::t_d7af05fc3fd151 1-231
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_collection.py
+  s_cecdc98e721f4b::t_9a4a0e2d2791c5 1-543
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_complete_invoke.py
+  s_cecdc98e721f4b::t_0389dc598385a1 1-665
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_profile.py
+  s_cecdc98e721f4b::t_3d5bb6574978f6 1-398
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_shared.py
+  s_cecdc98e721f4b::t_9bac969a03900f 1-878
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_file_core_case_run.py
+  s_cecdc98e721f4b::t_da5d335abe2fb6 1-123
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_file_core_contract.py
+  s_cecdc98e721f4b::t_5b35c1278b9aac 1-998
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_public_case_run.py
+  s_cecdc98e721f4b::t_3f63bc10a70f26 1-173
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_service_cli_case_run.py
+  s_cecdc98e721f4b::t_1f45920652fa12 1-672
+apps/bcs/scripts/e2e-runner/bcs_e2e/sessionless_native.py
+  s_cecdc98e721f4b::t_b9146d854ff0f0 1-151
+apps/bcs/scripts/e2e-runner/bcs_e2e/sessionless_run.py
+  s_cecdc98e721f4b::t_b1d0e015df8a53 1-230
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_core_case_run.py
+  s_cecdc98e721f4b::t_600dc0f2b592a0 1-155
+apps/bcs/scripts/e2e-runner/bcs_e2e/structured_templates_case_run.py
+  s_cecdc98e721f4b::t_da899ae56e7aab 1-145
+apps/bcs/scripts/e2e-runner/bcs_e2e/termination.py
+  s_cecdc98e721f4b::t_b79dae52638746 1-174
+apps/bcs/scripts/e2e-runner/bcs_e2e/transport.py
+  s_cecdc98e721f4b::t_d9cdf393af73cd 1-711
+apps/bcs/scripts/e2e-runner/bcs_e2e/transport_plan.py
+  s_cecdc98e721f4b::t_96abcf1bd3b5d6 1-123
+apps/bcs/scripts/e2e-runner/bcs_e2e/transport_projection.py
+  s_cecdc98e721f4b::t_5f9eeb6d79d0d8 1-125
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_api_steps.py
+  s_cecdc98e721f4b::t_4e39f74e1693ff 1-105
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_baseline.py
+  s_cecdc98e721f4b::t_f7aac55cf2663b 1-81
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_context.py
+  s_cecdc98e721f4b::t_ad786b87eaeb6c 1-133
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_registration.py
+  s_cecdc98e721f4b::t_54da200172bc0f 1-172
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_reporting.py
+  s_cecdc98e721f4b::t_8c456d1bc6d526 1-309
+apps/bcs/scripts/e2e-runner/bcs_e2e/upload_targets.py
+  s_cecdc98e721f4b::t_df91b3b1ab973f 1-68
+apps/bcs/scripts/e2e-runner/bcs_e2e/webhook_subscription_case_run.py
+  s_cecdc98e721f4b::t_ff29ea01622c2a 1-157
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_case_run.py
+  s_cecdc98e721f4b::t_de862ba152be44 1-200
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_commands.py
+  s_cecdc98e721f4b::t_bf7d9a90fe0ccd 1-239
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_create_get_contract.py
+  s_cecdc98e721f4b::t_c99bb813f9afa2 1-228
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_detail_contract.py
+  s_cecdc98e721f4b::t_97d28c69e44782 1-240
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_fuse_contract.py
+  s_cecdc98e721f4b::t_3ece45e7de9552 1-268
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_list_contract.py
+  s_cecdc98e721f4b::t_ccc488783727ce 1-259
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_member_contract.py
+  s_cecdc98e721f4b::t_46c5e267d332ff 1-269
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_profile.py
+  s_cecdc98e721f4b::t_9c825d2c2dad3a 1-800
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_runner.py
+  s_cecdc98e721f4b::t_bb12d510899d1c 1-1004
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_status_contract.py
+  s_cecdc98e721f4b::t_36f4f3beec5e4a 1-254
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_status_run.py
+  s_cecdc98e721f4b::t_9042040cec27e9 1-122
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_group_case_run.py
+  s_cecdc98e721f4b::t_05c59a6b254a97 1-137
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_group_governance_contract.py
+  s_cecdc98e721f4b::t_660ae0a4ce4a0b 1-390
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_group_lifecycle_contract.py
+  s_cecdc98e721f4b::t_5e5d310d9daeae 1-512
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_incident_core_contract.py
+  s_cecdc98e721f4b::t_d2a4b84ca39696 1-523
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_roundtrip_contract.py
+  s_cecdc98e721f4b::t_d1c7cab0f6bed6 1-694
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_story_case_run.py
+  s_cecdc98e721f4b::t_da7bc77a32fbc3 1-165
+apps/bcs/scripts/e2e-runner/bcs_e2e/write_transport.py
+  s_cecdc98e721f4b::t_d28198d3984e37 1-1043
+apps/bcs/scripts/e2e-runner/bcs_e2e/ws_transport.py
+  s_cecdc98e721f4b::t_77e6e1cce72a04 1-285
+apps/bcs/scripts/e2e-runner/caller-execution-migration-contract.json
+  s_cecdc98e721f4b::t_39522dc8d64480 1-140
+apps/bcs/scripts/e2e-runner/channel-cli-migration-contract.json
+  s_cecdc98e721f4b::t_2e494434032007 1-57
+apps/bcs/scripts/e2e-runner/channel-http-migration-contract.json
+  s_cecdc98e721f4b::t_b3cead037d0669 1-46
+apps/bcs/scripts/e2e-runner/collaboration-team-migration-contract.json
+  s_cecdc98e721f4b::t_d4d599af92ee83 1-50
+apps/bcs/scripts/e2e-runner/custom-collaboration-migration-contract.json
+  s_cecdc98e721f4b::t_840564a6889ddb 1-46
+apps/bcs/scripts/e2e-runner/delivery-policy-migration-contract.json
+  s_cecdc98e721f4b::t_0bc44ae1516867 1-90
+apps/bcs/scripts/e2e-runner/direct-chat-migration-contract.json
+  s_cecdc98e721f4b::t_f32f05a59b4819 1-42
+apps/bcs/scripts/e2e-runner/discovery_probe.py
+  s_cecdc98e721f4b::t_50d4fd25040bab 1-77
+apps/bcs/scripts/e2e-runner/draft-group-migration-contract.json
+  s_cecdc98e721f4b::t_a1451070814f41 1-238
+apps/bcs/scripts/e2e-runner/edge-admission-migration-contract.json
+  s_cecdc98e721f4b::t_13929afcd3a31a 1-26
+apps/bcs/scripts/e2e-runner/edge-bot-search-migration-contract.json
+  s_cecdc98e721f4b::t_c4ffcc7fb23f6d 1-127
+apps/bcs/scripts/e2e-runner/edge-friend-connections-list-migration-contract.json
+  s_cecdc98e721f4b::t_1721718aab9e49 1-26
+apps/bcs/scripts/e2e-runner/edge-friend-requests-list-migration-contract.json
+  s_cecdc98e721f4b::t_0384fbfa540e93 1-34
+apps/bcs/scripts/e2e-runner/environment-mapping.md
+  s_cecdc98e721f4b::t_bdb4eb74b6ee69 1-172
+apps/bcs/scripts/e2e-runner/execution-observation-audit.md
+  s_cecdc98e721f4b::t_ebe48a74e16d7c 1-412
+apps/bcs/scripts/e2e-runner/execution-safety-status.md
+  s_cecdc98e721f4b::t_eb042f12cdf778 1-441
+apps/bcs/scripts/e2e-runner/fixed-loop-migration-contract.json
+  s_cecdc98e721f4b::t_3f78e05d44c04d 1-76
+apps/bcs/scripts/e2e-runner/fixture-cron-check.md
+  s_cecdc98e721f4b::t_b06e5ba912999d 1-157
+apps/bcs/scripts/e2e-runner/group-context-migration-contract.json
+  s_cecdc98e721f4b::t_af9bd24820218f 1-55
+apps/bcs/scripts/e2e-runner/input-boundary-gap.md
+  s_cecdc98e721f4b::t_3c961ccb877e33 1-102
+apps/bcs/scripts/e2e-runner/judge-migration-contract.json
+  s_cecdc98e721f4b::t_5fd210aea14aa8 1-189
+apps/bcs/scripts/e2e-runner/local-coverage-suite.md
+  s_cecdc98e721f4b::t_640a87777be335 1-82
+apps/bcs/scripts/e2e-runner/local-entry-switch.md
+  s_cecdc98e721f4b::t_ba76f9b1edb8dc 1-98
+apps/bcs/scripts/e2e-runner/manifest.json
+  s_cecdc98e721f4b::t_b6ef13056262dc 1-444
+apps/bcs/scripts/e2e-runner/migration-contracts.json
+  s_cecdc98e721f4b::t_d1ceabd73cbdbc 1-403
+apps/bcs/scripts/e2e-runner/migration-freeze-review-20261029.md
+  s_cecdc98e721f4b::t_849c68c2cc4799 1-513
+apps/bcs/scripts/e2e-runner/nested-fixed-loop-migration-contract.json
+  s_cecdc98e721f4b::t_ffe77fdfb53514 1-241
+apps/bcs/scripts/e2e-runner/network-migration-contract.json
+  s_cecdc98e721f4b::t_97d1c5d441eeb9 1-59
+apps/bcs/scripts/e2e-runner/next-story-migrations.md
+  s_cecdc98e721f4b::t_221ff687afabfd 1-4224
+apps/bcs/scripts/e2e-runner/operator-cli-migration-contract.json
+  s_cecdc98e721f4b::t_4136a20b2b1142 1-79
+apps/bcs/scripts/e2e-runner/policy-check.md
+  s_cecdc98e721f4b::t_5b43da4fd9e82f 1-167
+apps/bcs/scripts/e2e-runner/preprod_cookie_env.sh
+  s_cecdc98e721f4b::t_4e1df6cc3327cb 1-81
+apps/bcs/scripts/e2e-runner/profiles/local.mock.json
+  s_cecdc98e721f4b::t_415b342c599509 1-53
+apps/bcs/scripts/e2e-runner/profiles/local.singlebox.example.json
+  s_cecdc98e721f4b::t_cb4f87dbb36084 1-151
+apps/bcs/scripts/e2e-runner/profiles/preprod.example.json
+  s_cecdc98e721f4b::t_136b9d9476b333 1-151
+apps/bcs/scripts/e2e-runner/provider-migration-contract.json
+  s_cecdc98e721f4b::t_c4085a5203e7c3 1-266
+apps/bcs/scripts/e2e-runner/remote-run.md
+  s_cecdc98e721f4b::t_df537aa7f39423 1-684
+apps/bcs/scripts/e2e-runner/result-queue-migration-contract.json
+  s_cecdc98e721f4b::t_9847eeea0b43c4 1-254
+apps/bcs/scripts/e2e-runner/retained-closure-matrix.md
+  s_cecdc98e721f4b::t_f48e807d04df07 1-150
+apps/bcs/scripts/e2e-runner/retained-file-manifest.json
+  s_cecdc98e721f4b::t_3cd90ce9c5b637 1-278
+apps/bcs/scripts/e2e-runner/retained-file.md
+  s_cecdc98e721f4b::t_81a9f04eca4090 1-485
+apps/bcs/scripts/e2e-runner/retained-manifest.json
+  s_cecdc98e721f4b::t_58b3270028e746 1-333
+apps/bcs/scripts/e2e-runner/retained-pilot-plan.md
+  s_cecdc98e721f4b::t_40c8014d6a9577 1-243
+apps/bcs/scripts/e2e-runner/retained-remote.md
+  s_cecdc98e721f4b::t_84dc017461ff4c 1-679
+apps/bcs/scripts/e2e-runner/retained-serial-admission.md
+  s_cecdc98e721f4b::t_2b081b6f043593 1-231
+apps/bcs/scripts/e2e-runner/retention-contracts.md
+  s_cecdc98e721f4b::t_b6d8af717f5c1f 1-91
+apps/bcs/scripts/e2e-runner/runner.py
+  s_cecdc98e721f4b::t_9dc5ea262ca7ce 1-6
+apps/bcs/scripts/e2e-runner/session-migration-contract.json
+  s_cecdc98e721f4b::t_43ba4ed9b5aba6 1-67
+apps/bcs/scripts/e2e-runner/sessions-services-migration-contract.json
+  s_cecdc98e721f4b::t_1d9b29f8da5527 1-30
+apps/bcs/scripts/e2e-runner/structured-migration-contract.json
+  s_cecdc98e721f4b::t_d5169af189dc46 1-130
+apps/bcs/scripts/e2e-runner/task-3.2-acceptance.md
+  s_cecdc98e721f4b::t_1f848455be389a 1-76
+apps/bcs/scripts/e2e-runner/task-3.3-acceptance.md
+  s_cecdc98e721f4b::t_54a71a2a4a7f2c 1-63
+apps/bcs/scripts/e2e-runner/task-3.4-acceptance.md
+  s_cecdc98e721f4b::t_4b4377dfb87b32 1-72
+apps/bcs/scripts/e2e-runner/tests/test_actor_admission.py
+  s_cecdc98e721f4b::t_75aca3ddd28009 1-58
+apps/bcs/scripts/e2e-runner/tests/test_alisd_wire.py
+  s_cecdc98e721f4b::t_1c742ec926ae8e 1-92
+apps/bcs/scripts/e2e-runner/tests/test_alisddbquery.py
+  s_cecdc98e721f4b::t_04f861a85c3c5d 1-173
+apps/bcs/scripts/e2e-runner/tests/test_alisddbquery_process.py
+  s_cecdc98e721f4b::t_388b9495ad2b01 1-130
+apps/bcs/scripts/e2e-runner/tests/test_bounded_process.py
+  s_cecdc98e721f4b::t_8cd9d7c6d5a04c 1-109
+apps/bcs/scripts/e2e-runner/tests/test_browser_context.py
+  s_cecdc98e721f4b::t_b60dbbeeb48b05 1-176
+apps/bcs/scripts/e2e-runner/tests/test_cancellation_fence.py
+  s_cecdc98e721f4b::t_fc5102480cb3f5 1-187
+apps/bcs/scripts/e2e-runner/tests/test_case_adapters.py
+  s_cecdc98e721f4b::t_837cd3ec8e6586 1-97
+apps/bcs/scripts/e2e-runner/tests/test_case_diagnostics.py
+  s_cecdc98e721f4b::t_53b9fc9f43936e 1-142
+apps/bcs/scripts/e2e-runner/tests/test_case_executor.py
+  s_cecdc98e721f4b::t_57462e0fc9c809 1-165
+apps/bcs/scripts/e2e-runner/tests/test_case_guard.py
+  s_cecdc98e721f4b::t_ef2bab3399f260 1-60
+apps/bcs/scripts/e2e-runner/tests/test_case_rewrite.py
+  s_cecdc98e721f4b::t_765671d1dcaae5 1-161
+apps/bcs/scripts/e2e-runner/tests/test_case_scope.py
+  s_cecdc98e721f4b::t_b9963bb15ddabb 1-327
+apps/bcs/scripts/e2e-runner/tests/test_channel_bindings_case_run.py
+  s_cecdc98e721f4b::t_bfbba06d45c39b 1-235
+apps/bcs/scripts/e2e-runner/tests/test_channel_cli_case_run.py
+  s_cecdc98e721f4b::t_730e132692793e 1-183
+apps/bcs/scripts/e2e-runner/tests/test_cleanup.py
+  s_cecdc98e721f4b::t_ed32359b6c55b1 1-219
+apps/bcs/scripts/e2e-runner/tests/test_cleanup_inventory.py
+  s_cecdc98e721f4b::t_25c35a37c73902 1-205
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team.py
+  s_cecdc98e721f4b::t_9f584dc87f31af 1-444
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team_case_run.py
+  s_cecdc98e721f4b::t_7c1446b41473f3 1-219
+apps/bcs/scripts/e2e-runner/tests/test_context.py
+  s_cecdc98e721f4b::t_81a5ad7b6dd808 1-198
+apps/bcs/scripts/e2e-runner/tests/test_correlation.py
+  s_cecdc98e721f4b::t_83f8de6c04e1d8 1-123
+apps/bcs/scripts/e2e-runner/tests/test_custom_collaboration_cli_case_run.py
+  s_cecdc98e721f4b::t_6eb195470d1026 1-1014
+apps/bcs/scripts/e2e-runner/tests/test_delivery_activity.py
+  s_cecdc98e721f4b::t_fcbb69391ee68b 1-101
+apps/bcs/scripts/e2e-runner/tests/test_delivery_observation.py
+  s_cecdc98e721f4b::t_4d16314a295d4b 1-431
+apps/bcs/scripts/e2e-runner/tests/test_delivery_pagination.py
+  s_cecdc98e721f4b::t_e109d1ef76fcf3 1-314
+apps/bcs/scripts/e2e-runner/tests/test_delivery_policy_check.py
+  s_cecdc98e721f4b::t_7db469a7e02341 1-254
+apps/bcs/scripts/e2e-runner/tests/test_delivery_policy_cli_case_run.py
+  s_cecdc98e721f4b::t_84d88991916714 1-300
+apps/bcs/scripts/e2e-runner/tests/test_delivery_wait.py
+  s_cecdc98e721f4b::t_3c9820e501ec61 1-196
+apps/bcs/scripts/e2e-runner/tests/test_diagnostics.py
+  s_cecdc98e721f4b::t_56cbca15c2ae9a 1-76
+apps/bcs/scripts/e2e-runner/tests/test_direct_chat_cli_case_leaf.py
+  s_cecdc98e721f4b::t_ce9c17e115ffc0 1-587
+apps/bcs/scripts/e2e-runner/tests/test_direct_chat_cli_case_run.py
+  s_cecdc98e721f4b::t_8bccd2929a0e9c 1-1319
+apps/bcs/scripts/e2e-runner/tests/test_docker_binding.py
+  s_cecdc98e721f4b::t_499b5b62b4dcd7 1-258
+apps/bcs/scripts/e2e-runner/tests/test_downstream_observation.py
+  s_cecdc98e721f4b::t_902c878c430e49 1-373
+apps/bcs/scripts/e2e-runner/tests/test_edge_friend_mutation_case_run.py
+  s_cecdc98e721f4b::t_a556e2d9191362 1-231
+apps/bcs/scripts/e2e-runner/tests/test_edge_read_case.py
+  s_cecdc98e721f4b::t_7e9313a4109647 1-143
+apps/bcs/scripts/e2e-runner/tests/test_edge_read_case_run.py
+  s_cecdc98e721f4b::t_a2c8faf487c8de 1-391
+apps/bcs/scripts/e2e-runner/tests/test_edge_read_contracts.py
+  s_cecdc98e721f4b::t_4a4c7d15fb67f8 1-140
+apps/bcs/scripts/e2e-runner/tests/test_edge_search_case.py
+  s_cecdc98e721f4b::t_522ecbe3c35780 1-158
+apps/bcs/scripts/e2e-runner/tests/test_edge_search_contract.py
+  s_cecdc98e721f4b::t_adbe9c9ab5a139 1-85
+apps/bcs/scripts/e2e-runner/tests/test_effect_policy.py
+  s_cecdc98e721f4b::t_869c8af589e751 1-105
+apps/bcs/scripts/e2e-runner/tests/test_evidence.py
+  s_cecdc98e721f4b::t_42725f8454a8c3 1-149
+apps/bcs/scripts/e2e-runner/tests/test_evidence_policy.py
+  s_cecdc98e721f4b::t_2c109ad3784cd3 1-111
+apps/bcs/scripts/e2e-runner/tests/test_execution_control.py
+  s_cecdc98e721f4b::t_7f498628eeeb06 1-207
+apps/bcs/scripts/e2e-runner/tests/test_execution_ledger.py
+  s_cecdc98e721f4b::t_334f9bfe2c8d0f 1-62
+apps/bcs/scripts/e2e-runner/tests/test_execution_safety.py
+  s_cecdc98e721f4b::t_c015e8d3031eb3 1-206
+apps/bcs/scripts/e2e-runner/tests/test_failure_evidence.py
+  s_cecdc98e721f4b::t_70516f488e7a98 1-211
+apps/bcs/scripts/e2e-runner/tests/test_fault_scenarios.py
+  s_cecdc98e721f4b::t_6ccd813cf4042d 1-167
+apps/bcs/scripts/e2e-runner/tests/test_file_steps.py
+  s_cecdc98e721f4b::t_8970155d6d343c 1-97
+apps/bcs/scripts/e2e-runner/tests/test_file_story_assertions.py
+  s_cecdc98e721f4b::t_0ae74fba6919db 1-188
+apps/bcs/scripts/e2e-runner/tests/test_file_transport.py
+  s_cecdc98e721f4b::t_5655f630fc7cb3 1-371
+apps/bcs/scripts/e2e-runner/tests/test_fixture_cron.py
+  s_cecdc98e721f4b::t_5353241b5c2f50 1-93
+apps/bcs/scripts/e2e-runner/tests/test_fixture_cron_check.py
+  s_cecdc98e721f4b::t_76a82468df02c9 1-206
+apps/bcs/scripts/e2e-runner/tests/test_fixtures.py
+  s_cecdc98e721f4b::t_18c98d1266d930 1-91
+apps/bcs/scripts/e2e-runner/tests/test_friend_cli_case_run.py
+  s_cecdc98e721f4b::t_59c5a329f5d9c2 1-188
+apps/bcs/scripts/e2e-runner/tests/test_friend_cli_runner.py
+  s_cecdc98e721f4b::t_4d4795c96e0d6c 1-178
+apps/bcs/scripts/e2e-runner/tests/test_friend_connection_decision_case_run.py
+  s_cecdc98e721f4b::t_c8b8371523d9ab 1-304
+apps/bcs/scripts/e2e-runner/tests/test_friend_public_accept_case_run.py
+  s_cecdc98e721f4b::t_80d8044ea4b5ef 1-269
+apps/bcs/scripts/e2e-runner/tests/test_global_policy_scope.py
+  s_cecdc98e721f4b::t_b3a7353cdfec9e 1-244
+apps/bcs/scripts/e2e-runner/tests/test_group_context_adapter.py
+  s_cecdc98e721f4b::t_38f5b5cdd3204b 1-339
+apps/bcs/scripts/e2e-runner/tests/test_group_context_case_run.py
+  s_cecdc98e721f4b::t_0234554df7468a 1-400
+apps/bcs/scripts/e2e-runner/tests/test_group_context_contract.py
+  s_cecdc98e721f4b::t_5a04ea77a186a5 1-300
+apps/bcs/scripts/e2e-runner/tests/test_group_story_assertions.py
+  s_cecdc98e721f4b::t_d6fccfc11a5d57 1-114
+apps/bcs/scripts/e2e-runner/tests/test_human_view_identity.py
+  s_cecdc98e721f4b::t_7cc6db03c52f7c 1-185
+apps/bcs/scripts/e2e-runner/tests/test_identity_binding.py
+  s_cecdc98e721f4b::t_075cf394ca1211 1-261
+apps/bcs/scripts/e2e-runner/tests/test_initial_session_cleanup.py
+  s_cecdc98e721f4b::t_a3e77703d09980 1-144
+apps/bcs/scripts/e2e-runner/tests/test_inventory.py
+  s_cecdc98e721f4b::t_03bf9b53d90a8f 1-157
+apps/bcs/scripts/e2e-runner/tests/test_ledger.py
+  s_cecdc98e721f4b::t_b89434aaad0ded 1-195
+apps/bcs/scripts/e2e-runner/tests/test_ledger_readonly.py
+  s_cecdc98e721f4b::t_5b18dac2aee4bc 1-109
+apps/bcs/scripts/e2e-runner/tests/test_legacy_file_assertions.py
+  s_cecdc98e721f4b::t_950fe1de364f40 1-91
+apps/bcs/scripts/e2e-runner/tests/test_legacy_file_views_live.py
+  s_cecdc98e721f4b::t_4b8e6d9e0a969b 1-98
+apps/bcs/scripts/e2e-runner/tests/test_local_auth.py
+  s_cecdc98e721f4b::t_c9b81155f63a9d 1-123
+apps/bcs/scripts/e2e-runner/tests/test_local_bot_receiver.py
+  s_cecdc98e721f4b::t_4b6d4ca9c4a547 1-299
+apps/bcs/scripts/e2e-runner/tests/test_local_caller_execution.py
+  s_cecdc98e721f4b::t_d78dd07aa0fa94 1-340
+apps/bcs/scripts/e2e-runner/tests/test_local_channel_cli.py
+  s_cecdc98e721f4b::t_7f255a80f480fb 1-190
+apps/bcs/scripts/e2e-runner/tests/test_local_channel_cli_run.py
+  s_cecdc98e721f4b::t_7f67bd375ae018 1-138
+apps/bcs/scripts/e2e-runner/tests/test_local_channel_http.py
+  s_cecdc98e721f4b::t_81c21dc4903987 1-168
+apps/bcs/scripts/e2e-runner/tests/test_local_cli.py
+  s_cecdc98e721f4b::t_79854bcd6863cb 1-573
+apps/bcs/scripts/e2e-runner/tests/test_local_cli_check.py
+  s_cecdc98e721f4b::t_9134859efac780 1-247
+apps/bcs/scripts/e2e-runner/tests/test_local_cli_exchange.py
+  s_cecdc98e721f4b::t_d8dbf267884817 1-287
+apps/bcs/scripts/e2e-runner/tests/test_local_collaboration_team_case_live.py
+  s_cecdc98e721f4b::t_51ca29c92dcbc5 1-184
+apps/bcs/scripts/e2e-runner/tests/test_local_collaboration_team_run.py
+  s_cecdc98e721f4b::t_04172be85027d9 1-257
+apps/bcs/scripts/e2e-runner/tests/test_local_config.py
+  s_cecdc98e721f4b::t_1fe979d5bbb646 1-169
+apps/bcs/scripts/e2e-runner/tests/test_local_coverage_suite.py
+  s_cecdc98e721f4b::t_050a1ca4781276 1-370
+apps/bcs/scripts/e2e-runner/tests/test_local_custom_collaboration_case.py
+  s_cecdc98e721f4b::t_0318643ec11e15 1-132
+apps/bcs/scripts/e2e-runner/tests/test_local_custom_collaboration_run.py
+  s_cecdc98e721f4b::t_438cfcaed24e60 1-320
+apps/bcs/scripts/e2e-runner/tests/test_local_delivery_policy.py
+  s_cecdc98e721f4b::t_ec008cff2b2051 1-198
+apps/bcs/scripts/e2e-runner/tests/test_local_direct_chat.py
+  s_cecdc98e721f4b::t_d20b3fb740c034 1-390
+apps/bcs/scripts/e2e-runner/tests/test_local_direct_chat_run.py
+  s_cecdc98e721f4b::t_38cadd85b33658 1-122
+apps/bcs/scripts/e2e-runner/tests/test_local_direct_receiver.py
+  s_cecdc98e721f4b::t_6eb3d3fd28b46e 1-81
+apps/bcs/scripts/e2e-runner/tests/test_local_draft_group_contract.py
+  s_cecdc98e721f4b::t_8daf26a7df4831 1-146
+apps/bcs/scripts/e2e-runner/tests/test_local_draft_group_run.py
+  s_cecdc98e721f4b::t_ec198ade4003f0 1-569
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutation_contract.py
+  s_cecdc98e721f4b::t_a3578b4c9d5d73 1-159
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutations_gating.py
+  s_cecdc98e721f4b::t_af68baf7f97ecd 1-218
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_read_run.py
+  s_cecdc98e721f4b::t_9a52dbf9868694 1-173
+apps/bcs/scripts/e2e-runner/tests/test_local_entry_switch.py
+  s_cecdc98e721f4b::t_2751cfff95395e 1-151
+apps/bcs/scripts/e2e-runner/tests/test_local_event.py
+  s_cecdc98e721f4b::t_7288cdfccc4d78 1-144
+apps/bcs/scripts/e2e-runner/tests/test_local_event_config.py
+  s_cecdc98e721f4b::t_a79bb0407608d4 1-57
+apps/bcs/scripts/e2e-runner/tests/test_local_event_contract.py
+  s_cecdc98e721f4b::t_f87a97c0d15593 1-56
+apps/bcs/scripts/e2e-runner/tests/test_local_event_sink.py
+  s_cecdc98e721f4b::t_02ab54a8b27103 1-248
+apps/bcs/scripts/e2e-runner/tests/test_local_event_storage.py
+  s_cecdc98e721f4b::t_ed0cb91a5d095b 1-238
+apps/bcs/scripts/e2e-runner/tests/test_local_execution_effects.py
+  s_cecdc98e721f4b::t_34d92389b6087d 1-148
+apps/bcs/scripts/e2e-runner/tests/test_local_file_exchange.py
+  s_cecdc98e721f4b::t_ba7a93a23452e1 1-293
+apps/bcs/scripts/e2e-runner/tests/test_local_file_retention_reporting.py
+  s_cecdc98e721f4b::t_487e400c542695 1-150
+apps/bcs/scripts/e2e-runner/tests/test_local_file_setup.py
+  s_cecdc98e721f4b::t_9675c73d1a3ac5 1-250
+apps/bcs/scripts/e2e-runner/tests/test_local_file_story.py
+  s_cecdc98e721f4b::t_2ca7acc7b50a6f 1-280
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_case_live.py
+  s_cecdc98e721f4b::t_574262d4594630 1-131
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_aa57b861db9320 1-95
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_route_live.py
+  s_cecdc98e721f4b::t_33cfab09faf9e0 1-103
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_sandbox.py
+  s_cecdc98e721f4b::t_5828fa20637aaa 1-135
+apps/bcs/scripts/e2e-runner/tests/test_local_fixture_sets.py
+  s_cecdc98e721f4b::t_162badfaf358a4 1-205
+apps/bcs/scripts/e2e-runner/tests/test_local_fixtures.py
+  s_cecdc98e721f4b::t_5b8659b4c1481a 1-161
+apps/bcs/scripts/e2e-runner/tests/test_local_judge_config.py
+  s_cecdc98e721f4b::t_762bebc3365a2b 1-82
+apps/bcs/scripts/e2e-runner/tests/test_local_judge_contract.py
+  s_cecdc98e721f4b::t_eb0b75781c6c63 1-48
+apps/bcs/scripts/e2e-runner/tests/test_local_judge_sandbox.py
+  s_cecdc98e721f4b::t_ca3f5e01fcb536 1-368
+apps/bcs/scripts/e2e-runner/tests/test_local_log_selection.py
+  s_cecdc98e721f4b::t_72f2e4092e2d1f 1-99
+apps/bcs/scripts/e2e-runner/tests/test_local_logs.py
+  s_cecdc98e721f4b::t_b118a7b37c40a3 1-134
+apps/bcs/scripts/e2e-runner/tests/test_local_nested_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_526a2efddf800d 1-170
+apps/bcs/scripts/e2e-runner/tests/test_local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_3d9412d829ad91 1-622
+apps/bcs/scripts/e2e-runner/tests/test_local_network_api.py
+  s_cecdc98e721f4b::t_e2d91a80b70b77 1-395
+apps/bcs/scripts/e2e-runner/tests/test_local_network_run.py
+  s_cecdc98e721f4b::t_86a374bdd853fa 1-194
+apps/bcs/scripts/e2e-runner/tests/test_local_operator_cli.py
+  s_cecdc98e721f4b::t_8235d251b6ceec 1-257
+apps/bcs/scripts/e2e-runner/tests/test_local_panel_asset.py
+  s_cecdc98e721f4b::t_3592fb42ff73d2 1-151
+apps/bcs/scripts/e2e-runner/tests/test_local_panel_runtime.py
+  s_cecdc98e721f4b::t_90f6f4ffe790aa 1-113
+apps/bcs/scripts/e2e-runner/tests/test_local_pilot_integration.py
+  s_cecdc98e721f4b::t_9dafb35fa9bd96 1-68
+apps/bcs/scripts/e2e-runner/tests/test_local_pilot_live.py
+  s_cecdc98e721f4b::t_0470840be4a464 1-561
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_api.py
+  s_cecdc98e721f4b::t_c31783e9e38d9a 1-528
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_contract.py
+  s_cecdc98e721f4b::t_53e7e48c49b46b 1-57
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_run.py
+  s_cecdc98e721f4b::t_6f8940ed612ca9 1-126
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_sink.py
+  s_cecdc98e721f4b::t_2e65557728f208 1-233
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_sink_live.py
+  s_cecdc98e721f4b::t_460b0b7f97c91c 1-108
+apps/bcs/scripts/e2e-runner/tests/test_local_recovery.py
+  s_cecdc98e721f4b::t_5c9785eeff89ef 1-294
+apps/bcs/scripts/e2e-runner/tests/test_local_result_queue_contract.py
+  s_cecdc98e721f4b::t_e44466fd0f503e 1-149
+apps/bcs/scripts/e2e-runner/tests/test_local_result_queue_run.py
+  s_cecdc98e721f4b::t_2cf22d3db84f96 1-572
+apps/bcs/scripts/e2e-runner/tests/test_local_role_identity.py
+  s_cecdc98e721f4b::t_e6a0829be0b146 1-168
+apps/bcs/scripts/e2e-runner/tests/test_local_run.py
+  s_cecdc98e721f4b::t_5fb3b7f98db1c9 1-324
+apps/bcs/scripts/e2e-runner/tests/test_local_session_completion.py
+  s_cecdc98e721f4b::t_90dba05c20bfe3 1-198
+apps/bcs/scripts/e2e-runner/tests/test_local_session_flow.py
+  s_cecdc98e721f4b::t_6742ed7b07dd4f 1-194
+apps/bcs/scripts/e2e-runner/tests/test_local_session_public.py
+  s_cecdc98e721f4b::t_772cf9b294d3e8 1-309
+apps/bcs/scripts/e2e-runner/tests/test_local_session_run.py
+  s_cecdc98e721f4b::t_0fac78f6c930e4 1-198
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_cli.py
+  s_cecdc98e721f4b::t_76bb2e8375b596 1-405
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_completion.py
+  s_cecdc98e721f4b::t_4bf62b946c8000 1-471
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_member_chat.py
+  s_cecdc98e721f4b::t_ce416a5aeb883f 1-413
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_parent_case.py
+  s_cecdc98e721f4b::t_38834e798dfd62 1-126
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_parent_run.py
+  s_cecdc98e721f4b::t_ab8b519bf0003a 1-561
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing.py
+  s_cecdc98e721f4b::t_c48dd85f73d1dd 1-438
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing_run.py
+  s_cecdc98e721f4b::t_f474c2079f40dc 1-174
+apps/bcs/scripts/e2e-runner/tests/test_local_slow_judge_run.py
+  s_cecdc98e721f4b::t_f0e41d1b0b6628 1-54
+apps/bcs/scripts/e2e-runner/tests/test_local_sqlite.py
+  s_cecdc98e721f4b::t_3574f099544508 1-187
+apps/bcs/scripts/e2e-runner/tests/test_local_story_commands.py
+  s_cecdc98e721f4b::t_1c0cac5f339190 1-582
+apps/bcs/scripts/e2e-runner/tests/test_local_structured.py
+  s_cecdc98e721f4b::t_254c81f22cd893 1-197
+apps/bcs/scripts/e2e-runner/tests/test_local_structured_contract.py
+  s_cecdc98e721f4b::t_edffbdc1d5bce6 1-51
+apps/bcs/scripts/e2e-runner/tests/test_local_structured_receiver.py
+  s_cecdc98e721f4b::t_9b08aa5462cb80 1-101
+apps/bcs/scripts/e2e-runner/tests/test_local_structured_storage.py
+  s_cecdc98e721f4b::t_8c954b58d9197c 1-98
+apps/bcs/scripts/e2e-runner/tests/test_local_template_asset.py
+  s_cecdc98e721f4b::t_932637b7f28b11 1-200
+apps/bcs/scripts/e2e-runner/tests/test_local_template_runtime.py
+  s_cecdc98e721f4b::t_77f7421769a581 1-156
+apps/bcs/scripts/e2e-runner/tests/test_local_trust_api.py
+  s_cecdc98e721f4b::t_7df8f826c66203 1-328
+apps/bcs/scripts/e2e-runner/tests/test_local_trust_cli.py
+  s_cecdc98e721f4b::t_83684a3779ae49 1-468
+apps/bcs/scripts/e2e-runner/tests/test_local_trust_store.py
+  s_cecdc98e721f4b::t_91edffe7d5b460 1-114
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_api.py
+  s_cecdc98e721f4b::t_740a664b43d0dd 1-261
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_cli.py
+  s_cecdc98e721f4b::t_a57c696e10cde1 1-330
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_combined.py
+  s_cecdc98e721f4b::t_3063f73243e5e5 1-117
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_config_run.py
+  s_cecdc98e721f4b::t_2e95cca2276ce7 1-121
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_context.py
+  s_cecdc98e721f4b::t_79cc14f438f162 1-93
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_delete.py
+  s_cecdc98e721f4b::t_b1b18663ed8ae9 1-166
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_incident.py
+  s_cecdc98e721f4b::t_02bcc2c463da02 1-211
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_messages.py
+  s_cecdc98e721f4b::t_454484f0a16ba2 1-181
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_reporting.py
+  s_cecdc98e721f4b::t_4267bdff7c3e07 1-169
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_run.py
+  s_cecdc98e721f4b::t_cfd7774362db01 1-149
+apps/bcs/scripts/e2e-runner/tests/test_log_observer.py
+  s_cecdc98e721f4b::t_39390a593c36d4 1-101
+apps/bcs/scripts/e2e-runner/tests/test_mapping_recheck.py
+  s_cecdc98e721f4b::t_b01414c13e34e2 1-253
+apps/bcs/scripts/e2e-runner/tests/test_mcp_reuse_conformance.py
+  s_cecdc98e721f4b::t_25ec7d8f0e501f 1-158
+apps/bcs/scripts/e2e-runner/tests/test_metadata_probe.py
+  s_cecdc98e721f4b::t_83d5a840c8efcf 1-242
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_a1f47db8104613 1-580
+apps/bcs/scripts/e2e-runner/tests/test_network_read_case_run.py
+  s_cecdc98e721f4b::t_5fed9935872142 1-465
+apps/bcs/scripts/e2e-runner/tests/test_network_register_case_run.py
+  s_cecdc98e721f4b::t_2bd6e6d2a5fe5c 1-234
+apps/bcs/scripts/e2e-runner/tests/test_network_status_case_run.py
+  s_cecdc98e721f4b::t_143bddad52b46a 1-227
+apps/bcs/scripts/e2e-runner/tests/test_observ_transport.py
+  s_cecdc98e721f4b::t_20d732b16ea76e 1-361
+apps/bcs/scripts/e2e-runner/tests/test_observation_budget.py
+  s_cecdc98e721f4b::t_aa4f180cf0be99 1-339
+apps/bcs/scripts/e2e-runner/tests/test_observation_gate.py
+  s_cecdc98e721f4b::t_f6900e70d18440 1-168
+apps/bcs/scripts/e2e-runner/tests/test_observation_scope.py
+  s_cecdc98e721f4b::t_622ac50a53c1fb 1-252
+apps/bcs/scripts/e2e-runner/tests/test_observer_admission_diagnostic.py
+  s_cecdc98e721f4b::t_a7d6d24447ae77 1-197
+apps/bcs/scripts/e2e-runner/tests/test_operation_authority.py
+  s_cecdc98e721f4b::t_637822cff54f7a 1-242
+apps/bcs/scripts/e2e-runner/tests/test_operator_cli_case_run.py
+  s_cecdc98e721f4b::t_5e3f0848842971 1-185
+apps/bcs/scripts/e2e-runner/tests/test_operator_cli_retained_admission.py
+  s_cecdc98e721f4b::t_8b331c647b3dbe 1-230
+apps/bcs/scripts/e2e-runner/tests/test_operator_cli_runner.py
+  s_cecdc98e721f4b::t_408a919e3b85ed 1-958
+apps/bcs/scripts/e2e-runner/tests/test_owned_bcs.py
+  s_cecdc98e721f4b::t_4cf6fe52f2206a 1-193
+apps/bcs/scripts/e2e-runner/tests/test_owned_bcs_live.py
+  s_cecdc98e721f4b::t_7a8fe203dfc693 1-367
+apps/bcs/scripts/e2e-runner/tests/test_owned_edge_read_adapter.py
+  s_cecdc98e721f4b::t_ade7dc897b2270 1-85
+apps/bcs/scripts/e2e-runner/tests/test_owned_edge_search_adapter.py
+  s_cecdc98e721f4b::t_85ce03a94bd8d3 1-83
+apps/bcs/scripts/e2e-runner/tests/test_owned_local_case_adapter.py
+  s_cecdc98e721f4b::t_822467a1e599e5 1-69
+apps/bcs/scripts/e2e-runner/tests/test_persistent_mock.py
+  s_cecdc98e721f4b::t_1c1dee6baaf98b 1-182
+apps/bcs/scripts/e2e-runner/tests/test_pilot.py
+  s_cecdc98e721f4b::t_76bc27e7d2136b 1-248
+apps/bcs/scripts/e2e-runner/tests/test_pool.py
+  s_cecdc98e721f4b::t_4b782ed3c5f1da 1-175
+apps/bcs/scripts/e2e-runner/tests/test_pool_scope.py
+  s_cecdc98e721f4b::t_c89a26b6ee1d04 1-83
+apps/bcs/scripts/e2e-runner/tests/test_prepare.py
+  s_cecdc98e721f4b::t_19706e9cf73ef9 1-41
+apps/bcs/scripts/e2e-runner/tests/test_probe.py
+  s_cecdc98e721f4b::t_fee4fdef718835 1-184
+apps/bcs/scripts/e2e-runner/tests/test_probe_lifecycle.py
+  s_cecdc98e721f4b::t_07ecd2c7946f8d 1-223
+apps/bcs/scripts/e2e-runner/tests/test_producer_inventory.py
+  s_cecdc98e721f4b::t_95b7aa2f0887b2 1-330
+apps/bcs/scripts/e2e-runner/tests/test_profile_axes.py
+  s_cecdc98e721f4b::t_a7c1c898f8ea33 1-88
+apps/bcs/scripts/e2e-runner/tests/test_profile_transition.py
+  s_cecdc98e721f4b::t_81836a87b04048 1-187
+apps/bcs/scripts/e2e-runner/tests/test_public_session_case.py
+  s_cecdc98e721f4b::t_3bfa80b7e23058 1-140
+apps/bcs/scripts/e2e-runner/tests/test_qualification.py
+  s_cecdc98e721f4b::t_fb2704f1dafc77 1-51
+apps/bcs/scripts/e2e-runner/tests/test_quota_group_increase.py
+  s_cecdc98e721f4b::t_402a58ff03510c 1-278
+apps/bcs/scripts/e2e-runner/tests/test_quota_group_increase_report.py
+  s_cecdc98e721f4b::t_596b86a25dea21 1-140
+apps/bcs/scripts/e2e-runner/tests/test_remote_channel_bindings_adapter.py
+  s_cecdc98e721f4b::t_a5397b9ff4bb60 1-294
+apps/bcs/scripts/e2e-runner/tests/test_remote_channel_cli_adapter.py
+  s_cecdc98e721f4b::t_1cc310b42a72b7 1-491
+apps/bcs/scripts/e2e-runner/tests/test_remote_check.py
+  s_cecdc98e721f4b::t_ab4148c545c6bf 1-165
+apps/bcs/scripts/e2e-runner/tests/test_remote_cleanup_scope.py
+  s_cecdc98e721f4b::t_60f9532d74b7d2 1-82
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_admission_adapter.py
+  s_cecdc98e721f4b::t_4affea25e8cc71 1-244
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_bd5d653a9f053d 1-493
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_transport.py
+  s_cecdc98e721f4b::t_44184f15706985 1-586
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_read_adapter.py
+  s_cecdc98e721f4b::t_3e0173061947d3 1-413
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_search_adapter.py
+  s_cecdc98e721f4b::t_54c5ccd81c1323 1-267
+apps/bcs/scripts/e2e-runner/tests/test_remote_effects.py
+  s_cecdc98e721f4b::t_be95ddcae07e45 1-111
+apps/bcs/scripts/e2e-runner/tests/test_remote_friend_cli_accept_adapter.py
+  s_cecdc98e721f4b::t_26f8b01d513fee 1-241
+apps/bcs/scripts/e2e-runner/tests/test_remote_friend_connection_decision_adapter.py
+  s_cecdc98e721f4b::t_feabcf2ebe6098 1-315
+apps/bcs/scripts/e2e-runner/tests/test_remote_friend_public_accept_adapter.py
+  s_cecdc98e721f4b::t_fff4014d76d955 1-357
+apps/bcs/scripts/e2e-runner/tests/test_remote_network_actor_status_adapter.py
+  s_cecdc98e721f4b::t_2221f0491471b4 1-263
+apps/bcs/scripts/e2e-runner/tests/test_remote_network_read_adapter.py
+  s_cecdc98e721f4b::t_018f72f31d124b 1-816
+apps/bcs/scripts/e2e-runner/tests/test_remote_network_register_adapter.py
+  s_cecdc98e721f4b::t_2e3b8246fce834 1-528
+apps/bcs/scripts/e2e-runner/tests/test_remote_observer_cli.py
+  s_cecdc98e721f4b::t_f1be3567d0cdad 1-454
+apps/bcs/scripts/e2e-runner/tests/test_remote_operator_cli_adapter.py
+  s_cecdc98e721f4b::t_49f8750913375c 1-1000
+apps/bcs/scripts/e2e-runner/tests/test_remote_pilot_all_cases.py
+  s_cecdc98e721f4b::t_ef9f4ba2954859 1-123
+apps/bcs/scripts/e2e-runner/tests/test_remote_pilot_composition.py
+  s_cecdc98e721f4b::t_1d5943710d6441 1-173
+apps/bcs/scripts/e2e-runner/tests/test_remote_platform_asset_adapter.py
+  s_cecdc98e721f4b::t_a435dded48f7f1 1-313
+apps/bcs/scripts/e2e-runner/tests/test_remote_reconcile.py
+  s_cecdc98e721f4b::t_af50effa4d1aa9 1-367
+apps/bcs/scripts/e2e-runner/tests/test_remote_run.py
+  s_cecdc98e721f4b::t_865df8364a2ae5 1-352
+apps/bcs/scripts/e2e-runner/tests/test_remote_structured_core_adapter.py
+  s_cecdc98e721f4b::t_74695b2a9e260c 1-735
+apps/bcs/scripts/e2e-runner/tests/test_remote_structured_templates_adapter.py
+  s_cecdc98e721f4b::t_8980757b2f8cac 1-249
+apps/bcs/scripts/e2e-runner/tests/test_remote_webhook_subscription_adapter.py
+  s_cecdc98e721f4b::t_97598c4ce7367f 1-727
+apps/bcs/scripts/e2e-runner/tests/test_remote_workspace_cli_create_get_adapter.py
+  s_cecdc98e721f4b::t_923b703306486d 1-178
+apps/bcs/scripts/e2e-runner/tests/test_reporting.py
+  s_cecdc98e721f4b::t_fe95c89758626e 1-400
+apps/bcs/scripts/e2e-runner/tests/test_response_correlation.py
+  s_cecdc98e721f4b::t_410f320e68e07e 1-299
+apps/bcs/scripts/e2e-runner/tests/test_retained.py
+  s_cecdc98e721f4b::t_5f4466e883c392 1-312
+apps/bcs/scripts/e2e-runner/tests/test_retained_admission_quota_order.py
+  s_cecdc98e721f4b::t_aea0c6ba4db422 1-109
+apps/bcs/scripts/e2e-runner/tests/test_retained_file.py
+  s_cecdc98e721f4b::t_bbdfc315d1e626 1-218
+apps/bcs/scripts/e2e-runner/tests/test_retained_file_remote.py
+  s_cecdc98e721f4b::t_80fea11a82bb1a 1-397
+apps/bcs/scripts/e2e-runner/tests/test_retained_recheck.py
+  s_cecdc98e721f4b::t_52f560671a97aa 1-286
+apps/bcs/scripts/e2e-runner/tests/test_retained_remote.py
+  s_cecdc98e721f4b::t_ecbdf4c7af8a2e 1-383
+apps/bcs/scripts/e2e-runner/tests/test_retained_reporting.py
+  s_cecdc98e721f4b::t_9fa28ea2917ade 1-249
+apps/bcs/scripts/e2e-runner/tests/test_retained_serial.py
+  s_cecdc98e721f4b::t_f0510d1f73e770 1-493
+apps/bcs/scripts/e2e-runner/tests/test_retained_session_ws.py
+  s_cecdc98e721f4b::t_35b5a6574221fb 1-112
+apps/bcs/scripts/e2e-runner/tests/test_retention_audit.py
+  s_cecdc98e721f4b::t_09e4c0977393ff 1-209
+apps/bcs/scripts/e2e-runner/tests/test_retention_quota.py
+  s_cecdc98e721f4b::t_ccf98cb683cb8c 1-229
+apps/bcs/scripts/e2e-runner/tests/test_retention_quota_v2.py
+  s_cecdc98e721f4b::t_a9a7ed09a13247 1-346
+apps/bcs/scripts/e2e-runner/tests/test_route_bindings.py
+  s_cecdc98e721f4b::t_3d971138b773f6 1-61
+apps/bcs/scripts/e2e-runner/tests/test_run_binding.py
+  s_cecdc98e721f4b::t_a28427ad591234 1-132
+apps/bcs/scripts/e2e-runner/tests/test_run_quarantine.py
+  s_cecdc98e721f4b::t_029f1bc44f5ea3 1-143
+apps/bcs/scripts/e2e-runner/tests/test_runner.py
+  s_cecdc98e721f4b::t_dbfe6dc6d5844c 1-327
+apps/bcs/scripts/e2e-runner/tests/test_runtime.py
+  s_cecdc98e721f4b::t_e5d6043f3a022f 1-148
+apps/bcs/scripts/e2e-runner/tests/test_scope_observation.py
+  s_cecdc98e721f4b::t_efaad2a1aef095 1-178
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_bot_groups.py
+  s_cecdc98e721f4b::t_1285e5b4d7a49e 1-224
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_case_run.py
+  s_cecdc98e721f4b::t_1538577e753832 1-274
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_collection.py
+  s_cecdc98e721f4b::t_c7a97f897be173 1-501
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_complete_invoke.py
+  s_cecdc98e721f4b::t_38ee00b0ed14f2 1-608
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_create_get.py
+  s_cecdc98e721f4b::t_b124668ac5f62d 1-259
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_group_invite.py
+  s_cecdc98e721f4b::t_0ec24eb6787f14 1-238
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_invite_join.py
+  s_cecdc98e721f4b::t_edf05853329959 1-279
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_lifecycle.py
+  s_cecdc98e721f4b::t_eb081ac9dc54fa 1-377
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_session_invite.py
+  s_cecdc98e721f4b::t_947a2ee7049f47 1-235
+apps/bcs/scripts/e2e-runner/tests/test_session_file_core.py
+  s_cecdc98e721f4b::t_a421d7d4a11d18 1-539
+apps/bcs/scripts/e2e-runner/tests/test_session_file_core_case_run.py
+  s_cecdc98e721f4b::t_4f46fe62f8c1d1 1-191
+apps/bcs/scripts/e2e-runner/tests/test_session_public_case_run.py
+  s_cecdc98e721f4b::t_3079ccb74c8182 1-235
+apps/bcs/scripts/e2e-runner/tests/test_session_service_cli_case_run.py
+  s_cecdc98e721f4b::t_905acc4ec22892 1-398
+apps/bcs/scripts/e2e-runner/tests/test_sessionless_native.py
+  s_cecdc98e721f4b::t_6e1dea582fc7eb 1-120
+apps/bcs/scripts/e2e-runner/tests/test_sessionless_run.py
+  s_cecdc98e721f4b::t_3cabf77fb98464 1-154
+apps/bcs/scripts/e2e-runner/tests/test_shared_database_review.py
+  s_cecdc98e721f4b::t_37211ee7227a39 1-173
+apps/bcs/scripts/e2e-runner/tests/test_state_io.py
+  s_cecdc98e721f4b::t_5052024ba6e268 1-79
+apps/bcs/scripts/e2e-runner/tests/test_station_legacy_discovery.py
+  s_cecdc98e721f4b::t_a64d5d0a297433 1-152
+apps/bcs/scripts/e2e-runner/tests/test_storage_targets.py
+  s_cecdc98e721f4b::t_f6447ec2cbd9be 1-191
+apps/bcs/scripts/e2e-runner/tests/test_storage_wire.py
+  s_cecdc98e721f4b::t_8077816870a1f3 1-163
+apps/bcs/scripts/e2e-runner/tests/test_stored_evidence.py
+  s_cecdc98e721f4b::t_5eba404b459a61 1-88
+apps/bcs/scripts/e2e-runner/tests/test_structured_core_case_run.py
+  s_cecdc98e721f4b::t_6b89f987615baa 1-263
+apps/bcs/scripts/e2e-runner/tests/test_structured_templates_case_run.py
+  s_cecdc98e721f4b::t_e4cab49af03a28 1-301
+apps/bcs/scripts/e2e-runner/tests/test_terminal_delivery_wait.py
+  s_cecdc98e721f4b::t_70d3993c5bc15d 1-214
+apps/bcs/scripts/e2e-runner/tests/test_termination.py
+  s_cecdc98e721f4b::t_64cc4bcc283220 1-57
+apps/bcs/scripts/e2e-runner/tests/test_termination_channels.py
+  s_cecdc98e721f4b::t_0d0021af58d5a3 1-166
+apps/bcs/scripts/e2e-runner/tests/test_termination_deadline.py
+  s_cecdc98e721f4b::t_7b16f92afa89f1 1-166
+apps/bcs/scripts/e2e-runner/tests/test_transport_evidence.py
+  s_cecdc98e721f4b::t_927630b39fd31b 1-340
+apps/bcs/scripts/e2e-runner/tests/test_trust_baseline.py
+  s_cecdc98e721f4b::t_83278fc3790e03 1-158
+apps/bcs/scripts/e2e-runner/tests/test_trust_context.py
+  s_cecdc98e721f4b::t_ed3058b71f7b12 1-119
+apps/bcs/scripts/e2e-runner/tests/test_trust_registration.py
+  s_cecdc98e721f4b::t_8e77c8b0d0c258 1-134
+apps/bcs/scripts/e2e-runner/tests/test_trust_reporting.py
+  s_cecdc98e721f4b::t_e1e5cde35c0967 1-277
+apps/bcs/scripts/e2e-runner/tests/test_webhook_subscription_case_run.py
+  s_cecdc98e721f4b::t_bf856c8644dce9 1-302
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_case_run.py
+  s_cecdc98e721f4b::t_e5d58d041c141a 1-309
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_detail.py
+  s_cecdc98e721f4b::t_a63e166375ef07 1-220
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_fuse.py
+  s_cecdc98e721f4b::t_05daf23a7cd604 1-272
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_list.py
+  s_cecdc98e721f4b::t_d2392a7d6603e6 1-223
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_member.py
+  s_cecdc98e721f4b::t_5663b0bb40420a 1-263
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_runner.py
+  s_cecdc98e721f4b::t_4eb05d964a5ae3 1-311
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_status.py
+  s_cecdc98e721f4b::t_0d4698199fe60f 1-369
+apps/bcs/scripts/e2e-runner/tests/test_workspace_cli_status_run.py
+  s_cecdc98e721f4b::t_31c9099f6b355a 1-266
+apps/bcs/scripts/e2e-runner/tests/test_workspace_group_case_run.py
+  s_cecdc98e721f4b::t_273bf224fd2b99 1-236
+apps/bcs/scripts/e2e-runner/tests/test_workspace_group_governance.py
+  s_cecdc98e721f4b::t_aa654c0d04a78e 1-345
+apps/bcs/scripts/e2e-runner/tests/test_workspace_group_lifecycle.py
+  s_cecdc98e721f4b::t_29979f80d2657d 1-396
+apps/bcs/scripts/e2e-runner/tests/test_workspace_incident_core.py
+  s_cecdc98e721f4b::t_bf7bd4655dc309 1-491
+apps/bcs/scripts/e2e-runner/tests/test_workspace_report_rendering.py
+  s_cecdc98e721f4b::t_da8d293812786a 1-133
+apps/bcs/scripts/e2e-runner/tests/test_workspace_roundtrip.py
+  s_cecdc98e721f4b::t_3458d52453ff80 1-734
+apps/bcs/scripts/e2e-runner/tests/test_workspace_story_case_run.py
+  s_cecdc98e721f4b::t_87b296389154fb 1-186
+apps/bcs/scripts/e2e-runner/tests/test_write_transport.py
+  s_cecdc98e721f4b::t_51742d60e67b0d 1-340
+apps/bcs/scripts/e2e-runner/tests/test_ws_evidence.py
+  s_cecdc98e721f4b::t_8299f14de4c76b 1-142
+apps/bcs/scripts/e2e-runner/tests/test_ws_gateway_auth.py
+  s_cecdc98e721f4b::t_1c38a1b706a160 1-97
+apps/bcs/scripts/e2e-runner/tests/test_ws_transport.py
+  s_cecdc98e721f4b::t_8d9f45ea6dae18 1-163
+apps/bcs/scripts/e2e-runner/transport-log-evidence.md
+  s_cecdc98e721f4b::t_a9fcfcbc1f0a96 1-432
+apps/bcs/scripts/e2e-runner/trusted-team-acceptance.md
+  s_cecdc98e721f4b::t_9117509befaa7e 1-76
+apps/bcs/scripts/e2e-runner/trusted-team-manifest.json
+  s_cecdc98e721f4b::t_5b465ea42b99e2 1-388
+apps/bcs/scripts/e2e-runner/webhook-migration-contract.json
+  s_cecdc98e721f4b::t_558eb0196d879b 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "da79152f5a7191ae995a51489ca20f82f7389586",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

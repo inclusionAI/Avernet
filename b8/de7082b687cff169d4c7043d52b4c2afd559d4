@@ -1,0 +1,45 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/bounded_process.py
+  s_cecdc98e721f4b::t_572b07aa494308 11,95-110
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_case_run.py
+  s_cecdc98e721f4b::t_b2d968a9e16b70 113
+apps/bcs/scripts/e2e-runner/bcs_e2e/channel_cli_runner.py
+  s_cecdc98e721f4b::t_8a2f4cbdcd5ac6 14,312,319-324
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_contract.py
+  s_cecdc98e721f4b::t_aaa5bf0f0159ee 8,95,101-102,109,113-115,119,129
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_runner.py
+  s_cecdc98e721f4b::t_a91700d7f7f7d5 12,389-390,393-395
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_leaf.py
+  s_cecdc98e721f4b::t_b0be393e559da1 22-27,486-487,489-493,495-496
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_run.py
+  s_cecdc98e721f4b::t_018e9a11df8c72 29,711,743,750-751,761,794,888-889
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_case_run.py
+  s_cecdc98e721f4b::t_afc01211781425 113
+apps/bcs/scripts/e2e-runner/bcs_e2e/friend_cli_runner.py
+  s_cecdc98e721f4b::t_9bf12ccf485167 12,166,169-172
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_friend_cli_accept_contract.py
+  s_cecdc98e721f4b::t_addace6de7d12f 8,164,223,246,253
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_case_run.py
+  s_cecdc98e721f4b::t_946234e4140548 118
+apps/bcs/scripts/e2e-runner/bcs_e2e/operator_cli_runner.py
+  s_cecdc98e721f4b::t_c1f432ed2ff133 31,513,525-527
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_channel_cli_adapter.py
+  s_cecdc98e721f4b::t_29680d2451757e 8,360,367-368,386-387,391-393,397,403-404
+apps/bcs/scripts/e2e-runner/tests/test_preprod_cli_stderr_diagnostics.py
+  s_cecdc98e721f4b::t_eb27eaf1f31707 1-386
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8de7082b687cff169d4c7043d52b4c2afd559d4",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

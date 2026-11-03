@@ -1,0 +1,19 @@
+apps/evolverun/docs/clawweb/specs/clawevolve-task-reference-materials.md
+  s_413b6633e8b715::t_b85be0cf948e3f 4,8,31,85,222,263,275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4262d0804e41296ef608ee17146079b0b97710db",
+  "prompts": {},
+  "sessions": {
+    "s_413b6633e8b715": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c2b-9482-7110-82bf-7c8dff86cc5c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

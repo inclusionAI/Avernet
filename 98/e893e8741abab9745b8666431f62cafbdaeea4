@@ -1,0 +1,37 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_friend_mutation_case.py
+  s_cecdc98e721f4b::t_1cc58fece86fbd 250-323,357-372,390,398-407,411,416,420-422
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutation_extras.py
+  s_cecdc98e721f4b::t_c3fe92a8164027 35-38,159,170-171,176,189,194-218,221-222,225-226,229-230,237,240,243,245-249,255,262-263,267-268,270-296,298,301,305-327,330-331,333-337,341,343-371,376-383,385-389,392-396
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_case.py
+  s_cecdc98e721f4b::t_d410c20d0dde25 95,143-145,147-148,152,156-163,165-166
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_reporting.py
+  s_cecdc98e721f4b::t_5e0ca0daefaeac 16,84
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_run.py
+  s_cecdc98e721f4b::t_f39f36c2e0d481 27,272
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_bc9f95da0c41d0 52-57,700-702,706-716
+apps/bcs/scripts/e2e-runner/tc-friend-auth-sync-migration-contract.json
+  s_cecdc98e721f4b::t_39245444d91ca6 390-391,395
+apps/bcs/scripts/e2e-runner/tests/test_edge_friend_mutation_case_run.py
+  s_cecdc98e721f4b::t_fb66a8a33d4609 70-97,176-202
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutation_contract.py
+  s_cecdc98e721f4b::t_a894c3e27f3709 1-6,18,24-27,63-64,67-68,74,81,93,95-134,150,152-154,161,165,184-226,233-236,247-251
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_d2865e58536726 482,484-493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "98e893e8741abab9745b8666431f62cafbdaeea4",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

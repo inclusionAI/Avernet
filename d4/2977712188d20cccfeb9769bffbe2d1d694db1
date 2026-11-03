@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskPanelV2.tsx
+  h_059e888e5e4e82 7,52-58
+apps/frontend-nextgen/src/assets/TaskPanel/v2/taskPanelNav.ts
+  h_059e888e5e4e82 26-27,53-56,78
+apps/frontend-nextgen/src/hooks/taskPanelNavBinding.ts
+  h_059e888e5e4e82 15,41-46,62
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  h_059e888e5e4e82 92,94-97
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskPanelV2.test.tsx
+  h_059e888e5e4e82 78-87,94,108-116
+apps/frontend-nextgen/test/hooks/taskPanelNavBinding.test.tsx
+  h_059e888e5e4e82 36-46
+apps/frontend-nextgen/test/stores/taskSidePanelStore.test.ts
+  h_059e888e5e4e82 160,165,168,170-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d42977712188d20cccfeb9769bffbe2d1d694db1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

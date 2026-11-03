@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_3545e674cb431d 81,119
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/__init__.py
+  s_cecdc98e721f4b::t_47251a3771a2e1 65-126,166-221
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/completion.py
+  s_cecdc98e721f4b::t_4c80bea0ab2bd5 1-906
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/completion_run.py
+  s_cecdc98e721f4b::t_f06b3b13a328fb 1-683
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy_density/registration_proposal.py
+  s_cecdc98e721f4b::t_cf11dc960d03e6 1-300
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_6eeae9a35ea60d 390-391
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_ca2d4a2a5e4b31 674-682
+apps/bcs/scripts/e2e-runner/tests/test_service_policy_density_completion.py
+  s_cecdc98e721f4b::t_0891a857d3d14d 1-920
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f32ac31a4bde88f452446ae8334e7fe32ab5e44",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

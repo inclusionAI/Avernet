@@ -1,0 +1,24 @@
+apps/backend/specs/2026-10-20-task-artifact-domain/spec.md
+  h_059e888e5e4e82 533
+apps/backend/src/agentclaw/community/core/task/task_context/task_artifact/artifact_object_storage.py
+  h_059e888e5e4e82 6,10,19,72
+apps/backend/src/agentclaw/community/core/task/task_context/task_artifact/task_artifact_object_storage.py
+  h_059e888e5e4e82 1-9,11,17-19,28-59,89-91,110-112,128
+apps/backend/src/agentclaw/community/di/modules/infrastructure/community/task_artifact_object_storage.py
+  h_059e888e5e4e82 9,35,53
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/task_artifact_object_storage.py
+  h_059e888e5e4e82 7,16,31
+apps/backend/tests/community/core/task/task_artifact/test_artifact_object_storage.py
+  h_059e888e5e4e82 13,48,53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "821730eae1c896946e4f6086d7b1db32dddacc7d",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

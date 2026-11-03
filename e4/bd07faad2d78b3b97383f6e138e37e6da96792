@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_3e40e68ab806a7::t_96bb8eb18ec8e3 394,458
+apps/backend/src/agentclaw/community/core/devices/services/device_service.py
+  s_3e40e68ab806a7::t_ca41ec2154c7a0 691,784
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e4bd07faad2d78b3b97383f6e138e37e6da96792",
+  "prompts": {},
+  "sessions": {
+    "s_3e40e68ab806a7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ec-f31e-77d3-beaf-69fa1009b899",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

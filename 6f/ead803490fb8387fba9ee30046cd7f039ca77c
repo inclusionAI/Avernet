@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/desktop_bot/lifecycle.py
+  s_a6fa00ea640af0::t_ed1b3776a7c0fc 19-22,288-291,299,302-307,310-311
+apps/backend/tests/community/core/desktop_bot/test_lifecycle_periodic.py
+  s_ef17b55ad16c72::t_b969f71a644031 3,20,52,369,377,384,389,396,409,418-438,448,456,473,489,503,901
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6fead803490fb8387fba9ee30046cd7f039ca77c",
+  "prompts": {},
+  "sessions": {
+    "s_a6fa00ea640af0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a35-221c-7b83-b756-26a65729d936",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_ef17b55ad16c72": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-6a60-7fd2-acb3-e76dd4dbe4dd",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

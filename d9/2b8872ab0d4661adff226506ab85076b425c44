@@ -1,0 +1,21 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_runner.py
+  s_cecdc98e721f4b::t_c03821852d1856 47-48,53-54,198-204
+apps/bcs/scripts/e2e-runner/tests/test_collaboration_team.py
+  s_cecdc98e721f4b::t_fa72d2317ffb06 221-222,224-225,419-431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d92b8872ab0d4661adff226506ab85076b425c44",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

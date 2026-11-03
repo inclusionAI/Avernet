@@ -1,0 +1,33 @@
+apps/backend/tests/community/core/services/test_identity_service_coverage.py
+  s_3829018997cfde::t_cbbe9b24ce109e 7,20-27,40,77,87-90,108-111,125-128,144-147,154,169,176-178,184-186,192-195,201-203,222-230,239,263-265,279-281,283,287,316,326
+  s_3829018997cfde::t_a28b956e920cee 284-286,288-301,303-315,317-325,327-329
+  s_3829018997cfde::t_3e28aa9ae577f6 302
+apps/backend/tests/community/core/services/test_identity_stage_addressing.py
+  s_3829018997cfde::t_cbbe9b24ce109e 116,144,175,180
+  s_3829018997cfde::t_8fea57b470b9e1 151-174,176-179,181
+  s_3829018997cfde::t_a28b956e920cee 11
+  s_3829018997cfde::t_5c263baa23580b 150
+apps/backend/src/agentclaw/community/core/services/identity.py
+  s_3829018997cfde::t_cbbe9b24ce109e 46-48,412-415
+  s_3829018997cfde::t_799c87df9752fb 406
+  s_3829018997cfde::t_678c61646e8843 309-312,314-316
+  s_3829018997cfde::t_0772a398337595 400-405,407-411,416-426
+  s_3829018997cfde::t_fd4cb2ce32c535 853-856,858-866,868
+  s_3829018997cfde::t_940d21b67ff2ed 313
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08c79a1cc2f3142afe518aa1e703085b968f384e",
+  "prompts": {},
+  "sessions": {
+    "s_3829018997cfde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-fe9d-7333-a924-df073e247434",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_63ef42fdafe6cc::t_9d87046322cb21 938
+apps/backend/tests/community/core/devices/test_mcp_device_payload.py
+  s_63ef42fdafe6cc::t_b401f720966305 128-193
+apps/backend/src/agentclaw/community/core/devices/services/singlebox_device_sync.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 75,85
+apps/backend/tests/community/core/devices/test_mcp_device_transport.py
+  s_63ef42fdafe6cc::t_699c07046d5835 325-364,366
+  s_2a4951d5a7635b::t_6b3e0a0da10ecf 365
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_sync.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 210,218
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 201
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_payload.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 79,81-85,144-161
+apps/backend/src/agentclaw/community/core/devices/services/device_sync.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 113
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_transport.py
+  s_63ef42fdafe6cc::t_f3578abdfc3726 180,189
+apps/backend/tests/community/core/mcp/services/test_sync_service.py
+  s_2a4951d5a7635b::t_cb49037845b1be 1624-1650
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "679bcaf240eec8ea24ce982df6107cf0cd180629",
+  "prompts": {},
+  "sessions": {
+    "s_2a4951d5a7635b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac2-1a47-7922-b150-d367090865c7",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_63ef42fdafe6cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ac1-fdab-72c3-a319-12ba47cb31b0",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

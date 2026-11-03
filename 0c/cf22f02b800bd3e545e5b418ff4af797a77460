@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_runtime_content.py
+  s_cd6e3f7ea80440::t_b8a1ac46f1e4b0 224-253
+apps/backend/tests/community/services/test_skill_set_service.py
+  s_cd6e3f7ea80440::t_842944ed10ee4b 453
+  s_cd6e3f7ea80440::t_3b21affd530b67 409-411,423-426,429,431-432,449-451,455
+  s_cd6e3f7ea80440::t_a671563a6e89ba 152,184,234,277,358
+  s_cd6e3f7ea80440::t_a4da740a021879 412-422,427-428,433-448,452,454
+  s_cd6e3f7ea80440::t_622607a2ed53c7 430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0ccf22f02b800bd3e545e5b418ff4af797a77460",
+  "prompts": {},
+  "sessions": {
+    "s_cd6e3f7ea80440": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d56-2bd0-7571-b988-d44995647226",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

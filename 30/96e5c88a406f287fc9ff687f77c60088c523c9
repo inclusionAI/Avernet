@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/adapters/http/harness/router.py
+  s_f61bbe12887ccd::t_25e605d323ca68 96,1061,1075-1092,2213,2230-2247,2291-2310
+apps/backend/src/agentclaw/community/core/harness/services/bot_profile.py
+  s_f61bbe12887ccd::t_49136aeb855d48 7,140-143,145-146,148-160
+apps/backend/src/agentclaw/community/core/harness/services/patch_engine.py
+  s_ca7af9dfba2884::t_2b58181a83814b 177-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3096e5c88a406f287fc9ff687f77c60088c523c9",
+  "prompts": {},
+  "sessions": {
+    "s_ca7af9dfba2884": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-cba6-7be2-89be-5ef06d15a772",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_f61bbe12887ccd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-d15a-73a1-bb49-814ed7cf254f",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

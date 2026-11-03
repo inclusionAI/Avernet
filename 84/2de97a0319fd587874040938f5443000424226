@@ -1,0 +1,49 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_ed3dce81ac02e8 135-137
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_e6c5a1ec5c5e9a 15-18,51-52,323-324
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_f56aaebd657811 45-46,738-765
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_24c2b0e2b5d6e9 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_d160a9187d4b84 436-441,446,472-477,482
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_owner_dual_case_run.py
+  s_cecdc98e721f4b::t_4e545ea7bb5b7a 1-778
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/dual_case_run.py
+  s_cecdc98e721f4b::t_3c4d76300358a4 1-872
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_8a39c59fe89211 332,341
+apps/bcs/scripts/e2e-runner/provider-owner-isolation-migration-contract.json
+  s_cecdc98e721f4b::t_98cf1406ae9a1e 1-533
+apps/bcs/scripts/e2e-runner/session-owner-permissions-migration-contract.json
+  s_cecdc98e721f4b::t_876cd38d9d5d00 1-298
+apps/bcs/scripts/e2e-runner/tests/test_dual_provider_owner_isolation_case_run.py
+  s_cecdc98e721f4b::t_7d56754dc33e89 1-620
+apps/bcs/scripts/e2e-runner/tests/test_dual_session_owner_case_run.py
+  s_cecdc98e721f4b::t_c2de1a14833b6e 1-629
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_518af4ad577997 103-108,241-246
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_owner_run.py
+  s_cecdc98e721f4b::t_f7a25a577bb62d 30,468,472,478-479,481-488,492
+apps/bcs/scripts/e2e-runner/tests/test_local_session_owner_run.py
+  s_cecdc98e721f4b::t_7b326f11509d3e 28,30-31,573,1233-1260
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_b8786bf8ede857 622-623
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "842de97a0319fd587874040938f5443000424226",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

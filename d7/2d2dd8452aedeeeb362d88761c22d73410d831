@@ -1,0 +1,44 @@
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 2,21,33-34,43-49,58-62,113-115,129-134,136,139,141,143,147,149-150,155,160,162,164,168,171-172,176-178,182-183,190-229
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 2,20,29,31,34,44-45,51-87
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/index.tsx
+  h_059e888e5e4e82 2-4,6-7,9-26,40-42,45,48-54
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/model.ts
+  h_059e888e5e4e82 1-6,10
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/Floor.tsx
+  h_059e888e5e4e82 4-5,23-29,59-63,80,91-95,129-170,172,189-191
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/ThreadReply.tsx
+  h_059e888e5e4e82 3,19-21,37-39,43-47,76-100
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  h_059e888e5e4e82 14,17,45-46,55-57,84,93-95,113,115-117,133-134,139-142,192-229,265-267,286-288
+apps/frontend-nextgen/src/components/Community/TopicInteractionBar/index.tsx
+  h_059e888e5e4e82 2-4,9-14,17,21-22,27-32,35,38,40-44,46,48-51,53-58,60,62-65,67-84
+apps/frontend-nextgen/src/hooks/personalCenterModel.ts
+  h_059e888e5e4e82 1
+apps/frontend-nextgen/src/hooks/useCommunityTopicActions.ts
+  h_059e888e5e4e82 4,62,71-76,78-85,94,106-114,122,163
+apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
+  h_059e888e5e4e82 2-4,7-9,27,30,32,42,48
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 86-90,92,95-98,105
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  h_059e888e5e4e82 76,80,83,87-88,92,95-110,113,115-117,121-194,197-273,323,344,647
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 38,41-42,44-50,53-68,71-87,90-105,108-127
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  h_059e888e5e4e82 303-321
+apps/frontend-nextgen/test/hooks/usePersonalCenter.test.tsx
+  h_059e888e5e4e82 25-27,30,32-36,47,49-56,58-67,70-74,77,80,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d72d2dd8452aedeeeb362d88761c22d73410d831",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

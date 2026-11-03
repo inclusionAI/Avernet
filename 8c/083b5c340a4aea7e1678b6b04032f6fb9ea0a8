@@ -1,0 +1,108 @@
+apps/bcsfuse/.env.example
+  h_5686002b4ce7b9 15-17,113-116
+apps/bcsfuse/README.md
+  h_5686002b4ce7b9 36-42,195-197
+apps/bcsfuse/configs/application.yaml
+  h_5686002b4ce7b9 40-42,45-48,139,143
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 321-324,803,807
+apps/bcsfuse/docs/qdrant-modes.md
+  h_5686002b4ce7b9 95-96,132-133
+apps/bcsfuse/main.py
+  h_5686002b4ce7b9 10,13,28,31,34-35,83-92,94-95,100,104-105,108,110,113,116-141,143,147-160,168-170,181-188
+apps/bcsfuse/packages/search-core/src/search_core/providers/fallback.py
+  h_5686002b4ce7b9 5,31-40,42,46-56,73-76,110-139,148-161,163-165,167-187,201,204
+apps/bcsfuse/packages/search-core/tests/test_regex_fallback_index_normalization_tdd.py
+  h_5686002b4ce7b9 58-129
+apps/bcsfuse/src/app/adapters/http/recommend_response_cache.py
+  h_5686002b4ce7b9 11,156-174,306,339-342,345,347,366-369
+apps/bcsfuse/src/app/adapters/http/recommend_routes.py
+  h_5686002b4ce7b9 366-371,403-407,419-420,422-430,432-433,446-448,460-472
+apps/bcsfuse/src/app/adapters/http/search_response_cache.py
+  h_5686002b4ce7b9 11,116-134,265,297-300,303,305,322-325
+apps/bcsfuse/src/app/adapters/http/search_threadpool.py
+  h_5686002b4ce7b9 6,11-14,16-18,29-36,42-46,56-87
+apps/bcsfuse/src/app/application/agent_search_service.py
+  h_5686002b4ce7b9 23-29,60,108,372,377,389,408,410,609-614,631,660-666,684-695,834-836,890,910
+apps/bcsfuse/src/app/application/services/agent_search_resilience_policy.py
+  h_5686002b4ce7b9 1-98
+apps/bcsfuse/src/app/application/services/agent_search_terminal_fallback.py
+  h_5686002b4ce7b9 81-86,143,155
+apps/bcsfuse/src/app/application/services/candidate_source_policy.py
+  h_5686002b4ce7b9 1-31
+apps/bcsfuse/src/app/application/services/fragment_keyword_routing.py
+  h_5686002b4ce7b9 113-118
+apps/bcsfuse/src/app/application/services/retrieval_dependency_circuit.py
+  h_5686002b4ce7b9 35,42-52,79-96,102,122-128
+apps/bcsfuse/src/app/application/services/search_degradation_reasons.py
+  h_5686002b4ce7b9 15-16
+apps/bcsfuse/src/app/application/services/semantic_failure_metadata.py
+  h_5686002b4ce7b9 34-44,60-63
+apps/bcsfuse/src/app/application/services/worker_candidate_recommendation_impl.py
+  h_5686002b4ce7b9 35-37,331,688-691
+apps/bcsfuse/src/app/application/services/worker_vector_match_fragments.py
+  h_5686002b4ce7b9 150,318-333,336,344-345,377
+apps/bcsfuse/src/app/application/services/worker_vector_match_service.py
+  h_5686002b4ce7b9 663-665,683
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  h_5686002b4ce7b9 128-151,158-159,184-189,191-195,256,303-308,558,560,564,571-573
+apps/bcsfuse/src/app/bootstrap/opensource.py
+  h_5686002b4ce7b9 121-128,132,134-135
+apps/bcsfuse/src/app/bootstrap/oss_business_routes.py
+  h_5686002b4ce7b9 744-749
+apps/bcsfuse/src/app/bootstrap/retrieval_dependency_health.py
+  h_5686002b4ce7b9 46,59-61,64-77,92-100
+apps/bcsfuse/src/app/bootstrap/search_capacity.py
+  h_5686002b4ce7b9 351-361
+apps/bcsfuse/src/app/domain/services/retrieval_logging.py
+  h_5686002b4ce7b9 8-19,27
+apps/bcsfuse/src/app/infra/logging/logging_config.py
+  h_5686002b4ce7b9 231-247,251
+apps/bcsfuse/src/app/infra/logging/nonblocking_logging.py
+  h_5686002b4ce7b9 1-174
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  h_5686002b4ce7b9 17,379-398,406-408,410-421,423-426,428-436
+apps/bcsfuse/src/app/providers/public/vector_index_startup_provider.py
+  h_5686002b4ce7b9 38-60,65-66,82-83,86-94,99,105,108,117-118
+apps/bcsfuse/tests/contract/test_agent_search_resilience_tdd.py
+  h_5686002b4ce7b9 182-229
+apps/bcsfuse/tests/contract/test_dense_outage_circuit_tdd.py
+  h_5686002b4ce7b9 1-305
+apps/bcsfuse/tests/contract/test_index_recovery_availability_tdd.py
+  h_5686002b4ce7b9 41-59,109-125
+apps/bcsfuse/tests/contract/test_nonblocking_logging_tdd.py
+  h_5686002b4ce7b9 1-116
+apps/bcsfuse/tests/contract/test_partial_index_readiness_tdd.py
+  h_5686002b4ce7b9 54,72-76,88-99,148-198,544-561
+apps/bcsfuse/tests/contract/test_preflight_eventloop_tdd.py
+  h_5686002b4ce7b9 1-200
+apps/bcsfuse/tests/contract/test_qdrant_readiness_reconnect_tdd.py
+  h_5686002b4ce7b9 144-191
+apps/bcsfuse/tests/contract/test_recommendation_projection_threadpool_tdd.py
+  h_5686002b4ce7b9 1-96
+apps/bcsfuse/tests/contract/test_required_cache_defaults_tdd.py
+  h_5686002b4ce7b9 75-77,79
+apps/bcsfuse/tests/contract/test_retrieval_dependency_health_monitor_tdd.py
+  h_5686002b4ce7b9 93,114
+apps/bcsfuse/tests/contract/test_retrieval_logging_nonblocking_tdd.py
+  h_5686002b4ce7b9 1-53
+apps/bcsfuse/tests/contract/test_search_capacity_observability.py
+  h_5686002b4ce7b9 186,188,198,201
+apps/bcsfuse/tests/contract/test_search_offload_circuit_tdd.py
+  h_5686002b4ce7b9 1-200
+apps/bcsfuse/tests/contract/test_server_admission_tdd.py
+  h_5686002b4ce7b9 1-132
+apps/bcsfuse/tests/contract/test_worker_vector_match_fallback.py
+  h_5686002b4ce7b9 70-94,136,704-743,862-888
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c083b5c340a4aea7e1678b6b04032f6fb9ea0a8",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

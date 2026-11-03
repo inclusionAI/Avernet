@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_payload.py
+  s_3856feb75a1d9b::t_ca1f9e8b202549 134-136
+  s_3856feb75a1d9b::t_2445947189a457 137-145
+apps/backend/tests/community/core/devices/test_mcp_device_payload.py
+  s_3856feb75a1d9b::t_d72b2cf34eda65 146
+  s_3856feb75a1d9b::t_f264f8e720cc7d 122-124,126-131,153-165,169,171-175,179,181-182,184-185
+  s_3856feb75a1d9b::t_16cdfaab6685cb 132-144,147,149-150
+  s_3856feb75a1d9b::t_73dc83e5a80f31 120-121,125,145,148,151-152,166-168,170,176-178,180,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee65aa904ddb371c4cf336dba7875d18228ebfb2",
+  "prompts": {},
+  "sessions": {
+    "s_3856feb75a1d9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-7d48-7320-a48b-85835c0b8107",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

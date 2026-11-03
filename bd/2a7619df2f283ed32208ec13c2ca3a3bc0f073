@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_cron_router.py
+  s_5c621d315cef42::t_b90d371373af2b 104,113-115,120-125,129,138-140,145-150,229-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd2a7619df2f283ed32208ec13c2ca3a3bc0f073",
+  "prompts": {},
+  "sessions": {
+    "s_5c621d315cef42": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c37-e041-70d3-ac8e-6a3ede3bffc8",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,50 @@
+apps/evolverun/clawweb/public/modules/clawevolve/server/contracts/ais-executor.ts
+  h_b601d8706f5d44 10-11
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/repair-task-repository.ts
+  h_b601d8706f5d44 6-13,36-43,101-103,115,124
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/full-repair/repair-runtime.ts
+  h_b601d8706f5d44 2615,2672,4560,4567,5276,5281
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/__tests__/aistudio-service.test.ts
+  h_b601d8706f5d44 52,57-59,64-85
+apps/evolverun/clawweb/public/modules/workflow/docs/repair-batch-v2.md
+  h_b601d8706f5d44 110
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/ais/session-ais-monitor.ts
+  h_b601d8706f5d44 1,33
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/common/__tests__/agent-execution-monitor.test.ts
+  h_b601d8706f5d44 1-27
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/ais/ais-task-runner.ts
+  h_b601d8706f5d44 16-24
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/common/agent-execution-monitor.ts
+  h_b601d8706f5d44 1,48-49
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/repair-ais-execution.test.ts
+  h_b601d8706f5d44 57-63
+apps/evolverun/clawweb/public/modules/workflow/server/services/repair-batch-service.ts
+  h_b601d8706f5d44 625,629,637,867-870
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/full-repair/__tests__/repair-task-service.test.ts
+  h_b601d8706f5d44 1047,1093
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/aistudio-service.ts
+  h_b601d8706f5d44 1,62,64-70,73-74,77,79,81-91
+apps/evolverun/clawweb/public/app/clawweb/server/repair-ais-execution.ts
+  h_b601d8706f5d44 260
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/closed-loop.test.ts
+  h_b601d8706f5d44 221,411-438,444,739
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/ais/__tests__/session-ais-monitor.test.ts
+  h_b601d8706f5d44 31-42
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  h_b601d8706f5d44 12-13
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  h_b601d8706f5d44 120,147,149,151,154-155,191,212,221
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/repair-batch-service.test.ts
+  h_b601d8706f5d44 502-520
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea994831d72ffb1f59c542af646cbb6a0485822b",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

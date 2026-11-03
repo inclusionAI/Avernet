@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/provider-owner-migration-contract.json
+  s_cecdc98e721f4b::t_a71899c2dfb770 1-377
+apps/bcs/scripts/e2e-runner/provider-owner-slice/README.md
+  s_cecdc98e721f4b::t_c6c36733540407 1-131
+apps/bcs/scripts/e2e-runner/provider-owner-slice/evidence/live-drift-evidence.json
+  s_cecdc98e721f4b::t_dc4ef7906ffd4c 1-69
+apps/bcs/scripts/e2e-runner/provider-owner-slice/modules/local_provider_owner_reporting.py
+  s_cecdc98e721f4b::t_ea37b6a37144f1 1-265
+apps/bcs/scripts/e2e-runner/provider-owner-slice/modules/local_provider_owner_run.py
+  s_cecdc98e721f4b::t_d70e0cb09c7a51 1-279
+apps/bcs/scripts/e2e-runner/provider-owner-slice/modules/provider_owner_contract.py
+  s_cecdc98e721f4b::t_b311f3430ddfa0 1-320
+apps/bcs/scripts/e2e-runner/provider-owner-slice/tests/test_local_provider_owner_run.py
+  s_cecdc98e721f4b::t_daed6b4952ed56 1-483
+apps/bcs/scripts/e2e-runner/provider-owner-slice/tests/test_provider_owner_contract.py
+  s_cecdc98e721f4b::t_97caae5954028d 1-292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c98a0831dd25db7d636b6a818a97800d9d503ba3",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

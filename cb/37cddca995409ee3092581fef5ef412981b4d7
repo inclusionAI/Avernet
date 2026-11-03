@@ -1,0 +1,52 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  h_059e888e5e4e82 135-140,144-149,155
+apps/backend/src/agentclaw/community/adapters/http/task/bbs/router.py
+  h_059e888e5e4e82 151-163,167-173,179
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_repository.py
+  h_059e888e5e4e82 49-51,162-166
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_topic_list_repository.py
+  h_059e888e5e4e82 1-166
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum.py
+  h_059e888e5e4e82 9,31-38,49,56-59
+apps/backend/src/agentclaw/community/core/task/forum/service_protocol.py
+  h_059e888e5e4e82 37,42-45
+apps/backend/src/agentclaw/community/core/task/forum/services/forum_service.py
+  h_059e888e5e4e82 86,100-115,124
+apps/backend/tests/community/adapters/http/openapi_v1/task/bbs/test_bbs_read_endpoints.py
+  h_059e888e5e4e82 5,16,34-37,77,90-91,103-144,244-245
+apps/backend/tests/community/adapters/http/task/bbs/test_bbs_internal_endpoints.py
+  h_059e888e5e4e82 141,167,192-233
+apps/backend/tests/community/core/task/forum/test_forum_service.py
+  h_059e888e5e4e82 15-18,478,485-540
+apps/backend/tests/community/repository/task/forum/test_forum_interaction_repository.py
+  h_059e888e5e4e82 128-208
+apps/backend/tests/community/repository/task/forum/test_forum_read_repository.py
+  h_059e888e5e4e82 8-11,25,33,85-164,281,310
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 33-39,160-164,211-234
+apps/frontend-nextgen/src/domain/community/types.ts
+  h_059e888e5e4e82 7,121-124
+apps/frontend-nextgen/src/hooks/useCommunityTopicList.ts
+  h_059e888e5e4e82 36-37,48,53-55,78,111,115-117,140
+apps/frontend-nextgen/src/services/backendApi/community/communityController.ts
+  h_059e888e5e4e82 78-85
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 101-102,104
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  h_059e888e5e4e82 127-143
+apps/frontend-nextgen/test/services/backendApi/community/communityController.test.ts
+  h_059e888e5e4e82 16-21,40-74
+docs/specs/2026-10-29-bbs-following-topic-feed/spec.md
+  h_059e888e5e4e82 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb37cddca995409ee3092581fef5ef412981b4d7",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

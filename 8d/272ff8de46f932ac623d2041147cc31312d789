@@ -1,0 +1,159 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_45a6eb398408f4 73
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_reporting.py
+  s_cecdc98e721f4b::t_54ab519459dae6 13,75-76,147
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_reporting.py
+  s_cecdc98e721f4b::t_df05f880c20c17 15,71-72,234
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_reporting.py
+  s_cecdc98e721f4b::t_4c1ebb1371da1e 12,68-69,157
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_collaboration_team_reporting.py
+  s_cecdc98e721f4b::t_c1b6de37beea16 18,87-88,239
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_custom_collaboration_reporting.py
+  s_cecdc98e721f4b::t_56417481410a25 271
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy_reporting.py
+  s_cecdc98e721f4b::t_554979464018c3 13,76-77,185
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_reporting.py
+  s_cecdc98e721f4b::t_56095e76d29e0f 12,67-68,218
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_reporting.py
+  s_cecdc98e721f4b::t_54704bbb77b1f2 14,80-81,185
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_reporting.py
+  s_cecdc98e721f4b::t_47a9a29a96af5a 18,86-87,221
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_read_reporting.py
+  s_cecdc98e721f4b::t_310d2451985098 10,93-94,198
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_reporting.py
+  s_cecdc98e721f4b::t_e4fef9473a1e3f 12,72-73,220
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_reporting.py
+  s_cecdc98e721f4b::t_0a2dad58b84b37 85,200
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_84ca56c0502dc6 11,74-75,140
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_9e515574d5b2e1 14,87-88,197
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_b01698254b600e 237
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_reporting.py
+  s_cecdc98e721f4b::t_ae621335be849f 12,69-70,178
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli_reporting.py
+  s_cecdc98e721f4b::t_2432402c4fd121 16,123-124,354
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_api.py
+  s_cecdc98e721f4b::t_eaaaa0a2a5daeb 123
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_reporting.py
+  s_cecdc98e721f4b::t_7b5bd0868bc75a 12,68-69,251
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_reporting.py
+  s_cecdc98e721f4b::t_501e7de02c6d4b 14,81-82,186
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_run.py
+  s_cecdc98e721f4b::t_1a26358ee7f2de 223
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_flow_reporting.py
+  s_cecdc98e721f4b::t_59e0486311b899 5,35,227
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_reporting.py
+  s_cecdc98e721f4b::t_489646d07830c0 13,74-75,213
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_reporting.py
+  s_cecdc98e721f4b::t_9a1ef0c00add5b 338
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_reporting.py
+  s_cecdc98e721f4b::t_07d0bbc784b58e 5,35,172
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_slow_judge_reporting.py
+  s_cecdc98e721f4b::t_0d79a4bbb18e42 136
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_reporting.py
+  s_cecdc98e721f4b::t_7ea3a237285c9c 12,83-84,237
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_reporting.py
+  s_cecdc98e721f4b::t_37f2a1930cc311 14,119,222
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_d3c462a426ed63 17
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_registration.py
+  s_cecdc98e721f4b::t_6969fab61056ba 13,78
+apps/bcs/scripts/e2e-runner/bcs_e2e/trust_reporting.py
+  s_cecdc98e721f4b::t_cd36f3710276e4 20,62,143
+apps/bcs/scripts/e2e-runner/tests/test_edge_read_contracts.py
+  s_cecdc98e721f4b::t_7c19326294bea7 24,128
+apps/bcs/scripts/e2e-runner/tests/test_edge_search_contract.py
+  s_cecdc98e721f4b::t_af8887731da890 14,79
+apps/bcs/scripts/e2e-runner/tests/test_effect_policy.py
+  s_cecdc98e721f4b::t_7c7ca709d3d3bc 31
+apps/bcs/scripts/e2e-runner/tests/test_local_caller_execution.py
+  s_cecdc98e721f4b::t_b7db6ebfd4ae26 20,187
+apps/bcs/scripts/e2e-runner/tests/test_local_channel_cli_run.py
+  s_cecdc98e721f4b::t_8a4134f8f4ad60 23,54
+apps/bcs/scripts/e2e-runner/tests/test_local_channel_http.py
+  s_cecdc98e721f4b::t_24f56a1954269c 24,56
+apps/bcs/scripts/e2e-runner/tests/test_local_custom_collaboration_run.py
+  s_cecdc98e721f4b::t_e4dd18557f3577 97,268
+apps/bcs/scripts/e2e-runner/tests/test_local_delivery_policy.py
+  s_cecdc98e721f4b::t_86e9122923f079 34,77
+apps/bcs/scripts/e2e-runner/tests/test_local_direct_chat_run.py
+  s_cecdc98e721f4b::t_0903350bab4a28 22,49
+apps/bcs/scripts/e2e-runner/tests/test_local_draft_group_run.py
+  s_cecdc98e721f4b::t_28b08fe3795a8d 173,221,556
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutation_contract.py
+  s_cecdc98e721f4b::t_1f98a682eca2cb 22,138
+apps/bcs/scripts/e2e-runner/tests/test_local_event.py
+  s_cecdc98e721f4b::t_dc15124df9b8e8 23,101
+apps/bcs/scripts/e2e-runner/tests/test_local_event_contract.py
+  s_cecdc98e721f4b::t_2657c44b100361 11,57
+apps/bcs/scripts/e2e-runner/tests/test_local_file_story.py
+  s_cecdc98e721f4b::t_9f78f741d12eb0 24,121
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_5eda2d91e597ae 12,91
+apps/bcs/scripts/e2e-runner/tests/test_local_judge_contract.py
+  s_cecdc98e721f4b::t_fadfae19d2e328 10,49
+apps/bcs/scripts/e2e-runner/tests/test_local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_60e55217b058f5 194,245,609
+apps/bcs/scripts/e2e-runner/tests/test_local_network_run.py
+  s_cecdc98e721f4b::t_0dceab63f386a1 22,77,109
+apps/bcs/scripts/e2e-runner/tests/test_local_operator_cli.py
+  s_cecdc98e721f4b::t_63be9670ed9514 34,84
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_contract.py
+  s_cecdc98e721f4b::t_7e7034f2a6a589 11,57
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_run.py
+  s_cecdc98e721f4b::t_aaa256eacbffdb 22,67
+apps/bcs/scripts/e2e-runner/tests/test_local_result_queue_run.py
+  s_cecdc98e721f4b::t_ede1943bdc0826 173,221,559
+apps/bcs/scripts/e2e-runner/tests/test_local_session_flow.py
+  s_cecdc98e721f4b::t_958d515bad4e04 22,55,87
+apps/bcs/scripts/e2e-runner/tests/test_local_session_run.py
+  s_cecdc98e721f4b::t_64bdb8ec62009a 22,68,95
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing_run.py
+  s_cecdc98e721f4b::t_768a642fb1c4fe 22,85
+apps/bcs/scripts/e2e-runner/tests/test_local_structured.py
+  s_cecdc98e721f4b::t_fbd7868546be85 24,124
+apps/bcs/scripts/e2e-runner/tests/test_local_structured_contract.py
+  s_cecdc98e721f4b::t_0db0b3b8008dad 11,52
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_combined.py
+  s_cecdc98e721f4b::t_1cba191fcfe52f 21,81
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_config_run.py
+  s_cecdc98e721f4b::t_fea05c36714975 19,73
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_run.py
+  s_cecdc98e721f4b::t_1a168fa3add9f9 20,98
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_8dd11bd664e32b 43,86,120,233,530
+apps/bcs/scripts/e2e-runner/tests/test_reporting.py
+  s_cecdc98e721f4b::t_b11bca4686c9cf 63
+apps/bcs/scripts/e2e-runner/tests/test_retained_file.py
+  s_cecdc98e721f4b::t_2c62cf8221de36 91,215
+apps/bcs/scripts/e2e-runner/tests/test_retained_file_remote.py
+  s_cecdc98e721f4b::t_e77bc78f0177da 28,222
+apps/bcs/scripts/e2e-runner/tests/test_retained_serial.py
+  s_cecdc98e721f4b::t_3c72011a2f3e93 160,291
+apps/bcs/scripts/e2e-runner/tests/test_runner.py
+  s_cecdc98e721f4b::t_31719e2fd820c7 10-11,132
+apps/bcs/scripts/e2e-runner/tests/test_trust_reporting.py
+  s_cecdc98e721f4b::t_95b6efccf4cd4b 66
+apps/bcs/scripts/e2e-runner/trusted-team-manifest.json
+  s_cecdc98e721f4b::t_a3486a6aa8313d 3,209-250
+scripts/ci/e2e_runner_case_guard.py
+  s_cecdc98e721f4b::t_638f1f48bd23fa 1-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8d272ff8de46f932ac623d2041147cc31312d789",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

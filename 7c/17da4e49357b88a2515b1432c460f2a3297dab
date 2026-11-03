@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_header_updater.py
+  s_45e85f76bbe02f::t_3b91adfabf8ec6 210,220-243,246-254
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_45e85f76bbe02f::t_569dfbc5bbf21c 519-523,3098-3101,3111,3129-3139,3141,3143-3153,3155-3180,3182,3184-3197,3320-3324,3338-3353,3355-3412,3414-3420
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c17da4e49357b88a2515b1432c460f2a3297dab",
+  "prompts": {},
+  "sessions": {
+    "s_45e85f76bbe02f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b6-6467-7280-98bc-0ace5c7f1cdf",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

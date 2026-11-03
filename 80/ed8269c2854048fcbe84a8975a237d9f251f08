@@ -1,0 +1,147 @@
+apps/frontend-nextgen/test/assets/TaskPanel/groupDisplay.test.ts
+  s_b9de8ed405a77c::t_3d585c54642166 201-243
+  s_b9de8ed405a77c::t_0571c119f4e36d 71-80
+  s_b9de8ed405a77c::t_5bd557e3a26ce4 182-200
+apps/frontend-nextgen/test/assets/TaskPanel/artifactDescriptor.branches.test.ts
+  s_b9de8ed405a77c::t_f737a174701a57 3,5
+  s_b9de8ed405a77c::t_7180f99bf29ec7 60-100
+  s_b9de8ed405a77c::t_7efa2c98e8fd87 1-2,4,6-59,101
+apps/frontend-nextgen/test/assets/TaskPanel/TaskPanel.branches.test.tsx
+  s_b9de8ed405a77c::t_3deead5bd2580e 6-7
+  s_b9de8ed405a77c::t_d38a1ca852eaeb 1-5,8-10,19-22,25-26,28-35,37-62,75-77,79-80,82-85,87-91,93-109,111-115,117-121,123-125,127-129,131-136
+  s_b9de8ed405a77c::t_6b44c0b3de6c04 11-18,23-24,27,36,63-74,78,81,86,92,110,116,122,126,130
+apps/frontend-nextgen/test/assets/TaskPanel/taskPanelMapper.branches.test.ts
+  s_b9de8ed405a77c::t_d4876e503d85ed 520,529-534
+  s_b9de8ed405a77c::t_da9e7d1c817f45 776-777
+  s_b9de8ed405a77c::t_3f69f6dc424b3a 170-171,175,204-208
+  s_b9de8ed405a77c::t_a2a0c5c5e43290 600,607-610
+  s_b9de8ed405a77c::t_aea1f501f8fa36 722,724-743
+  s_b9de8ed405a77c::t_fd9713a0dbb162 745-746,748-761,763-775
+  s_b9de8ed405a77c::t_1224c8dc3e1c35 762
+  s_b9de8ed405a77c::t_db263f31aa0980 337-519,521-528,535-581,583-585,592-599,601-606,611-630,960
+  s_b9de8ed405a77c::t_231f1a82f8ddc2 582,586-591
+  s_b9de8ed405a77c::t_73bf6efd6e944c 747
+  s_b9de8ed405a77c::t_5b65e0600ec001 209
+  s_b9de8ed405a77c::t_dd1753ce6229de 645,649,655,660,679,699,702-704,707-708,711,716-717,720
+  s_b9de8ed405a77c::t_65c1549acaeb44 863-864
+  s_b9de8ed405a77c::t_6a1e1f85cd90db 723
+  s_b9de8ed405a77c::t_19aab87843e18c 867-868
+  s_b9de8ed405a77c::t_f29188f0a9aa75 631-644,646-648,650-654,656-659,661-678,680-698,700-701,705-706,709-710,712-715,718-719,721,744,778-862,865-866,869-959
+  s_b9de8ed405a77c::t_4e11d2ae9612b7 1-169,172-174,176-203,210-336
+apps/frontend-nextgen/test/assets/TaskPanel/DagView.test.tsx
+  s_b9de8ed405a77c::t_d5f1d7b27f50eb 398-400,402-403,406-407,409-410
+  s_b9de8ed405a77c::t_0cc80cadc53dff 1-2,4-45,47-48,54-99,123-211,243-317,319,323,325-328,392-397,404-405,411-414,416-439,441,449,452-542
+  s_b9de8ed405a77c::t_a3430cab263548 212-242
+  s_b9de8ed405a77c::t_7defb40d3610e3 329-363,367-370,373,375-379,384,388,391
+  s_b9de8ed405a77c::t_c0ea68bc64b3e3 318,320-322,324
+  s_b9de8ed405a77c::t_db8b4ea3a8ced2 543-550,553-554
+  s_b9de8ed405a77c::t_2b88212906c2be 401,408
+  s_b9de8ed405a77c::t_34ec53df82574a 415
+  s_b9de8ed405a77c::t_05f410795f648b 3
+  s_b9de8ed405a77c::t_6cda68aaefdf88 50-51,53,364-366,371-372,374,385-387
+  s_b9de8ed405a77c::t_15eeddd81a5d14 440,442-448,450-451
+  s_b9de8ed405a77c::t_9081c126c2f36d 46,49,52
+  s_b9de8ed405a77c::t_c79630c8177118 551-552
+  s_b9de8ed405a77c::t_046525f3db4ee0 100-122
+  s_b9de8ed405a77c::t_8b10d7197a3da0 380-383,389-390
+apps/frontend-nextgen/test/assets/TaskPanel/TaskProgress.test.tsx
+  s_b9de8ed405a77c::t_6c0057319ef04f 107-115
+apps/frontend-nextgen/test/assets/TaskPanel/useTaskArtifactPreview.branches.test.tsx
+  s_b9de8ed405a77c::t_7ea0f2453eb0b5 2-3
+  s_b9de8ed405a77c::t_92bf9595ae03a5 371,397,419,441,463,485,507
+  s_b9de8ed405a77c::t_f79351203e0d7e 591
+  s_b9de8ed405a77c::t_cb1c54e4532e50 1,4-176,184-200,202-369,372-377,379-395,398-403,405-417,420-425,427-439,442-447,449-461,464-469,471-483,486-491,493-505,508-513,515-535,543-549,552,556-582,595
+  s_b9de8ed405a77c::t_60f032d8ac76a3 550,553-554
+  s_b9de8ed405a77c::t_1424addcd1192e 177-183
+  s_b9de8ed405a77c::t_e3fa0cda05dc97 536-542,555
+  s_b9de8ed405a77c::t_2b132bf7de43ba 201
+  s_b9de8ed405a77c::t_28420321cb3764 378,404,426,448,470,492,514
+  s_b9de8ed405a77c::t_190e44dd5cad32 551,592
+  s_b9de8ed405a77c::t_a60a0a2534ccbf 583-590,593-594
+  s_b9de8ed405a77c::t_a9f5592ea0f68a 370,396,418,440,462,484,506
+  s_b9de8ed405a77c::t_3f3f952df5426b 596-629,631,633-658,660,662-687,689,691-700
+  s_b9de8ed405a77c::t_2c4e1d6b274761 630,632,659,661,688,690
+apps/frontend-nextgen/src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts
+  s_b9de8ed405a77c::t_903710296160d4 102-103
+  s_b9de8ed405a77c::t_8bfb12e37c0680 143-144
+apps/frontend-nextgen/src/assets/TaskPanel/GroupDrillDown.tsx
+  s_b9de8ed405a77c::t_3b2814400fc319 542
+  s_b9de8ed405a77c::t_18446ee10bdb4a 243
+  s_b9de8ed405a77c::t_c288cc168ee48a 325-326,332-333
+  s_b9de8ed405a77c::t_11598e32ff4e8a 413-414
+  s_b9de8ed405a77c::t_0bf5060053c2e4 536
+apps/frontend-nextgen/test/assets/TaskPanel/GroupDrillDown.branches.test.tsx
+  s_b9de8ed405a77c::t_ca6f7c8f931966 436-498
+  s_b9de8ed405a77c::t_df8d1d2628f01c 252
+  s_b9de8ed405a77c::t_ab6d3f1f478d25 294
+  s_b9de8ed405a77c::t_1f89e1c123734c 181
+  s_b9de8ed405a77c::t_8b2d7482cdca0f 774
+  s_b9de8ed405a77c::t_1f70a3ecd6e1f0 931
+  s_b9de8ed405a77c::t_3508403146a2a5 1009-1010
+  s_b9de8ed405a77c::t_ab31179c9b1457 521-525
+  s_b9de8ed405a77c::t_b076b270a7e053 1074-1103
+  s_b9de8ed405a77c::t_79156a6cdaf6d7 22-23
+  s_b9de8ed405a77c::t_92c0f80d7380af 1163
+  s_b9de8ed405a77c::t_7425f085ddf8df 1170-1174,1176-1177
+  s_b9de8ed405a77c::t_0cc1366851d51a 1175,1182
+  s_b9de8ed405a77c::t_e7223a9dc589d6 1001-1008
+  s_b9de8ed405a77c::t_1597319a43bb52 834
+  s_b9de8ed405a77c::t_90cea19985f4db 11
+  s_b9de8ed405a77c::t_c0f7ebb58d9aef 1119
+  s_b9de8ed405a77c::t_45e5111f901412 541-546
+  s_b9de8ed405a77c::t_097b86eac81bea 354
+  s_b9de8ed405a77c::t_92072a036d3b65 1047
+  s_b9de8ed405a77c::t_893c95e236f658 149
+  s_b9de8ed405a77c::t_9d8323fb00dc4b 1-10,12-21,24-116,118-119,121-148,150-180,182-251,253-293,295-353,355-435,499-520,526-540,547-773,775-829,831-833,835-896,932-1000,1011-1046,1048-1073,1104-1118,1120-1162,1164-1169,1185-1208
+  s_b9de8ed405a77c::t_1c36e04d1a1492 830
+  s_b9de8ed405a77c::t_e1d423043fcd12 1178-1181,1183-1184
+  s_b9de8ed405a77c::t_91f846f1fbd129 117,120
+  s_b9de8ed405a77c::t_a55177bfa15469 897-930
+apps/frontend-nextgen/test/assets/TaskPanel/TaskPanelFetcher.branches.test.tsx
+  s_b9de8ed405a77c::t_5da34129e7c74e 1-87,89-128,130-169,171-210,212-528,530-721
+  s_b9de8ed405a77c::t_4ae8c8ca55e3bf 529
+  s_b9de8ed405a77c::t_cb3d480c05d02f 170
+  s_b9de8ed405a77c::t_44ac1c6cb2103d 211
+  s_b9de8ed405a77c::t_5a51e13968493a 756
+  s_b9de8ed405a77c::t_09f6f69e69674d 129
+  s_b9de8ed405a77c::t_7fc783eb9e3d19 88
+  s_b9de8ed405a77c::t_34a4f87ef0e8d9 771
+  s_b9de8ed405a77c::t_d5b1027ed6599c 722-755,757-770,772-930
+apps/frontend-nextgen/src/assets/TaskPanel/DagView.tsx
+  s_b9de8ed405a77c::t_81577720780ab9 282-283
+  s_b9de8ed405a77c::t_8e3c82af8a61c9 130-131
+  s_b9de8ed405a77c::t_4ba8da9c0e169e 196-197
+  s_b9de8ed405a77c::t_af0a777c6fd9cd 158-159,164-165,168-169
+  s_b9de8ed405a77c::t_cbd84615d486f9 213-214
+  s_b9de8ed405a77c::t_999005650350ce 245-246,248-249
+  s_b9de8ed405a77c::t_638f0b2a89e679 104-106,110,120,123-124
+apps/frontend-nextgen/src/assets/TaskPanel/taskPanelMapper.ts
+  s_b9de8ed405a77c::t_94a35932f6d4f4 192-193
+  s_b9de8ed405a77c::t_8e390dd99842e2 338-339
+  s_b9de8ed405a77c::t_7d2feb82542792 317-318
+  s_b9de8ed405a77c::t_c6745392a383b9 720-721
+  s_b9de8ed405a77c::t_a82800191e073c 729-730
+  s_b9de8ed405a77c::t_305440d51b379b 527-528
+  s_b9de8ed405a77c::t_d526027e315843 461,463
+  s_b9de8ed405a77c::t_ac16ea80f3a152 131-132,136-137
+  s_b9de8ed405a77c::t_0e71b878a61bcc 343-344
+  s_b9de8ed405a77c::t_915c7d647f1881 662-663,670-678,681-683
+  s_b9de8ed405a77c::t_97091f02c30caf 377-378
+  s_b9de8ed405a77c::t_e3293733593e32 373-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "80ed8269c2854048fcbe84a8975a237d9f251f08",
+  "prompts": {},
+  "sessions": {
+    "s_b9de8ed405a77c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a23c1a4d-f694-487d-b65d-ae715c528899",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

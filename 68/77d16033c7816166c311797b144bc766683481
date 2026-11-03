@@ -1,0 +1,22 @@
+apps/backend/specs/2026-11-02-task-config/spec.md
+  h_059e888e5e4e82 229-230,247
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  h_059e888e5e4e82 87-92
+apps/frontend-nextgen/src/services/workspace/botSkillService.ts
+  h_059e888e5e4e82 21,85,89,93,105
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  h_059e888e5e4e82 83-88,93-114
+apps/frontend-nextgen/test/services/workspace/botSkillService.test.ts
+  h_059e888e5e4e82 39,54,66,73,82,93,104,121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6877d16033c7816166c311797b144bc766683481",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

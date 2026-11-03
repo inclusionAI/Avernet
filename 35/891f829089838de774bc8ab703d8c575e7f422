@@ -1,0 +1,36 @@
+apps/frontend-nextgen/src/assets/TaskPanel/GroupDrillDown.tsx
+  h_059e888e5e4e82 39
+apps/frontend-nextgen/src/assets/TaskPanel/groupDisplay.ts
+  h_059e888e5e4e82 1-93
+apps/frontend-nextgen/src/assets/TaskPanel/hooks/useGroupMemberNames.ts
+  h_059e888e5e4e82 1-51
+apps/frontend-nextgen/src/assets/TaskPanel/types.ts
+  h_059e888e5e4e82 37-38,94-95
+apps/frontend-nextgen/src/assets/TaskPanel/v2/ArtifactsSection.tsx
+  h_059e888e5e4e82 158
+apps/frontend-nextgen/src/assets/TaskPanel/v2/NodeListViewV2.tsx
+  h_059e888e5e4e82 48-49
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.tsx
+  h_059e888e5e4e82 145,163,240,242
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactsList.tsx
+  h_059e888e5e4e82 5-6,15-16,35,37-40
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskNodePanelV2.tsx
+  h_059e888e5e4e82 112
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskOverviewV2.tsx
+  h_059e888e5e4e82 100
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskPanelV2.tsx
+  h_059e888e5e4e82 7,12-13,48-51,53,153,162
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskPanelV2.test.tsx
+  h_059e888e5e4e82 4,8-17,158-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35891f829089838de774bc8ab703d8c575e7f422",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

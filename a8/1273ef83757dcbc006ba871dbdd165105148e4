@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_sync.py
+  s_cc131103d18414::t_0235a0cd9112be 21-31,131
+apps/backend/tests/community/core/devices/test_baas_device_sync.py
+  s_cc131103d18414::t_95e6968bd14fdd 335-378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a81273ef83757dcbc006ba871dbdd165105148e4",
+  "prompts": {},
+  "sessions": {
+    "s_cc131103d18414": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-d645-7443-a1a1-6c0bf053e3dd",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

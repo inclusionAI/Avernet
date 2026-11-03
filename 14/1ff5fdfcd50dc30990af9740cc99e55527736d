@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/core/desktop_bot/errors.py
+  s_2890c2120e6ea0::t_119118b8199dab 16-23
+apps/backend/tests/community/core/desktop_bot/services/test_desktop_bot_service.py
+  s_2890c2120e6ea0::t_f8a33d9ff96405 5,10,150-156,158-208
+  s_2890c2120e6ea0::t_327611b260f47b 157
+  s_2890c2120e6ea0::t_7bb83a91885323 209
+apps/backend/tests/community/api/desktop/test_desktop_router.py
+  s_2890c2120e6ea0::t_119118b8199dab 291-292,295,303
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_bot_service.py
+  s_2890c2120e6ea0::t_119118b8199dab 22,84-93,521-532,548-558
+  s_2890c2120e6ea0::t_63e05859d76055 559
+apps/backend/src/agentclaw/community/adapters/http/desktop/router.py
+  s_2890c2120e6ea0::t_119118b8199dab 14,79-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "141ff5fdfcd50dc30990af9740cc99e55527736d",
+  "prompts": {},
+  "sessions": {
+    "s_2890c2120e6ea0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c3f-0311-7d81-a41a-11fa0d264b3f",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

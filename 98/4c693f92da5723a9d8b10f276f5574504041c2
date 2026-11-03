@@ -1,0 +1,19 @@
+apps/backend/specs/preserve-caller-outbound-append/009-pr-report.md
+  s_6f405a676c2088::t_c5107d76c53823 8,11,18-20,22-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "984c693f92da5723a9d8b10f276f5574504041c2",
+  "prompts": {},
+  "sessions": {
+    "s_6f405a676c2088": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18185-bb88-7473-91c4-546e1daafbc8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

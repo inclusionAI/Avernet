@@ -1,0 +1,40 @@
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependencies.py
+  h_5686002b4ce7b9 38,84,247,266-268,890,964-966,972
+apps/bcsfuse/src/app/adapters/http/recommend_routes.py
+  h_5686002b4ce7b9 307-311,356-360
+apps/bcsfuse/src/app/adapters/http/search_response_projection.py
+  h_5686002b4ce7b9 14,48-50,105-107
+apps/bcsfuse/src/app/application/agent_search_service.py
+  h_5686002b4ce7b9 34-37,202-203,277,288,293-320,359,370,383,411,458-459,690,914-917
+apps/bcsfuse/src/app/application/services/fragment_dense_projection.py
+  h_5686002b4ce7b9 1-43
+apps/bcsfuse/src/app/application/services/fragment_retrieval_branches.py
+  h_5686002b4ce7b9 1-35
+apps/bcsfuse/src/app/application/services/keyword_candidate_selection.py
+  h_5686002b4ce7b9 19-24,46-50
+apps/bcsfuse/src/app/application/services/retrieval_branch_runner.py
+  h_5686002b4ce7b9 1-73
+apps/bcsfuse/src/app/application/services/search_index_state.py
+  h_5686002b4ce7b9 1-122
+apps/bcsfuse/src/app/application/services/worker_vector_match_fragments.py
+  h_5686002b4ce7b9 19,23-24,37,39-40,43-44,140-141,149-162,164-177,179-188,191-227,302-309
+apps/bcsfuse/src/app/application/services/worker_vector_match_service.py
+  h_5686002b4ce7b9 63,146,171
+apps/bcsfuse/src/app/bootstrap/oss_business_routes.py
+  h_5686002b4ce7b9 714-719,745-749
+apps/bcsfuse/tests/contract/test_search_index_state_tdd.py
+  h_5686002b4ce7b9 1-241
+apps/bcsfuse/tests/contract/test_search_retrieval_capacity_p0_tdd.py
+  h_5686002b4ce7b9 1-308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e77f553880936383e4379062db87fd5b45acf746",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

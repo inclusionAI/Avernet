@@ -1,0 +1,141 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_1c1eec404490ee 116-119
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_3680c1332ea14b 13,47,316-327
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_b989a9e3192316 44,734-746
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/__init__.py
+  s_cecdc98e721f4b::t_c230800c9572b1 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/checks.py
+  s_cecdc98e721f4b::t_75e23b9fb14368 1-630
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/collaboration-drafts.enabled.json
+  s_cecdc98e721f4b::t_a18bae7dec180b 1-5
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/contract.py
+  s_cecdc98e721f4b::t_8b3d52277d4b71 1-211
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/dual_case_run.py
+  s_cecdc98e721f4b::t_1c570dcba436f3 1-738
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/reporting.py
+  s_cecdc98e721f4b::t_0ad05cc4c7ed55 1-169
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/run.py
+  s_cecdc98e721f4b::t_3b36c500d7bc74 1-333
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/runtime.py
+  s_cecdc98e721f4b::t_225725a91a0a82 1-66
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/story.py
+  s_cecdc98e721f4b::t_f8f3551dc21395 1-624
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_106ff02aa082cd 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_backlog_story_commands/__init__.py
+  s_cecdc98e721f4b::t_273654a1d82603 1-91
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_story.py
+  s_cecdc98e721f4b::t_f7871a64cc090d 38-41,167-172,283-285,294-301
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_completion.py
+  s_cecdc98e721f4b::t_c80d9d24a5d934 16-18,69-70,107-108,194,281,284,288,340,358-377,392-393,404,419-428,431,433-436,439-441,443-445,452-469,472-474,477-479,481,483-485,488-494,497-499,501-503,505-507,511,516-519,522-528,531-546,560
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_contract.py
+  s_cecdc98e721f4b::t_a0c8a7e64618cf 20-73
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_flow_reporting.py
+  s_cecdc98e721f4b::t_4e3ff34c93b38c 10,107,114-116,120-127,211,213-215,226-229,234-237,255-261
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_public.py
+  s_cecdc98e721f4b::t_4137b388e65604 28-29,32,78,351,440-447,561-562,585,587-590,593,595-598,608-609,618-619,626-629,653-656,661-662,669-672,679-682,703-706,719-720,727-730,737-740,748-749,757-763,771-772,791-794,814-817,833-837,841-842,862-864
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_public_storage/__init__.py
+  s_cecdc98e721f4b::t_6fb1120da06734 1-179
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_reporting.py
+  s_cecdc98e721f4b::t_2a79fe67a7dea5 15,92,105-106,111-114,228
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_run.py
+  s_cecdc98e721f4b::t_82c6238e054a4e 8-11,111,150-151,176-177
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_cli.py
+  s_cecdc98e721f4b::t_46536eff59ff88 28-63,300-309,332-418,422-427,641-650,669,674-675,678-814,818-823
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_completion.py
+  s_cecdc98e721f4b::t_8f61c07a4447bd 11-12,15,39-49,395-401,411,414-440,444-449,458-468,484,487-579,583-588
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_case.py
+  s_cecdc98e721f4b::t_48b5bd36cfd252 4-7,18-19,30-31,36,54-59,68-70,76-77,87-88,101-103,108-115,134-136,138,141,146-147,151-152
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_reporting.py
+  s_cecdc98e721f4b::t_f3b5f1605439d9 16-28,78-86,88-93,223,234-235,237,239-241,246-247,251-252,254-258,309,311-320,363
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_run.py
+  s_cecdc98e721f4b::t_455b40113b72d4 24,505-508
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing.py
+  s_cecdc98e721f4b::t_b43fd535b8b792 28-29,62-68,183-184,495-502,731-736,768-769,944-945
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_reporting.py
+  s_cecdc98e721f4b::t_48a19c5ae705b2 10,61,146,148-150,161-164,169-172,190-194
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_story_commands.py
+  s_cecdc98e721f4b::t_b6dc373fdf4659 19-22,75,331,335-336
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_a3faff09489f3e 186,199-205,373-391,422,466,532,545,552,631-632
+apps/bcs/scripts/e2e-runner/bcs_e2e/mock_judge/__init__.py
+  s_cecdc98e721f4b::t_d68bc2308b149a 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/mock_judge/page_bank.py
+  s_cecdc98e721f4b::t_dcbbd14981468d 1-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/mock_judge/server.py
+  s_cecdc98e721f4b::t_ac5fc3825224ff 1-411
+apps/bcs/scripts/e2e-runner/bcs_e2e/reporting.py
+  s_cecdc98e721f4b::t_8a37526c49ff11 578-580
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_cli_contract/__init__.py
+  s_cecdc98e721f4b::t_c1eac8299f1e08 1-481
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_file_core_contract.py
+  s_cecdc98e721f4b::t_ee9ba4bebd75f6 37-63,129-130,132-135,489-490,493-495,498-504,508-518,522-525,529-533,568-570,573,578-584,587,594,607-631
+apps/bcs/scripts/e2e-runner/draft-delivery-migration-contract.json
+  s_cecdc98e721f4b::t_ef04862f7afb08 1-690
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_c453381fd364b7 366
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_checks.py
+  s_cecdc98e721f4b::t_eee747043985ce 1-324
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_contract.py
+  s_cecdc98e721f4b::t_5eab73245766ff 1-189
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_dual_case_run.py
+  s_cecdc98e721f4b::t_a1b02928bf3189 1-732
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_run.py
+  s_cecdc98e721f4b::t_124fe239dd5dc6 1-387
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_story.py
+  s_cecdc98e721f4b::t_0b513ea3ea4bd1 1-525
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_704be223f46e2a 1-116
+apps/bcs/scripts/e2e-runner/tests/test_local_file_story.py
+  s_cecdc98e721f4b::t_a6b37a0a9ac45e 37,98,122,167
+apps/bcs/scripts/e2e-runner/tests/test_local_session_completion.py
+  s_cecdc98e721f4b::t_6be3f7eb2ea4a5 111-118,125-130
+apps/bcs/scripts/e2e-runner/tests/test_local_session_flow.py
+  s_cecdc98e721f4b::t_85a04875763c54 48,81-82
+apps/bcs/scripts/e2e-runner/tests/test_local_session_run.py
+  s_cecdc98e721f4b::t_a05383dd5bb766 63,99
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_cli.py
+  s_cecdc98e721f4b::t_5637872aee1134 307-308,310-313,376
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_completion.py
+  s_cecdc98e721f4b::t_c64099350c66a9 337-343,362-371,378,380,383,385,452
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_member_chat.py
+  s_cecdc98e721f4b::t_c0164cc20341e8 329,331-334,393
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_parent_case.py
+  s_cecdc98e721f4b::t_dda37ae99a0b3e 13-25,46-51,54-90,101-102,105,110-111,122-131,134-152
+apps/bcs/scripts/e2e-runner/tests/test_local_session_service_parent_run.py
+  s_cecdc98e721f4b::t_a6e023f783f9e3 13,22-34,84-97,99-103,105-108,113-114,116,124-138,144-145,472-483
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing.py
+  s_cecdc98e721f4b::t_41acb848803615 169
+apps/bcs/scripts/e2e-runner/tests/test_local_session_sharing_run.py
+  s_cecdc98e721f4b::t_6be8f65418a4f3 79-80
+apps/bcs/scripts/e2e-runner/tests/test_local_story_commands.py
+  s_cecdc98e721f4b::t_eeb2b63df57ea3 72-73
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_187f31c32c0370 138,617-618
+apps/bcs/scripts/e2e-runner/tests/test_mock_judge_server.py
+  s_cecdc98e721f4b::t_2035d1fd268546 1-411
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_bot_groups.py
+  s_cecdc98e721f4b::t_149c83a61cdce7 165-166
+apps/bcs/scripts/e2e-runner/tests/test_session_cli_create_get.py
+  s_cecdc98e721f4b::t_fbd737845d9605 194-195
+apps/bcs/scripts/e2e-runner/tests/test_session_file_core.py
+  s_cecdc98e721f4b::t_83f5c653e005fd 357-358,371-378,389-390,407,412-414,416,420-421,423,425-430,433-435,437,440,467,475,485,515
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "080a0ca73c7527c0f93ba25abcacacc718c3fe30",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

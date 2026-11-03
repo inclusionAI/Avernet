@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_12aa8dfbb414c9::t_49e81589c5e2e9 4349-4350,4367
+apps/backend/src/agentclaw/community/core/bot_management/services/cleanup_service.py
+  s_3829018997cfde::t_72a995efe47d09 7,16-19,86-88,97,128-139
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center.py
+  s_12aa8dfbb414c9::t_c30969696131d5 507-510
+apps/backend/tests/community/core/bot_management/services/test_cleanup_service_startup_script.py
+  s_3829018997cfde::t_2455b7ac91dadc 12,20,28,78-79,81-82,84-85,115-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04974bad44245fd51fb3e868e0ba9c97ddefe1e9",
+  "prompts": {},
+  "sessions": {
+    "s_12aa8dfbb414c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-9b1b-7521-bf37-8cba27f67784",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_3829018997cfde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-fe9d-7333-a924-df073e247434",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

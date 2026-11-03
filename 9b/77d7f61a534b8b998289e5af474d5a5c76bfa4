@@ -1,0 +1,49 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_contract.py
+  s_cecdc98e721f4b::t_c78e93d922673e 22,40-43
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_reporting.py
+  s_cecdc98e721f4b::t_5618ea5cc91130 15,173,182-183,202-204,206-207
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_run.py
+  s_cecdc98e721f4b::t_5518ede04dd182 32-35,355-356
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_9a36e079e09e2f 11-72,84-87
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_8d0ade1ca3fdda 12,127-128,137-138,153-160
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_run.py
+  s_cecdc98e721f4b::t_f6c1d0482b423d 13-14,78-82
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_a34f3d9247aff0 24,42-45
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_315ea941f107be 15,185,194-195,215-217,219-220
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_8ae648d326195c 31-34,374-375
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_contract.py
+  s_cecdc98e721f4b::t_ecea8cc0b4980f 24,42-45
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_reporting.py
+  s_cecdc98e721f4b::t_4d69b18c7f90c5 15,174,183-184,203-205,207-208
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_run.py
+  s_cecdc98e721f4b::t_0d864918cb81d5 32-35,353-354
+apps/bcs/scripts/e2e-runner/tests/test_local_draft_group_run.py
+  s_cecdc98e721f4b::t_d6064e82938378 14,209-212,228-229
+apps/bcs/scripts/e2e-runner/tests/test_local_fixed_loop_contract.py
+  s_cecdc98e721f4b::t_de480661bdee83 10-12,17-29,100-101,111-125
+apps/bcs/scripts/e2e-runner/tests/test_local_nested_fixed_loop_run.py
+  s_cecdc98e721f4b::t_d3707450c84d35 14,235-238,252-253
+apps/bcs/scripts/e2e-runner/tests/test_local_result_queue_run.py
+  s_cecdc98e721f4b::t_907319006ebe33 14,210-213,228-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b77d7f61a534b8b998289e5af474d5a5c76bfa4",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/common.sh
+  s_cecdc98e721f4b::t_e5594d60ff9fb1 444,454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2e85087412b53a66e8243c9e3674dbef77f7fea5",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

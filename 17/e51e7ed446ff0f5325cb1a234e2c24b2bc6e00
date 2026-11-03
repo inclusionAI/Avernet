@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/bot_knowledge/publication_selection.py
+  s_16462c91ec5d93::t_1befdb68cce9e0 152,209
+apps/backend/src/agentclaw/community/core/bot_knowledge/stage_selection.py
+  s_16462c91ec5d93::t_afec54c5ee153b 197,216,387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "17e51e7ed446ff0f5325cb1a234e2c24b2bc6e00",
+  "prompts": {},
+  "sessions": {
+    "s_16462c91ec5d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d51-5517-7430-b6d2-f4ced4c931de",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

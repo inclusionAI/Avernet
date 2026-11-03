@@ -1,0 +1,35 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_run.py
+  s_cecdc98e721f4b::t_cf93d502c91614 232-244,261,279,282-283,287,314,348,359-360,366,378,389
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_e672973db91611 773,776-777,779-780
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_9e241d265d8b7f 7,10,42-43,92-93,95-97,116-138,177-178,730-758,760-785,788-807,810-836,839-860,863-900,903-918
+apps/bcs/scripts/e2e-runner/bcs_e2e/route_bindings.py
+  s_cecdc98e721f4b::t_92967c25e8af30 217,234,260,448-449
+apps/bcs/scripts/e2e-runner/bcs_e2e/transport.py
+  s_cecdc98e721f4b::t_a77b4a0c9529f4 303-305
+apps/bcs/scripts/e2e-runner/bcs_e2e/write_transport.py
+  s_cecdc98e721f4b::t_f8d44a1b89c214 370
+apps/bcs/scripts/e2e-runner/tests/test_edge_red_edge_dual_registration.py
+  s_cecdc98e721f4b::t_1d50136443a24d 1-204
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_32f72875f1cff2 371,379-380,382,385
+apps/bcs/scripts/e2e-runner/tests/test_remote_edge_friend_mutation_adapter.py
+  s_cecdc98e721f4b::t_8b671033243f64 175,194-195,299,339-389,534,536,544-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "341e19f6282629ef7914b0cd44836eab3b13d4d8",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

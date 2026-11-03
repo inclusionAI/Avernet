@@ -1,0 +1,132 @@
+apps/bcsfuse/README.md
+  h_5686002b4ce7b9 113-116
+apps/bcsfuse/docs/api/api-external.md
+  h_5686002b4ce7b9 269
+apps/bcsfuse/docs/api/api-reference.md
+  h_5686002b4ce7b9 305
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 294-299,305-312,438-441,444-451,454,1133-1136
+apps/bcsfuse/docs/qdrant-modes.md
+  h_5686002b4ce7b9 87-89
+apps/bcsfuse/packages/search-core/src/search_core/providers/fallback.py
+  h_5686002b4ce7b9 51-53,96
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  h_5686002b4ce7b9 266-274
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_server.py
+  h_5686002b4ce7b9 129-138
+apps/bcsfuse/packages/search-core/tests/test_regex_fallback_index_normalization_tdd.py
+  h_5686002b4ce7b9 1-57
+apps/bcsfuse/src/app/adapters/http/bot_recommendation_projection.py
+  h_5686002b4ce7b9 1-34
+apps/bcsfuse/src/app/adapters/http/recommend_routes.py
+  h_5686002b4ce7b9 40-42,391-392,408-415,433-434
+apps/bcsfuse/src/app/adapters/http/search_response_projection.py
+  h_5686002b4ce7b9 15-17,26-39
+apps/bcsfuse/src/app/application/agent_search_cache.py
+  h_5686002b4ce7b9 14,109,111
+apps/bcsfuse/src/app/application/agent_search_service.py
+  h_5686002b4ce7b9 23-28,35-39,44-45,218,220,246-254,302-348,352-353,531-537,567-571,580-584,594-620,625-649,651,653-669,677-678,704-705,710,741,759-766,785,791,793-797,799-802,805-847,852,865,877-878,885-888,897
+apps/bcsfuse/src/app/application/services/agent_search_terminal_fallback.py
+  h_5686002b4ce7b9 1-160
+apps/bcsfuse/src/app/application/services/fragment_keyword_routing.py
+  h_5686002b4ce7b9 1-125
+apps/bcsfuse/src/app/application/services/keyword_candidate_selection.py
+  h_5686002b4ce7b9 5,29,33-83
+apps/bcsfuse/src/app/application/services/literal_fallback_maintenance.py
+  h_5686002b4ce7b9 11,45-46,191-192,204-223,240,245-288
+apps/bcsfuse/src/app/application/services/literal_fallback_recovery.py
+  h_5686002b4ce7b9 1-99
+apps/bcsfuse/src/app/application/services/local_retrieval_snapshot.py
+  h_5686002b4ce7b9 71-113,135-152,226-227
+apps/bcsfuse/src/app/application/services/local_snapshot_router.py
+  h_5686002b4ce7b9 1-116
+apps/bcsfuse/src/app/application/services/query_intent_policy.py
+  h_5686002b4ce7b9 1-99
+apps/bcsfuse/src/app/application/services/query_normalizer.py
+  h_5686002b4ce7b9 1-44
+apps/bcsfuse/src/app/application/services/search_degradation_reasons.py
+  h_5686002b4ce7b9 1-69
+apps/bcsfuse/src/app/application/services/search_mode_policy.py
+  h_5686002b4ce7b9 1-37
+apps/bcsfuse/src/app/application/services/worker_candidate_recommendation_impl.py
+  h_5686002b4ce7b9 693-699
+apps/bcsfuse/src/app/application/services/worker_vector_match_fragments.py
+  h_5686002b4ce7b9 18,29,139-166,192-201,313-317,321-326,328-330
+apps/bcsfuse/src/app/application/services/worker_vector_match_service.py
+  h_5686002b4ce7b9 59,120
+apps/bcsfuse/src/app/bootstrap/oss_business_support.py
+  h_5686002b4ce7b9 35,54-57,382-387
+apps/bcsfuse/src/app/bootstrap/search_capacity.py
+  h_5686002b4ce7b9 6,14-19,40-42,52-63,68-70,96-119,125-127,131-150,223-225,237-248,277-289,291-294,318,322,327-331,333-334,342-343,348,354-357,359-363,436-455
+apps/bcsfuse/src/app/domain/services/profile_embedding_indexer.py
+  h_5686002b4ce7b9 259-260,287-291,368-388
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  h_5686002b4ce7b9 134-150,388-389,397,406-415
+apps/bcsfuse/src/app/infra/worker_profiles/sources/api_profile_source.py
+  h_5686002b4ce7b9 40-49,601-602,616-617,631-632,646-647,661
+apps/bcsfuse/tests/contract/test_agent_search_service_tdd.py
+  h_5686002b4ce7b9 117,139,171,319,692
+apps/bcsfuse/tests/contract/test_always_return_search_fallback_tdd.py
+  h_5686002b4ce7b9 121,365,491,544
+apps/bcsfuse/tests/contract/test_api_profile_embedding_payload_tdd.py
+  h_5686002b4ce7b9 1-56
+apps/bcsfuse/tests/contract/test_auth_mode_matrix_tdd.py
+  h_5686002b4ce7b9 1-97
+apps/bcsfuse/tests/contract/test_direct_identifier_shortcut_tdd.py
+  h_5686002b4ce7b9 1-165
+apps/bcsfuse/tests/contract/test_direct_keyword_availability_tdd.py
+  h_5686002b4ce7b9 1-334
+apps/bcsfuse/tests/contract/test_embedding_outage_contract_tdd.py
+  h_5686002b4ce7b9 107,135
+apps/bcsfuse/tests/contract/test_embedding_reason_code_tdd.py
+  h_5686002b4ce7b9 143
+apps/bcsfuse/tests/contract/test_embedding_shared_capacity_tdd.py
+  h_5686002b4ce7b9 289
+apps/bcsfuse/tests/contract/test_internal_only_vector_boundary.py
+  h_5686002b4ce7b9 3,15-22,35-36
+apps/bcsfuse/tests/contract/test_key_bypass_reason_tdd.py
+  h_5686002b4ce7b9 1-20
+apps/bcsfuse/tests/contract/test_mysql_fused_profile_store_contract.py
+  h_5686002b4ce7b9 107-113
+apps/bcsfuse/tests/contract/test_mysql_vector_persistence_backend_contract.py
+  h_5686002b4ce7b9 119-125
+apps/bcsfuse/tests/contract/test_mysql_worker_profile_binding_store_contract.py
+  h_5686002b4ce7b9 99-105
+apps/bcsfuse/tests/contract/test_profile_activation_index_batching_tdd.py
+  h_5686002b4ce7b9 203-205,265-282
+apps/bcsfuse/tests/contract/test_qdrant_mysql_vector_store_contract.py
+  h_5686002b4ce7b9 108-114
+apps/bcsfuse/tests/contract/test_qdrant_readiness_reconnect_tdd.py
+  h_5686002b4ce7b9 1-143
+apps/bcsfuse/tests/contract/test_qdrant_vector_store_contract.py
+  h_5686002b4ce7b9 36-45,54-55,136-142
+apps/bcsfuse/tests/contract/test_query_normalization_intent_routes_tdd.py
+  h_5686002b4ce7b9 1-254
+apps/bcsfuse/tests/contract/test_recommendation_recall_thresholds_tdd.py
+  h_5686002b4ce7b9 65,113
+apps/bcsfuse/tests/contract/test_search_admission_boundary_tdd.py
+  h_5686002b4ce7b9 75,102,114
+apps/bcsfuse/tests/contract/test_search_capacity_observability.py
+  h_5686002b4ce7b9 93,97
+apps/bcsfuse/tests/contract/test_search_capacity_queue_tdd.py
+  h_5686002b4ce7b9 51
+apps/bcsfuse/tests/contract/test_search_capacity_route_split_tdd.py
+  h_5686002b4ce7b9 1-145
+apps/bcsfuse/tests/contract/test_search_mode_contract_tdd.py
+  h_5686002b4ce7b9 1-128
+apps/bcsfuse/tests/contract/test_search_stage_profiling_tdd.py
+  h_5686002b4ce7b9 1-122
+apps/bcsfuse/tests/contract/test_worker_vector_match_fallback.py
+  h_5686002b4ce7b9 571-795
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "89a6414982ade26f7317f75b553513b58e2d58d6",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

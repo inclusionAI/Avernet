@@ -1,0 +1,27 @@
+apps/backend/tests/community/api/bot_management/test_router_search_disconnect.py
+  s_92e5304eac29c0::t_8eb40c50524a74 1,8-10,13,38,40-69,71,103,105
+  s_92e5304eac29c0::t_7f93a03917e52c 6
+  s_92e5304eac29c0::t_5cad4f057f84e9 22
+  s_92e5304eac29c0::t_24acba72bf745a 39,70,104
+  s_92e5304eac29c0::t_b1490d25001ed5 72-73,106-108
+  s_92e5304eac29c0::t_466ebc54be0148 2-5,7,11-12,14-21,23-37,74-102
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_92e5304eac29c0::t_33a7ab0e9756f9 1969-1975
+  s_92e5304eac29c0::t_ce46b39a43fbd0 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "76e4b9db036f6cb9cb4af991f1293d58c92b660e",
+  "prompts": {},
+  "sessions": {
+    "s_92e5304eac29c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c38-9ed1-7b23-af60-0bf4f459d81f",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_9936d53f7c0f1e::t_42f060ed4b81e0 3101,3109-3120,3122-3123,3125-3128,3130-3167
+apps/backend/tests/community/core/service_bot/services/test_baas_service_http_methods.py
+  s_9936d53f7c0f1e::t_50dacc313c3094 25-29,218-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f3d0eccdb185fbec966bf752520f124bc4d4dc4c",
+  "prompts": {},
+  "sessions": {
+    "s_9936d53f7c0f1e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19cc5-6469-7cd0-96bc-5b4a43b7ce13",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

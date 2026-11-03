@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/authority-dual-migration-contract.json
+  s_cecdc98e721f4b::t_d85e92eb2f8f66 104
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/contract.py
+  s_cecdc98e721f4b::t_7189110759864c 47
+apps/bcs/scripts/e2e-runner/bcs_e2e/provider_publishes/contract.py
+  s_cecdc98e721f4b::t_aaffb5b6800d05 16,18
+apps/bcs/scripts/e2e-runner/provider-publishes-migration-contract.json
+  s_cecdc98e721f4b::t_9dbf2217aad0a1 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f996eda403aaf7ace8699e15569630e25dd131e",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
