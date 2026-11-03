@@ -1,0 +1,28 @@
+apps/bcsfuse/README.md
+  s_89ee1c722ef961::t_fa42b5c1d09d54 13
+.aci/zbcsfuse/zbcsfuse-dev-ci.aci.yml
+  s_89ee1c722ef961::t_0d688dff8e457e 10-11,49-50,101-102,126
+.aci/zbcsfuse/zbcsfuse-pre-deploy.aci.yml
+  s_89ee1c722ef961::t_0d688dff8e457e 9-10,52-53,108-109,133
+apps/bcsfuse/tests/ci/test_zbcsfuse_pipeline.py
+  s_89ee1c722ef961::t_0d688dff8e457e 3-4,19,98-130,134-136,140-147,153-163
+  s_89ee1c722ef961::t_0395ada4d37115 131-133,137-139,148-152
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_89ee1c722ef961::t_0d688dff8e457e 9,27,175,191,194,196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9896b73fc94c02c3db4e3d89fd5ff98634f35890",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
