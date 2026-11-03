@@ -4,6 +4,7 @@ import {
   addressFromKey,
   routineKey,
   validateCreateTarget,
+  routineInstanceMode,
   type RoutineContext,
 } from '@/services/botScheduledTasks/types';
 import { describeFailure } from '@/services/botScheduledTasks/results';
@@ -24,7 +25,10 @@ const context: RoutineContext = {
   caller_mode: false,
   supported: true,
   can_manage: true,
-  environments: [],
+  environments: (['draft', 'verify', 'online'] as const).map((stage) => ({
+    runtime_stage: stage,
+    instances: ['uuid', 'uuid-2'],
+  })),
 };
 const dto = {
   routine_id: 'job/a',
@@ -313,5 +317,78 @@ describe('next scheduled execution is an explicitly local estimate', () => {
     { ...task, timezone: 'Invalid/Zone' },
   ])('disabled or incomplete/invalid schedules have no estimated time', (input) => {
     expect(estimateNextRun(input, Date.parse('2026-11-03T00:00:00Z'))).toBeUndefined();
+  });
+});
+
+describe('instance selection follows the number of distinct reported UUIDs', () => {
+  const instanceContext = (instances: string[], caller = false, engine = 'openclaw'): RoutineContext => ({
+    ...context,
+    caller_mode: caller,
+    engine,
+    environments: context.environments.map((env) => ({ ...env, instances })),
+  });
+  test('one UUID hides selection and omits even a stale form UUID from create', async () => {
+    request.mockResolvedValue(ok(dto, 201000));
+    const single = instanceContext(['uuid']);
+    expect(routineInstanceMode(single, 'verify')).toBe('single');
+    await client().save(single, { ...form, device_uuid: 'stale-other-instance' });
+    expect(request.mock.calls[0][1].data).not.toHaveProperty('device_uuid');
+    expect(request.mock.calls[0][1].data).not.toHaveProperty('operator_id');
+  });
+  test('multiple UUIDs require an explicit instance from the selected environment', () => {
+    expect(routineInstanceMode(context, 'verify')).toBe('multiple');
+    expect(() => validateCreateTarget(context, { runtime_stage: 'verify' }, 'admin')).toThrow('请选择');
+    expect(() => validateCreateTarget(context, { runtime_stage: 'verify', device_uuid: 'foreign' }, 'admin')).toThrow(
+      '请选择',
+    );
+    expect(validateCreateTarget(context, form, 'admin')).toEqual({ runtime_stage: 'verify', device_uuid: 'uuid' });
+  });
+  test('duplicate UUIDs and empty IDs do not turn a single instance into multiple', () => {
+    expect(routineInstanceMode(instanceContext(['uuid', 'uuid', '', ' ']), 'verify')).toBe('single');
+  });
+  test('no UUIDs is unknown and never silently treated as single', () => {
+    const missing = instanceContext([]);
+    expect(routineInstanceMode(missing, 'verify')).toBe('unknown');
+    expect(() => validateCreateTarget(missing, form, 'admin')).toThrow('就绪');
+  });
+  test.each([false, true])('Caller=%s single-instance creation omits UUID', async (caller) => {
+    const single = instanceContext(['uuid'], caller);
+    request.mockResolvedValue(ok(dto, 201000));
+    await client().save(single, { ...form, runtime_stage: 'online', operator_id: 'stale-other-caller' });
+    const body = request.mock.calls[0][1].data;
+    expect(body).not.toHaveProperty('device_uuid');
+    expect(body.operator_id).toBe(caller ? 'admin' : undefined);
+  });
+  test('instance mode is scoped to the chosen environment', () => {
+    const mixed: RoutineContext = {
+      ...context,
+      environments: [
+        { runtime_stage: 'draft', instances: ['draft'] },
+        { runtime_stage: 'online', instances: ['online-1', 'online-2'] },
+      ],
+    };
+    expect(routineInstanceMode(mixed, 'draft')).toBe('single');
+    expect(routineInstanceMode(mixed, 'online')).toBe('multiple');
+    expect(() => validateCreateTarget(mixed, { runtime_stage: 'online', device_uuid: 'draft' }, 'admin')).toThrow(
+      '请选择',
+    );
+  });
+  test('Teclaw online is instance-free regardless of reported count', () => {
+    const teclaw = instanceContext(['one', 'two'], true, 'teclaw');
+    expect(routineInstanceMode(teclaw, 'online')).toBe('none');
+    expect(validateCreateTarget(teclaw, { runtime_stage: 'online', device_uuid: 'one' }, 'admin')).toEqual({
+      runtime_stage: 'online',
+      operator_id: 'admin',
+    });
+  });
+  test('existing task updates keep the original UUID when the Bot now has one instance', async () => {
+    request.mockResolvedValue(ok(dto));
+    const original = mapManagedRoutine(dto, scope);
+    await client().save(instanceContext(['another']), { ...form, device_uuid: undefined }, original);
+    expect(request.mock.calls[0][1].params).toMatchObject({
+      runtime_stage: 'verify',
+      device_uuid: 'uuid',
+      operator_id: 'caller',
+    });
   });
 });

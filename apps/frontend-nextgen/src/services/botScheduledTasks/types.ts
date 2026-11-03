@@ -15,7 +15,6 @@ export interface RoutineEnvironment {
   runtime_stage: RoutineStage;
   available?: boolean;
   reason?: string;
-  requires_instance: boolean;
   instances: string[];
 }
 export interface RoutineContext {
@@ -161,16 +160,36 @@ export function preciseTarget(context: RoutineContext, target: RoutineTarget) {
   if (context.bot_type !== 'service') return true;
   return Boolean(target.runtime_stage && (target.device_uuid || target.operator_id));
 }
+export function routineInstanceIds(context: RoutineContext, stage?: RoutineStage | null): string[] {
+  return [
+    ...new Set(
+      (context.environments.find((env) => env.runtime_stage === stage)?.instances || []).filter(
+        (id) => typeof id === 'string' && id.trim(),
+      ),
+    ),
+  ];
+}
+export function routineInstanceMode(context: RoutineContext, stage?: RoutineStage | null) {
+  if (context.bot_type !== 'service' || (context.engine === 'teclaw' && stage === 'online')) return 'none';
+  if (!stage) return 'unknown';
+  const count = routineInstanceIds(context, stage).length;
+  return count >= 2 ? 'multiple' : count === 1 ? 'single' : 'unknown';
+}
 export function validateCreateTarget(context: RoutineContext, form: RoutineTarget, actorId: string): RoutineTarget {
   if (context.bot_type !== 'service') return {};
   if (context.caller_mode === undefined) throw new Error('尚未确认 Bot 的 Caller 配置，请刷新后重试');
   if (!form.runtime_stage) throw new Error('请选择生效环境');
   if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持生产态');
-  const noInstance = context.engine === 'teclaw' && form.runtime_stage === 'online';
-  if (!noInstance && !form.device_uuid) throw new Error('请选择已确认的运行实例');
+  const mode = routineInstanceMode(context, form.runtime_stage);
+  if (mode === 'unknown') throw new Error('当前环境尚无可用运行实例，请确认实例已就绪后刷新');
+  if (
+    mode === 'multiple' &&
+    (!form.device_uuid || !routineInstanceIds(context, form.runtime_stage).includes(form.device_uuid))
+  )
+    throw new Error('请选择当前环境中已确认的运行实例');
   return targetParams({
     runtime_stage: form.runtime_stage,
-    device_uuid: noInstance ? undefined : form.device_uuid,
-    operator_id: context.caller_mode ? form.operator_id || actorId : undefined,
+    device_uuid: mode === 'multiple' ? form.device_uuid : undefined,
+    operator_id: context.caller_mode ? actorId : undefined,
   });
 }
