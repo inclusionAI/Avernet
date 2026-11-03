@@ -215,6 +215,13 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "service conformance, and architecture tests in this change; drain when "
         "singlebox has a signed /openapi/v1 principal flow for the new routes."
     ),
+    "bot_overview": (
+        "New unauthenticated Bot overview. Its only engine provider (AICoding / "
+        "Claude Code) is a draft that reports no engine data yet, so a singlebox "
+        "flow could assert identity and status only. Covered by service, HTTP "
+        "router and endpoint tests; drain when a provider reports real engine "
+        "data that singlebox can serve."
+    ),
     "bot_message_feedback": (
         "New bot output message feedback module. Covered by endpoint, service, "
         "repository and architecture tests; drain when a real singlebox flow "
