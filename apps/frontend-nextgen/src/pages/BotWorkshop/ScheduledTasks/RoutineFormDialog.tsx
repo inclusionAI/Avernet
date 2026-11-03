@@ -13,6 +13,8 @@ import {
 import {
   stageNames,
   validateCreateTarget,
+  routineInstanceMode,
+  routineInstanceIds,
   type ManagedRoutine,
   type RoutineContext,
   type RoutineForm,
@@ -71,7 +73,12 @@ export function RoutineFormDialog({
       active = false;
     };
   }, [onLoadModels]);
-  const environment = context.environments.find((item) => item.runtime_stage === form.runtime_stage);
+  const instanceMode = routineInstanceMode(context, form.runtime_stage);
+  const instanceIds = routineInstanceIds(context, form.runtime_stage);
+  useEffect(() => {
+    if (!original && context.caller_mode && form.runtime_stage !== 'online')
+      setForm((current) => ({ ...current, runtime_stage: 'online', device_uuid: undefined, operator_id: undefined }));
+  }, [original, context.caller_mode, form.runtime_stage]);
   let targetError = '';
   try {
     original ? undefined : validateCreateTarget(context, form, 'current-user');
@@ -150,7 +157,7 @@ export function RoutineFormDialog({
                   </SelectContent>
                 </Select>
               </div>
-              {form.runtime_stage && !(context.engine === 'teclaw' && form.runtime_stage === 'online') && (
+              {instanceMode === 'multiple' && (
                 <div className="space-y-1 text-sm">
                   <span>运行实例</span>
                   <Select
@@ -162,16 +169,13 @@ export function RoutineFormDialog({
                       <SelectValue placeholder="请选择运行实例" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[
-                        ...new Set([
-                          ...(environment?.instances || []),
-                          ...(original?.device_uuid ? [original.device_uuid] : []),
-                        ]),
-                      ].map((uid) => (
-                        <SelectItem key={uid} value={uid}>
-                          {uid}
-                        </SelectItem>
-                      ))}
+                      {[...new Set([...instanceIds, ...(original?.device_uuid ? [original.device_uuid] : [])])].map(
+                        (uid) => (
+                          <SelectItem key={uid} value={uid}>
+                            {uid}
+                          </SelectItem>
+                        ),
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -179,9 +183,9 @@ export function RoutineFormDialog({
               {context.caller_mode && (
                 <p className="text-xs text-muted-foreground sm:col-span-2">Caller 模式仅支持生产态。</p>
               )}
-              {environment && environment.requires_instance && environment.instances.length === 0 && (
+              {!original && form.runtime_stage && targetError && (
                 <p className="text-xs text-destructive sm:col-span-2" role="status">
-                  {environment.reason || '尚未取得可信运行实例'}。请切换运行态并刷新；不会自动选择其他目标。
+                  {targetError}
                 </p>
               )}
               {original && (

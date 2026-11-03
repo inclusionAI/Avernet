@@ -13,6 +13,7 @@ export function RoutineList({
   page,
   pageSize,
   stage,
+  showStageFilter,
   keyword,
   canManage,
   editable,
@@ -31,6 +32,7 @@ export function RoutineList({
   page: number;
   pageSize: number;
   stage?: RoutineStage;
+  showStageFilter: boolean;
   keyword: string;
   canManage: boolean;
   editable: boolean;
@@ -53,19 +55,21 @@ export function RoutineList({
   return (
     <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <Select value={stage || 'all'} onValueChange={onStage}>
-          <SelectTrigger className="w-40" aria-label="运行态筛选">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部运行态</SelectItem>
-            {(['draft', 'verify', 'online'] as const).map((value) => (
-              <SelectItem key={value} value={value}>
-                {stageNames[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {showStageFilter && (
+          <Select value={stage || 'all'} onValueChange={onStage}>
+            <SelectTrigger className="w-40" aria-label="运行态筛选">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部运行态</SelectItem>
+              {(['draft', 'verify', 'online'] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {stageNames[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Input
           className="max-w-sm"
           aria-label="当前页筛选"
