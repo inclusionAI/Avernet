@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
-import type { ConversationBotView } from '@/domain/conversation';
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
+import type { ConversationBotView } from '@/domain/conversation';
 import { useConversationSessions } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
@@ -121,7 +121,7 @@ describe('useConversationSessions', () => {
     expect(result.current.openBotIds['bot-a:2088']).toBe(true);
   });
 
-  it('loads and creates Coding Bot sessions through the normal chain', async () => {
+  it('does not fall back to the generic create API when the Coding host is unavailable', async () => {
     const codingBot: ConversationBotView = {
       bot: {
         ...managedBot.bot,
@@ -133,16 +133,14 @@ describe('useConversationSessions', () => {
       section: 'managed',
     };
     listManagedSessions.mockResolvedValue(okPage(['s-coding']));
-    createSession.mockResolvedValue({ ok: true, data: { ...sessionOf('s-new-coding'), botId: codingBot.bot.botId } });
     const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
 
     act(() => result.current.toggleBot(codingBot.bot.botId, 'managed'));
     await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(codingBot.bot, '327325', 'all', 1, 10, ''));
 
     await act(async () => result.current.createSession(codingBot.bot.botId));
-    expect(createSession).toHaveBeenCalledWith(codingBot.bot, '327325');
-    expect(useConversationStore.getState().selectedBotId).toBe(codingBot.bot.botId);
-    expect(useConversationStore.getState().selectedSessionId).toBe('s-new-coding');
+    expect(createSession).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith('当前部署未提供 Coding Bot 会话创建能力。');
   });
 
   it('creates Coding Bot sessions through the embedded action bridge', async () => {
@@ -595,4 +593,51 @@ it('团队缺 entity 的不可聊天 Bot 即使被深链展开也不查询/创�
   });
   expect(listManagedSessions).not.toHaveBeenCalled();
   expect(createSession).not.toHaveBeenCalled();
+});
+
+describe('Coding Bot session origin', () => {
+  it.each(['managed', 'team'] as const)(
+    '%s Coding Bot loads others through the flat Coding list and preserves the creator identity',
+    async (section) => {
+      const codingBot: ConversationBotView = {
+        bot: {
+          ...managedBot.bot,
+          botId: `${section}-coding:2088`,
+          realBotId: `${section}-coding`,
+          engine: 'claude_code',
+          isAgentCodingBot: true,
+        },
+        section,
+      };
+      const otherSessionId = `user:400001:session:shared:agent:${section}-coding`;
+      listManagedSessions.mockResolvedValue(okPage([otherSessionId]));
+      act(() => {
+        useConversationStore.setState({
+          originByManagedBotId: { [codingBot.bot.botId]: 'others' },
+          effectiveScopeByManagedBotId: { [codingBot.bot.botId]: 'all' },
+        });
+      });
+      const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+
+      act(() => result.current.toggleBot(codingBot.bot.botId, section));
+      await waitFor(() =>
+        expect(listManagedSessions).toHaveBeenCalledWith(
+          codingBot.bot,
+          '327325',
+          'all',
+          1,
+          10,
+          '',
+          undefined,
+          'others',
+        ),
+      );
+
+      act(() => result.current.selectMineSession(codingBot.bot.botId, otherSessionId));
+      const store = useConversationStore.getState();
+      expect(store.selectedOrigin).toBe('others');
+      expect(store.selectedFriendUserId).toBe('400001');
+      expect(store.selectedSessionId).toBe(otherSessionId);
+    },
+  );
 });

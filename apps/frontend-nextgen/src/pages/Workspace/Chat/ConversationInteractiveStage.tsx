@@ -43,13 +43,17 @@ export function ConversationInteractiveStage(props: {
     onToggleSidePane,
     onSidePaneIsOpenChange,
   } = props;
-  const { botChat, fileFeature, taskExecution } = model;
+  const { botChat, fileFeature, taskExecution, presentation } = model;
+  const composerBot = presentation.composerExtensions
+    ? model.chatBots.find((bot) => bot.botId === model.selectedSession?.botId) ?? null
+    : null;
+  const composerSession = presentation.composerExtensions ? model.selectedSession : null;
   return (
     <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
       <ConversationComposerHost
-        bot={model.chatBots.find((bot) => bot.botId === model.selectedSession?.botId) ?? null}
-        session={model.selectedSession}
-        command={fileFeature.command}
+        bot={composerBot}
+        session={composerSession}
+        command={presentation.fileFeatures ? fileFeature.command : undefined}
         onSend={model.handleSend}
       >
         {(composer) => (
@@ -64,9 +68,10 @@ export function ConversationInteractiveStage(props: {
             messages={botChat.chat.messages}
             headerActions={headerActions}
             highlightMessageId={highlightMessageId}
-            sidePaneOpen={sidePaneOpen}
-            onToggleSidePane={onToggleSidePane}
-            onSidePaneIsOpenChange={onSidePaneIsOpenChange}
+            sidePaneOpen={presentation.sidePane ? sidePaneOpen : false}
+            onToggleSidePane={presentation.sidePane ? onToggleSidePane : undefined}
+            onSidePaneIsOpenChange={presentation.sidePane ? onSidePaneIsOpenChange : undefined}
+            sidePaneEnabled={presentation.sidePane}
             isRequesting={botChat.chat.isRequesting}
             isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
             connectionStatus={botChat.connectionStatus}
@@ -77,7 +82,7 @@ export function ConversationInteractiveStage(props: {
             chatBridge={model.chatBridge}
             onDraftChange={model.onDraftChange}
             onSend={composer.onSend}
-            composerHeader={composer.header}
+            composerHeader={presentation.composerExtensions ? composer.header : undefined}
             onStop={botChat.stop}
             onReconnect={() => void botChat.reconnect()}
             onPanelAction={model.handlePanelAction}
@@ -88,32 +93,39 @@ export function ConversationInteractiveStage(props: {
               onLoadMore: () => void botChat.loadMoreHistory(),
             }}
             modelSelector={
-              <BotModelSelectorContainer
-                chatBots={model.chatBots}
-                session={model.selectedSession}
-                activeIdentityId={model.requesterIdentityId}
-                onSessionModelChange={model.onSessionModelChange}
-              />
+              presentation.modelSelector ? (
+                <BotModelSelectorContainer
+                  chatBots={model.chatBots}
+                  session={model.selectedSession}
+                  activeIdentityId={model.requesterIdentityId}
+                  onSessionModelChange={model.onSessionModelChange}
+                />
+              ) : undefined
             }
             taskComposer={
-              <ComposerCapabilitiesMenu
-                onOpened={() => Tracert.click(Points.workspaceChat.openWorkflowMenu)}
-                execution={taskExecution}
-                enableWorkflow
-                onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}
-                disabled={model.taskComposerDisabled}
-                disabledReason={model.taskComposerDisabledReason}
-                selections={taskExecution.selections}
-                onWorkflowSelected={taskExecution.selectWorkflow}
-                onDynamicSelected={taskExecution.selectDynamic}
-                onRemoveSelection={taskExecution.removeSelection}
-                /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
-                capabilitySets={fileFeature.capabilitySets}
-              />
+              presentation.taskComposer ? (
+                <ComposerCapabilitiesMenu
+                  onOpened={() => Tracert.click(Points.workspaceChat.openWorkflowMenu)}
+                  execution={taskExecution}
+                  enableWorkflow
+                  onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}
+                  disabled={model.taskComposerDisabled}
+                  disabledReason={model.taskComposerDisabledReason}
+                  selections={taskExecution.selections}
+                  onWorkflowSelected={taskExecution.selectWorkflow}
+                  onDynamicSelected={taskExecution.selectDynamic}
+                  onRemoveSelection={taskExecution.removeSelection}
+                  /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
+                  capabilitySets={fileFeature.capabilitySets}
+                />
+              ) : undefined
             }
-            fileChip={model.desktopFileFeaturesHidden ? undefined : fileFeature.fileChip}
-            command={composer.command}
-            fileToolbar={fileFeature.fileToolbar}
+            fileChip={
+              presentation.fileFeatures && !model.desktopFileFeaturesHidden ? fileFeature.fileChip : undefined
+            }
+            command={presentation.fileFeatures ? composer.command : undefined}
+            fileToolbar={presentation.fileFeatures ? fileFeature.fileToolbar : undefined}
+            composerPlaceholder={presentation.composerPlaceholder}
             senderRef={fileFeature.senderRef}
             mode="bot"
             interactive
@@ -121,7 +133,7 @@ export function ConversationInteractiveStage(props: {
           />
         )}
       </ConversationComposerHost>
-      {fileFeature.featureNode}
+      {presentation.fileFeatures ? fileFeature.featureNode : null}
       {headerRightPanels}
     </div>
   );

@@ -58,6 +58,8 @@ export interface UseChatHeaderPanelsOptions {
   openFileDrawer: () => void;
   closeFileDrawer: () => void;
   fileDrawerOpen: boolean;
+  /** 是否启用任务副屏及其进入会话自动恢复逻辑。 */
+  sidePaneEnabled?: boolean;
 }
 
 export interface UseChatHeaderPanelsResult {
@@ -126,7 +128,12 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   const { session, messages, panelRef } = options;
   const sessionId = session?.sessionId ?? null;
 
-  useSessionTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
+  const sidePaneEnabled = options.sidePaneEnabled !== false;
+  useSessionTaskPanelBootstrap({
+    sessionId: sidePaneEnabled ? sessionId : null,
+    userId: sidePaneEnabled ? options.userId : null,
+    panelRef,
+  });
 
   const [openPanel, setOpenPanel] = useState<ChatHeaderPanelKind | null>(null);
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
@@ -171,9 +178,13 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   }, [sessionId]);
 
   // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
-  const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);
+  const sidePaneDisabled = useMemo(
+    () => !sidePaneEnabled || !sessionHasSidePaneContent(messages),
+    [messages, sidePaneEnabled],
+  );
 
   const toggleSidePane = useCallback(() => {
+    if (!sidePaneEnabled) return;
     setSidePaneOpen((current) => {
       const next = !current;
       const panel = panelRef.current;
@@ -186,7 +197,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       // 立即弹回（「打开一瞬又关闭」）；重建成功即面板已展开，镜像同步为 true。
       return reopenSidePaneTabsFromMessages(messages, panel);
     });
-  }, [panelRef, messages]);
+  }, [panelRef, messages, sidePaneEnabled]);
 
   const favorites = useMemo<ChatHeaderFavoritesModel>(() => {
     const favorite = session?.favorite === true;

@@ -69,6 +69,20 @@ describe('useTaskExecution relay bootstrap', () => {
     useTaskStore.getState().reset();
   });
 
+  it('无任务上下文时不请求 Bot skills', async () => {
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context: null,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(result.current.dynamicTaskEnabled).toBe(false);
+    expect(mockedHasTaskIntent).not.toHaveBeenCalled();
+  });
+
   it('安装 task-intent-recognition 后动态任务可选', async () => {
     mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
     const { result } = renderHook(() =>

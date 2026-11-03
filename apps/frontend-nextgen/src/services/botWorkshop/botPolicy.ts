@@ -24,6 +24,44 @@ export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boole
   if (!currentUserId) return false;
   return bot.ownerId === currentUserId || bot.actions.includes('edit') || canValidateServiceBot(bot);
 }
+
+/**
+ * TeamClaw's managed chat directory only exposes online service bots. For a
+ * service Coding Bot that is still draft/prestable, AIXCoding owns the usable
+ * runtime and is reached through its standalone route instead.
+ */
+export function isDraftOrPrestableServiceCodingBot(bot: BotDomain): boolean {
+  return Boolean(
+    bot.runtime?.isAgentCodingBot &&
+      bot.serviceMode === 'service' &&
+      (bot.lifecycle === 'draft' || bot.lifecycle === 'prestable'),
+  );
+}
+
+/**
+ * Draft/verify Coding Chat is an authoring/verification surface, not the
+ * normal managed-chat action. Keep it aligned with Bot detail access: Owner,
+ * explicit edit collaborator, or a backend-granted service verification
+ * operator.
+ */
+export function canOpenDraftOrPrestableServiceCodingBot(bot: BotDomain, currentUserId?: string): boolean {
+  return isDraftOrPrestableServiceCodingBot(bot) && canEnterBotDetail(bot, currentUserId);
+}
+
+export function buildDraftOrPrestableServiceCodingBotChatHref(bot: BotDomain): string {
+  const params = new URLSearchParams({ botId: bot.id });
+  if (bot.ownerId) params.set('ownerId', bot.ownerId);
+
+  // AIXCoding maps prestable to stage=verify and requires a valid publish ID
+  // when a stage is selected. If the list DTO omits it, keep the direct Bot
+  // URL and let the runtime surface its own bootstrap error.
+  const publishId = Number(bot.harnessContext?.botPublishId);
+  if (bot.lifecycle === 'prestable' && Number.isInteger(publishId) && publishId > 0) {
+    params.set('publishId', String(publishId));
+    params.set('stage', 'verify');
+  }
+  return `/coding/coding-chat?${params.toString()}`;
+}
 const actions: BotAction[] = [
   'view',
   'edit',

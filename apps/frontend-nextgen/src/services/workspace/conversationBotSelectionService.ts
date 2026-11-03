@@ -10,15 +10,17 @@ export interface ConversationBotSelectionTarget {
   section: ConversationBotSection;
   origin: ConversationOrigin;
   scope: ConversationSessionScope;
+  /** Coding Bot 的 others 复用扁平会话列表，不走好友分组目录。 */
+  flatCodingOthers?: boolean;
 }
 
 /** 仅返回目标当前来源/范围的列表，不能把上一范围缓存当成已加载。 */
 function getList(target: ConversationBotSelectionTarget) {
-  if (target.origin !== 'mine') return undefined;
+  if (target.origin !== 'mine' && !target.flatCodingOthers) return undefined;
   const state = useConversationStore.getState();
   if (target.section === 'friend') return state.friendBotSessionsByBotId[target.botId];
   const cache = state.sessionsByBotId[target.botId];
-  return cache?.origin === 'mine' && cache.scope === target.scope ? cache.sessions : undefined;
+  return cache?.origin === target.origin && cache.scope === target.scope ? cache.sessions : undefined;
 }
 
 // 2026-11-02 反馈治理:移除展开即自动首选(begin/complete)——展开 Bot 行只控制列表显隐,

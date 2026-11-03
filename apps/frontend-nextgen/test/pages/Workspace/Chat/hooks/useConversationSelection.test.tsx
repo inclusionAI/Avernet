@@ -718,3 +718,78 @@ describe('无显式写点的选中由选择 Hook 中央认领快照', () => {
     expect(result.current.readonly.friend).toEqual({ userId: 'f9', displayName: '小明' });
   });
 });
+
+describe('Coding Bot 会话归属按 sessionId 解析', () => {
+  const codingBot: ChatBotView = {
+    ...managedBot,
+    botId: 'coding-bot:2088',
+    realBotId: 'coding-bot',
+    ownerId: '2088',
+    isAgentCodingBot: true,
+  };
+  const codingView: ConversationBotView = { bot: codingBot, section: 'team' };
+  const rowOf = (sessionId: string) => ({
+    sessionId,
+    botId: codingBot.botId,
+    title: sessionId,
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+
+  it('深链中的创建者与当前用户相同（含数字前导零）时覆盖错误 origin 为 mine', () => {
+    const { result } = renderHook(() =>
+      useConversationSelection({ userId: '101', managedBots: [codingView], friendBots: [], hydrated: true }),
+    );
+    const sessionId = 'user:000101:session:mine:agent:coding-bot';
+
+    act(() =>
+      result.current.onRouteSelection({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'others',
+        friendUserId: '999',
+        sessionId,
+      }),
+    );
+
+    const store = useConversationStore.getState();
+    expect(store.selectedOrigin).toBe('mine');
+    expect(store.selectedFriendUserId).toBeNull();
+    expect(store.selectedSessionId).toBe(sessionId);
+  });
+
+  it('深链中的创建者不同时切到 others，并把 Coding 会话解析为交互舞台', () => {
+    const sessionId = 'user:202:session:shared:agent:coding-bot';
+    seedStore({
+      sessionsByBotId: {
+        [codingBot.botId]: {
+          botId: codingBot.botId,
+          origin: 'others',
+          scope: 'all',
+          sessions: { ...emptyList, items: [rowOf(sessionId)] },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ userId: '101', managedBots: [codingView], friendBots: [], hydrated: true }),
+    );
+
+    act(() =>
+      result.current.onRouteSelection({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'mine',
+        sessionId,
+      }),
+    );
+
+    const store = useConversationStore.getState();
+    expect(store.selectedOrigin).toBe('others');
+    expect(store.selectedFriendUserId).toBe('202');
+    expect(result.current.interactive.session?.sessionId).toBe(sessionId);
+    expect(result.current.readonly.session).toBeNull();
+  });
+});

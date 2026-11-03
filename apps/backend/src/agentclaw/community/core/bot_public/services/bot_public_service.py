@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataServiceProtocol,
     BotCatalogMetadataUnavailableError,
+    BotCatalogProfileNotFoundError,
     BotCatalogSearchFilters,
     BotCatalogSearchUnavailableError,
 )
@@ -1918,6 +1919,147 @@ class BotPublicService(BotPublicServiceProtocol):
             total,
         )
         return {"total": total, "items": items}
+
+    def get_catalog_public_bot_profile(
+        self,
+        bot_uuid: str,
+        *,
+        caller: BotCatalogCaller,
+        request_id: str,
+    ) -> Dict[str, Any]:
+        """Return the public profile of one catalog Bot for the friend-request dialog.
+
+        公开性由 BCS catalog 精确裁决（``bot_uuids`` 命中才可见）；名称/引擎等
+        摘要 Backend 侧记录补充，已公开能力取 Bot 能力集配置的 MCP 列表。
+        """
+        normalized_uuid = (bot_uuid or "").strip()
+        if not normalized_uuid:
+            raise BotCatalogProfileNotFoundError(bot_uuid)
+        try:
+            metadata_page = self._catalog_metadata_service.search_public_bot_metadata(
+                search=None,
+                page=1,
+                page_size=1,
+                bot_uuids=(normalized_uuid,),
+                caller=caller,
+                request_id=request_id,
+            )
+        except BotCatalogMetadataUnavailableError as exc:
+            logger.warning(
+                "[BotPublicService.catalog_profile] request_id=%s failure=metadata_unavailable",
+                request_id,
+            )
+            raise BotCatalogSearchUnavailableError() from exc
+        except Exception as exc:  # noqa: BLE001 - catalog metadata is fail-closed
+            logger.warning(
+                "[BotPublicService.catalog_profile] request_id=%s failure=invalid_metadata",
+                request_id,
+            )
+            raise BotCatalogSearchUnavailableError() from exc
+        if not metadata_page.items:
+            raise BotCatalogProfileNotFoundError(normalized_uuid)
+        metadata = metadata_page.items[0]
+        address = metadata.address
+        _, backend_bots = self._bot_repository.list_bots_by_owner_bot_pairs(
+            [(address.bot_id, address.entity_id)],
+            page=1,
+            page_size=1,
+        )
+        bot = backend_bots[0] if backend_bots else None
+        capabilities = self._published_capabilities(
+            bot=bot,
+            bot_id=address.bot_id,
+            entity_id=address.entity_id,
+        )
+        profile = {
+            "bot_id": address.bot_id,
+            "bot_uuid": normalized_uuid,
+            # Backend 记录优先，BCS 元数据兜底（与 catalog search 的回退口径一致）。
+            "bot_name": str(
+                (bot and bot.get("bot_name")) or metadata.name or address.bot_id
+            ),
+            "owner_name": (bot and bot.get("owner_name")) or None,
+            "description": str(
+                (bot and bot.get("bot_desc") or None) or metadata.summary or ""
+            ),
+            "engine_name": str((bot and bot.get("active_engine")) or ""),
+            "capabilities": capabilities,
+        }
+        logger.info(
+            "[BotPublicService.catalog_profile] request_id=%s bot_uuid=%s "
+            "capability_count=%s backend_join=%s",
+            request_id,
+            normalized_uuid,
+            len(capabilities),
+            bot is not None,
+        )
+        return profile
+
+    def _published_capabilities(
+        self,
+        *,
+        bot: Optional[Dict[str, Any]],
+        bot_id: str,
+        entity_id: str,
+    ) -> List[Dict[str, str]]:
+        """已公开能力 = Bot 能力集配置的 MCP 列表（capability_id + display_name，去重）。
+
+        能力集服务失败只降级为空列表：能力清单纯展示用途，不允许阻断画像返回。
+        """
+        if bot is None:
+            # Backend 无记录（BCS-only）：能力数据在 Backend 能力集表中，无源可查。
+            return []
+        owner_id = str(
+            bot.get("owner_id") or bot.get("entity_id") or entity_id or ""
+        ).strip()
+        bot_key = str(bot.get("bot_id") or bot_id or "").strip()
+        if not owner_id or not bot_key:
+            return []
+        try:
+            skill_set_service = self._skill_set_service_factory.create(
+                entity_id=entity_id or owner_id, bot_id=bot_key
+            )
+            mcp_sets = skill_set_service.get_all_skill_sets_with_mcps(
+                user_id=owner_id, bolt_id=bot_key
+            )
+        except Exception as exc:  # noqa: BLE001 - capability list is display-only
+            logger.warning(
+                "[BotPublicService.catalog_profile] capabilities degraded "
+                "bot_id=%s owner_id=%s: %s",
+                bot_key,
+                owner_id,
+                exc,
+            )
+            return []
+        capabilities: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        if not isinstance(mcp_sets, list):
+            return []
+        for mcp_set in mcp_sets:
+            if not isinstance(mcp_set, dict):
+                continue
+            mcps = mcp_set.get("mcps")
+            if not isinstance(mcps, list):
+                continue
+            for mcp in mcps:
+                if not isinstance(mcp, dict):
+                    continue
+                display_name = str(mcp.get("name") or "").strip()
+                capability_id = str(
+                    mcp.get("id") or mcp.get("server_code") or display_name
+                ).strip()
+                if not display_name or not capability_id:
+                    continue
+                if capability_id in seen:
+                    continue
+                seen.add(capability_id)
+                capabilities.append(
+                    {
+                        "capability_id": capability_id,
+                        "display_name": display_name,
+                    }
+                )
+        return capabilities
 
     @staticmethod
     def _catalog_address(bot: dict[str, Any]) -> BotCatalogAddress | None:
