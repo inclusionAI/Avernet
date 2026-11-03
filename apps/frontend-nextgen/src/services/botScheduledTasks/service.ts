@@ -1,6 +1,7 @@
 import type { EditLockDto } from '@/services/backendApi/bots/botEditorController';
 import { sendRoutineRequest } from './http';
 import { loadRoutineContext } from './metadata';
+import { loadRoutineLock } from './locks';
 import { batchOutcome, isBatch, runOutcome } from './results';
 import {
   routineKey,
@@ -79,7 +80,7 @@ export function createRoutineClient(botId: string, ownerId: string | undefined, 
   return {
     scope,
     context: () => loadRoutineContext(scope),
-    getLock: () => sendRoutineRequest<EditLockDto>(`${base}/edit-lock`, { params }),
+    getLock: (context: Pick<RoutineContext, 'bot_type' | 'owner_id'>) => loadRoutineLock(scope, context),
     async list(target: RoutineTarget = {}, page = 1, pageSize = 20): Promise<RuntimePage<ManagedRoutine>> {
       const result = await request<RuntimePage<RoutineDto>>('', 'GET', {
         ...completeTarget(target),

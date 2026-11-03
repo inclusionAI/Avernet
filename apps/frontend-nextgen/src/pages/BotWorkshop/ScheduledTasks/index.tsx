@@ -99,7 +99,9 @@ const ScheduledTasksPage = () => {
                   ? '当前 Bot 无需编辑锁，可管理定时任务'
                   : '已持有 Bot 编辑锁，可管理定时任务'
                 : !lock
-                ? '暂无法确认 Bot 编辑锁状态，当前仅可查看，请刷新重试'
+                ? state.lockError
+                  ? `Bot 编辑锁查询失败，当前仅可查看：${state.lockError}`
+                  : '正在确认 Bot 编辑锁状态，当前仅可查看'
                 : other
                 ? `${holder} 正在持有 Bot 编辑锁，当前仅可查看；如需操作，请到 Bot 列表管理编辑锁`
                 : '当前未持有 Bot 编辑锁，仅可查看；请到 Bot 列表获取编辑锁后再操作'}
