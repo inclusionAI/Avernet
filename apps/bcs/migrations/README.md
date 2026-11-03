@@ -587,3 +587,80 @@ There is no backfill and no default: existing Bot rows keep NULL, and the
 column is written only when an avatar is stored. Apply remote DDL before
 rolling out binaries that read the column; SQLite bootstrap applies the
 migration automatically on startup. A downgrade may retain the column.
+## Versioned login sessions (MySQL/SQLite 041)
+
+`042_auth_session_version.sql` adds the strict versioned login-session columns
+to `bcs_user_identities`: nullable `session_id`, non-null `session_revision`
+(default 0), and the `session_expires_at` BIGINT/INTEGER Unix-seconds column
+used for dialect-neutral expiry comparisons. The legacy `token_expire_at`
+datetime column is kept in lockstep only for legacy tooling. Session scope
+stays `(user_id, auth_source, env)` via the existing `uk_user_id` unique
+index; the migration adds no index, table, or cache, and every session
+operation remains exactly one SELECT or one conditional UPDATE.
+
+Historical opaque browser tokens are invalidated on purpose: the V1 API auth
+chain resolves sessions only by token hash + revision under scope, never by
+the legacy token, so the migration clears `token`/`token_expire_at` exactly
+once (spec §8.5/§9). The clear is guarded by the recorded version-42 migration
+row — never by column guards — so re-running migrations never invalidates
+live sessions a second time. Fresh databases go through the same body: the
+columns are added by the chain's version-42 step, keeping fresh and upgraded
+schemas identical. SQLite splits the file with the shared
+`split_sql_statements` splitter and column-guards each `ADD COLUMN` so a
+partially applied step resumes cleanly; bcs-admin applies the MySQL file and
+records the version plus the file checksum itself.
+
+**MySQL strict mode is mandatory for these deployments.** The session token
+hash persisted under `token` (and the new `session_id`) is exactly 64
+characters — SHA-256 hex in the pre-existing `varchar(64)` column, with
+zero headroom. A permissive (non-strict) SQL mode silently truncates longer
+values instead of failing the write, which a deployment must never accept:
+a truncated stored hash no longer certifies the credential it was written
+for. Provision the database with a strict SQL mode (e.g.
+`STRICT_TRANS_TABLES`) and keep statements that would overflow failing
+loudly.
+
+### Rollout runbook (V1 API auth chain, 2026-11)
+
+Order is mandatory; jumping ahead of the drain step can resurrect revoked
+sessions (see `api-contracts/v1/authentication/contract.md` §4):
+
+1. **Block / drain old writers.** Stop or drain every instance that still
+   runs a pre-2026-11 binary writing sessions through the unconditional
+   `update_token` path — the legacy `/auth/*` entry included. Mixed
+   old/new writer binaries against one shared session store are NOT a
+   supported upgrade path and not an allowed canary shape.
+2. **Schema upgrade.** Apply the migration chain through
+   `042_auth_session_version`. Only sessions are invalidated
+   (`token`/`token_expire_at` cleared exactly once by the guarded body);
+   identity rows and user assets are never deleted.
+3. **Deploy the fixed writers.** All instances now run binaries whose two
+   entries (legacy `/auth/*` and V1 `/openapi/v1/auth/*`) share the one
+   strict engine; the legacy entry keeps its response shapes, not its old
+   safety weaknesses.
+4. **Enable the new configuration.** Add `[api.auth]` (chain + per-source
+   tables, secrets as logical `[secret]`-backend references) and restart —
+   config switching is restart-only, no hot reload. MySQL deployments must
+   already be in strict mode before this step (see above).
+5. **New login.** Pre-upgrade sid-less sessions are rejected by design;
+   re-login is the recovery path, so announce it before step 2.
+
+### Rollback runbook
+
+- **Close the OAuth lifecycle entry first:** remove `[api.auth]` — the
+  chain degrades to gateway-only business authentication and the login
+  family fails closed with `auth_not_configured` while `/user` keeps
+  resolving Humans through the remaining sources. Group-session signing
+  and the `friend_auth_sync` resigner keep their own independent secret
+  contracts and stay working.
+- **Never roll binaries back across the writer boundary.** Binary rollback
+  must be coordinated with the configuration AND the JWT/schema
+  compatibility policy: the `session_id`/`session_revision` columns and
+  the sid/revision session JWT contract persist through downgrade, so a
+  rollback target must still read them (or refuse sessions outright);
+  binaries that write sessions unconditionally must never be re-enabled.
+  If only such a binary remains, keep the OAuth entry closed, revoke
+  related sessions, and run gateway-only.
+- **Re-login after restore.** Rolling forward or back invalidates
+  pre-upgrade sid-less sessions in both directions; after restoring the
+  fixed writers + `[api.auth]`, users re-login through the new chain.

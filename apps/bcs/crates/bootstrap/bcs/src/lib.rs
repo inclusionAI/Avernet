@@ -121,9 +121,14 @@ pub use bcs_group_store::GroupBuilder;
 pub use bcs_routing::MessageRouter;
 
 // Server modules
+pub mod api_auth_registry;
+pub mod api_auth_wiring;
+pub mod api_auth_ports;
 pub mod auth_wiring;
 pub mod bot_authority_wiring;
 mod bot_ws_admission_config;
+mod api_auth_config_values;
+mod api_auth_provider_configs;
 mod config;
 mod collaboration_drafts;
 mod config_loader;
@@ -136,7 +141,8 @@ mod friend_connect_notification;
 pub use friend_auth_sync::HttpFriendAuthSyncPort;
 pub mod http_adapter;
 pub mod agent_identity;
-mod identity_wiring;
+pub mod identity_wiring;
+pub mod identity_session_wiring;
 mod caller_identity_wiring;
 pub mod lifecycle;
 mod ws_leadership;

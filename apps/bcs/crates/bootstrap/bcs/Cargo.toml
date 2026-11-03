@@ -113,6 +113,7 @@ bcs-auth-wechat  = { workspace = true }
 bcs-auth-alipay  = { workspace = true }
 bcs-auth-local  = { workspace = true }
 bcs-auth-oauth  = { workspace = true }
+bcs-app-auth    = { workspace = true }
 bcs-user-identity = { workspace = true }
 bcs-cache-local = { workspace = true }
 bcs-cache-redis = { workspace = true }
@@ -218,10 +219,11 @@ chrono = { workspace = true }
 [dev-dependencies]
 dirs = "5.0"
 futures-util = "0.3"
+rsa = { workspace = true }
 bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 serial_test = "3"
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }
