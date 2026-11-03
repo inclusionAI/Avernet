@@ -1,3 +1,21 @@
+########## Shared libraries ##########
+# Repo-local Python libraries the backend depends on (middleware/python/*) are
+# built here into wheels, on their own, and the builder below installs the
+# wheels. Neither the builder nor the runtime image ever sees their source tree,
+# so nothing depends on where a library sits relative to apps/backend.
+FROM python:3.12-slim-bookworm AS shared-libs
+
+ARG UV_VERSION=
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
+
+# The package's own pyproject names the Aliyun index for its build backend.
+COPY middleware/python/avernet-common /build/avernet-common
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv build --wheel --out-dir /wheels /build/avernet-common
+
 ########## Builder ##########
 FROM python:3.12-slim-bookworm AS builder
 
@@ -16,14 +34,12 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 # Install dependencies first (without the project) for better layer caching.
 # The default uv index is the Aliyun PyPI mirror (see apps/backend/pyproject.toml).
-# avernet-common is a path dependency at ../../middleware/python/avernet-common
-# relative to the project, which from WORKDIR /app is /middleware/python/... —
-# so it is copied to exactly that path, here and in the runtime stage (the
-# editable install points the venv at its src/).
-COPY middleware/python/avernet-common /middleware/python/avernet-common
+# avernet-common is a path dependency in the lock; ``--no-install-package``
+# skips it (its own dependencies, e.g. PyJWT, still come from the lock) because
+# it is installed from the wheel built above.
 COPY apps/backend/pyproject.toml apps/backend/uv.lock apps/backend/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project --no-install-package avernet-common
 
 # Then install the project itself — the entrypoint runs the app as a module
 # (``python -m agentclaw.community.main``), so ``agentclaw.community`` has to be
@@ -31,7 +47,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 420 namespace whose only child here is community/ (see the hatch wheel target).
 COPY apps/backend/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-install-package avernet-common
+
+# Last, because ``uv sync`` is exact and would remove anything the lock does not
+# install. ``--no-deps``: every dependency is already pinned by the sync above.
+COPY --from=shared-libs /wheels /tmp/wheels
+RUN uv pip install --python /app/.venv/bin/python --no-deps /tmp/wheels/*.whl
 
 ########## Runtime ##########
 FROM python:3.12-slim-bookworm AS runtime
@@ -93,7 +114,6 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 COPY --from=builder /app/.venv /app/.venv
 COPY apps/backend/src /app/src
-COPY middleware/python/avernet-common/src /middleware/python/avernet-common/src
 
 # YamlConfigProvider searches ${PWD}/configs before the packaged
 # agentclaw/community/configs, so this copy is the one an operator overrides:

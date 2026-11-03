@@ -11,10 +11,10 @@ dependencies = [..., "avernet-common"]
 avernet-common = { path = "../../middleware/python/avernet-common", editable = true }
 ```
 
-Then run `uv lock && uv sync` in that app. A Docker image that installs the app
-must copy this directory to the same path relative to the app's project
-directory, in the runtime stage as well (the editable install links to
-`src/`). See `docker/services/backend.dockerfile`.
+Then run `uv lock && uv sync` in that app. A Docker image builds this package
+into a wheel in its own stage (`uv build --wheel`), syncs the app with
+`--no-install-package avernet-common`, then installs the wheel. See
+`docker/services/backend.dockerfile`.
 
 CI and the pre-push hook run a consuming app's tests when this directory
 changes; add new consumers to `.github/workflows/unit-tests.yml` and

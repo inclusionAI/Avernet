@@ -129,8 +129,8 @@ dev = [
 
 [tool.uv.sources]
 # Editable, so a change under middleware/ is picked up without a reinstall.
-# docker/services/backend.dockerfile copies the package to the same relative
-# path in both stages, which is what keeps that link valid in the image.
+# docker/services/backend.dockerfile does not use this path: it builds the
+# package into a wheel in its own stage and installs that.
 avernet-common = { path = "../../middleware/python/avernet-common", editable = true }
 
 # Specify pypi index
