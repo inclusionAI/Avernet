@@ -129,6 +129,13 @@ _BOT_FREE = frozenset(
         # which needs no entry here only because it adds no segment at all. Its
         # status poll *is* `{bot_id}`-first and needs nothing here.
         "with-manifest",
+        # Copying a bot (v1): `POST /openapi/v1/bots/copy` is a creation — the
+        # dst bot is what this call mints, so there is no bot to address yet,
+        # like `with-manifest`. Its retry sub-resource `/copy/{bot_id}/retry`
+        # does address the dst bot, but piggybacks on the `copy` first-segment
+        # literal the creation reserves; the reserved-name list below keeps a
+        # bot called `copy` unreachable at the creation address.
+        "copy",
         "work-order-notifications",
         "work-orders",
     }
