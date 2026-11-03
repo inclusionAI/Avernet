@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from secbaas.community.bootstrap._chat_transport import build_chat_transport
+
 from ._async_chat_pool_support import (
     mock_chat_client as mock_chat_client,
 )
@@ -23,7 +25,9 @@ class TestOutboundAuthRefresh:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
         mock_cls, mock_client = mock_chat_client_class
         h1 = {"x-proxypass-token": "mock"}
         h2 = {"x-proxypass-token": "placeholder"}
@@ -42,7 +46,9 @@ class TestOutboundAuthRefresh:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         owner = MagicMock()
         owner.tracks_session = MagicMock(return_value=True)
         pool._clients["sbx-own"] = [_ConnEntry(client=owner, a2a_mode="on")]
@@ -59,7 +65,9 @@ class TestOutboundAuthRefresh:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
         mock_cls, mock_client = mock_chat_client_class
         await pool.get("sbx-empty", "ws://h/ws", None)
         await pool.get("sbx-empty", "ws://h/ws", {"x-proxypass-token": ""})
@@ -74,7 +82,9 @@ class TestOutboundAuthRefresh:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
         v3_like = MagicMock(
             spec=[
                 "is_connected",
@@ -104,7 +114,8 @@ class TestOutboundAuthRefresh:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        factory = MagicMock(wraps=build_chat_transport)
+        pool = AsyncChatClientPool(transport_factory=factory, max_conns_per_sandbox=1)
         mock_cls, mock_client = mock_chat_client_class
 
         async def minter_a() -> str:
@@ -116,12 +127,13 @@ class TestOutboundAuthRefresh:
         await pool.get(
             "sbx", "ws://h/ws", {"x-proxypass-token": "t"}, token_minter=minter_a
         )
-        kwargs1 = mock_cls.call_args.kwargs
+        kwargs1 = factory.call_args.kwargs
         assert kwargs1["proxypass_token_minter"] is minter_a
 
         await pool.get(
             "sbx", "ws://h/ws", {"x-proxypass-token": "t"}, token_minter=minter_b
         )  # 复用：不建新连接
         assert mock_cls.call_count == 1, "复用路径不得重建连接"
-        assert mock_client.proxypass_token_minter is not None
+        factory.assert_called_once()
+        assert factory.call_args.kwargs["proxypass_token_minter"] is minter_a
         await pool.close_all()

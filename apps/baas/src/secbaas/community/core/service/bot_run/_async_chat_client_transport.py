@@ -1,156 +1,124 @@
-"""Transport seam for :class:`AsyncChatClient`.
+"""Internal chat capability contract; no implementation selection or owner access.
 
-The orchestrator only talks to a transport object.  ``ws`` and ``a2a``
-implementations therefore stay in their own modules and cannot reach into
-each other's internals.
+The facade calls operations; implementations publish events through explicitly
+bound callbacks. Wire clients and conversation SessionState never cross this seam.
+See ADR-0016 and docs/async-chat-transports.md for lifecycle semantics.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
+from secbaas.community.api.bot_interaction import InteractionResolution
+
+from ._interaction_protocol import EngineInteractionResolveExchange
+
 ChatTransportMode = Literal["off", "grey", "on"]
+EventHandler = Callable[..., Any]
+TokenMinter = Callable[[], Awaitable[str]]
 
 
-def normalize_chat_transport_mode(
-    value: str, *, parameter_name: str = "transport_mode"
-) -> ChatTransportMode:
-    """Validate a transport mode value once at the construction boundary."""
+def normalize_chat_transport_mode(value: str) -> ChatTransportMode:
+    """Validate implementation selection at the assembly boundary."""
     if value not in {"off", "grey", "on"}:
-        raise ValueError(f"invalid {parameter_name}: {value!r}")
+        raise ValueError(f"invalid transport_mode: {value!r}")
     return cast(ChatTransportMode, value)
 
 
-def build_chat_transport(
-    owner: AsyncChatTransportOwner,
-    mode: ChatTransportMode,
-    *,
-    proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
-) -> AsyncChatTransportBase:
-    """Construct the transport selected by ``mode`` without leaking policy branches
-    into ``AsyncChatClient``.
+@dataclass(frozen=True)
+class ChatTransportCallbacks:
+    """Notifications, not access to a facade or mutable conversation state.
 
-    Tests that need to patch a concrete implementation still patch the
-    implementation module rather than this seam.
+    Handlers are registered before connect and retained across main reconnect.
+    Session failures are scoped to the supplied registered keys; the consumer
+    decides how to terminate its own unfinished conversations.
     """
-    if mode == "off":
-        from ._async_chat_client_ws import WebSocketChatTransport
 
-        return WebSocketChatTransport(owner)
-    if mode in {"grey", "on"}:
-        from ._async_chat_client_a2a import A2aChatTransport
-
-        return A2aChatTransport(
-            owner, mode, proxypass_token_minter=proxypass_token_minter
-        )
-    raise ValueError(f"invalid transport_mode: {mode!r}")
+    events: Mapping[str, EventHandler]
+    on_disconnect: EventHandler
+    on_sessions_failed: Callable[[tuple[str, ...], str, str], None]
 
 
-class AsyncChatTransportOwner(Protocol):
-    """Minimal state required by WS and A2A transport implementations."""
-
-    uri: str
-    client_id: str
-    client_version: str
-    headers: dict[str, str]
+class ChatTransport(Protocol):
+    """Internal consumer → transport contract (not an engine wire protocol)."""
 
     @property
-    def _client(self) -> Any | None:  # noqa: SLF001
-        raise NotImplementedError
-
-    def _bind_client_events(self, client: Any) -> None:  # noqa: SLF001
-        raise NotImplementedError
-
-    def _event_bridge_snapshot(self) -> dict[str, Any]:  # noqa: SLF001
-        raise NotImplementedError
+    def uri(self) -> str: ...
 
     @property
-    def _sessions(self) -> dict[str, Any]:  # noqa: SLF001
-        raise NotImplementedError
+    def is_connected(self) -> bool: ...
 
     @property
-    def _ignore_case(self) -> bool:  # noqa: SLF001
-        raise NotImplementedError
+    def transport_name(self) -> str: ...
 
-    @staticmethod
-    def _handle_terminal_error(  # noqa: SLF001
-        state: Any,
-        session_key: str,
-        error_msg: str,
-        source: str,
-        error_code: str = "",
-    ) -> None:
-        raise NotImplementedError
+    def bind_events(self, callbacks: ChatTransportCallbacks) -> None: ...
 
+    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None: ...
 
-class AsyncChatTransportBase:
-    """Base contract shared by the concrete WS and A2A transports."""
+    async def connect(self) -> dict[str, Any]: ...
 
-    def __init__(self, owner: AsyncChatTransportOwner) -> None:
-        self.owner = owner
+    async def reconnect(self) -> dict[str, Any]:
+        """Replace the main connection only; preserve secondary running tasks."""
+        ...
 
-    @property
-    def transport_name(self) -> str:
-        """Actual transport selected by the last successful ``connect``."""
-        raise NotImplementedError
+    async def close(self) -> None:
+        """Dispose of all owned connections and transport run ownership."""
+        ...
 
-    def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
-        """Keep the latest nonempty proxy credential for future handshakes.
-
-        WS uses it only when reconnecting. HTTP implementations additionally
-        refresh their per-request credentials in their own override.
-        """
-        token = (headers or {}).get("x-proxypass-token", "")
-        if token:
-            self.owner.headers["x-proxypass-token"] = token
-
-    async def create(self) -> tuple[Any, dict[str, Any]]:
-        """Create a client, bind callbacks BEFORE connecting, and return hello."""
-        raise NotImplementedError
-
-    async def send_target(
+    async def send(
         self,
         *,
         session_key: str,
+        message: str,
+        auth_token: str | None,
+        app_id: str | None,
+        timeout_ms: int | None,
+        chat_metadata: dict[str, str] | None,
         attachments: list[Any] | None,
-        request_kind: Literal["send", "inject"] = "send",
-    ) -> Any:
-        """Return the client responsible for a chat/inject request."""
-        raise NotImplementedError
+    ) -> dict[str, Any]: ...
 
-    async def abort_target(self, *, session_key: str) -> Any:
-        """Return the client responsible for ``chat.abort``."""
-        raise NotImplementedError
+    async def inject(
+        self,
+        *,
+        session_key: str,
+        message: str,
+        auth_token: str | None,
+        chat_metadata: dict[str, str] | None,
+        attachments: list[Any] | None,
+    ) -> dict[str, Any]: ...
 
-    async def interaction_target(
-        self, *, session_key: str
-    ) -> tuple[Any, dict[str, Any]]:
-        """Return the resolve-interaction client and extra call kwargs."""
-        raise NotImplementedError
+    async def abort(
+        self, *, session_key: str, run_id: str | None
+    ) -> dict[str, Any]: ...
 
-    def bind_fallback_client(self, client: Any, event_handlers: dict[str, Any]) -> None:
-        """Bind an implementation-owned secondary client, if applicable."""
-        return None
+    def can_resolve_interaction(self, session_key: str) -> bool:
+        """Whether this session has an available interaction uplink, not just main."""
+        ...
 
-    async def close(self) -> None:
-        """Close implementation-owned secondary clients and state."""
-        return None
+    async def resolve_interaction(
+        self,
+        *,
+        session_key: str,
+        interaction_id: str,
+        resolution: InteractionResolution,
+    ) -> EngineInteractionResolveExchange: ...
 
-    def has_active_sessions(self) -> bool:
-        """Whether implementation-specific clients keep this entry active."""
-        return False
+    def has_active_sessions(self) -> bool: ...
 
-    def tracks_session(self, session_key: str) -> bool:
-        """Whether an implementation-specific client tracks ``session_key``."""
-        return False
+    def tracks_session(self, session_key: str) -> bool: ...
 
-    def release_terminal_ownership(
-        self, session_key: str, chat_state: Any, payload: dict[str, Any]
-    ) -> None:
-        """Release implementation-specific ownership at a terminal frame."""
-        return None
 
-    def release_failed_request(self, session_key: str) -> None:
-        """Release ownership when the engine never starts the run."""
-        return None
+class ChatTransportFactory(Protocol):
+    """Bootstrap-supplied assembly callable for dynamically pooled connections."""
+
+    def __call__(
+        self,
+        *,
+        uri: str,
+        mode: ChatTransportMode,
+        headers: dict[str, str] | None,
+        ignore_case: bool,
+        proxypass_token_minter: TokenMinter | None,
+    ) -> ChatTransport: ...

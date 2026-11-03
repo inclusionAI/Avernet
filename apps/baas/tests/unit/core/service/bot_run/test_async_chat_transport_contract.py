@@ -5,11 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-    SessionState,
-)
+from secbaas.community.core.service.bot_run._async_chat_client import SessionState
 from secbaas.community.core.service.bot_run._bot_a2a_client import A2aUnavailableError
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_interaction_support import (
     _claim_service_for,
@@ -82,7 +80,7 @@ async def test_callbacks_bound_before_handshake(monkeypatch, leg):
         )
     else:
         monkeypatch.setattr(f"{_A2A_MODULE}.BotA2aClient", _HandshakeClient)
-    acc = AsyncChatClient(
+    acc = make_chat_client(
         uri="ws://host/ws",
         max_retries=0,
         transport_mode="off" if leg == "ws" else "grey",
@@ -91,7 +89,7 @@ async def test_callbacks_bound_before_handshake(monkeypatch, leg):
         if leg == "fallback-ws":
             await acc.connect()
             acc._sessions["handshake"] = state = SessionState()
-            await acc._chat_transport.create_fallback()
+            await acc._chat_transport._ensure_fallback()
         else:
             acc._sessions["handshake"] = state = SessionState()
             await acc.connect()
@@ -104,11 +102,11 @@ async def test_callbacks_bound_before_handshake(monkeypatch, leg):
 @pytest.mark.asyncio
 async def test_ws_reconnect_binds_before_handshake(monkeypatch):
     monkeypatch.setattr(f"{_WS_MODULE}.BotWebSocketClient", _HandshakeClient)
-    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+    acc = make_chat_client(uri="ws://host/ws", max_retries=0)
     await acc.connect()
     acc._sessions["handshake"] = state = SessionState()
     acc.refresh_outbound_auth({"x-proxypass-token": "reconnect-placeholder"})
-    acc._client.connected = False
+    acc._chat_transport._client.connected = False
     acc._max_retries = 1
     acc._retry_base_backoff = 0
     task = asyncio.create_task(acc._reconnect_loop())
@@ -116,7 +114,10 @@ async def test_ws_reconnect_binds_before_handshake(monkeypatch):
         await asyncio.wait_for(state.chat_complete.wait(), timeout=1)
         assert state.content == "during connect"
         assert acc.transport_name == "v3-ws"
-        assert acc._client.headers["x-proxypass-token"] == "reconnect-placeholder"
+        assert (
+            acc._chat_transport._client.headers["x-proxypass-token"]
+            == "reconnect-placeholder"
+        )
     finally:
         await acc.close()
         task.cancel()
@@ -143,7 +144,7 @@ async def test_ws_operations_never_mint_or_receive_a2a_arguments(
     minter = AsyncMock(side_effect=AssertionError("WS invoked an A2A minter"))
     resolution = InteractionResolution(kind="exec", decision="allow-once")
     service = _claim_service_for(resolution)
-    acc = AsyncChatClient(
+    acc = make_chat_client(
         uri="ws://host/ws",
         transport_mode=mode,
         max_retries=0,
@@ -167,7 +168,9 @@ async def test_ws_operations_never_mint_or_receive_a2a_arguments(
             session_key="sk1", interaction_id="int-1", deadline_ms=None
         )
         target = (
-            acc._chat_transport.fallback_client if leg == "fallback" else acc._client
+            acc._chat_transport.fallback_client
+            if leg == "fallback"
+            else acc._chat_transport._client
         )
         target.chat_send.assert_awaited_once()
         target.chat_inject.assert_awaited_once()
@@ -187,11 +190,14 @@ async def test_ws_operations_never_mint_or_receive_a2a_arguments(
 @pytest.mark.parametrize("event", ["chat", "agent", "error"])
 @pytest.mark.parametrize("ignore_case", [False, True])
 def test_fallback_terminal_prefers_exact_session(event, ignore_case):
-    acc = AsyncChatClient(
+    acc = make_chat_client(
         uri="ws://host/ws", transport_mode="on", ignore_case=ignore_case
     )
     strategy = acc._chat_transport
     strategy.routed_sessions.update({"a": "v3", "ab": "v3"})
-    bridge = strategy._scoped_bridge(acc._event_bridge_snapshot()[event])
+    strategy.fallback_client = client = MagicMock()
+    bridge = strategy._fallback_bridge(
+        client, event, acc._event_bridge_snapshot()[event]
+    )
     bridge({"sessionKey": "ab", "state": "error" if event == "error" else "final"})
     assert strategy.routed_sessions == {"a": "v3"}

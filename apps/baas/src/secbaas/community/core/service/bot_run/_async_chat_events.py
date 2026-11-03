@@ -16,7 +16,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
 from ..bot_interaction import BotInteractionService
-from ._async_chat_client_transport import AsyncChatTransportBase
+from ._async_chat_client_transport import ChatTransport
 from ._interaction_protocol import (
     EngineInteractionRequestedEvent,
     EngineInteractionResolvedEvent,
@@ -111,8 +111,7 @@ class AsyncChatEvents:
     _session_matcher: SessionKeyMatcher
     _ignore_case: bool
     _interaction_service: BotInteractionService | None
-    _chat_transport: AsyncChatTransportBase
-    _client: Any | None
+    _chat_transport: ChatTransport
     _interaction_tasks: dict[tuple[str, str], asyncio.Task[None]]
     _sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None
     verbose: bool
@@ -146,16 +145,6 @@ class AsyncChatEvents:
             state, StreamChunk(type="error", content=msg)
         )
 
-    def _release_terminal_ownership(
-        self, session_key: str, chat_state: Any, payload: dict[str, Any]
-    ) -> None:
-        """Delegate terminal ownership release to the applicable transport."""
-        self._chat_transport.release_terminal_ownership(
-            session_key=session_key,
-            chat_state=chat_state,
-            payload=payload,
-        )
-
     @_with_session_trace("_on_chat")
     def _on_chat(
         self,
@@ -185,10 +174,6 @@ class AsyncChatEvents:
             if content.get("text") is not None:
                 text = content.get("text")
                 break
-
-        # R7-F2/R8：归属释放锚定真实终态——先于 state 判定执行，
-        # state 有无（等待方是否已收口）不影响释放（R8-F3 的缝正在于此）。
-        self._release_terminal_ownership(session_key, chat_state, payload)
 
         # No state associated with this session key
         if state is None:
@@ -265,11 +250,6 @@ class AsyncChatEvents:
         由 @_with_session_trace 装饰器自动查找 state 并恢复 trace context，
         使日志的 traceid 能正确关联原始请求。
         """
-        # R9-F3：agent final/error 是真实终态通道（_derive_event_name 可把
-        # 无显式事件名的终态派发为 agent；WS 转发层遇终态直接结束，不保证
-        # 再补 chat 终态）——释放接入在 state 判定之前，等待中与后台两态
-        # 无差别。
-        self._release_terminal_ownership(session_key, payload.get("state", ""), payload)
         if state is None:
             logger.warning(
                 "[agent] No session state for sessionKey=%s, ignore_case=%s",
@@ -388,9 +368,9 @@ class AsyncChatEvents:
             if state.stream_queue is not None and payload.get("kind") == "mode_switch":
                 state.pending_mode_transition_ids.add(event.interaction_id)
 
-        # Engine events normally arrive only on an active client. Keep persistence
-        # and SSE delivery above, but do not start a dispatcher without an uplink.
-        if self._client is None:
+        # Main may be reconnecting while this session's uplink remains usable.
+        # Availability and routing belong to the transport, not the facade.
+        if not self._chat_transport.can_resolve_interaction(event.session_key):
             return
 
         task_key = (event.session_key, event.interaction_id)
@@ -536,26 +516,11 @@ class AsyncChatEvents:
                 interaction_id=interaction_id,
             )
             if command is not None:
-                # P1-4：答复按产生 interaction 的传输归属路由——B3 的
-                # reroute run 必须回到其专用连接，错发只会得到 not_found
-                # 并让审批无法恢复。交互分发把这些差异完全交给策略；
-                # 调用方只拿到目标 client 和额外调用参数。
-                client, resolve_kwargs = await self._chat_transport.interaction_target(
-                    session_key=session_key
-                )
-                if client is None:
-                    interaction_service.mark_failed(
-                        session_key=session_key,
-                        interaction_id=interaction_id,
-                        error="engine websocket is disconnected",
-                    )
-                    return
-
                 try:
-                    exchange = await client.interaction_resolve(
+                    exchange = await self._chat_transport.resolve_interaction(
+                        session_key=session_key,
                         interaction_id=command.interaction_id,
                         resolution=command.resolution,
-                        **resolve_kwargs,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -621,8 +586,6 @@ class AsyncChatEvents:
             session_key: 会话 key（由装饰器注入）
             state: 会话状态（由装饰器注入）
         """
-        # R9-F3：error 通道同样终结 run——释放接入在 state 判定之前。
-        self._release_terminal_ownership(session_key, payload.get("state", ""), payload)
         if state is None:
             logger.warning(
                 "[error] No session state for sessionKey=%s, ignore_case=%s",

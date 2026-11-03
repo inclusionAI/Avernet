@@ -11,6 +11,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
     BotSessionError,
     NotConnectedError,
 )
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_a2a_test_support import (
     _StubV3Transport,
@@ -40,17 +41,17 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
     def _acc_with_owned_a2a_main(self) -> AsyncChatClient:
         """transport=a2a + 显式诚实面主连接（归属查询/abort 不误报）。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
+        acc = make_chat_client(uri="ws://host/ws", max_retries=0, transport_mode="grey")
         acc._chat_transport._current_name = "a2a"
-        acc._client = MagicMock()
-        acc._client.connected = True
-        acc._client.close = AsyncMock()
-        acc._client.chat_abort = AsyncMock(return_value={"ok": False})
-        acc._client.tracks_session = MagicMock(return_value=False)
-        acc._client.has_running_runs = False
+        acc._chat_transport._client = MagicMock()
+        acc._chat_transport._client.connected = True
+        acc._chat_transport._client.close = AsyncMock()
+        acc._chat_transport._client.chat_abort = AsyncMock(return_value={"ok": False})
+        acc._chat_transport._client.tracks_session = MagicMock(return_value=False)
+        acc._chat_transport._client.has_running_runs = False
         # 桥面快照从主连接 _event_handlers 复刻——挂编排器真实 chat
         # 处理器，fallback 收引擎帧走真分发路径（非 mock）。
-        acc._client._event_handlers = {"chat": acc._on_chat}
+        acc._chat_transport._client._event_handlers = {"chat": acc._on_chat}
         return acc
 
     @pytest.mark.asyncio
@@ -78,7 +79,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
             "abort 未随 run 走 v3"
         )
-        acc._client.chat_abort.assert_not_awaited()  # 被误发 A2A 主连接即失败
+        acc._chat_transport._client.chat_abort.assert_not_awaited()  # 被误发 A2A 主连接即失败
         await acc.close()
 
     @pytest.mark.asyncio
@@ -130,7 +131,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert acc._chat_transport.fallback_client.chat_abort_calls == [
             ("sk-att", {"run_id": None})
         ]
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()
 
     @pytest.mark.asyncio
@@ -201,7 +202,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert "sk-att" not in acc._chat_transport.routed_sessions, (
             "失败发送残留归属标记"
         )
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()
 
     # ─────────── R8：归属释放必须锚定真实终态，不枚举等待方退出方式 ───────────
@@ -246,7 +247,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert fallback.chat_abort_calls == [("sk-att", {"run_id": None})], (
             "主 run 的 abort 被注入误导到错误连接"
         )
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()
 
     @pytest.mark.asyncio
@@ -277,7 +278,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             "取消等待方误删在途 run 归属"
         )
         await acc.chat_abort("sk-att")
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()
 
     @pytest.mark.asyncio
@@ -324,7 +325,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
             "流式提前关闭误删在途 run 归属"
         )
         await acc.chat_abort("sk-att")
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()
 
     @pytest.mark.asyncio
@@ -359,10 +360,10 @@ class TestAttachFallbackRunOwnershipLifecycle:
         """R9-F1：流式请求通过入口连接检查后在并发/同 session 排队期间
         断连——恢复执行必须抛 NotConnectedError，不得被 finally 里未初始化
         变量的 UnboundLocalError 吞掉真实断连原因。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
-        acc._client = MagicMock()
-        acc._client.connected = True
-        acc._client.close = AsyncMock()
+        acc = make_chat_client(uri="ws://host/ws", max_retries=0)
+        acc._chat_transport._client = MagicMock()
+        acc._chat_transport._client.connected = True
+        acc._chat_transport._client.close = AsyncMock()
 
         # 先占住同 session 让生成器排队（入口检查此时已通过）
         async with acc._condition:
@@ -377,7 +378,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
 
         t = asyncio.create_task(consume())
         await asyncio.sleep(0.1)  # t 已在 condition 排队
-        acc._client.connected = False  # 排队期间断连
+        acc._chat_transport._client.connected = False  # 排队期间断连
         async with acc._condition:
             acc._active_sessions.discard("sk-att")
             acc._condition.notify_all()
@@ -437,7 +438,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         agent，WS 转发层遇终态直接结束）——agent final/error 与 error 通道
         必须同样释放归属，后台态（state=None）不许漏。"""
         acc = self._acc_with_owned_a2a_main()
-        acc._client._event_handlers = {
+        acc._chat_transport._client._event_handlers = {
             "chat": acc._on_chat,
             "agent": acc._on_agent,
             "error": acc._on_error,
@@ -477,7 +478,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         """R9-F3b：等待方被 agent final 唤醒（仅 agent 通道终结、无 chat
         final）——run 已终结，归属必须释放。"""
         acc = self._acc_with_owned_a2a_main()
-        acc._client._event_handlers = {
+        acc._chat_transport._client._event_handlers = {
             "chat": acc._on_chat,
             "agent": acc._on_agent,
             "error": acc._on_error,
@@ -520,7 +521,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         session 的超串，如 chat-10 ⊃ chat-1）的终态经主连接分发时，不得
         在归属子表 contains 误中前缀 session 而清掉 fallback 的归属。"""
         acc = self._acc_with_owned_a2a_main()
-        acc._client._event_handlers["chat"] = acc._on_chat  # 双注册同形
+        acc._chat_transport._client._event_handlers["chat"] = acc._on_chat  # 双注册同形
 
         # chat-1：附件 run，后台在途于 v3 fallback
         await acc.send_message(
@@ -530,7 +531,7 @@ class TestAttachFallbackRunOwnershipLifecycle:
         fallback = acc._chat_transport.fallback_client
 
         # chat-10：A2A 主连接 run（裸 key，包含 chat-1 为前缀）终结
-        acc._client._event_handlers["chat"](
+        acc._chat_transport._client._event_handlers["chat"](
             {
                 "sessionKey": "chat-10",
                 "state": "final",
@@ -547,5 +548,5 @@ class TestAttachFallbackRunOwnershipLifecycle:
         assert fallback.chat_abort_calls == [("chat-1", {"run_id": None})], (
             "跨 session 误清理后 abort 被错发 A2A 主连接"
         )
-        acc._client.chat_abort.assert_not_awaited()
+        acc._chat_transport._client.chat_abort.assert_not_awaited()
         await acc.close()

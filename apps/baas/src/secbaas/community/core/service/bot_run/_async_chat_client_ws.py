@@ -1,68 +1,32 @@
-"""WebSocket-only transport implementation for ``AsyncChatClient``."""
+"""WS-only transport; no A2A probing, routing state or HTTP authentication."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
-from ._async_chat_client_transport import (
-    AsyncChatTransportBase,
-    AsyncChatTransportOwner,
-)
+from ._async_chat_transport_base import ChatTransportBase
 from ._bot_websocket_client import BotWebSocketClient
 
 
-def make_ws_client(owner: AsyncChatTransportOwner) -> BotWebSocketClient:
-    """Construct a WS endpoint; A2A may reuse it only for its explicit fallback."""
+def make_ws_client(
+    *, uri: str, client_id: str, client_version: str, headers: dict[str, str]
+) -> BotWebSocketClient:
+    """Construct the stable WS wire client, also used by explicit fallback."""
     return BotWebSocketClient(
-        uri=owner.uri,
-        client_id=owner.client_id,
-        client_version=owner.client_version,
-        headers=owner.headers,
+        uri=uri, client_id=client_id, client_version=client_version, headers=headers
     )
 
 
-class WebSocketChatTransport(AsyncChatTransportBase):
-    """Pure ``v3-ws`` transport.
-
-    This path never constructs an A2A client, never reads A2A fallback state,
-    and never adds session-key arguments to interaction calls.
-    """
-
+class WebSocketChatTransport(ChatTransportBase):
     @property
     def transport_name(self) -> str:
-        return "v3-ws"
+        return "v3-ws" if self._client is not None else "unknown"
 
-    async def create(self) -> tuple[Any, dict[str, Any]]:
-        client = make_ws_client(self.owner)
-        self.owner._bind_client_events(client)
-        hello = await client.connect()
-        return client, hello
-
-    async def send_target(
-        self,
-        *,
-        session_key: str,
-        attachments: list[Any] | None,
-        request_kind: Literal["send", "inject"] = "send",
-    ) -> Any:
-        return self.owner._client
-
-    async def abort_target(self, *, session_key: str) -> Any:
-        return self.owner._client
-
-    async def interaction_target(
-        self, *, session_key: str
-    ) -> tuple[Any, dict[str, Any]]:
-        return self.owner._client, {}
-
-    def has_active_sessions(self) -> bool:
-        client = self.owner._client
-        return bool(getattr(client, "has_running_runs", False))
-
-    def tracks_session(self, session_key: str) -> bool:
-        client = self.owner._client
-        inner_tracks = getattr(client, "tracks_session", None)
-        return bool(inner_tracks and inner_tracks(session_key))
-
-    async def close(self) -> None:
-        return None
+    async def connect(self) -> dict[str, Any]:
+        client = make_ws_client(
+            uri=self.uri,
+            client_id=self.client_id,
+            client_version=self.client_version,
+            headers=self.headers,
+        )
+        return await self._connect_client(client)

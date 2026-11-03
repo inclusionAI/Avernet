@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+from tests.utils.chat_transport import make_chat_client
+
 from ._async_chat_test_support import (
     mock_bot_ws as mock_bot_ws,
 )
@@ -16,16 +18,13 @@ class TestConcurrencySemaphore:
     @pytest.mark.asyncio
     async def test_semaphore_limits_parallel(self, mock_bot_ws, mock_bot_ws_instance):
         """max_concurrent_sessions=2 时，第 3 个请求会阻塞直到前面的完成。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_concurrent_sessions=2)
+        client = make_chat_client(uri="ws://host/ws", max_concurrent_sessions=2)
         await client.connect()
 
         running = 0
@@ -60,16 +59,13 @@ class TestConcurrencySemaphore:
     @pytest.mark.asyncio
     async def test_semaphore_unlimited(self, mock_bot_ws, mock_bot_ws_instance):
         """max_concurrent_sessions=0 时，所有并发请求立即执行。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_concurrent_sessions=0)
+        client = make_chat_client(uri="ws://host/ws", max_concurrent_sessions=0)
         await client.connect()
 
         async def instant_chat_send(*args, **kwargs):
@@ -95,16 +91,13 @@ class TestSessionKeyQueueing:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """同一 sessionKey 的第二个请求排队等待第一个完成后执行，而非硬拒绝。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", session_key_timeout=5.0)
+        client = make_chat_client(uri="ws://host/ws", session_key_timeout=5.0)
         await client.connect()
 
         order = []
@@ -156,7 +149,6 @@ class TestSessionKeyQueueing:
     async def test_same_key_queueing_timeout(self, mock_bot_ws, mock_bot_ws_instance):
         """排队等待超时后抛 ConcurrentSessionError。"""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             ConcurrentSessionError,
         )
 
@@ -165,7 +157,7 @@ class TestSessionKeyQueueing:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", session_key_timeout=0.05)
+        client = make_chat_client(uri="ws://host/ws", session_key_timeout=0.05)
         await client.connect()
 
         async def never_complete(*args, **kwargs):
@@ -189,16 +181,13 @@ class TestSessionKeyQueueing:
     @pytest.mark.asyncio
     async def test_different_keys_no_blocking(self, mock_bot_ws, mock_bot_ws_instance):
         """不同 sessionKey 的请求互不阻塞。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def instant_send(*args, **kwargs):
@@ -221,11 +210,8 @@ class TestReconnection:
     @pytest.mark.asyncio
     async def test_is_reconnecting_property(self, mock_bot_ws, mock_bot_ws_instance):
         """is_reconnecting 初始为 False。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client.is_reconnecting is False
 
     @pytest.mark.asyncio
@@ -233,16 +219,13 @@ class TestReconnection:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """max_retries=0 时不启动重连监控任务。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         # max_retries=0 时不启动 _reconnect_monitor
         assert client._reconnect_monitor is None
@@ -252,16 +235,13 @@ class TestReconnection:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """max_retries>0 时启动重连监控任务。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=1)
+        client = make_chat_client(uri="ws://host/ws", max_retries=1)
         await client.connect()
         assert client._reconnect_monitor is not None
         assert not client._reconnect_monitor.done()
@@ -273,16 +253,13 @@ class TestReconnection:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """close() 设置 _closed_intentionally=True 并取消重连监控。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=2)
+        client = make_chat_client(uri="ws://host/ws", max_retries=2)
         await client.connect()
         monitor = client._reconnect_monitor
         assert monitor is not None
@@ -294,11 +271,8 @@ class TestReconnection:
 
 class TestNewInitParams:
     def test_default_concurrency_params(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client._max_concurrent_sessions == 0
         assert client._session_key_timeout == 30.0
         assert client._max_retries == 1
@@ -307,11 +281,8 @@ class TestNewInitParams:
         assert client._active_sessions == set()
 
     def test_custom_concurrency_params(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws",
             max_concurrent_sessions=5,
             session_key_timeout=10.0,
@@ -326,11 +297,8 @@ class TestNewInitParams:
         assert client._concurrency_sem._value == 5
 
     def test_active_sessions_is_set(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert isinstance(client._active_sessions, set)
 
     @pytest.mark.asyncio
@@ -338,16 +306,13 @@ class TestNewInitParams:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """关闭时清理所有 active sessions。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         # 手动添加 active sessions
@@ -365,11 +330,10 @@ class TestNotConnectedError:
     ):
         """send_message raises NotConnectedError when not connected."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             NotConnectedError,
         )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         # _client is None → NotConnectedError
         with pytest.raises(NotConnectedError, match="Not connected"):
             await client.send_message("Hi", session_key="s1")
@@ -380,11 +344,10 @@ class TestNotConnectedError:
     ):
         """inject_message raises NotConnectedError when not connected."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             NotConnectedError,
         )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         with pytest.raises(NotConnectedError, match="Not connected"):
             await client.inject_message("Hi", session_key="s1")
 
@@ -393,16 +356,13 @@ class TestInjectMessageSemaphore:
     @pytest.mark.asyncio
     async def test_inject_respects_semaphore(self, mock_bot_ws, mock_bot_ws_instance):
         """inject_message 受并发信号量约束。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_concurrent_sessions=1)
+        client = make_chat_client(uri="ws://host/ws", max_concurrent_sessions=1)
         await client.connect()
 
         barrier = asyncio.Event()
@@ -446,16 +406,13 @@ class TestInjectMessageSemaphore:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """max_concurrent_sessions=0 时 inject_message 不受信号量限制。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", max_concurrent_sessions=0)
+        client = make_chat_client(uri="ws://host/ws", max_concurrent_sessions=0)
         await client.connect()
 
         call_count = 0

@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+from tests.utils.chat_transport import make_chat_client
+
 from ._async_chat_test_support import (
     _TEST_SESSION_KEY,
     _setup_session_state,
@@ -19,11 +21,8 @@ from ._async_chat_test_support import (
 class TestOnChat:
     @pytest.mark.asyncio
     async def test_on_chat_delta_state(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         client._on_chat(
@@ -40,11 +39,8 @@ class TestOnChat:
 
     @pytest.mark.asyncio
     async def test_on_chat_final_state(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         client._on_chat(
@@ -61,11 +57,8 @@ class TestOnChat:
 
     @pytest.mark.asyncio
     async def test_on_chat_ignores_inject_run_id_final_state(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
         state.stream_queue = asyncio.Queue()
 
@@ -85,11 +78,8 @@ class TestOnChat:
 
     @pytest.mark.asyncio
     async def test_on_chat_error_state(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         client._on_chat(
@@ -105,11 +95,8 @@ class TestOnChat:
 
     @pytest.mark.asyncio
     async def test_on_chat_unknown_state(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         client._on_chat(
@@ -126,11 +113,8 @@ class TestOnChat:
 
     @pytest.mark.asyncio
     async def test_on_chat_empty_content(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         client._on_chat(
@@ -149,11 +133,8 @@ class TestOnChat:
 class TestOnAgent:
     @pytest.mark.asyncio
     async def test_on_agent_tool_result_appends(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         payload = {
@@ -168,11 +149,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_tool_non_result_ignored(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         payload = {
@@ -185,11 +163,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_assistant_appends(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         payload = {
@@ -204,11 +179,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_assistant_replaces_on_consecutive(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         first = {
@@ -232,11 +204,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_lifecycle_end_sets_event(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         payload = {
@@ -251,11 +220,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_lifecycle_non_end_ignored(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         payload = {
@@ -269,11 +235,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_unknown_stream_resets_assistant(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
 
         state.last_stream_is_assistant = True
@@ -288,11 +251,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_final_sets_complete_events(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
         state.stream_queue = asyncio.Queue()
 
@@ -316,11 +276,8 @@ class TestOnAgent:
 
     @pytest.mark.asyncio
     async def test_on_agent_final_empty_message(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client)
         state.stream_queue = asyncio.Queue()
 
@@ -344,16 +301,13 @@ class TestOnAgent:
 class TestIntegration:
     @pytest.mark.asyncio
     async def test_full_send_message_flow(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def simulate_chat_response(*args, **kwargs):
@@ -383,16 +337,13 @@ class TestIntegration:
     async def test_send_message_with_agent_events(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def simulate_with_agent(*args, **kwargs):
@@ -426,16 +377,12 @@ class TestIntegration:
     ):
         import asyncio
 
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
-
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def slow_chat_send(*args, **kwargs):
@@ -464,7 +411,6 @@ class TestIntegration:
         import asyncio
 
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             ConcurrentSessionError,
         )
 
@@ -474,7 +420,7 @@ class TestIntegration:
         }
 
         # 使用极短超时，让排队快速超时
-        client = AsyncChatClient(uri="ws://host/ws", session_key_timeout=0.05)
+        client = make_chat_client(uri="ws://host/ws", session_key_timeout=0.05)
         await client.connect()
 
         async def never_complete(*args, **kwargs):

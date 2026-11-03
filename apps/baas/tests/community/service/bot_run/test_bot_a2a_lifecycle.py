@@ -34,6 +34,7 @@ from secbaas.community.core.service.bot_run._bot_a2a_client import (
     A2aUnavailableError,
     BotA2aClient,
 )
+from tests.utils.chat_transport import make_chat_client
 
 
 def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
@@ -47,9 +48,6 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
 
     from secbaas.community.api.bot_interaction import InteractionRequestedResult
     from secbaas.community.core.service.bot_interaction import InteractionDispatch
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
 
     srv = LiveServer(make_card_app("JSONRPC", "1.0"))
     try:
@@ -65,7 +63,7 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
                 interaction_id="i-1",
                 resolution=resolution,
             )
-            acc = AsyncChatClient(
+            acc = make_chat_client(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
                 transport_mode="on",
                 max_retries=0,
@@ -77,8 +75,8 @@ def test_attachment_hitl_answer_routes_via_v3_and_run_resumes():
             async def spy_resolve(**kwargs: Any) -> Any:
                 raise AssertionError("answer leaked to a2a transport")
 
-            assert acc._client is not None
-            acc._client.interaction_resolve = spy_resolve
+            assert acc._chat_transport._client is not None
+            acc._chat_transport._client.interaction_resolve = spy_resolve
 
             with patch(
                 "secbaas.community.core.service.bot_run._async_chat_client_ws.BotWebSocketClient",

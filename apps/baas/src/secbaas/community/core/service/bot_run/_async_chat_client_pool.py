@@ -27,6 +27,10 @@ from secbaas.community.logger import get_logger
 
 from ..bot_interaction import BotInteractionService
 from ._async_chat_client import AsyncChatClient
+from ._async_chat_client_transport import (
+    ChatTransportFactory,
+    normalize_chat_transport_mode,
+)
 
 logger = get_logger("core-bot-run")
 
@@ -50,7 +54,9 @@ class AsyncChatClientPool:
     """按 sandbox_id 维护多条 AsyncChatClient 连接
 
     使用方式:
-        pool = AsyncChatClientPool(max_size=100, max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=transport_factory, max_size=100, max_conns_per_sandbox=2
+        )
         client = await pool.get(sandbox_id, uri, headers)
         # 直接使用 client，无需 release
         content, events = await client.send_message(...)
@@ -61,6 +67,8 @@ class AsyncChatClientPool:
 
     def __init__(
         self,
+        *,
+        transport_factory: ChatTransportFactory,
         max_size: int = 100,
         max_conns_per_sandbox: int = 1,
         max_concurrent_per_conn: int = 0,
@@ -73,6 +81,7 @@ class AsyncChatClientPool:
         """初始化连接池
 
         Args:
+            transport_factory: 由 bootstrap 注入的传输工厂
             max_size: 池中最大总连接数，超出时 LRU 淘汰
             max_conns_per_sandbox: 每个 sandbox_id 最多维护的连接数
             max_concurrent_per_conn: 每条连接最大并发会话数，0 表示不限
@@ -82,6 +91,7 @@ class AsyncChatClientPool:
             system_config_service: 系统配置服务，用于创建连接时读取运行开关
             interaction_service: 交互持久化与应答服务；仅在交互开关启用时注入连接
         """
+        self._transport_factory = transport_factory
         self._max_size = max_size
         self._max_conns_per_sandbox = max_conns_per_sandbox
         self._max_concurrent_per_conn = max_concurrent_per_conn
@@ -224,15 +234,21 @@ class AsyncChatClientPool:
                 self._max_conns_per_sandbox,
                 len(self._clients.get(sandbox_id, [])),
             )
-            new_client = AsyncChatClient(
+            ignore_case = self._read_ignore_case(self._system_config_service)
+            transport = self._transport_factory(
                 uri=uri,
                 headers=headers,
+                mode=normalize_chat_transport_mode(current_mode),
+                ignore_case=ignore_case,
+                proxypass_token_minter=token_minter,
+            )
+            new_client = AsyncChatClient(
+                transport=transport,
                 max_concurrent_sessions=self._max_concurrent_per_conn,
                 session_key_timeout=self._session_key_timeout,
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
-                transport_mode=current_mode,
-                ignore_case=self._read_ignore_case(self._system_config_service),
+                ignore_case=ignore_case,
                 interaction_service=self._interaction_service
                 if self._enable_process_interaction(self._system_config_service)
                 else None,
@@ -240,7 +256,6 @@ class AsyncChatClientPool:
                     self._load_sensitive_bypass_keys,
                     self._system_config_service,
                 ),
-                proxypass_token_minter=token_minter,
             )
             await new_client.connect()
 

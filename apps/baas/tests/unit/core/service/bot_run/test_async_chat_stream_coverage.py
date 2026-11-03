@@ -7,10 +7,10 @@ import pytest
 
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
     ConcurrentSessionError,
     NotConnectedError,
 )
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_coverage_support import (
     _setup_session_state,
@@ -25,7 +25,7 @@ from ._async_chat_coverage_support import (
 
 class TestOnDisconnect:
     def test_on_disconnect_pushes_error_to_streams(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state1 = _setup_session_state(client, "s1")
         state1.stream_queue = asyncio.Queue()
         state2 = _setup_session_state(client, "s2")
@@ -47,7 +47,7 @@ class TestOnDisconnect:
             assert state.chat_complete.is_set()
 
     def test_on_disconnect_skips_completed_sessions(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         done = _setup_session_state(client, "done")
         done.state = "final"
         done.content = "ok"
@@ -61,13 +61,13 @@ class TestOnDisconnect:
         assert done.stream_queue.empty()
 
     def test_on_disconnect_sets_disconnect_event(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client._disconnect_event.is_set() is False
         client._on_disconnect("disconnect", {})
         assert client._disconnect_event.is_set() is True
 
     def test_notify_disconnect(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client._disconnect_event.is_set() is False
         client._notify_disconnect()
         assert client._disconnect_event.is_set() is True
@@ -76,7 +76,7 @@ class TestOnDisconnect:
 class TestSendMessageStream:
     @pytest.mark.asyncio
     async def test_stream_success(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         async def push_chunks(*args, **kwargs):
@@ -101,7 +101,7 @@ class TestSendMessageStream:
 
     @pytest.mark.asyncio
     async def test_stream_not_connected_raises(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         with pytest.raises(NotConnectedError):
             async for _ in client.send_message_stream("hello"):
                 pass
@@ -110,7 +110,7 @@ class TestSendMessageStream:
     async def test_stream_error_chunk_terminates(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         async def push_error(*args, **kwargs):
@@ -131,7 +131,7 @@ class TestSendMessageStream:
 
     @pytest.mark.asyncio
     async def test_stream_with_timeout(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         async def push_chunks(*args, **kwargs):
@@ -154,7 +154,7 @@ class TestSendMessageStream:
 
     @pytest.mark.asyncio
     async def test_stream_timeout_exceeded(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         async def never_push(*args, **kwargs):
@@ -174,7 +174,7 @@ class TestSendMessageStream:
 
     @pytest.mark.asyncio
     async def test_stream_with_semaphore(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_concurrent_sessions=1, max_retries=0
         )
         await client.connect()
@@ -199,7 +199,7 @@ class TestSendMessageStream:
     async def test_stream_concurrent_same_key_timeout(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", session_key_timeout=0.05, max_retries=0
         )
         await client.connect()
@@ -229,7 +229,7 @@ class TestSendMessageStream:
     async def test_stream_connection_lost_before_send(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         # Simulate connection lost between condition release and send
@@ -243,7 +243,7 @@ class TestSendMessageStream:
 class TestDrainStreamQueue:
     @pytest.mark.asyncio
     async def test_drain_no_timeout(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         queue: asyncio.Queue[StreamChunk] = asyncio.Queue()
         queue.put_nowait(StreamChunk(type="delta", content="d1"))
         queue.put_nowait(StreamChunk(type="final", content="f1"))
@@ -257,7 +257,7 @@ class TestDrainStreamQueue:
 
     @pytest.mark.asyncio
     async def test_drain_timeout_remaining_zero(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         queue: asyncio.Queue[StreamChunk] = asyncio.Queue()
         # Empty queue with very short timeout → immediate timeout
         chunks = []
@@ -269,7 +269,7 @@ class TestDrainStreamQueue:
 
     @pytest.mark.asyncio
     async def test_drain_timeout_after_some_chunks(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         queue: asyncio.Queue[StreamChunk] = asyncio.Queue()
         queue.put_nowait(StreamChunk(type="delta", content="d1"))
 
@@ -288,7 +288,7 @@ class TestInjectMessageAdditional:
     async def test_inject_auto_generates_session_key(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         await client.inject_message("hello")
         mock_bot_ws_instance.chat_inject.assert_called_once()
@@ -298,7 +298,7 @@ class TestInjectMessageAdditional:
 
     @pytest.mark.asyncio
     async def test_inject_with_chat_metadata(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         await client.inject_message(
             "hello", session_key="sk1", chat_metadata={"key": "value"}
@@ -314,7 +314,7 @@ class TestSendMessageAdditional:
     async def test_send_message_connection_lost_before_send(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         # is_connected is True at entry, then False at the second check (line 352)
@@ -336,7 +336,7 @@ class TestSendMessageAdditional:
     async def test_send_message_with_app_id_and_metadata(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
 
         async def fire_complete(*args, **kwargs):
@@ -362,7 +362,7 @@ class TestSendMessageAdditional:
 
     @pytest.mark.asyncio
     async def test_send_message_with_semaphore(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_concurrent_sessions=1, max_retries=0
         )
         await client.connect()
@@ -384,7 +384,7 @@ class TestReconnectLoop:
     @pytest.mark.asyncio
     async def test_reconnect_success(self, mock_bot_ws, mock_bot_ws_instance):
         """Test that reconnect loop reconnects after disconnect."""
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=2, retry_base_backoff=0.01
         )
         await client.connect()
@@ -414,7 +414,7 @@ class TestReconnectLoop:
     async def test_reconnect_all_attempts_exhausted(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=1, retry_base_backoff=0.01
         )
         await client.connect()
@@ -434,7 +434,7 @@ class TestReconnectLoop:
     async def test_reconnect_loop_stops_on_close(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=3, retry_base_backoff=0.01
         )
         await client.connect()
@@ -449,7 +449,7 @@ class TestReconnectLoop:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """When closing old client during reconnect fails, it should be swallowed."""
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=1, retry_base_backoff=0.01
         )
         await client.connect()
@@ -480,7 +480,7 @@ class TestReconnectLoop:
     async def test_reconnect_closed_intentionally_during_backoff(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=3, retry_base_backoff=0.05
         )
         await client.connect()
@@ -498,7 +498,7 @@ class TestCloseAdditional:
     async def test_close_with_reconnect_monitor_done(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         # No reconnect monitor when max_retries=0
         assert client._reconnect_monitor is None
@@ -509,7 +509,7 @@ class TestCloseAdditional:
     async def test_close_cancels_monitor_await_cancelled(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=1)
+        client = make_chat_client(uri="ws://host/ws", max_retries=1)
         await client.connect()
         monitor = client._reconnect_monitor
         assert monitor is not None
@@ -520,7 +520,7 @@ class TestCloseAdditional:
 
     @pytest.mark.asyncio
     async def test_close_when_already_closed(self, mock_bot_ws, mock_bot_ws_instance):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         await client.close()
         # Double close should not raise

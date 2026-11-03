@@ -10,6 +10,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
     BotSessionError,
 )
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_a2a_test_support import (
     _a2a_acc_with_stub_main_client,
@@ -97,7 +98,7 @@ class TestInjectAttachmentsV3Reroute:
 
     async def test_bridge_snapshot_is_available_before_connect(self, mock_bot_ws):
         """回调表不依赖低层客户端的私有 registry，握手前即可绑定。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        acc = make_chat_client(uri="ws://host/ws", max_retries=0)
         assert acc._event_bridge_snapshot()["chat"] == acc._on_chat
         assert set(acc._event_bridge_snapshot()) == {
             "chat",
@@ -114,7 +115,7 @@ class TestInjectAttachmentsV3Reroute:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """fallback close 抛错必须吞掉——主连接收口不得被旁支拖死。"""
-        acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
+        acc = make_chat_client(uri="ws://host/ws", max_retries=0, transport_mode="grey")
         await acc.connect()
 
         bad_fallback = MagicMock()
@@ -161,7 +162,7 @@ class TestV3FallbackDisconnectRecovery:
 
     def _acc_with_awaitable_main(self) -> AsyncChatClient:
         acc = _a2a_acc_with_stub_main_client()
-        acc._client.chat_send = AsyncMock(return_value={"ok": True})
+        acc._chat_transport._client.chat_send = AsyncMock(return_value={"ok": True})
         return acc
 
     @pytest.mark.asyncio
@@ -194,7 +195,7 @@ class TestV3FallbackDisconnectRecovery:
             await asyncio.wait_for(task, 2)
         # 不自动重发：断连后 fallback/主连接都没有第二次 chat.send
         assert len(fallback.chat_send_calls) == 1
-        assert acc._client.chat_send.await_count == 0
+        assert acc._chat_transport._client.chat_send.await_count == 0
         # 坏连接不再被持有；归属路由表收口
         assert acc._chat_transport.fallback_client is None
         assert acc._chat_transport.routed_sessions == {}
@@ -252,7 +253,9 @@ class TestV3FallbackDisconnectRecovery:
                 and len(_StubV3Transport.instances[-1].chat_send_calls) >= 1
             )
         )
-        await self._wait_until(lambda: acc._client.chat_send.await_count == 1)
+        await self._wait_until(
+            lambda: acc._chat_transport._client.chat_send.await_count == 1
+        )
 
         acc._chat_transport.fallback_client.simulate_disconnect()
 

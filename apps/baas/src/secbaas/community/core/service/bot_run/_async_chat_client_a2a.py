@@ -1,19 +1,19 @@
-"""A2A transport implementation and its A2A-only fallback state."""
+"""A2A connection ownership, probing, HTTP auth and isolated WS fallback."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.logger import get_logger
 
-from ._async_chat_client_transport import (
-    AsyncChatTransportBase,
-    AsyncChatTransportOwner,
-)
-from ._async_chat_client_ws import WebSocketChatTransport, make_ws_client
+from ._async_chat_client_transport import EventHandler, TokenMinter
+from ._async_chat_client_ws import make_ws_client
+from ._async_chat_transport_base import ChatTransportBase
 from ._bot_a2a_client import A2aUnavailableError, BotA2aClient
+from ._chat_errors import NotConnectedError
+from ._interaction_protocol import EngineInteractionResolveExchange
 
 logger = get_logger("core-bot-run")
 
@@ -59,76 +59,80 @@ def _a2a_base_url_from_ws(uri: str) -> str | None:
     return ("https://" if scheme == "wss" else "http://") + host_port + prefix
 
 
-class A2aChatTransport(AsyncChatTransportBase):
-    """A2A transport, including grey fallback and A2A-attachment reroute.
-
-    The object owns the fallback client, its per-run ownership table, and the
-    source marker used to distinguish fallback frames from A2A frames.  The
-    WebSocket implementation never sees any of this state.
-    """
+class A2aChatTransport(ChatTransportBase):
+    """Own all A2A transport state without access to the conversation facade."""
 
     def __init__(
         self,
-        owner: AsyncChatTransportOwner,
+        uri: str,
         mode: str,
         *,
-        proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
+        headers: dict[str, str] | None = None,
+        client_id: str | None = None,
+        client_version: str = "1.0.0",
+        ignore_case: bool = False,
+        proxypass_token_minter: TokenMinter | None = None,
     ) -> None:
-        super().__init__(owner)
+        super().__init__(
+            uri, headers=headers, client_id=client_id, client_version=client_version
+        )
         if mode not in {"grey", "on"}:
             raise ValueError(f"invalid A2A transport mode: {mode!r}")
         self.mode = mode
+        self._ignore_case = ignore_case
         self._proxypass_token_minter = proxypass_token_minter
         self._current_name = "unknown"
         self.fallback_client: Any | None = None
         self.routed_sessions: dict[str, str] = {}
-        self._on_fallback_frame = False
         self._fallback_lock = asyncio.Lock()
 
     @property
     def transport_name(self) -> str:
-        return self._current_name
+        return self._current_name if self._client is not None else "unknown"
 
     def refresh_outbound_auth(self, headers: dict[str, str] | None) -> None:
         super().refresh_outbound_auth(headers)
-        client = self.owner._client
-        if self._current_name == "a2a" and client is not None:
-            client.refresh_proxypass_token(headers)
+        if self._current_name == "a2a" and self._client is not None:
+            self._client.refresh_proxypass_token(headers)
 
-    async def create(self) -> tuple[Any, dict[str, Any]]:
-        a2a_base = _a2a_base_url_from_ws(self.owner.uri)
+    def _make_ws_client(self) -> Any:
+        return make_ws_client(
+            uri=self.uri,
+            client_id=self.client_id,
+            client_version=self.client_version,
+            headers=self.headers,
+        )
+
+    async def connect(self) -> dict[str, Any]:
+        if self._client is not None:
+            raise RuntimeError("Already connected")
+        a2a_base = _a2a_base_url_from_ws(self.uri)
         if self.mode == "on" and a2a_base is None:
             raise A2aUnavailableError(
                 "no HTTP base could be derived from the ws endpoint"
             )
-
         if a2a_base is not None:
             try:
-                candidate = BotA2aClient(
-                    base_url=a2a_base,
-                    headers=self.owner.headers,
-                )
-                self.owner._bind_client_events(candidate)
-                await candidate.connect()
+                candidate = BotA2aClient(base_url=a2a_base, headers=self.headers)
+                await self._connect_client(candidate)
                 self._current_name = "a2a"
-                return candidate, dict(candidate.server_info or {})
+                return dict(candidate.server_info or {})
             except A2aUnavailableError as exc:
                 if self.mode == "on":
                     raise
                 logger.info("[a2a-transport] probing failed (%s) — v3", exc)
 
-        client, hello = await WebSocketChatTransport(self.owner).create()
+        hello = await self._connect_client(self._make_ws_client())
         self._current_name = "v3-ws"
-        return client, hello
+        return hello
 
-    async def send_target(
+    async def _request_client(
         self,
         *,
         session_key: str,
         attachments: list[Any] | None,
-        request_kind: Literal["send", "inject"] = "send",
+        request_kind: Literal["send", "inject"],
     ) -> Any:
-        client = self.owner._client  # noqa: SLF001
         if self._current_name == "a2a" and attachments:
             target = await self._ensure_fallback()
             if request_kind == "send":
@@ -136,30 +140,47 @@ class A2aChatTransport(AsyncChatTransportBase):
             return target
         if request_kind == "send":
             self.routed_sessions.pop(session_key, None)
-        return client
+        return self._require_client()
 
-    async def abort_target(self, *, session_key: str) -> Any:
-        # The ownership table is authoritative for a fallback run even after a
-        # grey reconnect has selected a WS main connection.
+    def _abort_client(self, session_key: str) -> Any:
+        # A main reconnect may select WS while older fallback runs still exist.
         if session_key in self.routed_sessions and self.fallback_client is not None:
             return self.fallback_client
-        return self.owner._client  # noqa: SLF001
+        return self._require_client()
 
-    async def interaction_target(
-        self, *, session_key: str
-    ) -> tuple[Any, dict[str, Any]]:
+    def can_resolve_interaction(self, session_key: str) -> bool:
+        if session_key in self.routed_sessions:
+            return self.fallback_client is not None and bool(
+                self.fallback_client.connected
+            )
+        return super().can_resolve_interaction(session_key)
+
+    async def resolve_interaction(
+        self,
+        *,
+        session_key: str,
+        interaction_id: str,
+        resolution: InteractionResolution,
+    ) -> EngineInteractionResolveExchange:
         if session_key in self.routed_sessions:
             if self.fallback_client is None:
-                return None, {}
-            return self.fallback_client, {}
-
-        client = self.owner._client  # noqa: SLF001
+                raise NotConnectedError("engine websocket is disconnected")
+            return cast(
+                "EngineInteractionResolveExchange",
+                await self.fallback_client.interaction_resolve(
+                    interaction_id=interaction_id, resolution=resolution
+                ),
+            )
         if self._current_name != "a2a":
-            return client, {}
-        # Background HITL dispatch does not pass through pool.get(). Only the
-        # HTTP leg needs fresh request-level auth; WS (main or fallback) must
-        # never invoke the A2A minter or receive A2A-only resolve arguments.
-        if client is not None and self._proxypass_token_minter is not None:
+            return await super().resolve_interaction(
+                session_key=session_key,
+                interaction_id=interaction_id,
+                resolution=resolution,
+            )
+        client = self._require_client()
+        # Background HITL bypasses pool.get(). Only the actual HTTP leg mints;
+        # WS main/fallback must never mint or receive A2A resolve arguments.
+        if self._proxypass_token_minter is not None:
             try:
                 self.refresh_outbound_auth(
                     {"x-proxypass-token": await self._proxypass_token_minter()}
@@ -170,123 +191,118 @@ class A2aChatTransport(AsyncChatTransportBase):
                     "resolve continues on last-known token",
                     exc_info=True,
                 )
-        return client, {"session_key": session_key}
-
-    async def create_fallback(self) -> Any:
-        return await self._ensure_fallback()
+        return cast(
+            "EngineInteractionResolveExchange",
+            await client.interaction_resolve(
+                interaction_id=interaction_id,
+                resolution=resolution,
+                session_key=session_key,
+            ),
+        )
 
     async def _ensure_fallback(self) -> Any:
         async with self._fallback_lock:
             if self.fallback_client is not None:
                 if getattr(self.fallback_client, "connected", False):
                     return self.fallback_client
-                self.fallback_client = None
-                self.routed_sessions.clear()
+                self._fallback_disconnected(self.fallback_client)
 
-            client = make_ws_client(self.owner)
-            self.bind_fallback_client(client, self.owner._event_bridge_snapshot())  # noqa: SLF001
-            await client.connect()
+            client = self._make_ws_client()
+            callbacks = self._event_callbacks()
+            for event, handler in callbacks.events.items():
+                client.on_event(event, self._fallback_bridge(client, event, handler))
+            client.on_disconnect(
+                lambda _event, _payload: self._fallback_disconnected(client)
+            )
             self.fallback_client = client
+            try:
+                await client.connect()
+            except BaseException:
+                self.fallback_client = None
+                try:
+                    await client.close()
+                except Exception:
+                    logger.exception(
+                        "Failed to dispose of fallback handshake candidate"
+                    )
+                raise
             return client
 
-    def _scoped_bridge(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+    def _fallback_bridge(
+        self, client: Any, event: str, handler: EventHandler
+    ) -> EventHandler:
         def wrapped(*args: Any, **kwargs: Any) -> Any:
-            self._on_fallback_frame = True
-            try:
-                return handler(*args, **kwargs)
-            finally:
-                self._on_fallback_frame = False
+            if self.fallback_client is not client:
+                return None
+            # Process ownership at its source, even when the facade has no waiter.
+            # Main events, wildcard logs and inject terminals cannot release it.
+            if event in {"chat", "agent", "error"} and args:
+                payload = args[-1]
+                if isinstance(payload, dict):
+                    self._release_terminal_ownership(payload)
+            return handler(*args, **kwargs)
 
         return wrapped
 
-    def _fallback_disconnect_handler(
-        self, client: Any
-    ) -> Callable[[str, dict[str, Any]], None]:
-        def handler(event_name: str, payload: dict[str, Any]) -> None:
-            if self.fallback_client is not client:
-                return
-            routed = list(self.routed_sessions.keys())
-            self.routed_sessions.clear()
-            self.fallback_client = None
-            logger.warning(
-                "[a2a-fallback] disconnected: terminating %d routed session(s)",
-                len(routed),
-            )
-            for session_key in routed:
-                state = self.owner._sessions.get(session_key)  # noqa: SLF001
-                if state is not None and not state.chat_complete.is_set():
-                    self.owner._handle_terminal_error(  # noqa: SLF001
-                        state,
-                        session_key,
-                        "fallback connection lost; run outcome unknown",
-                        "fallback_disconnect",
-                    )
-
-        return handler
-
-    def bind_fallback_client(self, client: Any, event_handlers: dict[str, Any]) -> None:
-        """Bridge owner callbacks and attach the isolated disconnect handler."""
-        for event_name, handler in event_handlers.items():
-            client.on_event(event_name, self._scoped_bridge(handler))
-        client.on_disconnect(self._fallback_disconnect_handler(client))
+    def _fallback_disconnected(self, client: Any) -> None:
+        if self.fallback_client is not client:
+            return
+        routed = tuple(self.routed_sessions)
+        self.routed_sessions.clear()
+        self.fallback_client = None
+        logger.warning(
+            "[a2a-fallback] disconnected: terminating %d routed session(s)", len(routed)
+        )
+        self._event_callbacks().on_sessions_failed(
+            routed,
+            "fallback connection lost; run outcome unknown",
+            "fallback_disconnect",
+        )
 
     def has_active_sessions(self) -> bool:
-        client = self.owner._client  # noqa: SLF001
-        if bool(getattr(client, "has_running_runs", False)):
-            return True
-        return bool(self.routed_sessions)
+        return super().has_active_sessions() or bool(self.routed_sessions)
 
     def tracks_session(self, session_key: str) -> bool:
-        if session_key in self.routed_sessions:
-            return True
-        client = self.owner._client  # noqa: SLF001
-        inner_tracks = getattr(client, "tracks_session", None)
-        return bool(inner_tracks and inner_tracks(session_key))
+        return session_key in self.routed_sessions or super().tracks_session(
+            session_key
+        )
 
     def _fuzzy_routed_key(self, session_key: str) -> str | None:
-        """Find a routed key with the same exact/contains semantics as
-        ``SessionKeyMatcher`` without pretending routed values are session
-        states."""
         if session_key in self.routed_sessions:
             return session_key
-        ignore_case = bool(self.owner._ignore_case)  # noqa: SLF001
-        target = session_key.lower() if ignore_case else session_key
+        target = session_key.lower() if self._ignore_case else session_key
         for stored_key in self.routed_sessions:
-            candidate = stored_key.lower() if ignore_case else stored_key
+            candidate = stored_key.lower() if self._ignore_case else stored_key
             if candidate in target:
                 return stored_key
         return None
 
-    def release_terminal_ownership(
-        self,
-        session_key: str,
-        chat_state: Any,
-        payload: dict[str, Any],
-    ) -> None:
-        if not self._on_fallback_frame:
-            return
-        if chat_state not in {"final", "error"}:
+    def _release_terminal_ownership(self, payload: dict[str, Any]) -> None:
+        if payload.get("state") not in {"final", "error"}:
             return
         run_id = payload.get("runId") or payload.get("run_id")
         if isinstance(run_id, str) and run_id.startswith("inject-"):
             return
         if payload.get("stopReason") == "inject":
             return
-        reg_key = self._fuzzy_routed_key(session_key)
-        if reg_key is None:
+        session_key = payload.get("sessionKey", "")
+        if not isinstance(session_key, str) or not session_key:
             return
-        self.routed_sessions.pop(reg_key, None)
+        reg_key = self._fuzzy_routed_key(session_key)
+        if reg_key is not None:
+            self.routed_sessions.pop(reg_key, None)
 
-    def release_failed_request(self, session_key: str) -> None:
-        """Remove fallback ownership when ``chat.send`` is rejected."""
+    def _send_rejected(self, session_key: str) -> None:
         self.routed_sessions.pop(session_key, None)
 
     async def close(self) -> None:
-        if self.fallback_client is not None:
-            try:
-                await self.fallback_client.close()
-            except Exception:
-                logger.exception("A2A fallback close failed")
-        self.fallback_client = None
-        self._on_fallback_frame = False
-        self.routed_sessions.clear()
+        try:
+            await super().close()
+        finally:
+            client, self.fallback_client = self.fallback_client, None
+            self.routed_sessions.clear()
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    logger.exception("A2A fallback close failed")

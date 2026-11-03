@@ -20,10 +20,12 @@ from a2a_test_support_lifecycle import (
     make_malformed_card_app,
 )
 
+from secbaas.community.bootstrap._chat_transport import build_chat_transport
 from secbaas.community.core.service.bot_run._bot_a2a_client import (
     A2aUnavailableError,
     BotA2aClient,
 )
+from tests.utils.chat_transport import make_chat_client
 
 
 def test_tracks_session_spans_background_run_until_end_of_stream():
@@ -67,9 +69,6 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
     holder,取消真发 CancelTask 而非 RUN_NOT_TRACKED。"""
     from unittest.mock import MagicMock
 
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
     from secbaas.community.core.service.bot_run._async_chat_client_pool import (
         AsyncChatClientPool,
         _ConnEntry,
@@ -81,17 +80,19 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
 
         async def scenario():
             inner = await _connect_async(srv.base)  # 真 BotA2aClient
-            holder = AsyncChatClient(
+            holder = make_chat_client(
                 uri="ws://x/ws", max_retries=0, transport_mode="on"
             )
-            holder._client = inner
+            holder._chat_transport._client = inner
             holder._chat_transport._current_name = "a2a"
 
             other = MagicMock()  # 另一条空闲连接
             other.tracks_session = MagicMock(return_value=False)
             other.has_running_runs = False
 
-            pool = AsyncChatClientPool()
+            pool = AsyncChatClientPool(
+                transport_factory=build_chat_transport,
+            )
             pool._clients["bg-6"] = [
                 _ConnEntry(client=other),
                 _ConnEntry(client=holder, a2a_mode="on"),
@@ -120,10 +121,6 @@ def test_pool_owner_lookup_survives_wait_result_false_send():
 def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
     from unittest.mock import patch
 
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
-
     srv = LiveServer(make_card_down_app())
     try:
 
@@ -133,7 +130,7 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
                 "BotWebSocketClient",
                 _FakeV3KingineTransport,
             ):
-                acc = AsyncChatClient(
+                acc = make_chat_client(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
                     transport_mode="grey",
                     max_retries=0,
@@ -142,7 +139,7 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
                 assert acc.transport_name == "v3-ws", (
                     f"探测失败时 grey 必须回退 v3（不炸不断流）: {hello}"
                 )
-                assert acc._client is not None
+                assert acc._chat_transport._client is not None
                 await acc.close()
                 return True
 
@@ -152,15 +149,12 @@ def test_async_client_grey_mode_falls_back_to_v3_on_probe_failure():
 
 
 def test_async_client_on_mode_raises_when_a2a_probe_fails():
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
 
     srv = LiveServer(make_card_down_app())
     try:
 
         async def scenario():
-            acc = AsyncChatClient(
+            acc = make_chat_client(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
                 transport_mode="on",
                 max_retries=0,
@@ -178,10 +172,6 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
     """结构畸形卡不炸灰度门——grey 仍如约回退 v3（原 WS 服务照常可用）。"""
     from unittest.mock import patch
 
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
-
     srv = LiveServer(make_malformed_card_app(payload))
     try:
 
@@ -191,7 +181,7 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
                 "BotWebSocketClient",
                 _FakeV3KingineTransport,
             ):
-                acc = AsyncChatClient(
+                acc = make_chat_client(
                     uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
                     transport_mode="grey",
                     max_retries=0,
@@ -212,15 +202,12 @@ def test_async_client_grey_malformed_card_falls_back_to_v3(case, payload):
 def test_async_client_on_mode_malformed_card_raises_a2a_error(case, payload):
     """on 模式下畸形卡 = 明确的 A2aUnavailableError 失败，而非裸
     AttributeError/TypeError 击穿建连。"""
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
 
     srv = LiveServer(make_malformed_card_app(payload))
     try:
 
         async def scenario():
-            acc = AsyncChatClient(
+            acc = make_chat_client(
                 uri=f"ws://127.0.0.1:{srv.port}/api/openclaw/ws",
                 transport_mode="on",
                 max_retries=0,

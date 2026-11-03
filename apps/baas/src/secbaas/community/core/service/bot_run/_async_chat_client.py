@@ -19,20 +19,20 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, cast
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
 
 from ..bot_interaction import BotInteractionService
 from ._async_chat_client_transport import (
-    ChatTransportMode,
-    build_chat_transport,
-    normalize_chat_transport_mode,
+    ChatTransport,
+    ChatTransportCallbacks,
 )
 from ._async_chat_events import AsyncChatEvents, _capture_trace_context
 from ._chat_errors import ChatRequestError
+from ._chat_errors import NotConnectedError as NotConnectedError
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
 
@@ -56,10 +56,6 @@ class BotSessionError(Exception):
     """
 
 
-class NotConnectedError(Exception):
-    """连接未建立或已断开时抛出。"""
-
-
 class AsyncChatClient(AsyncChatEvents):
     """Transport-agnostic chat client orchestration.
 
@@ -78,7 +74,7 @@ class AsyncChatClient(AsyncChatEvents):
     - retry_base_backoff: 重连退避基数（秒），实际退避 = base * 2^(attempt-1)。
 
     使用示例:
-        client = AsyncChatClient(uri, headers=headers, verbose=True)
+        client = AsyncChatClient(transport=transport, verbose=True)
         await client.connect()
         try:
             content, agent_events = await client.send_message("你好", session_key="sess-1")
@@ -90,10 +86,7 @@ class AsyncChatClient(AsyncChatEvents):
 
     def __init__(
         self,
-        uri: str,
-        headers: dict[str, str] | None = None,
-        client_id: str | None = None,
-        client_version: str = "1.0.0",
+        transport: ChatTransport,
         verbose: bool = False,
         max_concurrent_sessions: int = 0,
         session_key_timeout: float = 30.0,
@@ -101,39 +94,22 @@ class AsyncChatClient(AsyncChatEvents):
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
         interaction_service: BotInteractionService | None = None,
-        transport_mode: str = "off",
         sensitive_bypass_keys_loader: Callable[[], tuple[str, ...]] | None = None,
-        proxypass_token_minter: Callable[[], Awaitable[str]] | None = None,
     ):
         """初始化客户端
 
         Args:
-            uri: transport 连接地址；off 模式为 WebSocket URI
-            headers: 请求头（如 Cookie）
-            client_id: 客户端 ID，不传则自动生成
-            client_version: 客户端版本
+            transport: 由装配层选择的传输能力；连接与鉴权由其独立持有
             verbose: 是否打印详细日志
             max_concurrent_sessions: 单连接最大并发会话数，0 表示不限
             session_key_timeout: 同一 sessionKey 并发等待超时（秒）
             max_retries: 连接断开后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
             ignore_case: sessionKey 模糊匹配是否忽略大小写
-            transport_mode: off（WS）、grey/on（HTTP 策略）三种传输模式
             sensitive_bypass_keys_loader: 敏感日志豁免片段读取函数
                 （由连接池注入，返回解析后的片段元组）
-            proxypass_token_minter: 可选的请求鉴权签发器，仅由 HTTP 策略消费
         """
-        self.uri = uri
-        # Constructor is the single transport-selection entry point.  The
-        # transport mode value is normalized into a generic
-        # transport mode and immediately delegated to the strategy factory.
-        self._transport_mode: ChatTransportMode = normalize_chat_transport_mode(
-            transport_mode,
-            parameter_name="transport_mode",
-        )
-        self.headers = headers or {}
-        self.client_id = client_id or f"client-{uuid.uuid4().hex[:8]}"
-        self.client_version = client_version
+        self._chat_transport = transport
         self.verbose = verbose
 
         self._max_concurrent_sessions = max_concurrent_sessions
@@ -151,8 +127,6 @@ class AsyncChatClient(AsyncChatEvents):
             if max_concurrent_sessions > 0
             else None
         )
-
-        self._client: Any | None = None
 
         # Condition 保护 _sessions 和 _active_sessions 的并发访问，
         # 同时用于同一 sessionKey 排队等待（wait/notify 机制）
@@ -180,27 +154,26 @@ class AsyncChatClient(AsyncChatEvents):
         # 断连事件：底层客户端断连时 set，_reconnect_loop 等待此事件
         self._disconnect_event: asyncio.Event = asyncio.Event()
 
-        # The strategy owns connection creation and reconnection, request
-        # routing, and transport-specific background ownership state.
-        self._chat_transport = build_chat_transport(
-            self, self._transport_mode, proxypass_token_minter=proxypass_token_minter
+        transport.bind_events(
+            ChatTransportCallbacks(
+                events=self._event_bridge_snapshot(),
+                on_disconnect=self._on_disconnect,
+                on_sessions_failed=self._on_transport_sessions_failed,
+            )
         )
+
+    @property
+    def uri(self) -> str:
+        """Connection endpoint for diagnostics, owned by the transport."""
+        return self._chat_transport.uri
 
     @property
     def is_connected(self) -> bool:
         """检查连接是否健康（供连接池健康检查使用）。"""
-        return self._client is not None and self._client.connected
-
-    @property
-    def transport_mode(self) -> ChatTransportMode:
-        """Transport mode selected once during construction."""
-        return self._transport_mode
+        return self._chat_transport.is_connected
 
     @property
     def transport_name(self) -> str:
-        """Actual transport of the current active connection, for diagnostics/tests."""
-        if self._client is None:
-            return "unknown"
         return self._chat_transport.transport_name
 
     @property
@@ -248,21 +221,8 @@ class AsyncChatClient(AsyncChatEvents):
         """Refresh authentication through the selected transport only."""
         self._chat_transport.refresh_outbound_auth(headers)
 
-    def _bind_client_events(self, client: Any) -> None:
-        """Bind the transport-agnostic session orchestration callbacks."""
-        for event_name, handler in self._event_bridge_snapshot().items():
-            client.on_event(event_name, handler)
-        client.on_disconnect(self._on_disconnect)
-
-    async def create_transport_client(self) -> tuple[Any, dict[str, Any]]:
-        """Create a replacement client through the selected transport strategy."""
-        return await self._chat_transport.create()
-
     async def connect(self) -> dict[str, Any]:
         """Connect through the explicitly selected transport strategy."""
-        if self._client is not None:
-            raise RuntimeError("Already connected")
-
         self._closed_intentionally = False
         self._disconnect_event.clear()
 
@@ -270,12 +230,10 @@ class AsyncChatClient(AsyncChatEvents):
             logger.info("Connecting...")
 
         try:
-            client, hello = await self.create_transport_client()
+            hello = await self._chat_transport.connect()
         except Exception as e:
             logger.error(f"Connect failed: {e}")
             raise
-
-        self._client = client
 
         if self._max_retries > 0 and self._reconnect_monitor is None:
             self._reconnect_monitor = asyncio.create_task(self._reconnect_loop())
@@ -372,13 +330,6 @@ class AsyncChatClient(AsyncChatEvents):
                     state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
-            # R7-F2/R8：归属释放不在等待侧做生命周期判定——唯一在此清理的情形是
-            # "run 从未开始"（chat_send 被引擎拒）。其余任何等待方离开方式
-            # （ACK 返回/超时/取消/流式提前关）run 都可能仍在 v3 连接上执行，
-            # 标记由终态处理（_release_terminal_ownership）、断连、
-            # close 释放。R7 按"枚举退出方式保标记"的方案在 inject 帧/
-            # CancelledError/终态先于恢复到达三个缝上全部漏判，R8 收敛于此。
-            send_failed = False
             try:
                 # 3. 检查连接状态
                 if not self.is_connected:
@@ -398,7 +349,6 @@ class AsyncChatClient(AsyncChatEvents):
                     )
                 except ChatRequestError:
                     state.chat_complete.set()
-                    send_failed = True
                     raise
 
                 if not wait_result:
@@ -430,9 +380,6 @@ class AsyncChatClient(AsyncChatEvents):
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
-                # B3（1c）/R7-F2/R8：只有 run 从未开始才在等待侧释放归属
-                if send_failed:
-                    self._chat_transport.release_failed_request(session_key)
 
         finally:
             # 8. 释放并发信号量
@@ -460,14 +407,7 @@ class AsyncChatClient(AsyncChatEvents):
             raise NotConnectedError(
                 "Not connected. Call connect() first or wait for reconnection."
             )
-        target = await self._chat_transport.abort_target(session_key=session_key)
-        return cast(
-            "dict[str, Any]",
-            await target.chat_abort(
-                session_key=session_key,
-                run_id=run_id,
-            ),
-        )
+        return await self._chat_transport.abort(session_key=session_key, run_id=run_id)
 
     async def send_message_stream(
         self,
@@ -497,11 +437,6 @@ class AsyncChatClient(AsyncChatEvents):
         if self._concurrency_sem is not None:
             await self._concurrency_sem.acquire()
 
-        # R9-F1：出口旗标先于外层 try 绑定——请求通过入口连接检查后可能
-        # 在信号量/同 session 排队期间断连，恢复执行到内层连接复查时抛
-        # NotConnectedError，finally 必须读得到已初始化的旗标，否则
-        # UnboundLocalError 会吞掉真实断连原因。
-        stream_send_failed = False
         try:
             async with self._condition:
                 while session_key in self._active_sessions:
@@ -552,7 +487,6 @@ class AsyncChatClient(AsyncChatEvents):
                     )
                 except ChatRequestError as e:
                     state.chat_complete.set()
-                    stream_send_failed = True
                     yield StreamChunk(
                         type="error",
                         content=f"chat.send failed: {e.error_code} - {e.error_message}",
@@ -568,9 +502,6 @@ class AsyncChatClient(AsyncChatEvents):
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
-                # B3（1c）/R7-F2/R8：只有 run 从未开始才在等待侧释放归属
-                if stream_send_failed:
-                    self._chat_transport.release_failed_request(session_key)
 
         finally:
             if self._concurrency_sem is not None:
@@ -614,13 +545,7 @@ class AsyncChatClient(AsyncChatEvents):
         try:
             # 发送消息（不等待响应）
             logger.info("[inject] Injecting message: session_key=%s", session_key)
-            # Request routing is owned by the selected transport strategy.
-            target = await self._chat_transport.send_target(
-                session_key=session_key,
-                attachments=attachments,
-                request_kind="inject",
-            )
-            inject_result = await target.chat_inject(
+            inject_result = await self._chat_transport.inject(
                 session_key=session_key,
                 message=message,
                 auth_token=auth_token,
@@ -679,9 +604,6 @@ class AsyncChatClient(AsyncChatEvents):
                 pass
             self._reconnect_monitor = None
 
-        if self._client:
-            await self._client.close()
-            self._client = None
         await self._chat_transport.close()
 
         interaction_tasks = list(self._interaction_tasks.values())
@@ -746,30 +668,19 @@ class AsyncChatClient(AsyncChatEvents):
     ) -> dict[str, Any]:
         """统一封装 chat_send 调用：打印 result + 判断 ok + 构造异常。
 
-        WS client 只返回原始 result dict（纯数据边界）。本方法是**唯一的**
-        ok 判断点、日志点和异常构造点：
+        Transport 返回原始 result dict，并独立处理请求拒绝的路由清理。
+        编排层统一负责调用方可见的日志与异常转换：
         1. 打印完整 ``result``（debug 级别，成功/失败都打）；
         2. ``ok=False`` 时：打 error 日志 + 从 result 构造 ``ChatRequestError`` 并抛出；
         3. ``ok=True`` 时：打 info 日志 + 返回 result。
         """
-        assert self._client is not None
         logger.info(
             "[%s] Sending: session_key=%s, timeout=%s",
             caller_label,
             session_key,
             timeout,
         )
-        # ── B3（16-5）请求级特性门：附件请求可由 transport 策略重路由到
-        # 专用 fallback 连接——不静默丢参、不硬错。fallback 懒创建一次
-        # （复用前查 connected，死连接就地失效重建）；事件 handlers 双注册
-        # （同一套编排回调）；on_disconnect 挂专用隔离处理器（R17-5/PR #2743
-        # R3-2：只终结归属 fallback 的会话，全局断连回调不误伤正常运行中
-        # 的请求）。close() 一并收口。
-        target = await self._chat_transport.send_target(
-            session_key=session_key,
-            attachments=attachments,
-        )
-        send_result = await target.chat_send(
+        send_result = await self._chat_transport.send(
             session_key=session_key,
             message=message,
             auth_token=auth_token,
@@ -786,7 +697,6 @@ class AsyncChatClient(AsyncChatEvents):
             send_result,
         )
 
-        send_result = cast("dict[str, Any]", send_result)
         if not send_result.get("ok"):
             error_payload = send_result.get("error", {})
             logger.error(
@@ -809,6 +719,15 @@ class AsyncChatClient(AsyncChatEvents):
             session_key,
         )
         return send_result
+
+    def _on_transport_sessions_failed(
+        self, session_keys: tuple[str, ...], message: str, source: str
+    ) -> None:
+        """Only the facade may transition its own conversation states."""
+        for session_key in session_keys:
+            state = self._sessions.get(session_key)
+            if state is not None and not state.chat_complete.is_set():
+                self._handle_terminal_error(state, session_key, message, source)
 
     def _on_disconnect(self, event_name: str, payload: dict[str, Any]) -> None:
         """断连回调：通知 _reconnect_loop 立即感知断连。
@@ -854,7 +773,7 @@ class AsyncChatClient(AsyncChatEvents):
         """
         while not self._closed_intentionally:
             # 等待连接断开：事件驱动，比轮询更及时
-            if self._client is not None and self._client.connected:
+            if self.is_connected:
                 # 还在线，等待断连事件或短暂检查
                 self._disconnect_event.clear()
                 # 用 wait_for 实现可中断的等待
@@ -863,7 +782,7 @@ class AsyncChatClient(AsyncChatEvents):
                 except TimeoutError:
                     pass
                 # 重新检查状态
-                if self._client is not None and self._client.connected:
+                if self.is_connected:
                     continue
                 # 断连了，继续走重连逻辑
 
@@ -889,19 +808,9 @@ class AsyncChatClient(AsyncChatEvents):
                     break
 
                 try:
-                    # 清理旧连接
-                    if self._client is not None:
-                        try:
-                            await self._client.close()
-                        except Exception:
-                            pass
-                        self._client = None
-
-                    # Reconnect through the constructor-selected strategy:
-                    # the selected transport must never be replaced by a
-                    # hard-coded WebSocket client on reconnect.
-                    new_client, _hello = await self.create_transport_client()
-                    self._client = new_client
+                    # Replace only the main transport connection. Secondary
+                    # running tasks and their ownership survive this operation.
+                    await self._chat_transport.reconnect()
                     self._disconnect_event.clear()
                     reconnected = True
                     logger.info(

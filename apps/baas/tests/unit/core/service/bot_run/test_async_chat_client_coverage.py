@@ -11,6 +11,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
     SessionState,
     _capture_trace_context,
 )
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_coverage_support import (
     _patch_decorator_test,
@@ -27,14 +28,14 @@ from ._async_chat_coverage_support import (
 class TestProperties:
     @pytest.mark.asyncio
     async def test_is_connected_false_when_no_client(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client.is_connected is False
 
     @pytest.mark.asyncio
     async def test_is_connected_true_when_client_connected(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         assert client.is_connected is True
 
@@ -42,31 +43,31 @@ class TestProperties:
     async def test_is_connected_false_when_client_disconnected(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         await client.connect()
         mock_bot_ws_instance.connected = False
         assert client.is_connected is False
 
     def test_is_reconnecting_default_false(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client.is_reconnecting is False
 
     def test_is_reconnecting_true_when_set(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._reconnecting = True
         assert client.is_reconnecting is True
 
     def test_has_active_sessions_false_default(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         assert client.has_active_sessions is False
 
     def test_has_active_sessions_true_when_active(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._active_sessions.add("s1")
         assert client.has_active_sessions is True
 
     def test_active_session_count(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._active_sessions.add("s1")
         client._active_sessions.add("s2")
         assert client.active_session_count == 2
@@ -75,7 +76,7 @@ class TestProperties:
     async def test_connect_registers_mode_transition_resolved_handler(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
 
         await client.connect()
 
@@ -129,7 +130,7 @@ class TestWithSessionTrace:
 
     @pytest.mark.asyncio
     async def test_wrapper_with_single_arg_payload(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
 
         received = {}
@@ -150,7 +151,7 @@ class TestWithSessionTrace:
 
     @pytest.mark.asyncio
     async def test_wrapper_with_two_args_event_name_payload(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
 
         # _log_event is called with (event_name, payload)
@@ -159,7 +160,7 @@ class TestWithSessionTrace:
 
     @pytest.mark.asyncio
     async def test_wrapper_empty_session_key(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
         # Empty sessionKey → no match → state=None
         client._on_chat({"sessionKey": "", "state": "final"})
@@ -175,7 +176,7 @@ class TestWithSessionTrace:
         mock_tracer.attach_context.return_value = sentinel_token
         mock_tracer.detach_context = MagicMock()
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.trace_context = sentinel_ctx
 
@@ -197,31 +198,31 @@ class TestWithSessionTrace:
 
 class TestGetSession:
     def test_exact_match(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "exact-key")
         result = client._get_session("exact-key")
         assert result is state
 
     def test_contains_match(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "short-key")
         result = client._get_session("prefix:short-key:suffix")
         assert result is state
 
     def test_no_match(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         result = client._get_session("nonexistent")
         assert result is None
 
     def test_empty_key(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         result = client._get_session("")
         assert result is None
 
 
 class TestEmitStreamChunk:
     def test_put_chunk_when_queue_exists(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = SessionState()
         state.stream_queue = asyncio.Queue()
         chunk = StreamChunk(type="delta", content="hello")
@@ -230,7 +231,7 @@ class TestEmitStreamChunk:
         assert state.stream_queue.get_nowait() is chunk
 
     def test_no_queue_no_error(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = SessionState()
         state.stream_queue = None
         # Should not raise

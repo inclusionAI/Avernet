@@ -5,6 +5,8 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from secbaas.community.bootstrap._chat_transport import build_chat_transport
+
 from ._async_chat_pool_support import (
     _FakeChatClient,
 )
@@ -22,7 +24,9 @@ class TestConstructor:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         assert pool._max_size == 100
         assert pool._max_conns_per_sandbox == 1
         assert pool._max_concurrent_per_conn == 0
@@ -36,6 +40,7 @@ class TestConstructor:
         )
 
         pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
             max_size=50,
             max_conns_per_sandbox=5,
             max_concurrent_per_conn=3,
@@ -61,7 +66,10 @@ class TestParamPassthrough:
             AsyncChatClientPool,
         )
 
+        transport = MagicMock()
+        factory = MagicMock(return_value=transport)
         pool = AsyncChatClientPool(
+            transport_factory=factory,
             max_concurrent_per_conn=5,
             session_key_timeout=15.0,
             max_retries=3,
@@ -70,16 +78,21 @@ class TestParamPassthrough:
         await pool.get("sandbox-1", "ws://host/ws")
 
         mock_cls.assert_called_once_with(
-            uri="ws://host/ws",
-            headers=None,
+            transport=transport,
             max_concurrent_sessions=5,
             session_key_timeout=15.0,
             max_retries=3,
             retry_base_backoff=2.0,
-            transport_mode="off",
             ignore_case=False,
             interaction_service=None,
             sensitive_bypass_keys_loader=ANY,
+        )
+
+        factory.assert_called_once_with(
+            uri="ws://host/ws",
+            mode="off",
+            headers=None,
+            ignore_case=False,
             proxypass_token_minter=None,
         )
 
@@ -109,6 +122,7 @@ class TestParamPassthrough:
         ]
         interaction_service = MagicMock()
         pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
             system_config_service=config_service,
             interaction_service=interaction_service,
         )
@@ -134,6 +148,7 @@ class TestParamPassthrough:
             MagicMock(conf_value="false"),
         ]
         pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
             system_config_service=config_service,
             interaction_service=MagicMock(),
         )
@@ -154,7 +169,9 @@ class TestReconnectAwareness:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         await pool.get("sandbox-1", "ws://host/ws")
 
         # 模拟连接正在重连
@@ -176,7 +193,9 @@ class TestReconnectAwareness:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
 
         # 创建一个重连中的 entry
         reconnecting_client = MagicMock()
@@ -208,7 +227,9 @@ class TestReconnectAwareness:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         await pool.get("sandbox-1", "ws://host/ws")
 
         # 模拟连接正在重连
@@ -235,7 +256,9 @@ class TestSessionRoutedGet:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         owner = MagicMock()
         owner.tracks_session = MagicMock(return_value=True)
         pool._clients["sbx-1"] = [_ConnEntry(client=owner, a2a_mode="on")]
@@ -255,7 +278,9 @@ class TestSessionRoutedGet:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         owner = MagicMock()
         owner.tracks_session = MagicMock(return_value=True)
         pool._clients["sbx-2"] = [_ConnEntry(client=owner, a2a_mode="on")]
@@ -273,7 +298,9 @@ class TestSessionRoutedGet:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         result = await pool.get(
             "sbx-3", "ws://host/ws", None, session_key="ghost-session"
         )
@@ -288,7 +315,9 @@ class TestSessionRoutedGet:
             _ConnEntry,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
         broken = MagicMock()
         broken.tracks_session = MagicMock(side_effect=RuntimeError("boom"))
         owner = MagicMock()
@@ -312,7 +341,9 @@ class TestTotalConnections:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         assert pool.total_connections == 0
 
         await pool.get("sandbox-1", "ws://host/ws")
@@ -348,7 +379,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
 
         async def get_client():
             return await pool.get("sbx-1", "ws://host/ws")
@@ -376,7 +409,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=2)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=2
+        )
 
         async def get_client():
             return await pool.get("sbx-2", "ws://host/ws")
@@ -399,7 +434,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
 
         async def get_and_mark_busy():
             client = await pool.get("sbx-busy", "ws://host/ws")
@@ -426,7 +463,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
 
         async def get_staggered():
             await asyncio.sleep(random.uniform(0, 0.02))
@@ -450,7 +489,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=3)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=3
+        )
 
         async def get_client():
             return await pool.get("sbx-3", "ws://host/ws")
@@ -474,7 +515,9 @@ class TestHighConcurrency:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool(max_conns_per_sandbox=1)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, max_conns_per_sandbox=1
+        )
 
         async def get_a():
             return await pool.get("sbx-A", "ws://host/ws")

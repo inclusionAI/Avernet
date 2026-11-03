@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from secbaas.community.bootstrap._chat_transport import build_chat_transport
+
 from ._async_chat_pool_support import (
     _FakeChatClient,
     _mode_flip_config_service,
@@ -46,6 +48,7 @@ class TestModeFlipReuseValidation:
 
         holder = {"value": "off"}
         pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
             max_conns_per_sandbox=1,
             system_config_service=_mode_flip_config_service(holder),
         )
@@ -82,6 +85,7 @@ class TestModeFlipReuseValidation:
 
         holder = {"value": "off"}
         pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
             max_conns_per_sandbox=1,
             system_config_service=_mode_flip_config_service(holder),
         )
@@ -117,7 +121,9 @@ class TestModeFlipReuseValidation:
         holder = {"value": "off"}
         service = _mode_flip_config_service(holder)
         pool = AsyncChatClientPool(
-            max_conns_per_sandbox=1, system_config_service=service
+            transport_factory=build_chat_transport,
+            max_conns_per_sandbox=1,
+            system_config_service=service,
         )
 
         c1 = await pool.get("sbx-stable", "ws://host/ws")
@@ -173,10 +179,15 @@ class TestReadA2aModeFailure:
 
         config_service = MagicMock()
         config_service.get_config.side_effect = fake_get_config
-        pool = AsyncChatClientPool(system_config_service=config_service)
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport, system_config_service=config_service
+        )
         await pool.get("sbx-cfg-down", "ws://host/ws")
 
-        assert mock_cls.call_args.kwargs["transport_mode"] == "off"
+        assert (
+            mock_cls.call_args.kwargs["transport"].__class__.__name__
+            == "WebSocketChatTransport"
+        )
         await pool.close_all()
 
 
@@ -186,7 +197,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         assert pool._load_sensitive_bypass_keys(None) == ()
 
     def test_parses_comma_and_newline(self):
@@ -194,7 +207,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.return_value = MagicMock(conf_value="abc, def\nghi,,")
         assert pool._load_sensitive_bypass_keys(service) == (
@@ -209,7 +224,9 @@ class TestLoadSensitiveBypassKeys:
         )
         from secbaas.community.core.service.config import SystemConfigKey
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.return_value = None
         pool._load_sensitive_bypass_keys(service)
@@ -222,7 +239,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.return_value = MagicMock(conf_value="abc")
         pool._load_sensitive_bypass_keys(service)
@@ -234,7 +253,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.return_value = None
         pool._load_sensitive_bypass_keys(service)
@@ -246,7 +267,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.return_value = MagicMock(conf_value="abc")
         assert pool._load_sensitive_bypass_keys(service) == ("abc",)
@@ -260,7 +283,9 @@ class TestLoadSensitiveBypassKeys:
             AsyncChatClientPool,
         )
 
-        pool = AsyncChatClientPool()
+        pool = AsyncChatClientPool(
+            transport_factory=build_chat_transport,
+        )
         service = MagicMock()
         service.get_config.side_effect = RuntimeError("db down")
         assert pool._load_sensitive_bypass_keys(service) == ()

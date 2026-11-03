@@ -4,10 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-    SessionState,
-)
+from secbaas.community.core.service.bot_run._async_chat_client import SessionState
+from tests.utils.chat_transport import make_chat_client
 
 _TEST_SESSION_KEY = "test-session-key"
 
@@ -40,10 +38,10 @@ def mock_bot_ws_instance(mock_bot_ws):
 @pytest.fixture
 async def connected_client(mock_bot_ws, mock_bot_ws_instance):
     """A client that has already connected."""
-    client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+    client = make_chat_client(uri="ws://host/ws", max_retries=0)
     await client.connect()
     yield client
-    if client._client is not None:
+    if client._chat_transport._client is not None:
         await client.close()
 
 

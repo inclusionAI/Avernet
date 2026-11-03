@@ -16,6 +16,7 @@ from a2a_test_support_engines import (
 )
 
 from secbaas.community.api.bot_interaction._models import InteractionResolution
+from tests.utils.chat_transport import make_chat_client
 
 
 def test_terminal_error_reaches_consumer_on_wire_error_frame():
@@ -106,22 +107,19 @@ def test_proxypass_route_prefix_survives_to_card_and_rpc():
     try:
 
         async def scenario():
-            from secbaas.community.core.service.bot_run._async_chat_client import (
-                AsyncChatClient,
-            )
 
-            acc = AsyncChatClient(
+            acc = make_chat_client(
                 uri=f"ws://127.0.0.1:{srv.port}{prefix}/api/openclaw/ws",
                 transport_mode="on",
                 max_retries=0,
             )
-            assert acc.transport_mode == "on"
+            assert acc._chat_transport.mode == "on"
             hello = await acc.connect()
             assert acc.transport_name == "a2a", (
                 f"probing must hit prefixed card: hello={hello}"
             )
             content, _events = await acc.send_message(session_key="s", message="hi")
-            base_url = acc._client.base_url
+            base_url = acc._chat_transport._client.base_url
             await acc.close()
             return base_url
 

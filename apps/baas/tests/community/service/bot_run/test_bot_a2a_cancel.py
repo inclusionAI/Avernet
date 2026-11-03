@@ -15,6 +15,8 @@ from a2a_test_support_cancel import (
     make_cancel_app,
 )
 
+from tests.utils.chat_transport import make_chat_client
+
 
 def test_chat_abort_forwards_cancel_task_to_engine():
     """真转发：wire 上的 taskId = 引擎侧 run id（流上捕获，1c 前 BaaS 只见
@@ -303,9 +305,6 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
     """编排层归属路由：B3 附件 reroute 的 session 的 abort 随 run 走 v3
     专用连接；A2A 正常 session 走 A2A 客户端；off/v3 模式永远 self._client
     （原路径不动，路由表不干扰）。"""
-    from secbaas.community.core.service.bot_run._async_chat_client import (
-        AsyncChatClient,
-    )
 
     calls: list[tuple] = []
 
@@ -320,16 +319,16 @@ def test_abort_routes_with_the_run_b3_and_off_modes():
             return {"ok": True}
 
     async def scenario():
-        acc = AsyncChatClient(uri="ws://unused", transport_mode="grey")
+        acc = make_chat_client(uri="ws://unused", transport_mode="grey")
         acc._chat_transport._current_name = "a2a"
-        acc._client = _FakeTransport("a2a")
+        acc._chat_transport._client = _FakeTransport("a2a")
         acc._chat_transport.fallback_client = _FakeTransport("v3")
         acc._chat_transport.routed_sessions["s-att"] = "v3"
         await acc.chat_abort("s-att", "r1")  # B3 reroute 过的 run
         await acc.chat_abort("s-normal")  # A2A 正常 session
 
-        acc2 = AsyncChatClient(uri="ws://unused")
-        acc2._client = _FakeTransport("v3-ws")
+        acc2 = make_chat_client(uri="ws://unused")
+        acc2._chat_transport._client = _FakeTransport("v3-ws")
         assert not hasattr(acc2._chat_transport, "routed_sessions")
         await acc2.chat_abort("s-att")
 

@@ -51,7 +51,7 @@ class _FakeChatClient:
         self._active = 0
         self._connected = False
         self.is_reconnecting = False
-        self.transport_mode = kwargs.get("transport_mode", "off")
+        self.transport_mode = getattr(kwargs["transport"], "mode", "off")
 
     @property
     def is_connected(self):

@@ -1,98 +1,146 @@
 # Async chat transport isolation
 
-This is an internal refactor of the existing chat client, not a new Service API
-or Plugin API. The engine wire protocols, system config `a2a_mode`, pool reuse
-rules and interaction persistence contracts remain unchanged. The pool maps
-that config to the facade's construction-only `transport_mode` argument.
-Existing callers of the private constructor must use `transport_mode` rather
-than `a2a_mode`; the exported pool API is unchanged.
+This is an internal capability contract (consumer → transport), not a new
+external Service API or registered Plugin API. Engine wire protocols, system
+config `a2a_mode`, pool request methods, reuse rules and interaction persistence
+are unchanged. See [ADR-0016](adr/0016-chat-transport-state-ownership.md).
 
 ## Responsibilities and dependency direction
 
-All source paths below are relative to
-`src/secbaas/community/core/service/bot_run/`.
+Source paths in the table are relative to
+`src/secbaas/community/core/service/bot_run/`, except bootstrap.
 
 | File | Owns | Must not own |
 | --- | --- | --- |
-| `_async_chat_client.py` | Session registration, concurrency/queueing, send/stream orchestration, reconnection loop | Concrete client construction, capability probing, fallback tables, HTTP token refresh policy |
-| `_async_chat_events.py` | Transport-neutral callbacks, stream translation, trace restoration, interaction polling/persistence | Concrete transport dependencies or transport-specific routing/authentication |
-| `_async_chat_client_transport.py` | Internal strategy contract, mode validation and lazy selection | Wire implementation or shared A2A fallback state |
-| `_async_chat_client_ws.py` | WS construction and unchanged WS request/interaction signature | A2A imports, probing, fallback ownership or HTTP token minting |
-| `_async_chat_client_a2a.py` | A2A probing, grey selection, attachment fallback ownership, A2A interaction auth/session arguments | Changes to the WS wire protocol |
+| `_async_chat_client.py` | Sessions, concurrency/queueing, send/stream orchestration, retry/backoff policy | Wire clients, concrete selection, fallback tables or auth policy |
+| `_async_chat_events.py` | Event handling, stream translation, trace restoration, interaction polling/persistence | Concrete transports, fallback release or protocol routing |
+| `_async_chat_client_transport.py` | `ChatTransport`, callbacks, factory signature and mode validation | Implementations, selection or mutable session state |
+| `_async_chat_transport_base.py` | Main connection lifecycle, callback registration, operation forwarding, credential snapshot | Conversation state, retry/backoff or A2A policy |
+| `_async_chat_client_ws.py` | WS construction and unchanged WS signatures | A2A imports, probing, fallback or HTTP token minting |
+| `_async_chat_client_a2a.py` | A2A probing, grey fallback, secondary WS lifecycle, run ownership, HTTP interaction auth/routing | Facade references or access to its state/helpers |
+| `bootstrap/_chat_transport.py`, `bootstrap/_core_services.py` | Concrete selection, lazy imports and pool factory injection | Conversation policy |
 | `_bot_websocket_client.py` / `_bot_a2a_client.py` | Their respective wire protocols | Facade session/concurrency policy |
-| `_chat_errors.py` | Shared request-rejection exception | Either wire implementation |
+| `_chat_errors.py` | Shared rejection/disconnection exceptions | Either wire implementation |
 
 ```text
-AsyncChatClient + AsyncChatEvents
-              |
-       transport contract/factory
-          /             \
-         WS             A2A
-          ^              |
-          +--------------+
-          explicit compatibility fallback only
+bootstrap ── injects factory ──> AsyncChatClientPool
+    │                                  │ injects selected ChatTransport
+    └── selects WS / A2A         AsyncChatClient + AsyncChatEvents
+                                       │ operations
+                                  ChatTransport
+                                   /       \
+                                  WS       A2A
+                                   ^        │
+                                   └────────┘ explicit compatibility fallback
 ```
 
-`off` lazily selects WS without importing either A2A module. A2A may call the
-WS constructor for its deliberate compatibility fallback; WS cannot depend on
-A2A. Shared orchestration must not inspect a low-level client's private handler
-registry or the A2A strategy's ownership state. `ChatRequestError` remains
-importable from `_bot_websocket_client` and the package for existing consumers.
+There is no `owner` constructor argument, reverse bootstrap import or raw-client
+`*_target()` API. The facade depends only on the contract. Implementations
+receive narrow callbacks, never the facade, `SessionState` or its mutable tables.
+A2A may use the stable WS constructor for compatibility; WS cannot depend on
+A2A. `off` must work without importing either A2A module.
+
+## Operation and callback contract
+
+- `send`, `inject` and `abort` receive the existing chat arguments and return
+  the raw engine response. The facade maps `ok=False` to `ChatRequestError` for
+  send/inject. Transport run ownership is cleared on an explicit send rejection
+  (`ok=False` or `ChatRequestError`), never on uncertain ACK timeout/cancellation.
+- `resolve_interaction` receives the session key and resolution. The transport
+  chooses the wire connection and supplies only that protocol's arguments; it
+  returns the existing `EngineInteractionResolveExchange` for facade persistence.
+  `can_resolve_interaction(session_key)` reports that session's uplink availability;
+  a main reconnect must not suppress dispatch on a healthy fallback connection.
+- `is_connected`, `transport_name`, `uri`, `has_active_sessions()` and
+  `tracks_session()` expose diagnostics and pool-relevant occupancy, not clients.
+- `refresh_outbound_auth(headers)` preserves the latest nonempty credential
+  snapshot for the next handshake. Only an active A2A leg additionally refreshes
+  per-request HTTP auth. The transport copies the caller's header dictionary.
+- `bind_events(ChatTransportCallbacks(...))` is required before connecting and
+  snapshots the event registry. Rebinding a live main connection fails clearly.
+  `events` maps the existing event names to handlers; callbacks retain their
+  existing payload/dispatch signature, including wildcard event logging.
+- `on_disconnect(event, payload)` notifies a current main connection failure;
+  the facade terminates unfinished waiters and signals its retry monitor.
+- `on_sessions_failed(keys, message, source)` reports failure of exactly the
+  supplied registered keys. The facade alone changes its unfinished states;
+  completed/unknown sessions and unrelated waiters are untouched. A fallback
+  failure does not trigger main reconnect.
 
 ## Lifecycle and routing invariants
 
-- Strategies bind the facade's declarative event bridge **before** awaiting a
-  primary or fallback handshake. Reconnect uses the same selected strategy and
-  the same ordering. Frames arriving during `connect()` must not be dropped.
-- `off` uses WS; `grey` probes A2A and falls back to WS on
-  `A2aUnavailableError`; `on` propagates that error. This branch also keeps its
-  explicit fail-fast behavior for `on` when no HTTP base can be derived from
-  the endpoint (unlike dev's legacy WS fallback for non-WS input). No URL or
-  config migration is needed for valid WS endpoints.
-- Only the A2A strategy owns the secondary attachment WS connection, its lock,
-  frame source marker, and per-session run ownership. Ownership survives a
-  grey reconnect selecting a WS main connection until the original fallback
-  run ends. Send/abort/interaction routing follows that ownership.
-- Fallback ownership is released only by the owning connection's real terminal
-  frames, not inject terminals or primary A2A frames. Exact session matches
-  take precedence over substring matching; matching otherwise retains the
-  existing case/contains rules. Disconnect terminates only fallback-owned runs.
-- Pool auth refresh preserves the latest nonempty handshake credential for
-  either transport's next connection. Only an active A2A client additionally
-  updates its per-request auth. Background A2A interaction dispatch re-mints
-  through the injected factory; failure logs and uses the last-known token.
-  WS main/fallback dispatch never mints, refreshes HTTP auth, or receives the
-  A2A-only `session_key` resolve argument.
-- Latest dev's A2A SSE keepalive, raw upstream error reporting and request auth
-  implementation stay in `_bot_a2a_client.py`, unchanged by this refactor.
+- Event/disconnect handlers are registered **before** any main/fallback
+  handshake. Failed or cancelled handshakes dispose of their candidates.
+- `connect()` establishes the main connection and returns server information.
+  `reconnect()` replaces only main, retaining callbacks and secondary runs.
+  `close()` disposes of all connections and transport ownership. Intentional
+  disposal does not emit a main-disconnect or scoped-failure callback.
+- `off` uses WS; `grey` probes A2A and selects WS on `A2aUnavailableError`;
+  `on` propagates it. This branch retains fail-fast behavior for `on` if no HTTP
+  base can be derived (dev's legacy implementation fell back for non-WS input).
+  Valid WS endpoints need no URL/config migration.
+- A2A alone owns the attachment fallback connection, lock and per-session
+  ownership. Existing fallback runs remain routable for abort/interaction even
+  if grey main reconnect selects WS. Full close also attempts fallback cleanup
+  if closing main fails.
+- Real terminal frames from the **current fallback** release ownership before
+  forwarding to the facade, including when no waiter exists. Inject terminals,
+  primary events and retired fallback frames cannot release it. Exact keys take
+  priority over the existing contains/optional case-insensitive matching.
+- ACK return, waiter timeout/cancellation and early stream close do not imply
+  engine termination; fallback ownership survives them. Fallback disconnect
+  clears its ownership and reports only those keys as an unknown run outcome.
+- Background A2A interaction dispatch re-mints using its injected token minter;
+  mint failure logs and uses the last-known token. WS main/fallback never mints,
+  refreshes HTTP auth or receives A2A's extra `session_key` resolve argument.
+- Dev's SSE keepalive, upstream error and request auth implementations stay in
+  `_bot_a2a_client.py`, unchanged by this refactor, as is the WS wire client.
+
+## Internal constructor migration
+
+Constructors are explicit: the pool requires `transport_factory`; the facade
+requires an already selected `transport`. No implicit fallback imports bootstrap
+from core. Production bootstrap injects `build_chat_transport` as a callable
+(`providers.Object`), not a prebuilt connection:
+
+```python
+# Assembly layer only; normal consumers continue using pool.get(...).
+pool = AsyncChatClientPool(transport_factory=build_chat_transport)
+transport = build_chat_transport(uri=uri, mode="off", headers=headers)
+client = AsyncChatClient(transport=transport, max_retries=1)
+```
+
+The pool's existing per-call token minter is passed to new transports; reuse
+refreshes credentials without replacing the original minter context. Direct
+internal/enterprise constructor users must adopt injection; pool `get(...)`
+callers and wire/API/config consumers need no migration.
 
 ## Validation and change impact
 
-Changing the strategy contract affects both implementations and the facade.
-Changing A2A probing, HTTP auth or attachment ownership should touch only A2A
-implementation/tests; WS wire changes should touch only WS implementation/tests.
-Shared callback changes require both regression suites. This seam is not a
-replacement for the existing BaaS SPI/plugin architecture (ADRs 0001/0003/0015).
+A2A auth/probing/ownership changes should touch only its implementation/tests;
+WS wire changes should touch only WS implementation/tests. Contract or shared
+callback changes require both regressions. This seam does not replace the
+BaaS SPI/plugin architecture (ADRs 0001/0003/0015); legacy wire paths are retained
+rather than mixing a package relocation into this refactor.
 
-The tests have been split by lifecycle, callbacks, streaming, interactions,
-authentication and A2A fallback ownership so transport-only work need not edit
-the previous multi-thousand-line shared test files. Existing cases are retained.
+Tests prove both sides independently: `test_async_chat_facade_contract.py`
+exercises the facade with a strict fake capability; transport isolation tests
+bind callbacks with no facade. Lifecycle/ownership regressions cover handshake
+ordering, cancellation, scoped failures, reconnect vs close and auth isolation.
+AST boundaries prevent owner access, raw targets, concrete facade dependencies
+and selection outside bootstrap. A fresh-interpreter check enforces WS without
+A2A imports or HTTP minting.
 
 From `apps/baas/`:
 
 ```bash
-# Shared orchestration, both strategies, WS wire behavior and isolation contracts
-.venv/bin/pytest -q tests/unit/core/service/bot_run/test_async_chat*.py \
-  tests/unit/core/service/bot_run/test_bot_websocket_client.py
-
-# Real TCP A2A streaming, errors, IAM, cancellation, HITL and fallback conformance
-.venv/bin/pytest -q tests/community/service/bot_run/test_bot_a2a*.py \
-  tests/community/service/bot_run/test_async_chat_a2a_integration.py
-
-# Includes import/policy boundaries and a clean-interpreter WS-without-A2A check
-.venv/bin/pytest -q tests/architecture
+.venv/bin/pytest -q tests/unit/core/service/bot_run \
+  tests/community/service/bot_run/test_bot_a2a*.py \
+  tests/community/service/bot_run/test_async_chat_a2a_integration.py \
+  tests/architecture
 ```
 
-The TCP suite needs permission to bind local loopback ports; replacing it with
-buffered ASGI transport would not verify streaming timing. The isolation check
-must use a fresh interpreter so pre-imported A2A modules cannot hide a regression.
+The community suite uses real loopback TCP for streaming, errors, cancellation
+and HITL; it needs permission to bind local ports. Buffered ASGI transport is
+not an equivalent streaming-timing test. Unit/architecture suites require no
+external services. The full Singlebox product gate remains a separate check.

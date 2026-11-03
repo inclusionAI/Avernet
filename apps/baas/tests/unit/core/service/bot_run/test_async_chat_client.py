@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+from tests.utils.chat_transport import make_chat_client
+
 from ._async_chat_test_support import (
     _setup_session_state,
 )
@@ -17,58 +19,43 @@ from ._async_chat_test_support import (
 
 class TestInit:
     def test_defaults_auto_generates_client_id(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://localhost/ws")
+        client = make_chat_client(uri="ws://localhost/ws")
         assert client.uri == "ws://localhost/ws"
-        assert client.client_id.startswith("client-")
-        assert len(client.client_id) == len("client-") + 8
-        assert client.client_version == "1.0.0"
-        assert client.headers == {}
+        assert client._chat_transport.client_id.startswith("client-")
+        assert len(client._chat_transport.client_id) == len("client-") + 8
+        assert client._chat_transport.client_version == "1.0.0"
+        assert client._chat_transport.headers == {}
         assert client.verbose is False
 
     def test_custom_params(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="wss://host/ws",
             client_id="my-custom-id",
             client_version="2.0.0",
             verbose=True,
         )
         assert client.uri == "wss://host/ws"
-        assert client.client_id == "my-custom-id"
-        assert client.client_version == "2.0.0"
+        assert client._chat_transport.client_id == "my-custom-id"
+        assert client._chat_transport.client_version == "2.0.0"
         assert client.verbose is True
 
     def test_header_passthrough(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         headers = {"Cookie": "session=abc123", "X-Custom": "val"}
-        client = AsyncChatClient(uri="ws://host/ws", headers=headers)
-        assert client.headers == headers
+        client = make_chat_client(uri="ws://host/ws", headers=headers)
+        assert client._chat_transport.headers == headers
 
     def test_empty_headers_defaults_to_empty_dict(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
-        assert client.headers == {}
+        client = make_chat_client(uri="ws://host/ws")
+        assert client._chat_transport.headers == {}
 
     def test_internal_state_initialized(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
-        assert client._client is None
+        client = make_chat_client(uri="ws://host/ws")
+        assert client._chat_transport._client is None
         # 纯 async 版本无 _loop 属性
         assert not hasattr(client, "_loop")
         assert isinstance(client._condition, asyncio.Condition)
@@ -79,38 +66,32 @@ class TestInit:
 class TestConnect:
     @pytest.mark.asyncio
     async def test_connect_success(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "myserver"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         result = await client.connect()
 
         mock_bot_ws.assert_called_once_with(
             uri="ws://host/ws",
-            client_id=client.client_id,
+            client_id=client._chat_transport.client_id,
             client_version="1.0.0",
             headers={},
         )
         mock_bot_ws_instance.on_event.assert_any_call("chat", client._on_chat)
         mock_bot_ws_instance.on_event.assert_any_call("agent", client._on_agent)
         assert result["server"]["host"] == "myserver"
-        assert client._client is mock_bot_ws_instance
+        assert client._chat_transport._client is mock_bot_ws_instance
 
     @pytest.mark.asyncio
     async def test_connect_error_propagation(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.side_effect = RuntimeError("Connection refused")
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         with pytest.raises(RuntimeError, match="Connection refused"):
             await client.connect()
 
@@ -118,16 +99,13 @@ class TestConnect:
     async def test_connect_already_connected_raises(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         with pytest.raises(RuntimeError, match="Already connected"):
@@ -138,16 +116,13 @@ class TestConnect:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """Verify connect() directly awaits BotWebSocketClient.connect."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         # 直接 await，不再通过 run_in_executor
@@ -155,33 +130,27 @@ class TestConnect:
 
     @pytest.mark.asyncio
     async def test_connect_verbose_logs(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "mysrv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         await client.connect()
-        assert client._client is mock_bot_ws_instance
+        assert client._chat_transport._client is mock_bot_ws_instance
 
 
 class TestSendMessage:
     @pytest.mark.asyncio
     async def test_send_message_success(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_chat_complete(*args, **kwargs):
@@ -202,16 +171,13 @@ class TestSendMessage:
     async def test_send_message_wait_result_false(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         content, agent_payloads = await client.send_message("Hi", wait_result=False)
@@ -223,16 +189,13 @@ class TestSendMessage:
     async def test_send_message_with_auth_token(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_chat_complete(*args, **kwargs):
@@ -256,11 +219,10 @@ class TestSendMessage:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             NotConnectedError,
         )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         with pytest.raises(
             NotConnectedError,
             match="Not connected",
@@ -271,16 +233,13 @@ class TestSendMessage:
     async def test_send_message_with_session_key(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_chat_complete(*args, **kwargs):
@@ -300,16 +259,13 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_timeout(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         # Don't fire chat_complete — timeout will occur
@@ -318,16 +274,13 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_resets_state(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         sk = "reset-test-key"
@@ -355,16 +308,13 @@ class TestSendMessage:
 class TestClose:
     @pytest.mark.asyncio
     async def test_close_normal(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         client._sessions["s1"] = _setup_session_state(client, "s1")
@@ -372,17 +322,14 @@ class TestClose:
 
         await client.close()
         mock_bot_ws_instance.close.assert_called_once()
-        assert client._client is None
+        assert client._chat_transport._client is None
         assert client._sessions == {}
         assert client._active_sessions == set()
 
     @pytest.mark.asyncio
     async def test_close_when_not_connected(self, mock_bot_ws, mock_bot_ws_instance):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.close()
         mock_bot_ws_instance.close.assert_not_called()
 
@@ -391,16 +338,13 @@ class TestClose:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """close() directly awaits BotWebSocketClient.close(), no executor."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
         await client.close()
         mock_bot_ws_instance.close.assert_called_once()

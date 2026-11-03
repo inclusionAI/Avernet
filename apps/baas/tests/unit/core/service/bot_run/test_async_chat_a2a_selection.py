@@ -8,9 +8,7 @@ import pytest
 from secbaas.community.api.bot_interaction import (
     InteractionResolution,
 )
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-)
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_coverage_support import (
     mock_bot_ws as mock_bot_ws,
@@ -102,7 +100,7 @@ class TestInteractionAnswerTransportAttribution:
     async def test_rerouted_session_answer_goes_to_v3_fallback(self, mock_bot_ws):
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
-        acc = AsyncChatClient(
+        acc = make_chat_client(
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
@@ -113,7 +111,7 @@ class TestInteractionAnswerTransportAttribution:
         a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         v3_client = MagicMock(name="v3")
         v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
-        acc._client = a2a_client
+        acc._chat_transport._client = a2a_client
         acc._chat_transport.fallback_client = v3_client
         acc._chat_transport.routed_sessions["sk1"] = "v3"  # B3 归属：附件 reroute 过
 
@@ -132,7 +130,7 @@ class TestInteractionAnswerTransportAttribution:
     ):
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
-        acc = AsyncChatClient(
+        acc = make_chat_client(
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
@@ -143,7 +141,7 @@ class TestInteractionAnswerTransportAttribution:
         a2a_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
         v3_client = MagicMock(name="v3")
         v3_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
-        acc._client = a2a_client
+        acc._chat_transport._client = a2a_client
         acc._chat_transport.fallback_client = v3_client
 
         await acc._dispatch_interaction_answer(
@@ -159,14 +157,14 @@ class TestInteractionAnswerTransportAttribution:
     async def test_rerouted_session_without_fallback_marks_failed(self, mock_bot_ws):
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
-        acc = AsyncChatClient(
+        acc = make_chat_client(
             uri="ws://host/ws",
             max_retries=0,
             interaction_service=service,
             transport_mode="grey",
         )
         acc._chat_transport._current_name = "a2a"
-        acc._client = MagicMock(name="a2a")
+        acc._chat_transport._client = MagicMock(name="a2a")
         acc._chat_transport.routed_sessions["sk1"] = "v3"
         acc._chat_transport.fallback_client = None  # fallback 已收口
 
@@ -183,12 +181,12 @@ class TestInteractionAnswerTransportAttribution:
         test_interaction_dispatch_uses_typed_claim_command 的精确钉）。"""
         resolution = InteractionResolution(kind="exec", decision="allow-once")
         service = _claim_service_for(resolution)
-        acc = AsyncChatClient(
+        acc = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         engine_client = MagicMock()
         engine_client.interaction_resolve = AsyncMock(return_value=_make_exchange())
-        acc._client = engine_client  # off 模式 v3-ws
+        acc._chat_transport._client = engine_client  # off 模式 v3-ws
         assert not hasattr(acc._chat_transport, "routed_sessions")
 
         await acc._dispatch_interaction_answer(
@@ -207,21 +205,15 @@ class TestInteractionAnswerTransportAttribution:
 class TestA2aModeValidation:
     def test_invalid_a2a_mode_is_rejected_at_construct(self, mock_bot_ws):
         """非法灰度模式在构造期即拒——不落到中途探测时才炸。"""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient as _ACC,
-        )
 
         with pytest.raises(ValueError, match="invalid transport_mode"):
-            _ACC(uri="ws://host/ws", transport_mode="bogus")
+            make_chat_client(uri="ws://host/ws", transport_mode="bogus")
 
     @pytest.mark.parametrize("mode", ["off", "grey", "on"])
     def test_valid_modes_are_accepted(self, mode, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient as _ACC,
-        )
 
-        client = _ACC(uri="ws://host/ws", transport_mode=mode)
-        assert client.transport_mode == mode
+        client = make_chat_client(uri="ws://host/ws", transport_mode=mode)
+        assert getattr(client._chat_transport, "mode", "off") == mode
 
     def test_constructor_selects_transport_strategy_once(self, mock_bot_ws):
         """off 默认只选 WS；grey/on 只选 A2A，构造后不允许混走另一实现。"""
@@ -232,18 +224,18 @@ class TestA2aModeValidation:
             WebSocketChatTransport,
         )
 
-        default_client = AsyncChatClient(uri="ws://host/ws")
+        default_client = make_chat_client(uri="ws://host/ws")
         assert isinstance(default_client._chat_transport, WebSocketChatTransport)
         assert not hasattr(default_client._chat_transport, "fallback_client")
         assert not hasattr(default_client._chat_transport, "routed_sessions")
 
         for mode in ("off", "grey", "on"):
-            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
+            client = make_chat_client(uri="ws://host/ws", transport_mode=mode)
             assert client.transport_name == "unknown"
             assert not hasattr(client, "_transport")
 
         for mode in ("grey", "on"):
-            client = AsyncChatClient(uri="ws://host/ws", transport_mode=mode)
+            client = make_chat_client(uri="ws://host/ws", transport_mode=mode)
             assert isinstance(client._chat_transport, A2aChatTransport)
             assert client._chat_transport.mode == mode
 
@@ -273,14 +265,14 @@ class TestA2aModeValidation:
                 ws_cls,
             ),
         ):
-            client = AsyncChatClient(
+            client = make_chat_client(
                 uri="ws://host/api/openclaw/ws",
                 transport_mode="on",
                 max_retries=1,
                 retry_base_backoff=0,
             )
             await client.connect()
-            old_client = client._client
+            old_client = client._chat_transport._client
 
             old_client.connected = False
             client._notify_disconnect()
@@ -288,7 +280,7 @@ class TestA2aModeValidation:
 
             assert a2a_cls.call_count == 2
             assert ws_cls.call_count == 0
-            assert client._client is not old_client
+            assert client._chat_transport._client is not old_client
             assert client._chat_transport.transport_name == "a2a"
             await client.close()
 
@@ -299,7 +291,7 @@ class TestA2aModeValidation:
             A2aUnavailableError,
         )
 
-        client = AsyncChatClient(uri="ws://host/not-openclaw", transport_mode="on")
+        client = make_chat_client(uri="ws://host/not-openclaw", transport_mode="on")
         # A non-openclaw/custom path is still convertible to a host base, so
         # force the strategy boundary directly to cover the no-base contract.
         with patch(
@@ -328,14 +320,14 @@ class TestA2aGreyReconnectFallbackOwnership:
                 return {"ok": True, "endpoint": self.name}
 
         minter = AsyncMock(side_effect=AssertionError("reconnected WS minted A2A auth"))
-        acc = AsyncChatClient(
+        acc = make_chat_client(
             uri="ws://host/api/openclaw/ws",
             transport_mode="grey",
             proxypass_token_minter=minter,
         )
         fallback = _FakeEndpoint("fallback")
         new_main = _FakeEndpoint("new-main-ws")
-        acc._client = new_main
+        acc._chat_transport._client = new_main
         acc._chat_transport._current_name = "v3-ws"
         acc._chat_transport.fallback_client = fallback
         acc._chat_transport.routed_sessions["s-att"] = "v3"
@@ -345,18 +337,22 @@ class TestA2aGreyReconnectFallbackOwnership:
             "ok": True,
             "endpoint": "fallback",
         }
-        client, extra = await acc._chat_transport.interaction_target(
-            session_key="s-att"
+        resolution = InteractionResolution(kind="exec", decision="allow-once")
+        fallback.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        new_main.interaction_resolve = AsyncMock(return_value=_make_exchange())
+        await acc._chat_transport.resolve_interaction(
+            session_key="s-att", interaction_id="i1", resolution=resolution
         )
-        assert client is fallback
-        assert extra == {}
-
+        fallback.interaction_resolve.assert_awaited_once_with(
+            interaction_id="i1", resolution=resolution
+        )
         # 未登记归属的 normal run 仍走重连后的 WS main，不带 A2A session key。
-        client, extra = await acc._chat_transport.interaction_target(
-            session_key="s-normal"
+        await acc._chat_transport.resolve_interaction(
+            session_key="s-normal", interaction_id="i2", resolution=resolution
         )
-        assert client is new_main
-        assert extra == {}
+        new_main.interaction_resolve.assert_awaited_once_with(
+            interaction_id="i2", resolution=resolution
+        )
         minter.assert_not_awaited()
 
 

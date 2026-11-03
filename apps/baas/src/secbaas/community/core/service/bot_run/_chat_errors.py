@@ -24,3 +24,7 @@ class ChatRequestError(Exception):
         self.error_code = error_code
         self.error_message = error_message
         self.retryable = retryable
+
+
+class NotConnectedError(Exception):
+    """No usable transport connection is available for the operation."""

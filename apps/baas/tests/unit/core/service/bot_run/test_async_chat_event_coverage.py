@@ -5,9 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-)
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_coverage_support import (
     _setup_session_state,
@@ -20,7 +18,7 @@ from ._async_chat_coverage_support import (
 class TestOnChatAdditional:
     @pytest.mark.asyncio
     async def test_on_chat_final_with_stop_reason_inject(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -39,7 +37,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_delta_with_delta_text(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -59,7 +57,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_delta_with_delta_field(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -77,7 +75,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_delta_no_delta_text(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -94,7 +92,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_no_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         # No session registered for this key
         client._on_chat(
             {
@@ -107,7 +105,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_verbose_delta(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         client._on_chat(
             {
@@ -120,7 +118,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_verbose_final(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         client._on_chat(
             {
@@ -133,7 +131,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_verbose_error(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         client._on_chat(
             {
@@ -147,7 +145,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_verbose_ignored_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         client._on_chat(
             {
@@ -160,7 +158,7 @@ class TestOnChatAdditional:
 
     @pytest.mark.asyncio
     async def test_on_chat_final_emits_stream_chunk(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -180,7 +178,7 @@ class TestOnChatAdditional:
     async def test_on_chat_picks_first_text_content(self, mock_bot_ws):
         """When contents has multiple elements, _on_chat uses the first
         one whose ``text`` field is not None (loop breaks on first hit)."""
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -205,7 +203,7 @@ class TestOnChatAdditional:
     async def test_on_chat_skips_content_without_text(self, mock_bot_ws):
         """Content elements without a ``text`` field are skipped; the
         first element with ``text`` is used."""
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -228,7 +226,7 @@ class TestOnChatAdditional:
     @pytest.mark.asyncio
     async def test_on_chat_empty_contents_yields_empty_text(self, mock_bot_ws):
         """When message.content is empty or has no text field, text stays ""."""
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -248,7 +246,7 @@ class TestOnChatAdditional:
 class TestOnAgentAdditional:
     @pytest.mark.asyncio
     async def test_on_agent_error_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -267,7 +265,7 @@ class TestOnAgentAdditional:
 
     @pytest.mark.asyncio
     async def test_on_agent_error_empty_message(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
 
         client._on_agent(
@@ -281,13 +279,13 @@ class TestOnAgentAdditional:
 
     @pytest.mark.asyncio
     async def test_on_agent_no_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._on_agent({"sessionKey": "unknown", "stream": "tool", "data": {}})
         # Should not raise
 
     @pytest.mark.asyncio
     async def test_on_agent_verbose(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         client._on_agent(
             {"sessionKey": "sk1", "stream": "tool", "data": {"phase": "start"}}
@@ -296,7 +294,7 @@ class TestOnAgentAdditional:
 
     @pytest.mark.asyncio
     async def test_on_agent_emits_stream_chunk(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -309,14 +307,14 @@ class TestOnAgentAdditional:
 
     @pytest.mark.asyncio
     async def test_on_agent_tool_no_data_phase(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         client._on_agent({"sessionKey": "sk1", "stream": "tool", "data": {}})
         assert len(state.agent_payloads) == 0
 
     @pytest.mark.asyncio
     async def test_on_agent_lifecycle_non_end(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         client._on_agent(
             {"sessionKey": "sk1", "stream": "lifecycle", "data": {"phase": "start"}}
@@ -325,7 +323,7 @@ class TestOnAgentAdditional:
 
     @pytest.mark.asyncio
     async def test_on_agent_unknown_stream(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.last_stream_is_assistant = True
         client._on_agent({"sessionKey": "sk1", "stream": "unknown", "data": {}})
@@ -335,7 +333,7 @@ class TestOnAgentAdditional:
 class TestOnAgentFinal:
     @pytest.mark.asyncio
     async def test_on_agent_final_sets_complete_events(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -358,7 +356,7 @@ class TestOnAgentFinal:
 
     @pytest.mark.asyncio
     async def test_on_agent_final_empty_content(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -379,7 +377,7 @@ class TestOnAgentFinal:
 
     @pytest.mark.asyncio
     async def test_on_agent_final_verbose(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        client = make_chat_client(uri="ws://host/ws", verbose=True)
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -402,7 +400,7 @@ class TestOnAgentFinal:
 class TestOnError:
     @pytest.mark.asyncio
     async def test_on_error_with_state_and_error(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -414,13 +412,13 @@ class TestOnError:
 
     @pytest.mark.asyncio
     async def test_on_error_no_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._on_error({"sessionKey": "unknown", "state": "error"})
         # Should not raise
 
     @pytest.mark.asyncio
     async def test_on_error_non_error_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         client._on_error({"sessionKey": "sk1", "state": "info"})
         assert state.state == ""
@@ -428,7 +426,7 @@ class TestOnError:
 
     @pytest.mark.asyncio
     async def test_on_error_no_state_field(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         state = _setup_session_state(client, "sk1")
         client._on_error({"sessionKey": "sk1"})
         assert state.state == ""
@@ -440,7 +438,7 @@ class TestLogEvent:
     async def test_log_event_interaction_resolved_keeps_only_metadata(
         self, mock_bot_ws
     ):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
 
         with patch(
@@ -465,7 +463,7 @@ class TestLogEvent:
     async def test_log_event_mode_transition_resolved_keeps_only_metadata(
         self, mock_bot_ws
     ):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
 
         with patch(
@@ -493,7 +491,7 @@ class TestLogEvent:
 
     @pytest.mark.asyncio
     async def test_log_event_chat_filters_sensitive(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
         client._log_event(
             "chat", {"sessionKey": "sk1", "message": "secret", "data": "ok"}
@@ -502,27 +500,27 @@ class TestLogEvent:
 
     @pytest.mark.asyncio
     async def test_log_event_agent_filters_sensitive(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
         client._log_event("agent", {"sessionKey": "sk1", "data": "secret"})
         # Should not raise
 
     @pytest.mark.asyncio
     async def test_log_event_non_sensitive(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         _setup_session_state(client, "sk1")
         client._log_event("system", {"sessionKey": "sk1", "data": "all visible"})
         # Should not raise
 
     @pytest.mark.asyncio
     async def test_log_event_no_state(self, mock_bot_ws):
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         client._log_event("system", {"sessionKey": "unknown"})
         # Should not raise
 
     @pytest.mark.asyncio
     async def test_log_event_bypass_hits_logs_full_payload(self, mock_bot_ws):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws",
             sensitive_bypass_keys_loader=lambda: ("sk1",),
         )
@@ -541,7 +539,7 @@ class TestLogEvent:
 
     @pytest.mark.asyncio
     async def test_log_event_bypass_miss_filters_sensitive(self, mock_bot_ws):
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws",
             sensitive_bypass_keys_loader=lambda: ("other-sess",),
         )

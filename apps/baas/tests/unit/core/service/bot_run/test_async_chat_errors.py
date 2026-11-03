@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.utils.chat_transport import make_chat_client
+
 from ._async_chat_test_support import (
     mock_bot_ws as mock_bot_ws,
 )
@@ -18,9 +20,7 @@ class TestChatRequestErrorPropagation:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message propagates ChatRequestError from chat_send and sets chat_complete."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
+
         from secbaas.community.core.service.bot_run._bot_websocket_client import (
             ChatRequestError,
         )
@@ -30,7 +30,7 @@ class TestChatRequestErrorPropagation:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
@@ -50,9 +50,7 @@ class TestChatRequestErrorPropagation:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message sets chat_complete on ChatRequestError to unblock waiters."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
+
         from secbaas.community.core.service.bot_run._bot_websocket_client import (
             ChatRequestError,
         )
@@ -62,7 +60,7 @@ class TestChatRequestErrorPropagation:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         error_obj = ChatRequestError(
@@ -100,9 +98,7 @@ class TestChatRequestErrorPropagation:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message cleans up session state after ChatRequestError."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
+
         from secbaas.community.core.service.bot_run._bot_websocket_client import (
             ChatRequestError,
         )
@@ -112,7 +108,7 @@ class TestChatRequestErrorPropagation:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
@@ -139,16 +135,13 @@ class TestChatRequestErrorStream:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message_stream emits error StreamChunk when ChatRequestError is raised."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
@@ -175,7 +168,6 @@ class TestChatRequestErrorStream:
     ):
         """send_message_stream sets chat_complete when ChatRequestError is raised."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             SessionState,
         )
 
@@ -184,7 +176,7 @@ class TestChatRequestErrorStream:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         # Pre-register a session state so we can inspect it after the error
@@ -214,16 +206,13 @@ class TestChatRequestErrorStream:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message_stream cleans up session state after ChatRequestError."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
@@ -252,7 +241,6 @@ class TestBotSessionError:
     ):
         """send_message raises BotSessionError when session ends with state=error."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             BotSessionError,
         )
 
@@ -261,7 +249,7 @@ class TestBotSessionError:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_error_chat_complete(*args, **kwargs):
@@ -284,7 +272,6 @@ class TestBotSessionError:
     ):
         """引擎 chat error 事件的 errorCode/errorMessage 透传进 BotSessionError。"""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             BotSessionError,
         )
 
@@ -293,7 +280,7 @@ class TestBotSessionError:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_engine_error_event(*args, **kwargs):
@@ -326,16 +313,13 @@ class TestBotSessionError:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message returns content normally when state=final (not error)."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def fire_final_chat_complete(*args, **kwargs):
@@ -358,7 +342,6 @@ class TestBotSessionError:
     ):
         """send_message raises BotSessionError when agent event sets state=error."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             BotSessionError,
         )
 
@@ -367,7 +350,7 @@ class TestBotSessionError:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         async def simulate_agent_error(*args, **kwargs):
@@ -391,16 +374,13 @@ class TestBotSessionError:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message_stream emits error StreamChunk when ChatRequestError is raised."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
@@ -427,7 +407,6 @@ class TestBotSessionError:
     ):
         """send_message_stream sets chat_complete when ChatRequestError is raised."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
             SessionState,
         )
 
@@ -436,7 +415,7 @@ class TestBotSessionError:
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         # Pre-register a session state so we can inspect it after the error
@@ -466,16 +445,13 @@ class TestBotSessionError:
         self, mock_bot_ws, mock_bot_ws_instance
     ):
         """send_message_stream cleans up session state after ChatRequestError."""
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
         mock_bot_ws_instance.connect.return_value = {
             "server": {"host": "srv"},
             "features": {},
         }
 
-        client = AsyncChatClient(uri="ws://host/ws")
+        client = make_chat_client(uri="ws://host/ws")
         await client.connect()
 
         mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {

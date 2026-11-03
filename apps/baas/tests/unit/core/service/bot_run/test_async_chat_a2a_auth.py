@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tests.utils.chat_transport import make_chat_client
+
 from ._async_chat_test_support import (
     mock_bot_ws as mock_bot_ws,
 )
@@ -15,35 +17,26 @@ class TestRefreshOutboundAuth:
     头必须转给内部 A2A 子客户端；v3 WS/None 子客户端天然 no-op。"""
 
     def test_forwards_to_a2a_client(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://h/ws", headers={}, transport_mode="grey")
+        client = make_chat_client(uri="ws://h/ws", headers={}, transport_mode="grey")
         a2a_like = MagicMock()
         client._chat_transport._current_name = "a2a"
-        client._client = a2a_like
+        client._chat_transport._client = a2a_like
         headers = {"x-proxypass-token": "placeholder"}
         client.refresh_outbound_auth(headers)
         a2a_like.refresh_proxypass_token.assert_called_once_with(headers)
 
     def test_noop_when_client_has_no_method(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://h/ws", headers={}, transport_mode="off")
+        client = make_chat_client(uri="ws://h/ws", headers={}, transport_mode="off")
         v3_like = MagicMock(spec=["is_connected", "close", "connect"])
-        client._client = v3_like
+        client._chat_transport._client = v3_like
         client.refresh_outbound_auth({"x-proxypass-token": "x"})  # 不得炸
 
     def test_noop_when_client_is_none(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(uri="ws://h/ws", headers={}, transport_mode="grey")
-        client._client = None
+        client = make_chat_client(uri="ws://h/ws", headers={}, transport_mode="grey")
+        client._chat_transport._client = None
         client.refresh_outbound_auth({"x-proxypass-token": "x"})  # 不得炸
 
 
@@ -53,20 +46,17 @@ class TestRefreshSyncsOuterHeaders:
     过期 token（评审 P2 场景 1）。"""
 
     def test_refresh_syncs_outer_headers_snapshot(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://h/ws",
             headers={"x-proxypass-token": "mock"},
             transport_mode="grey",
         )
         a2a_like = MagicMock()
         client._chat_transport._current_name = "a2a"
-        client._client = a2a_like
+        client._chat_transport._client = a2a_like
         client.refresh_outbound_auth({"x-proxypass-token": "placeholder"})
-        assert client.headers["x-proxypass-token"] == "placeholder", (
+        assert client._chat_transport.headers["x-proxypass-token"] == "placeholder", (
             "外层快照必须同步——附件 fallback 握手依赖它"
         )
         a2a_like.refresh_proxypass_token.assert_called_once_with(
@@ -74,18 +64,15 @@ class TestRefreshSyncsOuterHeaders:
         )
 
     def test_refresh_ignores_empty_token_for_outer_snapshot(self, mock_bot_ws):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
 
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://h/ws",
             headers={"x-proxypass-token": "mock"},
             transport_mode="grey",
         )
         client.refresh_outbound_auth({"x-proxypass-token": ""})
         client.refresh_outbound_auth(None)
-        assert client.headers["x-proxypass-token"] == "mock"
+        assert client._chat_transport.headers["x-proxypass-token"] == "mock"
 
 
 class TestInteractionDispatchRemint:
@@ -95,14 +82,12 @@ class TestInteractionDispatchRemint:
 
     @staticmethod
     def _make_client(minter):
-        from secbaas.community.core.service.bot_run._async_chat_client import (
-            AsyncChatClient,
-        )
+
         from secbaas.community.core.service.bot_run._interaction_protocol import (
             EngineInteractionResolveExchange,
         )
 
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri=("wss://proxy.example/proxypass/sandbox/api/openclaw/ws"),
             headers={},
             transport_mode="grey",
@@ -119,7 +104,7 @@ class TestInteractionDispatchRemint:
                 error_message=None,
             )
         )
-        client._client = a2a
+        client._chat_transport._client = a2a
 
         svc = MagicMock()
         cmd = MagicMock()
@@ -142,7 +127,7 @@ class TestInteractionDispatchRemint:
         a2a.refresh_proxypass_token.assert_called_once_with(
             {"x-proxypass-token": "sample"}
         )
-        assert client.headers["x-proxypass-token"] == "sample"
+        assert client._chat_transport.headers["x-proxypass-token"] == "sample"
         svc.should_poll.assert_not_called(), "成功派发后 task 应终结"
         assert a2a.interaction_resolve.await_count == 1
 

@@ -8,6 +8,7 @@ import pytest
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
 )
+from tests.utils.chat_transport import make_chat_client
 
 
 class _StubV3Transport:
@@ -75,10 +76,10 @@ def stub_v3_patch():
 
 def _a2a_acc_with_stub_main_client() -> AsyncChatClient:
     """A2A 策略 + 可收口的替身主连接（close 可 await）。"""
-    acc = AsyncChatClient(uri="ws://host/ws", max_retries=0, transport_mode="grey")
-    acc._client = MagicMock()
-    acc._client.connected = True
-    acc._client.close = AsyncMock()
+    acc = make_chat_client(uri="ws://host/ws", max_retries=0, transport_mode="grey")
+    acc._chat_transport._client = MagicMock()
+    acc._chat_transport._client.connected = True
+    acc._chat_transport._client.close = AsyncMock()
     acc._chat_transport._current_name = "a2a"  # 已连接的 A2A 策略测试面
     return acc
 

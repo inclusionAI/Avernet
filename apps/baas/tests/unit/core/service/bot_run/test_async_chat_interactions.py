@@ -13,9 +13,6 @@ from secbaas.community.api.bot_interaction import (
     InteractionResolvedResult,
 )
 from secbaas.community.core.service.bot_interaction import InteractionDispatch
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-)
 from secbaas.community.core.service.bot_run._async_chat_events import (
     _public_interaction_envelope,
 )
@@ -23,6 +20,7 @@ from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionResolveExchange,
 )
 from secbaas.community.core.service.sse import DefaultStreamConverter
+from tests.utils.chat_transport import make_chat_client
 
 from ._async_chat_coverage_support import (
     _setup_session_state,
@@ -82,7 +80,7 @@ class TestInteractionEvents:
     def test_requested_is_ignored_when_interaction_processing_is_disabled(
         self, mock_bot_ws
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -96,7 +94,7 @@ class TestInteractionEvents:
     def test_resolved_is_ignored_when_interaction_processing_is_disabled(
         self, mock_bot_ws
     ):
-        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        client = make_chat_client(uri="ws://host/ws", max_retries=0)
         state = _setup_session_state(client, "sk1")
         state.stream_queue = asyncio.Queue()
 
@@ -113,7 +111,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-1",
             created=True,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -161,7 +159,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-mixed",
             created=True,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -209,7 +207,7 @@ class TestInteractionEvents:
                 created=False,
             ),
         ]
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -227,7 +225,7 @@ class TestInteractionEvents:
     ):
         service = MagicMock()
         service.record_requested.side_effect = RuntimeError("db unavailable")
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -249,7 +247,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-1",
             applied=True,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -294,7 +292,7 @@ class TestInteractionEvents:
                 applied=False,
             ),
         ]
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -319,7 +317,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-mode",
             applied=False,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -390,7 +388,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-mode",
             applied=True,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -419,7 +417,7 @@ class TestInteractionEvents:
             baas_interaction_id="BAAS-INTERACTION-public-mode",
             applied=False,
         )
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -448,7 +446,7 @@ class TestInteractionEvents:
         self, mock_bot_ws
     ):
         service = MagicMock()
-        client = AsyncChatClient(
+        client = make_chat_client(
             uri="ws://host/ws", max_retries=0, interaction_service=service
         )
         state = _setup_session_state(client, "sk1")
@@ -499,10 +497,10 @@ async def test_interaction_dispatch_uses_typed_claim_command(mock_bot_ws):
             response=engine_response,
         )
     )
-    client = AsyncChatClient(
+    client = make_chat_client(
         uri="ws://host/ws", max_retries=0, interaction_service=service
     )
-    client._client = engine_client
+    client._chat_transport._client = engine_client
 
     await client._dispatch_interaction_answer(
         session_key="sk1",
@@ -554,10 +552,10 @@ async def test_mode_switch_dispatch_marks_accepted_rpc_resolved(mock_bot_ws):
             response=engine_response,
         )
     )
-    client = AsyncChatClient(
+    client = make_chat_client(
         uri="ws://host/ws", max_retries=0, interaction_service=service
     )
-    client._client = engine_client
+    client._chat_transport._client = engine_client
 
     await client._dispatch_interaction_answer(
         session_key="sk1",
