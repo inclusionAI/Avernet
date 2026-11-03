@@ -1,0 +1,16 @@
+apps/frontend-nextgen/test/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.test.tsx
+  h_059e888e5e4e82 19-20
+apps/frontend-nextgen/test/hooks/useComposerSend.test.ts
+  h_059e888e5e4e82 13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92624786c11a5f47c5424cab5d7d79b267226121",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

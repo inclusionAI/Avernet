@@ -1,0 +1,19 @@
+apps/backend/tests/corp/di/test_profile_and_modules_for.py
+  s_f34bddef00d9b0::t_d201526a7dcaf5 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb3d0014376bd152e774fd096248a2cb66ada3d9",
+  "prompts": {},
+  "sessions": {
+    "s_f34bddef00d9b0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0146ab22-33c9-4afb-a36f-26c1d576d45a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
