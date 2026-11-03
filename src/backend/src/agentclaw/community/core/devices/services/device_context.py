@@ -58,3 +58,25 @@ class UnknownProviderError(RuntimeError):
 
 class ConnInfoBuildError(RuntimeError):
     """ConnInfoBuilder 调底层(baas /http-info、arca proxy 等)失败。"""
+
+
+class DeviceOfflineError(RuntimeError):
+    """Bot 设备离线 — 有 binding 但对应 ARCA 沙箱无活跃实例。
+
+    与 DeviceNotBoundError 的区别：
+    - DeviceNotBoundError：bot 根本没有 active binding（未 apply / 已 release）
+    - DeviceOfflineError：binding 存在但设备不在线（provider 无活跃实例）
+
+    Caller 应映射为 503 Service Unavailable。
+    """
+
+
+class DeviceConnectionUnavailableError(RuntimeError):
+    """Bot 设备连接暂时不可用 — ARCA proxy 可达但沙箱拒绝连接。
+
+    与 DeviceOfflineError 的区别：
+    - DeviceOfflineError：设备不在线（503）
+    - DeviceConnectionUnavailableError：连接被拒绝（502）
+
+    Caller 应映射为 502 Bad Gateway。
+    """

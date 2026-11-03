@@ -464,6 +464,8 @@ class ExpertChatService:
             ConnectionError: 底层连接失败
         """
         from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
             DeviceNotBoundError,
         )
 
@@ -490,6 +492,26 @@ class ExpertChatService:
         except DeviceNotBoundError as e:
             logger.warning(f"[ExpertChatService] Bot has no active binding: {bot_id}: {e}")
             raise BotNotPublishedError(f"Bot未绑定设备: {bot_id}")
+        except DeviceOfflineError as e:
+            logger.warning(
+                "[ExpertChatService] Bot device is offline for bot=%s: %s",
+                bot_id, e,
+            )
+            raise ConnectionError(
+                "Bot设备已离线",
+                error_code="5003",
+                original_error=str(e),
+            )
+        except DeviceConnectionUnavailableError as e:
+            logger.warning(
+                "[ExpertChatService] Device connection temporarily unavailable for bot=%s: %s",
+                bot_id, e,
+            )
+            raise ConnectionError(
+                "Bot设备连接暂时不可用",
+                error_code="5002",
+                original_error=str(e),
+            )
         except Exception as e:
             error_msg = str(e)
             logger.error(
