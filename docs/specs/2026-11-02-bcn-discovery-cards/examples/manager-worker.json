@@ -4,8 +4,8 @@
   "version": "7",
   "supportedInterfaces": [
     {
-      "url": "https://non-invocable.invalid/groups/group-mw-001",
-      "protocolBinding": "JSONRPC",
+      "url": "local://groups/group-mw-001",
+      "protocolBinding": "LOCAL",
       "protocolVersion": "1.0"
     }
   ],
@@ -44,9 +44,103 @@
                   "revision": "sha256:410c8334e700b5c4693a814cced101f50143ee5e260a236d02de47b72cd39b6c"
                 }
               ]
+            },
+            "agents": {
+              "bcn://demo/agents/bot-manager-001": {
+                "name": "数据库诊断经理",
+                "description": "分解数据库诊断任务并汇总执行结果。",
+                "version": "1.0.0",
+                "supportedInterfaces": [
+                  {
+                    "url": "https://agents.example.com/a2a/bot-manager-001",
+                    "protocolBinding": "HTTP+JSON",
+                    "protocolVersion": "1.0"
+                  }
+                ],
+                "capabilities": {
+                  "streaming": true,
+                  "extensions": [
+                    {
+                      "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+                      "description": "BCN discovery identity and composition",
+                      "required": false,
+                      "params": {
+                        "resourceId": "bcn://demo/agents/bot-manager-001",
+                        "resourceKind": "agent",
+                        "execution": {
+                          "mode": "remote"
+                        },
+                        "revision": "sha256:988301d530c424148832bb01e969622e6e5ec660e0568c6e8ffaabdb4c5902e8"
+                      }
+                    }
+                  ]
+                },
+                "defaultInputModes": [
+                  "text/plain"
+                ],
+                "defaultOutputModes": [
+                  "text/plain"
+                ],
+                "skills": [
+                  {
+                    "id": "coordinate",
+                    "name": "数据库诊断经理",
+                    "description": "分解数据库诊断任务并汇总执行结果。",
+                    "tags": [
+                      "database"
+                    ]
+                  }
+                ]
+              },
+              "bcn://demo/agents/bot-worker-001": {
+                "name": "数据库诊断工程师",
+                "description": "分析数据库指标并提供诊断建议。",
+                "version": "1.0.0",
+                "supportedInterfaces": [
+                  {
+                    "url": "https://agents.example.com/a2a/bot-worker-001",
+                    "protocolBinding": "HTTP+JSON",
+                    "protocolVersion": "1.0"
+                  }
+                ],
+                "capabilities": {
+                  "streaming": true,
+                  "extensions": [
+                    {
+                      "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+                      "description": "BCN discovery identity and composition",
+                      "required": false,
+                      "params": {
+                        "resourceId": "bcn://demo/agents/bot-worker-001",
+                        "resourceKind": "agent",
+                        "execution": {
+                          "mode": "remote"
+                        },
+                        "revision": "sha256:410c8334e700b5c4693a814cced101f50143ee5e260a236d02de47b72cd39b6c"
+                      }
+                    }
+                  ]
+                },
+                "defaultInputModes": [
+                  "text/plain"
+                ],
+                "defaultOutputModes": [
+                  "text/plain"
+                ],
+                "skills": [
+                  {
+                    "id": "diagnose",
+                    "name": "数据库诊断工程师",
+                    "description": "分析数据库指标并提供诊断建议。",
+                    "tags": [
+                      "database"
+                    ]
+                  }
+                ]
+              }
             }
           },
-          "revision": "sha256:08021aaf0a6768d5f1584804848d26fe8f6389f54e6adbd46ece62483d1a5cfa"
+          "revision": "sha256:715ddc16a6722ee75b9c22e7c260018f9142d54acaf823a5969ba9802c4f97b8"
         }
       }
     ]
