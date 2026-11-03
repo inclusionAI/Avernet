@@ -1,0 +1,152 @@
+apps/bcsfuse/docs/README.md
+  s_89ee1c722ef961::t_dfe99f1d631535 30
+  s_89ee1c722ef961::t_4aa9e568b23d14 1-29,31-54
+apps/bcsfuse/docs/archive/validation/card-catalog-20261028-20261103.md
+  s_9e428ec8192673::t_c6744ef8828603 1-303
+apps/bcsfuse/docs/archive/deployment/tc-ack-20260821.md
+  s_89ee1c722ef961::t_0913d75392cc45 10,85-86
+  s_9e428ec8192673::t_c6744ef8828603 1-9,11-84,87-420
+apps/bcsfuse/docs/architecture/alipay-operations-extension.md
+  s_9e428ec8192673::t_c6744ef8828603 1-47
+apps/bcsfuse/docs/architecture/alipay-catalog.md
+  s_9e428ec8192673::t_c6744ef8828603 1-89
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_9e428ec8192673::t_c6744ef8828603 36,38-40,42-43,45,100,102,110,131,133-135,137-139,141-142,144-145
+apps/bcsfuse/docs/deployment/card-storage-migration.md
+  s_89ee1c722ef961::t_379111ccc4b044 12,41,44
+  s_9e428ec8192673::t_c6744ef8828603 1-11,13-40,42-43,45-61
+apps/bcsfuse/README.md
+  s_89ee1c722ef961::t_ab2f93b0ba234b 3,7-9,13-15,46-59
+apps/bcsfuse/docs/alipay-agent-search/README.md
+  s_89ee1c722ef961::t_e415aa6c905e50 1-20
+apps/bcsfuse/docs/alipay-agent-search/支付宝Agent搜索建设与迁移方案.md
+  s_89ee1c722ef961::t_b92884c2de47d9 551
+apps/bcsfuse/docs/architecture/alipay-retrieval-runtime.md
+  s_89ee1c722ef961::t_ea0a2c8550dcde 1,3-4,6,9-12,15-17,19,21-26,28-29,31,33-35,37-39,41,43-50,52-54,56-57,59,61-64,66-67
+apps/bcsfuse/docs/architecture/search-application-architecture.md
+  s_89ee1c722ef961::t_d60f70e623f2ca 1,3-4,6,8,10-11,13-15,17,19-23,25-26,28,30-32,34
+apps/bcsfuse/docs/archive/README.md
+  s_89ee1c722ef961::t_45cdde5d0c5139 3-4,6-11,13
+apps/bcsfuse/docs/archive/legacy-tc/API_REFERENCE.md
+  s_89ee1c722ef961::t_461bdbe0a32ed2 1-2
+apps/bcsfuse/docs/archive/legacy-tc/API_USAGE_GUIDE.md
+  s_89ee1c722ef961::t_d6f0bce4e2cb30 1-2
+apps/bcsfuse/docs/archive/legacy-tc/CHANGELOG.md
+  s_89ee1c722ef961::t_3019e8d980c6bf 1-2
+apps/bcsfuse/docs/archive/legacy-tc/CLAUDE.md
+  s_89ee1c722ef961::t_c907f373f288fb 1-2
+apps/bcsfuse/docs/archive/legacy-tc/DELIVERY_DOCUMENT.md
+  s_89ee1c722ef961::t_a550c9b96896f9 1-2
+apps/bcsfuse/docs/archive/legacy-tc/DEPLOYMENT_GUIDE.md
+  s_89ee1c722ef961::t_ac29a7d34e4918 1-2
+apps/bcsfuse/docs/archive/legacy-tc/FEATURE_FLAGS.md
+  s_89ee1c722ef961::t_bd2682da0bb3f4 1-2,362
+apps/bcsfuse/docs/archive/legacy-tc/G2_LLM_CONFLICT_ANALYSIS_DESIGN.md
+  s_89ee1c722ef961::t_45c1f3f94d48b7 1-2
+apps/bcsfuse/docs/archive/legacy-tc/GLOBAL_DESIGN.md
+  s_89ee1c722ef961::t_5c5417922d93c1 1-2
+apps/bcsfuse/docs/archive/legacy-tc/NON_GOALS.md
+  s_89ee1c722ef961::t_3768465dbccd9c 1-2
+apps/bcsfuse/docs/archive/legacy-tc/PRODUCTION_DEPLOYMENT_GUIDE.md
+  s_89ee1c722ef961::t_b0ab5d7e947175 1-2,107
+apps/bcsfuse/docs/archive/legacy-tc/QUICK_START_GUIDE.md
+  s_89ee1c722ef961::t_f1616443ec814a 1-2,384,417-421
+apps/bcsfuse/docs/archive/legacy-tc/RERANKER_INTEGRATION.md
+  s_89ee1c722ef961::t_d96b93fde22dd7 1-2
+apps/bcsfuse/docs/archive/legacy-tc/UPSTREAM_INTEGRATION_GUIDE.md
+  s_89ee1c722ef961::t_e75605a51686c0 1-2
+apps/bcsfuse/docs/archive/legacy-tc/VECTOR_RETRIEVAL_GUIDE.md
+  s_89ee1c722ef961::t_45bec62bc08010 1-2
+apps/bcsfuse/docs/archive/legacy-tc/VECTOR_STORE_ARCHITECTURE.md
+  s_89ee1c722ef961::t_dc970c5d30df49 1-2
+apps/bcsfuse/docs/archive/legacy-tc/WORKER_PROFILE_FUSION_SEQUENCE_DIAGRAM.md
+  s_89ee1c722ef961::t_f2325ba1b00221 1-2
+apps/bcsfuse/docs/archive/legacy-tc/WORKER_REGISTRY_API_CONTRACT.md
+  s_89ee1c722ef961::t_036a74d01617ab 1-2,369
+apps/bcsfuse/docs/archive/legacy-tc/api/README.md
+  s_89ee1c722ef961::t_325f2b0fbecbc5 1-2,15,30,37,236-237
+apps/bcsfuse/docs/archive/legacy-tc/api/fusion-api.md
+  s_89ee1c722ef961::t_df5e304f85a145 1-2,823-824
+apps/bcsfuse/docs/archive/legacy-tc/api/quick-reference.md
+  s_89ee1c722ef961::t_851aa614176e5d 1-2,376-377,380
+apps/bcsfuse/docs/archive/legacy-tc/api/worker-registry-api.md
+  s_89ee1c722ef961::t_8686283e660c07 1-2,598-599
+apps/bcsfuse/docs/archive/legacy-tc/plan/profie/PROFILE_QUALITY_SCORING_PLAN.md
+  s_89ee1c722ef961::t_4ca091a6174b31 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/PROFILE_EMBEDDING_FRAGMENT_REFACTORING_V2.md
+  s_89ee1c722ef961::t_430c18de261212 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/SMART_VECTOR_UPDATE_SPEC.md
+  s_89ee1c722ef961::t_332d63e309fc08 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bcsfuse-capability-verify/design.md
+  s_89ee1c722ef961::t_fc74bfefea9ef6 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bcsfuse-capability-verify/requirements.md
+  s_89ee1c722ef961::t_f69c904aaea2b0 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bcsfuse-capability-verify/tasks.md
+  s_89ee1c722ef961::t_9de2977d8e0987 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/README.md
+  s_89ee1c722ef961::t_f853d31bc4cca6 1-2,440
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/api-guide.md
+  s_89ee1c722ef961::t_63dc875ea97930 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/design-decisions.md
+  s_89ee1c722ef961::t_5d3f5952addd5e 1-2,398
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/fusion-storage-design.md
+  s_89ee1c722ef961::t_ba336fe43e0970 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/post-fusion-notification.md
+  s_89ee1c722ef961::t_cd7640652d7b5f 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/session-scoped-fuse-design.md
+  s_89ee1c722ef961::t_1c0fc96d184257 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/technical-design.md
+  s_89ee1c722ef961::t_1fda6676b0b275 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-profile-fuse/worker-config-field-design.md
+  s_89ee1c722ef961::t_971107d72e7cf8 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/bot-search-recommend-tracking-design.md
+  s_89ee1c722ef961::t_db5568f0f986b5 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/logging-unification/design.md
+  s_89ee1c722ef961::t_eb382dd5ecc4a0 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/logging-unification/requirements.md
+  s_89ee1c722ef961::t_87d29a20060b43 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/logging-unification/tasks.md
+  s_89ee1c722ef961::t_c3efe7d602677b 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/qdrant-zdas-vector-store-design.md
+  s_89ee1c722ef961::t_47a6231b6cb866 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/qdrant-zdas-vector-store-spec/design.md
+  s_89ee1c722ef961::t_5ef2918974ed18 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/qdrant-zdas-vector-store-spec/requirements.md
+  s_89ee1c722ef961::t_cc5298496eda0a 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/qdrant-zdas-vector-store-spec/tasks.md
+  s_89ee1c722ef961::t_304f32361684de 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/trace-id/design.md
+  s_89ee1c722ef961::t_f3acedfd9e20e2 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/trace-id/requirements.md
+  s_89ee1c722ef961::t_6bb1259e7a651a 1-2
+apps/bcsfuse/docs/archive/legacy-tc/specs/trace-id/tasks.md
+  s_89ee1c722ef961::t_ee640ee6169980 1-2
+apps/bcsfuse/docs/archive/legacy-tc/superpowers/plans/2026-04-20-bcsfuse-capability-verify.md
+  s_89ee1c722ef961::t_f4eb6fb2afd451 1-2
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_89ee1c722ef961::t_625e6a2dcc384b 142
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c69893e511fb7b686598a32720c218a37a988ba3",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
