@@ -75,16 +75,28 @@ freezes code-selected conversion/version and filter defaults. Later calls use th
 saved configuration, even if deployment defaults have changed. Incompatible
 conversion code fails explicitly. Hosts treating absent/empty `active_index` as
 `default` report both effective `active_index` and `index_key` as `default`.
-The initial default is allowed to populate through normal source sync before its
-build task completes; hosts must gate readiness on source/Doc/index restoration.
-This requires provisioning the build table before upgrading these hosts.
+The first registration has status `configured`: configuration is saved, but no
+build task is scheduled. Repeated selection does not retry a failed build. Only
+an explicit create/retry request queues a configured or failed record as `pending`.
+The repository's `create(config, enqueue=False)` registers configuration without
+changing existing task state; its default `enqueue=True` preserves explicit build
+creation/retry behavior. This requires provisioning the build table before
+upgrading these hosts.
 
-For migration from implicit hash identities, source sync writes independent
-`default` Docs using cross-generation vector reuse. Legacy Docs and collections
-remain intact. A missing or invalid vector is regenerated; startup must not serve
-an empty collection as if restoration had completed. The legacy hash helper stays
-available only for older direct library callers; explicit version paths never
-call it. TC's existing composition is unchanged.
+Startup restores saved Docs into Qdrant without conversion or embedding. Readiness
+becomes true after restoration and successful index checks, including when the
+saved index is empty. It does not promise every Card is already indexed. The
+existing background revision scan prepares missing/stale Cards and retries failed
+preparation; restarting retains this recovery through persisted source revisions.
+If every Doc is missing, background preparation processes every Card, but readiness
+does not wait for it. Failed Qdrant application still prevents readiness.
+
+Old hash-scoped Docs remain separate from `default`. The normal background scan
+can populate missing `default` Docs and reuse matching vectors from old generations;
+there is no startup migration or automatic full-build job. A missing or invalid
+vector is regenerated in background preparation. Old Docs and collections remain
+intact. The legacy hash helper stays available only for older direct library
+callers; explicit version paths never call it. TC's composition is unchanged.
 
 HTTP creation requires model and dimension; optional `filter_fields` selects the
 version's filtering rules. Omission uses application defaults for a new version,
@@ -99,7 +111,7 @@ A build writes independent Doc artifacts. It does not change any running query
 model or Qdrant collection. `select(build_id)` only accepts completed builds with
 the configured conversion version; the host binds model, dimension and collection
 at startup and uses existing restoration/readiness before accepting traffic.
-Source updates after completion are reconciled at startup and by normal sync.
+Source updates after completion are reconciled by normal background sync.
 No task, HTTP route, cleanup or background thread starts merely by importing these
 modules. The host starts build polling explicitly. Old artifacts are not deleted.
 

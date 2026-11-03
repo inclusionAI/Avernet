@@ -158,3 +158,11 @@ point payload 都保存所属 `index_key`，由系统在写入和恢复时补充
 应用可以通过 `status_model` 扩展索引诊断响应；不改变 Card 的业务字段。
 
 HTTP 无关的协议与持久化约定见 [provider contracts](provider-contracts.md#card-management)。
+
+## 启动与后台补齐
+
+启动只把当前索引版本已有的 Doc（正文、标签和向量）恢复到 Qdrant，
+不等待所有 Card 加工完成。`/ready` 成功表示已有索引恢复完成且服务可查询，
+不表示所有 Card 都已入索引；没有已有 Doc 时可以作为空索引就绪。
+后台沿用版本比较，只补处理缺失或落后的 Card，失败后继续重试，重启也可接续。
+Qdrant 同步失败仍会阻止就绪。首次选择 `default` 只保存配置，不自动登记全量重建任务。

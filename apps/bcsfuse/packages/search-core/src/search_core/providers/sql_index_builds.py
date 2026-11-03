@@ -78,15 +78,20 @@ class SqlIndexBuildRepository:
             )
             return self.decode(cur.fetchone())
 
-    def create(self, config):
+    def create(self, config, *, enqueue=True):
         current = self.get(config.build_id)
         if current is None:
             try:
                 with self.cursor() as (conn, cur):
                     self.execute(
                         cur,
-                        f"INSERT INTO {TABLE} (environment,build_id,config_json,status,gmt_create,gmt_modify) VALUES (?,?,?,'pending',{self.now},{self.now})",
-                        (self.environment, config.build_id, config.model_dump_json()),
+                        f"INSERT INTO {TABLE} (environment,build_id,config_json,status,gmt_create,gmt_modify) VALUES (?,?,?,?,{self.now},{self.now})",
+                        (
+                            self.environment,
+                            config.build_id,
+                            config.model_dump_json(),
+                            "pending" if enqueue else "configured",
+                        ),
                     )
                     conn.commit()
             except Exception:
@@ -97,11 +102,11 @@ class SqlIndexBuildRepository:
                 current = self.get(config.build_id)
         if current.config != config:
             raise IndexBuildConflict("build ID already has different configuration")
-        if current.status == "failed":
+        if enqueue and current.status in {"configured", "failed"}:
             with self.cursor() as (conn, cur):
                 self.execute(
                     cur,
-                    f"UPDATE {TABLE} SET status='pending',error_code='',owner_token='',lease_until=NULL,gmt_modify={self.now} WHERE environment=? AND build_id=? AND status='failed'",
+                    f"UPDATE {TABLE} SET status='pending',error_code='',owner_token='',lease_until=NULL,gmt_modify={self.now} WHERE environment=? AND build_id=? AND status IN ('configured','failed')",
                     (self.environment, config.build_id),
                 )
                 conn.commit()
