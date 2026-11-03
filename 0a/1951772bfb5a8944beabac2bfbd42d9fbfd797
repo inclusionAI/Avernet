@@ -1,0 +1,51 @@
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_89ee1c722ef961::t_ea052680678208 95-102
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_89ee1c722ef961::t_09c025a654b1d9 150-152,154-163,168-169,174-178
+  s_89ee1c722ef961::t_ea052680678208 164-167,170-173
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_89ee1c722ef961::t_ea052680678208 89-93,149-154,160
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_89ee1c722ef961::t_ea052680678208 62-67,95-98,207-212,215-226
+  s_89ee1c722ef961::t_1b4fba813d48d3 201-206,213-214,227-234
+  s_89ee1c722ef961::t_09c025a654b1d9 61,68,184
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_89ee1c722ef961::t_ea052680678208 174-178,182-189,194,198,206-207,247-249
+  s_89ee1c722ef961::t_77e40a1d9b1c3d 21,81,91,94,122,130,158,252,264,270-272
+apps/bcsfuse/packages/search-core/tests/test_card_deletion.py
+  s_89ee1c722ef961::t_9ff135cc408a03 1-17,25-28,36-50,55-56,63-71,73-74,76-119
+  s_89ee1c722ef961::t_ea052680678208 18-24,29-35,51-53,57-62
+  s_89ee1c722ef961::t_a5258e36ab7ded 54,72,75
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  s_89ee1c722ef961::t_09c025a654b1d9 192-194,202,209-213
+  s_89ee1c722ef961::t_ea052680678208 195-201,203-208
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  s_89ee1c722ef961::t_ea052680678208 26-43
+  s_89ee1c722ef961::t_4eb8ef3e6e1c42 3-4,14,25,44-46
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_89ee1c722ef961::t_09c025a654b1d9 285-287
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_89ee1c722ef961::t_ea052680678208 74-81,85-89
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/retrieval.py
+  s_89ee1c722ef961::t_09c025a654b1d9 33-37,41
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_card_preparation.py
+  s_89ee1c722ef961::t_b3504c8c5394ef 10-18
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_89ee1c722ef961::t_475c2a2d03d032 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a1951772bfb5a8944beabac2bfbd42d9fbfd797",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
