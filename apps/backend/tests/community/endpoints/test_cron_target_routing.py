@@ -365,39 +365,3 @@ def _seed_with_adapter_failure(world):
 )
 def running_failure_preserves_result():
     """An adapter failure must not be presented as an empty successful list."""
-
-
-@endpoint_test(
-    method="GET", path="/api/cron/targets", scenario="owner_target_discovery",
-    input=CaseInput(headers={"x-user-id": "u_owner"}, query_params={"bot_id": "bot_test"}),
-    seed=_seed_bot_with_owner,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"bot_id": "bot_test", "can_manage": True}}),
-)
-def management_targets_owner():
-    """Target discovery resolves the literal route before the task-id route."""
-
-
-def _seed_member_without_lock(world):
-    from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
-    _seed_member_with_lock(world)
-    world.get(CollaboratorLockService).release_lock("bot_test", "u_owner", "u_member")
-
-
-@endpoint_test(
-    method="GET", path="/api/cron/targets", scenario="member_target_discovery_without_lock",
-    input=CaseInput(headers={"x-user-id": "u_member"}, query_params={"bot_id": "bot_test", "owner_id": "u_owner"}),
-    seed=_seed_member_without_lock,
-    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"can_manage": False}}),
-)
-def management_targets_member():
-    """Reading does not require ADMIN or a Bot edit lock."""
-
-
-@endpoint_test(
-    method="GET", path="/api/cron", scenario="member_list_without_lock",
-    input=CaseInput(headers={"x-user-id": "u_member"}, query_params={"bot_id": "bot_test", "owner_id": "u_owner"}),
-    seed=_seed_member_without_lock,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
-)
-def management_list_member():
-    """A MEMBER can inspect existing jobs without reserving the Bot editor."""

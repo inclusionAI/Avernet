@@ -8,8 +8,6 @@ from typing import Any, Protocol, runtime_checkable
 class CronRelayServiceProtocol(Protocol):
     """Service API for cron listing and request forwarding."""
 
-    async def get_management_targets(self, *, bot_id: str, owner_id: str, actor_id: str) -> dict: ...
-
     async def list_all_crons(self, *args: Any, **kwargs: Any) -> Any:
         """List ordinary runtimes and the authenticated user's existing Callers.
 
