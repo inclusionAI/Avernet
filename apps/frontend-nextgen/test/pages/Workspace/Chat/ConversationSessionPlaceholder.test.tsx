@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui';
+import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import type { ConversationBotView } from '@/domain/conversation';
 import { ConversationSessionPlaceholder } from '@/pages/Workspace/Chat/components/ConversationSessionPlaceholder';
-import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
@@ -26,12 +27,25 @@ const a: ConversationBotView = {
   bot: { botId: 'a', realBotId: 'a', displayName: 'Bot A', chatable: true, online: true },
 };
 const b: ConversationBotView = { ...a, bot: { ...a.bot, botId: 'b', realBotId: 'b', displayName: 'Bot B' } };
+const codingBotView: ConversationBotView = {
+  section: 'managed',
+  bot: {
+    botId: 'coding:owner',
+    realBotId: 'coding',
+    ownerId: 'owner',
+    displayName: 'Coding Bot',
+    chatable: true,
+    online: true,
+    isAgentCodingBot: true,
+  },
+};
 const friendBotView: ConversationBotView = {
   section: 'friend',
   bot: { botId: 'f', realBotId: 'f', displayName: 'Bot F', chatable: true, online: true },
 };
 const options = { userId: 'user', managedBots: [a, b], friendBots: [] };
 const friendOptions = { userId: 'user', managedBots: [a, b], friendBots: [friendBotView] };
+const codingOptions = { userId: 'user', managedBots: [codingBotView], friendBots: [] };
 const s = (id: string, botId: string) => ({
   sessionId: id,
   botId,
@@ -67,6 +81,16 @@ function Fixture() {
       ) : (
         <div data-testid="chat-session">{selection.interactive.session?.title ?? '未选择 Bot'}</div>
       )}
+    </>
+  );
+}
+function CodingFixture() {
+  const sessions = useConversationSessions(codingOptions);
+  const placeholder = useConversationSessionPlaceholder({ ...codingOptions, sessions });
+  return (
+    <>
+      <Button onClick={() => openManagedBotViaRoute('coding:owner', sessions)}>深链进入 Coding</Button>
+      {placeholder && <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />}
     </>
   );
 }
@@ -179,6 +203,9 @@ beforeEach(() => {
   jest.mocked(conversationService.listManagedSessions).mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
   jest.mocked(botSessionService.createSession).mockResolvedValue({ ok: true, data: s('新建会话', 'b') });
 });
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
+});
 it('deep-linking into an empty Bot replaces old chat with creation prompt, and creates/selects its new session', async () => {
   render(<Fixture />);
   expect(screen.getByTestId('chat-session')).toHaveTextContent('旧会话');
@@ -190,6 +217,33 @@ it('deep-linking into an empty Bot replaces old chat with creation prompt, and c
   expect(botSessionService.createSession).toHaveBeenCalledWith(b.bot, 'user');
   expect(store.getState().sessionsByBotId.b.sessions.total).toBe(1);
 });
+it('Coding Bot creation always delegates to AIXCoding and never falls back to the generic service', async () => {
+  const createSession = jest.fn().mockResolvedValue({
+    ok: true,
+    session: { sessionId: 'coding-session', title: '新对话' },
+  });
+  extendCapabilities({
+    getCodingBotConversationHost: () => ({
+      status: 'available',
+      value: { Stage: () => null, createSession },
+    }),
+  });
+
+  render(<CodingFixture />);
+  fireEvent.click(screen.getByRole('button', { name: '深链进入 Coding' }));
+  await screen.findByText('Coding Bot 暂无会话');
+  fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+
+  await waitFor(() => expect(store.getState().selectedSessionId).toBe('coding-session'));
+  expect(createSession).toHaveBeenCalledWith({
+    botId: 'coding',
+    userId: 'user',
+    ownerId: 'owner',
+    title: '新对话',
+  });
+  expect(botSessionService.createSession).not.toHaveBeenCalled();
+});
+
 it('loading does not show old chat or a false empty prompt, then waits for a manual pick', async () => {
   let resolve!: (data: Awaited<ReturnType<typeof conversationService.listManagedSessions>>) => void;
   jest.mocked(conversationService.listManagedSessions).mockReturnValue(

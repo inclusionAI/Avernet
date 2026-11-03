@@ -4,9 +4,9 @@
 //   (不调 useWorkspace),页内不出现二级身份/视图切换 tab;
 // - 选中 origin=others 时渲染真实只读面板,不渲染交互舞台(Task 7 review 约定);
 // - CollaborationPage 承接旧协作群分支,GroupWorkspaceArea 保持挂载。
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
-import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -136,9 +136,13 @@ jest.mock('@/pages/Workspace/hooks/useBotChat', () => ({
 
 // Coding Bot 主工作区只验证互斥边界;Embedded/publish 合同由 CodingBotStageBoundary 单测覆盖。
 jest.mock('@/pages/Workspace/Chat/CodingBotStageBoundary', () => ({
-  CodingBotStageBoundary: ({ bot, session }: { bot: { realBotId: string }; session: { sessionId: string } }) => (
-    <div data-testid="coding-bot-stage" data-bot-id={bot.realBotId} data-session-id={session.sessionId} />
-  ),
+  CodingBotStageBoundary: ({
+    bot,
+    session,
+  }: {
+    bot: { realBotId: string };
+    session?: { sessionId: string } | null;
+  }) => <div data-testid="coding-bot-stage" data-bot-id={bot.realBotId} data-session-id={session?.sessionId ?? ''} />,
 }));
 
 // 交互舞台只替换接收端(保持传参装配的真实性);只读面板走真实组件。
@@ -260,12 +264,26 @@ describe('ConversationPage(Task 8 组合页)', () => {
     await screen.findByText('我的 Bot');
   });
 
-  it('点击 AgentCoding Bot 展开普通会话目录，不再进入专用 coding-chat', async () => {
+  it('Coding Bot 无会话时复用统一空态，并由已挂载的子应用创建首会话', async () => {
+    const createCodingSession = jest.fn().mockResolvedValue({
+      ok: true,
+      session: { sessionId: 'coding-first-session', title: '新对话' },
+    });
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => <div />, createSession: createCodingSession },
+      }),
+    });
     const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
       listDirectory: jest.Mock;
     };
+    const genericSessionService = require('@/services/workspace/botSessionService').botSessionService as {
+      createSession: jest.Mock;
+    };
     const { history } = require('@umijs/max') as { history: { push: jest.Mock; replace: jest.Mock } };
     history.push.mockClear();
+    genericSessionService.createSession.mockClear();
     conversationServiceMock.listDirectory.mockResolvedValueOnce({
       ok: true,
       data: { managedBots: [agentCodingBot], friendBots: [] },
@@ -286,7 +304,27 @@ describe('ConversationPage(Task 8 组合页)', () => {
     });
 
     expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+    expect(screen.getByText('创建会话后，即可开始与此 Bot 对话。')).toBeInTheDocument();
+    const stageBeforeCreate = screen.getByTestId('coding-bot-stage');
+    expect(stageBeforeCreate).toHaveAttribute('data-bot-id', 'coding-bot');
+    expect(stageBeforeCreate).toHaveAttribute('data-session-id', '');
+    expect(stageBeforeCreate.parentElement).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('coding-bot-stage')).toHaveAttribute('data-session-id', 'coding-first-session'),
+    );
+    expect(screen.getByTestId('coding-bot-stage')).toBe(stageBeforeCreate);
+    expect(screen.queryByText('AgentCoding Bot 暂无会话')).not.toBeInTheDocument();
+    expect(screen.getByTestId('coding-bot-stage').parentElement).not.toHaveAttribute('aria-hidden');
+    expect(createCodingSession).toHaveBeenCalledWith({
+      botId: 'coding-bot',
+      userId: '101',
+      ownerId: '2088',
+      title: '新对话',
+    });
+    expect(genericSessionService.createSession).not.toHaveBeenCalled();
     expect(history.push).not.toHaveBeenCalled();
   });
 
@@ -422,7 +460,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
       });
     });
 
-    expect(await screen.findByText('AgentCoding Bot 暂无会话')).toBeInTheDocument();
+    const stage = await screen.findByTestId('coding-bot-stage');
+    expect(stage).toHaveAttribute('data-session-id', '');
     expect(preload).toHaveBeenCalledTimes(1);
   });
 
