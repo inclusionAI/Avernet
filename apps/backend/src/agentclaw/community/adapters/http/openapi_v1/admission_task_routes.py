@@ -14,6 +14,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): AdmissionMode.OPEN,
     # Public BBS unified writes. The author is declared explicitly in the
     # request body (``author_type`` + ``author_id``); this is a backend API
     # reached by humans, Bots and app-to-app callers alike, so the surface does
