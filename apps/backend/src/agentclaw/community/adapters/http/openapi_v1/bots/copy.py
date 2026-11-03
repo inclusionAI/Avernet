@@ -31,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi_injector import Injected
 from pydantic import BaseModel, Field
 
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     OwnerNameDep,
@@ -46,7 +47,6 @@ from agentclaw.community.core.bot_copy.types import BotCopyRow, BotCopyStatus
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import generate_bot_id
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
@@ -101,7 +101,7 @@ class BotCopyResponse(BaseModel):
     redirect_url: Optional[str] = Field(default=None)
 
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
+router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
 
 
 def _generate_operation_id() -> str:
@@ -167,6 +167,14 @@ def submit_copy(
         raise HTTPException(status_code=403, detail="no edit permission on source bot")
 
     operation_id = _generate_operation_id()
+    # Lazy import: bot_service sits in a circular edge with workspace_service
+    # that only post-top-import ordering resolves; importing at module top can
+    # trip it when this module is imported lazily inside openapi_v1's router
+    # composition.
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        generate_bot_id,
+    )
+
     dst_bot_id = generate_bot_id(owner_id, bot_repo)
 
     current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=None)

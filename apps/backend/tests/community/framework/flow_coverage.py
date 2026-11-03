@@ -228,10 +228,12 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "exercises the feedback submission end-to-end."
     ),
     "bot_copy": (
-        "Bot-copy v1 module (Stage A: ac_bot_copy ledger + copy_state + "
-        "POST /copy route + retry). Covered by repository, derive, and "
-        "handler-unit tests; drain when Stage B lands CopyCompiler + create_job "
-        "state_ref threading + a real singlebox e2e copy flow (Task 7)."
+        "Bot-copy v1 module (Route B manifest-reuse: ac_bot_copy ledger + "
+        "POST /openapi/v1/bots/copy + retry + copy_state on Bot). Covered by "
+        "repository, derive, handler-unit, and architecture tests; routes "
+        "mounted + authorization wired. Drain when a real singlebox e2e copy "
+        "flow exercises POST /copy → manifest-creation → /bots/{dst}.copy_state "
+        "end-to-end (needs provision/DaaS stand-in)."
     ),
     "approval": _EXEMPT_REASON,
     "apply_engine": (
