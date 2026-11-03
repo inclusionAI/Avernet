@@ -17,6 +17,7 @@ class BuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     embedding_model: str = Field(min_length=1, max_length=128)
     embedding_dimension: int = Field(strict=True, ge=1, le=8192)
+    filter_fields: tuple[str, ...] | None = None
 
 
 class BuildStatus(BaseModel):
@@ -24,6 +25,8 @@ class BuildStatus(BaseModel):
     index_key: str
     embedding_model: str
     embedding_dimension: int
+    conversion_version: str
+    filter_fields: tuple[str, ...]
     status: str
     completed_count: int
     total_count: int
@@ -36,6 +39,8 @@ def response(row):
         index_key=row.config.index_key,
         embedding_model=row.config.embedding_model,
         embedding_dimension=row.config.embedding_dimension,
+        conversion_version=row.config.conversion_version,
+        filter_fields=row.config.filter_fields,
         status=row.status,
         completed_count=row.completed_count,
         total_count=row.total_count,
@@ -56,7 +61,11 @@ def create_index_build_router(
     ):
         try:
             row = await asyncio.to_thread(
-                service.create, build_id, body.embedding_model, body.embedding_dimension
+                service.create,
+                build_id,
+                body.embedding_model,
+                body.embedding_dimension,
+                filter_fields=body.filter_fields,
             )
             return response(row)
         except IndexBuildConflict as error:

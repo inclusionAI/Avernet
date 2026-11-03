@@ -48,6 +48,13 @@ application used by both TC and Agent Search. A change checkpoint advances only
 after the complete batch succeeds. TC retains its legacy SQL, locks and schedule;
 new providers do not require migrating existing TC tables.
 
+`load_vector_candidates(source_id, embedding_key)` is the explicit exception to
+generation-scoped reads: it returns nondeleted candidates across generations in
+the same environment, newest first, for embedding reuse only. Doc IDs may repeat.
+Consumers rerun conversion and match text hashes, model/dimension and valid vectors;
+they must never restore or serve these candidates directly. Contract coverage is
+in `tests/test_index_documents.py`; current source revisions still fence publication.
+
 For new MySQL-compatible deployments, `gmt_create` and `gmt_modify` are
 `TIMESTAMP(6)`, with database initialization and automatic modification time.
 The SQL adapter projects modification time through `UNIX_TIMESTAMP` and binds

@@ -34,6 +34,19 @@ revisions before marking a build completed. The model factory is a context manag
 receiving model name and dimension; it owns model-client cleanup. Configuration
 models use Pydantic, available through the package's `models` extra.
 
+Generation builds should rerun business conversion and reuse vectors only when
+the model/dimension key and resulting search-text hash match a valid stored
+vector. `IndexDocuments.load_vector_candidates(source_id, embedding_key)` reads
+nondeleted candidates across generations in the same environment, newest first;
+the same Doc ID can appear more than once. `catalog/documents.py` selects an exact
+text match, including older candidates when a newer one has different text. This
+lookup is only for embedding reuse, never index recovery or search. Filter labels
+and rerank text are regenerated even when the vector is reused. A filter-only
+generation still builds and stores new Docs, but does not call embedding for
+documents with matching cached vectors. Missing/invalid vectors or changed
+text/model/dimension require embedding. Explicit single-source repair may bypass
+reuse to repair a bad cached vector.
+
 `rebuild_source` is also usable directly for a single-source repair. Supply a
 `read_source(id)` callback returning a record with `revision`, and a
 `prepare_documents(record)` callback that deliberately bypasses artifacts being
@@ -50,8 +63,37 @@ every serving replica has applied it.
 The SQL task table remains `bcsfuse_index_builds`, with the existing
 `(environment, build_id)` identity and serialized configuration. `SQLITE_SCHEMA`
 is available for local host initialization; production provisioning belongs to
-the deployment. Existing task/config serialization and `index_key` hashing remain
-unchanged by this extraction.
+the deployment. No additional columns or tables are needed for vector reuse.
+
+`IndexBuildConfig.index_key` is exactly `build_id`, not a configuration hash.
+Names are 1–64 characters, starting with an ASCII letter/digit and then allowing
+letters, digits, `_`, `-` and `.`. Configuration is immutable within an environment.
+Changing a name isolates artifacts; it does not force new embedding calls.
+
+`default(model, dimension)` creates the fixed `default` record on first use and
+freezes code-selected conversion/version and filter defaults. Later calls use the
+saved configuration, even if deployment defaults have changed. Incompatible
+conversion code fails explicitly. Hosts treating absent/empty `active_index` as
+`default` report both effective `active_index` and `index_key` as `default`.
+The initial default is allowed to populate through normal source sync before its
+build task completes; hosts must gate readiness on source/Doc/index restoration.
+This requires provisioning the build table before upgrading these hosts.
+
+For migration from implicit hash identities, source sync writes independent
+`default` Docs using cross-generation vector reuse. Legacy Docs and collections
+remain intact. A missing or invalid vector is regenerated; startup must not serve
+an empty collection as if restoration had completed. The legacy hash helper stays
+available only for older direct library callers; explicit version paths never
+call it. TC's existing composition is unchanged.
+
+HTTP creation requires model and dimension; optional `filter_fields` selects the
+version's filtering rules. Omission uses application defaults for a new version,
+or saved filters for a retry. The application may add mandatory business fields.
+GET/PUT responses expose the resolved `conversion_version` and `filter_fields`.
+There is no builder registry or executable rule JSON: hosts bind their built-in
+converter, and the system records its version. New rules require matching code.
+Incremental processing uses the selected version's persisted model/filters and
+the compatible converter, not changing deployment defaults.
 
 A build writes independent Doc artifacts. It does not change any running query
 model or Qdrant collection. `select(build_id)` only accepts completed builds with
@@ -60,6 +102,13 @@ at startup and uses existing restoration/readiness before accepting traffic.
 Source updates after completion are reconciled at startup and by normal sync.
 No task, HTTP route, cleanup or background thread starts merely by importing these
 modules. The host starts build polling explicitly. Old artifacts are not deleted.
+
+When applying a Card Doc to Qdrant, the shared synchronizer adds `index_key` to
+the point payload. Dense and keyword collections receive the same value on both
+incremental writes and recovery. This is system metadata outside the business
+Card and embedding text; it cannot be a business filter field. It identifies
+ownership, not global activation: compare it with the responding instance's
+`/ready.index_key`. No per-point `active` flag is maintained.
 
 ## TC compatibility
 
