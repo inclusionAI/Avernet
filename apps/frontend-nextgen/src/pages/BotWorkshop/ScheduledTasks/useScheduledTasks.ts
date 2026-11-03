@@ -33,7 +33,6 @@ export function useScheduledTasks(
   const [contextError, setContextError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [lastResult, setLastResult] = useState<OperationResult>();
   const busyRef = useRef(false);
   const requestId = useRef(0);
   const contextRequestId = useRef(0);
@@ -84,7 +83,6 @@ export function useScheduledTasks(
     setContext(undefined);
     setLock(undefined);
     setLockError('');
-    setLastResult(undefined);
     void refreshContext();
     return () => {
       contextRequestId.current += 1;
@@ -151,7 +149,6 @@ export function useScheduledTasks(
     if (busyRef.current) throw new Error('操作处理中，请稍后');
     busyRef.current = true;
     setBusy(true);
-    setLastResult(undefined);
     try {
       const [next, currentLock] = await Promise.all([client.context(), refreshLock()]);
       if (currentClient.current !== client) throw new Error('Bot 或登录身份已切换，请重新操作');
@@ -159,7 +156,6 @@ export function useScheduledTasks(
       if (!next.can_manage) throw new Error('当前账号没有定时任务管理权限');
       if (!ownsLock(currentLock)) throw new Error('当前未持有 Bot 编辑锁，请到 Bot 列表获取后重试。输入已保留');
       const result = await work(next);
-      setLastResult(result);
       await load();
       return result;
     } catch (reason) {
@@ -181,7 +177,6 @@ export function useScheduledTasks(
     lockError,
     editable,
     error: contextError || error,
-    lastResult,
     loading: identity.loading || (identity.ready && loading),
     busy,
     client,

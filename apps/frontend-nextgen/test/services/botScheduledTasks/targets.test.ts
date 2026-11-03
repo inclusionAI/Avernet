@@ -7,6 +7,7 @@ import {
   type RoutineContext,
 } from '@/services/botScheduledTasks/types';
 import { describeFailure } from '@/services/botScheduledTasks/results';
+import { estimateNextRun } from '@/services/botScheduledTasks/nextRun';
 jest.mock('@/services/backendApi/httpClient', () => {
   const actual = jest.requireActual('@/services/backendApi/httpClient');
   return { ...actual, backendRequest: jest.fn() };
@@ -287,4 +288,30 @@ test('service lock reads continue using the OpenAPI endpoint and verified owner'
     '/openapi/v1/bots/bot%2Fa/edit-lock',
     expect.objectContaining({ method: 'GET', params: { user_id: 'admin', entity_id: 'owner' } }),
   );
+});
+
+describe('next scheduled execution is an explicitly local estimate', () => {
+  const task = { cron: '0 9 * * *', timezone: 'Asia/Shanghai', enabled: true };
+  test.each([
+    ['0 9 * * *', 'Asia/Shanghai', '2026-11-03T00:30:00Z', '2026-11-03T01:00:00.000Z'],
+    ['*/30 * * * *', 'UTC', '2026-11-03T00:30:00Z', '2026-11-03T01:00:00.000Z'],
+    ['0 */6 * * *', 'UTC', '2026-11-03T01:00:00Z', '2026-11-03T06:00:00.000Z'],
+    ['0 18 * * 1-5', 'Asia/Shanghai', '2026-11-06T10:00:00Z', '2026-11-09T10:00:00.000Z'],
+    ['0 0 1 * *', 'UTC', '2026-10-31T23:59:00Z', '2026-11-01T00:00:00.000Z'],
+    ['0 3 * * *', 'America/New_York', '2026-03-08T06:59:00Z', '2026-03-08T07:00:00.000Z'],
+    ['0 9 29 2 *', 'Asia/Shanghai', '2026-11-03T00:00:00Z', '2028-02-29T01:00:00.000Z'],
+  ])('%s in %s handles time boundaries', (cron, timezone, now, expected) => {
+    expect(estimateNextRun({ ...task, cron, timezone }, Date.parse(now))).toBe(expected);
+  });
+  test.each([
+    { ...task, enabled: false },
+    { ...task, cron: '' },
+    { ...task, cron: 'bad cron' },
+    { ...task, cron: '* * * * * *' },
+    { ...task, cron: '0 0 30 2 *' },
+    { ...task, timezone: '' },
+    { ...task, timezone: 'Invalid/Zone' },
+  ])('disabled or incomplete/invalid schedules have no estimated time', (input) => {
+    expect(estimateNextRun(input, Date.parse('2026-11-03T00:00:00Z'))).toBeUndefined();
+  });
 });
