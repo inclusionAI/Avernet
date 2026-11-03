@@ -276,6 +276,9 @@ async def test_auxiliary_uses_llm_task_without_agent_session(
         body = json.loads(req.content)
         assert req.url.path == "/tools/invoke"
         assert body["tool"] == "llm-task"
+        assert body["args"]["maxTokens"] == 10240
+        assert body["args"]["timeoutMs"] == 60000
+        assert body["args"]["thinking"] == "off"
         assert "sessionKey" not in body and "sessionKey" not in body["args"]
         assert body["args"]["input"] == request.message
         assert body["args"]["schema"]["additionalProperties"] is False
@@ -285,7 +288,13 @@ async def test_auxiliary_uses_llm_task_without_agent_session(
             "isError": status == "error", "details": {"json": expected if status != "invalid" else {"verdict": "approve"}}
         }})
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    def client(**kwargs):
+        assert kwargs["timeout"] == 65
+        assert kwargs["trust_env"] is False
+        assert kwargs["follow_redirects"] is False
+        return original(transport=httpx.MockTransport(handle), **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client)
     engine = OpenClawHostingEngine(HostingGatewayConfig(url="ws://localhost", device_key_file=key_file, token="test"))
     monkeypatch.setattr(engine, "_execute", lambda *a, **kw: pytest.fail("no persistent agent fallback"))
     if status == "ok":
