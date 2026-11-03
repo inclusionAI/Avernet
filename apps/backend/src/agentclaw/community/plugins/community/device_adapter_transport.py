@@ -108,10 +108,18 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        # ``invoke`` is a transport with a real default deadline. BaasService's
+        # general HTTP method itself defaults to 30s, while transient engine
+        # adapters legitimately need longer. Sending an explicit timeout keeps
+        # that provider default intact and lets the catch map read timeouts to
+        # DeviceAdapterTimeoutError instead of a generic upstream failure.
+        request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
         try:
             response = await asyncio.to_thread(
                 self._baas_service.invoke_http,
-                **self._invoke_kwargs(conn_info, method, path, body, params, timeout),
+                **self._invoke_kwargs(
+                    conn_info, method, path, body, params, request_timeout
+                ),
             )
             response.raise_for_status()
             result = response.json()
@@ -121,7 +129,7 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         except httpx.HTTPStatusError as exc:
             raise self._map_status_error(exc) from exc
         except httpx.RequestError as exc:
-            if timeout is not None and isinstance(exc, httpx.TimeoutException):
+            if isinstance(exc, httpx.TimeoutException):
                 raise DeviceAdapterTimeoutError(
                     f"Adapter request timed out: {method} {path}"
                 ) from exc

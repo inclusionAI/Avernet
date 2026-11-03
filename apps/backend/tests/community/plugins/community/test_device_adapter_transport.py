@@ -86,6 +86,37 @@ def test_invoke_accepts_legacy_bind_id_alias():
     assert baas.invoke_http.call_args.kwargs["bind_id"] == 23
 
 
+
+def test_invoke_applies_its_default_timeout():
+    """No caller timeout still means a deliberate transport timeout, not BaaS' 30s."""
+    transport, baas = _transport(_response(200, {"success": True, "data": {}}))
+
+    asyncio.run(
+        transport.invoke(
+            conn_info={"binding_id": 17, "engine_port": 20003},
+            method="GET",
+            path="/api/sessions",
+        )
+    )
+
+    assert baas.invoke_http.call_args.kwargs["timeout"] == 120.0
+
+
+def test_invoke_maps_implicit_timeout():
+    """A timeout inherited from the transport default still maps to a 504."""
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = httpx.ReadTimeout(
+        "slow", request=httpx.Request("GET", "https://proxy.example/api/test")
+    )
+
+    with pytest.raises(DeviceAdapterTimeoutError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 1}, method="GET", path="/api/test"
+            )
+        )
+
+
 def test_invoke_multipart_forwards_replayable_package_and_provider_header():
     transport, baas = _transport()
     baas.get_http_info.return_value = HttpConnectionInfo(
