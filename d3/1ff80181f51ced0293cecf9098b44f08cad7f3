@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/teclaw_builder.py
+  s_a4521271eee0de::t_bc6189d70b56fd 13,49,52-53,60-65
+apps/backend/tests/community/core/devices/services/conn_info_builders/test_teclaw_builder.py
+  s_a4521271eee0de::t_0fecbff515df4c 67
+  s_a4521271eee0de::t_1ead137ad2eb31 68
+  s_a4521271eee0de::t_bc6189d70b56fd 9-11,27-37,51-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d31ff80181f51ced0293cecf9098b44f08cad7f3",
+  "prompts": {},
+  "sessions": {
+    "s_a4521271eee0de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c11-bc28-7ea3-a7a7-9a0b38cfec93",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
