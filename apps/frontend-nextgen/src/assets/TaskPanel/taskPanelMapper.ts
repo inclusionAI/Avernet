@@ -279,7 +279,7 @@ function mapActionLog(
 }
 
 function mapArtifacts(list?: TaskDashboardResponse['artifacts']): TaskView['artifacts'] {
-  return (list ?? []).map((a) => ({
+  return (list ?? []).map((a, sourceOrder) => ({
     id: a.artifact_id,
     name: a.name,
     type: a.type,
@@ -287,6 +287,7 @@ function mapArtifacts(list?: TaskDashboardResponse['artifacts']): TaskView['arti
     summary: a.summary ?? null,
     nodeId: a.node_id ?? null,
     updatedAt: a.created_at,
+    sourceOrder,
   }));
 }
 

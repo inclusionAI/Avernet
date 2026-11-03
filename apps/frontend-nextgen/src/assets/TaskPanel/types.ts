@@ -36,6 +36,8 @@ export interface TaskArtifactView {
   stage?: number | null;
   /** 是否最终产物(Descriptor content.is_final_artifact === "true");卡片边框高亮使用。 */
   isFinalArtifact?: boolean;
+  /** 内部排序辅助键:对应后端产物列表输入序(读侧倒序),仅排序层反转使用,不做展示。 */
+  sourceOrder?: number;
   /** 产出者(Descriptor.creator);legacy 为 null */
   owner?: string | null;
   /** 产出者可读名：单 Bot 名或协作群成员名列表；缺省回落 owner ID。 */
