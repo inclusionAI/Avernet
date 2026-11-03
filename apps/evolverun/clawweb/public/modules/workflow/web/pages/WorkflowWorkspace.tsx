@@ -349,7 +349,7 @@ export default function WorkflowWorkspace() {
 
     <main className="flex min-w-0 flex-1 flex-col bg-slate-50">
       {transitionError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{transitionError}</p>}
-      {activeView === 'workbench' ? (<div className="min-h-0 flex-1 overflow-y-auto"><ApprovalWorkbench isAdmin={isAdmin} /></div>) : isError ? (<div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>) : activeView === 'dashboard' && isAdmin ? (
+      {activeView === 'workbench' ? (<div className="min-h-0 flex-1 overflow-y-auto"><ApprovalWorkbench isAdmin={isAdmin} userId={user?.userId} /></div>) : isError ? (<div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>) : activeView === 'dashboard' && isAdmin ? (
         <div className="min-h-0 flex-1 overflow-y-auto"><Dashboard embedded /></div>
       ) : selectedWorkflow ? (
         <>

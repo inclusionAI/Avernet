@@ -74,3 +74,11 @@ it('blocks cross-origin browser reads even when the global CORS policy allows th
  expect((await fetch(url,{headers:{origin:'https://clawweb.example','sec-fetch-site':'same-origin'}})).status).toBe(200)
  expect((await fetch(url)).status).toBe(200)
 })
+it('restricts all-person search to a verified administrator and validates scope',async()=>{
+ const url=await fixture()
+ expect((await fetch(`${url}?scope=all`,{headers:{cookie:'session=alice','x-user-id':'admin'}})).status).toBe(403)
+ const all=await fetch(`${url}?scope=all&personalStatus=pending`,{headers:{cookie:'session=admin'}});expect(all.status).toBe(200)
+ const body=await all.json();expect(body.scope).toBe('all')
+ expect(body.items[0].matchedApprovers).toEqual([{empId:'123',personalStatus:'pending'},{empId:'456',personalStatus:'pending'}])
+ expect((await fetch(`${url}?scope=everyone`,{headers:{cookie:'session=admin'}})).status).toBe(400)
+})

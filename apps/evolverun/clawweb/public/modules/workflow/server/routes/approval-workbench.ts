@@ -52,11 +52,13 @@ export function createApprovalWorkbenchRouter(store: ApprovalWorkbenchStore, res
       if (status && !['pending','handled','approved','rejected'].includes(status)) throw new ApprovalWorkbenchError('INVALID_ARGUMENT','无效审批状态')
       const cardStatus = stringParam('status')
       if (cardStatus && !['pending','approved','rejected'].includes(cardStatus)) throw new ApprovalWorkbenchError('INVALID_ARGUMENT','无效卡片状态')
-      const filters: ApprovalWorkbenchFilters = { empId:stringParam('empId'),workflowId:stringParam('workflowId'),flowId:stringParam('flowId'),
+      const scope = stringParam('scope')
+      if (scope && scope !== 'all') throw new ApprovalWorkbenchError('INVALID_ARGUMENT','无效查询范围')
+      const filters: ApprovalWorkbenchFilters = { scope:scope as ApprovalWorkbenchFilters['scope'], empId:stringParam('empId'),workflowId:stringParam('workflowId'),flowId:stringParam('flowId'),
         personalStatus:status as ApprovalWorkbenchFilters['personalStatus'], status:cardStatus as ApprovalWorkbenchFilters['status'], createdFrom:dateParam('createdFrom'),createdTo:dateParam('createdTo'),limit:numberParam('limit'),cursor:stringParam('cursor'),start:numberParam('start'),end:numberParam('end') }
       const result = await searchApprovalWorkbench(store, principal, filters)
       const base = (options.publicBaseUrl ?? '').replace(/\/+$/, '')
-      res.json({ ...result, page: { returned: result.items.length, hasMore: Boolean(result.nextCursor), nextCursor: result.nextCursor },
+      res.json({ ...result, ...(scope === 'all' ? {scope: 'all'} : {}), page: { returned: result.items.length, hasMore: Boolean(result.nextCursor), nextCursor: result.nextCursor },
         items:result.items.map(item=>({...item,createdAt:new Date(item.createdAt * 1000).toISOString(),approvalUrl:`${base}/approval/${item.cardId}`})) })
     } catch (error) {
       if (error instanceof ApprovalWorkbenchError) { res.status(error.code === 'FORBIDDEN' ? 403 : 400).json({code:error.code,message:error.message}); return }

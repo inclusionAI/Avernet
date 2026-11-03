@@ -77,3 +77,13 @@ it.each(['mysql','zdas'] as const)('locks the run then the card before taking a 
  expect(statements[0]).toMatch(/FROM flow_runs .* FOR UPDATE$/)
  expect(statements[1]).toMatch(/^SELECT \* FROM approval_cards WHERE id = \? FOR UPDATE$/)
 })
+it('queries all-person scope without a candidate employee and filters each person before paging', async()=>{
+ const raw=new Database(':memory:');raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT); INSERT INTO flow_runs VALUES ('f1','waiting'),('f2','waiting'),('f3','cancelled'); CREATE TABLE approval_cards (id INTEGER PRIMARY KEY,flow_id TEXT,node_id TEXT,workflow_id TEXT,workflow_title TEXT,message TEXT,approver_ids TEXT,approved_by TEXT,rejected_by TEXT,status TEXT,delivery_mode TEXT,created_at INTEGER); INSERT INTO approval_cards VALUES (1,'f1','n','wf','流程','审批','00123,456','00123','','pending','card-web',100),(2,'f2','n','wf','流程','审批','789','','','pending','card-web',99),(3,'f3','n','wf','流程','审批','222','','','pending','card-web',98)`)
+ const db=new SqliteDatabase(raw);connections.push(db);const store=createApprovalWorkbenchStore(db);const admin={userId:'999',isAdmin:true}
+ const first=await searchApprovalWorkbench(store,admin,{scope:'all',personalStatus:'pending',limit:1})
+ expect(first.items).toMatchObject([{cardId:1,matchedApprovers:[{empId:'456',personalStatus:'pending'}]}])
+ const second=await searchApprovalWorkbench(store,admin,{scope:'all',personalStatus:'pending',limit:1,cursor:first.nextCursor!})
+ expect(second.items).toMatchObject([{cardId:2,matchedApprovers:[{empId:'789',personalStatus:'pending'}]}]);expect(second.nextCursor).toBeNull()
+ const handled=await searchApprovalWorkbench(store,admin,{scope:'all',personalStatus:'handled'})
+ expect(handled.items).toMatchObject([{cardId:1,matchedApprovers:[{empId:'00123',personalStatus:'approved'}]}])
+})

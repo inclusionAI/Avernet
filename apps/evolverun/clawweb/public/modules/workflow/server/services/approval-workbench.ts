@@ -8,14 +8,14 @@ export type ApprovalWorkbenchCard = {
 }
 export type ApprovalPrincipal = { userId: string; isAdmin: boolean }
 export type ApprovalWorkbenchStore = {
-  scan(before: { createdAt: number; id: number } | null, limit: number, candidate: { empId: string; workflowId?: string; flowId?: string; createdFrom?: number; createdTo?: number; status?: string }): Promise<ApprovalWorkbenchCard[]>
+  scan(before: { createdAt: number; id: number } | null, limit: number, candidate: { empId?: string; workflowId?: string; flowId?: string; createdFrom?: number; createdTo?: number; status?: string }): Promise<ApprovalWorkbenchCard[]>
   findById?(id: number): Promise<import('../repositories/approval-card-repository.js').ApprovalCardRow | null>
   findRunStatus?(flowId: string): Promise<string | null>
   findLatestCardId?(flowId: string, nodeId: string): Promise<number | null>
   resolveActive?(id: number, actorId: string, action: 'approve' | 'reject', comment?: string): Promise<import('../repositories/approval-card-repository.js').ApprovalActionResult>
 }
 export type ApprovalWorkbenchFilters = {
-  empId?: string; workflowId?: string; flowId?: string;
+  empId?: string; scope?: 'all'; workflowId?: string; flowId?: string;
   personalStatus?: 'pending' | 'handled' | 'approved' | 'rejected';
   status?: 'pending' | 'approved' | 'rejected';
   createdFrom?: number; createdTo?: number; limit?: number; cursor?: string; start?: number; end?: number;
@@ -31,9 +31,12 @@ function includes(ids: string[], id: string) { return ids.some(value => normaliz
 
 /** Filter BEFORE pagination, scanning ordered DB chunks instead of dropping matches past a page. */
 export async function searchApprovalWorkbench(store: ApprovalWorkbenchStore, principal: ApprovalPrincipal, filters: ApprovalWorkbenchFilters) {
-  const actor = principal.userId.trim(), target = (filters.empId ?? actor).trim()
-  if (!actor || !target) throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '审批人工号不能为空')
-  if (normalizeApprovalEmployee(actor) !== normalizeApprovalEmployee(target) && !principal.isAdmin) throw new ApprovalWorkbenchError('FORBIDDEN', '仅管理员可以查询其他人的审批')
+  const actor = principal.userId.trim(), all = filters.scope === 'all'
+  const target = all ? undefined : (filters.empId ?? actor).trim()
+  if (!actor || (!all && !target)) throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '审批人工号不能为空')
+  if (all && !principal.isAdmin) throw new ApprovalWorkbenchError('FORBIDDEN', '仅管理员可以查询所有人的审批')
+  if (all && filters.empId != null) throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '所有人范围不能同时指定审批人工号')
+  if (target && normalizeApprovalEmployee(actor) !== normalizeApprovalEmployee(target) && !principal.isAdmin) throw new ApprovalWorkbenchError('FORBIDDEN', '仅管理员可以查询其他人的审批')
   const hasRange = filters.start != null || filters.end != null
   if (hasRange && (filters.cursor || filters.limit != null || filters.start == null || filters.end == null ||
       !Number.isInteger(filters.start) || !Number.isInteger(filters.end) || filters.start < 1 || filters.end < filters.start || filters.end > 10000 || filters.end - filters.start + 1 > 100)) {
@@ -44,7 +47,7 @@ export async function searchApprovalWorkbench(store: ApprovalWorkbenchStore, pri
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '每页数量必须在 1 至 100 之间')
   if (filters.createdFrom != null && filters.createdTo != null && filters.createdFrom >= filters.createdTo) throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '创建时间范围无效')
   const queryKey = createHash('sha256').update(JSON.stringify([
-    normalizeApprovalEmployee(actor), normalizeApprovalEmployee(target), filters.workflowId ?? null, filters.flowId ?? null,
+    normalizeApprovalEmployee(actor), all ? {scope:'all'} : normalizeApprovalEmployee(target!), filters.workflowId ?? null, filters.flowId ?? null,
     filters.personalStatus ?? null, filters.status ?? null, filters.createdFrom ?? null, filters.createdTo ?? null,
   ])).digest('hex')
   let before: { createdAt: number; id: number } | null = null
@@ -55,10 +58,10 @@ export async function searchApprovalWorkbench(store: ApprovalWorkbenchStore, pri
       before = { id: decoded.id, createdAt: decoded.createdAt }
     } catch { throw new ApprovalWorkbenchError('INVALID_ARGUMENT', '分页参数无效') }
   }
-  const items: Array<{ cardId: number; flowId: string; nodeId: string; workflowId: string; workflowTitle: string | null; message: string | null; approverIds: string[]; status: string; personalStatus: 'pending' | 'approved' | 'rejected'; actionability: 'available' | 'unknown' | 'none'; createdAt: number }> = []
+  const items: Array<{ cardId: number; flowId: string; nodeId: string; workflowId: string; workflowTitle: string | null; message: string | null; approverIds: string[]; status: string; personalStatus: 'pending' | 'approved' | 'rejected' | null; matchedApprovers?: Array<{empId:string;personalStatus:'pending'|'approved'|'rejected'}>; actionability: 'available' | 'unknown' | 'none'; createdAt: number }> = []
   let more = false, last: { createdAt: number; id: number } | null = null
   while (true) {
-    const batch = await store.scan(before, 200, { empId: normalizeApprovalEmployee(target), workflowId: filters.workflowId, flowId: filters.flowId, createdFrom: filters.createdFrom, createdTo: filters.createdTo, status: filters.status })
+    const batch = await store.scan(before, 200, { empId: target ? normalizeApprovalEmployee(target) : undefined, workflowId: filters.workflowId, flowId: filters.flowId, createdFrom: filters.createdFrom, createdTo: filters.createdTo, status: filters.status })
     if (!batch.length) break
     for (const row of batch) {
       before = { createdAt: Number(row.created_at), id: Number(row.id) }
@@ -66,17 +69,29 @@ export async function searchApprovalWorkbench(store: ApprovalWorkbenchStore, pri
       if (filters.createdFrom != null && Number(row.created_at) < filters.createdFrom) continue
       if (filters.createdTo != null && Number(row.created_at) >= filters.createdTo) continue
       const approverIds = list(row.approver_ids)
-      if (!includes(approverIds, target)) continue
-      const approved = includes(list(row.approved_by), target), rejected = includes(list(row.rejected_by), target)
-      if (approved && rejected) continue // inconsistent historical data must not become an actionable task
-      const personalStatus = approved ? 'approved' : rejected ? 'rejected' : row.status === 'pending' ? 'pending' : null
-      if (personalStatus === 'pending' && (terminalRun(row.run_status) || row.is_latest === 0)) continue
-      if (!personalStatus || (filters.personalStatus === 'handled' && personalStatus === 'pending') ||
-          (filters.personalStatus && filters.personalStatus !== 'handled' && filters.personalStatus !== personalStatus)) continue
+      const candidates = all ? approverIds : target && includes(approverIds, target) ? [target] : []
+      const seen = new Set<string>()
+      const matchedApprovers: Array<{empId:string;personalStatus:'pending'|'approved'|'rejected'}> = []
+      for (const person of candidates) {
+        const key = normalizeApprovalEmployee(person)
+        if (seen.has(key)) continue
+        seen.add(key)
+        const approved = includes(list(row.approved_by), person), rejected = includes(list(row.rejected_by), person)
+        if (approved && rejected) continue // inconsistent history is not actionable
+        const personalStatus = approved ? 'approved' : rejected ? 'rejected' : row.status === 'pending' ? 'pending' : null
+        if (personalStatus === 'pending' && (terminalRun(row.run_status) || row.is_latest === 0)) continue
+        if (!personalStatus || (filters.personalStatus === 'handled' && personalStatus === 'pending') ||
+            (filters.personalStatus && filters.personalStatus !== 'handled' && filters.personalStatus !== personalStatus)) continue
+        matchedApprovers.push({empId: all ? person : approverIds.find(id => normalizeApprovalEmployee(id) === key)!, personalStatus})
+      }
+      if (!matchedApprovers.length) continue
+      // An all-person card can contain several different personal decisions.
+      const personalStatus = all ? null : matchedApprovers[0].personalStatus
+      const hasPendingApprover = matchedApprovers.some(person => person.personalStatus === 'pending')
       if (skip > 0) { skip--; continue }
       if (items.length === limit) { more = true; break }
       items.push({ cardId: row.id, flowId: row.flow_id, nodeId: row.node_id, workflowId: row.workflow_id,
-        workflowTitle: row.workflow_title, message: row.message, approverIds, status: row.status, personalStatus, actionability: personalStatus !== 'pending' ? 'none' : activeApprovalRun(row.run_status) && row.is_latest === 1 ? 'available' : 'unknown', createdAt: Number(row.created_at) })
+        workflowTitle: row.workflow_title, message: row.message, approverIds, status: row.status, personalStatus, ...(all ? {matchedApprovers} : {}), actionability: !hasPendingApprover ? 'none' : activeApprovalRun(row.run_status) && row.is_latest === 1 ? 'available' : 'unknown', createdAt: Number(row.created_at) })
       last = before
     }
     if (more || batch.length < 200) break
