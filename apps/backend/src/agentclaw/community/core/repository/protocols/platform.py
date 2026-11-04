@@ -199,6 +199,11 @@ class TaskQueueRepositoryProtocol(Protocol):
         ``retired`` holds each row whose retirement *this* call made (read back
         after its ``UPDATE`` landed), so the worker can run the task type's
         give-up hook for it. A row another worker retired first is not in it.
+
+        When ``task_types`` is provided, select only those types, or exclude
+        them when ``exclude_task_types`` is true. Filtering precedes each
+        branch's limit and also guards claim and retirement updates. ``None``
+        keeps the original unfiltered behavior.
         """
         ...
 
