@@ -1,5 +1,5 @@
 // 对话页二级侧栏:搜索 + 我的 Bot / 团队空间 Bot / 好友 Bot 三组目录(组名按 dmore index.html 侧栏实测);
-// 团队 Bot 数据走独立 collaborations 目录(section=team,独立加载/错误/重试,他人会话开发中暂禁)。
+// 团队空间 Bot 数据走独立 collaborations 目录(section=team,独立加载/错误/重试,他人会话开发中暂禁)。
 // 本体(ConversationSidebarContent)与外壳分离:桌面端用 ResizableWorkspaceSidebar,
 // <lg 由页面(任务 8)以 Drawer 包裹同一 Content,保证两端一致。
 // 组件只消费 Store 状态与同步 setter / Hook 模型回调,不触达 Service。
@@ -19,7 +19,7 @@ import { FriendItem, ManagedItem } from './ConversationSidebarItems';
 
 export interface ConversationSidebarProps {
   managedBots: ConversationBotView[];
-  /** 团队 Bot 第三分组(collaborations 目录,section=team;sprint spec 2026-10-10-conversation-team-bots)。 */
+  /** 团队空间 Bot 第三分组(collaborations 目录,section=team;sprint spec 2026-10-10-conversation-team-bots)。 */
   teamBots: ConversationBotView[];
   friendBots: ConversationBotView[];
   store: ConversationState;

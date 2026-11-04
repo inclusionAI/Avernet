@@ -19,7 +19,7 @@ export interface ConversationOriginFilterProps {
   /** 是否展示「发起人」分组;好友 Bot 无归属概念,仅保留「会话」范围(dmore 截图 3.png)。 */
   supportsOrigin?: boolean;
   supportsFavorites?: boolean;
-  /** 团队 Bot 他人会话后端尚未就绪；保留选项提示但不可操作。 */
+  /** 团队空间 Bot 他人会话后端尚未就绪；保留选项提示但不可操作。 */
   othersDisabled?: boolean;
   /** 外部显隐类注入（行级 hover 群发 + 激活常显，2026-11-04 操作组显隐重构）。 */
   triggerClassName?: string;

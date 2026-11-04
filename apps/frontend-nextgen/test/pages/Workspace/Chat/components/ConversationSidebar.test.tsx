@@ -115,7 +115,7 @@ describe('ConversationSidebar', () => {
       />,
     );
     const search = screen.getByRole('textbox', { name: '搜索 Bot' });
-    // 关键词只命中团队 Bot:管理/好友分组仍渲染组题但行过滤不出。
+    // 关键词只命中团队空间 Bot:管理/好友分组仍渲染组题但行过滤不出。
     fireEvent.change(search, { target: { value: '团队空间' } });
     expect(screen.getByText('团队空间 Bot A')).toBeInTheDocument();
     expect(screen.queryByText('管理 Bot A')).not.toBeInTheDocument();
@@ -727,7 +727,7 @@ describe('ConversationSidebar', () => {
       fireEvent.click(teamToggles);
       expect(useConversationStore.getState().collapsedBotGroups).toEqual({ team: true });
       syncStore();
-      // 收起即净:团队 Bot 行不渲染,标题计数仍在;搜索时强制展开可检索。
+      // 收起即净:团队空间 Bot 行不渲染,标题计数仍在;搜索时强制展开可检索。
       expect(screen.queryByText('团队空间 Bot A')).toBeNull();
       expect(within(screen.getByRole('group', { name: '团队空间 Bot' })).getByText('1')).toBeInTheDocument();
       expect(teamToggles).toHaveAttribute('aria-expanded', 'false');
@@ -908,7 +908,7 @@ it('搜索中团队组无匹配时保留分类标题，不展示目录空态', (
 });
 
 it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () => {
-  const team: ConversationBotView = { ...botOf('team:entity', '团队 Bot'), section: 'team' };
+  const team: ConversationBotView = { ...botOf('team:entity', '团队空间 Bot'), section: 'team' };
   render(<ConversationSidebar {...sidebarProps({ teamBots: [team] })} />);
   const teamGroup = screen.getByRole('group', { name: '团队空间 Bot' });
   fireEvent.click(within(teamGroup).getByRole('button', { name: '发起人与会话筛选' }));

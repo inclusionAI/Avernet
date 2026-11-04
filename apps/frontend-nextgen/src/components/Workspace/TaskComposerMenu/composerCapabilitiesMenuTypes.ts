@@ -21,7 +21,7 @@ export interface ComposerCapabilitiesMenuProps {
   onDynamicSelected?: () => void;
   /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
   onRemoveSelection?: (key: string) => void;
-  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队 Bot 传入）。
+  /** 能力集只读查看装配（useBotCapabilitySets；单聊 我的/团队空间 Bot 传入）。
    * 不传时「通用协作能力」文案区不渲染——好友 Bot 会话与协作群即此形态，＋ 区独立保留。 */
   capabilitySets?: ComposerCapabilitySetsState | null;
   /** 调试会话仅复用附件与能力集入口，不暴露任务创建菜单。 */

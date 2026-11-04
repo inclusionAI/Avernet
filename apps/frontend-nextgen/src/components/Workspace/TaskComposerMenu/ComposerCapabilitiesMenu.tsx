@@ -4,7 +4,7 @@
  * 胶囊拆区（add-composer-capability-set-viewer，2026-10-14）：DMore 179×28 胶囊保持原视觉，
  * 以竖分隔线为界拆为两个独立触发区——
  * - ＋ 圆钮（aria「添加附件」）：打开原混排菜单（上传文件/添加图片/文件管理 + 任务/工作流任务），行为不变；
- * - 「通用协作能力 ⌄」文案区：仅当调用方装配 capabilitySets（单聊 我的/团队 Bot）时渲染，
+ * - 「通用协作能力 ⌄」文案区：仅当调用方装配 capabilitySets（单聊 我的/团队空间 Bot）时渲染，
  *   打开只读能力集查看（CapabilitySetViewer：已激活集 + 【查看明细】Skills/MCP 子面板）。
  * 好友 Bot 会话与协作群不传 capabilitySets → 文案区不渲染，＋ 区独立保留。
  *
@@ -265,7 +265,7 @@ export function ComposerCapabilitiesMenu({
             {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
           </PopoverContent>
         </Popover>
-        {/* 「通用协作能力」文案区：仅单聊 我的/团队 Bot 装配（capabilitySets 非空）。
+        {/* 「通用协作能力」文案区：仅单聊 我的/团队空间 Bot 装配（capabilitySets 非空）。
          * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。 */}
         {capabilitySets ? (
           <>

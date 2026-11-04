@@ -29,7 +29,7 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
-  /** 「通用协作能力」能力集只读查看装配（我的/团队 Bot 非空；好友 Bot 为 null，
+  /** 「通用协作能力」能力集只读查看装配（我的/团队空间 Bot 非空；好友 Bot 为 null，
    *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
   capabilitySets: ComposerCapabilitySetsState | null;
 }

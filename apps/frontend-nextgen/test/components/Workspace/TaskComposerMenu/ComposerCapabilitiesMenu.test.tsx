@@ -32,7 +32,7 @@ function execution(overrides: Partial<UseTaskExecutionResult> = {}): UseTaskExec
   };
 }
 
-/** 能力集装配桩（单聊 我的/团队 Bot 场景传入）。 */
+/** 能力集装配桩（单聊 我的/团队空间 Bot 场景传入）。 */
 function capabilitySets(overrides: Partial<ComposerCapabilitySetsState> = {}): ComposerCapabilitySetsState {
   return {
     sets: [{ id: 'set-1', name: '默认能力集', isDefault: true, mcps: [] }],

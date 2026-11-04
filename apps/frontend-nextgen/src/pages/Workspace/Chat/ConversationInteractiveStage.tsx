@@ -135,7 +135,7 @@ export function ConversationInteractiveStage(props: {
                   onWorkflowSelected={taskExecution.selectWorkflow}
                   onDynamicSelected={taskExecution.selectDynamic}
                   onRemoveSelection={taskExecution.removeSelection}
-                  /* 能力集只读查看：我的/团队 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
+                  /* 能力集只读查看：我的/团队空间 Bot 装配（好友 Bot 为 null 不渲染文案区）。 */
                   capabilitySets={fileFeature.capabilitySets}
                   /* 平台注入的额外菜单行（capability 覆盖式插槽），如知识库引用入口。 */
                   extraMenuRows={composer.extraMenuRows}

@@ -118,7 +118,7 @@ export const teamBotConversationService = {
           !Number.isFinite(data.total) ||
           data.total < 0
         ) {
-          throw new Error(response.message || '团队 Bot 接口返回格式异常');
+          throw new Error(response.message || '团队空间 Bot 接口返回格式异常');
         }
         for (const dto of data.items) {
           if (typeof dto.bot_id !== 'string' || !dto.bot_id.trim()) continue;
