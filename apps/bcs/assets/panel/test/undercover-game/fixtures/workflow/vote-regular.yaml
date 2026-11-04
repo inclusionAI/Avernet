@@ -1,0 +1,88 @@
+name: "谁是卧底 第1轮 投票"
+metadata:
+  description: "存活玩家根据全部发言并行投票，主持人计票"
+participants:
+  seat2:
+    display_name: "2号 小甲"
+    required: true
+  seat3:
+    display_name: "3号 小乙"
+    required: true
+  seat4:
+    display_name: "4号 小丙"
+    required: true
+  seat5:
+    display_name: "5号 小丁"
+    required: true
+  referee:
+    display_name: "主持人"
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    defaults:
+      node_timeout_ms: 420000
+      max_attempts: 1
+    nodes:
+      vote_start:
+        kind: bot_task
+        display_name: "投票预备确认"
+        assignee:
+          type: bot_binding
+          binding: seat2
+        transitions:
+          complete:
+            targets: [vote_1, vote_2, vote_3, vote_4, vote_5]
+      vote_1:
+        kind: human_input
+        display_name: "👤 你的投票（1号 · 人类玩家）"
+        node_timeout_ms: 900000
+        transitions:
+          complete:
+            targets: [tally]
+      vote_2:
+        kind: bot_task
+        display_name: "2号投票"
+        assignee:
+          type: bot_binding
+          binding: seat2
+        transitions:
+          complete:
+            targets: [tally]
+      vote_3:
+        kind: bot_task
+        display_name: "3号投票"
+        assignee:
+          type: bot_binding
+          binding: seat3
+        transitions:
+          complete:
+            targets: [tally]
+      vote_4:
+        kind: bot_task
+        display_name: "4号投票"
+        assignee:
+          type: bot_binding
+          binding: seat4
+        transitions:
+          complete:
+            targets: [tally]
+      vote_5:
+        kind: bot_task
+        display_name: "5号投票"
+        assignee:
+          type: bot_binding
+          binding: seat5
+        transitions:
+          complete:
+            targets: [tally]
+      tally:
+        kind: bot_task
+        display_name: "开票"
+        assignee:
+          type: bot_binding
+          binding: referee
+        node_timeout_ms: 600000
+        final_output: true

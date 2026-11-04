@@ -136,7 +136,7 @@ The scan enforces complete provenance, no tracked source-pack archives, a 120 Ki
 
 ### Local design preview
 
-Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=600&mode=vote`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states.
+Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=600&mode=vote`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states. Every mode also renders the real workflow-board mock: `mode=vote`/`mode=pk-vote` show the parallel `vote_start → vote_N → tally` graph, while speech modes show the serial `speak_N → collect` graph.
 
 ### Host portrait and speech status
 
@@ -153,6 +153,53 @@ The persistent Action Dock is independent of the actor details:
 - recovery: confirmed `onAction({type:'send_message', content:'卡住了'})` through the existing host bridge.
 
 Server-side HumanInput validation remains authoritative. Expired or conflicting submissions become stale and trigger a refresh. Vote targets and raw structured vote output remain hidden during active collection, including structured ballots that arrive as host node artifacts; host tally prose and the authorized phase-end result remain public.
+
+### State-machine workflow board
+
+The panel shows the current phase's real BCS state-machine graph through the
+existing `GET /state-machine-runs/{run_id}/graph` response. The board is a
+structural projection only:
+
+- **Read fields:** `run.run_id`, `run.status`, `nodes[].node_id`,
+  `nodes[].status`, `nodes[].attempt`, and `edges[].source/target`. It never
+  reads `artifact_text`, `instruction`, `display_name`, `error`, words, ballots,
+  or vote targets. Raw error values are never rendered; a failed node shows only
+  its public `失败` state.
+- **Node identity:** `nodeActorMap` maps `speak_N`/`vote_N` to the player's public
+  seat nickname and `collect`/`tally` to the host. `vote_start` is a known
+  protocol confirmation node that is intentionally absent from `nodeActorMap`,
+  so it renders as a neutral "预备/投票开始确认" node instead of a player.
+  Nodes missing from the map are shown as `未映射节点` with a degrade notice.
+- **Topology:** lanes are derived from the actual graph edges by longest-path
+  rank. Regular speech therefore draws the real serial chain of `speak_N`
+  nodes and its final `collect`; vote draws `vote_start` → parallel `vote_N` →
+  `tally`; PK uses the same graph shapes for the PK candidates/voters that the
+  run actually contains. The board never hardcodes node counts or guesses a
+  node's status from `phase`.
+- **States:** `pending`, `ready`, `running`, `completed`, `failed`, `aborted`,
+  `retry_scheduled`, and `skipped` are rendered with distinct labels/tones (`aborted`
+  has its own tone even though it shares the terminal semantics of `failed`);
+  `attempt > 1` or `retry_scheduled` adds an attempt badge. The run status is
+  shown separately from node status. Unrecognized values show `状态未知` rather
+  than being inferred.
+- **Degradation:** a missing graph shows "尚未获取本阶段运行图"; a graph whose
+  `run.run_id` differs from the panel `runId` invalidates and clears the board;
+  missing `edges` renders the real node list without inferred order; unknown
+  nodes or node kinds, unknown edges, self-loop/cyclic graphs, duplicate edges
+  (deduplicated), and unknown statuses show explicit notices and never
+  fabricate progress.
+- **Layout/privacy:** the board sits above the table stage with horizontally
+  scrolling lanes (also in narrow panels) and connector lines/arrowheads drawn
+  from the real edges. The board body is height-capped (`min(240px, 30vh)`) and
+  scrolls both axes so the night-banquet stage stays reachable on first paint
+  even for the taller parallel-vote graph. It contains no live input, so speech/vote submission,
+  confirmation, timer, keyboard focus, and recovery behavior are unchanged.
+
+The board is fixture-tested from graphs derived from the actual referee
+`render_speak_yaml`/`render_vote_yaml` output: serial speech, parallel vote with
+`tally` last, PK speech/vote, failed/retry states, missing graph/edges, unknown
+nodes, run switching, and a privacy scan for forbidden artifact/error/word/vote
+fields.
 
 ### Club room and game finale
 
@@ -220,4 +267,4 @@ Preview PK with `?width=560&height=800&mode=pk-vote` or `?width=360&height=600&m
 - The night-banquet view is verified through jsdom component tests, deterministic atlas checks, and the local Vite preview; it has not been visually regression-tested in a real browser against a live BCS deployment here.
 - PK uses the existing contract and is covered by the focused/component fixtures, but only limited PK visual QA was performed in this phase.
 - Narrow layout keeps the vignette/roster fallback; the full stage is optimized for wide/medium containers.
-- No new workflow/state-machine visualization, BCS Service API, Plugin API, referee script, database, or migration change is introduced.
+- The workflow board is verified from real referee-script graph fixtures and the local preview; it has not yet been validated against a live BCS deployment/run. No BCS Service API, Plugin API, referee script, database, or migration change is introduced.
