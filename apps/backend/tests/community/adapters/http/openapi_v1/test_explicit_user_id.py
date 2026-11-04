@@ -638,7 +638,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The non-user Bot overview adds one Bot-path operation with no user_id.
 # The task_config match probe adds one operation without a path/query bot_id.
 # Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 142}
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 143}
 
 
 def _schema() -> dict:
