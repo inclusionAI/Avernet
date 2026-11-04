@@ -105,10 +105,10 @@ consumed from the row:
 | Column | Use |
 | --- | --- |
 | `id`, `avernet_tenant`, `env`, `is_delete` | scope + liveness filter |
-| `bot_id`, `entity_id` | immutable BCS address `<bot_id>:<entity_id>` |
+| `bot_id`, `entity_id`, `bot_type` | established address via `bcn_bot_reference`: service entity reference, retained conversion reference, or the legacy personal/default Owner reference |
 | `bot_name` | profile `name` (missing saved value projects to `bot_id`, the same projection the daily BCN metadata path sends) |
 | `bot_desc` | profile `summary` (missing saved value projects to `""`) |
-| `ext` | avatar projection via the shared `avatar_from_record` helper |
+| `ext` | avatar projection via `avatar_from_record` and retained `bcn_provider_bot_ref` for converted service Bots |
 | `owner_id` | current committed Owner (`owner_user_id`) |
 | `call_type` | caller `enabled` for an established config |
 | `caller_config_revision` | caller applicability + `source_revision` |
@@ -156,6 +156,13 @@ facts error rather than parsing into a default payload.
   raises `MetadataDeliveryError(kind, code)` with the stable
   NOT_SENT / REJECTED / UNKNOWN classification. HTTP status mapping
   belongs to the adapter, not to Core or kernel.
+- Empty/blank summaries cannot be confirmed through the existing onboard
+  contract: BCS preserves the previous summary and its reply does not echo it.
+  After an otherwise confirmed profile send, report `unknown` with
+  `collaboration_summary_unconfirmed`. Name/avatar may have been applied;
+  independent managers/caller items continue. No second write, retry, or
+  unverified summary-clear success is introduced. The recording Plugin models
+  the same preservation and outcome.
 - Per-item outcomes are explicit. `RepairReport` carries one item per
   fixed component; `report_status` derives `succeeded` /
   `partial_failed` / `failed` from the items alone, and an empty report

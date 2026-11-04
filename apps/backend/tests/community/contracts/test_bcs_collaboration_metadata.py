@@ -14,6 +14,7 @@ assertion below.
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -51,11 +52,13 @@ from agentclaw.community.plugin_api.bcs_collaboration_metadata import (
 from agentclaw.community.plugin_api.bcs_managers import BcsManagersPlugin
 from agentclaw.community.plugin_api.bcs_ownership import BcsOwnershipPlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.local.bcs_collaboration_metadata import (
     RecordingBcsCollaborationMetadataPlugin,
 )
 from agentclaw.community.plugins.local.bcs_managers import RecordingBcsManagersPlugin
 from agentclaw.community.plugins.local.bcs_ownership import RecordingBcsOwnershipPlugin
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from tests.community.core.bot_collaborator.manager_sync.factories import seed_sync_facts
 
 _TENANT = "t"
@@ -135,6 +138,10 @@ def repair_world(world):
         space_id=None,
         bot_id=_BOT_ID,
     )
+    with avernet_tenant_scope(_TENANT), world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == _BOT_PK).update(
+            {"bot_desc": "Saved summary"}
+        )
     command = RepairCommand(SyncKey(_TENANT, _ENV, _BOT_PK), _OWNER)
     return (
         command,
@@ -149,6 +156,62 @@ async def test_consumer_uses_metadata_plugin(repair_world):
     report = await service.repair(command)
     assert report.status == "succeeded"
     assert [name for name, value in metadata.calls] == ["exists", "profile"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bot_type,bot_id,reference,expected",
+    [
+        ("personal", "b", None, "b:owner"),
+        ("desktop", "b", None, "b:owner"),
+        ("service", "default", None, "default:owner"),
+        ("service", "b", None, "b:e"),
+        ("service", "b", "b:original-owner", "b:original-owner"),
+    ],
+)
+async def test_all_components_use_the_established_registration_reference(
+    world, repair_world, bot_type, bot_id, reference, expected,
+):
+    command, service, metadata = repair_world
+    with avernet_tenant_scope(_TENANT), world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == _BOT_PK).update({
+            "bot_id": bot_id,
+            "bot_type": bot_type,
+            "ext": json.dumps({"bcn_provider_bot_ref": reference}),
+            "call_type": "caller",
+            "caller_config_revision": 9,
+        })
+    metadata.existing.clear()
+    metadata.existing.add(expected)
+
+    report = await service.repair(command)
+
+    assert report.status == "succeeded"
+    assert metadata.calls[0] == ("exists", expected)
+    assert [operation for operation, _ in metadata.calls] == ["exists", "profile", "caller"]
+    assert all(snapshot.bcs_bot_id == expected for _, snapshot in metadata.calls[1:])
+    assert [snapshot.bcs_bot_id for snapshot in world.get(BcsOwnershipPlugin).calls] == [expected]
+    assert [snapshot.bcs_bot_id for snapshot in world.get(BcsManagersPlugin).calls] == [expected]
+
+
+@pytest.mark.asyncio
+async def test_consumer_reports_unconfirmed_summary_without_losing_other_items(
+    world, repair_world,
+):
+    command, service, metadata = repair_world
+    await service.repair(command)
+    metadata.calls.clear()
+    with avernet_tenant_scope(_TENANT), world.get(DatabasePlugin).orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == _BOT_PK).update({"bot_desc": ""})
+
+    report = await service.repair(command)
+
+    assert report.status == "partial_failed"
+    assert report.items[1].status == "unknown"
+    assert report.items[1].error_code == "collaboration_summary_unconfirmed"
+    assert report.items[2].status == "succeeded"
+    assert metadata.profiles[_STABLE].summary == "Saved summary"
+    assert [operation for operation, _ in metadata.calls] == ["exists", "profile"]
 
 
 @pytest.mark.asyncio

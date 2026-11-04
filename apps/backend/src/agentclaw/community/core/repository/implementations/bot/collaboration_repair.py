@@ -9,9 +9,12 @@ business mutator, writes no state, and never bumps
 
 from __future__ import annotations
 
+import json
+
 from injector import inject
 from sqlalchemy.exc import SQLAlchemyError
 
+from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
 from agentclaw.community.core.bot_management.collaboration_repair.profile import (
     avatar_from_record,
 )
@@ -73,6 +76,8 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
         session is still open here; the frozen facts are returned only
         after it closes.
         """
+        # Validate ext before reading the retained registration reference from it.
+        avatar_url = self._avatar(bot)
         bcs_bot_id = self._bcs_bot_id(bot)
         return RepairFacts(
             key=key,
@@ -84,7 +89,7 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
                 # saved description to an explicit empty summary.
                 name=bot.bot_name or bot.bot_id,
                 summary=bot.bot_desc or "",
-                avatar_url=self._avatar(bot),
+                avatar_url=avatar_url,
             ),
             owner_user_id=bot.owner_id,
             caller=self._caller(bot, bcs_bot_id),
@@ -92,18 +97,25 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
 
     @staticmethod
     def _bcs_bot_id(bot: BotModel) -> str:
-        """Compose the immutable BCS address, refusing owner-derived parts.
-
-        The address is always ``<bot_id>:<entity_id>``; a missing,
-        blank or padded saved value raises instead of being guessed,
-        and the current Owner is never substituted for the entity.
-        """
+        """Use the same established reference as registration and sync projectors."""
         for name, value in (("bot_id", bot.bot_id), ("entity_id", bot.entity_id)):
             if not isinstance(value, str) or not value or value != value.strip():
                 raise RepairFactsError(
                     RepairFactsErrorCode.COLLABORATION_BOT_IDENTITY_UNRESOLVED
                 )
-        return f"{bot.bot_id}:{bot.entity_id}"
+        try:
+            return bcn_bot_reference({
+                "bot_id": bot.bot_id,
+                "entity_id": bot.entity_id,
+                "owner_id": bot.owner_id,
+                "bot_type": bot.bot_type,
+                # _project has already validated that ext is a JSON object.
+                "ext": json.loads(bot.ext) if bot.ext is not None else {},
+            })
+        except ValueError as exc:
+            raise RepairFactsError(
+                RepairFactsErrorCode.COLLABORATION_BOT_IDENTITY_UNRESOLVED
+            ) from exc
 
     @staticmethod
     def _avatar(bot: BotModel) -> str:

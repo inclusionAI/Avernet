@@ -15,13 +15,33 @@
 - 精确路径：`POST /openapi/v1/bots/{bot_id}/collaboration/repair`，不使用 `/bcs/repair`。
 - “BCS 对应 Bot 不存在时返回明确错误，不自动注册、不创建、不恢复已删除 Bot。”
 - 只有 Backend 当前 Owner 可修复；沿用 App grant、admission、租户、地址解析和授权机制。
-- 稳定 BCS 身份使用解析得到的 `bot_id:entity_id`，不能用当前 Owner 当后缀。
+- BCS 身份复用既有 `bcn_bot_reference`；保留 personal/default 的注册规则和 service 转换引用，service Bot handoff 不以当前 Owner 重拼地址。
 - 修复范围为 `ownership`、`profile`（名称/描述/头像）、`managers`、适用的 `caller_config`；不盲目覆盖审批、visibility、friend_ext、运行时或凭证。
 - 手动修复每项至多一次写入，不调用仅入队的 request_bot，不调用带默认重试的 sync_once；不改变既有后台同步规则。
 - Core 不导入 HTTP 框架、具体 Plugin 或读取环境；装配只在 composition root。
 - Backend 自身数据库读写失败报错，不当作空事实或成功；下游分项失败必须明确报告。
 - 除 Task 1 经批准保留的 BotService 历史豁免外，新增/修改源码 ≤1,000 行；不修改 BCS、前端或无关业务，不降低 CI/覆盖阈值。
 - 本文所有步骤是未来执行指令；编写基线 `a9b62a1f2`，测试“预期”不是验证证据。
+
+## PR #3569 review fixes (2026-11-04)
+
+1. Add SQL-reader and consumer regressions for personal/default Bots and
+   converted service Bots. Resolve their established reference through
+   `bcn_bot_reference`, including the saved `bcn_provider_bot_ref`, and reject
+   invalid stored references before sending.
+2. Add production-adapter and consumer regressions for empty/blank summaries.
+   The existing BCS onboard contract preserves the old summary and does not
+   echo it; after a confirmed onboard, report `profile=unknown` with
+   `collaboration_summary_unconfirmed` for these inputs. Keep the avatar/name
+   write and subsequent independent items, without adding another write or
+   changing the BCS contract. Align the recording implementation and docs.
+3. Cover multiline credential constructors and field-like literal values in
+   the secret scanner. Exempt lookup keys only in their actual AST position;
+   inspect complete multiline calls before declaring them safe.
+4. Diagnose the failing Backend job from its logs/artifacts, reproduce its
+   failure, and fix the cause without reducing test/coverage thresholds.
+5. Run focused regressions, architecture and contract suites, the Backend CI
+   gate, source-size checks and the secret scanner over the final changes.
 
 ---
 

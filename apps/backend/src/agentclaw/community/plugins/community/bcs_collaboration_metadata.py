@@ -201,6 +201,14 @@ class BcnCollaborationMetadataAdapter(BcsCollaborationMetadataPlugin):
         except BcnServiceError as exc:
             self._raise_delivery_failure("profile", snapshot.bcs_bot_id, exc)
         self._confirm_onboard(snapshot.bcs_bot_id, result)
+        if not snapshot.summary.strip():
+            # BCS onboard treats empty/blank summaries as Keep, and its reply
+            # does not echo the stored summary. Name/avatar may have changed,
+            # but this acknowledgement cannot confirm the entire profile.
+            raise MetadataDeliveryError(
+                DeliveryFailure.UNKNOWN,
+                MetadataDeliveryErrorCode.COLLABORATION_SUMMARY_UNCONFIRMED,
+            )
         logger.info(
             "collaboration_metadata operation=profile bcs_bot_id=%s outcome=confirmed",
             snapshot.bcs_bot_id,

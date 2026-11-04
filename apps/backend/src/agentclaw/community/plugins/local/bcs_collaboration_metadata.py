@@ -18,6 +18,7 @@ so a scripted failure always characterizes the delivery of a known Bot.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 
 from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.kernel.collaboration_repair import (
@@ -83,6 +84,17 @@ class RecordingBcsCollaborationMetadataPlugin(BcsCollaborationMetadataPlugin):
         failure = self.failures.get("profile")
         if failure is not None:
             raise failure
+        if not snapshot.summary.strip():
+            # Match the existing onboard transport: a blank summary preserves
+            # the previous value while name/avatar can still be applied.
+            previous = self.profiles.get(snapshot.bcs_bot_id)
+            self.profiles[snapshot.bcs_bot_id] = replace(
+                snapshot, summary=previous.summary if previous is not None else ""
+            )
+            raise MetadataDeliveryError(
+                DeliveryFailure.UNKNOWN,
+                MetadataDeliveryErrorCode.COLLABORATION_SUMMARY_UNCONFIRMED,
+            )
         self.profiles[snapshot.bcs_bot_id] = snapshot
 
     async def sync_caller(

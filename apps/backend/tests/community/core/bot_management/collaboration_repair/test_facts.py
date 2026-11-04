@@ -153,6 +153,50 @@ def test_owner_change_never_leaks_into_the_stable_address(db: DatabasePlugin) ->
     assert "orig-owner" not in facts.profile.bcs_bot_id
 
 
+@pytest.mark.parametrize(
+    "bot_type,bot_id,reference,expected",
+    [
+        ("personal", "b", None, "b:owner"),
+        ("desktop", "b", None, "b:owner"),
+        ("service", "default", None, "default:owner"),
+        ("service", "b", None, "b:staff_original"),
+        ("service", "b", "b:original-owner", "b:original-owner"),
+    ],
+)
+def test_profile_and_caller_use_the_registered_reference(
+    db: DatabasePlugin, bot_type: str, bot_id: str,
+    reference: str | None, expected: str,
+) -> None:
+    key = seed_sync_facts(
+        db, tenant="t", env="dev", bot_pk=21,
+        entity_id="staff_original", owner_id="owner", bot_id=bot_id,
+    )
+    _update_bot(
+        db, 21, bot_type=bot_type,
+        ext=json.dumps({"bcn_provider_bot_ref": reference}),
+        call_type="caller", caller_config_revision=3,
+    )
+
+    facts = _reader(db).read_facts(key)
+
+    assert facts.profile.bcs_bot_id == expected
+    assert facts.caller == CallerSnapshot(expected, True, 3)
+
+
+@pytest.mark.parametrize("reference", ["", "other:owner", "b:", 123])
+def test_invalid_retained_reference_does_not_fall_back_to_entity(
+    db: DatabasePlugin, reference: object,
+) -> None:
+    key = seed_sync_facts(
+        db, tenant="t", env="dev", bot_pk=22,
+        entity_id="staff_original", owner_id="owner", bot_id="b",
+    )
+    _update_bot(db, 22, ext=json.dumps({"bcn_provider_bot_ref": reference}))
+
+    with pytest.raises(RepairFactsError, match="collaboration_bot_identity_unresolved"):
+        _reader(db).read_facts(key)
+
+
 def test_missing_deleted_and_wrong_scope_never_produce_facts(
     db: DatabasePlugin,
 ) -> None:

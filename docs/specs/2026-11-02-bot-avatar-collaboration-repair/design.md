@@ -195,7 +195,7 @@ POST /openapi/v1/bots/{bot_id}/collaboration/repair
 - 复用 OpenAPI 当前认证、App grant、Bot admission 与 owner-scoped 授权链，只有 Backend 当前 Owner 可执行。
 - Backend 授权、租户及存活状态校验在任何 BCS 请求之前完成；不能依赖可能已漂移的 BCS owner 判断调用人是否有权修复。
 - 由 `BotAddressResolver` 解析唯一 Bot，携带稳定 `bot_pk`、`entity_id`、租户与环境。
-- BCS 地址复用既有 resolver/reference helper；owner/managers 的稳定身份为 `bot_id:entity_id`。当前 Owner 只是要同步的人员事实，不能代替 entity 后缀。
+- BCS 地址复用既有 `bcn_bot_reference`：原生 service Bot 使用 `bot_id:entity_id`，转换后的 service Bot 保留 `ext.bcn_provider_bot_ref`，personal/default Bot 沿用既有 Owner 后缀规则。四个分项使用同一已注册地址；service Bot handoff 不得用当前 Owner 重新拼接地址。
 - 复用既有下游鉴权：Owner/managers 使用受 scope 限制的 Backend trusted App principal，资料和 caller 配置使用各自已有认证链。不要求 BCS 漂移后的旧 Owner 授权，也不放宽 BCS 的 trusted-App/Provider scope。
 - 只发单 Bot 操作，不启动/重启 Bot，不签发或轮换凭证，不写 Backend 的 Owner/协作者业务事实。
 
@@ -209,6 +209,11 @@ POST /openapi/v1/bots/{bot_id}/collaboration/repair
 | `ownership` | 当前已提交 `owner_id`，复用 ownership reader/projector 和单次发送 Plugin | 不是 handoff；不走转交申请/接受，不初始化 version-0 ownership |
 | `managers` | 当前有效 admin/member 协作者，复用 managers reader/projector 和全量替换接口 | 保留 Space 资格规则、排除 Owner、去重排序及 1,000 人限制；移除已撤销成员 |
 | `caller_config` | 对既有 caller 同步适用的 Bot，重放当前 `bot_call_type` 派生开关及已保存的 `caller_config_revision` | 保留既有 `minimum_isolation` 和 CAS；不 bump revision，不修改 call type，不下发身份材料 |
+
+现有 onboard 协议将空串/纯空白简介解释为保留原值，响应也不回传简介。
+因此这类 profile 请求在收到 onboard 确认后仍返回 `unknown`，原因码为
+`collaboration_summary_unconfirmed`；名称、头像可能已完成更新，其他独立分项
+继续执行。Backend 不将它误报为全部成功，也不额外发送写入或更改 BCS 的兼容语义。
 
 Caller 修复必须复用现有领域映射，不能简单调用会修改 call type、凭证或运行时的业务更新方法。若旧 transport 参数名仍为 `owner_workno`，需保证实际定位遵守 resolver 得到的稳定地址；必要时在 Backend 适配层接受已解析 reference，不能把当前 Owner 当地址。没有适用的已建立 caller 配置时显式标记 `not_applicable`；有效的 disabled 配置仍须同步，不能误判为不适用。
 

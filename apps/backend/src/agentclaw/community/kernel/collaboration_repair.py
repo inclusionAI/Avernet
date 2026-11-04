@@ -99,6 +99,7 @@ class MetadataDeliveryErrorCode(StrEnum):
     COLLABORATION_REJECTED = "collaboration_rejected"
     COLLABORATION_UPSTREAM_ERROR = "collaboration_upstream_error"
     COLLABORATION_RESPONSE_MALFORMED = "collaboration_response_malformed"
+    COLLABORATION_SUMMARY_UNCONFIRMED = "collaboration_summary_unconfirmed"
     UNKNOWN = "unknown"
 
 
@@ -118,8 +119,9 @@ class RepairCommand:
 class ProfileSnapshot:
     """Profile facts as projected from the saved Bot record.
 
-    ``bcs_bot_id`` is the immutable ``<bot_id>:<entity_id>`` address —
-    never owner-qualified. ``name``/``summary`` follow the same
+    ``bcs_bot_id`` is the established registration reference: service Bots use
+    their entity or retained conversion reference; personal/default Bots use
+    the existing owner-qualified registration rule. ``name``/``summary`` follow the same
     projection the daily metadata path sends: a missing saved name
     projects to ``bot_id``, a missing saved description to ``""``.
     ``avatar_url`` is ``""`` only as an explicit clear, never as a

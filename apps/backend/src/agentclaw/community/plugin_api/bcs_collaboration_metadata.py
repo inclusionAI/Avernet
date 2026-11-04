@@ -23,8 +23,8 @@ __all__ = ["BcsCollaborationMetadataPlugin", "MetadataDeliveryError"]
 class BcsCollaborationMetadataPlugin(Plugin, Protocol):
     """Repair BCS-side collaboration metadata for one existing stable Bot.
 
-    Every method addresses BCS with the immutable
-    ``<bot_id>:<entity_id>`` identity carried inside the snapshot.
+    Every method addresses BCS with the established registration reference
+    carried inside the snapshot, including retained conversion references.
     Callers must not target a Bot they have not confirmed with
     ``exists`` first; this plugin never registers a missing Bot and
     never initializes ownership.
@@ -50,7 +50,10 @@ class BcsCollaborationMetadataPlugin(Plugin, Protocol):
         A returned ``None`` means BCS confirmed the update. Any outcome
         BCS did not confirm raises ``MetadataDeliveryError``; the
         explicit ``avatar_url`` clear (``""``) is a valid payload and is
-        transmitted as-is.
+        transmitted as-is. The current onboard transport preserves empty/blank
+        summaries and does not echo them: those inputs raise UNKNOWN with
+        ``collaboration_summary_unconfirmed`` after acknowledgement, even if
+        name/avatar were applied. Consumers must preserve the partial result.
         """
         ...
 

@@ -265,6 +265,13 @@ class RepairCase:
         assert len(rows) == 1, "expected exactly one BCS row for the fixture Bot"
         return {"name": rows[0][0], "avatar_url": rows[0][1]}
 
+    def read_bcs_summary(self) -> str | None:
+        rows = self._bcs_query(
+            "SELECT bot_info FROM bcs_bots WHERE bot_uuid=?", (self.target,)
+        )
+        assert len(rows) == 1, "expected exactly one BCS row for the fixture Bot"
+        return json.loads(rows[0][0])["summary"]
+
     def bcs_bot_count(self) -> tuple[int, int]:
         total = self._bcs_query("SELECT COUNT(*) FROM bcs_bots")[0][0]
         target = self._bcs_query(

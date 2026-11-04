@@ -91,7 +91,32 @@ def test_repair_restores_saved_profile_and_confirms_authority(repair_case):
     assert case.read_bcs_owner() == case.owner
     assert case.read_bcs_managers() == {case.other_user}
     assert case.registry_row() == {"name": name, "avatar_url": _SET_URL}
+    assert case.read_bcs_summary() == "saved repair summary"
     assert case.bcs_bot_count() == rows_before
+    case.assert_no_repair_queue()
+
+
+def test_empty_summary_is_unconfirmed_while_other_profile_fields_are_applied(repair_case):
+    case = repair_case(provider_binding=True)
+    name = f"Saved {case.suffix}"
+    case.save_profile(name=name, summary="", avatar_url="")
+    case.admin_onboard(
+        name=_DRIFTED_NAME, summary="old summary", avatar_url=_DRIFTED_AVATAR,
+    )
+
+    response = case.repair()
+
+    assert response.status_code == 200
+    report = response.json()["data"]
+    assert report["status"] == "partial_failed"
+    assert report["items"][1] == {
+        "component": "profile", "status": "unknown",
+        "error_code": "collaboration_summary_unconfirmed",
+    }
+    assert report["items"][0]["status"] == "succeeded"
+    assert report["items"][2]["status"] == "succeeded"
+    assert case.registry_row() == {"name": name, "avatar_url": None}
+    assert case.read_bcs_summary() == "old summary"
     case.assert_no_repair_queue()
 
 
