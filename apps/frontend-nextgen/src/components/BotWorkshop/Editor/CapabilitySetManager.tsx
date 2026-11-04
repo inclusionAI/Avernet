@@ -26,6 +26,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     workshopSkills,
     marketMcps,
     editable,
+    compact,
     onCreate,
     onDelete,
     onActive,
@@ -168,6 +169,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}
+                        compact={compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
                         editable={editable}
                         onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
@@ -176,6 +178,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="mcp"
                         items={set.mcps}
+                        compact={compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
                         editable={editable}
                         identities={props.mcpCallTypes}
@@ -187,7 +190,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         onRemove={(id) => onMcp(set.id, id, false)}
                       />
                       {set.clis.length ? (
-                        <CapabilityMembers kind="cli" items={set.clis} editable={false} />
+                        <CapabilityMembers kind="cli" items={set.clis} compact={compact} editable={false} />
                       ) : null}
                     </div>
                   ) : null}

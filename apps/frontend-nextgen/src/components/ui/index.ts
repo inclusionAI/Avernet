@@ -12,6 +12,7 @@ export * from './Input';
 export * from './Modal';
 export * from './notify';
 export * from './Pagination';
+export * from './PaneDialog';
 export * from './Popconfirm';
 export * from './Popover';
 export * from './Segmented';

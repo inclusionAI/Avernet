@@ -15,6 +15,8 @@ export interface CollaborationSquareState {
   bots: PublicBot[];
   groups: PublicGroup[];
   botProfile: PublicBotProfile | null;
+  /** 画像拉取失败的原因文案；非空时由弹窗内展示（不再 toast）。随 botProfile 一同复位。 */
+  botProfileError: string | null;
   groupMembers: PublicGroupMember[];
   groupOwnerUserName: string | null;
   loading: boolean;
@@ -36,6 +38,7 @@ export interface CollaborationSquareState {
   setGroups: (groups: PublicGroup[]) => void;
   appendGroups: (groups: PublicGroup[]) => void;
   setBotProfile: (profile: PublicBotProfile | null) => void;
+  setBotProfileError: (error: string | null) => void;
   setGroupMembers: (members: PublicGroupMember[]) => void;
   setGroupMembersDetail: (detail: PublicGroupMembersDetail) => void;
   setLoading: (loading: boolean) => void;
@@ -60,10 +63,17 @@ export interface CollaborationSquareState {
   reset: () => void;
 }
 
+/** 按 id 去重地把分页结果追加到既有列表（bots/groups/tasks 的 append 复用）。 */
+const appendUniqueById = <T extends { id: string }>(list: T[], items: T[]) => {
+  const existingIds = new Set(list.map((item) => item.id));
+  return [...list, ...items.filter((item) => !existingIds.has(item.id))];
+};
+
 const initialState = {
   bots: [],
   groups: [],
   botProfile: null,
+  botProfileError: null,
   groupMembers: [],
   groupOwnerUserName: null,
   loading: true,
@@ -85,18 +95,11 @@ const initialState = {
 export const useCollaborationSquareStore = create<CollaborationSquareState>((set) => ({
   ...initialState,
   setBots: (bots) => set({ bots }),
-  appendBots: (bots) =>
-    set((state) => {
-      const existingIds = new Set(state.bots.map((bot) => bot.id));
-      return { bots: [...state.bots, ...bots.filter((bot) => !existingIds.has(bot.id))] };
-    }),
+  appendBots: (bots) => set((state) => ({ bots: appendUniqueById(state.bots, bots) })),
   setGroups: (groups) => set({ groups }),
-  appendGroups: (groups) =>
-    set((state) => {
-      const existingIds = new Set(state.groups.map((group) => group.id));
-      return { groups: [...state.groups, ...groups.filter((group) => !existingIds.has(group.id))] };
-    }),
-  setBotProfile: (botProfile) => set({ botProfile }),
+  appendGroups: (groups) => set((state) => ({ groups: appendUniqueById(state.groups, groups) })),
+  setBotProfile: (botProfile) => set({ botProfile, botProfileError: null }),
+  setBotProfileError: (botProfileError) => set({ botProfileError }),
   setGroupMembers: (groupMembers) => set({ groupMembers }),
   setGroupMembersDetail: ({ members, ownerUserName }) =>
     set({ groupMembers: members, groupOwnerUserName: ownerUserName }),
@@ -106,7 +109,7 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
   setQuery: (resource, query) => set(resource === 'bot' ? { botQuery: query } : { groupQuery: query }),
   setBotSearchMode: (botSearchMode) =>
     set((state) => (state.botSearchMode === botSearchMode ? { botSearchMode } : { botSearchMode, botQuery: '' })),
-  setSelectedBotId: (selectedBotId) => set({ selectedBotId, botProfile: null }),
+  setSelectedBotId: (selectedBotId) => set({ selectedBotId, botProfile: null, botProfileError: null }),
   setSelectedGroupId: (selectedGroupId) => set({ selectedGroupId, groupMembers: [], groupOwnerUserName: null }),
   setBusy: (key, busy) =>
     set((state) => ({
@@ -121,6 +124,7 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
       bots: state.bots.filter((bot) => bot.id !== id),
       selectedBotId: state.selectedBotId === id ? null : state.selectedBotId,
       botProfile: state.botProfile?.id === id ? null : state.botProfile,
+      botProfileError: state.selectedBotId === id ? null : state.botProfileError,
     })),
   removeGroup: (id) =>
     set((state) => ({
@@ -130,11 +134,7 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
       groupOwnerUserName: state.selectedGroupId === id ? null : state.groupOwnerUserName,
     })),
   setTasks: (tasks) => set({ tasks }),
-  appendTasks: (tasks) =>
-    set((state) => {
-      const existingIds = new Set(state.tasks.map((task) => task.id));
-      return { tasks: [...state.tasks, ...tasks.filter((task) => !existingIds.has(task.id))] };
-    }),
+  appendTasks: (tasks) => set((state) => ({ tasks: appendUniqueById(state.tasks, tasks) })),
   setTaskQuery: (taskQuery) => set({ taskQuery }),
   setTaskStatusFilter: (taskStatusFilter) => set({ taskStatusFilter }),
   setSelectedTaskId: (selectedTaskId) => set({ selectedTaskId, taskDetail: null }),
