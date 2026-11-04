@@ -307,7 +307,10 @@ export class BcnProtocol {
     } catch (error) {
       // Abort wins over every later completion, including a callback that ignores
       // AbortSignal. This sample sends no deltas, so no partial answer can leak.
-      if (run.status !== "active" || error?.name === "AbortError") return;
+      // A protocol abort changes run.status before rejecting the callback. An
+      // otherwise-active AbortError can come from the callback's own timeout and
+      // still needs a terminal event to release the BCS node.
+      if (run.status !== "active") return;
       const message = (error instanceof Error ? error.message : String(error)) || "decision failed";
       this.emitChat(run, {
         state: "error",
