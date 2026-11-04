@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/service_bot/services/deploy/test_teclaw_file_promotion.py
+  s_efdc569f38ed1d::t_4b67871b6ed074 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0feb879a4540d71c18d66cc9e6716ff07dbf8638",
+  "prompts": {},
+  "sessions": {
+    "s_efdc569f38ed1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b6-7494-7731-aaa6-374472cea173",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

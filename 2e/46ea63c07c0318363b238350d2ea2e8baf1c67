@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/devices/services/test_baas_publish_task_handlers.py
+  s_27802bf2e1b024::t_78fba18e9f88a4 813,820,856,910,2385
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2e46ea63c07c0318363b238350d2ea2e8baf1c67",
+  "prompts": {},
+  "sessions": {
+    "s_27802bf2e1b024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a117-d240-7ca3-8227-68fedcb56672",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

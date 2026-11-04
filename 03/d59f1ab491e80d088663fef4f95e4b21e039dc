@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/task/domain/identity.py
+  s_4b400329c6a7c2::t_773fe3e6831522 41-57
+apps/backend/src/agentclaw/community/core/task/forum/interaction/models.py
+  s_4b400329c6a7c2::t_773fe3e6831522 90,94-96,101,105,167,170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "03d59f1ab491e80d088663fef4f95e4b21e039dc",
+  "prompts": {},
+  "sessions": {
+    "s_4b400329c6a7c2": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "98a6cd13-fbb8-42cc-b35c-3b235f4a35b1",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

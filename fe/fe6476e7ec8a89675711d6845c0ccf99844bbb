@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_scan.py
+  s_83ef916dbeb6c6::t_5ec25c049e1edb 205,358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fefe6476e7ec8a89675711d6845c0ccf99844bbb",
+  "prompts": {},
+  "sessions": {
+    "s_83ef916dbeb6c6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b6-85cd-7391-8f13-00fe16f0a63e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
