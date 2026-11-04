@@ -173,17 +173,8 @@ echo "============================================================"
 
 log_info "Running P0 targeted test suite in container..."
 
-docker exec bcsfuse-opencore-g8 python -m pytest \
-    tests/security/test_opencore_security_boundary.py \
-    tests/integration/test_opencore_app_startup_health_e2e.py \
-    tests/contract/test_opencore_model_service_contract.py \
-    tests/integration/test_opencore_dev_smoke_provider_registry_e2e.py \
-    tests/contract/test_opencore_provider_public_safe_contract.py \
-    tests/integration/test_worker_registry_flow.py \
-    tests/integration/test_opencore_recommend_e2e.py \
-    tests/integration/test_opencore_fusion_verify_e2e.py \
-    tests/integration/test_opencore_middleware_lifespan_e2e.py \
-    -v --tb=short
+docker exec -e PYTHON=python -e PYTHONPATH=src:packages/search-core/src \
+    bcsfuse-opencore-g8 bash scripts/run_targeted_tests.sh --core
 
 TEST_EXIT_CODE=$?
 if [ $TEST_EXIT_CODE -eq 0 ]; then

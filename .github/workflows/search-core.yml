@@ -26,8 +26,17 @@ jobs:
       - name: TC compatibility contracts
         working-directory: apps/bcsfuse
         run: >-
-          python -m pytest tests/contract/test_search_migration_baseline.py
+          python -m pytest tests/contract/test_tc_catalog.py
+          tests/contract/test_tc_sync_contract.py
+          tests/contract/test_tc_http_compat.py
+          tests/contract/test_tc_fuse_modes.py
+          tests/contract/test_tc_review_regressions.py
+          tests/contract/test_tc_migration.py
+          tests/contract/test_search_migration_baseline.py
           tests/contract/test_shared_search_application.py
+          tests/unit/application/test_profile_merge_service.py
+          tests/unit/utils/test_fuse_util.py
+          tests/integration/test_g9_core_acceptance.py
           tests/unit/bootstrap/test_app_factory.py
           tests/opensource/test_bootstrap_safe_imports.py
           tests/opensource/test_package_layout.py

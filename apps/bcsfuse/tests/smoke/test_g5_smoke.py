@@ -27,6 +27,7 @@ from app.domain.models.skill_profile import SkillProfile
 from app.domain.models.retrieval_mode import RetrievalMode
 from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+from tests.contract.test_tc_catalog import runtime as tc_runtime, sync  # noqa: F401
 
 
 # =============================================================================
@@ -377,16 +378,6 @@ class TestG5SmokeConfig:
 class TestG5CandidateRecommendationSmoke:
     """Stage 4: Candidate Recommendation Smoke Tests (Real LLM)"""
 
-    def test_smoke_candidate_recommendation_importable(self):
-        """验证 Candidate Recommendation Service 可导入"""
-        from app.application.services.worker_candidate_recommendation_impl import (
-            WorkerCandidateRecommendationImpl,
-        )
-        from app.domain.services.worker_candidate_recommendation_service import (
-            WorkerCandidateRecommendationService,
-        )
-        assert WorkerCandidateRecommendationImpl is not None
-        assert WorkerCandidateRecommendationService is not None
 
     def test_smoke_diagnosis_with_candidate_recommendation(
         self,
@@ -394,6 +385,7 @@ class TestG5CandidateRecommendationSmoke:
         fake_retrieval_service_for_smoke,
         fake_preparation_service_for_smoke,
         fake_profile_source_for_smoke,
+        tc_runtime,  # noqa: F811
     ):
         """
         Smoke Test: ExpertDiagnosisService with Candidate Recommendation
@@ -402,9 +394,6 @@ class TestG5CandidateRecommendationSmoke:
         - Candidate recommendation 可用
         - 整体链路正常工作
         """
-        from app.application.services.worker_candidate_recommendation_impl import (
-            WorkerCandidateRecommendationImpl,
-        )
 
         # 创建 G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
@@ -415,9 +404,10 @@ class TestG5CandidateRecommendationSmoke:
         )
 
         # 创建 Candidate Recommendation Service
-        candidate_rec_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=fake_retrieval_service_for_smoke,
-        )
+        client, registry = tc_runtime
+        sync(client, "smoke_test_001", description="Microservice architecture expertise",
+             profile={"profile_id": "default"})
+        candidate_rec_service = registry.require("tc_search")
 
         # 创建 ExpertDiagnosisService with both services
         diagnosis_service = ExpertDiagnosisService(
@@ -454,10 +444,3 @@ class TestG5Stage4Config:
         assert CandidateRecommendationResponse is not None
         assert DomainCoverage is not None
         assert ParticipantsSufficiencyChecker is not None
-
-    def test_candidate_recommendation_impl_importable(self):
-        """验证 Candidate Recommendation Implementation 可导入"""
-        from app.application.services.worker_candidate_recommendation_impl import (
-            WorkerCandidateRecommendationImpl,
-        )
-        assert WorkerCandidateRecommendationImpl is not None

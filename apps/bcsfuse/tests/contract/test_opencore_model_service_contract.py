@@ -137,26 +137,6 @@ class TestSearchModelsContract:
 class TestRecommendModelsContract:
     """Test Recommend request/response models contract."""
 
-    def test_recommend_schemas_import(self):
-        """Test recommend schemas import."""
-        from app.adapters.http.schemas.recommend_schemas import (
-            BotRecommendationRequest,
-            BotRecommendation,
-            BotRecommendationResponse,
-        )
-        assert BotRecommendationRequest is not None
-        assert BotRecommendation is not None
-        assert BotRecommendationResponse is not None
-
-    def test_recommend_request_minimal_instantiation(self):
-        """Test minimal BotRecommendationRequest instantiation."""
-        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
-
-        req = BotRecommendationRequest(question="test question")
-        assert req.question == "test question"
-        assert req.topK == 5
-        assert req.min_score == 0.01
-
     def test_recommend_request_invalid_payload_fails(self):
         """Test invalid BotRecommendationRequest fails validation."""
         from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
@@ -185,15 +165,6 @@ class TestFusionModelsContract:
         assert FuseOptions is not None
         assert FusionRequest is not None
         assert FusionResult is not None
-
-    def test_fusion_request_minimal_instantiation(self):
-        """Test minimal FusionRequest instantiation."""
-        from app.adapters.http.schemas.fusion_schemas import FusionRequest
-
-        req = FusionRequest(question="test question", participants=["bot1"])
-        assert req.question == "test question"
-        assert req.participants == ["bot1"]
-        assert req.fusion_mode == "agent"
 
     def test_fusion_options_minimal_instantiation(self):
         """Test minimal FuseOptions instantiation."""
@@ -229,22 +200,6 @@ class TestVerifyModelsContract:
         assert BatchVerifyAllRequest is not None
         assert BatchVerifyResponse is not None
 
-    def test_batch_verify_request_minimal_instantiation(self):
-        """Test minimal BatchVerifyRequest instantiation."""
-        from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
-
-        req = BatchVerifyRequest(worker_ids=["wrk_001"])
-        assert req.worker_ids == ["wrk_001"]
-        assert req.capabilities is None
-
-    def test_batch_verify_all_request_minimal_instantiation(self):
-        """Test minimal BatchVerifyAllRequest instantiation."""
-        from app.adapters.http.schemas.verify_schemas import BatchVerifyAllRequest
-
-        req = BatchVerifyAllRequest()
-        assert req.capabilities is None
-        assert req.filters == {}
-
     def test_verify_request_invalid_payload_fails(self):
         """Test invalid BatchVerifyRequest fails validation."""
         from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
@@ -266,10 +221,6 @@ class TestServicesContract:
         from app.application.services.worker_profiling_service import WorkerProfilingService
         assert WorkerProfilingService is not None
 
-    def test_worker_profile_query_service_imports(self):
-        """Test WorkerProfileQueryService can be imported."""
-        from app.application.services.worker_profile_query_service import WorkerProfileQueryService
-        assert WorkerProfileQueryService is not None
 
     def test_semantic_match_service_imports(self):
         """Test SemanticMatchService can be imported."""

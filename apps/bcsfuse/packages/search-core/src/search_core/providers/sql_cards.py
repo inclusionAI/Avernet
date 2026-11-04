@@ -13,6 +13,7 @@ from search_core.api.cards import (
     CardRecord,
     CatalogConflict,
 )
+from search_core.providers.card_schema import validate_card_table
 from search_core.providers.card_writes import CardWrites
 from search_core.providers.sql_index_documents import (
     validate_environment,
@@ -32,8 +33,7 @@ class SqlCardRepository(CardWrites):
         environment: str = "local",
         placeholder: Literal["?", "%s"] = "%s",
     ):
-        if table != "bcsfuse_agent_cards":
-            raise ValueError("invalid catalog table")
+        validate_card_table(table)
         if placeholder not in {"?", "%s"}:
             raise ValueError("invalid SQL placeholder")
         self.connect, self.table, self.placeholder = connect, table, placeholder

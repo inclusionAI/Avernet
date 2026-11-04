@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 
 
 class BotRecommendationRequest(BaseModel):
@@ -111,7 +111,7 @@ class BotRecommendation(BaseModel):
     Attributes:
         profile_key: Profile unique key
         worker_id: Worker ID (staff_id)
-        score: Recommendation score (0-1)
+        score: Original finite retrieval or model score
         reasons: List of recommendation reasons
         short_profile: Short profile summary (max 30 chars)
         profile_tags: Profile tags dictionary
@@ -127,11 +127,7 @@ class BotRecommendation(BaseModel):
         description="Worker ID (staff_id)",
     )
 
-    score: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Recommendation score (0-1)",
-    )
+    score: FiniteFloat = Field(description="Original finite retrieval or model score")
 
     reasons: list[str | dict[str, Any]] = Field(
         default_factory=list,

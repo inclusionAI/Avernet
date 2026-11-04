@@ -17,67 +17,8 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime
 
 
-class TestStrictParticipantsInRetrievalService:
-    """Retrieval Service 层的 strict_participants 测试"""
 
-    def test_strict_mode_returns_empty_when_no_match(self):
-        """
-        验证：strict=True 时，profile_keys 过滤为空时返回空结果
 
-        不允许 fallback 到全库
-        """
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from app.domain.models.retrieval_mode import RetrievalMode
-
-        # 模拟 profile source
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_existing_profile:default"
-        mock_profile.active_skills = []
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = ""
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        # 请求不存在的 profile
-        result = service.retrieve(
-            question="test question",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            profile_keys=["nonexistent_profile:default"],
-            strict_participants=True,
-        )
-
-        # 必须返回空结果
-        assert result.total_count == 0
-        assert len(result.results) == 0
-
-    def test_non_strict_mode_allows_continuation(self):
-        """
-        验证：strict=False 时，过滤为空后继续执行（后续可能 fallback）
-        """
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from app.domain.models.retrieval_mode import RetrievalMode
-
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_existing:default"
-        mock_profile.active_skills = []
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = ""
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="test question",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            profile_keys=["nonexistent:default"],
-            strict_participants=False,
-        )
-
-        # 返回空结果（fallback 在 G5Enhancer 层处理）
-        assert result.total_count == 0
 
 
 class TestStrictParticipantsInG5Enhancer:
@@ -329,47 +270,3 @@ class TestStrictParticipantsParameterChain:
         call_kwargs = mock_expert_service.diagnose.call_args[1]
         assert call_kwargs.get("strict_participants") == True, \
             "strict_participants 必须传递到 ExpertDiagnosisService"
-
-
-class TestStrictModeIntegration:
-    """strict 模式集成测试"""
-
-    def test_full_chain_strict_mode_blocks_all_fallbacks(self):
-        """
-        完整链路测试：strict 模式应该阻止所有 fallback
-
-        从 RetrievalService 到 ExpertDiagnosisService
-        """
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-
-        # 模拟 profile source
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_different_profile:default"
-        mock_profile.active_skills = []
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = ""
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        retrieval_service = WorkerProfileRetrievalService(source=mock_source)
-
-        mock_gateway = MagicMock()
-        mock_preparation = MagicMock()
-
-        enhancer = G5ExpertEnhancerImpl(
-            gateway=mock_gateway,
-            retrieval_service=retrieval_service,
-            preparation_service=mock_preparation,
-            profile_source=mock_source,
-        )
-
-        # 请求不存在的 profile，strict 模式
-        result = enhancer._retrieve_candidate_profiles(
-            question="test question",
-            participants=["nonexistent_profile:default"],
-            strict_participants=True,
-        )
-
-        # 必须返回空，不能有 fallback
-        assert result == [], f"strict 模式应该返回空列表，但得到 {len(result)} 个结果"

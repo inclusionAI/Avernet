@@ -31,6 +31,7 @@ from app.domain.models.skill_profile import SkillProfile
 from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 from app.adapters.http.fusion_routes import router, set_provider
 from fastapi import FastAPI
+from tests.contract.test_tc_catalog import runtime as tc_runtime, sync  # noqa: F401
 
 
 # =============================================================================
@@ -62,11 +63,29 @@ class MockG5ProviderWithRecommendation(PerspectiveProvider):
 
 
 @pytest.fixture
-def client():
-    """创建测试客户端"""
+def client(monkeypatch):
+    """Exercise the G5 consumer with its diagnosis service and a local provider."""
+    from app.adapters.http import fusion_routes
+    from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
+    from app.application.services.group_fusion_service import GroupFusionService
+
+    services = []
+
+    def group_service():
+        service = GroupFusionService(
+            provider=fusion_routes._provider or MockG5ProviderWithRecommendation(),
+            expert_diagnosis_service=ExpertDiagnosisService(),
+        )
+        services.append(service)
+        return service
+
+    monkeypatch.setattr(fusion_routes, "get_service", group_service)
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
+    for service in services:
+        service.shutdown()
 
 
 @pytest.fixture
@@ -702,45 +721,18 @@ class TestG5ServiceIntegration:
     def test_expert_diagnosis_service_with_candidate_recommendation(
         self,
         mock_retrieval_service,
-        sample_recommendation_response,
+        tc_runtime,  # noqa: F811
     ):
         """
         ExpertDiagnosisService 与 CandidateRecommendation 集成
         """
         from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
-        from app.application.services.worker_candidate_recommendation_impl import (
-            WorkerCandidateRecommendationImpl,
-        )
-        from app.domain.services.worker_profile_retrieval_service import (
-            RetrievalResult,
-            RetrievalResponse,
-        )
-
-        # 配置 retrieval service mock
-        retrieval_svc, profiles = mock_retrieval_service
-
-        def mock_retrieve(question, mode, top_k=None, profile_keys=None, **kwargs):
-            if profile_keys:
-                filtered = [p for p in profiles if p.profile_key in profile_keys]
-            else:
-                filtered = profiles
-
-            results = [
-                RetrievalResult(profile=p, total_score=0.8 + i * 0.05)
-                for i, p in enumerate(filtered[:top_k] if top_k else filtered)
-            ]
-            return RetrievalResponse(
-                results=results,
-                question=question,
-                mode=mode,
-            )
-
-        retrieval_svc.retrieve.side_effect = mock_retrieve
-
-        # 创建 candidate recommendation service
-        candidate_rec_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_svc,
-        )
+        client, registry = tc_runtime
+        _retrieval_svc, profiles = mock_retrieval_service
+        for profile in profiles:
+            sync(client, profile.staff_id, description="API security expertise",
+                 profile={"profile_id": profile.profile_id})
+        candidate_rec_service = registry.require("tc_search")
 
         # 创建 ExpertDiagnosisService with candidate recommendation
         service = ExpertDiagnosisService(

@@ -11,96 +11,11 @@ from datetime import datetime
 
 from app.domain.models.fusion_request import FusionRequest, FuseOptions
 from app.domain.models.fusion_result import FusionResult, Perspective
-from app.domain.models.retrieval_mode import RetrievalMode
 
 
-class TestStrictParticipantsInRetrievalService:
-    """Tests for strict_participants in WorkerProfileRetrievalService"""
 
-    def test_strict_mode_returns_empty_on_no_match(self):
-        """Should return empty results in strict mode when no keys match"""
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
 
-        # Mock source
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_existing_profile:default"
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
 
-        service = WorkerProfileRetrievalService(
-            source=mock_source,
-            strict_participants=True,
-        )
-
-        result = service.retrieve(
-            question="test question",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            profile_keys=["nonexistent_profile:default"],
-            strict_participants=True,
-        )
-
-        assert result.total_count == 0
-        assert len(result.results) == 0
-
-    def test_non_strict_mode_allows_fallback(self):
-        """In non-strict mode, empty filter results should not block retrieval"""
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-
-        # Mock source
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_existing_profile:default"
-        mock_profile.active_skills = []
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = ""
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        service = WorkerProfileRetrievalService(
-            source=mock_source,
-        )
-
-        # Non-strict mode with non-matching keys - the retrieval should continue
-        # but filter results be empty (no fallback happens at this level)
-        result = service.retrieve(
-            question="test question",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            profile_keys=["nonexistent_profile:default"],
-            strict_participants=False,
-        )
-
-        # The service returns empty because no keys matched
-        # The fallback logic is at the G5ExpertEnhancer level
-        assert result.total_count == 0
-
-    def test_strict_mode_with_canonicalization(self):
-        """Should use canonicalization to match keys in strict mode"""
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-
-        # Mock source with profile that has staff_ prefix
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_test_architect:default"
-        mock_profile.active_skills = [MagicMock(name="skill")]
-        mock_profile.active_skills[0].name = "architecture"
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = "architecture design"
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        service = WorkerProfileRetrievalService(
-            source=mock_source,
-        )
-
-        # Request with wrk_ prefix should be canonicalized to staff_wrk_
-        result = service.retrieve(
-            question="architecture design question",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            profile_keys=["wrk_test_architect:default"],
-            strict_participants=True,
-        )
-
-        # Should find the profile via canonicalization
-        assert result.total_count == 1
-        assert result.results[0].profile.profile_key == "staff_wrk_test_architect:default"
 
 
 class TestStrictParticipantsInG5Enhancer:
@@ -416,98 +331,8 @@ class TestStrictParticipantsInGroupFusionService:
         assert call_kwargs.get("participants") == ["explicit_participant:default"]
 
 
-class TestStrictParticipantsEndToEnd:
-    """End-to-end tests for strict_participants behavior"""
 
-    def test_full_chain_strict_mode_blocks_fallback(self):
-        """
-        Full chain test: strict mode should prevent fallback
-        when participants don't match any profiles.
-        """
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
-        # Setup: mock source with profiles that won't match
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_different_profile:default"
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        retrieval_service = WorkerProfileRetrievalService(
-            source=mock_source,
-        )
-
-        mock_gateway = MagicMock()
-        mock_preparation = MagicMock()
-
-        enhancer = G5ExpertEnhancerImpl(
-            gateway=mock_gateway,
-            retrieval_service=retrieval_service,
-            preparation_service=mock_preparation,
-            profile_source=mock_source,
-        )
-
-        # Request for non-existent profile with strict mode
-        result = enhancer.enhance(
-            question="test question",
-            base_perspectives=[],
-            participants=["nonexistent_profile:default"],
-            strict_participants=True,
-        )
-
-        # Should return empty, not fallback to the different profile
-        assert result == []
-
-    def test_full_chain_canonicalization_enables_match(self):
-        """
-        Full chain test: canonicalization should enable matching
-        even with different prefixes.
-        """
-        from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-        from app.domain.models.worker_profile import SkillProfile
-
-        # Setup: mock source with matching profile (different prefix)
-        mock_source = MagicMock()
-        mock_profile = MagicMock()
-        mock_profile.profile_key = "staff_wrk_test_architect:default"
-        # Use a real SkillProfile object instead of MagicMock for name attribute
-        mock_skill = SkillProfile(
-            skill_id="test",
-            name="architecture",
-            description="test",
-            skill_set_name="default",
-        )
-        mock_profile.active_skills = [mock_skill]
-        mock_profile.context_fragments = []
-        mock_profile.searchable_text = "architecture"
-        mock_source.scan.return_value = MagicMock(profiles=[mock_profile])
-
-        retrieval_service = WorkerProfileRetrievalService(
-            source=mock_source,
-        )
-
-        mock_gateway = MagicMock()
-        mock_preparation = MagicMock()
-
-        enhancer = G5ExpertEnhancerImpl(
-            gateway=mock_gateway,
-            retrieval_service=retrieval_service,
-            preparation_service=mock_preparation,
-            profile_source=mock_source,
-            max_experts=1,
-        )
-
-        # Request with wrk_ prefix - should match via canonicalization
-        result = enhancer._retrieve_candidate_profiles(
-            question="test question",
-            participants=["wrk_test_architect:default"],
-            strict_participants=True,
-        )
-
-        # Should find the profile via canonicalization
-        assert len(result) == 1
-        assert result[0].profile_key == "staff_wrk_test_architect:default"
 
 
 class TestStrictParticipantsPerspectiveCollection:

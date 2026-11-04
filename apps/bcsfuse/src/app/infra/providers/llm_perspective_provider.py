@@ -21,15 +21,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 from app.domain.models.fusion_result import Perspective
 from app.domain.models.llm_request import LLMRequest
 from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.services.perspective_provider import (
+    PerspectiveContext,
+)
 
 if TYPE_CHECKING:
     from app.application.services.llm_gateway_service import LLMGatewayService
     from app.domain.services.worker_profile_source import WorkerProfileSource
-    from app.domain.models.worker_profile import WorkerProfile
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class LLMPerspectiveProvider:
         logger.info("[LLM-Perspective] staff_id=%s, profile_id=%s", staff_id, profile_id)
 
         # Step 2: 获取 Profile 内容
-        profile_content, profile_diagnostics = self._get_profile_content_with_diagnostics(staff_id, profile_id)
+        profile_content, profile_diagnostics = self._get_profile_content_with_diagnostics(staff_id, profile_id, participant_id=participant_id)
         diagnostics.update(profile_diagnostics)
 
         if not profile_content:
@@ -241,7 +242,7 @@ class LLMPerspectiveProvider:
         content, _ = self._get_profile_content_with_diagnostics(staff_id, profile_id)
         return content
 
-    def _get_profile_content_with_diagnostics(self, staff_id: str, profile_id: str) -> tuple[Optional[str], dict]:
+    def _get_profile_content_with_diagnostics(self, staff_id: str, profile_id: str, *, participant_id: str | None = None) -> tuple[Optional[str], dict]:
         """
         获取 Profile 内容（带诊断信息）
 
@@ -262,7 +263,11 @@ class LLMPerspectiveProvider:
         }
 
         try:
-            profile = self._profile_source.get_profile(staff_id, profile_id)
+            lookup = getattr(type(self._profile_source), "get_by_participant", None)
+            if participant_id is not None and callable(lookup):
+                profile = lookup(self._profile_source, participant_id)
+            else:
+                profile = self._profile_source.get_profile(staff_id, profile_id)
             if profile is None:
                 logger.warning("[LLM-Perspective] Profile not found: staff_id=%s, profile_id=%s", staff_id, profile_id)
                 diagnostics["profile_format_conversion_success"] = False
