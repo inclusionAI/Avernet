@@ -111,7 +111,18 @@ export function normalizeUndercoverGameViewModel(
   messages: SessionMessage[] = [],
   resolvedEvents: PublicOutputEvent[] = [],
 ): UndercoverGameViewModel {
-  const pendingHumanNode = pendingNodes.find((node) => Boolean(params.nodeActorMap[node.node_id]));
+  // viewer 由每个客户端用自己的（已认证）身份解析：多人类时共享面板参数里**不带**
+  // currentViewerActorId，profile 只对单人局写出无歧义的 viewer。服务端 per-caller
+  // 鉴权生效前，前端只激活与 viewer 匹配的那一席（防御纵深；真正的隔离在服务端
+  // apply）。viewer 未知且待办分属多个不同人类时一个都不激活——宁可显示等待，也
+  // 不能让 A 替 B 提交。
+  const activated = pendingNodes.filter((node) => Boolean(params.nodeActorMap[node.node_id]));
+  const viewerNodes = params.currentViewerActorId
+    ? activated.filter((node) => params.nodeActorMap[node.node_id] === params.currentViewerActorId)
+    : [];
+  const distinctActors = new Set(activated.map((node) => params.nodeActorMap[node.node_id]));
+  const unambiguous = !params.currentViewerActorId && distinctActors.size === 1;
+  const pendingHumanNode = viewerNodes[0] ?? (unambiguous ? activated[0] : undefined);
   const pendingActorId = pendingHumanNode ? params.nodeActorMap[pendingHumanNode.node_id] : undefined;
   const events = latestAttemptEvents(mergePublicOutputEvents(mapPublicOutputEvents(messages, params), resolvedEvents));
   const byActor = new Map<string, PublicOutputEvent[]>();

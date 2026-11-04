@@ -56,8 +56,8 @@ GroupContext 里抄。
 
 | 命令 | 输出里有词吗 |
 | --- | --- |
-| `status` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` `finish` | **没有**，可以放心引用 |
-| `init`（`human_word` 字段）`my-word` | 只有**人类玩家自己那个词**，只能说给他一个人听 |
+| `status` `init` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` `finish` | **没有**，可以放心引用 |
+| `my-word` | **没有**：只回座位与「去副屏看」的提醒，工具结果是共享信道，不复述词 |
 | `render-speak-run` `render-vote-run` | 只有文件路径，词在文件里，我不读也不贴 |
 | `reveal` | 有，且只有终局才能调 |
 
@@ -86,11 +86,11 @@ uc init --session S --referee-uuid R --human human_123 \
   [--group G] [--difficulty easy|medium|hard] [--undercover 1] [--max-rounds 6] [--force]
 ```
 
-重新查询当前 session，校验主持人与完整 worker 名单、人类 Present 状态，再检查协作权限；通过后才抽词对、随机座位、随机身份。返回 `seating`（座位号 + 名字 + 是不是人类）、`human_seat`、
-`human_word`、`referee_uuid`。同一局重复调会被拒，除非 `--force`。
+重新查询当前 session，校验主持人与完整 worker 名单、人类 Present 状态，再检查协作权限；通过后才抽词对、随机座位、随机身份。返回 `seating`（座位号 + 名字 + 是不是人类）、
+`human_seat` / `human_seats`、`referee_uuid`。同一局重复调会被拒，除非 `--force`。
 
-**`human_word` 是人类玩家自己那个词**，也是全场唯一一个我可以说出口的词：群聊是我和他
-的私密双人频道，Bot 收不到。发牌时念给他一次（S1 第 2 步），别的座位的词脚本不会给我。
+**`init` 不返回任何词**（多人版起）：词只出现在每个人类座位自己的副屏 HumanInput 私有指令里。
+群里只说座位，绝不念词——群聊是多个人类共用的公开信道，Bot 也收不到，但不能假定只有一个人在看。
 
 `--referee-uuid` 是 begin/init 的必填参数，仅使用本次投递 ID；不要传给 open-round/open-vote。
 
@@ -257,11 +257,12 @@ JSON 字符串时原样保留；如果上游提供对象，先用 `json.dumps()`
 ### `my-word`
 
 ```bash
-uc my-word --session S
+uc my-word --session S [--seat N | --human <actor_id>]
 ```
 
-人类玩家忘了自己的词时用。返回 `human_seat` 和 `human_word`，只有他自己那一个词，
-随时可以调、次数不限。**只说给他一个人听**——虽然群聊本来就只有他看得到。
+人类玩家忘了自己的词时用。**不再返回词**：工具结果是共享信道，回 `human_seat` / `actor_id`
+和一句「你的词在你自己的副屏输入框上方」。只说给他本人听，让他自己看副屏；多人类时
+每个人都有自己的词，绝不复述别人的词。
 
 ### `mask`
 

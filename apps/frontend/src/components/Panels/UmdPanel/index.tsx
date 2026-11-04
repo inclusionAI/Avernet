@@ -1,9 +1,11 @@
 import UmdLoader from '@/components/UmdLoader';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import type { PanelContentProps } from '@aix-chat/ui';
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { decodeOpenCreateGroupOptions } from '@/services/backend-api/GroupCreationController';
 import type { OpenCreateGroupOptions } from '@/services/backend-api/GroupCreationController';
+import { resolveUndercoverViewerActorId } from './resolveUndercoverViewerActorId';
 
 const CreateGroupModal = React.lazy(() => import('@/pages/GroupChat/components/CreateGroupModal'));
 
@@ -57,8 +59,12 @@ export function UmdPanel({
   onAction,
   onInteraction,
 }: PanelContentProps) {
+  const { userId } = useHumanIdentity();
   const cdn = payload?.cdn;
   const entry = payload?.entry;
+  const exportName = ((payload as any)?._componentKey || entry) as string | undefined;
+  const viewerActorId = resolveUndercoverViewerActorId(exportName, userId);
+  // 身份可能晚于 UMD 到达；不并入 loaderKey，UmdLoader 会把更新后的 data 传给已挂载组件。
   // 兼容两种数据格式：
   // 1. CDN 模式：payload.data 包含业务数据
   // 2. Registry 模式：payload 直接就是业务数据
@@ -117,6 +123,7 @@ export function UmdPanel({
   // UMD 组件期望直接在 props 上接收数据，而不是嵌套在 data 对象中
   const umdData = {
     ...data,
+    ...(viewerActorId ? { viewerActorId } : {}),
     payload,
     onAction: wrappedOnAction,
     onInteraction: wrappedOnInteraction,

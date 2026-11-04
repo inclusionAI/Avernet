@@ -1,8 +1,9 @@
 // @sdd: UmdPanel 导出点路径重建单测——锁定引擎 resolveBusinessEntry entry 丢前缀缺陷的 teamclaw 侧修复。
 //
-// 引擎 @tc-chat/ui 为 ESM 产物，jest 不转换 node_modules，故本测试只覆盖纯逻辑 resolveExportName
+// 引擎 @tc-chat/ui 为 ESM 产物，故本测试只覆盖导出路径与 viewer 解析纯逻辑
 // （组件加载/注册的引擎交互由 /panel-self-test 自测页 + 预发联调端到端验证）。
 import { resolveExportName } from '@/services/bcs/resolveUmdExport';
+import { resolveUndercoverViewerActorId } from '@/services/bcs/resolveUndercoverViewerActorId';
 
 describe('resolveExportName：UMD 导出点路径重建（修复 entry 丢 libraryName 前缀）', () => {
   it('声明式 component=lib.Comp：按 _componentKey 重建点路径', () => {
@@ -54,5 +55,29 @@ describe('resolveExportName：UMD 导出点路径重建（修复 entry 丢 libra
       _componentKey: 'bcsPanel.StateMachineRunView',
     };
     expect(resolveExportName(params)).toBe('bcsPanel.StateMachineRunView');
+  });
+});
+
+describe('resolveUndercoverViewerActorId：每客户端 Human 身份注入', () => {
+  it('只向卧底面板注入带 human 前缀的当前登录身份', () => {
+    expect(resolveUndercoverViewerActorId('bcsPanel.UndercoverGamePanel', 'alice')).toBe('human_alice');
+    expect(resolveUndercoverViewerActorId('UndercoverGamePanel', 'bob')).toBe('human_bob');
+  });
+
+  it('保留已经规范化的 actor_id，不重复添加前缀', () => {
+    expect(resolveUndercoverViewerActorId('bcsPanel.UndercoverGamePanel', 'human_alice')).toBe('human_alice');
+    expect(resolveUndercoverViewerActorId('bcsPanel.UndercoverGamePanel', 'human-alice')).toBe('human-alice');
+  });
+
+  it('身份尚未解析时不注入，等待后续重渲染', () => {
+    for (const identityId of [undefined, null, '', '   ']) {
+      expect(resolveUndercoverViewerActorId('bcsPanel.UndercoverGamePanel', identityId)).toBeUndefined();
+    }
+  });
+
+  it('不向其他远程 UMD 或同名第三方组件暴露登录身份', () => {
+    for (const exportName of ['bcsPanel.StateMachineRunView', 'RiskSummary', 'other.UndercoverGamePanel']) {
+      expect(resolveUndercoverViewerActorId(exportName, 'alice')).toBeUndefined();
+    }
   });
 });

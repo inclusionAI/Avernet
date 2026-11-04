@@ -1,0 +1,372 @@
+"""
+偷看者(Peeker)隔离测试:多人类对局下,任何一位玩家都不能通过 profile 生成的
+渲染产物 / 公开 panel 参数 / 其他玩家 Bot 节点指令 看到别人的词。
+
+范围定义:
+- 本测试断言 profile 层(undercover.py 渲染)与 panel 层(公开参数)的隔离边界。
+- "以人类 A 身份调所有接口/副屏,断言拿不到 B 的词" —— 在 profile/panel 范围内,
+  等价于断言:任何单座位的 HumanInput 指令、任何公开 panel 参数、任何 Bot 节点
+  指令都不携带其他玩家的私有词。
+- BCS 服务端"未指定 assignee 的 frontend human_input 对所有 Present 人类可见"的
+  泄露点属于服务端职责,已写入同目录 RFC(<RFC-101>、threat-model-multiplayer.md),
+  不在 profile/panel 测试范围内强制实现。
+
+fixtures 采用多人类(2 Human + 3 Bot)对局,直接构造 state,不依赖 bcs-cli。
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import os
+import re
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from test_undercover_panel import SCRIPT, undercover
+
+BOTH_WORDS = ("隐词甲", "隐词乙")  # civilian / undercover
+
+
+def build_multi_human_state() -> dict:
+    """2 Human + 3 Bot,总 5 人,1 卧底的干净 AWAIT_START 状态。"""
+    state = {
+        "session_id": "group-game:multi-h1",
+        "group_id": "group-game",
+        "human_actor_id": "human-A",
+        "human_actor_ids": ["human-A", "human-B"],
+        "referee_uuid": "referee-1",
+        "phase": "AWAIT_START",
+        "config": {"max_rounds": 6, "undercover": 1, "players": 5},
+        "words": {"civilian": "隐词甲", "undercover": "隐词乙"},
+        "round": 1,
+        "rounds": [
+            {
+                "round": 1,
+                "order": [1, 2, 3, 4, 5],
+                "speeches": {}, "votes": {}, "counts": {}, "renders": {},
+            }
+        ],
+        "pending_ping": None,
+        "result": None,
+        "seats": [
+            {"seat": 1, "kind": "human", "display": "你", "bot_name": "你", "bot_uuid": None, "binding": None,
+             "actor_id": "human-A", "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+            {"seat": 2, "kind": "human", "display": "你", "bot_name": "你", "bot_uuid": None, "binding": None,
+             "actor_id": "human-B", "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+            {"seat": 3, "kind": "bot", "display": "悟空", "bot_name": "玩家悟空", "bot_uuid": "bot-wukong", "binding": "seat3",
+             "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+            {"seat": 4, "kind": "bot", "display": "八戒", "bot_name": "玩家八戒", "bot_uuid": "bot-bajie", "binding": "seat4",
+             "word": "隐词乙", "role": "undercover", "alive": True, "eliminated_round": None},
+            {"seat": 5, "kind": "bot", "display": "沙僧", "bot_name": "玩家沙僧", "bot_uuid": "bot-shaseng", "binding": "seat5",
+             "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+        ],
+    }
+    return state
+
+
+class PeekerIsolationTest(unittest.TestCase):
+    """以"偷看者"视角验证多人类对局的上下文隔离。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.env = patch.dict(os.environ, {"BOT_DATA_DIR": cls.temp_dir.name})
+        cls.env.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.env.stop()
+        cls.temp_dir.cleanup()
+
+    def setUp(self) -> None:
+        self.state = build_multi_human_state()
+
+    # ---- 发言 HumanInput:任一人类的词只出现在他自己的指令里 ----
+
+    def test_speech_human_A_instruction_does_not_leak_human_B_word(self) -> None:
+        text, _ = undercover.render_speak_yaml(self.state)
+        node_a, node_b = self._speak_node(text, 1), self._speak_node(text, 2)
+        # A 只看到自己的词(隐词甲)
+        self.assertIn("隐词甲", node_a)
+        # A 看不见 B 的座位/词;two human civilians share 隐词甲,用座位号区分私有性
+        self.assertNotIn("你是 2 号", node_a)
+        # B 的指令里没有 A 私有信息(B 与 A 同词,但座位不同)
+        self.assertNotIn("你是 1 号", node_b)
+
+    def test_speech_each_human_node_has_only_own_seat_number(self) -> None:
+        text, _ = undercover.render_speak_yaml(self.state)
+        for seat in (1, 2):
+            node = self._speak_node(text, seat)
+            self.assertIn(f"你是 {seat} 号", node)
+            other = 2 if seat == 1 else 1
+            self.assertNotIn(f"你是 {other} 号", node)
+
+    def test_public_speech_panel_params_contain_no_word(self) -> None:
+        panel = undercover.public_panel_projection(self.state, "speak", 1)
+        blob = json.dumps(panel, ensure_ascii=False)
+        for word in BOTH_WORDS:
+            self.assertNotIn(word, blob)
+        self.assertNotIn("word", blob)
+
+    # ---- 投票 HumanInput ----
+
+    def test_vote_human_A_instruction_does_not_leak_other_human_vote(self) -> None:
+        text, _ = undercover.render_vote_yaml(self.state)
+        node_a = self._vote_node(text, 1)
+        node_b = self._vote_node(text, 2)
+        self.assertIn("你是 1 号", node_a)
+        self.assertNotIn("你是 2 号", node_a)
+        self.assertIn("你是 2 号", node_b)
+        self.assertNotIn("你是 1 号", node_b)
+
+    def test_public_vote_panel_params_contain_no_word(self) -> None:
+        panel = undercover.public_panel_projection(self.state, "vote", 1)
+        blob = json.dumps(panel, ensure_ascii=False)
+        for word in BOTH_WORDS:
+            self.assertNotIn(word, blob)
+
+    # ---- Bot 节点指令不携带别的玩家的词 ----
+
+    def test_bot_nodes_do_not_contain_any_human_word_as_secret(self) -> None:
+        text, _ = undercover.render_speak_yaml(self.state)
+        for seat in (3, 4, 5):
+            node = self._speak_node(text, seat)
+            # Bot 节点只知道自己的词;别的玩家的词(另一词)不得出现
+            own = next(seat_item["word"] for seat_item in self.state["seats"] if seat_item["seat"] == seat)
+            other_word = next(word for word in BOTH_WORDS if word != own)
+            self.assertNotIn(other_word, node)
+
+    def test_bot_instruction_isolates_word_per_binding(self) -> None:
+        text, _ = undercover.render_vote_yaml(self.state)
+        for seat in (3, 4, 5):
+            own = next(seat_item["word"] for seat_item in self.state["seats"] if seat_item["seat"] == seat)
+            node = self._vote_node(text, seat)
+            self.assertIn(own, node)
+            for other in BOTH_WORDS:
+                if other != own:
+                    self.assertNotIn(other, node)
+
+    # ---- 副屏/接口视角:以人类 A 身份遍历所有输出 ----
+
+    def test_viewer_A_perspective_full_output_has_only_A_word(self) -> None:
+        """以 A 为 currentViewer,整段 YAML 里 A 座位以外的私有词只出现在对应 Bot 节点,
+        不进入 A 可读的公开 panel 参数。"""
+        for kind in ("speak", "vote"):
+            panel = undercover.public_panel_projection(self.state, kind, 1)
+            json_payload = json.dumps(panel, ensure_ascii=False)
+            for word in BOTH_WORDS:
+                self.assertNotIn(word, json_payload, f"{kind} panel leaked {word}")
+
+    # ---- 公开面：viewer 必须按 client 解析，候选必须含每个存活人类 ----
+
+    def test_multi_human_panel_params_do_not_pin_a_primary_viewer(self) -> None:
+        for kind in ("speak", "vote"):
+            panel = undercover.public_panel_projection(self.state, kind, 1)
+            self.assertNotIn("currentViewerActorId", panel, f"{kind} pinned a primary human")
+            self.assertNotIn("currentAction", panel, f"{kind} pinned a primary human action")
+
+    def test_single_human_panel_params_keep_unambiguous_viewer(self) -> None:
+        single = build_multi_human_state()
+        single["seats"] = [s for s in single["seats"] if s["seat"] != 2]
+        single["human_actor_ids"] = ["human-A"]
+        panel = undercover.public_panel_projection(single, "speak", 1)
+        self.assertEqual(panel["currentViewerActorId"], "human-A")
+
+    def test_vote_candidates_include_every_alive_human(self) -> None:
+        panel = undercover.public_panel_projection(self.state, "vote", 1)
+        candidates = {c["actorId"] for c in panel["voteCandidates"]}
+        # 存活人类必须都在共享候选里（不因 viewer 身份被剪掉）；投自己由客户端过滤。
+        self.assertIn("human-A", candidates)
+        self.assertIn("human-B", candidates)
+        self.assertIn("bot-wukong", candidates)
+
+    # ---- 投票链：不得把上游 Human ballot 转发给下游 Human ----
+
+    def test_vote_chain_never_links_human_directly_to_human(self) -> None:
+        text, _ = undercover.render_vote_yaml(self.state)
+        for seat in (1, 2):
+            body = self._node_block(text, f"vote_{seat}")
+            targets = re.search(r"targets: \[(.*?)\]", body)[1].split(", ")
+            self.assertNotIn("vote_1", targets)
+            self.assertNotIn("vote_2", targets)
+        # 非末尾人类经裁判的中立过场节点串行，过场只对下游说一句话。
+        first = self._node_block(text, "vote_1")
+        self.assertIn("vote_scrub_1", first)
+        self.assertIn("tally", first)
+        scrub = self._node_block(text, "vote_scrub_1")
+        self.assertIn("binding: referee", scrub)
+        self.assertIn("targets: [vote_2]", scrub)
+        self.assertIn("不得引用、转述、概括、评价", scrub)
+
+    # ---- 最后 Bot 出局后，只剩 Human（含 Human 卧底）仍要能投票 ----
+
+    def test_vote_renders_when_only_humans_remain(self) -> None:
+        for seat in self.state["seats"]:
+            if seat["kind"] == "bot":
+                seat["alive"] = False
+        text, bindings = undercover.render_vote_yaml(self.state)
+        start = self._node_block(text, "vote_start")
+        self.assertIn("binding: referee", start)
+        self.assertIn("targets: [vote_1]", start)
+        tally = self._node_block(text, "tally")
+        targets = re.search(r"targets: \[(.*?)\]", tally)
+        self.assertIsNone(targets)  # tally 是终点，没有 transitions
+        parents = set()
+        for node in ("vote_1", "vote_2"):
+            body = self._node_block(text, node)
+            parents.update(re.search(r"targets: \[(.*?)\]", body)[1].split(", "))
+        self.assertIn("tally", parents)
+        self.assertNotIn("seat3", " ".join(bindings))
+        # 只剩人类时发言渲染同样不能崩。
+        speak, _ = undercover.render_speak_yaml(self.state)
+        self.assertIn("speak_1:", speak)
+        self.assertIn("collect:", speak)
+
+    def test_three_humans_continue_to_next_vote_after_last_bot_is_eliminated(self) -> None:
+        state = build_multi_human_state()
+        state["seats"] = state["seats"][:4]
+        state["seats"][2] = {
+            "seat": 3, "kind": "human", "display": "你", "bot_name": "你", "bot_uuid": None,
+            "binding": None, "actor_id": "human-C", "word": "隐词乙", "role": "undercover",
+            "alive": True, "eliminated_round": None,
+        }
+        state["seats"][3]["role"] = "civilian"
+        state["seats"][3]["word"] = "隐词甲"
+        state["human_actor_ids"] = ["human-A", "human-B", "human-C"]
+        state["config"]["players"] = 4
+        state["rounds"][0]["order"] = [1, 2, 3, 4]
+        state["phase"] = "VOTE_RUNNING"
+        undercover.save_state(state)
+
+        votes = {"1": "我投4号", "2": "我投4号", "3": "我投4号", "4": "我投1号"}
+        with patch.object(undercover, "emit") as emit:
+            undercover.cmd_votes_set(argparse.Namespace(
+                session=state["session_id"], json=json.dumps(votes),
+            ))
+        result = emit.call_args.args[0]
+        self.assertEqual(result["verdict"], "continue")
+        self.assertEqual(result["eliminated"]["seat"], 4)
+        self.assertEqual([item["seat"] for item in result["alive"]], [1, 2, 3])
+
+        speak = undercover.prepare_speak_run(state["session_id"], retry=False)
+        self.assertEqual(speak["round"], 2)
+        self.assertEqual(speak["bindings"], ["referee=referee-1"])
+        speeches = {str(seat): "它常用于日常生活" for seat in (1, 2, 3)}
+        with patch.object(undercover, "emit"):
+            undercover.cmd_speeches_set(argparse.Namespace(
+                session=state["session_id"], json=json.dumps(speeches), flag=[],
+            ))
+        vote = undercover.prepare_vote_run(state["session_id"], retry=False)
+        self.assertEqual(vote["round"], 2)
+        self.assertEqual(vote["bindings"], ["referee=referee-1"])
+        vote_yaml = Path(vote["yaml_path"]).read_text(encoding="utf-8")
+        start = self._node_block(vote_yaml, "vote_start")
+        self.assertIn("binding: referee", start)
+        self.assertIn("targets: [vote_1]", start)
+        for seat in (1, 2, 3):
+            self.assertIn(f"      vote_{seat}:\n", vote_yaml)
+        self.assertNotIn("      vote_4:\n", vote_yaml)
+
+    # ---- 旧存档：只有顶层 human_actor_id 也要保住 word reminder ----
+
+    def test_legacy_single_human_state_keeps_word_reminder(self) -> None:
+        legacy = {
+            "session_id": "group-game:legacy", "group_id": "group-game",
+            "human_actor_id": "human-A", "referee_uuid": "referee-1",
+            "phase": "AWAIT_START", "config": {"max_rounds": 6, "undercover": 1, "players": 3},
+            "words": {"civilian": "隐词甲", "undercover": "隐词乙"}, "round": 1, "rounds": [],
+            "pending_ping": None, "result": None,
+            "seats": [
+                {"seat": 1, "kind": "human", "display": "你", "bot_uuid": None, "binding": None,
+                 "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+                {"seat": 2, "kind": "bot", "display": "悟空", "bot_uuid": "bot-wukong", "binding": "seat2",
+                 "word": "隐词甲", "role": "civilian", "alive": True, "eliminated_round": None},
+            ],
+        }
+        self.assertNotIn("human_actor_ids", legacy)
+        self.assertNotIn("actor_id", legacy["seats"][0])
+        undercover.save_state(legacy)
+        loaded = undercover.load_state("group-game:legacy")
+        self.assertEqual(undercover.human_actor_ids(loaded), ["human-A"])
+        self.assertEqual(undercover.sole_human_viewer_id(loaded), "human-A")
+        with patch.object(undercover, "emit") as emit:
+            undercover.cmd_my_word(argparse.Namespace(session="group-game:legacy", human=None, seat=None))
+        payload = emit.call_args.args[0]
+        self.assertEqual(payload["human_seat"], 1)
+        self.assertTrue(payload["word_in_tool_result"] is False)
+        self.assertNotIn("human_word", payload)
+        self.assertNotIn("隐词甲", json.dumps(payload, ensure_ascii=False))
+        self.assertIn("副屏", payload["word_reminder"])
+
+    def test_my_word_tool_result_never_contains_any_word(self) -> None:
+        undercover.save_state(self.state)
+        for seat in (1, 2):
+            with patch.object(undercover, "emit") as emit:
+                undercover.cmd_my_word(argparse.Namespace(session=self.state["session_id"], human=None, seat=seat))
+            payload = emit.call_args.args[0]
+            self.assertEqual(payload["human_seat"], seat)
+            blob = json.dumps(payload, ensure_ascii=False)
+            for word in BOTH_WORDS:
+                self.assertNotIn(word, blob)
+
+    def test_my_word_explicit_human_selector_is_strict(self) -> None:
+        undercover.save_state(self.state)
+        for actor_id, expected_seat in (("human-A", 1), ("human-B", 2), (None, 1)):
+            with self.subTest(actor_id=actor_id), patch.object(undercover, "emit") as emit:
+                undercover.cmd_my_word(argparse.Namespace(
+                    session=self.state["session_id"], human=actor_id, seat=None,
+                ))
+                self.assertEqual(emit.call_args.args[0]["human_seat"], expected_seat)
+
+        for actor_id in ("stale-human", ""):
+            out = io.StringIO()
+            with (self.subTest(actor_id=actor_id), patch.object(undercover, "emit") as emit,
+                  contextlib.redirect_stdout(out)):
+                with self.assertRaises(SystemExit) as raised:
+                    undercover.cmd_my_word(argparse.Namespace(
+                        session=self.state["session_id"], human=actor_id, seat=None,
+                    ))
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(json.loads(out.getvalue())["error"], "HUMAN_NOT_FOUND")
+                emit.assert_not_called()
+
+    def test_my_word_explicit_seat_selector_is_strict(self) -> None:
+        undercover.save_state(self.state)
+        for seat in (0, 3, 99):
+            out = io.StringIO()
+            with (self.subTest(seat=seat), patch.object(undercover, "emit") as emit,
+                  contextlib.redirect_stdout(out)):
+                with self.assertRaises(SystemExit) as raised:
+                    undercover.cmd_my_word(argparse.Namespace(
+                        session=self.state["session_id"], human=None, seat=seat,
+                    ))
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(json.loads(out.getvalue())["error"], "HUMAN_NOT_FOUND")
+                emit.assert_not_called()
+
+    # ---- 辅助 ----
+
+    def _speak_node(self, yaml_text: str, seat: int) -> str:
+        return self._node_block(yaml_text, f"speak_{seat}")
+
+    def _vote_node(self, yaml_text: str, seat: int) -> str:
+        return self._node_block(yaml_text, f"vote_{seat}")
+
+    @staticmethod
+    def _node_block(yaml_text: str, node_id: str) -> str:
+        marker = f"      {node_id}:\n"
+        idx = yaml_text.find(marker)
+        if idx < 0:
+            return ""
+        body = yaml_text[idx + len(marker):]
+        # 下一个同级节点或文件结束为止
+        nxt = re.search(r"\n      \w+:", body)
+        return body[: nxt.start()] if nxt else body
+
+
+if __name__ == "__main__":
+    unittest.main()

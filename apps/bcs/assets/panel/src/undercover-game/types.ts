@@ -33,6 +33,8 @@ export interface UndercoverGamePanelParams {
 export interface PanelAction { type: 'send_message'; content: string }
 export interface UndercoverGamePanelProps extends Partial<UndercoverGamePanelParams> {
   data?: Partial<UndercoverGamePanelParams>; className?: string; style?: CSSProperties;
+  /** 每个客户端自己的已认证身份；多人类时由宿主按当前登录 actor 注入。 */
+  viewerActorId?: string;
   onInteraction?: (payload: UndercoverPanelInteraction) => void;
   onAction?: (action: PanelAction) => unknown | Promise<unknown>;
 }
