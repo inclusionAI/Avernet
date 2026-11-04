@@ -1,7 +1,6 @@
 // 管理 Bot / 好友 Bot 通用行:展开区 + 行内动作(归属筛选 / 新建会话)。
-// 展开区按 section/origin 分流:
-// - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
-// - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
+// 展开区按 section/origin 分流:managed+mine/friend 交互式 Session 列表(选中/新建/加载更多);
+// managed+others 好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
 import { Button } from '@/components/ui';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import { formatCodingOtherSessionTitle } from '@/domain/conversation/codingSessionOwnership';
@@ -19,6 +18,7 @@ import { AvatarTile } from '../../components/AvatarTile';
 import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationBotItemActions } from './ConversationBotItemActions';
+import { resolveBotRowLayout } from './ConversationBotItemLayout';
 import { OthersArea, type ConversationBotItemOthers } from './ConversationBotOthersArea';
 import { ConversationBotRuntimeBadge } from './ConversationBotRuntimeBadge';
 import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
@@ -99,39 +99,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // Bot 状态异常或好友服务 Bot 无 online 发布时，整行禁用并悬停提示原因。
   const { reason: unavailableReason, unavailable } = resolveBotUnavailable(bot, section);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
-  // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
-  // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
-  const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
-  const searchActive = sessionKey !== '';
-  // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
-  const searchVisible = scope === 'all';
-  const showFilter = isManaged || canFavorite;
-  // 「更多操作」菜单入口(#2990 还原):「有菜单项才显示入口」——回调存在且 bot.spaceId 有值
-  // (菜单仅「Bot 管理」,缺空间信息不渲染),只读视角(others)不渲染。
-  const showMenu = Boolean(onOpenBotManagement && bot.spaceId) && !isOthers;
-  // 操作区渲染门控:可用行走既有会话入口(hasSessionControls);不可用 Bot 仅保留
-  // 常驻「更多操作」(运维直达,2026-10-21),无菜单项则整区不渲染。
-  const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu);
-  // 展开态的收起入口并入右侧操作组。发布分支已将渐隐区收紧 10px：
-  // 3/4/5 个按钮分别预留 86/112/138px（按钮 24px + 间隙 2px）。
-  const actionButtonCount =
-    (expanded ? 1 : 0) +
-    (!isOthers ? 1 : 0) +
-    (searchVisible ? 1 : 0) +
-    (showFilter ? 1 : 0) +
-    (showMenu ? 1 : 0);
-  // hover 让位(2026-11-04 显隐重构):操作组仅 hover/键盘/菜单打开/触屏显示(触屏常显
-  // → 让位同步常显),展开态不再整组钉住;激活 icon 让位见 activeMarkPadding。
-  // 展开+菜单达 5 按钮时 hover 让位需 138px(原 pinned 独有档位下沉到 hover 变体)。
-  const hoverActionsPadding =
-    actionButtonCount >= 5
-      ? 'group-hover:pr-[138px] group-focus-within:pr-[138px] group-has-[[data-state=open]]:pr-[138px] [@media(hover:none)]:pr-[138px]'
-      : actionButtonCount >= 4
-        ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px] [@media(hover:none)]:pr-[112px]'
-        : 'group-hover:pr-[86px] group-focus-within:pr-[86px] [@media(hover:none)]:pr-[86px]';
-  // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
-  const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
   const visibleSessions = React.useMemo(() => {
     if (!flatCodingOthers || !sessions) return sessions;
     return {
@@ -148,16 +116,32 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     row: instanceRow,
     inputDisabled: instanceInputDisabled,
     marked: searchMarked,
-  } = useConversationInstanceRow(bot, searchActive);
-  // 常显 icon 让位(2026-11-04 显隐重构与同日修正):收起指示器(展开态常显,
-  // 用户反馈 hover 别处时它消失是误伤——它是展开状态的行级指示)与激活标记
-  // (🔍 检索/实例、归属/范围筛选非默认项)共同按数量预留静态让位;操作组其余
-  // 按钮仅 hover 显示。检索标记仅在 🔍 渲染(scope=all)时计入。
-  const pinnedMarkCount =
-    (expanded ? 1 : 0) + (searchMarked && searchVisible ? 1 : 0) + (filterActive ? 1 : 0);
-  const pinnedMarked = !unavailable && pinnedMarkCount > 0;
-  const pinnedMarkPadding =
-    pinnedMarkCount >= 3 ? 'pr-[86px]' : pinnedMarkCount >= 2 ? 'pr-[60px]' : 'pr-9';
+  } = useConversationInstanceRow(bot, sessionKey !== '');
+  // 显隐与让位布局（2026-11-04 重构）拆至 ConversationBotItemLayout（TC-G005）：hover 三档让位+激活标记常显。
+  const {
+    filterActive,
+    searchActive,
+    searchVisible,
+    showFilter,
+    showMenu,
+    stripVisible,
+    hoverActionsPadding,
+    pinnedMarked,
+    pinnedMarkPadding,
+  } = resolveBotRowLayout({
+    isManaged,
+    isOthers,
+    canFavorite,
+    origin,
+    scope,
+    sessionKey,
+    expanded,
+    unavailable,
+    hasSessionControls,
+    searchMarked,
+    hasManagement: Boolean(onOpenBotManagement && bot.spaceId),
+  });
+  const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
   const handleSearchToggle = () => {
     if (!expanded) onToggle();
     setSearchInputOpen((current) => !current);

@@ -28,12 +28,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui';
-import { CapabilitySetViewer } from '@/components/Workspace/CapabilitySetViewer';
+import { CapabilitySetEntryPill } from '@/components/Workspace/TaskComposerMenu/CapabilitySetEntryPill';
 import { MenuRow, SelectionChip } from '@/components/Workspace/TaskComposerMenu/ComposerMenuPrimitives';
 import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace/TaskComposerMenu/WorkflowSubPanel';
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
-import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
+import { FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -192,21 +192,13 @@ export function ComposerCapabilitiesMenu({
 }: ComposerCapabilitiesMenuProps) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
-  const [capabilityOpen, setCapabilityOpen] = useState(false);
   // 已激活能力集入口（2026-11-04 需求）：挂载预载一次，入口初见即显示真实激活集名
-  // 而非默认占位（load 自带 in-flight 去重；气泡打开时的重拉由 onOpenChange 既有逻辑承载）。
+  // 而非默认占位（load 自带 in-flight 去重；气泡打开时的重拉由 pill 的 onOpenChange 承载）。
   const capabilitySetsRef = useRef(capabilitySets);
   useEffect(() => {
     capabilitySetsRef.current?.load();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载预载，引用变化不重复拉取。
   }, []);
-  // 入口文案（2026-11-04 需求）：显示真实激活集名称；多集时首个名称 + 个数徽标；
-  // 未加载/空回落默认「通用协作能力」（保持既有可见入口不消失）。
-  const activeSets = capabilitySets?.sets ?? [];
-  const capabilitySetName = activeSets.length ? activeSets[0].name : '通用协作能力';
-  const capabilityEntryLabel =
-    activeSets.length > 1 ? `${capabilitySetName} 等 ${activeSets.length} 个能力集` : capabilitySetName;
-  const activeSetTitle = activeSets.map((set) => set.name).join('、');
   const pickWorkflow = (w: WorkflowPanelItem) => {
     onWorkflowSelected?.(w);
     close();
@@ -266,55 +258,9 @@ export function ComposerCapabilitiesMenu({
           </PopoverContent>
         </Popover>
         {/* 「通用协作能力」文案区：仅单聊 我的/团队空间 Bot 装配（capabilitySets 非空）。
-         * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。 */}
-        {capabilitySets ? (
-          <>
-            <span aria-hidden="true" className="ml-2.5 h-4 w-px bg-divider" />
-            <Popover
-              open={capabilityOpen}
-              onOpenChange={(next) => {
-                setCapabilityOpen(next);
-                // 每次打开重拉（spec「数据刷新」）；Popover 卸载内容即重置明细态。
-                if (next) capabilitySets.load();
-              }}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="ghost"
-                  aria-label={capabilityEntryLabel}
-                  aria-haspopup="menu"
-                  aria-expanded={capabilityOpen}
-                  className="h-7 gap-0 px-2"
-                >
-                  {/* 真实名称可能较长：截断保护 + title 悬停全显（多集名称列表）。 */}
-                  <span
-                    className="max-w-40 truncate text-[13px] font-normal leading-none text-foreground"
-                    title={activeSetTitle}
-                  >
-                    {capabilitySetName}
-                  </span>
-                  {activeSets.length > 1 && (
-                    <span
-                      aria-hidden="true"
-                      className="ml-1 rounded bg-muted px-1 text-[10px] font-normal leading-4 text-muted-foreground"
-                    >
-                      {activeSets.length}
-                    </span>
-                  )}
-                  <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
-                </Button>
-              </PopoverTrigger>
-              {/* 能力集气泡（PRD demo TokenComposer 规格）：320px 双页卡片，自带头部/滚动，
-               * 阴影沿用 demo 大阴影 0_16px_40px fg/0.12。 */}
-              <PopoverContent
-                align="start"
-                className="capability-popover w-[320px] rounded-2xl p-0 shadow-[0_16px_40px_hsl(var(--foreground)/0.12)]"
-              >
-                <CapabilitySetViewer state={capabilitySets} />
-              </PopoverContent>
-            </Popover>
-          </>
-        ) : null}
+         * 好友 Bot 会话与协作群不传 → 文案区与竖分隔线均不渲染，＋ 区独立保留。
+         * 入口 pill（真实集名/徽标/查看气泡/Tooltip）拆至 CapabilitySetEntryPill（TC-G005）。 */}
+        {capabilitySets ? <CapabilitySetEntryPill state={capabilitySets} /> : null}
       </div>
       {(selections ?? []).map((selection) => {
         const key = composerSelectionKey(selection);
