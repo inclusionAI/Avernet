@@ -71,3 +71,17 @@ describe('task escort workspace sidebar', () => {
     expect(screen.queryByRole('button', { name: /技术调研.*tech-research/ })).not.toBeInTheDocument()
   })
 })
+
+it('shows the workbench to a personal user even without a selected workflow', () => {
+  const change = vi.fn()
+  render(<Sidebar activeView="overview" onViewChange={change} isAdmin={false} hasWorkflow={false} />)
+  fireEvent.click(screen.getByRole('button', { name: '工作台' }))
+  expect(change).toHaveBeenCalledWith('workbench')
+  expect(screen.queryByRole('button', { name: '数据大盘' })).not.toBeInTheDocument()
+})
+
+it('puts the workbench immediately after the dashboard for an admin', () => {
+  renderSidebar(true)
+  const labels = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'))
+  expect(labels.indexOf('工作台')).toBe(labels.indexOf('数据大盘') + 1)
+})

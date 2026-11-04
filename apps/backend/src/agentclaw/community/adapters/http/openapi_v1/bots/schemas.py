@@ -23,6 +23,7 @@ from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
 )
+from agentclaw.community.core.bot_copy.types import BotCopyStateSummary
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -82,6 +83,7 @@ class Bot(BaseModel):
     bcn_bot_id: str = Field(
         default="", description="Established BCN address; stable across Owner handoff."
     )
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -143,6 +145,13 @@ class Bot(BaseModel):
         default=None,
         description="Business space the bot's record is assigned to (owner view). "
         "Populated on the listing endpoints.",
+    )
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="If this bot is the dst of a copy operation, its live progress "
+        "(operation_id / status / source_bot_id); null for bots not created via "
+        "copy. FE shows the retry button whenever copy_state is non-null and "
+        "status != CONVERGED.",
     )
 
 

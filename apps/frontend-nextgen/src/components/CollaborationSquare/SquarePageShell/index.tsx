@@ -1,10 +1,13 @@
 import { PublicBotCatalogPanel } from '@/components/CollaborationSquare/PublicBotCatalogPanel';
+import { GroupIdentityDisplay } from '@/components/CollaborationSquare/PublicGroupSquareSection/GroupIdentityDisplay';
 import { PublicGroupSquareSection } from '@/components/CollaborationSquare/PublicGroupSquareSection';
 import {
   PublicTaskCatalogPanel,
   type TaskCatalogViewModel,
 } from '@/components/CollaborationSquare/PublicTaskCatalogPanel';
 import { SquareNavigation } from '@/components/CollaborationSquare/SquareNavigation';
+import { SquareIdentityPicker } from '@/components/CollaborationSquare/SquareIdentityPicker';
+import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
 import { PageHeader } from '@/components/Common/PageHeader';
 import type { BotCatalogViewModel, SquareResource } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
@@ -82,14 +85,46 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
 
   const resourceTitle = resource === 'bot' ? '公开 Bot' : resource === 'group' ? '公开协作群' : '任务广场';
 
+  // dmore Frame 2：搜索栏(348px) + 身份展示挂到页头右端；群 Tab 同规格上移页头
+  //（搜索 348px + 固定登录身份展示 222px，artboard-004），内容区不再重复出现工具栏。
+  // 身份选择器与下拉弹层（dmore artboard-002 弹层 338px）保持等宽（222 提至 338）。
+  const headerActions =
+    resource === 'bot' ? (
+      <>
+        <SquareSearchBar
+          resource="bot"
+          query={botViewModel.query}
+          mode={botViewModel.mode}
+          onQueryChange={botViewModel.setQuery}
+          onModeChange={botViewModel.setMode}
+          className="w-full md:w-[348px] md:shrink-0"
+        />
+        <div className="w-full shrink-0 md:w-[338px]">
+          <SquareIdentityPicker />
+        </div>
+      </>
+    ) : resource === 'group' ? (
+      <>
+        <SquareSearchBar
+          resource="group"
+          query={square.groupQuery}
+          onQueryChange={(query) => square.setQuery('group', query)}
+          className="w-full md:w-[348px] md:shrink-0"
+        />
+        <div className="w-full shrink-0 md:w-[222px]">
+          <GroupIdentityDisplay />
+        </div>
+      </>
+    ) : undefined;
+
   return (
     <div className={`flex h-full flex-col ${resource !== 'task' ? 'bg-background' : 'bg-muted'}`}>
-      <SquareNavigation active={resource === 'group' ? 'group' : 'bot'} />
+      <SquareNavigation active={resource === 'group' ? 'group' : 'bot'} actions={headerActions} />
       <main ref={scrollRootRef} className="app-scrollbar min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
-        <div className={`mx-auto flex w-full max-w-7xl flex-col ${
-          resource !== 'task' ? 'px-4 pb-4 pt-3 sm:px-6 sm:pb-6 lg:px-8 lg:pb-8' : 'p-4 sm:p-6 lg:p-8'
+        <div className={`flex w-full flex-col ${
+          resource !== 'task' ? 'px-5 pb-6 pt-4' : 'p-4 sm:p-6 lg:p-8'
         }`}>
-          <section className={resource !== 'task' ? 'space-y-5' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
+          <section className={resource !== 'task' ? 'space-y-4' : 'space-y-4'} aria-label={`${resourceTitle}内容`}>
             {resource === 'task' && <PageHeader title={resourceTitle} description={TASK_DESCRIPTION} />}
             {resource === 'bot' && <TrackExpo point={Points.collabSquare.heroExpo} />}
             {resource === 'bot' && (
@@ -99,9 +134,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
                 smartEmptyHint="请输入关键词进行智能搜索"
               />
             )}
-            {resource === 'group' && (
-              <PublicGroupSquareSection square={square} scrollRootRef={scrollRootRef} canLoadMore={canLoadMore} />
-            )}
+            {resource === 'group' && <PublicGroupSquareSection square={square} scrollRootRef={scrollRootRef} canLoadMore={canLoadMore} />}
             {resource === 'task' && <PublicTaskCatalogPanel vm={taskViewModel} />}
           </section>
         </div>

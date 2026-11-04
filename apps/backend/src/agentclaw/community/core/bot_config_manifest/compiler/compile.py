@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Collection, Mapping
 
+from agentclaw.community.core.apply_engine.capabilities import Capabilities
 from agentclaw.community.core.apply_engine.compiler import Compiled, CompileRefused, DesiredStateCompiler, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Category, Section
 from agentclaw.community.core.apply_engine.desired_state import DesiredState
@@ -86,7 +87,7 @@ class ManifestCompiler(DesiredStateCompiler):
         or a construct's materialiser was withdrawn — so the ``PUT``'s own
         validation is not enough.
         """
-        self._parsed_or_empty(ctx, ref)
+        self._load_document(ctx, ref)
 
     async def compile(
         self, ctx: ApplyContext, ref: StateRef, *, only: Collection[ApplyConstruct] | None = None
@@ -101,11 +102,13 @@ class ManifestCompiler(DesiredStateCompiler):
         engine failure.
         """
         try:
-            parsed = self._parsed_or_empty(ctx, ref)
+            parsed = self._load_document(ctx, ref)
         except (ManifestValidationError, ManifestBindingMismatchError) as exc:
             raise CompileRefused(
                 f"the stored document no longer validates for this bot: {exc}", domain_error=exc
             ) from exc
+        if parsed is None:
+            return Compiled(DesiredState.EMPTY, ())
         return await self.compile_document(ctx, parsed, only=only)
 
     async def compile_document(
@@ -126,19 +129,26 @@ class ManifestCompiler(DesiredStateCompiler):
             ),
         )
         try:
-            state = await self._state(session, parsed, only)
+            state = await self._state(session, parsed, only, ctx.capabilities)
             sources = tuple(session.source_session.resolution_records())
         finally:
             session.close()
         return Compiled(state, sources)
 
     async def _state(
-        self, session: CompileSession, parsed: Mapping[str, Any], only: Collection[ApplyConstruct] | None
+        self,
+        session: CompileSession,
+        parsed: Mapping[str, Any],
+        only: Collection[ApplyConstruct] | None,
+        capabilities: Capabilities,
     ) -> DesiredState:
         def declared(construct: ApplyConstruct):
             if only is not None and construct not in only:
                 return None
-            return declared_entries(parsed, construct)
+            entries = declared_entries(parsed, construct)
+            if entries is None and capabilities.supports(construct):
+                return []
+            return entries
 
         script = declared(Section.SCRIPT)
         identity = declared(Category.IDENTITY)
@@ -168,8 +178,8 @@ class ManifestCompiler(DesiredStateCompiler):
             cli_tools=await compile_cli_tools(session, cli_tools, **kwargs) if cli_tools is not None else None,
         )
 
-    def _parsed_or_empty(self, ctx: ApplyContext, ref: StateRef) -> dict[str, Any]:
-        """The stored document, re-validated, or ``{}`` when there is none."""
+    def _load_document(self, ctx: ApplyContext, ref: StateRef) -> dict[str, Any] | None:
+        """The stored document, re-validated, or ``None`` when there is none."""
         expected = expected_manifest_digest(ref)
         if expected is not None:
             if ctx.env != get_current_env() or ctx.tenant != get_current_avernet_tenant():
@@ -178,7 +188,7 @@ class ManifestCompiler(DesiredStateCompiler):
         if record is None:
             if expected is not None:
                 raise ManifestBindingMismatchError("bound Manifest document is missing")
-            return {}
+            return None
         parsed = self._manifests.validate(
             document=record.document, active_engine=ctx.engine_type, bot_type=ctx.bot_type
         ).parsed

@@ -24,7 +24,8 @@ export interface RecoveryAgentExecutor {
 }
 export interface RecoveryTaskNotifier {
   /** False means notification is disabled; do not record a delivery attempt. */
-  notify(input: { ownerId: string; taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
+  notify(input: { ownerId: string; botId: string; targetEnvironment: RecoveryRequest["target"]["env"];
+    taskId: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -166,8 +167,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (!value.simulation || value.status !== "running" || !["assess", "plan"].includes(value.phase)) this.fail(409, "当前不能提交仿真判断");
       const reads = new Set(value.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded")
         .map(event => event.payload.tool_call_id));
-      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued"].includes(input.decision)
-        || value.phase === "plan" && !["insufficient_evidence", "user_continued"].includes(input.decision)
+      if (!["message", "environment", "observe", "insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
+        || value.phase === "plan" && !["insufficient_evidence", "user_continued", "owner_handoff"].includes(input.decision)
         || typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 8000
         || !Array.isArray(input.evidence_ids) || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id && simulationReadTools.has(item.source)
           && (input.decision !== "user_continued" || ["session_read", "trajectory_read"].includes(item.source))
@@ -451,7 +452,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
-      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, taskId: task.taskId, kind, summary,
+      const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, botId: task.request.target.bot_id,
+        targetEnvironment: task.request.target.env, taskId: task.taskId, kind, summary,
         ...(kind === "result" ? { effect: task.judgment?.effect ?? "unknown" } : {}) });
       if (result === false) return;
       sent = true;

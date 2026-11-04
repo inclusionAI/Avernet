@@ -30,6 +30,7 @@ vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () 
 vi.mock('../../components/workflow-workspace/EditorTab', () => ({ default: () => <div>编辑器内容</div> }))
 vi.mock('../../components/workflow-workspace/ManagementTab', () => ({ default: () => <div>管理内容</div> }))
 vi.mock('../../components/workflow-workspace/EvolutionTab', () => ({ default: () => <div>护航内容</div> }))
+vi.mock('../../components/workflow-workspace/ApprovalWorkbench', () => ({ default: () => <div>审批工作台内容</div> }))
 vi.mock('../Dashboard', () => ({ default: () => <div>管理员大盘内容</div> }))
 
 import WorkflowWorkspace from '../WorkflowWorkspace'
@@ -171,4 +172,11 @@ it('retains the in-memory draft after an approved workspace route change', async
   const unload = new Event('beforeunload', { cancelable: true })
   window.dispatchEvent(unload)
   expect(unload.defaultPrevented).toBe(true)
+})
+
+ it('navigates to a global workbench independent of the selected workflow', async () => {
+  renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=overview')
+  await userEvent.click(screen.getByRole('button', { name: '工作台' }))
+  expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=workbench')
+  expect(screen.getByText('审批工作台内容')).toBeInTheDocument()
 })

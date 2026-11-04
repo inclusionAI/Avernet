@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::core::{ActorKind, BindingChannels, BotCapabilities, ServiceResult, Skill};
+use crate::types::bot_profile::AvatarChange;
 
 #[derive(Debug, Clone)]
 pub struct OnboardActorIdentity {
@@ -37,6 +38,10 @@ pub struct AdminBotOnboardCommand {
     pub scopes: Vec<String>,
     pub binding_channels: Option<BindingChannels>,
     pub actor_identity: Option<OnboardActorIdentity>,
+    /// Avatar transition for the record's dedicated avatar field
+    /// (bot-avatar plan Task 5). `Keep` (the wire field omitted) never
+    /// touches the stored avatar.
+    pub avatar: AvatarChange,
 }
 
 #[derive(Debug, Clone)]

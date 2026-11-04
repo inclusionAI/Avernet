@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
     from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
         LegacySkillSetScope,
     )
@@ -17,13 +18,18 @@ if TYPE_CHECKING:
 
 
 class CapabilityDesiredStateRepositoryProtocol(Protocol):
-    """Tenant/env-scoped atomic SkillSet desired-state operations."""
+    """Tenant/env-scoped atomic SkillSet desired-state operations.
+
+    Membership, activation, Default exclusion, Installation reconciliation and
+    capability compensation preserve Bot MCP overrides. Explicit Direct MCP
+    uninstall, configuration replacement and Bot deletion own their cleanup.
+    """
 
     @abstractmethod
     def purge_bot_installations(
         self, *, bot_id: str, owner_id: str, env: str
     ) -> dict[str, int]:
-        """Remove both Installation tables during explicit Bot deletion."""
+        """Remove both Installation tables and Bot MCP overrides on Bot deletion."""
         ...
 
     @abstractmethod
@@ -289,11 +295,15 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     @abstractmethod
     def claim_apply_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
-        config: dict | None, platform_default_codes: frozenset[str],
+        config: McpConfigWriteIntent[dict[str, Any]], platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        """An apply's Direct MCP claim plus atomic override; refuses a code a Set supplies."""
+        """A Direct MCP claim plus atomic configuration action; refuses current Set supply.
+
+        PRESERVE performs no configuration write; None clears; a mapping
+        replaces the complete Bot override. Supply is rechecked under lock.
+        """
         ...
     @abstractmethod
     def manifest_direct_mcp_exists(
@@ -381,4 +391,6 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         owner_id: str,
         state: CapabilityDesiredState,
         engine_type: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Restore capability facts without deleting or rolling back Bot overrides."""
+        ...

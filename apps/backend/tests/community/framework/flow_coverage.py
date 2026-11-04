@@ -215,10 +215,25 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "service conformance, and architecture tests in this change; drain when "
         "singlebox has a signed /openapi/v1 principal flow for the new routes."
     ),
+    "bot_overview": (
+        "New non-user Bot overview on /openapi/v1, which needs a gateway-signed "
+        "principal singlebox cannot mint (see _GATEWAY_PRINCIPAL_EXEMPT_REASON); "
+        "its only engine provider (AICoding / Claude Code) is also still a "
+        "draft. Covered by service, HTTP router and endpoint tests; drain when "
+        "singlebox can sign a principal and a provider reports real data."
+    ),
     "bot_message_feedback": (
         "New bot output message feedback module. Covered by endpoint, service, "
         "repository and architecture tests; drain when a real singlebox flow "
         "exercises the feedback submission end-to-end."
+    ),
+    "bot_copy": (
+        "Bot-copy v1 module (Route B manifest-reuse: ac_bot_copy ledger + "
+        "POST /openapi/v1/bots/copy + retry + copy_state on Bot). Covered by "
+        "repository, derive, handler-unit, and architecture tests; routes "
+        "mounted + authorization wired. Drain when a real singlebox e2e copy "
+        "flow exercises POST /copy → manifest-creation → /bots/{dst}.copy_state "
+        "end-to-end (needs provision/DaaS stand-in)."
     ),
     "approval": _EXEMPT_REASON,
     "apply_engine": (

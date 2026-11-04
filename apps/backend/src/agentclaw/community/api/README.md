@@ -229,6 +229,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.render_screen_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_overview.bot_overview_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here

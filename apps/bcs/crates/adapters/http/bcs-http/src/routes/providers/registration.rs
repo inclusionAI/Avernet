@@ -1,5 +1,6 @@
 //! Provider and Bot registration HTTP translation.
 use super::*;
+use crate::mapping::bot_profile::to_core_avatar;
 
 pub async fn register_provider(
     State(state): State<HttpAppState>,
@@ -98,6 +99,7 @@ pub async fn register_provider_bot(
             // the token-preserving soft-merge path.
             reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
             connection_mode,
+            avatar: to_core_avatar(req.avatar_url),
         };
     let outcome = if let Some(source) = source {
         let service = state.services.a2a_bot_management.as_ref().ok_or_else(|| ProviderRouteError {

@@ -1,10 +1,10 @@
 /** Exact candidate promotion. The caller owns authorization, saved provenance and durable registration. */
 import { parse as parseYaml } from 'yaml';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
+import { createConfiguredTemporaryDirectory } from '@avernet/clawweb-shared/server/env';
 import { cloneClawflows, createTempRepo, removeTempRepo, type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
 import { createPreparedGitBundle, restorePreparedGitBundle, readPreparedPackMetadata, verifyPreparedPackMetadata, preparedGitRunner,
   readPreparedRemoteRefs, gitOidPattern, validPackGitId, type PreparedPackMetadata } from './pack-git-prepared.js';
@@ -81,7 +81,7 @@ export async function prepareDeployCandidate(repoDir: string, workflowId: string
   if (!gitOidPattern.test(releaseCommit)) throw new Error('Invalid deploy commit');
   // Construct the annotated object without installing/replacing any local tag.
   const tagger = await text([...identity, 'var', 'GIT_COMMITTER_IDENT']);
-  const dir = await mkdtemp(path.join(tmpdir(), 'cw-prepared-tag-'));
+  const dir = await createConfiguredTemporaryDirectory('cw-prepared-tag');
   let tagObject: string;
   try {
     const file = path.join(dir, 'tag');

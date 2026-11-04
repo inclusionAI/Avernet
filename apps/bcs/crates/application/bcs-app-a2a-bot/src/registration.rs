@@ -2,6 +2,7 @@ use super::*;
 use bcs_service_api::{ActorKind, ProviderBotConnectionMode, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams};
 use bcs_service_api::types::a2a_bot::A2aRegistrationCard;
+use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
 
 fn invalid(message: &str) -> ServiceError {
     ServiceError::InvalidOperation {message:message.into(),request_id:None}
@@ -30,7 +31,15 @@ impl A2aBotManagement {
         let params = RegisterProviderBotParams {webhook_url:None,bot_name:command.name,summary:command.summary,
             owners:command.owners,provider_bot_ref:command.provider_bot_ref,domains:command.domains,
             skills:command.skills,scopes:command.scopes,bot_uuid:command.bot_uuid,connection_mode:command.connection_mode,initial_caller:None};
-        let result = registration.register(&command.provider_id,&command.provider_admin_token,params,card).await?;
+        let result = registration.core.register(&command.provider_id,&command.provider_admin_token,params,card).await?;
+        // Ownership and Card have committed. Match ordinary Provider registration:
+        // explicit avatar failures are errors, without rollback or retry of admission.
+        if !matches!(command.avatar, AvatarChange::Keep) {
+            let written=registration.registry.update_avatar_existing(&result.binding.bot_uuid,command.avatar).await?;
+            if written==ProfileWrite::Missing {
+                return Err(ServiceError::BotNotFound(result.binding.bot_uuid));
+            }
+        }
         let bot_runtime_token = if matches!(result.auth_mode, bcs_service_api::ProviderAuthMode::AgentPass) {
             None
         } else { Some(result.bot_runtime_token) };

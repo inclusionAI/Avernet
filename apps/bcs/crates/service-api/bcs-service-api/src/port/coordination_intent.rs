@@ -45,6 +45,11 @@ pub trait CoordinationIntentPort: Send + Sync {
         deadline_ms: u64,
     ) -> ServiceResult<CoordinationClaim>;
 
+    /// Read-only task correlation. Missing/expired cache entries remain unknown.
+    async fn task_result(&self, _intent_id: &str) -> ServiceResult<Option<CoordinationResult>> { Ok(None) }
+    async fn task_delivery(&self, _intent_id: &str) -> ServiceResult<Option<String>> { Ok(None) }
+    async fn record_task_delivery(&self, _intent_id: &str, _delivery_id: &str) -> ServiceResult<()> { Ok(()) }
+
     /// Append an immutable receipt. Retries must only repeat this operation.
     async fn finish(
         &self, intent_id: &str, context: &CoordinationContext,

@@ -10,6 +10,8 @@ RuntimeState = Literal["draft", "verify", "online"]
 class PublicBot(BaseModel):
     """The allowlisted public projection of a catalog Bot."""
 
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
+
     bot_id: str = Field(description="Stable public Bot identifier.")
     bot_uuid: str | None = Field(
         default=None,

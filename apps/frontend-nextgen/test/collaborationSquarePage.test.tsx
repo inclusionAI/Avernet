@@ -6,10 +6,11 @@ import path from 'node:path';
 import { TextDecoder, TextEncoder } from 'node:util';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import SquareBotCard from '../src/components/CollaborationSquare/BotCard';
+import SquareBotCard, { SquareBotCardSkeleton } from '../src/components/CollaborationSquare/BotCard';
 import { BotProfileModal } from '../src/components/CollaborationSquare/BotProfileModal';
-import GroupCard from '../src/components/CollaborationSquare/GroupCard';
+import GroupCard, { GroupCardSkeleton } from '../src/components/CollaborationSquare/GroupCard';
 import { GroupMembersModal } from '../src/components/CollaborationSquare/GroupMembersModal';
+import { ShareGroupDialog } from '../src/components/CollaborationSquare/ShareGroupDialog';
 import SquareSearchBar from '../src/components/CollaborationSquare/SquareSearchBar';
 
 Object.assign(globalThis, { TextDecoder, TextEncoder });
@@ -142,6 +143,32 @@ describe('collaboration square accessible UI', () => {
     expect(html).not.toContain('管理权限');
   });
 
+  test('分享协作群弹窗展示群预览与分享链接，复制按钮初始为复制链接', () => {
+    const html = renderWithPortals(
+      <ShareGroupDialog open group={{ ...group, id: 'g1', typeLabel: '任务协作' }} onClose={jest.fn()} />,
+    );
+    expect(html).toContain('分享协作群');
+    expect(html).toContain('复制链接，邀请其他用户查看这个公开协作群。');
+    expect(html).toContain('产品共创群');
+    expect(html).toContain('任务协作');
+    expect(html).toContain('分享链接');
+    expect(html).toContain('/collaboration-square/groups?');
+    expect(html).toContain('复制链接');
+  });
+
+  test('加载骨架逐区镜像真实卡片结构（dmore 分区，loading→loaded 零跳版）', () => {
+    const groupHtml = renderToStaticMarkup(<GroupCardSkeleton />);
+    // 头部名称行 + 右上 65×20 类型胶囊位；底部 border-t 行内左「成员」chip 位 + 右两个 32px 图标钮位。
+    expect(groupHtml).toContain('w-[65px]');
+    expect(groupHtml).toContain('border-t');
+    expect((groupHtml.match(/h-8 w-8 rounded-lg/g) ?? [])).toHaveLength(2);
+
+    const botHtml = renderToStaticMarkup(<SquareBotCardSkeleton />);
+    // 40px 圆角头像位 + 沿用真实卡面双层软阴影（避免加载完成时阴影 pop）。
+    expect(botHtml).toContain('h-10 w-10');
+    expect(botHtml).toContain('rgba(0,10,26,0.07)');
+  });
+
   test('详情和成员弹层只渲染公开信息', () => {
     const botHtml = renderWithPortals(
       <BotProfileModal
@@ -185,17 +212,17 @@ describe('collaboration square accessible UI', () => {
     expect(memberHtml).not.toContain('参与者');
   });
 
-  test('公开 Bot 页面保留名称搜索与智能搜索入口', () => {
+  test('公开 Bot 页面保留按名称与智能搜索入口', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: jest.fn() });
     render(
       <SquareSearchBar resource="bot" query="" mode="name" onQueryChange={jest.fn()} onModeChange={jest.fn()} />,
     );
     const modeSelect = screen.getByRole('combobox', { name: 'Bot 搜索模式' });
-    expect(modeSelect).toHaveTextContent('名称搜索');
-    expect(screen.getByRole('textbox', { name: '搜索 Bot 名称' })).toBeInTheDocument();
+    expect(modeSelect).toHaveTextContent('按名称');
+    expect(screen.getByRole('textbox', { name: '输入Bot名称' })).toBeInTheDocument();
     fireEvent.keyDown(modeSelect, { key: 'ArrowDown' });
-    expect(screen.getByRole('option', { name: '名称搜索' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '智能搜索' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '按名称' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '智能' })).toBeInTheDocument();
   });
 
   test('页面实现遵守项目 UI 与分层约束', () => {
@@ -204,9 +231,11 @@ describe('collaboration square accessible UI', () => {
       'src/pages/CollaborationSquare/Groups/index.tsx',
       'src/pages/CollaborationSquare/Tasks/index.tsx',
       'config/routes.ts',
+      'src/components/CollaborationSquare/CreateGroupSessionModal/index.tsx',
       'src/components/CollaborationSquare/SquarePageShell/index.tsx',
       'src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx',
       'src/components/CollaborationSquare/PublicGroupSquareSection/index.tsx',
+      'src/components/CollaborationSquare/ShareGroupDialog/index.tsx',
       'src/hooks/useCollaborationSquare.ts',
       'src/hooks/useCollaborationSquareList.ts',
       'src/hooks/useCreateGroupSessionFlow.ts',
@@ -224,13 +253,17 @@ describe('collaboration square accessible UI', () => {
       '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，为我或我的 Bot 申请加对方 Bot 为好友。',
     );
     expect(source).toContain('输入能力或职责描述后，将智能搜索匹配的公开 Bot。');
-    expect(source).toContain('onModeChange={vm.setMode}');
+    expect(source).toContain('onModeChange={botViewModel.setMode}');
     expect(source).toContain('COLLABORATION_SQUARE_PAGE_SIZE = 24');
     expect(source).toContain('new IntersectionObserver');
     expect(source).toContain('onScroll={handleScroll}');
     expect(source).toContain('rootMargin: `0px 0px ${LOAD_MORE_PRELOAD_DISTANCE}px 0px`');
     expect(source).not.toContain('发现协作群，支持基于公开协作群快速创建新会话。');
     expect(source).toContain('发现公开 BBS 求助任务');
+    // 回归锁：卡片图标钮弹窗关闭时不得把焦点还给触发钮，否则其 tooltip 未 hover 凭空展开。
+    // 回归锁（3 处）：分享弹窗阻断初始/归还抢焦、创建会话弹窗阻断归还抢焦——
+    // 焦点落回带 tooltip 的触发钮/预览条名称段会令 tooltip 未 hover 凭空展开。
+    expect(source.match(/\(event\) => event\.preventDefault\(\)\}/g)).toHaveLength(3);
     expect(source).toContain('resource="task"');
     expect(source).toContain('/collaboration-square/tasks');
   });

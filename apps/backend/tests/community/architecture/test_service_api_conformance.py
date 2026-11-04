@@ -378,7 +378,11 @@ from agentclaw.community.core.expert_market.creation import ExpertCreationServic
 from agentclaw.community.api.conversation_knowledge_service import ConversationKnowledgeServiceProtocol
 from agentclaw.community.core.knowledge_management.services.conversation import ConversationKnowledgeService
 
+from agentclaw.community.api.bot_overview_service import BotOverviewServiceProtocol
+from agentclaw.community.core.bot_overview.service import BotOverviewService
+
 _PAIRS = [
+    (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),
     (BotKnowledgeServiceProtocol, BotKnowledgeService),
     (BotKnowledgePublicationSelectionProtocol, BotKnowledgePublicationSelection),

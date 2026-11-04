@@ -252,6 +252,59 @@ class TestGetEngineConfig:
         assert body["success"] is False
         assert body["error_code"] == 500
 
+    def test_device_not_bound_returns_conflict(self, engine_cfg_client):
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceNotBoundError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceNotBoundError(
+            "DeviceContextResolver: no active binding for bot=default"
+        )
+        resp = tc.get("/api/bots/default/engine-config")
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 409
+        assert body["data"] is None
+
+    def test_device_not_bound_returns_stable_message(self, engine_cfg_client):
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceNotBoundError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceNotBoundError(
+            "DeviceContextResolver: no active binding for bot=default"
+        )
+        resp = tc.get("/api/bots/default/engine-config")
+        body = resp.json()
+        assert body["message"] == "Bot has no active device"
+        assert "no active binding" not in body["message"]
+
+    def test_device_not_bound_is_logged_without_error(self, engine_cfg_client, caplog):
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceNotBoundError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceNotBoundError(
+            "DeviceContextResolver: no active binding for bot=default"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.get("/api/bots/default/engine-config")
+
+        assert resp.json()["error_code"] == 409
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.get_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.INFO for record in records)
+
 
 class TestUpdateBotExtForOthers:
     def test_permission_denied_for_non_admin(self, client):

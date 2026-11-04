@@ -11,7 +11,8 @@ use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 
 pub(super) fn build_card_management(
     db: Arc<dyn DbPlugin>, flavor:bcs_db_api::DbSqlFlavor, bots: Arc<dyn BotProviderRepoPort>,
-    providers: Arc<dyn ProviderCoreService>, guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+    providers: Arc<dyn ProviderCoreService>, registry: Arc<dyn bcs_service_api::BotRegistryCoreService>,
+    guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
 ) -> crate::Result<(Arc<dyn A2aBotManagementService>, Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>)> {
     let cards = Arc::new(DbA2aBotStore::new(db, crate::env::resolve_env(), flavor));
     let registration = Arc::new(bcs_bot::core::a2a_provider_registration::A2aProviderRegistrationCore::new(providers.clone(), bots.clone()));
@@ -19,7 +20,7 @@ pub(super) fn build_card_management(
     let mut fetcher = HttpA2aCardFetcher::new(guard, vec![bcs_a2a_http::tools::EXTENSION.into(),
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
-    Ok((Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration)), core))
+    Ok((Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration, registry)), core))
 }
 
 pub(super) fn build_delivery(

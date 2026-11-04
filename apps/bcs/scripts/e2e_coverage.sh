@@ -355,12 +355,30 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-bot-store/src/memory_ownership_sync.rs
     bcs-bot-store/src/memory_bot_provider_storage.rs
     bcs-bot-store/src/memory_bot_repo_port.rs
+    # The bot-avatar plan reorganized this store: T1 (4fb7a510cf) moved the
+    # memory identity/runtime operations out of memory_bot_repo_port.rs, and
+    # T3 (b5d99b3109) added memory_profile.rs (avatar persistence). The three
+    # split files showed 0 E2E hits in the 2026-11-03 singlebox measurement
+    # (337+296+219 instrumentable lines), same as their already-listed parent
+    # file: the SQLite E2E stack selects the persistent repo, never this one.
+    bcs-bot-store/src/memory_identity_ops.rs
+    bcs-bot-store/src/memory_runtime_ops.rs
+    bcs-bot-store/src/memory_profile.rs
     bcs-bot-store/src/memory_control_plane.rs
     bcs-bot-store/src/memory_controllable.rs
     bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
     bcs-bot-store/src/memory_registration_ownership.rs
     bcs-bot-store/src/memory_retirement.rs
+    # The collaboration-store split introduced memory_* module files; the four
+    # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11
+    # instrumentable lines). memory_events.rs is deliberately NOT listed: its
+    # shared state_machine_transition_events helper is executed via the SQL path
+    # (11 E2E hits), so the warn-and-re-include rule would fire on it.
+    bcs-collaboration-store/src/memory_binding.rs
+    bcs-collaboration-store/src/memory_definition.rs
+    bcs-collaboration-store/src/memory_runs.rs
+    bcs-collaboration-store/src/memory_transition.rs
     bcs-event-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs

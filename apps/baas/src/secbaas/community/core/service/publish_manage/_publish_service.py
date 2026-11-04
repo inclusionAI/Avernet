@@ -1446,6 +1446,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
 
         if not eligible_devices:
+            if publish_type == PublishType.DESTROY and all(
+                device.status == DeviceStatus.RELEASED.value for device in all_devices
+            ):
+                logger.info(
+                    f"[create_device_records] DESTROY publish_id={publish_id} "
+                    "has no non-released devices; allowing an idempotent no-op"
+                )
+                return
+
             logger.warning(
                 f"[create_device_records] No eligible devices for "
                 f"publish_id={publish_id} type={publish_type.value}"
@@ -3016,6 +3025,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     modifier=operator,
                 )
                 if updated_rows == 0:
+                    logger.warning(
+                        f"Device configuration update affected no rows "
+                        f"(device_id={device_record.id}, publish_id={publish_record.id}, "
+                        f"tenant={tenant}, env={env})"
+                    )
                     raise RuntimeError("Device configuration update affected no rows")
                 image_config_ready = True
                 # Only expose PROCESSING to callback/timeout retries after

@@ -167,6 +167,14 @@ class BotAccessRefusedError(Exception):
     """
 
 
+class BotAccessCheckForbiddenError(Exception):
+    """The caller is not an allowlisted application (→ 403, Bot-independent).
+
+    Raised by the transitional Bot access check before any Bot is read, so the
+    refusal carries nothing about the Bot or user that was asked about.
+    """
+
+
 class BotEditLockError(Exception):
     """Base for edit-lock failures raised by the authorization dependency."""
 

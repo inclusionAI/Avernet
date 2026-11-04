@@ -17,6 +17,11 @@ failure cannot be overwritten by a later success. Timeouts, missing reports and
 failed suites return a nonzero status. A package with no tests is `NO_TESTS`, not
 a passing test.
 
+Passing test console logs are retained in JUnit rather than streamed to the CI
+console. Failing test logs remain visible in both places. Workflow server/shared
+suites use Node; browser suites continue to use jsdom. These reduce test-runner
+overhead without changing test selection, coverage or timeout budgets.
+
 Reports: `test-results/summary.{md,json}`, `junit.xml`, `coverage/` (LCOV,
 Cobertura and Istanbul JSON), and `packages/*/` (individual JSON/JUnit/HTML).
 Coverage measures each package's own server/web/src source, including untouched

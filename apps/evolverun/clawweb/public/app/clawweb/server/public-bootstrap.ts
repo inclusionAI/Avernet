@@ -5,7 +5,7 @@ import cookieParser from "cookie-parser";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClawevolveModule } from "@avernet/clawevolve";
-import { createInsightRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
+import { createInsightRuntime, createInsightManagementRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
 import { createApprovalRouter } from "@avernet/workflow/server/routes/approval";
 import { createInternalApprovalCardsRouter } from "@avernet/workflow/server/routes/internal/approval-cards";
 import { ApprovalCardRepository } from "@avernet/workflow/server/repositories/approval-card-repository";
@@ -175,6 +175,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       repairPoll?.unref();
       app.use("/api/bench", clawevolve.benchRouter);
       app.use("/api/insight/v1", createSessionRecoveryRouter(options.sessionRecovery));
+      app.use("/api/insight/v1", createInsightManagementRuntime(db).router);
       app.use("/api/insight/v1", createInsightRouter(insight.service));
       // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)
       const approvalCardRepo = new ApprovalCardRepository(db);

@@ -98,6 +98,7 @@ async def _apply(materialiser, ctx, entries):
         return resolved, None, None
     plan = await materialiser.plan(ctx, resolved.intents)
     written = await materialiser.write(ctx, plan)
+    assert written.removals == plan.removals
     return resolved, plan, written
 
 
@@ -165,7 +166,7 @@ def test_a_declared_skill_uploads_the_validated_package_and_activates():
     )
 
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     # One upload, of a package the real validator accepts, named by its own
     # front matter — the same entry point the raw-zip router path takes.
     assert [call["name"] for call in uploads.uploads] == ["quality-check"]
@@ -190,7 +191,7 @@ def test_the_second_apply_fully_overwrites_and_reports_updated():
     reader.assets = (skill_asset(qc_id, "quality-check"),)
 
     _, plan, second = _run(_apply(materialiser, _ctx(), entries))
-    assert [e.outcome.value for e in second] == ["updated"]
+    assert [e.outcome.value for e in second.entries] == ["updated"]
     assert len(uploads.uploads) == 2
     assert activation.writes == 2
     assert len(objects.calls) == 1  # only the first apply hit the store;
@@ -204,7 +205,7 @@ def test_an_inactive_same_name_skill_is_reinstated_as_created():
     it active."""
     materialiser, uploads, activation, _, _, _ = skill_rig(packages={QC_KEY: QZ})
     result, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     assert uploads.uploads and activation.skill_activations
 
 
@@ -301,7 +302,7 @@ def test_a_tar_gz_source_with_a_subpath_flattens_to_the_skill():
         )
     )
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     assert uploads.uploads[0]["name"] == "quality-check"
     # The canonical package came from the subtree: wrapper files are gone.
     with zipfile.ZipFile(io.BytesIO(uploads.uploads[0]["package"])) as ziparchive:
@@ -489,7 +490,7 @@ def test_a_declared_name_matching_a_set_governed_skill_becomes_direct():
     )
     resolved, _plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert resolved.ok
-    assert [entry.outcome.value for entry in written] == ["updated"]
+    assert [entry.outcome.value for entry in written.entries] == ["updated"]
     assert uploads.uploads
     assert activation.skill_activations
 
@@ -503,7 +504,7 @@ def test_a_declared_name_matching_a_non_local_active_skill_becomes_local_direct(
     )
     resolved, _plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert resolved.ok
-    assert [entry.outcome.value for entry in written] == ["updated"]
+    assert [entry.outcome.value for entry in written.entries] == ["updated"]
     assert uploads.uploads
 
 
@@ -522,7 +523,7 @@ def test_a_center_and_a_repo_skill_are_claimed_as_the_shared_asset_itself():
     plan = _run(raw.plan(ctx, resolved.intents))
     assert [(p.intent.identity, p.outcome) for p in plan.entries] == [("triage", "updated"), ("weather", "created")]
     written = _run(raw.write(ctx, plan))
-    assert [(e.identity, e.outcome.value) for e in written] == [("triage", "updated"), ("weather", "created")]
+    assert [(e.identity, e.outcome.value) for e in written.entries] == [("triage", "updated"), ("weather", "created")]
     assert activation.skill_activations == [41, 42] and uploads.uploads == []
     assert [(kind, key) for kind, key, _ in shared.asked] == [("center", "triage"), ("repo", "team/weather")]
     assert {actor for _, _, actor in shared.asked} == {ctx.actor_id}, "asked as the apply's principal"
@@ -588,7 +589,7 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
         packages={QC_KEY: QZ},
     )
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     assert plan.removals == ("some-other-skill",)
     assert activation.skill_deactivations == [11]
     assert uploads.uploads[0]["name"] == "quality-check"
@@ -670,7 +671,7 @@ def test_an_unpinned_skill_source_defaults_to_keep_last():
     reader.assets = (skill_asset(qc_id, "quality-check"),)
 
     _, _, second = _run(_apply(materialiser, _ctx(), entries))
-    assert [e.outcome.value for e in second] == ["updated"]
+    assert [e.outcome.value for e in second.entries] == ["updated"]
     assert len(uploads.uploads) == 2
 
 
@@ -709,7 +710,7 @@ def test_a_dry_run_receipt_is_not_installation_evidence():
     )
 
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     # What got written is D2's canonical repack (the passthrough road).
     assert (
         uploads.uploads[0]["package"]
@@ -740,7 +741,7 @@ def test_a_receipt_left_behind_by_an_aborted_write_is_not_evidence():
     reader.assets = (skill_asset(12, "quality-check"),)
 
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
 
 
 def test_an_unreadable_installed_package_is_treated_as_unknown():
@@ -758,7 +759,7 @@ def test_an_unreadable_installed_package_is_treated_as_unknown():
     reader.assets = (skill_asset(12, "quality-check"),)
 
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
 
 
 def test_a_deactivation_conflict_mid_write_reports_partially_written():
@@ -869,7 +870,7 @@ def test_a_skills_entry_from_a_git_tree_builds_a_package():
         _apply(materialiser, _ctx(), [{"name": "demo", "from": "src"}])
     )
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     # The manual-upload road unchanged: an installed skill IS an uploaded
     # one — so the uploaded package must pass the real validator.
     real_validator().validate_zip(uploads.uploads[0]["package"])
@@ -906,7 +907,7 @@ def test_a_moved_ref_note_survives_into_the_package():
     result, _, written = _run(_apply(materialiser, _ctx(), [{"name": "demo", "from": "src"}]))
     assert result.ok
     # Non-strict moves are applied and reported: both SHAs on the row.
-    note = written[0].note
+    note = written.entries[0].note
     assert note is not None
     assert "b" * 40 in note
     assert "a" * 40 in note
@@ -938,8 +939,8 @@ def test_git_keep_last_serves_the_stored_tree():
         )
     )
     assert result.ok, [f.reason for f in result.failures]
-    assert [e.outcome.value for e in written] == ["created"]
-    assert "keep_last" in written[0].note
+    assert [e.outcome.value for e in written.entries] == ["created"]
+    assert "keep_last" in written.entries[0].note
     real_validator().validate_zip(uploads.uploads[0]["package"])
 
 

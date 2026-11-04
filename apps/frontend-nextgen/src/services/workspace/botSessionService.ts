@@ -260,6 +260,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     ownerId,
     engineOwnerId: dto.owner_entity_id,
     displayName: dto.bot_name || dto.bot_id,
+    avatarUrl: dto.avatar_url?.trim() || undefined,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: dto.status,
     reachability: 'reachable',

@@ -62,6 +62,31 @@ Existing host Skill description reads still use the caller's identity. The
 frontend consumes the returned `botName`; the personal Bot list is loaded only
 for the registration dialog and retains its original access rules.
 
+## Team-space Skill tasks
+
+Members of the TEAM space captured in a task's frozen `targetSkill` can view
+and operate that Skill task, including interactions, feedback files, retry,
+cancel, sharing, task logs and candidate rejection. Their normal task list
+includes these tasks. Task detail exposes `canManage` for Skill tasks so UI
+controls use the same authorization as the server. Applying a candidate also
+requires ownership or explicit collaboration on the source Bot. Task detail
+exposes `canApplySkill`; the application button is disabled with an explanation
+for other space members, while rejection and other task controls remain usable.
+The server rechecks this permission before recording acceptance or calling the
+Host, using the Bot primary key and environment to match collaboration records.
+
+Authorization uses the existing `SpaceDirectory` with the actual caller's
+identity on each request. Losing membership removes team access. The target
+Skill's frozen space grants access; the selected Stage implementation's space
+does not. Personal/no-space tasks, native Bot tasks and administrator checks
+retain their existing rules. Public sharing remains read-only for outsiders.
+
+Team operations preserve task creator and Bot owner. Candidate application
+forwards the actual caller to the Host and records that actor in version/audit
+data; it retains package conflict checks and the Host's own authorization.
+Moving a Skill changes defaults for future tasks, not an existing task's frozen
+space. Application also rechecks access to the current asset's space.
+
 ## Singlebox and capability discovery
 
 `GET /api/evolve/capabilities` reports `skillManagement` and

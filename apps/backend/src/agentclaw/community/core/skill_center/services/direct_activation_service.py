@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
 from injector import inject
 
 from agentclaw.community.core.bot_management.addressing import (
@@ -391,14 +393,14 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self,
         *,
         server_code: str,
-        config: dict | None,
+        config: McpConfigWriteIntent[dict[str, Any]],
         bot_id: str,
         owner_id: str,
         actor_id: str,
         apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]:
-        """An apply's Direct MCP claim plus complete Bot override; refused when a Set supplies it."""
+        """An apply's Direct claim and preserve/clear/replace action; refused when a Set supplies it."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         mutation_result = None
@@ -426,6 +428,9 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=mutation,
                 scope_from_result=mcp_claim_scope,
+                # Explicit config still reaches the claim to consume aliases.
+                # Only an effective supply/config delta requires MCP delivery.
+                skip_projection_when_unchanged=True,
             )
             self._log_manifest_source_transitions(
                 apply_id=apply_id, bot_id=bot_id, capability_type="mcp",

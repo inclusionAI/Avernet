@@ -60,13 +60,29 @@ impl CoordinationCacheStore {
         if remaining == 0 { return Err(error("coordination_deadline_exceeded")); }
         let bytes = serde_json::to_vec(value).map_err(|_| error("invalid_coordination_record"))?;
         tokio::time::timeout(Duration::from_millis(remaining), self.cache.set_value(
-            &Self::key(id, suffix)?, bytes, Some(Duration::from_secs(172800)), CacheSetMode::InsertOnly,
+            &Self::key(id, suffix)?, bytes, Some(Duration::from_secs(7 * 24 * 60 * 60)), CacheSetMode::InsertOnly,
         )).await.map_err(|_| error("coordination_cache_timeout"))?
             .map_err(|_| error("coordination_cache_unavailable"))
     }
 }
 #[async_trait]
 impl CoordinationIntentPort for CoordinationCacheStore {
+    async fn task_result(&self, id: &str) -> ServiceResult<Option<CoordinationResult>> {
+        self.read(id, "result", now_ms() + 3000).await?
+            .map(serde_json::from_value).transpose().map_err(|_| error("invalid_coordination_receipt"))
+    }
+    async fn task_delivery(&self, id: &str) -> ServiceResult<Option<String>> {
+        self.read(id, "delivery", now_ms() + 3000).await?
+            .map(serde_json::from_value).transpose().map_err(|_| error("invalid_task_delivery"))
+    }
+    async fn record_task_delivery(&self, id: &str, delivery: &str) -> ServiceResult<()> {
+        if self.create(id, "delivery", &json!(delivery), now_ms() + 3000).await? {
+            return Ok(());
+        }
+        if self.task_delivery(id).await?.as_deref() == Some(delivery) { return Ok(()); }
+        Err(error("task_delivery_conflict"))
+    }
+
     async fn resolve_and_claim(&self, id: &str, tool: &str,
         context: &CoordinationContext, deadline_ms: u64) -> ServiceResult<CoordinationClaim> {
         let value = self.read(id, "payload", deadline_ms).await?

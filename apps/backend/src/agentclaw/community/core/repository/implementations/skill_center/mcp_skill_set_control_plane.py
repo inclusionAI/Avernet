@@ -183,10 +183,6 @@ class McpSkillSetControlPlaneCommands:
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
-                bot_mcp_configs.delete(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
             session.flush()
             return DesiredStateMutation(
                 self._as_item(row), True, old,
@@ -234,8 +230,8 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), server_code=server_code,
             )
-            # An active ordinary Set can supply the same MCP after Default
-            # exclusion. Its Installation and configuration belong to that Set.
+            # An active ordinary Set can still supply the MCP after Default
+            # exclusion. Bot overrides are independent of either supply source.
             active_ordinary_claim = any(
                 old.set_active[set_id]
                 and any(member[0] == server_code for member in members)
@@ -244,10 +240,6 @@ class McpSkillSetControlPlaneCommands:
             removed_installation = 0
             if not active_ordinary_claim:
                 removed_installation = mcp_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
-                bot_mcp_configs.delete(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )

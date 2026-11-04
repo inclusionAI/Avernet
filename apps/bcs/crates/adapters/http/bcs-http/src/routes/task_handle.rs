@@ -6,10 +6,10 @@ use crate::state::HttpAppState;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StatusRequest { task_refs: Vec<String> }
+pub struct StatusRequest { #[serde(rename = "intent_ids", alias = "task_refs")] task_refs: Vec<String> }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CancelRequest { task_ref: String, reason: String }
+pub struct CancelRequest { #[serde(rename = "intent_id", alias = "task_ref")] task_ref: String, reason: String }
 fn error(error: bcs_service_api::ServiceError) -> Response {
     let status = if matches!(error, bcs_service_api::ServiceError::InvalidOperation { .. }) {
         StatusCode::BAD_REQUEST

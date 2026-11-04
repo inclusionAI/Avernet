@@ -9,7 +9,7 @@ export type NavigationSection = Extract<RouteSection, 'collab' | 'bot'>;
 /** 产品侧栏分组展示名。 */
 export const navSectionLabels: Record<NavigationSection, string> = {
   collab: '协作',
-  bot: 'Bot',
+  bot: '管理',
 };
 
 export interface NavigationItem {

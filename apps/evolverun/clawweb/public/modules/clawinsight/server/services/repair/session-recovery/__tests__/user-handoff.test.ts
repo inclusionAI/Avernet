@@ -200,7 +200,8 @@ it.each(["assess", "observe", "plan", "verify"] as const)("notifies the Owner an
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", phase, completionReason: "owner_handoff", plan: null,
     ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" }, judgment: { effect: "not_recovered", summary } });
-  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", effect: "not_recovered", summary });
+  expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
+    taskId: task.taskId, kind: "result", effect: "not_recovered", summary });
   expect(task.timeline.some(event => event.kind === "notification" && event.payload.kind === "result" && event.payload.sent === true)).toBe(true);
   const notice = actionNotifier.after.mock.calls.map(([value]) => value).find(value => value.kind === "result");
   expect(task.timeline.find(event => event.event_id === notice?.eventId)).toMatchObject({
@@ -229,7 +230,8 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["recovered", "
     expect(task).toMatchObject({ status: "completed", completionReason: "owner_handoff", phase, plan: null,
       ownerDeadlineAt: null, observationDeadlineAt: null, execution: { state: "ended" },
       judgment: { effect, summary, delivery: "unconfirmed", response: "none", evidence_ids: [read.evidenceId] } });
-    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", taskId: task.taskId, kind: "result", effect, summary });
+    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
+      taskId: task.taskId, kind: "result", effect, summary });
     expect(runtime.sendMessage).not.toHaveBeenCalled();
     expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
     await service.reportResults();

@@ -495,9 +495,16 @@ impl SessionServiceImpl {
     ) -> Result<SessionDetail, ApplicationError> {
         let mut participants = session.participants.clone();
         backfill_participant_names(self.registry.as_ref(), &mut participants).await;
+        // Design §5.3: detail keeps its existing name backfill and gains the
+        // avatar column from ONE batched display-profile read for this
+        // Session; Human members never join the Bot read, and read failures
+        // surface as service errors instead of null rows.
+        let avatars = self
+            .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
+            .await?;
         let participants = participants
             .iter()
-            .map(project_participant)
+            .map(|participant| project_participant(participant, &avatars))
             .collect::<Vec<_>>();
         Ok(SessionDetail {
             session_id: session.id.clone(),
@@ -523,19 +530,31 @@ impl SessionServiceImpl {
     /// Backfill display names for all participants, then project the one
     /// identified by `bot_uuid`. Backfilling the whole slice first avoids
     /// borrowing the slice immutably (for the lookup) while it is still
-    /// mutably borrowed by `backfill_participant_names`.
+    /// mutably borrowed by `backfill_participant_names`. The projected row
+    /// then gains its avatar through the same batched display-profile read
+    /// used by detail and list (design §5.1); a Human target reads nothing.
+    ///
+    /// A missing target is reported at the source as a `participant_not_found`
+    /// 404 — before any avatar I/O — so the mutations that funnel through
+    /// here (add/update/human self-join) never have to remap an Internal
+    /// into a 404, and a registry avatar failure after a committed mutation
+    /// propagates as an Internal (design §5.3), never disguised as 404.
     pub(super) async fn backfill_and_project_participant(
         &self,
         participants: &mut [Participant],
         bot_uuid: &str,
     ) -> Result<SessionParticipant, ApplicationError> {
         backfill_participant_names(self.registry.as_ref(), participants).await;
-        participants
+        let target = participants
             .iter()
             .find(|p| p.bot_uuid == bot_uuid)
-            .map(project_participant)
             .ok_or_else(|| {
-                ApplicationError::internal("participant not present in returned Session")
-            })
+                ApplicationError::not_found(
+                    "participant_not_found",
+                    format!("Participant '{bot_uuid}' not found in returned Session"),
+                )
+            })?;
+        let avatars = self.avatar_map_for_ids(avatar::single_bot_id(target)).await?;
+        Ok(project_participant(target, &avatars))
     }
 }

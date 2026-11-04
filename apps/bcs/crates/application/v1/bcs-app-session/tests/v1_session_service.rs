@@ -812,3 +812,9 @@ mod message_views;
 
 #[path = "v1_session_service/participant_eligibility.rs"]
 mod participant_eligibility;
+
+#[path = "v1_session_service/avatars.rs"]
+mod avatars;
+
+#[path = "v1_session_service/avatar_budget.rs"]
+mod avatar_budget;

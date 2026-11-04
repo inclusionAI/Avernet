@@ -20,6 +20,8 @@ import { evolveBotOptionKey } from '../components/evolveBotIdentity'
 import EvolveModelFields, { EVOLVE_CUSTOM_MODEL } from '../components/EvolveModelFields'
 import { useEvolveModelConfig } from '../hooks/useEvolveModelConfig'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
+import { TaskReferenceMaterialsField, TaskReferenceMaterialsDetail } from '../components/TaskReferenceMaterials'
+import { useTaskReferenceMaterials } from '../hooks/useTaskReferenceMaterials'
 import SkillEvolutionFields, {
   type StageExtensionDraft,
   type StageSelectionDraft,
@@ -727,6 +729,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   })
   const isSkillEvolution = (taskType === 'full' || taskType === 'diagnose' || taskType === 'hardening')
     && !improvementSource && searchParams.get('target') === 'skill'
+  const materialsEnabled = !improvementSource && (taskType === 'hardening' || taskType === 'full')
+  const referenceMaterials = useTaskReferenceMaterials(materialsEnabled)
 
   useEffect(() => {
     if (diagnoseEnabled && serviceRuntimeSelected && diagnoseSessionSource !== 'service_export') {
@@ -1095,6 +1099,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             <label className="mt-3 block max-w-xs"><span className="mb-1.5 block text-xs font-medium text-gray-600">最大优化轮数 <span className="font-normal text-gray-400">（上限 100 轮）</span></span><input className={inputClass} type="number" min={1} max={100} step={1} inputMode="numeric" value={maxRounds} onChange={(event) => setMaxRounds(event.target.value)} placeholder="请输入 1 到 100" /></label>
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
+          {materialsEnabled && <TaskReferenceMaterialsField state={referenceMaterials} disabled={submitting} />}
           {!openVersion && taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
           {capabilities.stageCustomization && !improvementSource && (taskType === 'diagnose' || taskType === 'hardening' || taskType === 'full') && <SkillEvolutionFields
             botId={botId}
@@ -1123,7 +1128,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
         <div className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-6 py-4">
           {submitError && <p className="mr-auto text-xs text-red-600">{submitError}</p>}
           <button className={secondaryButton} onClick={() => navigate(createReturnTo)}>取消</button>
-          <button disabled={submitting || !fixedTargetReady || botsLoading || restorePacksLoading || !currentUserId || !evolveUserId || !botId || !isOpenClawBot(selectedBot) || (taskType === 'pack_restore' && !selectedRestorePack) || (improvementSource && !activeHandoff) || (crossBotTarget && !crossBotConfirmed)} className={`${primaryButton} disabled:opacity-50`} onClick={async () => {
+          <button disabled={submitting || referenceMaterials.blocked || !fixedTargetReady || botsLoading || restorePacksLoading || !currentUserId || !evolveUserId || !botId || !isOpenClawBot(selectedBot) || (taskType === 'pack_restore' && !selectedRestorePack) || (improvementSource && !activeHandoff) || (crossBotTarget && !crossBotConfirmed)} className={`${primaryButton} disabled:opacity-50`} onClick={async () => {
             if (!taskName.trim()) { setSubmitError('请输入任务名称'); return }
             if (!currentUserId) { setSubmitError('无法识别当前用户，请重新登录'); return }
             if (!botId) { setSubmitError('请选择目标 Bot'); return }
@@ -1183,7 +1188,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             }
             setSubmitting(true); setSubmitError('')
             try {
-              const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined }
+              const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined,
+                ...(referenceMaterials.uploadId ? { referenceMaterialsUploadId: referenceMaterials.uploadId } : {}) }
               const payloadStartDate = taskType === 'diagnose' ? dateValue(-parsedLookbackDays) : startDate
               const payloadEndDate = taskType === 'diagnose' ? dateValue() : endDate
               const fullNodeCommandYamls = customCommands
@@ -2039,8 +2045,8 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
   const testEnvironmentSteps = isStageTest ? steps.filter((step) => ['skill_init', 'skill_prepare', 'skill_finalize'].includes(step.stepType) || step.command.startsWith('stage-test supplied ')) : []
   const visibleSteps = steps.filter((step) => !testEnvironmentSteps.includes(step))
   const shared = task.config.shared === true
-  const canShare = !adminReadMode && (user?.userId === task.created_by || user?.isClawEvolveAdmin === true)
-  const canOperate = !adminReadMode && (user?.userId === task.user_id || canShare)
+  const canShare = !adminReadMode && (task.canManage ?? (user?.userId === task.created_by || user?.isClawEvolveAdmin === true))
+  const canOperate = !adminReadMode && (task.canManage ?? (user?.userId === task.user_id || canShare))
   const renderStepInteractions = (stepId: string, result?: ReactNode) => <StepInteractions task={task} stepId={stepId} canOperate={canOperate} onUpdated={loadTask} result={result} />
   const canRetryRecordedStep = (step: EvolveStep, index: number) => {
     if (!['failed', 'canceled'].includes(step.status)) return false
@@ -2224,6 +2230,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
         </div>
 
         <aside className="min-w-0 space-y-4">
+          {Boolean(task.config.reference_materials) && <TaskReferenceMaterialsDetail taskId={task.task_id} />}
           {logArchives.length > 0 && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div><h2 className="text-sm font-semibold text-gray-900">任务日志</h2><p className="mt-1 text-xs text-gray-500">独立归档，不影响任务节点和运行状态。</p></div>
             <div className="mt-4 space-y-3">

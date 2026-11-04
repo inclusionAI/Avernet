@@ -237,7 +237,8 @@ impl GroupSessionConnectionServiceImpl {
             }
         }
         // The connect-time participant projection comes from the
-        // same strict snapshot.
+        // same strict snapshot. The WS connection view keeps the shared row
+        // shape; avatar projection is not part of the authorization snapshot.
         Ok(snapshot
             .participants
             .iter()
@@ -245,6 +246,7 @@ impl GroupSessionConnectionServiceImpl {
                 actor_id: participant.actor_id.clone(),
                 actor_kind: participant.actor_kind,
                 name: None,
+                avatar_url: None,
                 role: participant.role,
                 tags: Vec::new(),
                 mode: participant.effective_mode,

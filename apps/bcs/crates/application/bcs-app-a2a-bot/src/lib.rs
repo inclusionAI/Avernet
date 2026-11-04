@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use async_trait::async_trait;
-use bcs_service_api::{ProviderCoreService, ServiceError, ServiceResult};
+use bcs_service_api::{BotRegistryCoreService, ProviderCoreService, ServiceError, ServiceResult};
 use bcs_service_api::application::a2a_bot::{A2aBotManagementService, ConfigureA2aBotCommand};
 use bcs_service_api::core::a2a_bot::A2aBotCoreService;
 use bcs_service_api::port::{a2a_card::A2aCardPort, repo::a2a_bot::A2aBotRecord};
@@ -9,17 +9,22 @@ mod registration;
 
 #[derive(Default)]
 struct RefreshRound {cursor:Option<String>,next_round_ms:Option<i64>}
+struct ProviderRegistration {
+    core:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>,
+    registry:Arc<dyn BotRegistryCoreService>,
+}
 pub struct A2aBotManagement {
     providers:Arc<dyn ProviderCoreService>,core:Arc<dyn A2aBotCoreService>,fetcher:Arc<dyn A2aCardPort>,
-    registration:Option<Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>>,
+    registration:Option<ProviderRegistration>,
     refresh_round:tokio::sync::Mutex<RefreshRound>,
 }
 impl A2aBotManagement {
     pub fn new(providers:Arc<dyn ProviderCoreService>,core:Arc<dyn A2aBotCoreService>,fetcher:Arc<dyn A2aCardPort>)->Self {
         Self {providers,core,fetcher,registration:None,refresh_round:Default::default()}
     }
-    pub fn with_registration(mut self,registration:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>)->Self {
-        self.registration=Some(registration);self
+    pub fn with_registration(mut self,registration:Arc<dyn bcs_service_api::core::a2a_bot::A2aProviderRegistrationCoreService>,
+        registry:Arc<dyn BotRegistryCoreService>)->Self {
+        self.registration=Some(ProviderRegistration {core:registration,registry});self
     }
     async fn authorize(&self,provider_id:&str,token: &str) -> ServiceResult<()> {
         if self.providers.get_provider(provider_id,token).await?.disabled {return Err(ServiceError::Forbidden("provider_disabled".into()));}Ok(())

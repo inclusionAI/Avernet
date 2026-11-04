@@ -11,6 +11,7 @@
         "type": "object",
         "required": ["task", "diagnose_goal", "session_source"],
         "properties": {
+          "reference_materials": { "type": "object", "description": "平台固定的任务只读参考材料；Runtime 提供 directory 和 index，不扩大修改范围" },
           "task": {
             "type": "object",
             "description": "平台生成的本次任务信息",
@@ -124,6 +125,7 @@
         "type": "object",
         "required": ["task", "goal"],
         "properties": {
+          "reference_materials": { "type": "object", "description": "平台固定的任务只读参考材料；Runtime 提供 directory 和 index，不扩大修改范围" },
           "task": {
             "type": "object",
             "description": "平台生成的本次任务信息",
@@ -255,6 +257,7 @@
         "type": "object",
         "required": ["task", "target_skill"],
         "properties": {
+          "reference_materials": { "type": "object", "description": "平台固定的任务只读参考材料；Runtime 提供 directory 和 index，不扩大修改范围" },
           "task": {
             "type": "object",
             "description": "平台生成的本次任务信息",
@@ -318,6 +321,7 @@
         "type": "object",
         "required": ["task", "round", "plan_result"],
         "properties": {
+          "reference_materials": { "type": "object", "description": "平台固定的任务只读参考材料；Runtime 提供 directory 和 index，不扩大修改范围" },
           "task": {
             "type": "object",
             "description": "平台生成的本次任务信息",

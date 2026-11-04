@@ -1,12 +1,14 @@
-import { assertDeploymentAvailable, clearConfirmedDeployment, markDeploymentPending } from '../editor/deploymentGuard'
+import { assertDeploymentAvailable, clearConfirmedDeployment, clearReconciledDeployment, markDeploymentPending } from '../editor/deploymentGuard'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAutoHealDiagnose, useAutoHealSave, useAutoHealDeploy } from '../api/hooks'
 import { useAutoHealSourceRun } from '../api/useAutoHealSourceRun'
-import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
+import StatusBadge from './StatusBadge'
 import type { FlowRun, AutoHealDiagnosisResult, AutoHealDiffItem, AutoHealErrorChainItem, AutoHealFixSuggestion } from '@avernet/clawweb-shared/web/types'
-import { formatDuration } from '@avernet/workflow/web/utils/time'
+import { formatDuration } from '../utils/time'
+import DeploymentRecoveryDialog from './DeploymentRecoveryDialog'
+import { PanelHeader, PhaseIndicator, type AutoHealPhase } from './AutoHealPanelHeader'
 
-type Phase = 'idle' | 'diagnosing' | 'diagnosed' | 'saving' | 'saved' | 'deploying' | 'deployed' | 'running' | 'run-error' | 'error'
+type Phase = AutoHealPhase
 
 interface AutoHealPanelProps {
   run: FlowRun
@@ -25,6 +27,9 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
   // verified actor. Never read or render it. Remove it and leave a non-sensitive
   // marker so an unknown in-flight write cannot silently be replaced on reload.
   const [legacyBlocked, setLegacyBlocked] = useState(true)
+  const [deploymentRecovery, setDeploymentRecovery] = useState<{ workflowId: string; message: string; storageAvailable: boolean } | null>(null)
+  const [deploymentRecoveryError, setDeploymentRecoveryError] = useState<string | null>(null)
+  const [deploymentRecoveryOpen, setDeploymentRecoveryOpen] = useState(false)
   useEffect(() => {
     const prefix = 'clawweb.autoheal.operation.v1.'
     const marker = 'clawweb.autoheal.review-blocked.v1.'
@@ -37,8 +42,15 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
         try { localStorage.setItem(marker + suffix, '1') } catch { failed = true }
         try { localStorage.removeItem(key) } catch { failed = true }
       }
-      setLegacyBlocked(failed || localStorage.getItem(marker + encodeURIComponent(run.workflow_id)) !== null)
-    } catch { setLegacyBlocked(true) }
+      const blockedMarker = localStorage.getItem(marker + encodeURIComponent(run.workflow_id)) !== null
+      setDeploymentRecovery(blockedMarker
+        ? { workflowId: run.workflow_id, message: '存在未确认的浏览器核对标记。请人工核对 Git 和数据库后，仅清除当前工作流标记。', storageAvailable: !failed }
+        : null)
+      setLegacyBlocked(failed || blockedMarker)
+    } catch {
+      setDeploymentRecovery({ workflowId: run.workflow_id, message: '无法访问浏览器核对标记，无法安全恢复。', storageAvailable: false })
+      setLegacyBlocked(true)
+    }
   }, [run.workflow_id])
   const [customPrompt, setCustomPrompt] = useState('')
   const [diagnosisResult, setDiagnosisResult] = useState<AutoHealDiagnosisResult | null>(null)
@@ -147,6 +159,22 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
     )
   }, [diagnosisResult, saveMutation, legacyBlocked, run.workflow_id])
 
+  const handleDeploymentRecoveryConfirm = useCallback(() => {
+    if (!deploymentRecovery || !deploymentRecovery.storageAvailable) return
+    setDeploymentRecoveryError(null)
+    try {
+      clearReconciledDeployment(run.workflow_id, { gitAndDatabaseConfirmed: true })
+    } catch (error) {
+      setDeploymentRecoveryError(extractErrorMessage(error, '已确认人工核对，但无法清除浏览器核对标记；当前工作流仍保持 blocked。'))
+      return
+    }
+    setDeploymentRecovery(null)
+    setDeploymentRecoveryOpen(false)
+    setLegacyBlocked(false)
+    setErrorMessage(null)
+    setPhase(saveResult && diagnosisResult ? 'saved' : 'idle')
+  }, [deploymentRecovery, run.workflow_id, saveResult, diagnosisResult])
+
   const handleRerun = useCallback(() => {
     if (!diagnosisResult || runInFlight.current) return
     if (!run.flow_id?.trim()) {
@@ -209,12 +237,14 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
             || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
             || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()) {
             setLegacyBlocked(true)
+            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署结果无法确认，当前工作流需要人工核对。', storageAvailable: true })
             setPhase('error')
             setErrorMessage('部署结果无法确认；请先人工核对 Git 和数据库，勿重试。')
             return
           }
           try { clearConfirmedDeployment(saveResult.workflowId) } catch (err) {
             setLegacyBlocked(true)
+            setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '浏览器核对标记清除失败，当前工作流仍保持 blocked。', storageAvailable: true })
             setPhase('error')
             setErrorMessage(extractErrorMessage(err, '无法清除浏览器核对标记。'))
             return
@@ -225,6 +255,7 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
         onError: (err) => {
           deployInFlight.current = false
           setLegacyBlocked(true)
+          setDeploymentRecovery({ workflowId: saveResult.workflowId, message: '部署失败或结果未知，当前工作流需要人工核对。', storageAvailable: true })
           setPhase('error')
           setErrorMessage(`${extractErrorMessage(err, '部署修复失败')}；结果可能未知，请先人工核对 Git 和数据库，勿重试。`)
         },
@@ -255,9 +286,20 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {legacyBlocked && <div role="alert" className="rounded border border-amber-300 p-3 text-sm">
-            存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请联系管理员核对 Git 和数据库后处理，暂不能保存或部署。
-          </div>}
+          {legacyBlocked && (
+            <div role="alert" className="rounded border border-amber-300 p-3 text-sm">
+              <p>存在未确认的操作，或无法访问浏览器核对标记。为防止重复写入，请先人工核对 Git 和数据库；核对完成前，暂不能保存或部署。</p>
+              {deploymentRecovery?.storageAvailable && (
+                <button
+                  type="button"
+                  onClick={() => { setDeploymentRecoveryError(null); setDeploymentRecoveryOpen(true) }}
+                  className="mt-2 rounded border border-input bg-card px-3 py-1.5 text-xs text-foreground"
+                >
+                  我已人工核对，清除当前工作流标记…
+                </button>
+              )}
+            </div>
+          )}
           {/* Error */}
           {(phase === 'error' || phase === 'run-error') && errorMessage && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
@@ -365,6 +407,15 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
           )}
         </div>
 
+        {deploymentRecovery && deploymentRecoveryOpen && (
+          <DeploymentRecoveryDialog
+            workflowId={deploymentRecovery.workflowId}
+            errorMessage={deploymentRecoveryError}
+            onCancel={() => setDeploymentRecoveryOpen(false)}
+            onConfirm={handleDeploymentRecoveryConfirm}
+          />
+        )}
+
         {/* Footer Actions */}
         <PanelFooter
           phase={phase}
@@ -384,85 +435,6 @@ function AutoHealPanelSession({ run, onClose, onRerunComplete }: AutoHealPanelPr
       </div>
     </div>
   )
-}
-
-// ── Sub-Components ──────────────────────────────────────────────
-
-function PanelHeader({ run, onClose }: { run: FlowRun; onClose: () => void }) {
-  return (
-    <div className="flex items-center justify-between border-b border-gray-200 bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <svg className="h-5 w-5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-          </svg>
-          <h2 className="font-bold text-white text-lg">自动修复</h2>
-        </div>
-        <div className="mt-1 flex items-center gap-3">
-          <span className="font-mono text-white/70 text-xs">{run.flow_id}</span>
-          <StatusBadge status={run.status} />
-        </div>
-        <div className="mt-1 flex items-center gap-4 text-white/60 text-xs">
-          <span>{run.workflow_title || run.workflow_id}</span>
-          {run.total_duration_ms != null && <span>{formatDuration(run.total_duration_ms)}</span>}
-          <span>{run.node_count} 节点</span>
-          {run.failed_count > 0 && <span className="text-red-300">{run.failed_count} 失败</span>}
-        </div>
-      </div>
-      <button
-        onClick={onClose}
-        className="ml-4 rounded-md p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-        title="关闭"
-      >
-        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-  )
-}
-
-function PhaseIndicator({ phase }: { phase: Phase }) {
-  const steps = [
-    { key: 'diagnose', label: '诊断', active: phase === 'diagnosing', done: ['diagnosed', 'saving', 'saved', 'deploying', 'deployed', 'running', 'run-error'].includes(phase) },
-    { key: 'save', label: '保存', active: phase === 'saving', done: ['saved', 'deploying', 'deployed', 'running', 'run-error'].includes(phase) },
-    { key: 'deploy', label: '部署', active: phase === 'deploying', done: ['deployed', 'running', 'run-error'].includes(phase) },
-    { key: 'rerun', label: '重跑', active: phase === 'running', done: phase === 'running' },
-  ]
-
-  const activeLabel =
-    phase === 'saving' ? '保存中…' :
-    phase === 'saved' ? '等待部署…' :
-    phase === 'deploying' ? '部署中…' :
-    phase === 'deployed' ? '部署完成' :
-    phase === 'running' ? '运行中…' : null
-
-  return (
-    <div className="flex items-center gap-3 border-b border-gray-100 bg-gray-50 px-6 py-2.5 text-xs">
-      {steps.map((step, i) => (
-        <span key={step.key} className="flex items-center gap-1">
-          <StepDot active={step.active} done={step.done} />
-          <span className={step.active ? 'font-medium text-blue-600' : step.done ? 'text-green-600' : 'text-gray-400'}>
-            {step.label}
-          </span>
-          {i < steps.length - 1 && <span className="mx-1 text-gray-300">→</span>}
-        </span>
-      ))}
-      {(phase === 'error' || phase === 'run-error') && <span className="ml-auto font-medium text-red-500">{phase === 'run-error' ? '运行失败' : '失败'}</span>}
-      {activeLabel && <span className="ml-auto font-medium text-blue-600">{activeLabel}</span>}
-    </div>
-  )
-}
-
-function StepDot({ active, done }: { active: boolean; done: boolean }) {
-  if (done) return <span className="text-green-600">✓</span>
-  if (active) return (
-    <svg className="h-3 w-3 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
-  )
-  return <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />
 }
 
 interface IdleContentProps {

@@ -105,6 +105,7 @@ async def _apply(materialiser, ctx, entries):
         return resolved, None, None
     plan = await materialiser.plan(ctx, resolved.intents)
     written = await materialiser.write(ctx, plan)
+    assert written.removals == plan.removals
     return resolved, plan, written
 
 
@@ -120,7 +121,7 @@ def test_an_inline_content_entry_materialises():
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "# rules"}])
     )
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     assert identity.writes == [
         {
             "file_type": "RULES.md",
@@ -137,7 +138,7 @@ def test_a_sourced_entry_fetches_then_writes():
     materialiser, identity, objects, _ = identity_rig()
     result, plan, written = _run(_apply(materialiser, _ctx(), [DECLARED]))
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     assert objects.calls[0][1] == SOUL_KEY
     assert identity.writes[0]["file_type"] == "SOUL.md"
     assert identity.writes[0]["content"] == SOUL_BODY.decode("utf-8")
@@ -220,12 +221,12 @@ def test_explicit_profile_writes_then_converges_and_empty_clears(engine):
         _apply(materialiser, _ctx(engine_type=engine), entries)
     )
     assert resolved.ok
-    assert [item.outcome.value for item in written] == ["updated"]
+    assert [item.outcome.value for item in written.entries] == ["updated"]
     assert identity.files["IDENTITY.md"] == "expert profile"
     assert identity.files["MEMORY.md"] == "memory"
     identity.writes.clear()
     _, _, written = _run(_apply(materialiser, _ctx(engine_type=engine), entries))
-    assert [item.outcome.value for item in written] == ["unchanged"]
+    assert [item.outcome.value for item in written.entries] == ["unchanged"]
     assert identity.writes == []
     resolved, _, _ = _run(
         _apply(
@@ -346,7 +347,7 @@ def test_the_second_apply_of_an_unchanged_document_writes_nothing():
     assert len(identity.writes) == 2
 
     _, _, second = _run(_apply(materialiser, _ctx(), manifest_entries))
-    assert [e.outcome.value for e in second] == ["unchanged", "unchanged"]
+    assert [e.outcome.value for e in second.entries] == ["unchanged", "unchanged"]
     assert len(identity.writes) == 2  # zero further writes — convergence
 
 
@@ -388,7 +389,7 @@ def test_a_changed_file_writes_the_new_body_as_an_update():
     _, _, written = _run(
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "new"}])
     )
-    assert [e.outcome.value for e in written] == ["updated"]
+    assert [e.outcome.value for e in written.entries] == ["updated"]
     assert identity.writes[0]["content"] == "new"
 
 
@@ -546,7 +547,7 @@ def test_an_identity_entry_can_read_one_file_from_a_git_source():
         _apply(materialiser, _ctx(), [{"type": "RULES.md", "from": "id"}])
     )
     assert result.ok
-    assert [e.outcome.value for e in written] == ["created"]
+    assert [e.outcome.value for e in written.entries] == ["created"]
     assert identity.writes[0]["file_type"] == "RULES.md"
     assert identity.writes[0]["content"] == "# rules\n"
     # The declaration's subpath is what named the file on the git road.
@@ -607,8 +608,8 @@ def test_empty_profile_converges_with_device_empty_presence_semantics(original):
     _, _, first = _run(_apply(materialiser, _ctx(), entries))
     writes_after_first = len(identity.writes)
     _, _, second = _run(_apply(materialiser, _ctx(), entries))
-    assert [entry.outcome.value for entry in second] == ["unchanged"]
+    assert [entry.outcome.value for entry in second.entries] == ["unchanged"]
     assert len(identity.writes) == writes_after_first
     if original is None:
-        assert [entry.outcome.value for entry in first] == ["unchanged"]
+        assert [entry.outcome.value for entry in first.entries] == ["unchanged"]
         assert identity.writes == []

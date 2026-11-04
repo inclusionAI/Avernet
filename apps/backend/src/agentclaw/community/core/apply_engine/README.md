@@ -49,6 +49,14 @@ conflict, refuses the whole apply — every declared category aborted, nothing
 written. The repository's claims refuse the same entries under their own
 lock, so Direct and set supply never share an Installation row.
 
+An MCP entry carries a configuration action separately from its supply:
+Manifest treats an absent `config` and an explicit `{}` as clearing the
+saved Bot override. A nonempty object replaces it. Resolve validates the
+resulting configuration, including inherited configuration after a clear.
+Genome compiles absent configuration to the same clear intent.
+Removing a Direct or override-only MCP entry still clears its configuration;
+currently Set-supplied entries remain outside this removal scope.
+
 Extracted from `core/bot_config_manifest/apply/` by
 `apps/backend/specs/2026-10-23-apply-engine-desired-state/`, which also
 records the resources-root rule (the workspace root minus
@@ -91,6 +99,7 @@ provides:
   - Intent
   - ResolveResult
   - CategoryPlan
+  - CategoryWriteResult  # every writer returns entry outcomes and confirmed removals
   - build_materialisers
   - ApplyOrchestrator
   - ApplyContext

@@ -90,6 +90,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
+    BotAccessCheckForbiddenError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
@@ -436,6 +437,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # two have different fixes. The message says nothing about which user was
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
+    BotAccessCheckForbiddenError: (403, "Forbidden"),
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),

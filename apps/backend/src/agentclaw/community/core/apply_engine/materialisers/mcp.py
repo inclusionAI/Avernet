@@ -6,15 +6,16 @@ servers less theirs — is outside it, never counted as current and never
 removed. A declared server a set supplies is a conflict (``set_conflicts``),
 which refuses the whole apply before anything is written.
 
-Every declared server becomes a Direct Installation; its closed ``config`` is
-the complete Bot override and commits atomically with it. Omitted Direct
+Every declared server becomes a Direct Installation. A configuration directive
+can preserve its saved Bot override, clear it, or replace the complete override
+atomically with the claim. Omitted Direct
 servers and their overrides are removed. Skill dependencies remain derived:
 they are not inserted into the Installation table, do not appear in
 ``removed``, and stale Bot overrides are cleared with an ``updated`` report row.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 from agentclaw.community.core.apply_engine.desired_state import DesiredMcpServer
 from agentclaw.community.core.apply_engine.context import ApplyContext
@@ -24,6 +25,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
     ChecksSetSupply,
@@ -39,6 +41,7 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
+from agentclaw.community.core.mcp.config_comparison import comparable_config
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -51,16 +54,6 @@ from agentclaw.community.core.skill_center.mcp_dependency_scope import (
 )
 
 
-def _comparison_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Normalize only semantics that HTTP defines as case-insensitive."""
-    if config is None:
-        return None
-    comparable = dict(config)
-    headers = comparable.get("headers")
-    if isinstance(headers, dict):
-        comparable["headers"] = {str(name).lower(): value for name, value in headers.items()}
-    return comparable
-
 
 class McpMaterialiser(Materialiser, ChecksSetSupply):
     """Converges this bot's enabled MCP servers toward the declaration.
@@ -72,7 +65,10 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(Intent("gh", {"headers": {}}), "updated"),),
                        removals=("old",))
-        write   -> (EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),),
+            removals=("old",),
+        )
 
     ``plan`` compares both the installed set and persisted override, so it can
     answer ``created``, ``updated`` or ``unchanged``.
@@ -95,7 +91,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
         self._reader = capability_reader
 
     async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredMcpServer]) -> ResolveResult:
-        """Validate every explicit MCP before the category writes anything: permission, then the override."""
+        """Validate permission and the configuration the entry will actually retain, before any write."""
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         for entry in entries:
@@ -123,12 +119,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     )
                 )
                 continue
-            intents.append(
-                Intent(
-                    server_code,
-                    normalized_config,
-                )
-            )
+            intents.append(Intent(server_code, normalized_config))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
@@ -209,16 +200,13 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                     if intent.identity not in effective_current
                     else (
                         EntryOutcome.UNCHANGED.value
-                        if _comparison_config(overrides.get(intent.identity))
-                        == _comparison_config(intent.value)
+                        if comparable_config(overrides.get(intent.identity))
+                        == comparable_config(intent.value)
                         else EntryOutcome.UPDATED.value
                     )
                 ),
-                requires_write=(
-                    intent.identity not in direct
-                    or _comparison_config(overrides.get(intent.identity))
-                    != _comparison_config(intent.value)
-                ),
+                # Clearing or replacing also consumes equivalent legacy aliases.
+                requires_write=True,
             )
             for intent in intents
         )
@@ -248,7 +236,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Apply Direct claims, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
         confirmed_write = False
@@ -317,7 +305,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                 ) from None
             raise
 
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 __all__ = ["McpMaterialiser"]

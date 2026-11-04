@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.apply_engine.activation_delegates import (
@@ -90,8 +91,14 @@ from ._fakes import (
 
 
 class _Database:
-    def __init__(self) -> None:
-        self.engine = create_engine("sqlite:///:memory:")
+    def __init__(self, *, shared: bool = False) -> None:
+        self.engine = create_engine(
+            "sqlite:///:memory:",
+            # Python's legacy sqlite mode can release a SAVEPOINT before the
+            # outer transaction has begun. Exercise real UoW rollback instead.
+            connect_args={"autocommit": False, **({"check_same_thread": False} if shared else {})},
+            **({"poolclass": StaticPool} if shared else {}),
+        )
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
 
@@ -372,6 +379,7 @@ def _rig(*, overlap: bool):
             steps=ArcaDelivery(lambda: None).steps_for,
         ),
         manifest_compiler(content=content, resolver=fetcher),
+        only={Category.SKILLS, Category.MCP},
     )
     digest = "sha256:" + hashlib.sha256(package).hexdigest()
     document = f"""schema_version: 1

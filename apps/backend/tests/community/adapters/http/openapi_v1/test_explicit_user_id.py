@@ -288,6 +288,8 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/experts"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/categories"),
     ("get", f"{PUBLIC_API_PREFIX}/experts/{{expert_id}}"),
+    # The Bot overview carries only non-user data, identical for every caller.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/overview"),
     # The minimal classification is tenant-wide, not owner-scoped.
     ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
@@ -629,12 +631,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
-# The task_config match probe addresses a bot id in the request body (no path or
-# query bot_id parameter), so the none bucket grows 139 -> 140.
-# Catalogue profile addresses the bot by ``bot_uuid`` in the path, a different
-# spelling from the ``bot_id`` parameter this rule counts, so it lands in
-# ``none`` alongside the uuid-addressed operations: 140 -> 141.
-_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 141}
+# The task_config match probe adds one operation without a path/query bot_id.
+# Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 142}
 
 
 def _schema() -> dict:
@@ -845,7 +844,7 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 289
+    assert len(taking) == 291
 
 
 def test_the_exempt_operations_take_none():

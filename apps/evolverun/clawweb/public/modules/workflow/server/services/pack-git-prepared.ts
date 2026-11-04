@@ -4,11 +4,11 @@
  * blobs. Transport config/credentials are not packaged; treat the history as confidential.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { parse as parseYaml } from 'yaml';
+import { createConfiguredTemporaryDirectory } from '@avernet/clawweb-shared/server/env';
 import { executeGit } from '@avernet/clawweb-shared/server/services/git-execution';
 
 /** Decoded bundle limit; base64 persistence needs up to 4/3 this space. No incremental fallback. */
@@ -151,7 +151,7 @@ export async function restorePreparedGitBundle(repoDir: string, bundleBase64: st
   const header = data.subarray(0, Math.max(0, headerEnd)).toString('ascii');
   if (headerEnd < 0 || headerEnd > 16 * 1024 || !/^# v[23] git bundle\n/.test(header)
     || /^-/m.test(header) || /^@filter=/m.test(header)) throw new Error('Prepared bundle must be self-contained');
-  const dir = await mkdtemp(path.join(tmpdir(), 'cw-prepared-bundle-'));
+  const dir = await createConfiguredTemporaryDirectory('cw-prepared-bundle');
   try {
     const file = path.join(dir, 'objects.bundle');
     await writeFile(file, data, { mode: 0o600, flag: 'wx' });

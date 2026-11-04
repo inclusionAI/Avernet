@@ -62,3 +62,11 @@ current integration contract; do not infer them from old `ocb/src/*` paths.
 Start at the [Backend development guide](../../../../README.md) for authority,
 profile selection and checks. Enterprise implementations are supplied by the
 host's `agentclaw.corp` package, not copied into this public tree.
+
+## Community database selection
+
+The community composition root selects `CommunitySqliteDatabase` for the
+validated `sqlite` backend and `CommunityDatabase` for MySQL/PostgreSQL. The
+SQLite plugin owns its FK pragma, schema check and explicit write reservation;
+ordinary sessions keep their existing commit/rollback behavior. The local
+`SqliteDB` remains an in-memory MockSeam, and enterprise ZDAS is bound by OCB.

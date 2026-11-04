@@ -42,6 +42,10 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.endpoints.manifest_device_seed import (
+    seed_empty_identity,
+    seed_empty_manifest_device,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -119,6 +123,7 @@ def _seed_bot(world) -> None:
 
 
 def _seed_bot_with_manifest(world) -> None:
+    seed_empty_manifest_device(world)
     _seed_bot(world)
     world.get(BotConfigManifestRepositoryProtocol).upsert(
         env=get_current_env(),
@@ -536,6 +541,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
     ``test_openapi_resources.py`` installs: through the assembled app is the
     point, not through a real device or a real mirror.
     """
+    seed_empty_identity(world)
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world)
     world.get(BotConfigManifestRepositoryProtocol).upsert(
@@ -672,10 +678,8 @@ def _resources_reached_the_write_chain(_response, world) -> None:
         ("data/tools", "a.py"): b"x = 1\n",
         ("data/tools/sub", "b.py"): b"y = 2\n",
     }
-    # The resources root is owned whole: cleared once, before any member is
-    # written — the ownership rule, including files the new archive no longer
-    # ships and files the bot wrote there itself.
-    assert len(_seed_bot_with_resource_manifest.clears) == 1
+    # Planning and replacement each read the current workspace root.
+    assert len(_seed_bot_with_resource_manifest.clears) == 2
     assert _seed_bot_with_resource_manifest.deletes == []
 
 

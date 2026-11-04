@@ -6,13 +6,20 @@ identifier supplied by the browser is never an authorization credential.
 
 ## Browser flow
 
-The external approval page and the run/workspace approval panels send actions
+The external approval page and the existing run approval panel send actions
 to `POST /api/approval/:id/resolve/session`. The host resolves the current user
 from the ClawWeb login request and checks that server-verified user against the
 approval record. The browser does not send an `empId`, and this path does not
 require the DingTalk JSAPI or an H5 application-domain allowlist.
 
-Approval API requests explicitly ask the host for JSON. When a DingTalk WebView
+The new person-centric workbench panel instead uses
+`POST /api/approval/workbench/:id/resolve`, with a verified principal and a
+same-origin check. Its router still requires host integration; it must not be
+assumed available merely because the panel exists. See
+[approval-workbench.md](approval-workbench.md) for its query, authorization,
+and unfinished Skill delegation boundaries.
+
+The external approval page explicitly asks the host for JSON. When a DingTalk WebView
 has no valid ClawWeb session, the page recognizes the host's `USER_NOT_LOGIN`
 response (or an HTML login response), reloads the complete approval URL once,
 and lets the top-level host login flow return the user to that page. This keeps

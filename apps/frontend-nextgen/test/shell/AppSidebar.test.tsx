@@ -103,14 +103,14 @@ it.each(['/ticket-center', '/work/my-task', '/bot-workshop'])(
 it('产品侧栏只展示协作 / Bot 双分组（不随路由整体换组）', () => {
   const view = renderSidebar({ activePath: '/admin' });
   expect(view.getByRole('region', { name: '协作' })).toBeInTheDocument();
-  expect(view.getByRole('region', { name: 'Bot' })).toBeInTheDocument();
+  expect(view.getByRole('region', { name: '管理' })).toBeInTheDocument();
   expect(view.queryByRole('region', { name: '老功能' })).not.toBeInTheDocument();
 });
 
 it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」', () => {
   const view = renderSidebar();
   const collab = view.getByRole('region', { name: '协作' });
-  const bot = view.getByRole('region', { name: 'Bot' });
+  const bot = view.getByRole('region', { name: '管理' });
   expect(view.getByRole('button', { name: /对话/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /协作群/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /发现/ })).toBeInTheDocument();
@@ -199,7 +199,7 @@ it('internal overlay：空间切换器以 compact 形态挂在 Bot 分组标题�
     }),
   });
   const view = renderSidebar();
-  const bot = view.getByRole('region', { name: 'Bot' });
+  const bot = view.getByRole('region', { name: '管理' });
   expect(view.getByTestId('space-switcher-compact')).toBeInTheDocument();
   expect(view.queryByTestId('space-switcher')).not.toBeInTheDocument();
   // compact 切换器位于 Bot 分组标题行内（先于组内导航项出现）

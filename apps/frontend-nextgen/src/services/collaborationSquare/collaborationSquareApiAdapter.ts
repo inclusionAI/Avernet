@@ -1,5 +1,9 @@
 import type { MessageViewScope } from '@/domain/collaboration/types';
-import { mapPublicBotCatalogDto, mapPublicGroupCatalogDto } from '@/domain/collaborationSquare/mapper';
+import {
+  mapBotProfileTransport,
+  mapPublicBotCatalogDto,
+  mapPublicGroupCatalogDto,
+} from '@/domain/collaborationSquare/mapper';
 import { mapBbsTaskItemDto, mapPlazaStatusToBbsStatus } from '@/domain/collaborationSquare/taskMapper';
 import type {
   CollaborationSquarePage,
@@ -26,13 +30,14 @@ import { createBotSession } from '@/services/backendApi/bots/privateBotSessionCo
 import { listBbsTasks } from '@/services/backendApi/collaboration/bbsTaskController';
 import { createFriendConnectionRequest } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import { getGroup, listPublicGroups } from '@/services/backendApi/collaboration/collaborationGroupController';
-import { discoverPublicBots, searchPublicBots } from '@/services/backendApi/collaboration/publicBotController';
+import { discoverPublicBots, getPublicBotProfile, searchPublicBots } from '@/services/backendApi/collaboration/publicBotController';
 import { createSession as createGroupSessionRequest } from '@/services/backendApi/collaboration/sessionController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
 import {
   isAceLoginResponse,
   mapActionError,
   mapListError,
+  mapProfileError,
   mapSessionRole,
   resolveBotNames,
   splitBotId,
@@ -87,7 +92,7 @@ function resolveEnrichActor(
   return context ? { type: 'human', id: context.userId } : undefined;
 }
 
-/** 接入公开 Bot Search/Discovery、Human→Bot 关系/会话与公开群列表；画像和群写能力保持显式 unsupported。 */
+/** 接入公开 Bot Search/Discovery/Profile（画像）、Human→Bot 关系/会话与公开群列表；群写保持显式 unsupported。 */
 export class CollaborationSquareApiAdapter implements CollaborationSquareGateway {
   async listBotPage(
     query: PublicBotSearchQuery = {},
@@ -157,9 +162,14 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     }
   }
 
-  async getBotProfile(botId: string): Promise<PublicBotProfile> {
-    void botId;
-    return unsupported('Bot 画像接口尚未接入');
+  async getBotProfile(botId: string, signal?: AbortSignal): Promise<PublicBotProfile> {
+    // bot-catalog profile（GET /openapi/v1/bots/catalog/profile/{id}）：名称/Owner/摘要沿用，
+    // 引擎与已公开能力（MCP 列表）来自后端画像端点；404 → target_invalid 由上层弹窗降级。
+    try {
+      return mapBotProfileTransport((await getPublicBotProfile(botId, signal)).data);
+    } catch (error) {
+      return mapProfileError(error);
+    }
   }
 
   async requestBotFriendship(

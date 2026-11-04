@@ -1,4 +1,4 @@
-import { assertDeploymentAvailable, clearConfirmedDeployment, markDeploymentPending } from '../editor/deploymentGuard'
+import { assertDeploymentAvailable, clearConfirmedDeployment, clearReconciledDeployment, markDeploymentPending } from '../editor/deploymentGuard'
 import { readWorkflowDocument } from '../api/workflowDocument'
 import { readEditorWorkflowSource } from '../api/editorWorkflowSource'
 import { saveWorkflowCanvasDocument } from '../editor/workflowDocumentSave'
@@ -10,6 +10,7 @@ import { QueryClientContext } from '@tanstack/react-query'
 import { createWorkflowPack } from '../editor/newWorkflowSave'
 import { useEditorStore, type EditorState } from '../editor/store'
 import WorkflowPackSidebar from '../components/WorkflowPackSidebar'
+import DeploymentRecoveryDialog from '../components/DeploymentRecoveryDialog'
 import EditorCanvas from '../components/EditorCanvas'
 import NodePalette from '../components/NodePalette'
 import NodePropertyPanel from '../components/NodePropertyPanel'
@@ -100,9 +101,22 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const navigationType = useContext(UNSAFE_LocationContext)?.navigationType
   const [deploymentBaselineRevision, setDeploymentBaselineRevision] = useState(0)
   const [showDeployConfirm, setShowDeployConfirm] = useState(false)
+  const [deploymentRecovery, setDeploymentRecovery] = useState<{ workflowId: string; message: string } | null>(null)
+  const [deploymentRecoveryError, setDeploymentRecoveryError] = useState<string | null>(null)
+  const [deploymentRecoveryOpen, setDeploymentRecoveryOpen] = useState(false)
   const [showWorkflowSettings, setShowWorkflowSettings] = useState(() =>
     Object.keys(useEditorStore.getState().pendingEdits ?? {}).some(key => key.startsWith('workflow:')))
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
+
+  useEffect(() => {
+    if (!selectedWorkflowId) { setDeploymentRecovery(null); return }
+    try {
+      assertDeploymentAvailable(selectedWorkflowId)
+      setDeploymentRecovery(null)
+    } catch (error) {
+      setDeploymentRecovery({ workflowId: selectedWorkflowId, message: extractApiErrorMessage(error) })
+    }
+  }, [selectedWorkflowId])
 
   const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
     _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
@@ -118,6 +132,10 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const { data: workflowSpec, databaseSpec: workflowDatabaseSpec, activeDeployNumber: workflowActiveDeployNumber, isLoading: workflowLoading, error: workflowReadError } = useEditorWorkflowDocument(selectedWorkflowId ?? '')
 
   const packCanvas = usePackCanvasSession(selectedWorkflowId, workflowDatabaseSpec, { enabled: workspaceTab === 'scripts' })
+  // The combined-save message may add DB partial-success context to the same
+  // Pack error. Show that richer message once, without hiding unrelated errors.
+  const packErrors = [...new Set([packCanvas.error, packCanvas.versionError])].filter((error): error is string =>
+    !!error && !(saveMessage?.type === 'error' && saveMessage.text.includes(error)))
   const deployment = selectedWorkflowId ? sessionFor(selectedWorkflowId).state.deployment : null
   const queryClient = useContext(QueryClientContext)
   const deployMutation = useAutoHealDeploy()
@@ -391,7 +409,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           || !Number.isSafeInteger(result.deployNumber) || result.deployNumber < 1 || !Number.isSafeInteger(result.version)
           || result.version < 1 || typeof result.tagName !== 'string' || !result.tagName.trim()) throw new Error('部署响应无法验证')
         try { clearConfirmedDeployment(id) } catch (err) {
-          publish(session, { ...session.state, deployment: { input, pending: false, error: extractApiErrorMessage(err) } })
+          const markerClearFailure = extractApiErrorMessage(err)
+          publish(session, { ...session.state, deployment: { input, pending: false, error: markerClearFailure } })
+          setDeploymentRecovery({ workflowId: id, message: markerClearFailure })
           return
         }
         publish(session, { ...session.state, deployment: null })
@@ -400,17 +420,39 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           setDeploymentBaselineRevision(revision => revision + 1)
         }
       } catch (err) {
-        publish(session, { ...session.state, deployment: { input, pending: false,
-          error: `部署失败或结果未知：${extractApiErrorMessage(err)}。请人工核对 Git 和数据库；没有日志恢复或安全自动重试。` } })
+        const failureMessage = `部署失败或结果未知：${extractApiErrorMessage(err)}。请人工核对 Git 和数据库；没有日志恢复或安全自动重试。`
+        publish(session, { ...session.state, deployment: { input, pending: false, error: failureMessage } })
+        setDeploymentRecovery({ workflowId: id, message: failureMessage })
       }
     } catch (err) {
       setSaveMessage({ type: 'error', text: `部署已阻止：${extractApiErrorMessage(err)}` })
     } finally { deployInFlight.current = false }
   }, [selectedWorkflowId, deployCandidate, deployMutation, setSaveMessage])
 
+  const handleDeploymentRecoveryConfirm = useCallback(() => {
+    if (!deploymentRecovery) return
+    const id = deploymentRecovery.workflowId
+    setDeploymentRecoveryError(null)
+    try {
+      clearReconciledDeployment(id, { gitAndDatabaseConfirmed: true })
+    } catch (error) {
+      setDeploymentRecoveryError(extractApiErrorMessage(error))
+      return
+    }
+    const session = sessionFor(id)
+    if (session.state.deployment) publish(session, { ...session.state, deployment: null })
+    setDeploymentRecovery(null)
+    setDeploymentRecoveryOpen(false)
+    setSaveMessage({ type: 'success', text: `已清除工作流 ${id} 的浏览器核对标记。请基于已核对的 Git 和数据库状态重新确认部署。` })
+  }, [deploymentRecovery, setSaveMessage])
+
   const handleDeployClick = useCallback(async () => {
     if (!selectedWorkflowId || deployInFlight.current) return
-    try { assertDeploymentAvailable(selectedWorkflowId) } catch (err) { setSaveMessage({ type: 'error', text: extractApiErrorMessage(err) }); return }
+    try { assertDeploymentAvailable(selectedWorkflowId) } catch (err) {
+      setDeploymentRecovery({ workflowId: selectedWorkflowId, message: extractApiErrorMessage(err) })
+      setSaveMessage(null)
+      return
+    }
     if (sessionFor(selectedWorkflowId).state.deployment) { setSaveMessage({ type: 'error', text: '上次部署结果未知，请人工核对 Git 与数据库。' }); return }
     if (hasPackVersionEditRisk(selectedWorkflowId)) { setSaveMessage({ type: 'error', text: '版本文件存在未保存更改或保存状态不确定，请先处理后再部署。' }); return }
     if (validationErrors.length) { setSaveMessage({ type: 'error', text: `部署前请修复验证错误: ${validationErrors[0].message}` }); return }
@@ -613,19 +655,54 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       </div>}
       {workspaceTab === 'workflow' && workflowReadError && <p role="alert" className="px-4 py-2 text-sm text-destructive">工作流读取失败，草稿仍保留：{extractApiErrorMessage(workflowReadError)}</p>}
       {workspaceTab === 'workflow' && deploymentBaselineStatus === 'error' && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">生效版本状态读取失败，暂无法比较；当前编排草稿仍保留，可独立保存。</p>}
-      {workspaceTab === 'scripts' && packCanvas.error && <div role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{packCanvas.error}</div>}
-      {deployment && <section aria-label="部署操作" className="border-b border-border bg-muted px-4 py-2 text-sm">
-        <p>{deployment.pending ? '部署操作正在进行。' : deployment.error}</p>
-        <p className="break-all">requestId：{deployment.input.requestId} · saved commit：{deployment.input.candidateCommit}</p>
-      </section>}
+      {workspaceTab === 'scripts' && packErrors.map(error => <div key={error} role="alert" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">{error}</div>)}
+      {deploymentRecovery?.workflowId === selectedWorkflowId && !deployment && (
+        <section role="alert" aria-label="部署人工核对标记" className="border-b border-border bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          <p>{deploymentRecovery.message}</p>
+          <button
+            type="button"
+            onClick={() => { setDeploymentRecoveryError(null); setSaveMessage(null); setDeploymentRecoveryOpen(true) }}
+            className="mt-2 rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-foreground"
+          >
+            我已人工核对，清除当前工作流标记…
+          </button>
+        </section>
+      )}
+      {deployment && (
+        <section
+          role={deployment.pending ? 'status' : 'alert'}
+          aria-label="部署操作"
+          className={`border-b border-border px-4 py-2 text-sm ${deployment.pending ? 'bg-muted text-muted-foreground' : 'bg-destructive/10 text-destructive'}`}
+        >
+          <p>{deployment.pending ? '部署操作正在进行。' : deployment.error}</p>
+          <p className="break-all">requestId：{deployment.input.requestId} · saved commit：{deployment.input.candidateCommit}</p>
+          {!deployment.pending && deploymentRecovery?.workflowId === selectedWorkflowId && (
+            <button
+              type="button"
+              onClick={() => { setDeploymentRecoveryError(null); setSaveMessage(null); setDeploymentRecoveryOpen(true) }}
+              className="mt-2 rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-foreground"
+            >
+              我已人工核对，清除当前工作流标记…
+            </button>
+          )}
+        </section>
+      )}
 
       {saveMessage && (
-        <div className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div role={saveMessage.type === 'error' ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${saveMessage.type === 'success' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
           {saveMessage.text}
         </div>
       )}
 
       {actionError && <div role="alert" className="flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError?.(null)} aria-label="关闭编辑提示">×</button></div>}
+      {deploymentRecovery && deploymentRecoveryOpen && (
+        <DeploymentRecoveryDialog
+          workflowId={deploymentRecovery.workflowId}
+          errorMessage={deploymentRecoveryError}
+          onCancel={() => setDeploymentRecoveryOpen(false)}
+          onConfirm={handleDeploymentRecoveryConfirm}
+        />
+      )}
       {recoveredDrafts && hasPendingEdits && <p role="status" className="border-b border-border bg-muted px-4 py-2 text-xs text-muted-foreground">已保留当前会话中未应用的草稿。请在 YAML 视图或右侧配置区域继续编辑并复制备份，应用后可保存完整版本。</p>}
       {hasPendingEdits && <div role="status" className="bg-warning/10 px-4 py-2 text-xs text-warning-foreground">有 {Object.keys(pendingEdits).length} 项未应用的配置。请在原编辑区域应用或放弃；画布修改、保存和部署已保护。</div>}
 
@@ -665,7 +742,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       </div>
 
       <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
-        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} />}
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} showSaveError={false} />}
       </div>
 
       {/* YAML Import Modal */}
