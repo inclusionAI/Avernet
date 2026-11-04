@@ -522,7 +522,7 @@ describe('BotTable management actions', () => {
   });
 });
 
-describe('BotTable 通用配置菜单项（collab-permission-entry-migration AC-01~03）', () => {
+describe('BotTable 公开设置菜单项（collab-permission-entry-migration AC-01~03）', () => {
   const bot = mapBotDto({ bot_id: 'b-gc', bot_name: '配置 Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
 
   test('门禁可用时菜单项可点击并触发回调', () => {
@@ -533,7 +533,7 @@ describe('BotTable 通用配置菜单项（collab-permission-entry-migration AC-
       onGeneralConfig,
     });
     fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
-    fireEvent.click(screen.getByRole('button', { name: '通用配置' }));
+    fireEvent.click(screen.getByRole('button', { name: '公开设置' }));
 
     expect(onGeneralConfig).toHaveBeenCalledWith(bot);
   });
@@ -541,19 +541,19 @@ describe('BotTable 通用配置菜单项（collab-permission-entry-migration AC-
   test('门禁不可用时菜单项禁用', () => {
     renderTable(bot, {
       onAction: jest.fn(),
-      getGeneralConfigAvailability: () => ({ enabled: false, disabledReason: '仅 Bot 管理员可变更通用配置' }),
+      getGeneralConfigAvailability: () => ({ enabled: false, disabledReason: '仅 Bot 管理员可变更公开设置' }),
       onGeneralConfig: jest.fn(),
     });
     fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
 
-    expect(screen.getByRole('button', { name: /通用配置/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /公开设置/ })).toBeDisabled();
   });
 
-  test('未传回调时不渲染通用配置菜单项', () => {
+  test('未传回调时不渲染公开设置菜单项', () => {
     renderTable(bot, { onAction: jest.fn() });
     fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
 
-    expect(screen.queryByRole('button', { name: /通用配置/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /公开设置/ })).not.toBeInTheDocument();
   });
 });
 
