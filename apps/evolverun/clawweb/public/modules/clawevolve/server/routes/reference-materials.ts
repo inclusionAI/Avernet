@@ -1,8 +1,7 @@
 import { Router, type Request, type ErrorRequestHandler } from "express";
 import multer from "multer";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { createConfiguredTemporaryDirectory, TemporaryDirectoryError } from "@avernet/clawweb-shared/server/env";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { EvolveRepository, EvolveTaskRow } from "../repositories/evolve-repository.js";
 import { MATERIAL_LIMITS, ReferenceMaterials } from "../services/evolve/reference-materials.js";
@@ -21,7 +20,7 @@ export function createReferenceMaterialsRouter(input: {
     const actor = input.actor(req);
     if (!actor) { res.status(401).json({ error: "请先登录再上传参考材料" }); return; }
     if (!input.materials.available) { res.status(503).json({ error: "参考材料存储不可用" }); return; }
-    const directory = await mkdtemp(join(tmpdir(), "clawevolve-materials-"));
+    const directory = await createConfiguredTemporaryDirectory("clawevolve-materials");
     // Disk storage bounds a single request without retaining the multipart body
     // in memory. The ZIP content is independently validated by the service.
     const upload = multer({ dest: directory, limits: {
@@ -45,7 +44,14 @@ export function createReferenceMaterialsRouter(input: {
   const errors: ErrorRequestHandler = (error, _req, res, next) => {
     if (res.headersSent) { next(error); return; }
     const status = error instanceof multer.MulterError ? 413 : Number(error?.status) || 500;
-    res.status(status).json({ error: status === 413 ? "材料包超过上传限制" : error instanceof Error ? error.message : "材料处理失败" });
+    const message = status === 413
+      ? "材料包超过上传限制"
+      : error instanceof TemporaryDirectoryError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : "材料处理失败";
+    res.status(status).json({ error: message });
   };
   router.use(errors);
   return router;

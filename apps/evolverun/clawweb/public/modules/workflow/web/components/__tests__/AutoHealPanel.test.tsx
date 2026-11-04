@@ -120,6 +120,30 @@ describe('AutoHealPanel source-aware reruns', () => {
     expect(requests('deploy')).toHaveLength(1)
   })
 
+  it('keeps other workflow markers when the user explicitly confirms reconciliation for this workflow', async () => {
+    const markerPrefix = 'clawweb.autoheal.review-blocked.v1.'
+    localStorage.setItem(markerPrefix + 'other-workflow', '1')
+    deployResponse = async () => response({ message: 'response lost' }, 503)
+    renderPanel()
+    await userEvent.click(await saveFix(false))
+    expect(await screen.findByText(/结果可能未知/)).toBeInTheDocument()
+    const currentKey = markerPrefix + encodeURIComponent(run.workflow_id)
+    const otherKey = markerPrefix + 'other-workflow'
+    expect(localStorage.getItem(currentKey)).toBe('1')
+    expect(localStorage.getItem(otherKey)).toBe('1')
+
+    await userEvent.click(screen.getByRole('button', { name: '我已人工核对，清除当前工作流标记…' }))
+    const confirm = screen.getByRole('button', { name: '清除当前工作流标记' })
+    expect(confirm).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox', { name: /我已人工核对 Git 和数据库/ }))
+    await userEvent.click(confirm)
+
+    expect(localStorage.getItem(currentKey)).toBeNull()
+    expect(localStorage.getItem(otherKey)).toBe('1')
+    expect(screen.queryByText(/存在未确认的操作/)).not.toBeInTheDocument()
+    expect(requests('deploy')).toHaveLength(1)
+  })
+
   it('removes legacy sensitive records without rendering them and blocks unsafe replacement', async () => {
     const prefix = 'clawweb.autoheal.operation.v1.'
     localStorage.setItem(prefix + run.workflow_id, JSON.stringify({ diagnosis: { rawResponse: 'SECRET-OTHER-USER', fixedSpec: { secret: 'placeholder' } } }))

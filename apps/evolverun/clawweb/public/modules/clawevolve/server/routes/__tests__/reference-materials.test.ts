@@ -1,8 +1,24 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+const temporaryDirectories = vi.hoisted(() => [] as string[]);
+vi.mock("@avernet/clawweb-shared/server/env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@avernet/clawweb-shared/server/env")>();
+  return {
+    ...actual,
+    createConfiguredTemporaryDirectory: async (scope: string) => {
+      const directory = await actual.createConfiguredTemporaryDirectory(scope);
+      temporaryDirectories.push(directory);
+      return directory;
+    },
+  };
+});
 import express from "express";
 import Database from "better-sqlite3";
 import JSZip from "jszip";
 import { once } from "node:events";
+import { readdirSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
@@ -19,7 +35,7 @@ const store = {
   createSignedUrl: vi.fn(async (key: string) => `https://artifact.example.test/${key}`),
 };
 beforeEach(async () => {
-  objects.clear(); dispatch.mockClear();
+  objects.clear(); dispatch.mockClear(); temporaryDirectories.length = 0;
   db = new SqliteDatabase(new Database(":memory:")); await runMigrations(db, "sqlite");
   repo = new EvolveRepository(db);
   await db.exec(`CREATE TABLE ac_entity_device_binding (id INTEGER PRIMARY KEY, device_provider TEXT, device_id TEXT, device_props TEXT, status TEXT, env TEXT)`);
@@ -51,6 +67,41 @@ async function upload() {
 function task(uploadId?: string) { return { taskType: "full", taskName: "参考业务材料优化", userId: "owner", botId: "bot", botEnv: "pre",
   inputMode: "direct_goal", goal: "完善日报输出", model: "test-model", maxRounds: 2,
   ...(uploadId ? { referenceMaterialsUploadId: uploadId } : {}) }; }
+
+it("does not disclose temporary-directory configuration in upload errors", async () => {
+  const missingParent = join(tmpdir(), "clawevolve-materials-missing-path");
+  vi.stubEnv("CLAWWEB_TEMP_DIR", missingParent);
+  try {
+    const bytes = await new JSZip().file("规范/test.md", "test").generateAsync({ type: "uint8array" });
+    const form = new FormData();
+    form.set("package", new Blob([bytes as Uint8Array<ArrayBuffer>]), "materials.zip");
+    const response = await request("/reference-materials/uploads", form);
+    const body = await response.text();
+    const result = JSON.parse(body) as { error: string };
+    expect(response.status, body).toBe(500);
+    expect(result.error).toBe("临时目录不可用或配置无效");
+    expect(result.error).not.toContain(missingParent);
+    expect(result.error).not.toContain("CLAWWEB_TEMP_DIR");
+    expect(result.error).not.toContain("parent=");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it("stages reference-material uploads under the configured temporary directory", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "clawevolve-materials-temp-"));
+  vi.stubEnv("CLAWWEB_TEMP_DIR", parent);
+  try {
+    await upload();
+    const directory = temporaryDirectories.at(-1)!;
+    expect(directory.startsWith(resolve(parent))).toBe(true);
+    expect(dirname(directory)).toBe(resolve(parent));
+    await vi.waitFor(() => expect(readdirSync(parent)).toEqual([]));
+  } finally {
+    vi.unstubAllEnvs();
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
 
 it("uploads and delivers the same signed material to native Plan and subsequent Optimize", async () => {
   const uploaded = await upload();
