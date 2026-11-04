@@ -62,8 +62,8 @@ from agentclaw.community.adapters.http.task.callback_routes import (
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
-    CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
+from agentclaw.community.core.task.task_dispatch.task_settings import (
+    HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_artifact_service import TaskArtifactApiServiceProtocol
@@ -245,7 +245,7 @@ async def get_task_settings(
 ) -> Envelope[list[TaskSettingStateDTO]]:
     """读取全部已支持的任务开关状态。"""
     env = get_current_env()
-    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT, RELAY_EXECUTION)
+    setting_types = (HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT, RELAY_EXECUTION)
     states = [
         TaskSettingStateDTO(
             setting_type=setting_type,

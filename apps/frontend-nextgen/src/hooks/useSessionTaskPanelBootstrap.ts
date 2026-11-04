@@ -31,6 +31,17 @@ async function waitForPanelHandle(
   return null;
 }
 
+/**
+ * 解析会话归属人工号（session_id 末尾 :user:<owner>）。
+ *
+ * 任务列表兜底要按会话归属人查询；但打开后的 panel 交互身份仍需用当前登录人。
+ * 无 :user: 段（测试/旧会话）时退回当前登录人。
+ */
+export function resolveSessionOwnerUserId(sessionId: string | null, fallbackUserId: string | null): string | null {
+  const owner = sessionId?.match(/:user:([^:]+)$/)?.[1]?.trim();
+  return owner || fallbackUserId;
+}
+
 function parseTaskTime(value: string | undefined): number {
   // list API 返回 `YYYY-MM-DD HH:mm:ss`；补 T 兼容 Safari。
   if (!value?.trim()) return Number.NEGATIVE_INFINITY;
@@ -55,7 +66,7 @@ export function findLatestTaskForSession(records: TaskListItem[], sessionId: str
 
 export function buildRelayTaskPanelTab(
   taskId: string,
-  ownerUserId: string,
+  userId: string,
   title?: string,
 ): PanelTab {
   return {
@@ -68,7 +79,7 @@ export function buildRelayTaskPanelTab(
       taskId,
       apiBaseUrl: '',
       bcsBaseUrl: '',
-      userId: ownerUserId,
+      userId,
       taskApiBase: TASK_READ_API_BASE,
     },
   };
@@ -95,10 +106,9 @@ export function buildSessionTaskPanelTab(record: TaskListItem, userId: string): 
 }
 
 /**
- * 进入会话时用任务列表反查该会话最新任务并打开副屏。
+ * 进入会话时用任务执行记录或任务列表反查任务并打开副屏。
  *
- * 历史消息中的 <AixUI type="panel"> 只有进入已加载分页后才渲染；长会话里任务消息
- * 可能还在更早分页，不能作为默认进入时的副屏触发源。此 hook 以 list_tasks 为主数据源。
+ * by_session 覆盖 relay 执行会话和已建任务的单 bot 主会话；未命中时再退回任务列表。
  */
 export function useSessionTaskPanelBootstrap({
   sessionId,
@@ -114,7 +124,9 @@ export function useSessionTaskPanelBootstrap({
   useEffect(() => {
     if (!sessionId || !userId) return undefined;
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
-    const bootstrapKey = `${userId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
+    const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
+    if (!sessionOwnerUserId) return undefined;
+    const bootstrapKey = `${sessionOwnerUserId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
     if (bootstrapKeyRef.current === bootstrapKey) return undefined;
     bootstrapKeyRef.current = bootstrapKey;
     let cancelled = false;
@@ -124,22 +136,20 @@ export function useSessionTaskPanelBootstrap({
         // 第二棒 session 没有声明式面板消息，先按执行记录反查；命中即恢复整图任务副屏。
         const sessionTask = await getTaskBySession(sessionId);
         if (cancelled) return;
-        if (sessionTask.ok) {
+        if (sessionTask.ok && sessionTask.data) {
           const relayTask = sessionTask.data;
-          if (relayTask) {
-            const panel = panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled));
-            if (cancelled || !panel) return;
-            if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(requestedTaskId);
-            useTaskSidePanelStore.getState().setActiveTask(relayTask.task_id);
-            useTaskSidePanelStore.getState().markTaskPanelOpenIntent(relayTask.task_id);
-            panel.openTab(buildRelayTaskPanelTab(relayTask.task_id, relayTask.owner_user_id));
-            useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(relayTask.task_id);
-            return;
-          }
+          const panel = panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled));
+          if (cancelled || !panel) return;
+          if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(requestedTaskId);
+          useTaskSidePanelStore.getState().setActiveTask(relayTask.task_id);
+          useTaskSidePanelStore.getState().markTaskPanelOpenIntent(relayTask.task_id);
+          panel.openTab(buildRelayTaskPanelTab(relayTask.task_id, userId));
+          useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(relayTask.task_id);
+          return;
         }
         // 普通会话保持既有策略：显式任务优先，普通进入已有副屏则沿用。
         if (!requestedTaskId && useTaskSidePanelStore.getState().activeTaskId) return;
-        const result = await listMyTasks({ user_id: userId });
+        const result = await listMyTasks({ user_id: sessionOwnerUserId });
         if (cancelled) return;
         if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(requestedTaskId);
         if (isEnvelopeFailure(result) || !result.data) return;

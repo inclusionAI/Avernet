@@ -1,7 +1,7 @@
 """Shared candidate retrieval for centralized dispatch and relay search.
 
 This module only retrieves and ranks catalog candidates. It does not decide
-HIT_SINGLE/HIT_MULTI_BOTS/MISS, apply claim-join filtering, or select BBS.
+HIT_SINGLE/HIT_MULTI_BOTS/MISS, or select BBS.
 """
 from __future__ import annotations
 

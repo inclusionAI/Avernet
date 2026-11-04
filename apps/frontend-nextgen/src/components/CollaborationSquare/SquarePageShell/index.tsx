@@ -58,6 +58,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     closeProfile: square.closeBotProfile,
     selectedBotId: square.selectedBotId,
     botProfile: square.botProfile,
+    botProfileError: square.botProfileError,
     detailLoading: square.detailLoading,
     copyBotId: square.copyBotId,
   };

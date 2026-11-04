@@ -128,13 +128,14 @@ task 测试用),`@envelope_errors` 映射 404;命中 → `envelope(by_session_re
    (`services/backendApi/tasks/taskController.ts` 加一函数,走 `TASK_READ_API_BASE`(`/openapi/v1/collaboration/tasks`)
    + `backendRequest`;`unwrapEnvelope` 解析;404 / 其它失败统一当 `null`,不抛、不弹错)。
 2. effect 里**先于 `listMyTasks`** 调一次 `getTaskBySession(sessionId)`;命中 → 即便已有 `activeTaskId` 也切到这个 task:
-   `useTaskSidePanelStore.setActiveTask(task_id)` + `markTaskPanelOpenIntent(task_id)` + `panelRef.current.openTab(buildRelayTaskPanelTab(task_id, owner_user_id))`;
+   `useTaskSidePanelStore.setActiveTask(task_id)` + `markTaskPanelOpenIntent(task_id)` + `panelRef.current.openTab(buildRelayTaskPanelTab(task_id, userId))`;
    `consumeTaskPanelOpenIntent`;`return`(不再查 `listMyTasks`)。未命中 → 落回现有 `listMyTasks` 兜底
-   (保留原 `activeTaskId` 沿用短路逻辑)。
-3. 新增 `buildRelayTaskPanelTab(taskId, ownerUserId, title?)`(挨着 `buildSessionTaskPanelTab`,`:33-51`):
+   (保留原 `activeTaskId` 沿用短路逻辑)。跨用户打开会话时,兜底列表按 session id 末尾
+   `:user:<owner>` 解析出的归属人工号查询;panel 的 userId 继续使用当前登录人。
+3. 新增 `buildRelayTaskPanelTab(taskId, userId, title?)`(挨着 `buildSessionTaskPanelTab`,`:33-51`):
    `{ id: 'task-'+taskId, title: title ?? '任务', type: 'taskPanel.TaskLoopView', closable: true,
    defaultWidth: resolveTaskPanelDefaultWidth(), params: { taskId, apiBaseUrl: '', bcsBaseUrl: '',
-   userId: ownerUserId, taskApiBase: TASK_READ_API_BASE } }`。`TASK_READ_API_BASE` from `services/tasks/taskConfig`;
+   userId, taskApiBase: TASK_READ_API_BASE } }`。`TASK_READ_API_BASE` from `services/tasks/taskConfig`;
    `TaskPanelAdapterWithUser` 会 overlay `taskApiBase`,传它是兜底。
 4. `markTaskPanelOpenIntent` **必须**在 `openTab` 之前(见 Constraint 5)。`panel.openTab` 自动展开副屏,无需 `setSidePaneOpen(true)`。
 

@@ -3,6 +3,7 @@ import {
   buildRelayTaskPanelTab,
   buildSessionTaskPanelTab,
   findLatestTaskForSession,
+  resolveSessionOwnerUserId,
   useSessionTaskPanelBootstrap,
 } from '@/hooks/useSessionTaskPanelBootstrap';
 import type { TaskListItem } from '@/domain/tasks/models';
@@ -61,6 +62,14 @@ describe('findLatestTaskForSession', () => {
   });
 });
 
+describe('resolveSessionOwnerUserId', () => {
+  it('优先解析 session_id 中的会话归属人，缺失时回退当前登录人', () => {
+    expect(resolveSessionOwnerUserId('agent:main:session:abc:user:440718', '146836')).toBe('440718');
+    expect(resolveSessionOwnerUserId('sess-1', '146836')).toBe('146836');
+    expect(resolveSessionOwnerUserId(null, '146836')).toBe('146836');
+  });
+});
+
 describe('buildSessionTaskPanelTab', () => {
   it('构造幂等 task tab 和任务面板参数', () => {
     const record = taskRecord('task-1', '2026-10-27 11:30:00');
@@ -79,7 +88,7 @@ describe('buildSessionTaskPanelTab', () => {
 
 describe('buildRelayTaskPanelTab', () => {
   it('构造第二棒整图 TaskPanel tab', () => {
-    const tab = buildRelayTaskPanelTab('task-relay', 'owner-1', '接力任务');
+    const tab = buildRelayTaskPanelTab('task-relay', 'u1', '接力任务');
 
     expect(tab).toMatchObject({
       id: 'task-task-relay',
@@ -92,7 +101,7 @@ describe('buildRelayTaskPanelTab', () => {
       taskId: 'task-relay',
       apiBaseUrl: '',
       bcsBaseUrl: '',
-      userId: 'owner-1',
+      userId: 'u1',
       taskApiBase: '/openapi/v1/collaboration/tasks',
     });
   });
@@ -105,17 +114,21 @@ describe('useSessionTaskPanelBootstrap', () => {
       ok: true,
       data: {
         task_id: 'task-relay',
-        owner_user_id: 'owner-relay',
+        owner_user_id: '440718',
         node_id: 'node-relay',
       },
     });
 
     renderHook(() =>
-      useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: ref }),
+      useSessionTaskPanelBootstrap({
+        sessionId: 'agent:main:session:sess-relay:user:440718',
+        userId: '146836',
+        panelRef: ref,
+      }),
     );
 
     await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
-    expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-relay');
+    expect(mockGetTaskBySession).toHaveBeenCalledWith('agent:main:session:sess-relay:user:440718');
     expect(mockListMyTasks).not.toHaveBeenCalled();
     expect(openTab.mock.calls[0][0]).toMatchObject({
       id: 'task-task-relay',
@@ -123,7 +136,7 @@ describe('useSessionTaskPanelBootstrap', () => {
     });
     expect(openTab.mock.calls[0][0].params).toMatchObject({
       taskId: 'task-relay',
-      userId: 'owner-relay',
+      userId: '146836',
       taskApiBase: '/openapi/v1/collaboration/tasks',
     });
     expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-relay');
@@ -158,6 +171,31 @@ describe('useSessionTaskPanelBootstrap', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('跨用户 list 兜底时按会话归属人查任务，但 panel 身份仍用当前登录人', async () => {
+    const sessionId = 'agent:main:session:sess-1:user:440718';
+    const ownerTask = {
+      ...taskRecord('task-owner', '2026-10-27 11:30:00'),
+      owner_user_id: '440718',
+      execution_config: { task_type: 'dynamic', main_session_id: sessionId },
+    } as TaskListItem;
+    const viewerTask = {
+      ...taskRecord('task-viewer', '2026-10-27 10:30:00'),
+      owner_user_id: '146836',
+      execution_config: { task_type: 'dynamic', main_session_id: 'agent:main:session:sess-other:user:146836' },
+    } as TaskListItem;
+    const { ref, openTab } = makePanelRef();
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [ownerTask, viewerTask] });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId, userId: '146836', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: '440718' });
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-owner' });
+    expect(openTab.mock.calls[0][0].params).toMatchObject({ userId: '146836' });
   });
 
   it('进入会话即按任务记录打开最新 TaskPanel，不依赖历史消息分页', async () => {
@@ -209,13 +247,10 @@ describe('useSessionTaskPanelBootstrap', () => {
     expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
 
-  it('已有活跃任务面板时，返回原会话不重新 bootstrap 当前副屏', async () => {
+  it('已有活跃任务面板时，by_session 未命中则不重新 bootstrap 当前副屏', async () => {
     const { ref, openTab } = makePanelRef();
     useTaskSidePanelStore.getState().setActiveTask('task-current');
-    mockListMyTasks.mockResolvedValue({
-      code: 0,
-      data: [taskRecord('task-new', '2026-10-27 11:30:00')],
-    });
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [taskRecord('task-new', '2026-10-27 11:30:00')] });
 
     renderHook(() =>
       useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
