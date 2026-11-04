@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_66129a5f2e899b::t_588094305ed4d6 851
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fc947250120728eef4d12d73be5e1fbf32b5c61",
+  "prompts": {},
+  "sessions": {
+    "s_66129a5f2e899b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a694-f9b2-7643-aa83-0d5ad89d3568",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
