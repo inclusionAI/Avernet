@@ -143,7 +143,7 @@ impl CallerContainerGatewayPort for FastGateway {
     async fn ensure_container(
         &self,
         _target: &BotDeliveryTarget,
-        _credential: &RedactedToken,
+        _cred: &RedactedToken,
         request: EnsureCallerContainer,
     ) -> Result<CallerContainerDescriptor, CallerContainerError> {
         Ok(CallerContainerDescriptor {
@@ -166,7 +166,7 @@ impl CallerContainerGatewayPort for HangingGateway {
     async fn ensure_container(
         &self,
         _target: &BotDeliveryTarget,
-        _credential: &RedactedToken,
+        _cred: &RedactedToken,
         _request: EnsureCallerContainer,
     ) -> Result<CallerContainerDescriptor, CallerContainerError> {
         hang().await;
@@ -261,7 +261,7 @@ impl CallerExecutionSendPort for FastSender {
     async fn send_caller_execution(
         &self,
         _target: &BotDeliveryTarget,
-        _credential: &RedactedToken,
+        _cred: &RedactedToken,
         command: SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -275,7 +275,7 @@ impl CallerExecutionSendPort for HangingSender {
     async fn send_caller_execution(
         &self,
         _target: &BotDeliveryTarget,
-        _credential: &RedactedToken,
+        _cred: &RedactedToken,
         _command: SendCallerExecutionCommand,
     ) -> Result<CallerDispatchAck, bcs_service_api::port::CallerSendError> {
         hang().await;
