@@ -1,6 +1,7 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
 from .authorization_rules_task import (
@@ -649,11 +650,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/routines/all"): NoCheck(
         "a collection, not one addressed bot"
     ),
-    ("GET", "/openapi/v1/bots/catalog/discover"): NoCheck("tenant-identical catalogue"),
-    ("GET", "/openapi/v1/bots/catalog/search"): NoCheck("tenant-identical catalogue"),
-    ("GET", "/openapi/v1/bots/catalog/profile/{bot_uuid}"): NoCheck(
-        "tenant-identical catalogue: the profile is readable exactly when BCS returns the bot for this bot_uuid (catalog membership is itself the authorization decision; a bot outside the caller catalog 404s)"
-    ),
+    **CATALOG_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/ceiling"): NoCheck(
         "the named user's account quota, not a bot"
     ),
