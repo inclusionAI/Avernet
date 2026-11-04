@@ -1,0 +1,14 @@
+apps/backend/tests/community/contracts/test_file_count_runtime.py
+  h_059e888e5e4e82 105-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "26704c6497f019074d91a9dc7f21d36baa5a7f3c",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

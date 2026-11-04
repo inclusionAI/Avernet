@@ -1,0 +1,16 @@
+apps/backend/tests/community/contracts/test_file_count_runtime.py
+  h_059e888e5e4e82 105-107
+apps/backend/tests/community/core/bot_management/engines/aicoding/test_artifact_command.py
+  h_059e888e5e4e82 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d55dd2097cf17d7ab4545db2c9337bbc2ce1ed6",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
