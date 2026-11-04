@@ -21,6 +21,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel,
     PublishStatus,
 )
+from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.kernel.knowledge import (
     BotKnowledgeScope,
     KnowledgeError,
@@ -85,6 +86,32 @@ def _require_publication_id(value: int) -> None:
         raise ValueError("publication_id must be a positive integer")
 
 
+def observation_space(session, bot: BotModel) -> int | None:
+    """Resolve Space/ACL checks; unbound legacy Bots without a Space may skip.
+
+    A NULL binding alone is insufficient: an existing personal Space is the
+    normal fallback, and a deleted personal Space remains an unexpected failure.
+    This is auxiliary observation policy, not a relaxation of require_space.
+    """
+    try:
+        return require_space(session, bot)
+    except KnowledgeError as error:
+        if error.code != "SPACE_NOT_FOUND" or bot.space_id is not None:
+            raise
+        personal_space = (
+            session.query(SpaceModel.id)
+            .filter_by(
+                env=bot.env,
+                space_type="PERSONAL",
+                personal_owner_id=bot.owner_id,
+            )
+            .first()
+        )
+        if personal_space is not None:
+            raise
+        return None
+
+
 class BotKnowledgePublicationSelection:
     def __init__(
         self, db: DatabasePlugin, configs: BotCommonConfigRepositoryProtocol
@@ -125,7 +152,14 @@ class BotKnowledgePublicationSelection:
                 )
                 if bot is None:
                     raise KnowledgeError("BOT_NOT_FOUND", 404)
-                space_id = require_space(session, bot)
+                space_id = observation_space(session, bot)
+                if space_id is None:
+                    logger.warning(
+                        "Knowledge observation skipped: publication_id=%s, "
+                        "reason=SPACE_NOT_FOUND",
+                        publication_id,
+                    )
+                    return False
                 identity = selection_identity(bot, publication) | {"space_id": space_id}
                 ids = (
                     session.query(BotKnowledgeBindingModel.kb_id)
@@ -149,7 +183,7 @@ class BotKnowledgePublicationSelection:
             self.configs.put(**selection_coordinates(identity), config_value=payload)
             return True
         except Exception:
-            logger.warning(
+            logger.exception(
                 "Knowledge observation not recorded: publication_id=%s", publication_id
             )
             return False
@@ -206,7 +240,7 @@ class BotKnowledgePublicationSelection:
         try:
             raw = self._read_record(identity)
         except Exception:
-            logger.warning(
+            logger.exception(
                 "Knowledge observation unavailable: publication_id=%s", publication_id
             )
             return {**result, "observation_status": "unavailable"}
