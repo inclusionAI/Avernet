@@ -33,7 +33,7 @@ def source_snapshot(profile: dict, state_dir: Path, run_id: str, case_id: str) -
     digest = require_profile_binding(state, profile)
     if (state.get('run_id') != run_id or state.get('status') != 'QUARANTINED'
             or state.get('active_case') != case_id or state.get('attempted_cases') != [case_id]
-            or state.get('adapter_kind') != 'gateway'
+            or state.get('adapter_kind') not in {'gateway', 'bcs-direct'}
             or state.get('last_report') != f'report-{case_id}.json'):
         raise ConfigError('recheck requires one completed, quarantined retained attempt')
     manifest = frozen_manifest(state_dir, state)

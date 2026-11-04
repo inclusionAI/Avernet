@@ -349,12 +349,12 @@ def remote_reconcile(profile: dict, *, state_dir: Path, run_id: str, confirm_run
     require_pilot_execution_binding(profile)
     require_resolved(profile)
     if (profile["environment"]["tier"] != "preprod"
-            or profile["entrypoint"]["kind"] != "gateway"
+            or profile["entrypoint"]["kind"] not in {"gateway", "bcs-direct"}
             or remote_effect_admission(profile)["status"] != "ADMITTED"):
-        raise ConfigError("remote-reconcile requires a reviewed preprod gateway effect policy")
+        raise ConfigError("remote-reconcile requires a reviewed preprod remote effect policy")
     state = read_state(state_dir / "run.json")
     digest = require_profile_binding(state, profile)
-    if state.get("run_id") != run_id or state.get("adapter_kind") != "gateway":
+    if state.get("run_id") != run_id or state.get("adapter_kind") not in {"gateway", "bcs-direct"}:
         raise ConfigError("remote-reconcile Run or environment binding mismatch")
     if state.get("status") not in {"FAILED", "BLOCKED", "CANCELLED", "CASE_COMPLETED"}:
         raise ConfigError("remote-reconcile requires a terminal or blocked remote Run")

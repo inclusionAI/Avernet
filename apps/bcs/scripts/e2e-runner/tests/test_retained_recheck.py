@@ -10,11 +10,15 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from bcs_e2e.profile import fingerprint, ConfigError
+from bcs_e2e.profile import fingerprint, ConfigError, load
 from bcs_e2e.pool import bound_pool_path, PoolLease
 from bcs_e2e.recheck_review import recheck_plan, RetainedRecheckReview
+from bcs_e2e.retained_remote import CONTRACT, execution_generation
 from bcs_e2e.run_state import read, write
 import test_delivery_observation as fixtures
+import test_remote_observer_cli
+from test_remote_pilot_all_cases import RemoteShapedAdapter
+from test_retained_remote import dual_header_profile
 
 
 class RetainedRecheckTests(unittest.TestCase):
@@ -284,3 +288,60 @@ class RetainedRecheckTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.assertFalse(self.lock.with_suffix('.guard').exists())
         self.assert_original_unchanged()
+
+
+class RetainedRecheckDualHeaderTests(RetainedRecheckTests):
+    """The complete recheck battery re-executed under the dual-header generation."""
+
+    def setUp(self):
+        self._token_env = patch.dict(os.environ, {'BCS_E2E_DRIVER_TOKEN': 'synthetic-driver-token'})
+        self._token_env.start()
+        self.addCleanup(self._token_env.stop)
+
+        def dual(path):
+            return dual_header_profile(load(path))
+
+        # Build the whole retained Run under the bcs-direct dual-header Profile:
+        # the gateway Human-view injection in the remote fixture setUp is skipped.
+        with patch('test_remote_observer_cli.load', side_effect=dual):
+            test_remote_observer_cli.RemoteObserverCliTests.setUp(self)
+        write(self.profile_path, self.profile)
+        self.receipt['profile_digest'] = fingerprint(self.profile)
+        write(self.receipt_path, self.receipt)
+        self.review_path = self.root / 'retained-review.json'
+        now = int(time.time())
+        self.review = {'schema_version': 1, 'contract': CONTRACT, 'profile_digest': fingerprint(self.profile),
+            'run_id': self.run_id, 'case_id': 'RETAIN-GROUP-01', 'reviewed_at': now - 1, 'expires_at': now + 1800,
+            'supervisor': self.profile['human']['user_id'], 'effect_review': {
+                'reference': 'synthetic-effect-review', 'sha256': 'd' * 64, 'deployment_commit': 'a' * 40,
+                'isolated_test_runtime': True, 'no_operational_channels': True, 'implicit_bot_execution_allowed': True}}
+        self.review['retention_quota'] = {'contract': 'retained-resource-quota-v1', 'registry_id': 'test-inventory',
+            'mode': 'initialize', 'expected_digest': 'absent', 'max_groups': 10, 'max_sessions': 20,
+            'baseline_groups': 0, 'baseline_sessions': 0, 'inventory_reference': 'test-inventory-review', 'inventory_sha256': 'e' * 64}
+        write(self.review_path, self.review)
+        self.adapter = RemoteShapedAdapter(self.profile)
+        self.http = []
+        self.visibility = 'protected'
+        fixtures.RetainedDeliveryCompositionTests.enable(self)
+        with self.boundaries():
+            rc, result = self.command(fixtures.RetainedDeliveryCompositionTests.args(self))
+        self.assertEqual(result['functional'], 'PASS', result)
+        self.original = {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}
+        self.lock = bound_pool_path(read(self.state / 'run.json'))
+        self.lock_bytes = self.lock.read_bytes()
+        self.recheck_path = self.root / 'fresh-recheck.json'
+        self.fresh_binding = self.root / 'fresh-binding.json'
+        write(self.fresh_binding, self.receipt)
+        template = recheck_plan(self.profile, self.state, self.run_id, 'RETAIN-GROUP-01')['review_template']
+        now = int(time.time())
+        template.update(reviewed_at=now - 1, expires_at=now + 600, observation_id='observe-1',
+                        observer_binding_digest=fingerprint(self.receipt))
+        template['execution_observation_budget'] = {'timeout_seconds': 30, 'max_rounds': 2, 'poll_interval_seconds': 1}
+        self.recheck = template
+        write(self.recheck_path, template)
+        self.calls.clear()
+        self.http.clear()
+        self.delivery_queries.clear()
+
+    def test_dual_header_generation_is_admitted_for_recheck(self):
+        self.assertEqual(execution_generation(self.profile), 'bcs-direct-dual-header')

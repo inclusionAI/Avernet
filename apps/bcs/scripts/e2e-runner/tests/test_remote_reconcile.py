@@ -354,7 +354,7 @@ class RemoteReconcileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp)
             build_state(state, profile, include_file=False, second_session=False)
-            with self.assertRaisesRegex(Exception, "reviewed preprod gateway"):
+            with self.assertRaisesRegex(Exception, "reviewed preprod remote effect policy"):
                 remote_reconcile(
                     profile, state_dir=state, run_id=RUN_ID, confirm_run_id=RUN_ID,
                     allow_read=True, allow_write=True,
@@ -365,3 +365,46 @@ class RemoteReconcileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def create_dual_header_profile():
+    profile = create_test_profile()
+    profile["entrypoint"].update(kind="bcs-direct", origin="https://bcs-pre.alipay.com")
+    profile.pop("identity_binding", None)
+    profile["auth"]["header_env"] = {"Authorization": "BCS_E2E_DRIVER_TOKEN", "Cookie": "BCS_E2E_HUMAN_COOKIE"}
+    return profile
+
+
+class RemoteReconcileDualHeaderTests(unittest.TestCase):
+    def test_reconciles_a_bcs_direct_retained_state(self):
+        profile = create_dual_header_profile()
+        adapter = FakeAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            build_state(state, profile)
+            run = read_state(state / "run.json")
+            run["adapter_kind"] = "bcs-direct"
+            write_state(state / "run.json", run)
+            report = _reconcile(profile, state, adapter)
+            self.assertEqual(report["status"], "RECONCILED")
+            self.assertEqual(adapter.file_verified, [("session-visible", "file-1")])
+            adopted = [item for item in report["resources"] if item.get("origin") == "implicit_reviewed"]
+            self.assertEqual(len(adopted), 2)
+            with Ledger(state / "run.sqlite", RUN_ID, fingerprint(profile)) as ledger:
+                cleanup = execute_cleanup(ledger, adapter, dry_run=False)
+            self.assertEqual(cleanup["status"], "PASS")
+            self.assertEqual(read_state(state / "run.json")["quiescence"], "CONFIRMED")
+
+    def test_gateway_branded_state_forging_dual_header_profile_is_refused(self):
+        profile = create_dual_header_profile()
+        adapter = FakeAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            build_state(state, profile)
+            run = read_state(state / "run.json")
+            run["adapter_kind"] = "gateway"
+            run["profile_digest"] = fingerprint(create_test_profile())
+            write_state(state / "run.json", run)
+            with self.assertRaises(Exception):
+                _reconcile(profile, state, adapter)
+            self.assertEqual(adapter.file_verified, [])
