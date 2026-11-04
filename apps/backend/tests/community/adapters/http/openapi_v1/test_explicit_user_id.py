@@ -429,6 +429,7 @@ _NO_USER_DIMENSION = {
     # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/by_session"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -634,7 +635,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Catalogue profile addresses the bot by ``bot_uuid`` in the path, a different
 # spelling from the ``bot_id`` parameter this rule counts, so it lands in
 # ``none`` alongside the uuid-addressed operations: 140 -> 141.
-_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 141}
+# The relay-session task read is account-level and carries no bot_id parameter.
+_BOT_ID_PLACEMENT = {"path": 217, "query": 1, "none": 142}
 
 
 def _schema() -> dict:

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import {
+  buildRelayTaskPanelTab,
   buildSessionTaskPanelTab,
   findLatestTaskForSession,
   useSessionTaskPanelBootstrap,
@@ -10,9 +11,11 @@ import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
+const mockGetTaskBySession = jest.fn();
 const mockListMyTasks = jest.fn();
 
 jest.mock('@/services/myTask', () => ({
+  getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
   isEnvelopeFailure: (result?: { code?: number }) => result?.code !== 0,
   listMyTasks: (...args: unknown[]) => mockListMyTasks(...args),
   normalizeMyTaskPage: (data: unknown) => ({ items: Array.isArray(data) ? data : [], total: 0, page: 1, pageSize: 10 }),
@@ -43,6 +46,7 @@ const makePanelRef = () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
   localStorage.clear();
   useTaskSidePanelStore.getState().resetAll();
 });
@@ -73,7 +77,89 @@ describe('buildSessionTaskPanelTab', () => {
   });
 });
 
+describe('buildRelayTaskPanelTab', () => {
+  it('构造第二棒整图 TaskPanel tab', () => {
+    const tab = buildRelayTaskPanelTab('task-relay', 'owner-1', '接力任务');
+
+    expect(tab).toMatchObject({
+      id: 'task-task-relay',
+      title: '接力任务',
+      type: 'taskPanel.TaskLoopView',
+      closable: true,
+      defaultWidth: 420,
+    });
+    expect(tab.params).toMatchObject({
+      taskId: 'task-relay',
+      apiBaseUrl: '',
+      bcsBaseUrl: '',
+      userId: 'owner-1',
+      taskApiBase: '/openapi/v1/collaboration/tasks',
+    });
+  });
+});
+
 describe('useSessionTaskPanelBootstrap', () => {
+  it('第二棒会话命中后优先打开该任务，不查询任务列表', async () => {
+    const { ref, openTab } = makePanelRef();
+    mockGetTaskBySession.mockResolvedValue({
+      ok: true,
+      data: {
+        task_id: 'task-relay',
+        owner_user_id: 'owner-relay',
+        node_id: 'node-relay',
+      },
+    });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-relay');
+    expect(mockListMyTasks).not.toHaveBeenCalled();
+    expect(openTab.mock.calls[0][0]).toMatchObject({
+      id: 'task-task-relay',
+      type: 'taskPanel.TaskLoopView',
+    });
+    expect(openTab.mock.calls[0][0].params).toMatchObject({
+      taskId: 'task-relay',
+      userId: 'owner-relay',
+      taskApiBase: '/openapi/v1/collaboration/tasks',
+    });
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-relay');
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
+  });
+
+  it('第二棒命中先于 PanelHandle 就绪时，短暂等待后仍自动拉起副屏', async () => {
+    jest.useFakeTimers();
+    try {
+      const { ref: readyRef, openTab } = makePanelRef();
+      const nullRef: React.RefObject<PanelHandle | null> = { current: null };
+      mockGetTaskBySession.mockResolvedValue({
+        ok: true,
+        data: { task_id: 'task-relay', owner_user_id: 'owner-relay', node_id: 'node-relay' },
+      });
+
+      renderHook(() =>
+        useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: nullRef }),
+      );
+      // by_session 已返回，但深链持久副屏 owner 仍在同帧后的 React commit 中接管 ref。
+      await act(async () => Promise.resolve());
+      expect(openTab).not.toHaveBeenCalled();
+
+      (nullRef as { current: PanelHandle | null }).current = readyRef.current;
+      await act(async () => jest.advanceTimersByTimeAsync(100));
+
+      expect(openTab).toHaveBeenCalledTimes(1);
+      expect(openTab.mock.calls[0][0]).toMatchObject({
+        id: 'task-task-relay',
+        type: 'taskPanel.TaskLoopView',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('进入会话即按任务记录打开最新 TaskPanel，不依赖历史消息分页', async () => {
     const { ref, openTab } = makePanelRef();
     mockListMyTasks.mockResolvedValue({
