@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import styled from 'styled-components';
 import type { RoomComposition } from './sceneLayout';
 import type { WorkflowBoardView, WorkflowNodeView, WorkflowStatusTone } from './workflowGraph';
@@ -21,9 +21,9 @@ const NODE_W = 164;
 const NODE_H = 62;
 const PAD = 10;
 
-const Board = styled.section`
-  margin: 0 0 10px;
-  padding: 10px 12px 12px;
+const Board = styled.section<{ $collapsed: boolean }>`
+  margin: 0 0 ${p => (p.$collapsed ? 6 : 10)}px;
+  padding: ${p => (p.$collapsed ? '7px 10px' : '10px 12px 12px')};
   border: 1px solid #8e6531;
   border-radius: 8px;
   background: linear-gradient(180deg, #121f2f 0%, #101b2a 100%);
@@ -61,6 +61,22 @@ const RunChip = styled.span<{ $tone: WorkflowStatusTone }>`
   font-size: 10px;
   letter-spacing: 0.04em;
   white-space: nowrap;
+`;
+const Toggle = styled.button`
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid #e8b45e;
+  border-radius: 4px;
+  min-height: 26px;
+  padding: 3px 9px;
+  color: #ffe7b0;
+  background: #0b0e16;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  &:hover { background: #16233a; }
+  &:focus-visible { outline: 2px solid #ffe7b0; outline-offset: 2px; }
 `;
 const Notice = styled.p`
   margin: 4px 0 0;
@@ -209,6 +225,8 @@ function NodeLabel({ node, final }: { node: WorkflowNodeView; final: boolean }) 
 export interface WorkflowBoardProps {
   board: WorkflowBoardView;
   composition: RoomComposition;
+  collapsed?: boolean;
+  runKey?: string;
 }
 
 /**
@@ -216,23 +234,29 @@ export interface WorkflowBoardProps {
  * is drawn from the current run's graph; the board never derives progress from
  * phase, never counts nodes on its own and never reads artifacts or errors.
  */
-export function WorkflowBoard({ board, composition }: WorkflowBoardProps) {
+export function WorkflowBoard({ board, composition, collapsed = false, runKey }: WorkflowBoardProps) {
   const markerId = `wf-arrow-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const contentId = `wf-content-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const [expanded, setExpanded] = useState(!collapsed);
+  useEffect(() => { setExpanded(!collapsed); }, [runKey, collapsed]);
+  const showContent = !collapsed || expanded;
   const maxRows = board.lanes.reduce((max, lane) => Math.max(max, lane.length), 0);
   const width = board.lanes.length ? PAD * 2 + (board.lanes.length - 1) * COL_W + NODE_W : 0;
   const height = maxRows ? PAD * 2 + (maxRows - 1) * ROW_H + NODE_H : 0;
   const byId = new Map(board.nodes.map((node) => [node.nodeId, node]));
-  return <Board data-region="workflow-board" data-run-id={board.runId ?? ''} data-run-status={(board.runStatus ?? 'unknown').toLowerCase()} data-workflow-degrade={board.degradeReasons.join(' ') || undefined} aria-label="当前运行流程">
+  return <Board $collapsed={!showContent} data-region="workflow-board" data-workflow-collapsed={!showContent ? 'true' : 'false'} data-workflow-expanded={expanded ? 'true' : 'false'} data-run-id={board.runId ?? ''} data-run-status={(board.runStatus ?? 'unknown').toLowerCase()} data-workflow-degrade={board.degradeReasons.join(' ') || undefined} aria-label="当前运行流程">
     <BoardHead>
       <BoardTitle>本阶段真实流程</BoardTitle>
       <BoardMeta>
         <RunChip $tone={board.runStatusTone}>{board.runStatusLabel}</RunChip>
         {board.available && <span>{board.nodes.length} 个节点 · {board.edges.length} 条连线</span>}
-        {(board.lanes.length > 3 || maxRows > 3) && <span>滚动查看全部</span>}
+        {!showContent ? <span>操作中 · 已收起</span> : (board.lanes.length > 3 || maxRows > 3) && <span>滚动查看全部</span>}
+        {collapsed && <Toggle type="button" data-region="workflow-toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded((value) => !value)}>{expanded ? '收起流程' : '查看流程'}</Toggle>}
       </BoardMeta>
     </BoardHead>
     {board.notice && <Notice role="status" data-workflow-notice="true">{board.notice}</Notice>}
-    {!board.available || !board.nodes.length
+    <div id={contentId}>
+    {showContent && (!board.available || !board.nodes.length
       ? <Empty>暂无可展示的运行节点。</Empty>
       : <>
         <Scroller $narrow={composition === 'narrow'}>
@@ -273,6 +297,7 @@ export function WorkflowBoard({ board, composition }: WorkflowBoardProps) {
             <SrOnly aria-hidden="true">{board.edges.map((edge) => <span key={`${edge.source}->${edge.target}`} data-workflow-edge-summary="true">{`${edge.source} → ${edge.target}`}</span>)}</SrOnly>
           </Canvas>
         </Scroller>
-      </>}
+      </>)}
+    </div>
   </Board>;
 }

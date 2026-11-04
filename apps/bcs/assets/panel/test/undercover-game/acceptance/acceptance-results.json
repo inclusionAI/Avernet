@@ -1,0 +1,5751 @@
+{
+  "generatedAt": "2026-11-04T14:24:42.945Z",
+  "title": "Phase-4 acceptance — undercover-game panel (#2608)",
+  "synthetic": true,
+  "liveBcsEvidence": false,
+  "environment": {
+    "previewBase": "http://127.0.0.1:4180",
+    "previewUrl": "http://127.0.0.1:4180/test/undercover-game/visual-preview.html",
+    "wideViewport": {
+      "width": 760,
+      "height": 1000
+    },
+    "narrowViewports": [
+      {
+        "width": 320,
+        "height": 600
+      },
+      {
+        "width": 360,
+        "height": 640
+      }
+    ],
+    "chromeProduct": "Chrome/156.0.8078.80",
+    "headless": true,
+    "viewportEmulation": "CDP Emulation.setDeviceMetricsOverride (deviceScaleFactor=1)",
+    "node": "v24.21.0",
+    "pillow": "python3 + Pillow",
+    "git": {
+      "branch": "codex/issue-2608-jrpg-ui",
+      "head": "00527a85d38baa11b7577b2b0bf3cced8bc06d8b",
+      "dirty": true
+    },
+    "syntheticData": "visual-preview.tsx fetch mocks (six synthetic players, preview-run, private word masked by the panel)",
+    "liveBcsStatus": "Not exercised. The Lead reported local BCS health responds but has 0 bots/groups at capture time; this run does not connect to BCS at all."
+  },
+  "commands": {
+    "run": "cd apps/bcs/assets/panel && node test/undercover-game/acceptance/capture.mjs",
+    "prerequisites": "Vite dev server serving apps/bcs/assets/panel at http://127.0.0.1:4180 (e.g. npx vite --host 127.0.0.1 --port 4178)",
+    "env": "PREVIEW_BASE, CHROME_PATH, PYTHON, SKIP_GIF"
+  },
+  "screenshots": [
+    {
+      "file": "01-speech-synthetic.png",
+      "mode": "speech",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "layout": "wide",
+      "actionActive": "true",
+      "boardCollapsed": "false",
+      "board": {
+        "x": 26,
+        "y": 150.1,
+        "width": 701,
+        "height": 148,
+        "top": 150.1,
+        "bottom": 298.1,
+        "left": 26,
+        "right": 727
+      },
+      "stage": {
+        "x": 26,
+        "y": 308.1,
+        "width": 705,
+        "height": 396.6,
+        "top": 308.1,
+        "bottom": 704.6,
+        "left": 26,
+        "right": 731
+      },
+      "dock": {
+        "x": 26,
+        "y": 594,
+        "width": 708,
+        "height": 380,
+        "top": 594,
+        "bottom": 974,
+        "left": 26,
+        "right": 734
+      },
+      "dockFooter": {
+        "x": 28,
+        "y": 915,
+        "width": 704,
+        "height": 57,
+        "top": 915,
+        "bottom": 972,
+        "left": 28,
+        "right": 732
+      },
+      "submitButton": {
+        "x": 42,
+        "y": 925,
+        "width": 82.9,
+        "height": 38,
+        "top": 925,
+        "bottom": 963,
+        "left": 42,
+        "right": 124.9,
+        "label": "提交发言",
+        "disabled": false
+      },
+      "layoutChecks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 308.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 308.1,
+              "bottom": 704.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 7
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 7
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 82.9,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 124.9,
+            "label": "提交发言",
+            "disabled": false
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "layoutPass": true,
+      "path": "acceptance/01-speech-synthetic.png",
+      "bytes": 308157,
+      "sha256": "36319dd57363fd1cdd8143c9fdda5e7eaf0121524b3cb4a270bb216e9bd09168",
+      "optimized": null,
+      "width": 760,
+      "height": 1000,
+      "synthetic": true,
+      "proves": "Human speech turn: masked word card (••••), editable speech textarea and submit footer are visible at 760x1000.",
+      "consoleErrors": []
+    },
+    {
+      "file": "02-vote-synthetic.png",
+      "mode": "vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "layout": "wide",
+      "actionActive": "true",
+      "boardCollapsed": "false",
+      "board": {
+        "x": 26,
+        "y": 150.1,
+        "width": 701,
+        "height": 289,
+        "top": 150.1,
+        "bottom": 439.1,
+        "left": 26,
+        "right": 727
+      },
+      "stage": {
+        "x": 26,
+        "y": 449.1,
+        "width": 705,
+        "height": 396.6,
+        "top": 449.1,
+        "bottom": 845.6,
+        "left": 26,
+        "right": 731
+      },
+      "dock": {
+        "x": 26,
+        "y": 594,
+        "width": 708,
+        "height": 380,
+        "top": 594,
+        "bottom": 974,
+        "left": 26,
+        "right": 734
+      },
+      "dockFooter": {
+        "x": 28,
+        "y": 915,
+        "width": 704,
+        "height": 57,
+        "top": 915,
+        "bottom": 972,
+        "left": 28,
+        "right": 732
+      },
+      "submitButton": {
+        "x": 42,
+        "y": 925,
+        "width": 95.6,
+        "height": 38,
+        "top": 925,
+        "bottom": 963,
+        "left": 42,
+        "right": 137.6,
+        "label": "确认并投票",
+        "disabled": true
+      },
+      "layoutChecks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 449.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 449.1,
+              "bottom": 845.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 95.6,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 137.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "value": "__abstain__",
+            "checked": false,
+            "rect": {
+              "x": 213,
+              "y": 719,
+              "width": 163,
+              "height": 54,
+              "top": 719,
+              "bottom": 773,
+              "left": 213,
+              "right": 376
+            }
+          }
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 42,
+              "y": 783,
+              "width": 676,
+              "height": 37,
+              "top": 783,
+              "bottom": 820,
+              "left": 42,
+              "right": 718
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "layoutPass": true,
+      "path": "acceptance/02-vote-synthetic.png",
+      "bytes": 232615,
+      "sha256": "03075053eb7e95f263450d0e0eb649e746840e0d8b7247381eaddaf6628e0293",
+      "optimized": null,
+      "width": 760,
+      "height": 1000,
+      "synthetic": true,
+      "proves": "Human vote turn: candidate radios, the 弃权 (abstain) card, the 确认 (confirmation) control and the 确认并投票 submit button are all visible.",
+      "extra": {
+        "abstainCardInView": true,
+        "confirmationControlInView": true
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "03-pk-vote-synthetic.png",
+      "mode": "pk-vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "layout": "wide",
+      "actionActive": "true",
+      "boardCollapsed": "false",
+      "board": {
+        "x": 26,
+        "y": 150.1,
+        "width": 701,
+        "height": 289,
+        "top": 150.1,
+        "bottom": 439.1,
+        "left": 26,
+        "right": 727
+      },
+      "stage": {
+        "x": 26,
+        "y": 449.1,
+        "width": 705,
+        "height": 396.6,
+        "top": 449.1,
+        "bottom": 845.6,
+        "left": 26,
+        "right": 731
+      },
+      "dock": {
+        "x": 26,
+        "y": 594,
+        "width": 708,
+        "height": 380,
+        "top": 594,
+        "bottom": 974,
+        "left": 26,
+        "right": 734
+      },
+      "dockFooter": {
+        "x": 28,
+        "y": 915,
+        "width": 704,
+        "height": 57,
+        "top": 915,
+        "bottom": 972,
+        "left": 28,
+        "right": 732
+      },
+      "submitButton": {
+        "x": 42,
+        "y": 925,
+        "width": 95.6,
+        "height": 38,
+        "top": 925,
+        "bottom": 963,
+        "left": 42,
+        "right": 137.6,
+        "label": "确认并投票",
+        "disabled": true
+      },
+      "layoutChecks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 449.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 449.1,
+              "bottom": 845.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 95.6,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 137.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 42,
+              "y": 719,
+              "width": 676,
+              "height": 37,
+              "top": 719,
+              "bottom": 756,
+              "left": 42,
+              "right": 718
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "layoutPass": true,
+      "path": "acceptance/03-pk-vote-synthetic.png",
+      "bytes": 221701,
+      "sha256": "a9132c1f8bee90a1af896666f9e61f5e5930b86ca5d6ca526d58a2d8dcc19f61",
+      "optimized": null,
+      "width": 760,
+      "height": 1000,
+      "synthetic": true,
+      "proves": "Human PK vote turn: PK header badge, single PK candidate, confirmation control and submit button; no abstain card is offered.",
+      "extra": {
+        "abstainInputPresent": false,
+        "candidates": 1,
+        "headerHasPk": true
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "04-eliminated-synthetic.png",
+      "mode": "eliminated",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "layout": "wide",
+      "actionActive": "false",
+      "boardCollapsed": "false",
+      "board": {
+        "x": 26,
+        "y": 150.1,
+        "width": 705,
+        "height": 148,
+        "top": 150.1,
+        "bottom": 298.1,
+        "left": 26,
+        "right": 731
+      },
+      "stage": {
+        "x": 26,
+        "y": 308.1,
+        "width": 705,
+        "height": 396.6,
+        "top": 308.1,
+        "bottom": 704.6,
+        "left": 26,
+        "right": 731
+      },
+      "dock": {
+        "x": 26,
+        "y": 774,
+        "width": 708,
+        "height": 200,
+        "top": 774,
+        "bottom": 974,
+        "left": 26,
+        "right": 734
+      },
+      "dockFooter": {
+        "x": 28,
+        "y": 915,
+        "width": 704,
+        "height": 57,
+        "top": 915,
+        "bottom": 972,
+        "left": 28,
+        "right": 732
+      },
+      "submitButton": null,
+      "layoutChecks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 308.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 308.1,
+              "bottom": 704.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 6
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 6
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "layoutPass": true,
+      "path": "acceptance/04-eliminated-synthetic.png",
+      "bytes": 404114,
+      "sha256": "54d6019b3b7857afe18eebf7c8181057d71b330ec2c6f17ea98e511acd085b2a",
+      "optimized": null,
+      "width": 760,
+      "height": 1000,
+      "synthetic": true,
+      "proves": "Eliminated seat state: the 6号 seat is rendered as eliminated (已淘汰) in the participant roster/scene while the rest of the room stays live.",
+      "extra": {
+        "eliminatedVisible": true,
+        "eliminatedSeatText": null
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "05-finished-synthetic.png",
+      "mode": "finished",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "layout": "wide",
+      "actionActive": "false",
+      "boardCollapsed": "false",
+      "board": {
+        "x": 26,
+        "y": 207.9,
+        "width": 701,
+        "height": 289,
+        "top": 207.9,
+        "bottom": 496.9,
+        "left": 26,
+        "right": 727
+      },
+      "stage": {
+        "x": 26,
+        "y": 506.9,
+        "width": 705,
+        "height": 396.6,
+        "top": 506.9,
+        "bottom": 903.4,
+        "left": 26,
+        "right": 731
+      },
+      "dock": {
+        "x": 26,
+        "y": 824.4,
+        "width": 708,
+        "height": 149.6,
+        "top": 824.4,
+        "bottom": 974,
+        "left": 26,
+        "right": 734
+      },
+      "dockFooter": {
+        "x": 28,
+        "y": 915,
+        "width": 704,
+        "height": 57,
+        "top": 915,
+        "bottom": 972,
+        "left": 28,
+        "right": 732
+      },
+      "submitButton": null,
+      "layoutChecks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 506.9,
+              "width": 705,
+              "height": 396.6,
+              "top": 506.9,
+              "bottom": 903.4,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "label": "游戏结束",
+            "rect": {
+              "x": 145,
+              "y": 210,
+              "width": 470,
+              "height": 580,
+              "top": 210,
+              "bottom": 790,
+              "left": 145,
+              "right": 615
+            }
+          }
+        }
+      },
+      "layoutPass": true,
+      "path": "acceptance/05-finished-synthetic.png",
+      "bytes": 162487,
+      "sha256": "1cb1dc58fcca782acaeb65a6c7f7bfd79629a374fc2e8333fbc14bbef4b99b3c",
+      "optimized": null,
+      "width": 760,
+      "height": 1000,
+      "synthetic": true,
+      "proves": "Finished state: the real GameOverDialog renders the synthetic public finale (winner + recap) with a 回到圆桌 button; no private word or raw ballot is shown.",
+      "extra": {
+        "dialogLabel": "游戏结束",
+        "dialogText": "CASE CLOSED · 宴散 平民阵营获胜 第 1 轮 · 夜宴落幕，每一句话都留下了线索 🎉 游戏结束！平民胜利！ 🏆 终局揭秘 最后一轮，大家从描述的细节里找到了破绽。 感谢各位来到隐秘圆桌，下局再见。 回到圆桌 想再来一局？请在聊天中新建会话",
+        "focusInsideDialog": true,
+        "backgroundInert": 3
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "narrow-320-speech-synthetic.png",
+      "mode": "speech",
+      "variant": "default",
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "panelSurfaceNote": "The preview harness adds 12px padding around the panel, so the browser viewport is exactly the target size while the panel surface is 24px smaller.",
+      "layout": "narrow",
+      "actionActive": "true",
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "workflowToggle": {
+        "present": true,
+        "text": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "focusable": true,
+        "disabled": false,
+        "visibleInViewport": true,
+        "focused": false,
+        "rect": {
+          "x": 33,
+          "y": 178.1,
+          "width": 61.6,
+          "height": 26,
+          "top": 178.1,
+          "bottom": 204.1,
+          "left": 33,
+          "right": 94.6
+        }
+      },
+      "dock": {
+        "x": 22,
+        "y": 344.5,
+        "width": 276,
+        "height": 233.5,
+        "top": 344.5,
+        "bottom": 578,
+        "left": 22,
+        "right": 298
+      },
+      "dockBody": {
+        "x": 24,
+        "y": 403.5,
+        "width": 272,
+        "height": 115.5,
+        "top": 403.5,
+        "bottom": 519,
+        "left": 24,
+        "right": 296,
+        "scrollTop": 140,
+        "scrollHeight": 310,
+        "clientHeight": 116
+      },
+      "dockFooter": {
+        "x": 24,
+        "y": 519,
+        "width": 272,
+        "height": 57,
+        "top": 519,
+        "bottom": 576,
+        "left": 24,
+        "right": 296
+      },
+      "stage": {
+        "x": 22,
+        "y": 222.1,
+        "width": 273,
+        "height": 119.4,
+        "top": 222.1,
+        "bottom": 341.5,
+        "left": 22,
+        "right": 295
+      },
+      "path": "acceptance/narrow-320-speech-synthetic.png",
+      "bytes": 99313,
+      "sha256": "23721099b8ce25cedbe3731111e0a386c43777bc97488ed8e88b2ce30024e54e",
+      "optimized": null,
+      "width": 320,
+      "height": 600,
+      "synthetic": true,
+      "proves": "Exact 320x600 viewport, speech turn: the workflow board is collapsed, the night-hall stage stays visible and the focused textarea + dock footer stay inside the visible action dock.",
+      "extra": {
+        "activeTag": "TEXTAREA",
+        "textarea": {
+          "x": 38,
+          "y": 452.078125,
+          "width": 240,
+          "height": 84,
+          "bottom": 536.078125
+        },
+        "dockBody": {
+          "x": 24,
+          "y": 403.484375,
+          "width": 272,
+          "height": 115.515625,
+          "bottom": 519
+        },
+        "dockBodyScrollTop": 140,
+        "dockFooter": {
+          "x": 24,
+          "y": 519,
+          "width": 272,
+          "height": 57,
+          "bottom": 576
+        }
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "narrow-320-speech-expanded-synthetic.png",
+      "mode": "speech",
+      "variant": "expanded",
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "panelSurfaceNote": "The preview harness adds 12px padding around the panel, so the browser viewport is exactly the target size while the panel surface is 24px smaller.",
+      "layout": "narrow",
+      "actionActive": "true",
+      "boardCollapsed": "false",
+      "boardExpanded": "true",
+      "renderedNodes": 7,
+      "workflowToggle": {
+        "present": true,
+        "text": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "focusable": true,
+        "disabled": false,
+        "visibleInViewport": true,
+        "focused": true,
+        "rect": {
+          "x": 35,
+          "y": 181.1,
+          "width": 61.6,
+          "height": 26,
+          "top": 181.1,
+          "bottom": 207.1,
+          "left": 35,
+          "right": 96.6
+        }
+      },
+      "dock": {
+        "x": 22,
+        "y": 344.5,
+        "width": 276,
+        "height": 233.5,
+        "top": 344.5,
+        "bottom": 578,
+        "left": 22,
+        "right": 298
+      },
+      "dockBody": {
+        "x": 24,
+        "y": 403.5,
+        "width": 272,
+        "height": 115.5,
+        "top": 403.5,
+        "bottom": 519,
+        "left": 24,
+        "right": 296,
+        "scrollTop": 140,
+        "scrollHeight": 310,
+        "clientHeight": 116
+      },
+      "dockFooter": {
+        "x": 24,
+        "y": 519,
+        "width": 272,
+        "height": 57,
+        "top": 519,
+        "bottom": 576,
+        "left": 24,
+        "right": 296
+      },
+      "stage": {
+        "x": 22,
+        "y": 331.1,
+        "width": 273,
+        "height": 119.4,
+        "top": 331.1,
+        "bottom": 450.5,
+        "left": 22,
+        "right": 295
+      },
+      "path": "acceptance/narrow-320-speech-expanded-synthetic.png",
+      "bytes": 69895,
+      "sha256": "3aa64b9d6ba6e8ca023da5dd4ad4e8544e1adae827c1a9b230dda05991ac8942",
+      "optimized": null,
+      "width": 320,
+      "height": 600,
+      "synthetic": true,
+      "proves": "Exact 320x600 viewport with the workflow board expanded via the 查看流程 toggle: the real graph node cards/edges are rendered (operation still pending) and the action dock with submit footer remains reachable below the scrollable Scene.",
+      "prepared": {
+        "activation": "CDP Input.dispatchMouseEvent click at toggle center",
+        "clickPoint": {
+          "x": 63.8046875,
+          "y": 191.078125
+        },
+        "labelBefore": "查看流程",
+        "ariaExpandedBefore": "false"
+      },
+      "extra": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 35,
+          "y": 181.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 207.078125
+        },
+        "toggleFocused": true,
+        "nodes": 7,
+        "edges": 21,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320,
+        "activation": "CDP Input.dispatchMouseEvent click at toggle center",
+        "realGraph": {
+          "nodes": 7,
+          "edges": 21
+        },
+        "actionDockStillReachable": true
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "narrow-320-vote-synthetic.png",
+      "mode": "vote",
+      "variant": "default",
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "panelSurfaceNote": "The preview harness adds 12px padding around the panel, so the browser viewport is exactly the target size while the panel surface is 24px smaller.",
+      "layout": "narrow",
+      "actionActive": "true",
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "workflowToggle": {
+        "present": true,
+        "text": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "focusable": true,
+        "disabled": false,
+        "visibleInViewport": true,
+        "focused": false,
+        "rect": {
+          "x": 33,
+          "y": 178.1,
+          "width": 61.6,
+          "height": 26,
+          "top": 178.1,
+          "bottom": 204.1,
+          "left": 33,
+          "right": 94.6
+        }
+      },
+      "dock": {
+        "x": 22,
+        "y": 344.5,
+        "width": 276,
+        "height": 233.5,
+        "top": 344.5,
+        "bottom": 578,
+        "left": 22,
+        "right": 298
+      },
+      "dockBody": {
+        "x": 24,
+        "y": 403.5,
+        "width": 272,
+        "height": 115.5,
+        "top": 403.5,
+        "bottom": 519,
+        "left": 24,
+        "right": 296,
+        "scrollTop": 281,
+        "scrollHeight": 397,
+        "clientHeight": 116
+      },
+      "dockFooter": {
+        "x": 24,
+        "y": 519,
+        "width": 272,
+        "height": 57,
+        "top": 519,
+        "bottom": 576,
+        "left": 24,
+        "right": 296
+      },
+      "stage": {
+        "x": 22,
+        "y": 222.1,
+        "width": 273,
+        "height": 119.4,
+        "top": 222.1,
+        "bottom": 341.5,
+        "left": 22,
+        "right": 295
+      },
+      "path": "acceptance/narrow-320-vote-synthetic.png",
+      "bytes": 95755,
+      "sha256": "714d81caf00b44d79913dcfe004a6b7456108964306afa8fe2992d8d623c2046",
+      "optimized": null,
+      "width": 320,
+      "height": 600,
+      "synthetic": true,
+      "proves": "Exact 320x600 viewport, vote turn: dock body is scrolled to expose the 弃权 (abstain) card and the 确认 (confirmation) control while the submit footer remains visible.",
+      "extra": {
+        "scrollTop": 281,
+        "scrollHeight": 397,
+        "clientHeight": 116,
+        "abstainCardInView": true,
+        "confirmationControlInView": true
+      },
+      "consoleErrors": []
+    },
+    {
+      "file": "narrow-360-speech-synthetic.png",
+      "mode": "speech",
+      "variant": "default",
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616,
+        "top": 12,
+        "bottom": 628,
+        "left": 12,
+        "right": 348
+      },
+      "panelSurfaceNote": "The preview harness adds 12px padding around the panel, so the browser viewport is exactly the target size while the panel surface is 24px smaller.",
+      "layout": "narrow",
+      "actionActive": "true",
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "workflowToggle": {
+        "present": true,
+        "text": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "focusable": true,
+        "disabled": false,
+        "visibleInViewport": true,
+        "focused": false,
+        "rect": {
+          "x": 33,
+          "y": 178.1,
+          "width": 61.6,
+          "height": 26,
+          "top": 178.1,
+          "bottom": 204.1,
+          "left": 33,
+          "right": 94.6
+        }
+      },
+      "dock": {
+        "x": 22,
+        "y": 368,
+        "width": 316,
+        "height": 250,
+        "top": 368,
+        "bottom": 618,
+        "left": 22,
+        "right": 338
+      },
+      "dockBody": {
+        "x": 24,
+        "y": 427,
+        "width": 312,
+        "height": 132,
+        "top": 427,
+        "bottom": 559,
+        "left": 24,
+        "right": 336,
+        "scrollTop": 120,
+        "scrollHeight": 310,
+        "clientHeight": 132
+      },
+      "dockFooter": {
+        "x": 24,
+        "y": 559,
+        "width": 312,
+        "height": 57,
+        "top": 559,
+        "bottom": 616,
+        "left": 24,
+        "right": 336
+      },
+      "stage": {
+        "x": 22,
+        "y": 222.1,
+        "width": 313,
+        "height": 136.9,
+        "top": 222.1,
+        "bottom": 359,
+        "left": 22,
+        "right": 335
+      },
+      "path": "acceptance/narrow-360-speech-synthetic.png",
+      "bytes": 118192,
+      "sha256": "5dcf129bc0a5a884727da3c4b62bc61d47fda5ebe4ecd465523b10677d3a9403",
+      "optimized": null,
+      "width": 360,
+      "height": 640,
+      "synthetic": true,
+      "proves": "Exact 360x640 viewport, speech turn: collapsed workflow board, visible night-hall stage, focused textarea and visible dock footer.",
+      "extra": {
+        "activeTag": "TEXTAREA",
+        "textarea": {
+          "x": 38,
+          "y": 495.59375,
+          "width": 280,
+          "height": 84,
+          "bottom": 579.59375
+        },
+        "dockBody": {
+          "x": 24,
+          "y": 427,
+          "width": 312,
+          "height": 132,
+          "bottom": 559
+        },
+        "dockBodyScrollTop": 120,
+        "dockFooter": {
+          "x": 24,
+          "y": 559,
+          "width": 312,
+          "height": 57,
+          "bottom": 616
+        }
+      },
+      "consoleErrors": []
+    }
+  ],
+  "layoutSweep": [
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "speech",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 320,
+          "height": 600
+        },
+        "mode": "speech",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 35,
+            "y": 181.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 207.078125
+          },
+          "toggleFocused": true,
+          "nodes": 7,
+          "edges": 21,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "320 <= 320 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 273,
+              "height": 119.4,
+              "top": 222.1,
+              "bottom": 341.5,
+              "left": 22,
+              "right": 295
+            },
+            "intersectionArea": 32596
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 519,
+            "width": 272,
+            "height": 57,
+            "top": 519,
+            "bottom": 576,
+            "left": 24,
+            "right": 296
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 529,
+            "width": 82.9,
+            "height": 38,
+            "top": 529,
+            "bottom": 567,
+            "left": 38,
+            "right": 120.9,
+            "label": "提交发言",
+            "disabled": false
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "vote",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 320,
+          "height": 600
+        },
+        "mode": "vote",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 35,
+            "y": 181.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 207.078125
+          },
+          "toggleFocused": true,
+          "nodes": 8,
+          "edges": 12,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "320 <= 320 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 273,
+              "height": 119.4,
+              "top": 222.1,
+              "bottom": 341.5,
+              "left": 22,
+              "right": 295
+            },
+            "intersectionArea": 32596
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 519,
+            "width": 272,
+            "height": 57,
+            "top": 519,
+            "bottom": 576,
+            "left": 24,
+            "right": 296
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 529,
+            "width": 95.6,
+            "height": 38,
+            "top": 529,
+            "bottom": 567,
+            "left": 38,
+            "right": 133.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "value": "__abstain__",
+            "checked": false,
+            "rect": {
+              "x": 38,
+              "y": 707.5,
+              "width": 240,
+              "height": 36,
+              "top": 707.5,
+              "bottom": 743.5,
+              "left": 38,
+              "right": 278
+            }
+          }
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 753.5,
+              "width": 240,
+              "height": 37,
+              "top": 753.5,
+              "bottom": 790.5,
+              "left": 38,
+              "right": 278
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "pk-vote",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 320,
+          "height": 600
+        },
+        "mode": "pk-vote",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 35,
+            "y": 181.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 207.078125
+          },
+          "toggleFocused": true,
+          "nodes": 8,
+          "edges": 12,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 320,
+          "innerWidth": 320
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "320 <= 320 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 273,
+              "height": 119.4,
+              "top": 222.1,
+              "bottom": 341.5,
+              "left": 22,
+              "right": 295
+            },
+            "intersectionArea": 32596
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 519,
+            "width": 272,
+            "height": 57,
+            "top": 519,
+            "bottom": 576,
+            "left": 24,
+            "right": 296
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 529,
+            "width": 95.6,
+            "height": 38,
+            "top": 529,
+            "bottom": 567,
+            "left": 38,
+            "right": 133.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 469.5,
+              "width": 244,
+              "height": 37,
+              "top": 469.5,
+              "bottom": 506.5,
+              "left": 38,
+              "right": 282
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "finished",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 296,
+        "height": 576,
+        "top": 12,
+        "bottom": 588,
+        "left": 12,
+        "right": 308
+      },
+      "boardCollapsed": "false",
+      "boardExpanded": "true",
+      "renderedNodes": 8,
+      "toggle": {
+        "present": false
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "320 <= 320 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 532.7,
+              "width": 273,
+              "height": 119.4,
+              "top": 532.7,
+              "bottom": 652.1,
+              "left": 22,
+              "right": 295
+            },
+            "intersectionArea": 18373
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 519,
+            "width": 272,
+            "height": 57,
+            "top": 519,
+            "bottom": 576,
+            "left": 24,
+            "right": 296
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "label": "游戏结束",
+            "rect": {
+              "x": 28,
+              "y": 28,
+              "width": 264,
+              "height": 544,
+              "top": 28,
+              "bottom": 572,
+              "left": 28,
+              "right": 292
+            }
+          }
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "speech",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616,
+        "top": 12,
+        "bottom": 628,
+        "left": 12,
+        "right": 348
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 360,
+          "height": 640
+        },
+        "mode": "speech",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 251.75,
+            "y": 156.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 182.078125
+          },
+          "toggleFocused": true,
+          "nodes": 7,
+          "edges": 21,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "360 <= 360 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 313,
+              "height": 136.9,
+              "top": 222.1,
+              "bottom": 359,
+              "left": 22,
+              "right": 335
+            },
+            "intersectionArea": 42850
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 559,
+            "width": 312,
+            "height": 57,
+            "top": 559,
+            "bottom": 616,
+            "left": 24,
+            "right": 336
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 569,
+            "width": 82.9,
+            "height": 38,
+            "top": 569,
+            "bottom": 607,
+            "left": 38,
+            "right": 120.9,
+            "label": "提交发言",
+            "disabled": false
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "vote",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616,
+        "top": 12,
+        "bottom": 628,
+        "left": 12,
+        "right": 348
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 360,
+          "height": 640
+        },
+        "mode": "vote",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 252.453125,
+            "y": 156.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 182.078125
+          },
+          "toggleFocused": true,
+          "nodes": 8,
+          "edges": 12,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "360 <= 360 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 313,
+              "height": 136.9,
+              "top": 222.1,
+              "bottom": 359,
+              "left": 22,
+              "right": 335
+            },
+            "intersectionArea": 42850
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 559,
+            "width": 312,
+            "height": 57,
+            "top": 559,
+            "bottom": 616,
+            "left": 24,
+            "right": 336
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 569,
+            "width": 95.6,
+            "height": 38,
+            "top": 569,
+            "bottom": 607,
+            "left": 38,
+            "right": 133.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "value": "__abstain__",
+            "checked": false,
+            "rect": {
+              "x": 38,
+              "y": 731,
+              "width": 280,
+              "height": 36,
+              "top": 731,
+              "bottom": 767,
+              "left": 38,
+              "right": 318
+            }
+          }
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 777,
+              "width": 280,
+              "height": 37,
+              "top": 777,
+              "bottom": 814,
+              "left": 38,
+              "right": 318
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "pk-vote",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616,
+        "top": 12,
+        "bottom": 628,
+        "left": 12,
+        "right": 348
+      },
+      "boardCollapsed": "true",
+      "boardExpanded": "false",
+      "renderedNodes": 0,
+      "toggle": {
+        "present": true,
+        "viewport": {
+          "width": 360,
+          "height": 640
+        },
+        "mode": "pk-vote",
+        "before": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": false,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "expanded": {
+          "collapsed": "false",
+          "expanded": "true",
+          "togglePresent": true,
+          "toggleLabel": "收起流程",
+          "ariaExpanded": "true",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 252.453125,
+            "y": 156.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 182.078125
+          },
+          "toggleFocused": true,
+          "nodes": 8,
+          "edges": 12,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "collapsed": {
+          "collapsed": "true",
+          "expanded": "false",
+          "togglePresent": true,
+          "toggleLabel": "查看流程",
+          "ariaExpanded": "false",
+          "ariaControls": "wf-content-_r_1_",
+          "ariaControlsTargetExists": true,
+          "toggleVisible": true,
+          "toggleRect": {
+            "x": 33,
+            "y": 178.078125,
+            "width": 61.609375,
+            "height": 26,
+            "bottom": 204.078125
+          },
+          "toggleFocused": true,
+          "nodes": 0,
+          "edges": 0,
+          "footerVisible": true,
+          "submitVisible": true,
+          "docScrollWidth": 360,
+          "innerWidth": 360
+        },
+        "checks": {
+          "togglePresentAndVisible": true,
+          "toggleFocusable": true,
+          "ariaControlsTargetExists": true,
+          "startsCollapsed": true,
+          "enterExpands": true,
+          "focusStaysOnToggleExpanded": true,
+          "dockFooterVisibleExpanded": true,
+          "noOverflowExpanded": true,
+          "spaceCollapses": true,
+          "focusStaysOnToggleCollapsed": true,
+          "dockFooterVisibleCollapsed": true
+        },
+        "pass": true
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "360 <= 360 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 222.1,
+              "width": 313,
+              "height": 136.9,
+              "top": 222.1,
+              "bottom": 359,
+              "left": 22,
+              "right": 335
+            },
+            "intersectionArea": 42850
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "true"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "collapsed": "true",
+            "expanded": "false",
+            "nodes": 0
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "present": true,
+            "text": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "focusable": true,
+            "disabled": false,
+            "visibleInViewport": true,
+            "focused": false,
+            "rect": {
+              "x": 33,
+              "y": 178.1,
+              "width": 61.6,
+              "height": 26,
+              "top": 178.1,
+              "bottom": 204.1,
+              "left": 33,
+              "right": 94.6
+            }
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": "false",
+            "label": "查看流程",
+            "renderedNodes": 0
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 559,
+            "width": 312,
+            "height": 57,
+            "top": 559,
+            "bottom": 616,
+            "left": 24,
+            "right": 336
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 38,
+            "y": 569,
+            "width": 95.6,
+            "height": 38,
+            "top": 569,
+            "bottom": 607,
+            "left": 38,
+            "right": 133.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 493,
+              "width": 284,
+              "height": 37,
+              "top": 493,
+              "bottom": 530,
+              "left": 38,
+              "right": 322
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "finished",
+      "panelRect": {
+        "x": 12,
+        "y": 12,
+        "width": 336,
+        "height": 616,
+        "top": 12,
+        "bottom": 628,
+        "left": 12,
+        "right": 348
+      },
+      "boardCollapsed": "false",
+      "boardExpanded": "true",
+      "renderedNodes": 8,
+      "toggle": {
+        "present": false
+      },
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "360 <= 360 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 22,
+              "y": 544.7,
+              "width": 313,
+              "height": 136.9,
+              "top": 544.7,
+              "bottom": 681.6,
+              "left": 22,
+              "right": 335
+            },
+            "intersectionArea": 29829
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 24,
+            "y": 559,
+            "width": 312,
+            "height": 57,
+            "top": 559,
+            "bottom": 616,
+            "left": 24,
+            "right": 336
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "label": "游戏结束",
+            "rect": {
+              "x": 28,
+              "y": 30,
+              "width": 304,
+              "height": 580,
+              "top": 30,
+              "bottom": 610,
+              "left": 28,
+              "right": 332
+            }
+          }
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    }
+  ],
+  "wideLayoutChecks": [
+    {
+      "file": "01-speech-synthetic.png",
+      "mode": "speech",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "boardCollapsed": "false",
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 308.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 308.1,
+              "bottom": 704.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 7
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 7
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 82.9,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 124.9,
+            "label": "提交发言",
+            "disabled": false
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "file": "02-vote-synthetic.png",
+      "mode": "vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "boardCollapsed": "false",
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 449.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 449.1,
+              "bottom": 845.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 95.6,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 137.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "value": "__abstain__",
+            "checked": false,
+            "rect": {
+              "x": 213,
+              "y": 719,
+              "width": 163,
+              "height": 54,
+              "top": 719,
+              "bottom": 773,
+              "left": 213,
+              "right": 376
+            }
+          }
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 42,
+              "y": 783,
+              "width": 676,
+              "height": 37,
+              "top": 783,
+              "bottom": 820,
+              "left": 42,
+              "right": 718
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "file": "03-pk-vote-synthetic.png",
+      "mode": "pk-vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "boardCollapsed": "false",
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 449.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 449.1,
+              "bottom": 845.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "actionActive": "true"
+          }
+        },
+        "actionDockVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "x": 42,
+            "y": 925,
+            "width": 95.6,
+            "height": 38,
+            "top": 925,
+            "bottom": 963,
+            "left": 42,
+            "right": 137.6,
+            "label": "确认并投票",
+            "disabled": true
+          }
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "checked": false,
+            "disabled": true,
+            "rect": {
+              "x": 42,
+              "y": 719,
+              "width": 676,
+              "height": 37,
+              "top": 719,
+              "bottom": 756,
+              "left": 42,
+              "right": 718
+            },
+            "label": "确认：尚未选择"
+          }
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "file": "04-eliminated-synthetic.png",
+      "mode": "eliminated",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "boardCollapsed": "false",
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 308.1,
+              "width": 705,
+              "height": 396.6,
+              "top": 308.1,
+              "bottom": 704.6,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 6
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 6
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    },
+    {
+      "file": "05-finished-synthetic.png",
+      "mode": "finished",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 736,
+        "height": 976,
+        "top": 12,
+        "bottom": 988,
+        "left": 12,
+        "right": 748
+      },
+      "boardCollapsed": "false",
+      "checks": {
+        "noPageHorizontalOverflow": {
+          "pass": true,
+          "detail": "760 <= 760 + 1"
+        },
+        "stageVisibleInViewport": {
+          "pass": true,
+          "detail": {
+            "rect": {
+              "x": 26,
+              "y": 506.9,
+              "width": 705,
+              "height": 396.6,
+              "top": 506.9,
+              "bottom": 903.4,
+              "left": 26,
+              "right": 731
+            },
+            "intersectionArea": 279533
+          }
+        },
+        "workflowBoardPresent": {
+          "pass": true,
+          "detail": {
+            "present": true,
+            "collapsed": "false"
+          }
+        },
+        "workflowBoardCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "collapsed": "false",
+            "expanded": "true",
+            "nodes": 8
+          }
+        },
+        "workflowToggleVisibleFocusable": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "present": false
+          }
+        },
+        "workflowToggleDefaultsCollapsed": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "ariaExpanded": null,
+            "label": null,
+            "renderedNodes": 8
+          }
+        },
+        "actionDockActive": {
+          "expected": false,
+          "pass": true,
+          "detail": {
+            "actionActive": "false"
+          }
+        },
+        "actionDockVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": true
+        },
+        "dockFooterVisible": {
+          "pass": true,
+          "detail": {
+            "x": 28,
+            "y": 915,
+            "width": 704,
+            "height": 57,
+            "top": 915,
+            "bottom": 972,
+            "left": 28,
+            "right": 732
+          }
+        },
+        "submitButtonVisible": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "abstainOffered": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "confirmationControlPresent": {
+          "expected": false,
+          "pass": true,
+          "detail": null
+        },
+        "resultDialogPresent": {
+          "expected": true,
+          "pass": true,
+          "detail": {
+            "label": "游戏结束",
+            "rect": {
+              "x": 145,
+              "y": 210,
+              "width": 470,
+              "height": 580,
+              "top": 210,
+              "bottom": 790,
+              "left": 145,
+              "right": 615
+            }
+          }
+        }
+      },
+      "pass": true,
+      "failedChecks": [],
+      "consoleErrors": []
+    }
+  ],
+  "toggleEvidence": [
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "speech",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 35,
+          "y": 181.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 207.078125
+        },
+        "toggleFocused": true,
+        "nodes": 7,
+        "edges": 21,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "pass": true
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "vote",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 35,
+          "y": 181.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 207.078125
+        },
+        "toggleFocused": true,
+        "nodes": 8,
+        "edges": 12,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "pass": true
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "pk-vote",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 35,
+          "y": 181.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 207.078125
+        },
+        "toggleFocused": true,
+        "nodes": 8,
+        "edges": 12,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 320,
+        "innerWidth": 320
+      },
+      "pass": true
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "speech",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 251.75,
+          "y": 156.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 182.078125
+        },
+        "toggleFocused": true,
+        "nodes": 7,
+        "edges": 21,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "pass": true
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "vote",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 252.453125,
+          "y": 156.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 182.078125
+        },
+        "toggleFocused": true,
+        "nodes": 8,
+        "edges": 12,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "pass": true
+    },
+    {
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "mode": "pk-vote",
+      "checks": {
+        "togglePresentAndVisible": true,
+        "toggleFocusable": true,
+        "ariaControlsTargetExists": true,
+        "startsCollapsed": true,
+        "enterExpands": true,
+        "focusStaysOnToggleExpanded": true,
+        "dockFooterVisibleExpanded": true,
+        "noOverflowExpanded": true,
+        "spaceCollapses": true,
+        "focusStaysOnToggleCollapsed": true,
+        "dockFooterVisibleCollapsed": true
+      },
+      "before": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": false,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "expanded": {
+        "collapsed": "false",
+        "expanded": "true",
+        "togglePresent": true,
+        "toggleLabel": "收起流程",
+        "ariaExpanded": "true",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 252.453125,
+          "y": 156.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 182.078125
+        },
+        "toggleFocused": true,
+        "nodes": 8,
+        "edges": 12,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "collapsed": {
+        "collapsed": "true",
+        "expanded": "false",
+        "togglePresent": true,
+        "toggleLabel": "查看流程",
+        "ariaExpanded": "false",
+        "ariaControls": "wf-content-_r_1_",
+        "ariaControlsTargetExists": true,
+        "toggleVisible": true,
+        "toggleRect": {
+          "x": 33,
+          "y": 178.078125,
+          "width": 61.609375,
+          "height": 26,
+          "bottom": 204.078125
+        },
+        "toggleFocused": true,
+        "nodes": 0,
+        "edges": 0,
+        "footerVisible": true,
+        "submitVisible": true,
+        "docScrollWidth": 360,
+        "innerWidth": 360
+      },
+      "pass": true
+    }
+  ],
+  "runSwitchReset": {
+    "verifiedBy": "jsdom unit test test/undercover-game/workflow-board.mjs",
+    "command": "cd apps/bcs/assets/panel && node test/undercover-game/workflow-board.mjs",
+    "exitCode": 0,
+    "pass": true,
+    "assertion": "narrow action board starts collapsed, toggle expands/collapses the real nodes, and a run switch does not reuse the old expanded state",
+    "outputTail": "Workflow board tests passed: serial speech, parallel vote with tally last, PK graphs, failed/retry states, missing graph/edges, unknown nodes, run switching, and privacy.",
+    "note": "visual-preview.tsx uses one fixed runId, so the browser cannot switch runs in place; the jsdom test drives the runId prop change and asserts data-workflow-expanded=false after the switch. A fresh browser page load (also covered by the layout sweep) remounts the board and also starts collapsed."
+  },
+  "keyboardWalkthrough": [
+    {
+      "scenario": "speech",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "mode": "speech",
+      "keySequence": [
+        "Tab",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "page load: action textarea receives focus automatically",
+          "expected": "(a) => a?.tag === 'TEXTAREA'",
+          "actual": {
+            "tag": "TEXTAREA",
+            "type": null,
+            "ariaLabel": "你的公开发言",
+            "text": "",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "type safe text via Input.insertText (在忙碌的一天结束之后才会用到)",
+          "expected": "textarea value === \"在忙碌的一天结束之后才会用到\"",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 轮到你了，描述你的词",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": null,
+            "checkboxChecked": null,
+            "textareaValue": "在忙碌的一天结束之后才会用到",
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves from textarea to submit button",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit' && /提交发言/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "提交发言",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter: speech submitted",
+          "expected": "dock shows ✓ 已提交 / 提交成功，等待其他玩家和主持人。",
+          "actual": {
+            "pass": true,
+            "snapshot": {
+              "submittedNotice": true,
+              "submittedHeader": true,
+              "dockTitle": "YOUR TURN · 玩家操作 ✓ 已提交，等待其他玩家",
+              "checks": [],
+              "abstainInput": false,
+              "checkedVote": null,
+              "checkboxChecked": null,
+              "textareaValue": null,
+              "dialogLabel": null
+            }
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    },
+    {
+      "scenario": "vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "mode": "vote",
+      "keySequence": [
+        "ArrowDown",
+        "Tab",
+        "Space",
+        "Tab",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "page load: first vote candidate radio receives focus",
+          "expected": "(a) => a?.tag === 'INPUT' && a?.type === 'radio'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "radio",
+            "ariaLabel": null,
+            "text": "",
+            "value": "a",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "ArrowDown: next candidate selected",
+          "expected": "checked radio value === \"c\"",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": true,
+            "checkedVote": "c",
+            "checkboxChecked": false,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves from radio group to confirmation checkbox",
+          "expected": "(a) => a?.type === 'checkbox'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "checkbox",
+            "ariaLabel": null,
+            "text": "",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Space: confirmation checkbox checked",
+          "expected": "(s) => s.checkboxChecked === true",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": true,
+            "checkedVote": "c",
+            "checkboxChecked": true,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to submit button (确认并投票)",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit' && /确认并投票/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "确认并投票",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter: vote submitted",
+          "expected": "(r) => r.pass",
+          "actual": {
+            "pass": true,
+            "snapshot": {
+              "submittedNotice": true,
+              "submittedHeader": true,
+              "dockTitle": "YOUR TURN · 玩家操作 ✓ 已提交，等待其他玩家",
+              "checks": [],
+              "abstainInput": false,
+              "checkedVote": null,
+              "checkboxChecked": null,
+              "textareaValue": null,
+              "dialogLabel": null
+            }
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    },
+    {
+      "scenario": "abstain",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "mode": "vote",
+      "keySequence": [
+        "ArrowUp",
+        "Tab",
+        "Space",
+        "Tab",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "page load: first vote candidate radio receives focus",
+          "expected": "(a) => a?.tag === 'INPUT' && a?.type === 'radio'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "radio",
+            "ariaLabel": null,
+            "text": "",
+            "value": "a",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "ArrowUp: wraps to the abstain radio (弃权)",
+          "expected": "checked radio value === \"__abstain__\"",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": true,
+            "checkedVote": "__abstain__",
+            "checkboxChecked": false,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to confirmation checkbox",
+          "expected": "(a) => a?.type === 'checkbox'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "checkbox",
+            "ariaLabel": null,
+            "text": "",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Space: abstain confirmation checked",
+          "expected": "(s) => s.checkboxChecked === true",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": true,
+            "checkedVote": "__abstain__",
+            "checkboxChecked": true,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to submit button (确认并投票)",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit'",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "确认并投票",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter: abstain ballot submitted",
+          "expected": "(r) => r.pass",
+          "actual": {
+            "pass": true,
+            "snapshot": {
+              "submittedNotice": true,
+              "submittedHeader": true,
+              "dockTitle": "YOUR TURN · 玩家操作 ✓ 已提交，等待其他玩家",
+              "checks": [],
+              "abstainInput": false,
+              "checkedVote": null,
+              "checkboxChecked": null,
+              "textareaValue": null,
+              "dialogLabel": null
+            }
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    },
+    {
+      "scenario": "pk-vote",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "mode": "pk-vote",
+      "keySequence": [
+        "Space",
+        "Tab",
+        "Space",
+        "Tab",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "page load: PK candidate radio receives focus",
+          "expected": "(a) => a?.tag === 'INPUT' && a?.type === 'radio'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "radio",
+            "ariaLabel": null,
+            "text": "",
+            "value": "c",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "No abstain input is offered in PK vote",
+          "expected": "input[value=\"__abstain__\"] absent",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": null,
+            "checkboxChecked": false,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Space: PK candidate selected",
+          "expected": "checked radio value === \"c\"",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": "c",
+            "checkboxChecked": false,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to confirmation checkbox",
+          "expected": "(a) => a?.type === 'checkbox'",
+          "actual": {
+            "tag": "INPUT",
+            "type": "checkbox",
+            "ariaLabel": null,
+            "text": "",
+            "value": "on",
+            "checked": false,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Space: PK confirmation checked",
+          "expected": "(s) => s.checkboxChecked === true",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 谁最可疑？投出你的判断",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": "c",
+            "checkboxChecked": true,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to submit button (确认并投票)",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit'",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "确认并投票",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter: PK vote submitted",
+          "expected": "(r) => r.pass",
+          "actual": {
+            "pass": true,
+            "snapshot": {
+              "submittedNotice": true,
+              "submittedHeader": true,
+              "dockTitle": "YOUR TURN · 玩家操作 ✓ 已提交，等待其他玩家",
+              "checks": [],
+              "abstainInput": false,
+              "checkedVote": null,
+              "checkboxChecked": null,
+              "textareaValue": null,
+              "dialogLabel": null
+            }
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    },
+    {
+      "scenario": "finished",
+      "viewport": {
+        "width": 760,
+        "height": 1000
+      },
+      "mode": "finished",
+      "keySequence": [
+        "Tab",
+        "Tab",
+        "Tab",
+        "Escape",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "result dialog auto-opens and traps focus on close button",
+          "expected": "(a) => a?.inDialog && /回到圆桌/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": null,
+            "text": "回到圆桌",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": true
+          },
+          "pass": true
+        },
+        {
+          "action": "background game content is inert while dialog is open",
+          "expected": "(n) => n >= 3",
+          "actual": 3,
+          "pass": true
+        },
+        {
+          "action": "Tab cycles inside the dialog (focus never escapes)",
+          "expected": "(elements) => elements.every((a) => a?.inDialog) && new Set(elements.map((a) => a?.text)).size >= 2",
+          "actual": [
+            {
+              "tag": "DIV",
+              "type": null,
+              "ariaLabel": "终局公开复盘",
+              "text": "🎉 游戏结束！平民胜利！\n\n🏆 终局揭秘\n\n最后一轮，大家从描述的细节里找到",
+              "value": null,
+              "checked": null,
+              "disabled": null,
+              "inDialog": true
+            },
+            {
+              "tag": "BUTTON",
+              "type": "button",
+              "ariaLabel": null,
+              "text": "回到圆桌",
+              "value": "",
+              "checked": null,
+              "disabled": false,
+              "inDialog": true
+            },
+            {
+              "tag": "DIV",
+              "type": null,
+              "ariaLabel": "终局公开复盘",
+              "text": "🎉 游戏结束！平民胜利！\n\n🏆 终局揭秘\n\n最后一轮，大家从描述的细节里找到",
+              "value": null,
+              "checked": null,
+              "disabled": null,
+              "inDialog": true
+            }
+          ],
+          "pass": true
+        },
+        {
+          "action": "Escape closes the dialog and restores focus to 查看终局",
+          "expected": "(a) => a?.tag === 'BUTTON' && /查看终局/.test(a?.text ?? '') && a?.inDialog === false",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": null,
+            "text": "查看终局",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "dock shows the result state with 查看终局 trigger",
+          "expected": "(s) => s.dialogLabel === null",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 本局落幕，感谢参与",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": null,
+            "checkboxChecked": null,
+            "textareaValue": null,
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter on 查看终局 reopens the result dialog",
+          "expected": "(a) => a?.inDialog && /回到圆桌/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": null,
+            "text": "回到圆桌",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": true
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    },
+    {
+      "scenario": "narrow-speech",
+      "viewport": {
+        "width": 320,
+        "height": 600
+      },
+      "mode": "speech",
+      "keySequence": [
+        "Tab",
+        "Tab",
+        "Tab",
+        "Tab",
+        "Enter",
+        "Space",
+        "Shift+Tab",
+        "Shift+Tab",
+        "Shift+Tab",
+        "Shift+Tab",
+        "Shift+Tab",
+        "Tab",
+        "Enter"
+      ],
+      "steps": [
+        {
+          "action": "page load: speech textarea receives focus at 320x600",
+          "expected": "(a) => a?.tag === 'TEXTAREA'",
+          "actual": {
+            "tag": "TEXTAREA",
+            "type": null,
+            "ariaLabel": "你的公开发言",
+            "text": "",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "focused textarea intersects the visible dock viewport",
+          "expected": "(g) => g.textareaVisibleInDockBody === true",
+          "actual": {
+            "textarea": {
+              "x": 38,
+              "y": 452.078125,
+              "width": 240,
+              "height": 84,
+              "bottom": 536.078125
+            },
+            "dockBody": {
+              "x": 24,
+              "y": 403.484375,
+              "width": 272,
+              "height": 115.515625,
+              "bottom": 519
+            },
+            "dockFooter": {
+              "x": 24,
+              "y": 519,
+              "width": 272,
+              "height": 57,
+              "bottom": 576
+            },
+            "submit": {
+              "x": 38,
+              "y": 529,
+              "width": 82.890625,
+              "height": 38,
+              "bottom": 567
+            },
+            "textareaVisibleInDockBody": true,
+            "dockBodyScrollTop": 140,
+            "dockFooterVisible": true,
+            "submitVisible": true
+          },
+          "pass": true
+        },
+        {
+          "action": "dock footer and submit button remain visible at 320x600",
+          "expected": "(g) => g.dockFooterVisible && g.submitVisible",
+          "actual": {
+            "textarea": {
+              "x": 38,
+              "y": 452.078125,
+              "width": 240,
+              "height": 84,
+              "bottom": 536.078125
+            },
+            "dockBody": {
+              "x": 24,
+              "y": 403.484375,
+              "width": 272,
+              "height": 115.515625,
+              "bottom": 519
+            },
+            "dockFooter": {
+              "x": 24,
+              "y": 519,
+              "width": 272,
+              "height": 57,
+              "bottom": 576
+            },
+            "submit": {
+              "x": 38,
+              "y": 529,
+              "width": 82.890625,
+              "height": 38,
+              "bottom": 567
+            },
+            "textareaVisibleInDockBody": true,
+            "dockBodyScrollTop": 140,
+            "dockFooterVisible": true,
+            "submitVisible": true
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to the submit button (提交发言)",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit'",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "提交发言",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to 告诉主持人卡住了",
+          "expected": "(a) => a?.tag === 'BUTTON' && /告诉主持人卡住了/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": null,
+            "text": "告诉主持人卡住了",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to the header refresh button",
+          "expected": "(a) => a?.tag === 'BUTTON' && /刷新/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": "刷新游戏状态",
+            "text": "↻ 刷新",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus reaches the 查看流程 workflow toggle",
+          "expected": "(a) => a?.tag === 'BUTTON' && /查看流程/.test(a?.text ?? '')",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "button",
+            "ariaLabel": null,
+            "text": "查看流程",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "collapsed default: aria-expanded=false, aria-controls target exists, 0 rendered nodes and toggle visible",
+          "expected": "(s) => s.toggleVisible && s.ariaExpanded === 'false' && s.ariaControlsTargetExists && s.nodes === 0 && s.collapsed === 'true' && s.expanded === 'false'",
+          "actual": {
+            "collapsed": "true",
+            "expanded": "false",
+            "togglePresent": true,
+            "toggleLabel": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "toggleVisible": true,
+            "toggleRect": {
+              "x": 33,
+              "y": 178.078125,
+              "width": 61.609375,
+              "height": 26,
+              "bottom": 204.078125
+            },
+            "toggleFocused": true,
+            "nodes": 0,
+            "edges": 0,
+            "footerVisible": true,
+            "submitVisible": true,
+            "docScrollWidth": 320,
+            "innerWidth": 320
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter on toggle: real graph expands (aria-expanded=true, label 收起流程, node cards rendered)",
+          "expected": "(s) => s.collapsed === 'false' && s.expanded === 'true' && s.ariaExpanded === 'true' && s.toggleLabel === '收起流程' && s.nodes > 0 && s.edges > 0",
+          "actual": {
+            "collapsed": "false",
+            "expanded": "true",
+            "togglePresent": true,
+            "toggleLabel": "收起流程",
+            "ariaExpanded": "true",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "toggleVisible": true,
+            "toggleRect": {
+              "x": 35,
+              "y": 181.078125,
+              "width": 61.609375,
+              "height": 26,
+              "bottom": 207.078125
+            },
+            "toggleFocused": true,
+            "nodes": 7,
+            "edges": 21,
+            "footerVisible": true,
+            "submitVisible": true,
+            "docScrollWidth": 320,
+            "innerWidth": 320
+          },
+          "pass": true
+        },
+        {
+          "action": "expanded state: focus stays on the toggle and dock footer stays visible",
+          "expected": "(s) => s.toggleFocused === true && s.footerVisible === true && s.submitVisible === true",
+          "actual": {
+            "collapsed": "false",
+            "expanded": "true",
+            "togglePresent": true,
+            "toggleLabel": "收起流程",
+            "ariaExpanded": "true",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "toggleVisible": true,
+            "toggleRect": {
+              "x": 35,
+              "y": 181.078125,
+              "width": 61.609375,
+              "height": 26,
+              "bottom": 207.078125
+            },
+            "toggleFocused": true,
+            "nodes": 7,
+            "edges": 21,
+            "footerVisible": true,
+            "submitVisible": true,
+            "docScrollWidth": 320,
+            "innerWidth": 320
+          },
+          "pass": true
+        },
+        {
+          "action": "expanded state: no page horizontal overflow",
+          "expected": "(s) => s.docScrollWidth <= s.innerWidth + 1",
+          "actual": {
+            "collapsed": "false",
+            "expanded": "true",
+            "togglePresent": true,
+            "toggleLabel": "收起流程",
+            "ariaExpanded": "true",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "toggleVisible": true,
+            "toggleRect": {
+              "x": 35,
+              "y": 181.078125,
+              "width": 61.609375,
+              "height": 26,
+              "bottom": 207.078125
+            },
+            "toggleFocused": true,
+            "nodes": 7,
+            "edges": 21,
+            "footerVisible": true,
+            "submitVisible": true,
+            "docScrollWidth": 320,
+            "innerWidth": 320
+          },
+          "pass": true
+        },
+        {
+          "action": "Space on toggle: board collapses again (aria-expanded=false, 0 nodes) and focus stays on the toggle",
+          "expected": "(s) => s.collapsed === 'true' && s.expanded === 'false' && s.ariaExpanded === 'false' && s.nodes === 0 && s.toggleFocused === true",
+          "actual": {
+            "collapsed": "true",
+            "expanded": "false",
+            "togglePresent": true,
+            "toggleLabel": "查看流程",
+            "ariaExpanded": "false",
+            "ariaControls": "wf-content-_r_1_",
+            "ariaControlsTargetExists": true,
+            "toggleVisible": true,
+            "toggleRect": {
+              "x": 33,
+              "y": 178.078125,
+              "width": 61.609375,
+              "height": 26,
+              "bottom": 204.078125
+            },
+            "toggleFocused": true,
+            "nodes": 0,
+            "edges": 0,
+            "footerVisible": true,
+            "submitVisible": true,
+            "docScrollWidth": 320,
+            "innerWidth": 320
+          },
+          "pass": true
+        },
+        {
+          "action": "Shift+Tab x5: focus returns to the speech textarea",
+          "expected": "final active element is the speech textarea",
+          "actual": [
+            {
+              "tag": "BUTTON",
+              "type": "button",
+              "ariaLabel": "刷新游戏状态",
+              "text": "↻ 刷新",
+              "value": "",
+              "checked": null,
+              "disabled": false,
+              "inDialog": false
+            },
+            {
+              "tag": "BODY",
+              "type": null,
+              "ariaLabel": null,
+              "text": "轮到你发言MIDNIGHT BANQUET · 夜宴谁是卧底第 1 轮 · 发言",
+              "value": null,
+              "checked": null,
+              "disabled": null,
+              "inDialog": false
+            },
+            {
+              "tag": "BUTTON",
+              "type": "button",
+              "ariaLabel": null,
+              "text": "告诉主持人卡住了",
+              "value": "",
+              "checked": null,
+              "disabled": false,
+              "inDialog": false
+            },
+            {
+              "tag": "BUTTON",
+              "type": "submit",
+              "ariaLabel": null,
+              "text": "提交发言",
+              "value": "",
+              "checked": null,
+              "disabled": false,
+              "inDialog": false
+            },
+            {
+              "tag": "TEXTAREA",
+              "type": null,
+              "ariaLabel": "你的公开发言",
+              "text": "",
+              "value": "",
+              "checked": null,
+              "disabled": false,
+              "inDialog": false
+            }
+          ],
+          "pass": true,
+          "observedPath": [
+            "BUTTON:↻ 刷新",
+            "BODY:轮到你发言MIDNIGH",
+            "BUTTON:告诉主持人卡住了",
+            "BUTTON:提交发言",
+            "TEXTAREA"
+          ]
+        },
+        {
+          "action": "type safe text via Input.insertText (在忙碌的一天结束之后才会用到)",
+          "expected": "(s) => s.textareaValue === SAFE_SPEECH_TEXT",
+          "actual": {
+            "submittedNotice": false,
+            "submittedHeader": false,
+            "dockTitle": "YOUR TURN · 玩家操作 轮到你了，描述你的词",
+            "checks": [],
+            "abstainInput": false,
+            "checkedVote": null,
+            "checkboxChecked": null,
+            "textareaValue": "在忙碌的一天结束之后才会用到",
+            "dialogLabel": null
+          },
+          "pass": true
+        },
+        {
+          "action": "Tab: focus moves to the submit button",
+          "expected": "(a) => a?.tag === 'BUTTON' && a?.type === 'submit'",
+          "actual": {
+            "tag": "BUTTON",
+            "type": "submit",
+            "ariaLabel": null,
+            "text": "提交发言",
+            "value": "",
+            "checked": null,
+            "disabled": false,
+            "inDialog": false
+          },
+          "pass": true
+        },
+        {
+          "action": "Enter: speech submitted after expanding/collapsing the board",
+          "expected": "(r) => r.pass",
+          "actual": {
+            "pass": true,
+            "snapshot": {
+              "submittedNotice": true,
+              "submittedHeader": true,
+              "dockTitle": "YOUR TURN · 玩家操作 ✓ 已提交，等待其他玩家",
+              "checks": [],
+              "abstainInput": false,
+              "checkedVote": null,
+              "checkboxChecked": null,
+              "textareaValue": null,
+              "dialogLabel": null
+            }
+          },
+          "pass": true
+        }
+      ],
+      "consoleErrors": [],
+      "pass": true
+    }
+  ],
+  "privacyScan": {
+    "needles": [
+      "<synthetic-private-word>",
+      "target_actor_id",
+      "\"kind\":\"vote\"",
+      "artifact_text",
+      "instruction"
+    ],
+    "pages": [
+      {
+        "file": "01-speech-synthetic.png",
+        "mode": "speech",
+        "visibleTextLength": 799,
+        "domHtmlLength": 194089,
+        "hits": [],
+        "wordCardText": "情报 你的词语 •••• 只说特征，不可说出本名 显示词语",
+        "wordCardHasMaskedWord": true,
+        "pass": true
+      },
+      {
+        "file": "02-vote-synthetic.png",
+        "mode": "vote",
+        "visibleTextLength": 692,
+        "domHtmlLength": 307441,
+        "hits": [],
+        "wordCardText": null,
+        "wordCardHasMaskedWord": null,
+        "pass": true
+      },
+      {
+        "file": "03-pk-vote-synthetic.png",
+        "mode": "pk-vote",
+        "visibleTextLength": 673,
+        "domHtmlLength": 221578,
+        "hits": [],
+        "wordCardText": null,
+        "wordCardHasMaskedWord": null,
+        "pass": true
+      },
+      {
+        "file": "04-eliminated-synthetic.png",
+        "mode": "eliminated",
+        "visibleTextLength": 668,
+        "domHtmlLength": 212400,
+        "hits": [],
+        "wordCardText": null,
+        "wordCardHasMaskedWord": null,
+        "pass": true
+      },
+      {
+        "file": "05-finished-synthetic.png",
+        "mode": "finished",
+        "visibleTextLength": 849,
+        "domHtmlLength": 193271,
+        "hits": [],
+        "wordCardText": null,
+        "wordCardHasMaskedWord": null,
+        "pass": true
+      },
+      {
+        "file": "narrow-320-speech-synthetic.png",
+        "mode": "speech",
+        "visibleTextLength": 322,
+        "domHtmlLength": 325871,
+        "hits": [],
+        "wordCardText": "情报 你的词语 •••• 只说特征，不可说出本名 显示词语",
+        "wordCardHasMaskedWord": true,
+        "pass": true
+      },
+      {
+        "file": "narrow-320-speech-expanded-synthetic.png",
+        "mode": "speech",
+        "visibleTextLength": 794,
+        "domHtmlLength": 335663,
+        "hits": [],
+        "wordCardText": "情报 你的词语 •••• 只说特征，不可说出本名 显示词语",
+        "wordCardHasMaskedWord": true,
+        "pass": true
+      },
+      {
+        "file": "narrow-320-vote-synthetic.png",
+        "mode": "vote",
+        "visibleTextLength": 342,
+        "domHtmlLength": 440989,
+        "hits": [],
+        "wordCardText": null,
+        "wordCardHasMaskedWord": null,
+        "pass": true
+      },
+      {
+        "file": "narrow-360-speech-synthetic.png",
+        "mode": "speech",
+        "visibleTextLength": 322,
+        "domHtmlLength": 325871,
+        "hits": [],
+        "wordCardText": "情报 你的词语 •••• 只说特征，不可说出本名 显示词语",
+        "wordCardHasMaskedWord": true,
+        "pass": true
+      }
+    ],
+    "hits": [],
+    "pass": true
+  },
+  "recording": {
+    "status": "assembled",
+    "file": "walkthrough-synthetic.gif",
+    "method": "CDP Page.startScreencast (JPEG), frames assembled with Pillow",
+    "capturedFrames": 45,
+    "gifFrames": 41,
+    "width": 360,
+    "totalDurationMs": 16823.037853240967,
+    "maxFps": 8,
+    "effectiveFps": 2.4,
+    "bytes": 1735157,
+    "label": "SYNTHETIC PREVIEW - not a live game (bottom watermark on every frame)",
+    "synthetic": true,
+    "liveGame": false,
+    "ackFailure": null
+  },
+  "errors": [],
+  "summary": {
+    "pass": true,
+    "failedChecks": [],
+    "notes": [
+      "Synthetic preview only: all data is served by visual-preview.tsx fetch mocks, not a live BCS game.",
+      "The preview harness pads #root by 12px, so the 320x600 screenshot contains a 296x576 panel surface and the 760x1000 screenshot contains a 736x976 panel surface.",
+      "The preview page clamps its internal frame height to 1000px, so 760x1000 is used instead of 760x1100 to avoid an 88px empty band.",
+      "finished mode opens the real GameOverDialog directly from visual-preview.tsx; no runtime mock injection is used for captures.",
+      "The 查看流程/收起流程 workflow toggle is rendered only when the board starts collapsed (narrow layout + pending action); the expanded state is local to the board and resets when the board is remounted for a new run."
+    ]
+  }
+}

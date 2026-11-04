@@ -119,7 +119,7 @@ The HUD step row (发词 · 描述 · 讨论 · 投票) is derived from `phase` 
 
 - **wide (≥680px):** stage, full seat ring, and Action Dock; the dialogue view from the static describe/discuss pages renders inside the Action Dock while no input is required.
 - **medium (460–679px):** the same stage with smaller portraits, a labeled roster below it (per-seat plates are wide-only), and the same dock dialogue.
-- **narrow (<460px):** stage vignette plus the labeled roster; the fixed Action Dock still owns dialogue, submit, confirmation, and recovery.
+- **narrow (<460px):** stage vignette plus the labeled roster; the fixed Action Dock still owns dialogue, submit, confirmation, and recovery. While an action is pending on a narrow panel the workflow board starts collapsed to a one-line run summary (the table stage and action entry stay visible) with a keyboard-reachable「查看流程/收起流程」toggle; the step row hides, and the dock uses a compact height so 320×600/360×640 do not need two nested scrolls. Expanding the board shows the same real nodes/edges; switching runs resets it to the default collapsed state.
 
 ### Provenance and visual verification
 
@@ -138,7 +138,67 @@ The scan enforces complete provenance, no tracked source-pack archives, a 120 Ki
 
 Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=600&mode=vote`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states. Every mode also renders the real workflow-board mock: `mode=vote`/`mode=pk-vote` show the parallel `vote_start → vote_N → tally` graph, while speech modes show the serial `speak_N → collect` graph.
 
+### 15-minute local preview and acceptance evidence
+
+The local preview is the fastest way for another contributor to see all five
+acceptance states without a BCS deployment. It is a **synthetic preview**
+(simulated players and local mock responses), not a live game.
+
+1. `cd apps/bcs/assets/panel` (dependencies must be installed with `npm ci` in
+   this worktree).
+2. Start the dev server: `npm exec vite -- --host 127.0.0.1 --port 4178`.
+3. Open these five URLs (each is a real rendering of the panel; no BCS needed):
+   - `...visual-preview.html?width=760&height=1100&mode=speech` — 发言 + 私有词卡（默认 `••••`）+ 真实 workflow 看板；
+   - `...visual-preview.html?width=760&height=1100&mode=vote` — 投票候选、弃权项与二次确认；
+   - `...visual-preview.html?width=760&height=1100&mode=pk-vote` — 平票 PK 投票（无弃权）；
+   - `...visual-preview.html?width=760&height=1100&mode=eliminated` — 出局座位与状态；
+   - `...visual-preview.html?width=760&height=1100&mode=finished` — 终局弹窗与公开复盘。
+4. Narrow checks: `?width=320&height=600&mode=speech`, `?width=320&height=600&mode=vote`,
+   `?width=360&height=640&mode=speech`. Expect: no page horizontal overflow,
+   the night-banquet stage visible, the action title/input/submit in the dock,
+   and the workflow board collapsed to its summary line with a「查看流程」
+   button; Tab to it and press Enter to expand the real graph nodes, then Enter
+   again to collapse (focus stays on the button).
+5. Keyboard smoke test: Tab to the word-reveal button/textarea; submit speech
+   with Tab→Enter; in vote use arrow keys to pick a candidate, Tab to the
+   confirmation checkbox, Space, Tab to submit, Enter; repeat with 弃权;
+   PK vote must not offer abstain. On the finale, Tab cycles inside the dialog
+   and Escape returns to the table; `查看终局` reopens it.
+6. Privacy spot check: the private word is masked until explicitly revealed,
+   and the DOM/visible text must not contain `target_actor_id`, raw vote JSON,
+   artifact text, instructions, or node errors.
+
+Review screenshots and machine checks are committed under
+[`test/undercover-game/acceptance/`](test/undercover-game/acceptance/):
+
+| State | Evidence | Provenance |
+| --- | --- | --- |
+| 发言 | `01-speech-synthetic.png` | synthetic visual-preview, 760×1100 |
+| 投票（含弃权二次确认） | `02-vote-synthetic.png` | synthetic visual-preview, 760×1100 |
+| 平票 PK | `03-pk-vote-synthetic.png` | synthetic visual-preview, 760×1100 |
+| 出局 | `04-eliminated-synthetic.png` | synthetic visual-preview, 760×1100 |
+| 终局 | `05-finished-synthetic.png` | synthetic visual-preview, 760×1100 |
+| 窄屏 320/360（默认收起） | `narrow-320-speech-synthetic.png`, `narrow-320-vote-synthetic.png`, `narrow-360-speech-synthetic.png` | synthetic visual-preview |
+| 窄屏展开流程 | `narrow-320-speech-expanded-synthetic.png` | synthetic visual-preview, after activating「查看流程」 |
+| 走查动画 | `walkthrough-synthetic.gif` (if generated) | synthetic state sequence |
+
+All images are explicitly labelled synthetic in
+`test/undercover-game/acceptance/README.md` and carry a visible
+`synthetic preview` watermark; they are not evidence of a live BCS game. Machine-readable checks (overflow/stage/dock/board-collapsed +
+keyboard walkthrough) live in `acceptance-results.json` in the same directory.
+The reproducible capture tool is `node test/undercover-game/acceptance/capture.mjs`
+(Chrome headless + CDP; requires the Vite server above).
+
+**Live-game boundary.** At the time of this phase the local BCS process answered
+`GET /health` (`status: ok`, version `0.1.4-beta.3`) but `GET /bots` returned
+`[]` and `GET /groups` returned zero items, so no referee/player Bots or game
+session exist to start a real undercover round. No live run ID, live screenshot,
+or live recording is claimed here; the issue's live acceptance still requires a
+deployed BCS with the referee profile and onboarded players. The panel makes no
+new server/API/referee changes for this acceptance work.
+
 ### Host portrait and speech status
+
 
 The host/judge appears as a framed portrait above the table with a public nameplate. During speech collection a running player shows only the waveform marker, even if partial public text is already available. Completed, non-pending public speech can expand into a speech bubble; other completed speakers keep clickable small bubbles. Lifecycle markers (vote, eliminated, retry, action required) remain distinct. Preview `?width=760&height=900&mode=markers` to inspect a running speaker alongside completed speeches in the wide composition.
 
@@ -190,7 +250,10 @@ structural projection only:
   fabricate progress.
 - **Layout/privacy:** the board sits above the table stage with horizontally
   scrolling lanes (also in narrow panels) and connector lines/arrowheads drawn
-  from the real edges. The board body is height-capped (`min(240px, 30vh)`) and
+  from the real edges. In narrow panels with a pending action the board starts
+  collapsed behind a focusable「查看流程」button (`aria-expanded`/`aria-controls`);
+  expanding renders the same real graph and「收起流程」collapses it again. A run
+  switch remounts the board and restores the default collapsed state. The board body is height-capped (`min(240px, 30vh)`) and
   scrolls both axes so the night-banquet stage stays reachable on first paint
   even for the taller parallel-vote graph. It contains no live input, so speech/vote submission,
   confirmation, timer, keyboard focus, and recovery behavior are unchanged.
@@ -267,4 +330,4 @@ Preview PK with `?width=560&height=800&mode=pk-vote` or `?width=360&height=600&m
 - The night-banquet view is verified through jsdom component tests, deterministic atlas checks, and the local Vite preview; it has not been visually regression-tested in a real browser against a live BCS deployment here.
 - PK uses the existing contract and is covered by the focused/component fixtures, but only limited PK visual QA was performed in this phase.
 - Narrow layout keeps the vignette/roster fallback; the full stage is optimized for wide/medium containers.
-- The workflow board is verified from real referee-script graph fixtures and the local preview; it has not yet been validated against a live BCS deployment/run. No BCS Service API, Plugin API, referee script, database, or migration change is introduced.
+- The workflow board is verified from real referee-script graph fixtures and the local preview; it has not yet been validated against a live BCS deployment/run. The phase-4 acceptance screenshots/recording are synthetic previews; no live BCS round could be started locally because the running BCS has zero bots/groups. No BCS Service API, Plugin API, referee script, database, or migration change is introduced.

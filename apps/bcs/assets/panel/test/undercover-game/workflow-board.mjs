@@ -13,13 +13,14 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 window.confirm = () => true;
-let resizeCallback;
+const resizeCallbacks = [];
 globalThis.ResizeObserver = class {
-  constructor(callback) { resizeCallback = callback; }
+  constructor(callback) { resizeCallbacks.push(callback); }
   observe() {}
   disconnect() {}
 };
 window.ResizeObserver = globalThis.ResizeObserver;
+const resizeAll = (width) => { for (const callback of resizeCallbacks) callback([{ contentRect: { width } }]); };
 
 const ReactModule = await import('react');
 const React = ReactModule.default;
@@ -162,6 +163,7 @@ try {
     assert.equal(board.querySelector('[data-final-node="true"]').getAttribute('data-node-id'), 'collect');
     for (const node of fixture.graph.nodes) assert.equal(statusOf(panel, node.node_id), node.status);
     assert.match(text(panel), /本阶段真实流程/);
+    assert.equal(board.querySelector('[data-region="workflow-toggle"]'), null, 'wide layout keeps the board always expanded');
     await act(async () => panel.unmount());
   }
 
@@ -317,6 +319,42 @@ try {
     assert.equal(boardOf(panel).getAttribute('data-run-id'), 'run-switched-to');
     assert.deepEqual(boardNodes(panel).map((node) => node.getAttribute('data-node-id')), runB.nodes.map((node) => node.node_id));
     assert.ok(boardNodes(panel).every((node) => node.getAttribute('data-node-status') === 'pending'));
+    await act(async () => panel.unmount());
+  }
+
+  // ---- Narrow action: board starts collapsed but is keyboard-expandable; run switch resets it ----
+  {
+    const fixture = workflowFixtures.speakSequential;
+    const instruction = '[UNDERCOVER_UI_CONTEXT_V1]' + JSON.stringify({ action: 'speech', round: 1, seatNumber: 1, word: '合成词', maxChars: 5, forbidOwnWord: true }) + '[/UNDERCOVER_UI_CONTEXT_V1]';
+    const pending = [{ node_id: 'speak_1', attempt: 1, instruction, timeout_deadline_ms: Date.now() + 60000 }];
+    globalThis.fetch = fetchFor(fixture.graph, pending);
+    let panel;
+    await act(async () => { panel = mount(fixtureProps(fixture), 320); await settle(); });
+    await act(async () => { resizeAll(320); await settle(); });
+    const board = boardOf(panel);
+    assert.equal(board.getAttribute('data-workflow-collapsed'), 'true');
+    assert.equal(board.getAttribute('data-workflow-expanded'), 'false');
+    assert.equal(boardNodes(panel).length, 0, 'collapsed board renders no nodes');
+    const toggle = board.querySelector('[data-region="workflow-toggle"]');
+    assert.ok(toggle, 'narrow action shows a keyboard-reachable toggle');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(toggle.textContent?.trim(), '查看流程');
+    assert.ok(toggle.getAttribute('aria-controls'));
+    assert.equal(panel.container.querySelector(`#${toggle.getAttribute('aria-controls')}`) !== null, true, 'aria-controls target exists');
+    toggle.focus();
+    assert.equal(document.activeElement, toggle, 'toggle is focusable');
+    await act(async () => { toggle.click(); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-expanded'), 'true');
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'false');
+    assert.ok(boardNodes(panel).length > 0, 'expanded board renders the real graph nodes');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(toggle.textContent?.trim(), '收起流程');
+    assert.deepEqual(edgePairs(panel), graphEdgePairs(fixture.graph));
+    await act(async () => { panel.render(fixtureProps(fixture, { runId: 'run-switched-away' })); await settle(); });
+    await act(async () => { resizeAll(320); await settle(); });
+    assert.equal(boardOf(panel).getAttribute('data-workflow-expanded'), 'false', 'run switch does not reuse the old expanded state');
+    assert.equal(boardOf(panel).getAttribute('data-workflow-collapsed'), 'true');
+    assert.equal(boardNodes(panel).length, 0);
     await act(async () => panel.unmount());
   }
 
