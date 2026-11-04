@@ -173,6 +173,13 @@ try {
   assert.match(text(s), /实际运行的 workflow/);
   assert.match(text(s), /我的回合/);
   assert.ok(s.container.querySelector('[data-region="ops-workflow"]'), 'workflow graph visible');
+  const workflowPanel = s.container.querySelector('[data-region="ops-workflow"]').parentElement;
+  assert.equal(getComputedStyle(workflowPanel).flexShrink, '0', 'scene cards keep their content height so controls remain reachable by scrolling');
+  const opsRoot = s.container.querySelector('[data-ops-panel="true"]');
+  const opsStyle = getComputedStyle(opsRoot);
+  assert.equal(opsStyle.getPropertyValue('--muted'), '', 'ops theme must not shadow the host raw-HSL --muted token');
+  assert.equal(opsStyle.getPropertyValue('--ops-muted-text'), OPS_PALETTE.obsidian.muted, 'muted text uses a panel-local alias');
+  assert.equal(opsStyle.getPropertyValue('--panel-alt'), OPS_PALETTE.obsidian.panelAlt, 'textarea surface still derives from the shared --muted token');
   // private word hidden
   assert.match(text(s), /••••/);
   assert.doesNotMatch(text(s), /苹果/);
@@ -200,11 +207,24 @@ try {
     nodeActorMap: { ...base.nodeActorMap, 'vote_a': 'd', 'tally': 'host' },
     voteCandidates: PLAYERS.filter((p) => !p.isHuman).map((p) => ({ ...p, eligible: true })),
   };
-  globalThis.fetch = fetchFor([
+  const voteFetch = fetchFor([
     snapshot({ run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'vote_a', status: 'ready' }, { node_id: 'tally', status: 'pending' }] },
       [{ node_id: 'vote_a', instruction: voteInstruction }],
       { 'vote_a': '{"kind":"vote","target_actor_id":"a"}' }),
   ], votePosts);
+  let releaseVote;
+  let notifyVoteStarted;
+  const voteStarted = new Promise((resolve) => { notifyVoteStarted = resolve; });
+  globalThis.fetch = async (url, init = {}) => {
+    const path = new URL(url, 'http://local.test').pathname;
+    if (init.method === 'POST' && path.endsWith('/respond')) {
+      votePosts.push(JSON.parse(init.body));
+      notifyVoteStarted();
+      await new Promise((resolve) => { releaseVote = resolve; });
+      return env({ data: { accepted: true }, enveloped: true });
+    }
+    return voteFetch(url, init);
+  };
   let v;
   await act(async () => { v = mount(voteParams); await settle(8); });
   assert.match(text(v), /谁是卧底 · 第 1 轮投票/);
@@ -227,9 +247,29 @@ try {
   await act(async () => { [...v.container.querySelectorAll('[data-ops-vote-choice]')][1].click(); await settle(); });
   assert.equal(v.container.querySelector('input[type="checkbox"]').checked, false, 'confirmation resets when the vote target changes');
   await act(async () => { v.container.querySelector('input[type="checkbox"]').click(); await settle(); });
-  await act(async () => { v.container.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(8); });
+  await act(async () => {
+    v.container.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await voteStarted;
+    await settle();
+  });
   assert.equal(votePosts.length, 1);
   assert.match(votePosts[0].content, /^\{"kind":"vote"/);
+  const selectedBallot = [...v.container.querySelectorAll('[data-ops-vote-choice]')].find((b) => b.getAttribute('aria-checked') === 'true');
+  const selectedText = selectedBallot.textContent;
+  const ballotControls = [...v.container.querySelectorAll('[data-ops-vote-choice]')];
+  assert.ok(ballotControls.every((control) => control.disabled), 'candidate and abstention controls freeze while the vote is submitting');
+  assert.equal(v.container.querySelector('input[type="checkbox"]').disabled, true, 'vote confirmation freezes while submitting');
+  assert.equal(button(v, '提交中…').disabled, true, 'vote submit button reports the pending request');
+  await act(async () => {
+    ballotControls.find((control) => control !== selectedBallot && !control.textContent.includes('弃权')).click();
+    v.container.querySelector('input[type="checkbox"]').click();
+    await settle();
+  });
+  assert.equal(selectedBallot.getAttribute('aria-checked'), 'true', 'slow submission cannot change the displayed ballot');
+  assert.equal(selectedBallot.textContent, selectedText);
+  assert.equal(v.container.querySelector('input[type="checkbox"]').checked, true, 'slow submission cannot change confirmation');
+  await act(async () => { releaseVote(); await settle(8); });
+  assert.equal(votePosts.length, 1, 'locked controls do not create a second vote');
   await act(async () => v.unmount());
 
   // 3) PK state: candidates restricted, no abstain.
@@ -289,6 +329,48 @@ try {
   assert.match(historyRegion.textContent, /第一轮线索：会在忙碌的一天用到。/, 'earlier round speech stays readable');
   assert.match(historyRegion.textContent, /第二轮线索：和水果有关。/, 'pk round speech stays readable');
   await act(async () => hp.unmount());
+
+  // 4d) Live current-round clues wrap without relying on a pending speech form.
+  const liveClue = '这是需要完整展示的实时线索，不会在忙碌的一天里突然消失。';
+  globalThis.fetch = fetchFor([
+    snapshot({ run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'speech-a', status: 'completed' }, { node_id: 'speech-b', status: 'running' }] }, [], { 'speech-a': liveClue }),
+  ], []);
+  let live;
+  await act(async () => { live = mount(base); await settle(8); });
+  assert.equal(live.container.querySelector('textarea'), null, 'live clue is observable after the human speech form is gone');
+  const liveRow = live.container.querySelector('[data-actor-id="a"]');
+  const liveClueNode = liveRow.lastElementChild;
+  assert.equal(liveClueNode.textContent, liveClue, 'live node detail supplies the complete clue');
+  assert.notEqual(liveClueNode.style.whiteSpace, 'nowrap', 'live clue is not restricted to one ellipsized line');
+  assert.equal(liveClueNode.style.overflowWrap, 'anywhere', 'long live clues wrap at narrow roster widths');
+  await act(async () => live.unmount());
+
+  // 4e) Reopened ballots explain invalidation only after vote_start completes in a running vote.
+  const reopenedNotice = '上一轮投票已作废，请根据最新发言重新投票。';
+  const openingCases = [
+    { name: 'visible', phase: 'voting', runStatus: 'running', voteStartStatus: 'completed', visible: true },
+    { name: 'vote_start pending', phase: 'voting', runStatus: 'running', voteStartStatus: 'ready', visible: false, waiting: true },
+    { name: 'run completed', phase: 'voting', runStatus: 'completed', voteStartStatus: 'completed', visible: false },
+    { name: 'not voting', phase: 'speaking', runStatus: 'running', voteStartStatus: 'completed', visible: false },
+  ];
+  for (const testCase of openingCases) {
+    globalThis.fetch = fetchFor([
+      snapshot({ run: { run_id: 'ops-run', status: testCase.runStatus }, nodes: [{ node_id: 'vote_start', status: testCase.voteStartStatus }] }, []),
+    ], []);
+    let opening;
+    await act(async () => {
+      opening = mount({ ...voteParams, phase: testCase.phase, attempt: 2, openingAnnouncement: reopenedNotice });
+      await settle(8);
+    });
+    if (testCase.visible) {
+      assert.match(text(opening), /上一轮投票已作废/, 'reopened vote renders the referee announcement');
+      assert.equal(opening.container.querySelectorAll('[data-region="ops-vote-opening"]').length, 1, 'opening announcement has one dedicated status region');
+    } else {
+      assert.doesNotMatch(text(opening), /上一轮投票已作废/, `${testCase.name} must not expose a stale opening announcement`);
+      if (testCase.waiting) assert.match(text(opening), /主持人正在开启投票/, 'running vote explains that vote_start is still pending');
+    }
+    await act(async () => opening.unmount());
+  }
 
   // 5) Finale: structured host verdict opens a result card, no raw private.
   const resultFile = 'undercover-result-v1-r1-a1.json';

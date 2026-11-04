@@ -39,7 +39,7 @@ const RootShell = styled.section<{ $palette: FlavorPalette }>`
   --bd-strong: ${(p) => p.$palette.borderStrong};
   --text: ${(p) => p.$palette.text};
   --text-inv: ${(p) => p.$palette.textInverse};
-  --muted: ${(p) => p.$palette.muted};
+  --ops-muted-text: ${(p) => p.$palette.muted};
   --accent: ${(p) => p.$palette.accent};
   --accent-soft: ${(p) => p.$palette.accentSoft};
   --accent-text: ${(p) => p.$palette.accentText};
@@ -67,12 +67,12 @@ const TopBar = styled.header`
 `;
 
 const Brand = styled.div``;
-const BrandEyebrow = styled.div`color:var(--muted);font-size:9px;letter-spacing:.22em;opacity:.9`;
+const BrandEyebrow = styled.div`color:var(--ops-muted-text);font-size:9px;letter-spacing:.22em;opacity:.9`;
 const BrandTitle = styled.h1`margin:1px 0 0;font-size:17px;font-weight:700;letter-spacing:.05em;color:var(--accent);`;
 
 const StatusStrip = styled.div`
   flex:1 1 auto; min-width: 140px; display:flex; flex-wrap:wrap; gap:4px 10px; justify-content:flex-end;
-  font-size:11px; color:var(--muted);
+  font-size:11px; color:var(--ops-muted-text);
   > span{white-space:nowrap}
   > .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
 `;
@@ -96,11 +96,12 @@ const toneColor = (tone: string | undefined, fallback: string) => {
 const Notice = styled.div<ThemeTone>`
   padding: 8px 10px; border: 1px solid var(--bd);
   border-left: 3px solid ${(p) => toneColor(p.$left, 'var(--run)')};
-  background: var(--panel); color: var(--muted);
+  background: var(--panel); color: var(--ops-muted-text);
   font-size: 11px; line-height: 1.6; overflow-wrap: anywhere;
 `;
 
 const Panel = styled.div<ThemeTone>`
+  flex-shrink: 0;
   border: 1px solid var(--bd);
   border-left: 3px solid ${(p) => toneColor(p.$left, 'var(--bd)')};
   background: var(--panel); border-radius: 6px;
@@ -108,13 +109,13 @@ const Panel = styled.div<ThemeTone>`
 `;
 
 const PanelTitle = styled.div`
-  display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);
+  display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--ops-muted-text);
   margin-bottom:8px; text-transform:uppercase;
   &::before{content:'';width:6px;height:6px;background:var(--run)}
 `;
 
 const SectLabel = styled.div`
-  font-size:10px; letter-spacing:.14em; color:var(--muted);
+  font-size:10px; letter-spacing:.14em; color:var(--ops-muted-text);
   margin-bottom:6px; text-transform:uppercase;
 `;
 
@@ -131,7 +132,7 @@ const TextBox = styled.textarea`
   width:100%; min-height:76px; resize:vertical; border:1px solid var(--bd-strong);
   border-radius:6px; padding:9px 10px; background:var(--panel-alt);
   color:var(--text); font-size:12px; line-height:1.7;
-  &::placeholder{color:var(--muted)}
+  &::placeholder{color:var(--ops-muted-text)}
 `;
 
 const WordChip = styled.div`
@@ -151,12 +152,13 @@ const Candidate = styled.button<{ $selected: boolean }>`
   background:${(p) => (p.$selected ? 'var(--accent-soft)' : 'transparent')};
   color:${(p) => (p.$selected ? 'var(--accent)' : 'var(--text)')};
   border-radius:5px; padding:6px 9px; font-size:12px; cursor:pointer;
-  &[data-abstain]{color:var(--muted);border-style:dashed}
-  &:hover{border-color:var(--accent)}
+  &[data-abstain]{color:var(--ops-muted-text);border-style:dashed}
+  &:hover:not(:disabled){border-color:var(--accent)}
+  &:disabled{opacity:.45;cursor:not-allowed}
 `;
 
 const ConfirmRow = styled.label`
-  display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; color:var(--muted); cursor:pointer;
+  display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; color:var(--ops-muted-text); cursor:pointer;
   input{accent-color:var(--accent)}
 `;
 
@@ -337,10 +339,10 @@ function Roster({ model, palette, currentViewer }: { model: UndercoverGameViewMo
                 <span style={{ color: elim ? palette.bad : st === 'action_required' ? palette.human : palette.muted, whiteSpace: 'nowrap' }}>{PLAYER_STATE[st] ?? st}</span>
               </div>
               {a.latestOutput?.text ? (
-                <div style={{ color: palette.muted, fontSize: 10, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.latestOutput.text}</div>
+                <div style={{ color: palette.muted, fontSize: 10, marginTop: 3, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>{a.latestOutput.text}</div>
               ) : (
                 a.publicHistory.length ? (
-                  <div style={{ color: palette.muted, fontSize: 10, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>历史：{a.publicHistory[a.publicHistory.length - 1].text}</div>
+                  <div style={{ color: palette.muted, fontSize: 10, marginTop: 3, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>历史：{a.publicHistory[a.publicHistory.length - 1].text}</div>
                 ) : null
               )}
             </div>
@@ -709,6 +711,9 @@ function OpsPanel({
   const phaseLabel = (isPk ? 'PK ' : '') + (params.phase.toLowerCase().includes('vot') ? '投票' : '发言');
   const deadline = pendingHumanNode?.timeout_deadline_ms ?? params.currentAction?.deadlineAt ?? params.deadlineAt;
   const terminalCopy = result ? '本局已结束。' : shown.terminal ? (shown.status === 'failed' || shown.status === 'aborted' ? '本阶段未正常完成。' : '本阶段已完成。') : null;
+  const voteOpening = params.phase.toLowerCase().includes('vot') && params.openingAnnouncement && graph?.run.run_id === params.runId && shown.status === 'running'
+    ? (graph.nodes.some((node) => node.node_id === 'vote_start' && node.status === 'completed') ? params.openingAnnouncement : '主持人正在开启投票，请稍候。')
+    : null;
 
   return (
     <RootShell
@@ -740,6 +745,7 @@ function OpsPanel({
         {error && <Notice $left="bad" role="alert">刷新失败：{error}。已保留最近一次成功的房间状态。</Notice>}
         {resultError && <Notice $left="bad" role="alert">{resultError.message}。请刷新重试。</Notice>}
         {terminalCopy && <Notice $left="running">{terminalCopy}</Notice>}
+        {voteOpening && <Notice $left="running" role="status" data-region="ops-vote-opening">{voteOpening}</Notice>}
 
         <Panel $left="running">
           <PanelTitle>本轮实际运行的 workflow</PanelTitle>
@@ -763,6 +769,9 @@ function OpsPanel({
         {pendingHumanNode && (
           <Panel $left={actionKind === 'vote' ? 'good' : 'accent'}>
             <PanelTitle>{actionKind === 'vote' ? (isPk ? 'PK 投票' : '投票') : '你的发言'} · 请求输入</PanelTitle>
+            {params.openingAnnouncement && graph?.run?.run_id === params.runId && shown.status === 'running' && graph.nodes.some(node => node.node_id === 'vote_start' && node.status === 'completed') && (
+              <Notice $left="accent" role="status">{params.openingAnnouncement}</Notice>
+            )}
             {parsed.error && <Notice $left="bad" role="alert">{parsed.error}</Notice>}
             {!parsed.error && canAct && (
               <form onSubmit={submit}>
@@ -809,6 +818,7 @@ function OpsPanel({
                           key={c.actorId}
                           type="button"
                           role="radio"
+                          disabled={submitting}
                           aria-checked={vote === c.actorId}
                           data-ops-vote-choice="true"
                           data-pk-candidate={isPk ? 'true' : undefined}
@@ -819,13 +829,13 @@ function OpsPanel({
                         </Candidate>
                       ))}
                       {allowAbstain && (
-                        <Candidate type="button" role="radio" aria-checked={vote === '__abstain__'} data-ops-vote-choice="true" $selected={vote === '__abstain__'} onClick={() => { setVote('__abstain__'); setConfirmed(false); setActionError(null); }}>
+                        <Candidate type="button" role="radio" disabled={submitting} aria-checked={vote === '__abstain__'} data-ops-vote-choice="true" $selected={vote === '__abstain__'} onClick={() => { setVote('__abstain__'); setConfirmed(false); setActionError(null); }}>
                           弃权
                         </Candidate>
                       )}
                     </CandidateGrid>
                     <ConfirmRow>
-                      <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} aria-label="确认投票" />
+                      <input type="checkbox" checked={confirmed} disabled={submitting} onChange={(e) => setConfirmed(e.target.checked)} aria-label="确认投票" />
                       我已确认，投出这一票
                     </ConfirmRow>
                   </>
