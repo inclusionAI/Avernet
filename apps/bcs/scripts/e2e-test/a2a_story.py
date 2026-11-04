@@ -420,7 +420,11 @@ class A2aStory(Story):
         assert all(request["message"].get("contextId") == "peer-context" for request in self.peer.requests[1:11])
         assert "contextId" not in self.peer.requests[11]["message"]
         assert self.peer.requests[12]["message"]["contextId"] == "peer-context"
-        assert self.peer.cancels == ["peer-task-6", "peer-task-8"], "Cancellation widened beyond the active Task"
+        with self.peer.lock:
+            cancels = list(self.peer.cancels)
+        assert cancels == ["peer-task-6", "peer-task-8"], (
+            f"Unexpected cancellations ({self.peer.binding}): expected tasks 6 and 8, received {cancels}"
+        )
         assert all(request["message"]["messageId"] not in self.peer.cancels for request in self.peer.requests)
         poll_card = copy.deepcopy(record["agent_card"])
         poll_card["capabilities"]["streaming"] = False

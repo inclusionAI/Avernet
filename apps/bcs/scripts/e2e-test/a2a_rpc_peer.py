@@ -26,8 +26,10 @@ def dispatch(handler, peer):
         with peer.lock:
             task = copy.deepcopy(peer.tasks[params["id"]])
             peer.rpc_resumed = True
+        # GetTask already established this Artifact baseline. Mark the repeated
+        # complete snapshot as final, not as an unsupported intermediate replacement.
         events = [{"artifactUpdate": {"taskId": task["id"], "contextId": task["contextId"],
-                   "artifact": task["artifacts"][0], "append": False}},
+                   "artifact": task["artifacts"][0], "append": False, "lastChunk": True}},
                   {"statusUpdate": {"taskId": task["id"], "contextId": task["contextId"],
                    "status": {"state": "TASK_STATE_COMPLETED"}}}]
         data = b"".join(("data:" + json.dumps(envelope(handler, event)) + "\n\n").encode()
