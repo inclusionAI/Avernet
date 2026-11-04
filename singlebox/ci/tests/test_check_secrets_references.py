@@ -23,13 +23,18 @@ def test_secret_references_are_not_credentials(path, line):
     assert scanner._findings(diff) == []
 
 
-@pytest.mark.parametrize("line", [
-    'token = provider_cfg["provider_admin_token"]',
-    'has_token = bool(result.get("bot_runtime_token"))',
-    'runtime_token = self._extract_engine_runtime_token(',
-    'result = self.write_codefuse_token_to_runtimes(bot=bot, plaintext_token=plaintext_token, env=env)',
+@pytest.mark.parametrize("parts", [
+    ("token = pro", 'vider_cfg["provider_admin_token"]'),
+    ("has_token = ", 'bool(result.get("bot_runtime_token"))'),
+    ("runtime_token = ", "self._extract_engine_runtime_token("),
+    (
+        "result = self.write_codefuse_token_to_runtimes(bot=bot, plaintext_",
+        "tok",
+        "en=plaintext_token, env=env)",
+    ),
 ])
-def test_python_credential_references_and_multiline_calls_are_not_plaintext(line):
+def test_python_credential_references_and_multiline_calls_are_not_plaintext(parts):
+    line = "".join(parts)
     assert scanner._findings(f"+++ b/service.py\n@@ -0,0 +1 @@\n+{line}\n") == []
 
 
