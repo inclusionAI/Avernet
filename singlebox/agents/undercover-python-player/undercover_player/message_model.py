@@ -163,8 +163,12 @@ def _extract_alive_seats(input_text: str) -> tuple[int, ...]:
 
 
 def _extract_allowed_targets(instruction: str) -> tuple[int, ...]:
-    """instruction 里的 `可以投：1号、5号；`，PK 时只列合法候选。"""
-    m = re.search(r"可以投[：:]\s*(.+?)(?:[；;。\n]|$)", instruction)
+    """只从独立的 `可以投：1号、5号；` 约束行提取合法候选。"""
+    m = re.search(
+        r"^[ \t]*可以投[：:][ \t]*([^\r\n；;。]*)",
+        instruction,
+        re.MULTILINE,
+    )
     if not m:
         return ()
     return tuple(sorted({int(n) for n in re.findall(r"(\d+)\s*号", m.group(1))}))

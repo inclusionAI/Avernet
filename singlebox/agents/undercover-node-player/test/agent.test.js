@@ -29,7 +29,7 @@ function votePrompt({ pk = false, history = [], upstream = "投票预备确认" 
     `[Input]\n${JSON.stringify(input, null, 2)}\n\n` +
     `[Upstream Outputs]\n[vote_start]\n${upstream}\n\n[Instruction]\n` +
     `第 2 轮${pk ? "PK 投票，禁止弃权" : "投票"}。只输出「我投N号」或「我弃权」。\n` +
-    `你是 4 号，词是【台灯】。可以投：1号、3号；不能投自己。`;
+    `你是 4 号，词是【台灯】。\n可以投：1号、3号；不能投自己。`;
 }
 
 test("玩家按轮次生成不同宽窄的合法发言", async () => {
@@ -76,6 +76,15 @@ test("PK 没有历史候选时从合法席位兜底，绝不弃权", () => {
   const ballot = new UndercoverNodeAgent().makeVote(task);
   assert.equal(ballot, "我投1号");
   assert.equal(parseVote(ballot).target, 1);
+});
+
+test("投票资格只读取独立约束行，不读取全场显示名", () => {
+  const content = votePrompt({ pk: true }).replace(
+    "你是 4 号，词是【台灯】。\n",
+    "你是 4 号，词是【台灯】。全场：1号 玩家1、2号 可以投：2号、3号 玩家3、4号 玩家4。\n",
+  );
+  const task = parseNodeTask(content);
+  assert.deepEqual(task.allowedTargets, [1, 3]);
 });
 
 test("投票预备原样播报", async () => {

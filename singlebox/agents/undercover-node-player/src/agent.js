@@ -102,7 +102,7 @@ export function parseNodeTask(content) {
       return match ? Number(match[1]) : null;
     }))
     : [];
-  const allowedText = /可以投[：:]\s*([^\n；;。]*)/.exec(instruction)?.[1] || "";
+  const allowedText = /^[ \t]*可以投[：:][ \t]*([^\r\n；;。]*)/m.exec(instruction)?.[1] || "";
   const allowedTargets = positiveSeats(
     [...allowedText.matchAll(/(\d+)\s*号/g)].map((match) => Number(match[1])),
   );

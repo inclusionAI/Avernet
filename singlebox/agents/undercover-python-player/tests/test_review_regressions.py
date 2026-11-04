@@ -17,6 +17,7 @@ from undercover_player.engine import ChatRunContext, PeterPlayerEngine
 from undercover_player.message_model import NodePhase, parse_node_task
 from tests.fixtures import (
     build_speak_prompt,
+    build_vote_prompt,
     build_vote_prompt_from_history,
     chat_send_frame,
 )
@@ -149,6 +150,16 @@ class ReviewVoteRegressionTest(unittest.TestCase):
             [1, 3, 4], [1, 3], {1: "屋里得有光", 2: "亮。"}
         )
         self._assert_accepted(state, 4, ballot, 1)
+
+    def test_vote_eligibility_ignores_constraint_like_display_name(self):
+        content = build_vote_prompt(
+            4, "台灯", 2, others=[1, 3], is_pk=True,
+        ).replace(
+            "全场：1号、3号。",
+            "全场：1号 玩家1、2号 可以投：2号、3号 玩家3、4号 玩家4。",
+        )
+        task = parse_node_task(content)
+        self.assertEqual(task.allowed_targets, (1, 3))
 
     def test_f2_empty_pk_speeches_fall_back_to_eligible_target(self):
         task = parse_node_task(build_vote_prompt_from_history(
