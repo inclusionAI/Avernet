@@ -22,6 +22,11 @@ from tests.community.core.service_bot.services.deploy._noop_storage_policy impor
 from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
+import httpx
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasServiceError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
 
 
@@ -209,6 +214,82 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("put")[0]
         assert call.args[0] == "/api/v1/paas/devices/PAAS-1/outbound-rule"
         assert call.kwargs["json"] == {"header_operation_rules": []}
+
+    def test_update_device_outbound_rule_retries_503_then_raises_transient(self, monkeypatch):
+        service, http = _make_service()
+
+        def make_503_response() -> MagicMock:
+            response = MagicMock(status_code=503, text="SERVER")
+            response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "server unavailable", request=MagicMock(), response=response
+            )
+            return response
+
+        responses = iter([make_503_response() for _ in range(3)])
+        http.set_override("put", lambda *args, **kwargs: next(responses))
+        rule = MagicMock()
+        rule.header_operation_rules = []
+        waits: list[int] = []
+        monkeypatch.setattr(baas_service_module.time, "sleep", waits.append)
+
+        with pytest.raises(BaasTransientServiceError, match="exceeded transient retries"):
+            service.update_device_outbound_rule("PAAS-1", rule)
+
+        assert len(http.calls_to("put")) == 3
+        assert waits == [1, 2]
+
+    def test_update_device_outbound_rule_retries_503_then_succeeds(self, monkeypatch):
+        service, http = _make_service()
+
+        def make_503_response() -> MagicMock:
+            response = MagicMock(status_code=503, text="SERVER")
+            response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "server unavailable", request=MagicMock(), response=response
+            )
+            return response
+
+        responses = iter([make_503_response(), _resp({})])
+        http.set_override("put", lambda *args, **kwargs: next(responses))
+        rule = MagicMock()
+        rule.header_operation_rules = []
+        waits: list[int] = []
+        monkeypatch.setattr(baas_service_module.time, "sleep", waits.append)
+
+        assert service.update_device_outbound_rule("PAAS-1", rule) is True
+
+        assert len(http.calls_to("put")) == 2
+        assert waits == [1]
+
+    def test_update_device_outbound_rule_does_not_retry_4xx(self):
+        service, http = _make_service()
+        response = MagicMock(status_code=400, text="BAD")
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "bad request", request=MagicMock(), response=response
+        )
+        http.set_response("put", response)
+        rule = MagicMock()
+        rule.header_operation_rules = []
+
+        with pytest.raises(BaasServiceError, match="BaaS API error: 400"):
+            service.update_device_outbound_rule("PAAS-1", rule)
+
+        assert len(http.calls_to("put")) == 1
+
+    def test_update_device_outbound_rule_does_not_retry_app_error_code(self, monkeypatch):
+        service, http = _make_service()
+        response = _resp({})
+        response.json.return_value = {"code": 404, "message": "BOT_NOT_FOUND"}
+        http.set_response("put", response)
+        rule = MagicMock()
+        rule.header_operation_rules = []
+        waits: list[int] = []
+        monkeypatch.setattr(baas_service_module.time, "sleep", waits.append)
+
+        with pytest.raises(BaasServiceError, match="BOT_NOT_FOUND"):
+            service.update_device_outbound_rule("PAAS-1", rule)
+
+        assert len(http.calls_to("put")) == 1
+        assert waits == []
 
     def test_append_token_uses_exact_append_path_and_jit_header(self, monkeypatch):
         service, http = _make_service()

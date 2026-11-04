@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import httpx
 import pytest
 
+from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasTransientServiceError
 from agentclaw.community.kernel.device_dto import HeaderOperationRule, OutBoundOperationRule
 
 DEVICE = "ARCA-SANDBOX-test@0"
@@ -67,31 +70,27 @@ def test_owner_refresh_preserves_caller_and_replaces_latest_owner(caplog):
     assert "baas_outbound_update_succeeded" in caplog.text
     assert "mode=append" in caplog.text
     assert DEVICE in caplog.text
-    assert "status_code=200 result_code=0 duration_ms=" in caplog.text
+    assert re.search(r"status_code=200 result_code=0 .+duration_ms=", caplog.text)
     assert "Authorization" in caplog.text
     for secret in ("caller-test-value", "owner-first-value", "owner-latest-value"):
         assert secret not in caplog.text
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("failure", ["http", "business", "timeout", "invalid-json"])
-def test_failed_update_preserves_exception_contract_and_safe_logs(failure, caplog):
+@pytest.mark.parametrize("failure", ["timeout", "http"])
+def test_transient_failure_retries_then_preserves_safe_logs(failure, caplog, monkeypatch):
     secret = "sensitive-test-rule-value"
+    waits: list[int] = []
+    monkeypatch.setattr(baas_service_module.time, "sleep", waits.append)
 
     def transport(request):
         if failure == "http":
             return httpx.Response(503, text=secret)
-        if failure == "business":
-            return httpx.Response(200, json={"code": 42, "message": secret})
-        if failure == "invalid-json":
-            return httpx.Response(200, text=secret)
         raise httpx.ReadTimeout(secret, request=request)
 
     caplog.set_level(logging.INFO)
-    expected = {"http": BaasServiceError, "business": BaasServiceError,
-                "timeout": httpx.ReadTimeout, "invalid-json": ValueError}[failure]
     with httpx.Client(base_url="https://baas.test", transport=httpx.MockTransport(transport)) as client:
-        with pytest.raises(expected):
+        with pytest.raises(BaasTransientServiceError, match="exceeded transient retries"):
             _service(client).update_device_outbound_rule(DEVICE, _rule("Authorization", secret))
 
     assert "baas_outbound_update_requested" in caplog.text
@@ -100,6 +99,35 @@ def test_failed_update_preserves_exception_contract_and_safe_logs(failure, caplo
     assert "mode=append" in caplog.text
     assert "error_type=" in caplog.text
     assert "duration_ms=" in caplog.text
+    assert secret not in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure,expected", [
+    ("business", BaasServiceError),
+    ("invalid-json", ValueError),
+])
+def test_non_transient_failure_raises_immediately(failure, expected, caplog):
+    secret = "sensitive-test-rule-value"
+
+    def transport(request):
+        if failure == "business":
+            return httpx.Response(200, json={"code": 42, "message": secret})
+        return httpx.Response(200, text=secret)
+
+    caplog.set_level(logging.INFO)
+    requests = []
+    def transport_with_count(request):
+        requests.append(request)
+        return transport(request)
+
+    with httpx.Client(base_url="https://baas.test", transport=httpx.MockTransport(transport_with_count)) as client:
+        with pytest.raises(expected):
+            _service(client).update_device_outbound_rule(DEVICE, _rule("Authorization", secret))
+
+    assert len(requests) == 1
+    assert "baas_outbound_update_requested" in caplog.text
+    assert "baas_outbound_update_succeeded" not in caplog.text
     assert secret not in caplog.text
 
 
