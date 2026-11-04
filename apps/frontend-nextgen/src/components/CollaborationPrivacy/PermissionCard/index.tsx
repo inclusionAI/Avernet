@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
 import { Copy, RefreshCw } from 'lucide-react';
@@ -41,9 +42,15 @@ export function PermissionCard({
       <CardHeader className="border-b border-divider pb-5">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <CardTitle className="min-w-0 truncate text-lg" title={bot.name}>
-              {bot.name}
-            </CardTitle>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CardTitle className="min-w-0 truncate text-lg">{bot.name}</CardTitle>
+                </TooltipTrigger>
+                {/* 截断名称的完整值（原原生 title 展示型迁移，unify-tooltip-antd） */}
+                <TooltipContent>{bot.name}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             {bot.engine !== 'unknown' && <Badge tone="neutral">{bot.engine}</Badge>}
             <IconButton
               className="shrink-0"
@@ -56,12 +63,17 @@ export function PermissionCard({
           </div>
           <div className="mt-3 flex min-w-0 items-center gap-2">
             <span className="shrink-0 text-xs font-medium text-muted-foreground">Bot UUID</span>
-            <code
-              className="min-w-0 max-w-[48rem] truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
-              title={bot.id}
-            >
-              {bot.id}
-            </code>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <code className="min-w-0 max-w-[48rem] truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground">
+                    {bot.id}
+                  </code>
+                </TooltipTrigger>
+                {/* 截断 UUID 的完整值（原原生 title 展示型迁移，unify-tooltip-antd） */}
+                <TooltipContent>{bot.id}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <IconButton
               className="shrink-0"
               label={`复制 ${bot.name} 的 Bot UUID`}

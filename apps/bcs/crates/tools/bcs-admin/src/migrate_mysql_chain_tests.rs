@@ -13,6 +13,12 @@ mod migration_chain_migrations;
 #[path = "../../../services/bcs-bot-store/tests/support/a2a_mysql_cases.rs"]
 mod a2a_store_contract;
 
+// The shared existing-only bot profile/avatar store contract
+// (bot-avatar plan Task 3): the ignored full-chain MySQL gate and the
+// bot-store SQLite conformance run the same verification body.
+#[path = "../../../services/bcs-bot-store/tests/support/bot_profile_contract.rs"]
+mod avatar_store_contract;
+
 use super::*;
 use std::sync::Arc;
 use bcs_config_api::mysql::MysqlConnectionConfig;
@@ -138,9 +144,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=39\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=40\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=39).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=40).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -161,6 +167,20 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         ).await;
 
         a2a_store_contract::verify(migrated_db.clone()).await;
+
+        // The SAME existing-only bot profile/avatar contract the Memory and
+        // SQLite conformance runs use, on the fully migrated MySQL schema
+        // (this exercises the real MySQL affected_rows=0 unchanged-write
+        // classification, SQLite's BEGIN IMMEDIATE locking and the
+        // `SELECT ... FOR UPDATE` confirm differ on this dialect).
+        avatar_store_contract::avatar_contract(
+            &bcs_bot_store::PersistentBotRepo::with_sql_flavor(
+                migrated_db.clone(),
+                bcs_db_api::DbSqlFlavor::Mysql,
+            ),
+        )
+        .await;
+        println!("Bot profile: existing-only avatar/profile MySQL contract passed (unchanged-value writes classify by the confirmed live row)");
 
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;
@@ -189,7 +209,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=19\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=20\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);
@@ -253,7 +273,7 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
         ("bcs_groups", vec!["human_mention_notify_mode", "service_spec"]),
-        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version"]),
+        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "ownership_version", "avatar_url"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "activation_count", "completed_at", "callback_status", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),

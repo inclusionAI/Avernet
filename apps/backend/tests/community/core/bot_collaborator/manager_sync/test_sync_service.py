@@ -35,6 +35,7 @@ def facts(*users: str, key: SyncKey | None = None) -> SyncFacts:
         "entity",
         "owner",
         tuple(CollaboratorFact(user, "admin", True) for user in users),
+        bot_type="service",
     )
 
 

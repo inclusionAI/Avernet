@@ -16,10 +16,12 @@ import { SessionHistorySearchPanel } from './components/SessionHistorySearchPane
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
 import { useChatEngineVersionNotice } from './hooks/useChatEngineVersionNotice';
 import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
+import type { ChatHeaderPanelKind } from './hooks/useChatHeaderPanels';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
 import type { ConversationSessionsModel } from './hooks/useConversationSessions.types';
 import { useSessionSwitchReset } from './hooks/useSessionSwitchReset';
+import { resolveConversationPresentation } from './conversationPresentation';
 
 interface StandardConversationStageContainerProps {
   bot: ChatBotView | null;
@@ -36,10 +38,10 @@ interface StandardConversationStageContainerProps {
 }
 
 /**
- * 普通 OpenClaw Bot 的 Chat Runtime 容器。
+ * 标准 Chat Runtime 容器；好友 Coding Bot 临时通过展示能力配置复用该容器。
  *
- * 必须和 CodingBotStageBoundary 互斥挂载，保证选中 Coding Bot 时
- * useBotChat / useConversationInteractiveChat / useChatBridge 不会初始化。
+ * 自有 Coding Bot 仍必须和 CodingBotStageBoundary 互斥挂载，避免普通 Runtime 与
+ * AIXCoding 子应用同时初始化。
  */
 export function StandardConversationStageContainer({
   bot,
@@ -64,6 +66,10 @@ export function StandardConversationStageContainer({
   });
   const target = useMemo(() => (bot ? buildBotChatTarget(bot, session) : null), [bot, session]);
   const botChat = useBotChat(bot, session, panelRef, undefined, userId);
+  const presentation = useMemo(
+    () => resolveConversationPresentation(bot, botChat.connectionRuntime),
+    [bot, botChat.connectionRuntime],
+  );
 
   useEffect(() => {
     onChatRequestingChange?.(botChat.chat.isRequesting);
@@ -85,6 +91,7 @@ export function StandardConversationStageContainer({
     panelRef,
     inputRef,
     sessions: sessionEdits,
+    presentation,
   });
 
   // 副屏桥注册:对齐旧 useWorkspace(bridge.submit → bot 单聊 chat.onRequest)。
@@ -112,8 +119,10 @@ export function StandardConversationStageContainer({
     openFileDrawer: interactiveModel.fileFeature.openFileDrawer,
     closeFileDrawer: interactiveModel.fileFeature.closeFileDrawer,
     fileDrawerOpen: interactiveModel.fileFeature.fileDrawerOpen,
+    sidePaneEnabled: presentation.sidePane,
   });
   const toggleFileDrawer = () => {
+    if (!presentation.resourceManager) return;
     if (interactiveModel.fileFeature.fileDrawerOpen) interactiveModel.fileFeature.closeFileDrawer();
     else {
       headerPanels.closePanel();
@@ -127,22 +136,33 @@ export function StandardConversationStageContainer({
       onTogglePanel={headerPanels.togglePanel}
       fileDrawerOpen={interactiveModel.fileFeature.fileDrawerOpen}
       onToggleFileDrawer={toggleFileDrawer}
+      showResourceManager={presentation.resourceManager}
       sidePaneOpen={headerPanels.sidePaneOpen}
+      showSidePane={presentation.sidePane}
       sidePaneDisabled={headerPanels.sidePaneDisabled}
       onToggleSidePane={headerPanels.toggleSidePane}
       notice={engineVersionNotice.notice}
     />
   );
-  const headerRightPanels =
-    headerPanels.openPanel === 'detail' ? (
-      <ChatHeaderRightPanel title="会话详情" onClose={headerPanels.closePanel}>
-        <SessionDetailPanel session={interactiveModel.selectedSession} />
-      </ChatHeaderRightPanel>
-    ) : headerPanels.openPanel === 'history' ? (
-      <ChatHeaderRightPanel title="历史消息" onClose={headerPanels.closePanel}>
+  // 头部右缘内联副屏（chat-header-panels）：单容器常挂、经 open 开合对话区让宽（与 SDK 副屏
+  // 同构，无抽屉蒙层）；renderPanelKind 记住最近一次打开的面板，收起过渡期间内容不闪切。
+  const openPanel = headerPanels.openPanel;
+  const renderPanelKindRef = useRef<ChatHeaderPanelKind>('detail');
+  if (openPanel) renderPanelKindRef.current = openPanel;
+  const renderPanelKind = openPanel ?? renderPanelKindRef.current;
+  const headerRightPanel = (
+    <ChatHeaderRightPanel
+      open={openPanel !== null}
+      title={renderPanelKind === 'history' ? '历史消息' : '会话详情'}
+      onClose={headerPanels.closePanel}
+    >
+      {renderPanelKind === 'history' ? (
         <SessionHistorySearchPanel search={headerPanels.historySearch} onLocate={headerPanels.locateMessage} />
-      </ChatHeaderRightPanel>
-    ) : null;
+      ) : (
+        <SessionDetailPanel session={interactiveModel.selectedSession} />
+      )}
+    </ChatHeaderRightPanel>
+  );
 
   return (
     <>
@@ -150,7 +170,7 @@ export function StandardConversationStageContainer({
         model={interactiveModel}
         onOpenSessionList={onOpenSessionList}
         headerActions={headerActions}
-        headerRightPanels={headerRightPanels}
+        headerRightPanels={headerRightPanel}
         highlightMessageId={headerPanels.highlightMessageId}
         sidePaneOpen={headerPanels.sidePaneOpen}
         onToggleSidePane={headerPanels.toggleSidePane}

@@ -206,6 +206,7 @@ async fn register_provider_bot(
             bot_uuid: None,
             reject_existing_bot_uuid: false,
             connection_mode: bcs_service_api::ProviderBotConnectionMode::Gateway,
+            avatar: bcs_service_api::types::bot_profile::AvatarChange::Keep,
         })
         .await
         .expect("register provider bot");

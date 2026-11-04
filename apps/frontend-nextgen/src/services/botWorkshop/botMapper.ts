@@ -105,6 +105,20 @@ function lifecycle(dto: BackendUnknownRecord, warnings: string[]) {
   return resolveBotLifecycle(dto, isService, warnings);
 }
 
+function mapBotPublishId(dto: BackendUnknownRecord): string | undefined {
+  const publishId =
+    asNumber(dto.publication_id) ??
+    asNumber(dto.bot_publish_id) ??
+    asNumber(dto.publish_id) ??
+    // Compatibility with string-only or nested legacy payloads.
+    asNumber(Number(asString(dto.bot_publish_id))) ??
+    asNumber(Number(asString(dto.publish_id))) ??
+    asNumber(asRecord(dto.publish).id);
+  return typeof publishId === 'number' && Number.isSafeInteger(publishId) && publishId > 0
+    ? String(publishId)
+    : undefined;
+}
+
 export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, currentUserId?: string) {
   const warnings: string[] = [];
   // 详情接口的内部运行时 bot_id 可能为 "default"；网关子资源必须继续使用
@@ -177,7 +191,10 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
       ? {
           entityType: entityType ?? (ownership === 'team' ? 'team' : 'staff'),
           entityId,
-          botPublishId: asString(dto.bot_publish_id) ?? asString(dto.publish_id) ?? asString(asRecord(dto.publish).id),
+          // The inventory OpenAPI returns a numeric publication id. Historical
+          // sources may use bot_publish_id/publish_id; accept both numbers and
+          // non-empty numeric strings before falling back to publish.id.
+          botPublishId: mapBotPublishId(dto),
         }
       : undefined,
     healthScore: asNumber(dto.health_score),

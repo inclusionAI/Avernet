@@ -17,6 +17,7 @@ use bcs_service_api::{
     SyncProviderBotCallerConfigurationCommand,
     UpdateProviderBotCommand, UpdateProviderBotOutcome, UpdateProviderCommand,
 };
+use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
 use bcs_user_directory_api::UserDirectoryPlugin;
 
 #[derive(Clone)]
@@ -458,6 +459,24 @@ impl ProviderManagementService for ProviderManagement {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
             self.ensure_authority_ownership(&binding.bot_uuid, &owner, &command.provider_id)
                 .await?;
+        }
+        // Explicit avatar after the registration and ownership composite
+        // (bot-avatar plan Task 5): the avatar applies through the same
+        // existing-only write contract as every other avatar source, so a
+        // fresh registration and a duplicate replay both take it. `Keep`
+        // adds no write. The write riding behind the committed registration
+        // is the pre-existing non-atomic boundary: a missing live row or a
+        // persistence failure returns an error and leaves the already
+        // registered Bot in place — no rollback, no retry, and never a
+        // silent success without the requested avatar.
+        if !matches!(command.avatar, AvatarChange::Keep) {
+            let avatar_write = self
+                .registry
+                .update_avatar_existing(&binding.bot_uuid, command.avatar)
+                .await?;
+            if avatar_write == ProfileWrite::Missing {
+                return Err(ServiceError::BotNotFound(binding.bot_uuid.clone()));
+            }
         }
         let created = !duplicate_registration;
         let capabilities = if created {

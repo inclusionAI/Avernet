@@ -40,10 +40,11 @@ class QualityTaskServiceProtocol(Protocol):
         owner_id: Optional[str] = None,
         ext: Optional[dict[str, Any]] = None,
         operator_id: Optional[str] = None,
+        uuid: Optional[str] = None,
     ) -> QualityTaskRecord:
         """Create a new quality task.
 
-        UUID is generated internally by the service.
+        UUID is generated internally when the caller does not supply one.
         """
         ...
 

@@ -15,14 +15,15 @@ jest.mock('@/services/tasks/taskService', () => ({
 jest.mock('@/services/workspace/botSkillService', () => ({
   botSkillService: {
     listSkillsForBotId: jest.fn(),
-    hasTaskIntentSkill: jest.fn((skills: Array<{ name: string; active: boolean }>) =>
-      skills.some((skill) => skill.active && skill.name === 'task-intent-recognition')),
+    hasTaskIntentSkill: jest.fn(),
+    // useTaskExecution 现走 hasTaskIntentSkillForBot:属主 bot → 列技能;非属主 → match 探针。
+    hasTaskIntentSkillForBot: jest.fn(),
   },
 }));
 
 const mockedExecute = executeTaskService as unknown as jest.Mock;
-const mockedListSkills = jest.requireMock('@/services/workspace/botSkillService').botSkillService
-  .listSkillsForBotId as jest.Mock;
+const mockedHasTaskIntent = jest.requireMock('@/services/workspace/botSkillService').botSkillService
+  .hasTaskIntentSkillForBot as jest.Mock;
 const context: TaskComposerContext = {
   sourceType: 'bot',
   ownerUserId: 'user-1',
@@ -64,15 +65,26 @@ describe('useTaskExecution relay bootstrap', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedExecute.mockResolvedValue(taskRecord('centralized'));
-    mockedListSkills.mockResolvedValue({ ok: true, data: [] });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: false });
     useTaskStore.getState().reset();
   });
 
+  it('无任务上下文时不请求 Bot skills', async () => {
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context: null,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(result.current.dynamicTaskEnabled).toBe(false);
+    expect(mockedHasTaskIntent).not.toHaveBeenCalled();
+  });
+
   it('安装 task-intent-recognition 后动态任务可选', async () => {
-    mockedListSkills.mockResolvedValue({
-      ok: true,
-      data: [{ name: 'task-intent-recognition', active: true }],
-    });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
     const { result } = renderHook(() =>
       useTaskExecution({
         panelRef: { current: null } as never,
@@ -82,11 +94,112 @@ describe('useTaskExecution relay bootstrap', () => {
     );
 
     await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(true));
+    expect(mockedHasTaskIntent).toHaveBeenCalledWith({
+      realBotId: 'bot-main',
+      botUuid: 'bot-main',
+      ownerId: undefined,
+      currentUserId: 'user-1',
+    });
     act(() => result.current.selectDynamic());
     expect(result.current.selections).toEqual([{ kind: 'dynamic' }]);
   });
 
+  it('任务探针传入完整 bot_uuid,同时拆分 realBotId/ownerId', async () => {
+    const scopedContext: TaskComposerContext = {
+      ...context,
+      ownerBotId: 'bot-main:owner-user',
+    };
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context: scopedContext,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(mockedHasTaskIntent).toHaveBeenCalledWith({
+      realBotId: 'bot-main',
+      botUuid: 'bot-main:owner-user',
+      ownerId: 'owner-user',
+      currentUserId: 'user-1',
+    });
+  });
+
+  it('同一个 Driver Bot 切换会话复用 Skill 结果,避免重复请求', async () => {
+    const { result, rerender } = renderHook(
+      ({ ctx }) =>
+        useTaskExecution({
+          panelRef: { current: null } as never,
+          context: ctx,
+          submitPanelMessage: jest.fn(),
+        }),
+      { initialProps: { ctx: context } },
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(false));
+    expect(mockedHasTaskIntent).toHaveBeenCalledTimes(1);
+
+    rerender({ ctx: { ...context, mainSessionName: 'session-switched' } });
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(mockedHasTaskIntent).toHaveBeenCalledTimes(1);
+    expect(result.current.dynamicTaskEnabled).toBe(false);
+  });
+
+  it('切换 Driver Bot 后重新探测并更新入口状态', async () => {
+    mockedHasTaskIntent
+      .mockResolvedValueOnce({ ok: true, data: true })
+      .mockResolvedValueOnce({ ok: true, data: false });
+    const botA: TaskComposerContext = { ...context, ownerBotId: 'bot-a:user-1' };
+    const botB: TaskComposerContext = { ...context, ownerBotId: 'bot-b:user-1' };
+    const { result, rerender } = renderHook(
+      ({ ctx }) =>
+        useTaskExecution({
+          panelRef: { current: null } as never,
+          context: ctx,
+          submitPanelMessage: jest.fn(),
+        }),
+      { initialProps: { ctx: botA } },
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(true));
+    rerender({ ctx: botB });
+    await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(false));
+    rerender({ ctx: botA });
+    await waitFor(() => expect(result.current.dynamicTaskEnabled).toBe(true));
+
+    expect(mockedHasTaskIntent).toHaveBeenNthCalledWith(1, {
+      realBotId: 'bot-a',
+      botUuid: 'bot-a:user-1',
+      ownerId: 'user-1',
+      currentUserId: 'user-1',
+    });
+    expect(mockedHasTaskIntent).toHaveBeenNthCalledWith(2, {
+      realBotId: 'bot-b',
+      botUuid: 'bot-b:user-1',
+      ownerId: 'user-1',
+      currentUserId: 'user-1',
+    });
+    expect(mockedHasTaskIntent).toHaveBeenCalledTimes(2);
+  });
+
   it('未安装 task-intent-recognition 时动态任务不可选', async () => {
+    const { result } = renderHook(() =>
+      useTaskExecution({
+        panelRef: { current: null } as never,
+        context,
+        submitPanelMessage: jest.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.dynamicTaskChecking).toBe(false));
+    expect(result.current.dynamicTaskEnabled).toBe(false);
+    act(() => result.current.selectDynamic());
+    expect(result.current.selections).toEqual([]);
+  });
+
+  it('技能探测 Promise 异常 → 安全降级为不可点且不向上抛', async () => {
+    mockedHasTaskIntent.mockRejectedValueOnce(new Error('Not Found'));
     const { result } = renderHook(() =>
       useTaskExecution({
         panelRef: { current: null } as never,
@@ -152,10 +265,7 @@ describe('useTaskExecution selections（多胶囊叠加态）', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resolveWorkflowCommand.mockResolvedValue({ command: 'cmd-x', title: '工作流X' });
-    mockedListSkills.mockResolvedValue({
-      ok: true,
-      data: [{ name: 'task-intent-recognition', active: true }],
-    });
+    mockedHasTaskIntent.mockResolvedValue({ ok: true, data: true });
   });
 
   function renderExecution() {

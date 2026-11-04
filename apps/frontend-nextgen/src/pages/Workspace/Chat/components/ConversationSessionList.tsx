@@ -1,11 +1,11 @@
 import type { ConversationSessionListState } from '@/domain/conversation/types';
+import { Points } from '@/tracking/points';
+import { TrackExpo } from '@/tracking/TrackExpo';
+import { Tracert } from '@/utils/tracert';
 import { ListErrorState } from '../../components/ListErrorState';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationLoadMore } from './ConversationLoadMore';
 import { ConversationSessionRow } from './ConversationSessionRow';
-import { Points } from '@/tracking/points';
-import { TrackExpo } from '@/tracking/TrackExpo';
-import { Tracert } from '@/utils/tracert';
 import { ConversationSessionRowsSkeleton } from './ConversationSkeletons';
 
 /** 我发起 / 好友 Bot 的交互式 Session 列表(选中 / 加载更多均来自 Hook 模型)。 */
@@ -19,6 +19,8 @@ export function ConversationSessionList(props: {
   isFavoritePending(sessionId: string): boolean;
   /** Bot 正在回复中的会话 id(#2990 还原):透传行组件渲染 loading 指示。 */
   replyingSessionId?: string | null;
+  emptyTitle?: string;
+  showCreateHint?: boolean;
 }) {
   const {
     actions,
@@ -29,6 +31,8 @@ export function ConversationSessionList(props: {
     onToggleFavorite,
     isFavoritePending,
     replyingSessionId,
+    emptyTitle = '还没有会话',
+    showCreateHint = true,
   } = props;
   // 未加载 ≠ 空列表:无缓存、或首拉在途(loading 且尚无 items)都只给行骨架,
   // 不闪「暂无会话」;已在途刷量(loading 但保留旧 items)继续展示旧行。
@@ -45,10 +49,12 @@ export function ConversationSessionList(props: {
     return (
       <div className="mx-4 my-2 flex flex-col items-center gap-1 rounded-lg bg-muted/40 px-3 py-3 text-center">
         <TrackExpo point={Points.workspaceChat.emptyGuideExpo} />
-        <p className="text-xs font-normal text-content-soft">还没有会话</p>
-        <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
-          点击 Bot 行尾的「＋」按钮，创建第一个会话
-        </p>
+        <p className="text-xs font-normal text-content-soft">{emptyTitle}</p>
+        {showCreateHint && (
+          <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
+            点击 Bot 行尾的「＋」按钮，创建第一个会话
+          </p>
+        )}
       </div>
     );
   }

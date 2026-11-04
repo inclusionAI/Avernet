@@ -621,9 +621,29 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         # Step 2.5: Infer device count and derive scale_amount
         # For non-CREATE types, we need the current device count:
         # - SCALE types: to derive scale_amount = |current - target|
+        # - DESTROY/STOP: to size batches across ALL eligible devices
         # - Other types: to infer replica_desired for auto-compact
         is_scale_type = publish_type in (PublishType.SCALE_UP, PublishType.SCALE_DOWN)
+        is_terminal_type = publish_type in (PublishType.DESTROY, PublishType.STOP)
         scale_amount: int | None = None
+        target_device_count: int | None = None
+        if is_terminal_type:
+            # DESTROY/STOP carry no replica_desired and must cover every ACTIVE
+            # device. Use the same eligibility rule as
+            # _create_device_records_for_publish so the batch plan and the
+            # device-record selection can never disagree on the target set.
+            from secbaas.community.api.device_manage import DeviceStatus
+
+            existing_devices = self._device_repo.list_by_bot_id(
+                bot_id=bot.id, tenant=tenant, env=env
+            )
+            target_device_count = len(
+                [d for d in existing_devices if d.status == DeviceStatus.ACTIVE.value]
+            )
+            logger.info(
+                f"Resolved target_device_count={target_device_count} for "
+                f"{publish_type.value}: bot_id={bot.id}"
+            )
         needs_device_count = publish_type != PublishType.CREATE and (
             config is None or not config.replica_desired
         )
@@ -761,7 +781,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         # Step 3: Generate batch configuration
         batch_configs = self._generate_batches(
-            publish_type, config, scale_amount=scale_amount
+            publish_type,
+            config,
+            scale_amount=scale_amount,
+            target_device_count=target_device_count,
         )
         logger.info(f"Generated {len(batch_configs)} batches for {publish_type.value}")
 
@@ -911,6 +934,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         publish_type: PublishType,
         config: PublishConfig | None = None,
         scale_amount: int | None = None,
+        target_device_count: int | None = None,
     ) -> list[BatchConfig]:
         """Generate batch configurations for publish type.
 
@@ -1006,7 +1030,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         # Calculate total device count for auto-compact
         total_device_count = self._calculate_total_devices(
-            config, stages, scale_amount=scale_amount
+            config,
+            stages,
+            scale_amount=scale_amount,
+            target_device_count=target_device_count,
         )
 
         # Auto-compact: progressive stages based on device count
@@ -1092,10 +1119,13 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         config: PublishConfig,
         stages: list[tuple[str, str]],
         scale_amount: int | None = None,
+        target_device_count: int | None = None,
     ) -> int | None:
         """Calculate total device count for auto-compact decision.
 
         Priority:
+        0. target_device_count parameter (terminal ops DESTROY/STOP) - the live
+           eligible device count, which these ops must cover in full
         1. scale_amount parameter (for SCALE_UP/DOWN) - the delta to add/remove
         2. config.replica_desired (for CREATE/UPDATE)
         3. Default: 1 (stage device_count defaults are production-scale configs,
@@ -1105,7 +1135,17 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         production-scale batch sizes, NOT target device counts. Summing them
         would cause auto-compact to malfunction for small bots. When
         replica_desired is not set, default to 1 to ensure proper auto-compact.
+
+        DESTROY and STOP carry no replica_desired: they must act on every
+        ACTIVE device, so the caller passes the live count as
+        target_device_count. Without it these ops would collapse to a single
+        device and silently leave the rest running (see the DESTROY leak fixed
+        alongside this parameter).
         """
+        # Terminal ops (DESTROY/STOP) carry an explicit live device count
+        if target_device_count is not None:
+            return target_device_count
+
         # Check scale_amount first (used by SCALE_UP/DOWN) - the actual delta
         if scale_amount:
             return scale_amount
@@ -1428,10 +1468,12 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         sorted_devices = sorted(eligible_devices, key=lambda d: d.id)
 
         device_idx = 0
+        covered_device_count = 0
         for batch in sorted_batches:
             batch_cap = batch.batch_capacity
             batch_devices = sorted_devices[device_idx : device_idx + batch_cap]
             device_idx += batch_cap
+            covered_device_count += len(batch_devices)
 
             for device in batch_devices:
                 extra_config_dict = dataclasses.asdict(
@@ -1469,9 +1511,32 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         logger.info(
             f"[create_device_records] publish_id={publish_id} type={publish_type.value} "
-            f"created {len(sorted_devices[:device_idx])} PENDING records "
+            f"created {covered_device_count} PENDING records "
             f"across {len(batch_records)} batches"
         )
+
+        # The batch plan must cover the whole eligible set. A short plan used to
+        # go unnoticed: DESTROY/STOP collapsed to one device and the remaining
+        # devices were sliced away here, leaving ACTIVE sandboxes behind a
+        # soft-deleted bot. Fail loudly instead of silently dropping devices.
+        #
+        # Only under-coverage is an error. Over-capacity is legitimate: a
+        # provision batch may be sized larger than the devices it will create
+        # or restart (e.g. CREATE with batch_capacity=5 and one pending device).
+        # SCALE_DOWN is also exempt: it is *supposed* to cover a subset, keeping
+        # the remainder running.
+        covers_all_devices = publish_type not in (
+            PublishType.SCALE_DOWN,
+            PublishType.UPDATE_DEVICE,
+            PublishType.RESTART,
+        )
+        if covers_all_devices and covered_device_count < len(sorted_devices):
+            raise ValueError(
+                f"Batch plan for {publish_type.value} publish "
+                f"(publish_id={publish_id}) covers {covered_device_count} of "
+                f"{len(sorted_devices)} eligible devices: refusing to drop "
+                f"{len(sorted_devices) - covered_device_count} device(s)"
+            )
 
     def _get_current_stage(self, tenant: str, publish_id: int) -> str | None:
         """Get current pipeline stage from the first non-completed batch.
@@ -2960,6 +3025,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     modifier=operator,
                 )
                 if updated_rows == 0:
+                    logger.warning(
+                        f"Device configuration update affected no rows "
+                        f"(device_id={device_record.id}, publish_id={publish_record.id}, "
+                        f"tenant={tenant}, env={env})"
+                    )
                     raise RuntimeError("Device configuration update affected no rows")
                 image_config_ready = True
                 # Only expose PROCESSING to callback/timeout retries after

@@ -32,6 +32,15 @@ const friendBot: ChatBotView = {
 };
 const managedView: ConversationBotView = { bot: managedBot, section: 'managed' };
 const friendView: ConversationBotView = { bot: friendBot, section: 'friend' };
+const codingBot: ChatBotView = {
+  ...managedBot,
+  botId: 'coding-bot:1',
+  realBotId: 'coding-bot',
+  displayName: 'Coding Bot',
+  engine: 'claude_code',
+  isAgentCodingBot: true,
+};
+const codingView: ConversationBotView = { bot: codingBot, section: 'team' };
 const emptyList = {
   items: [],
   page: 1,
@@ -154,6 +163,86 @@ describe('useConversationDeepLinkSessionHydration', () => {
     await waitFor(() => {
       expect(useConversationStore.getState().selectedSessionSnapshot?.session.sessionId).toBe('fs-deep');
     });
+  });
+
+  it('Coding Bot others 深链允许精确拉取详情并保留创建者身份', async () => {
+    const sessionId = 'user:200:session:shared:agent:coding-bot';
+    useConversationStore.setState({
+      ...conversationInitialState,
+      selectedBotId: codingBot.botId,
+      selectedSection: 'team',
+      selectedOrigin: 'others',
+      selectedScope: 'all',
+      selectedFriendUserId: '200',
+      selectedSessionId: sessionId,
+      sessionsByBotId: {
+        [codingBot.botId]: {
+          botId: codingBot.botId,
+          origin: 'others',
+          scope: 'all',
+          sessions: emptyList,
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+    getSessionDetail.mockResolvedValue({
+      ok: true,
+      data: { ...sessionOfSessionId(sessionId), botId: codingBot.botId },
+    });
+
+    renderDeepLinkHydration('100', [codingView]);
+
+    await waitFor(() => expect(getSessionDetail).toHaveBeenCalledWith(codingBot, '100', sessionId));
+    await waitFor(() => {
+      expect(useConversationStore.getState().selectedSessionSnapshot).toMatchObject({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'others',
+        friendUserId: '200',
+        session: { sessionId },
+      });
+    });
+  });
+
+  it('普通 Bot others 仍由只读好友链路处理，不调用会话详情接口', async () => {
+    useConversationStore.setState({
+      ...conversationInitialState,
+      selectedBotId: managedBot.botId,
+      selectedSection: 'managed',
+      selectedOrigin: 'others',
+      selectedScope: 'all',
+      selectedFriendUserId: '200',
+      selectedSessionId: 'shared-session',
+    });
+
+    renderDeepLinkHydration('100', [managedView]);
+    await act(async () => Promise.resolve());
+
+    expect(getSessionDetail).not.toHaveBeenCalled();
+  });
+
+  it('Coding Bot 详情归属与当前选择不一致时不写入快照', async () => {
+    const sessionId = 'user:100:session:mine:agent:coding-bot';
+    useConversationStore.setState({
+      ...conversationInitialState,
+      selectedBotId: codingBot.botId,
+      selectedSection: 'team',
+      selectedOrigin: 'others',
+      selectedScope: 'all',
+      selectedFriendUserId: '200',
+      selectedSessionId: sessionId,
+    });
+    getSessionDetail.mockResolvedValue({
+      ok: true,
+      data: { ...sessionOfSessionId(sessionId), botId: codingBot.botId },
+    });
+
+    renderDeepLinkHydration('100', [codingView]);
+    await act(async () => Promise.resolve());
+
+    expect(getSessionDetail).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
   });
 
   it('请求返回前选中会话已切换时,丢弃旧响应', async () => {

@@ -11,6 +11,10 @@ import type { PanelHandle } from '@tc-chat/core';
 import { createRef } from 'react';
 
 let mockSlotProps: Array<Record<string, unknown>> = [];
+const mockHeaderProps: Array<Record<string, unknown>> = [];
+jest.mock('@/pages/Workspace/components/GroupHeader', () => ({
+  GroupHeader: (props: Record<string, unknown>) => { mockHeaderProps.push(props); return null; },
+}));
 jest.mock('@/components/Workspace/ChatLayoutPanelSlot', () => {
   const { forwardRef } = jest.requireActual('react');
   return {
@@ -52,6 +56,7 @@ const chat = {
 
 it('副屏插槽接线：宽 480、点外不收起，并复用单聊 1px 分隔线样式', () => {
   mockSlotProps.length = 0;
+  const locateSession = jest.fn();
   const { container } = render(
     <GroupChatPane
       group={group}
@@ -69,6 +74,7 @@ it('副屏插槽接线：宽 480、点外不收起，并复用单聊 1px 分隔�
       canManageGroup={{ allowed: false }}
       activePanel="none"
       onTogglePanel={noop}
+      onLocateSession={locateSession}
       favorites={{ favorite: false, disabled: false, onToggle: noop }}
       sidePaneOpen={false}
       onToggleSidePane={noop}
@@ -83,4 +89,5 @@ it('副屏插槽接线：宽 480、点外不收起，并复用单聊 1px 分隔�
   const slotProps = mockSlotProps.at(-1) as { panelWidth?: number; dismissOnOutside?: boolean };
   expect(slotProps?.panelWidth).toBe(480);
   expect(slotProps?.dismissOnOutside).toBe(false);
+  expect(mockHeaderProps.at(-1)?.onLocateSession).toBe(locateSession);
 });

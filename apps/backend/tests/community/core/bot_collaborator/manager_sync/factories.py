@@ -46,6 +46,7 @@ def seed_sync_facts(
             BotModel(
                 id=bot_pk,
                 bot_id=bot_id,
+                bot_type="service",
                 entity_id=entity_id,
                 entity_type="staff",
                 creator_id=owner_id,

@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({ evolve: {
   getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(),
 }, bots: { list: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
+const materials = vi.hoisted(() => ({ options: vi.fn(), upload: vi.fn() }))
+vi.mock('../../api/reference-materials', () => ({ referenceMaterialsApi: materials }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'viewer-not-owner' } }) }))
 
 const asset = { assetId: 'asset / 1', botId: 'bot-1', name: '我的技能', skillId: 'skill-1', currentVersion: 'v1', updatedAt: 1789060000 }
@@ -32,6 +34,9 @@ function open(action: SkillTaskAction = 'diagnose', onClose = vi.fn()) {
 beforeEach(() => {
   vi.stubGlobal('React', React)
   vi.resetAllMocks()
+  materials.options.mockResolvedValue({ available: true, maxFiles: 500, maxFileBytes: 20 * 1024 * 1024,
+    maxTotalBytes: 100 * 1024 * 1024, maxArchiveBytes: 110 * 1024 * 1024, maxPathBytes: 1024, maxPathComponentBytes: 255, maxDepth: 20 })
+  materials.upload.mockResolvedValue({ materialId: 'skill-material', expiresAt: Date.now() + 60_000, files: [], totalBytes: 3 })
   api.evolve.getSkillTaskDefaults.mockResolvedValue(defaults)
   api.evolve.createTask.mockResolvedValue({ task_id: 'task-1', status: 'pending' })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
@@ -205,4 +210,33 @@ describe('Skill task launch confirmation', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
     expect(api.evolve.createTask).not.toHaveBeenCalled()
   })
+})
+
+it.each(['hardening', 'optimize'] as const)('uploads reference files before confirming Skill %s and preserves its fixed target', async action => {
+  open(action)
+  fireEvent.click(await screen.findByRole('button', { name: '添加参考材料' }))
+  await screen.findByRole('button', { name: '添加文件' })
+  const file = new File(['abc'], 'rules.md')
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode('abc').buffer })
+  fireEvent.change(screen.getByLabelText('选择参考文件'), { target: { files: [file] } })
+  const confirm = screen.getByRole('button', { name: action === 'optimize' ? '确认优化' : '确认加固' }) as HTMLButtonElement
+  expect(confirm.disabled).toBe(true)
+  fireEvent.click(confirm)
+  expect(api.evolve.createTask).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '上传材料' }))
+  await screen.findByRole('button', { name: '上传完成' })
+  expect(confirm.disabled).toBe(false)
+  fireEvent.click(confirm)
+  await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledOnce())
+  expect(api.evolve.createTask.mock.calls[0][0]).toMatchObject({
+    targetSkillAssetId: asset.assetId, userId: 'original-owner', botId: asset.botId,
+    referenceMaterialsUploadId: 'skill-material', taskType: action === 'optimize' ? 'full' : 'hardening',
+  })
+})
+
+it('keeps standalone Skill diagnosis outside the reference upload scope', async () => {
+  open('diagnose')
+  await screen.findByText(defaults.diagnose.goal)
+  expect(screen.queryByLabelText('选择参考文件')).toBeNull()
+  expect(materials.options).not.toHaveBeenCalled()
 })

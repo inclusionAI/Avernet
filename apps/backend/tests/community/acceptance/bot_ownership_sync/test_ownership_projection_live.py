@@ -74,3 +74,33 @@ def test_transient_disconnect_retries_real_delivery_without_rolling_back(owner_c
     case.wait_business_event("send_confirmed")
     case.assert_one_proxy_drop_then_forward()
     case.assert_old_owner_forbidden()
+
+
+def test_admin_http_repair_recovers_rejected_owner_sync_and_restores_authority(owner_case):
+    case = owner_case(register_recipient=False)
+    case.handoff()
+    case.assert_committed()
+    case.wait_business_event("send_rejected")
+    assert case.read_owner(case.old_owner) == case.old_owner
+
+    denied = case.request_operations_repair(actor=case.old_owner)
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "ADMIN_REQUIRED"
+    missing = case.request_operations_repair(bot_pk=9223372036854775807)
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "BOT_NOT_FOUND"
+
+    # No replay of handoff or direct call to Core: the admin submits the real
+    # HTTP repair command, which reads Backend state and delivers to real BCS.
+    case.register_recipient()
+    case.operations_repair()
+    case.wait_business_event("send_confirmed")
+    case.wait_owner(case.new_owner)
+    case.wait_roster(case.new_owner, set())
+    case.assert_old_owner_forbidden()
+    case.assert_committed()
+    case.assert_queue_completed()
+    before = case.business_event_count("send_confirmed")
+    case.operations_repair()
+    case.wait_business_event("send_confirmed", after_count=before)
+    case.wait_owner(case.new_owner)

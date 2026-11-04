@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::avatar::AvatarField;
 use crate::{Attachment, Skill, deserialize_skills};
 
 fn default_worker_send_task_message_enabled() -> bool {
@@ -220,6 +221,12 @@ pub struct RegisterProviderBotRequest {
     /// connects over WebSocket; accepted only for allow-listed providers.
     #[serde(default)]
     pub connection_mode: Option<ProviderBotConnectionModeDto>,
+    /// Bot avatar URL for the record's dedicated avatar field. Omission
+    /// keeps the stored avatar; an explicit value replaces it and the
+    /// empty string clears it. Explicit `null` and non-string values fail
+    /// deserialization (bot-avatar plan Task 5).
+    #[serde(default, skip_serializing_if = "AvatarField::is_omitted")]
+    pub avatar_url: AvatarField,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

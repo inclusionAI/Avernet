@@ -36,6 +36,8 @@ export interface ChatPanelProps {
   fileChip?: FileChipConfig;
   command?: CommandConfig;
   composerHeader?: ReactNode;
+  /** 输入框占位文案；由会话展示模式决定，避免承诺未开放能力。 */
+  composerPlaceholder?: string;
   fileToolbar?: ReactNode;
   senderRef?: React.RefObject<SenderRef | null>;
   mode?: 'demo' | 'support' | 'bot';
@@ -61,6 +63,8 @@ export interface ChatPanelProps {
   headerActions?: ReactNode;
   /** 待定位高亮的消息 id（历史面板结果点击）；由消息列表滚动至该消息并短暂高亮。 */
   highlightMessageId?: string | null;
+  /** 是否挂载副屏容器及任务关联会话；好友 Coding Bot 兼容模式关闭。 */
+  sidePaneEnabled?: boolean;
   /** 副屏开合态（chat-header-panels，真实态同步）：开时渲染副屏右上「收起」悬浮钮。 */
   sidePaneOpen?: boolean;
   /** 副屏开合 toggle（chat-header-panels）：开时悬浮钮点按 = 关闭。 */

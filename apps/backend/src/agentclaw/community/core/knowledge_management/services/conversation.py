@@ -69,20 +69,29 @@ class ConversationKnowledgeService:
         request_headers: Mapping[str, str],
         cursor: int = 0,
         limit: int = 20,
+        runtime_stage: str = "draft",
     ) -> dict:
         page_size(limit, cursor)
         if limit > 20:
             raise KnowledgeManagementError("INVALID_KNOWLEDGE_INPUT")
         require_id(actor_id)
         bot = self.source.conversation_bot(scope)
+        if bot.get("bot_type") == "service" and runtime_stage != "online":
+            # Sharing/publication grants online chat access, not draft/verify
+            # configuration visibility. Reuse the existing native Editor policy.
+            self.source.bot_context(scope, actor_id)
         self._authorize(bot, actor_id, request_headers)
-        # Do not expose draft selections for published/service Bot conversations.
-        if bot.get("bot_type") != "personal":
-            raise KnowledgeManagementError("KNOWLEDGE_CONVERSATION_UNSUPPORTED")
-        # An unused Bot cannot expose any knowledge. Its space may never have
-        # initialized the provider tenant; do not make that normal state a 404.
-        if not self.source.has_enabled_selection(bot=bot):
+        stage = self.source.stage_selection(bot=bot, runtime_stage=runtime_stage)
+        metadata = ({key: value for key, value in stage.items() if key != "kb_ids"}
+                    if stage is not None else {})
+        if stage is not None and runtime_stage != "draft" and stage["kb_ids"] is None:
             return {"items": [], "next_cursor": None}
+        if runtime_stage != "draft":
+            # Explicit all-off also avoids provider I/O; unknown returned above.
+            if not stage["kb_ids"]:
+                return {"items": [], "next_cursor": None, **metadata}
+        elif not self.source.has_enabled_selection(bot=bot):
+            return {"items": [], "next_cursor": None, **metadata}
         space_id = bot["space_id"]
         page = self.catalog.page_authorized(
             scope=scope,
@@ -90,7 +99,9 @@ class ConversationKnowledgeService:
             cursor=cursor,
             limit=limit,
         )
-        saved = self.source.selections(bot=bot, kb_ids=page["kb_ids"])
+        saved = self.source.selections(bot=bot, kb_ids=page["kb_ids"]) if runtime_stage == "draft" else {
+            kb_id: {"enabled": kb_id in stage["kb_ids"]} for kb_id in page["kb_ids"]
+        }
         enabled = [
             kb_id
             for kb_id in page["kb_ids"]
@@ -123,4 +134,4 @@ class ConversationKnowledgeService:
                 items.append({"kb_id": kb_id, "name": value["name"]})
         # A filtered page may be empty but nonterminal: never walk more grant pages
         # or replace the provider's opaque cursor to fill it server-side.
-        return {"items": items, "next_cursor": page["next_cursor"]}
+        return {"items": items, "next_cursor": page["next_cursor"], **metadata}

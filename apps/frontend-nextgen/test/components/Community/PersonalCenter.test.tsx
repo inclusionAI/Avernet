@@ -208,7 +208,7 @@ describe('CommunityPersonalCenter', () => {
     ).toHaveClass('truncate');
   });
 
-  it('keeps liked topic and reply rows separate while distinguishing their source content', () => {
+  it('keeps liked topic and reply rows separate while distinguishing their source content', async () => {
     const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'LIKED';
     mockedCenter.activityPage = {
@@ -251,10 +251,11 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.getByText('帖子：主题标题')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toBeInTheDocument();
     expect(screen.getByText('回复：这是一个需要完整 hover 展示的比较长回复内容')).toHaveClass('truncate');
-    expect(screen.getByTitle('这是一个需要完整 hover 展示的比较长回复内容')).toHaveAttribute(
-      'title',
-      '这是一个需要完整 hover 展示的比较长回复内容',
-    );
+    // unify-tooltip-antd：正文预览由统一 Tooltip 悬停承载（原原生 title 迁移）
+    await userEvent.setup().hover(screen.getByRole('heading', { name: `回复：这是一个需要完整 hover 展示的比较长回复内容` }));
+    expect(
+      await screen.findByText(/这是一个需要完整 hover 展示的比较长回复内容/, { selector: '[role="tooltip"]' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('主题标题，主题内容')).toBeInTheDocument();
     expect(screen.getByText('共 2 条')).toBeInTheDocument();
   });

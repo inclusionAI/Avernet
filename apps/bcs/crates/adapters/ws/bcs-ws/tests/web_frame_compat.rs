@@ -245,6 +245,7 @@ impl GroupSessionConnectionService for RecordingGroupSessionConnections {
                 actor_id: "human_100001".to_string(),
                 actor_kind: ActorKind::Human,
                 name: Some("Test Human".to_string()),
+                avatar_url: None,
                 role: ParticipantRole::Observer,
                 tags: Vec::new(),
                 mode: ParticipantMode::Present,

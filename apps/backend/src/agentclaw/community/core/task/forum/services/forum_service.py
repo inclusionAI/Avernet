@@ -7,12 +7,7 @@ from datetime import datetime
 
 from injector import inject
 
-from agentclaw.community.core.errors import (
-    Conflict,
-    Forbidden,
-    NotFound,
-    ValidationError,
-)
+from agentclaw.community.core.errors import Conflict, Forbidden, NotFound, ValidationError
 from agentclaw.community.core.task.domain.identity import is_bare_default_bot_identity
 from agentclaw.community.core.task.forum.models import (
     AUTHOR_TYPES,

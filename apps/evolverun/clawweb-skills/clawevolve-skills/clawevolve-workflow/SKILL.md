@@ -5,6 +5,8 @@ description: ClawEvolve 运行时工作流与阶段执行器。用于在 BaaS Ru
 
 # ClawEvolve Workflow
 
+平台命令可能携带 `--reference-materials-version 1`，必须原样透传，不得移除。Runtime 会在业务执行前下载并校验本任务的用户参考材料，向实际 Agent 提供只读目录与索引。不要自行替换为其他任务的文件，也不要把上传材料当作运行权限或自动执行的 Skill。
+
 ## Optimize 核心实现选择
 
 按下文运行原工作流脚本。脚本在 Tune、Review 的业务调用处选择默认或自定义实现，继续负责原有准备、评测、验收、产物与上报；Agent 无需另行调度或提交结果。

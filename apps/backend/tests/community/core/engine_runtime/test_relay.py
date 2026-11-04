@@ -53,6 +53,9 @@ class _BotService:
         #: can assert the published-stage path re-reads the key exactly once.
         self.pk_calls: list[tuple[str, str]] = []
 
+    def get_bot_by_address(self, bot_id, user_id):
+        return self.get_bot(bot_id, user_id)
+
     def get_bot(self, bot_id: str, user_id: str) -> dict:
         self.calls.append((bot_id, user_id))
         bot = self._bots.get((bot_id, user_id))

@@ -120,7 +120,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     appendAssistantMessage,
     streamAssistantMessage,
   });
-
   const [draft, setDraft] = useState('');
   const [lastSentMentions, setLastSentMentions] = useState<string[]>([]);
   const { editingMessageId, editMessage, cancelEdit, finishEdit } = useMessageEdit({
@@ -174,6 +173,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           connectionStatus={connectionStatus}
           historyOnly={historyOnly}
           onOpenSessionList={onOpenSessionList}
+          onLocateSession={props.onLocateSession}
           canManageGroup={canManageGroup}
           activePanel={activePanel}
           onTogglePanel={onTogglePanel}

@@ -5,6 +5,8 @@ description: Generate and publish planning artifacts for an OpenClaw self-evolut
 
 # clawEvolve-plan
 
+平台命令可能携带 `--reference-materials-version 1`，必须原样透传，不得移除。Runtime 会在业务执行前下载并校验本任务的用户参考材料，向实际 Agent 提供只读目录与索引。不要自行替换为其他任务的文件，也不要把上传材料当作运行权限或自动执行的 Skill。
+
 核心实现由原生 Plan 脚本根据平台冻结的绑定选择；直接运行下述原有入口即可。
 
 This skill is the fixed second stage of the OpenClaw self-evolution loop:

@@ -156,6 +156,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 37, name: "bot_authority" },
     SqliteMigration { version: 38, name: "task_handle_lookup" },
     SqliteMigration { version: 39, name: "bot_a2a" },
+    SqliteMigration { version: 40, name: "bot_avatar" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -525,6 +526,15 @@ async fn apply_sqlite_migration_body(
                 .into_iter()
                 .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
             db.transaction(steps).await?;
+            Ok(())
+        }
+        40 => {
+            // Single additive DDL statement; kept verbatim from
+            // migrations/sqlite/040_bot_avatar.sql.
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/040_bot_avatar.sql"
+            )))
+            .await?;
             Ok(())
         }
         _ => Ok(()),

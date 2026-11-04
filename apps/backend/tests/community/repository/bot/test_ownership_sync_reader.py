@@ -50,7 +50,7 @@ def test_read_owner_ignores_missing_space_and_large_roster(world: World) -> None
     )
     reader = SqlOwnershipSyncReadRepository(db)
 
-    assert reader.read_facts(key) == OwnershipFacts(key, "bot-stable", "stable", "B")
+    assert reader.read_facts(key) == OwnershipFacts(key, "bot-stable", "stable", "B", bot_type="service")
     assert reader.page_keys(avernet_tenant="t", env="dev", after_pk=0, limit=100) == (
         key,
     )
@@ -88,12 +88,12 @@ def test_read_facts_is_fresh_after_another_session_commits(db: DatabasePlugin) -
     )
     reader = SqlOwnershipSyncReadRepository(db)
     before = reader.read_facts(key)
-    assert before == OwnershipFacts(key, "bot-stable", "stable", "A")
+    assert before == OwnershipFacts(key, "bot-stable", "stable", "A", bot_type="service")
 
     with avernet_tenant_scope("t"), db.orm_session() as session:
         session.query(BotModel).filter(BotModel.id == 7).update({"owner_id": "B"})
 
-    assert reader.read_facts(key) == OwnershipFacts(key, "bot-stable", "stable", "B")
+    assert reader.read_facts(key) == OwnershipFacts(key, "bot-stable", "stable", "B", bot_type="service")
     assert before.owner_id == "A"
 
 
@@ -118,7 +118,7 @@ def test_reads_only_bot_facts_without_collaborators(db: DatabasePlugin) -> None:
     finally:
         event.remove(Session, "do_orm_execute", record)
 
-    assert facts == OwnershipFacts(key, "bot-stable", "stable", "B")
+    assert facts == OwnershipFacts(key, "bot-stable", "stable", "B", bot_type="service")
     assert page == (key,)
     assert len(statements) == 2
     assert all(state.is_select for state in statements)
@@ -261,3 +261,33 @@ def test_sql_errors_map_to_read_error_and_restore_tenant(
         assert get_current_avernet_tenant() == "caller"
     assert excinfo.value.code == "read_error"
     assert excinfo.value.__cause__ is failure
+
+
+@pytest.mark.parametrize("bot_type,expected", [("personal", "bot-stable:B"), ("service", "bot-stable:original")])
+def test_readers_preserve_type_and_retained_registration_reference(db, bot_type, expected):
+    import json
+
+    from agentclaw.community.core.repository.implementations.bot.manager_sync import SqlManagerSyncReadRepository
+    from agentclaw.community.core.bot_management.ownership_sync.projector import build_snapshot as owner_snapshot
+    from agentclaw.community.core.bot_collaborator.manager_sync.projector import build_snapshot as manager_snapshot
+    key = seed_sync_facts(db, tenant="t", env="dev", bot_pk=7, entity_id="stable", owner_id="B")
+    with avernet_tenant_scope("t"), db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == 7).update({
+            "bot_type": bot_type, "ext": json.dumps({"bcn_provider_bot_ref": "bot-stable:original"}),
+        })
+    ownership = SqlOwnershipSyncReadRepository(db).read_facts(key)
+    managers = SqlManagerSyncReadRepository(db).read_facts(key)
+    assert ownership.bot_type == managers.bot_type == bot_type
+    assert ownership.bcn_provider_bot_ref == managers.bcn_provider_bot_ref == "bot-stable:original"
+    assert owner_snapshot(ownership).bcs_bot_id == manager_snapshot(managers).bcs_bot_id == expected
+
+
+@pytest.mark.parametrize("raw_ext", ["{", "[]", "null"])
+def test_invalid_serialized_metadata_fails_closed(db, raw_ext):
+    from agentclaw.community.core.repository.implementations.bot.manager_sync import SqlManagerSyncReadRepository
+    key = seed_sync_facts(db, tenant="t", env="dev", bot_pk=7, entity_id="stable", owner_id="B")
+    with avernet_tenant_scope("t"), db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == 7).update({"ext": raw_ext})
+    for reader in (SqlOwnershipSyncReadRepository(db), SqlManagerSyncReadRepository(db)):
+        with pytest.raises(SnapshotUnavailable, match="invalid_bot_ext"):
+            reader.read_facts(key)

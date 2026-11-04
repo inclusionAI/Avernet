@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use super::{ActorStatus, EnsureHumanResult, ServiceError, ServiceResult};
 use crate::types::bot_authority::{AuthorityMutation, BotOwnershipView};
+use crate::types::bot_profile::{AvatarChange, BotAvatarMap, ExistingProfileUpdate, ProfileWrite};
 use bcs_domain::Group;
 
 pub use bcs_domain::registry::deserialize_skills;
@@ -527,6 +528,57 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// This avoids the risk of overwriting name/summary with stale or None values
     /// when only a visibility change is needed.
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()>;
+
+    /// Existing-only Bot profile write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_profile_existing`, delegating
+    /// persistence to the repository. Missing/tombstoned targets stay
+    /// `ProfileWrite::Missing` — no INSERT, and never a silent success.
+    /// Unconfigured core implementations fail closed instead of defaulting
+    /// the repo's per-record write contract to a silent success.
+    async fn update_profile_existing(
+        &self,
+        _bot_id: &str,
+        _update: ExistingProfileUpdate,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot profile update is not configured".into(),
+        ))
+    }
+
+    /// Existing-only avatar write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_avatar_existing`. Same
+    /// fail-closed default discipline as
+    /// [`update_profile_existing`](Self::update_profile_existing).
+    async fn update_avatar_existing(
+        &self,
+        _bot_id: &str,
+        _avatar: AvatarChange,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot avatar update is not configured".into(),
+        ))
+    }
+
+    /// Batched avatar URLs for a whole participant result page (bot-avatar
+    /// plan Task 4).
+    ///
+    /// Unlike the repository's bounded `read_avatar_batch`, the core accepts
+    /// the full submitted page: it deduplicates the ids and chunks them into
+    /// store-sized batches, merging each batch's map into one result. The
+    /// query budget stays one repository batch read per chunk; an empty page
+    /// issues no repository call at all. The core does NOT authorize which
+    /// resources are visible — environment isolation, Human-exclusion and
+    /// tombstone-display semantics belong to the repository read. Read
+    /// failures propagate; they are never swallowed into an empty map.
+    ///
+    /// This default is fail-closed and `NoopBotRegistryCoreService` does NOT
+    /// override it, so Noop-wired V1 fixtures fail every list/detail path
+    /// that projects avatars — loudly by design.
+    async fn avatar_urls(&self, _bot_ids: &[String]) -> ServiceResult<BotAvatarMap> {
+        Err(ServiceError::InternalError(
+            "bot avatar url lookup is not configured".into(),
+        ))
+    }
 
     /// DEPRECATED: Hidden mechanism is deprecated. Use `visibility` field instead,
     /// and use [`update_actor_status`](Self::update_actor_status) for the

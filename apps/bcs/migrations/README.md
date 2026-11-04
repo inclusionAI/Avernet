@@ -578,3 +578,12 @@ been migrated by this source change.
 
 See repository-root `docs/specs/a2a/task-bindings-v1.md` for query/write costs and
 `docs/specs/a2a/minimal-card-registration-v1.md` for Card registration/refresh.
+
+## Bot avatar column (MySQL/SQLite 040)
+
+`040_bot_avatar.sql` adds only the nullable `bcs_bots.avatar_url TEXT NULL`
+column in both dialects, keeping the version numbering aligned at 040.
+There is no backfill and no default: existing Bot rows keep NULL, and the
+column is written only when an avatar is stored. Apply remote DDL before
+rolling out binaries that read the column; SQLite bootstrap applies the
+migration automatically on startup. A downgrade may retain the column.

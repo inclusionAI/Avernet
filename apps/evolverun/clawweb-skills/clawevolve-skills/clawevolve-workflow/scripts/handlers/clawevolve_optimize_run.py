@@ -8552,7 +8552,10 @@ def action_auto_tune(args):
     workspace = Path(paths["workspace"])
 
     business_core = select_business_core(args)
+    from clawevolve_runtime.reference_materials import prompt as material_prompt
     prompt = _build_tune_prompt(args, paths, business_input=business_core is not None)
+    if isinstance(prompt, str):
+        prompt += material_prompt()
 
     _mark_step(args, "ensure-tune", "RUNNING")
     tune_timeout = getattr(args, "tune_timeout", TUNE_AGENT_TIMEOUT)
@@ -8629,7 +8632,10 @@ def action_auto_review(args):
     workspace = Path(paths["workspace"])
 
     business_core = select_business_core(args)
+    from clawevolve_runtime.reference_materials import prompt as material_prompt
     prompt = _build_review_prompt(args, paths, business_input=business_core is not None)
+    if isinstance(prompt, str):
+        prompt += material_prompt()
 
     _mark_step(args, "ensure-review", "RUNNING")
     review_timeout = getattr(args, "review_timeout", REVIEW_AGENT_TIMEOUT)
@@ -9847,6 +9853,7 @@ def main():
     parser.add_argument("--optimizer-model", default="", help="model id for tune/review agents")
     parser.add_argument("--tune-model", default="", help="model id for tune agent")
     parser.add_argument("--review-model", default="", help="model id for review agent")
+    parser.add_argument("--reference-materials-version", choices=["1"], default="")
     parser.add_argument("--workspace", help="workspace dir")
     parser.add_argument("--skill-base-dir", help="skills base dir")
     parser.add_argument("--step-id", help="ClawWeb step id")

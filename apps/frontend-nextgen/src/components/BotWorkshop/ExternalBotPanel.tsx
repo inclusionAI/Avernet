@@ -90,7 +90,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
 
   if (externalBots.loading)
     return (
-      <div aria-label="外部 Bot 管理" className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+      <div aria-label="外部 Bot 管理" className="overflow-hidden rounded-[10px] bg-card">
         <Skeleton.Card />
       </div>
     );
@@ -134,7 +134,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
         </Button>
       </div>
       {visibleItems.length ? (
-        <div className="overflow-hidden rounded-[10px] border border-border/60 bg-card">
+        <div className="overflow-hidden rounded-[10px] bg-card">
           <DataTable columns={columns} rows={visibleItems} getRowKey={(bot) => bot.id} ariaLabel="外部 Bot 列表" rowHeight="h-18" />
         </div>
       ) : (

@@ -157,6 +157,9 @@ class CodeContent(ArtifactContent):
     code_base_address: str   # 代码库地址(http(s))
     pr_link: str             # PR 链接(http(s))
     pr_desc: str             # PR 描述(允许空串)
+
+# 2026-11-03 增补:四个分支均继承 ArtifactContent 的通用内容字段
+is_final_artifact: str     # "true" | "false",缺省 "false";是否最终交付产物
 ```
 
 内容分支类**不带 `kind` 字段**——形态的单一事实源是 `TaskArtifact.kind`(3.1)与分支类本身;tagged union 只存在于**序列化形**:content 落库为 `{"kind": "text"|"file"|"url_link"|"code", ...}` 的 tag 前缀 JSON,tag 由序列化器负责——写入时按分支类派发(isinstance),读取时按 tag 选构造类。这样领域模型无重复字段,type 也不靠 `Literal["text"]` 兜护。
@@ -166,6 +169,7 @@ class CodeContent(ArtifactContent):
 - `FileContent` 互斥性在领域构造器校验:`BOT_WORKSPACE` → `file_id` 必须为 None、`storage_id` 做相对路径校验(拒绝绝对路径与 `..` 逃逸,长度上限 512);`SESSION_FILE` → `file_id` 必填,`file_id`/`file_name`/`storage_id` 长度与字符校验;`OBJECT_FILE` → `file_id` 必须为 None,`storage_id` 做对象 key 结构校验(拒绝对 `\`、绝对/`~` 开头、空段/`.`/`..` 段、控制字符;长度沿用 512 上限)——**前缀域归属校验在服务层**(配置依赖,模型层只见结构);
 - `UrlLinkContent`/`CodeContent` 校验:`url`/`code_base_address`/`pr_link` 必须是 http(s) 前缀且长度上限 2048;`type` 为开放字符串(不建受治枚举,业务类型词汇由调用方生态演进;非空,长度上限 64);`code_base_name` 非空;`pr_desc` 允许空串、长度上限 8KB;
 - **信任边界(方案取舍,已显式声明)**:回调上报的引用**只做结构校验,不做归属交叉核验**——上报人(已鉴权的回调发送方)可信,`storage_id`/`file_id` 原样进产物与读侧 Descriptor。风险敞口 = 看板读者可见到上报者提供的会话标识与文件元数据;**字节不因此泄露**(两处读口均为参与者级 ACL)。有限归属核验(如"上报 session 须与节点 assignee/relay 会话相关")列为后续加固项,本期不建;
+- `is_final_artifact` 是四个分支的通用内容字段:**字符串枚举 `"true"|"false"`**(不使用 boolean),报文缺省按 `"false"` 处理;该值随 canonical content 序列化参与 `content_hash`,用于读侧/前端标记最终产物,而非按最后一棒节点推断;
 - 字段里**不出现**:**文件字节的临时访问凭证**——presign、带 token 的下载 URL、object handle、宿主机绝对路径;`file_type` 是引用元数据(供前端挑下载/预览行为),不是字节承诺;文本分支连格式元数据也不带,text 即全部内容。**边界澄清(方案取舍)**:`UrlLinkContent.url` 与 `CodeContent.pr_link`/`code_base_address` 是**产物内容本身**——bot 交付的稳定业务链接(需求条目、语雀文档、PR),不是"文件字节怎么取"的临时能力,不受上述禁令约束,原样入库入 Descriptor。
 
 ### 3.5 血缘 ——(方案取舍)本期只到"作用域 + 创建者"
@@ -176,7 +180,10 @@ class CodeContent(ArtifactContent):
 
 ## 4. 回调上报契约(产物怎么进来)
 
-产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`)。**(2026-10-22 用户定稿,推翻原 event 内方案):`artifacts` 位于报文顶层,与 `trace`/`task_acceptance_result` 平级**——产物是“一次执行的结果清单”而非事件内部细节;携带条件仍是仅 `event_type=EXECUTION_RESULT` 且 `execution_decision=ACCEPTED`(其余组合 to_domain 整体拒绝)。列表 item 为**扁平自描述结构**:每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自为对应分支的 **JSON 对象**(2026-10-22 用户定稿,不再收 JSON 字符串;核心解析对字符串仍容忍,为手动 API 兼容):
+产物信息的上报**只走接力链路**(用户定稿):`POST /api/v1/collaboration/tasks/callback/report`(`adapters/http/task/router.py:463`,两事件合约落点 `:559`)。**(2026-11-03 定稿):`artifacts` 位于报文顶层,与 `trace`/`task_acceptance_result` 平级**——产物是“一次执行的结果清单”而非事件内部细节。携带条件只有两个:
+1. `event_type=EXECUTION_RESULT` 且 `event.execution_decision=ACCEPTED`:普通节点产物转 `TaskNodePatch.artifact_patch`;
+2. 终态 `event_type=PLAN_RESULT` 且 `event=null`(完成任务或不再派发):最后一棒最终产物转 `TaskReportCommand.artifact_patch`。
+带后继计划的 `PLAN_RESULT(event=TaskNode)`、DECLINED 执行结果,以及其它组合携带 `artifacts` 均整体拒绝。列表 item 为**扁平自描述结构**:每个 item 携带产物名、kind、归属字段和**恰好一个**内容字段,四个内容字段互斥、各自为对应分支的 **JSON 对象**(2026-10-22 用户定稿,不再收 JSON 字符串;核心解析对字符串仍容忍,为手动 API 兼容):
 
 ```json
 {
@@ -199,7 +206,8 @@ class CodeContent(ArtifactContent):
         "storage_id": "reports/analysis-report.md",
         "file_type": "text/markdown",
         "file_name": "analysis-report.md",
-        "file_id": null
+        "file_id": null,
+        "is_final_artifact": "false"
       },                                   // BOT_WORKSPACE:storage_id=工作区相对路径(拒绝对路径/~/.. 逃逸),file_id 恒 null
       "url_link_content": null,             // url_link 分支内容对象,如 {"url": "https://…", "type": "dima需求"}
       "code_content": null                  // code 分支内容对象,如 {"code_base_name": "avernet", …}
@@ -217,7 +225,8 @@ class CodeContent(ArtifactContent):
         "storage_id": "sess-xxx",
         "file_type": "application/pdf",
         "file_name": "analysis-report.pdf",
-        "file_id": "f-987"
+        "file_id": "f-987",
+        "is_final_artifact": "false"
       },                                   // SESSION_FILE:storage_id=群聊会话 id,file_id 必填
       "url_link_content": null,
       "code_content": null
@@ -243,7 +252,7 @@ class CodeContent(ArtifactContent):
 
 | 通道 | 行为 |
 |---|---|
-| **relay(/callback/report)** | `ExecutionEventDTO` 顶层新增 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验;`to_domain` 转 `TaskNodePatch.artifact_patch`;只有 `execution_decision=ACCEPTED` 的事件允许携带,**DECLINED 携带即非法**;产物与 `output_patch` 同批生效(写入同一原子变更,见 5.1 relay 发布点) |
+| **relay(/callback/report)** | 报文顶层 optional `artifacts`,item 为**扁平自描述结构**(见上 JSON):`artifact_kind` + 恰好一个 content 字段(互斥),`task_id`/`node_id`/`session_id`/`attempt` 与报文/图上真值交叉校验。`EXECUTION_RESULT+ACCEPTED` 转 `TaskNodePatch.artifact_patch`;终态 `PLAN_RESULT(event=null)` 转 `TaskReportCommand.artifact_patch` 并在任务收口或 HUNG 停止派发时capture。`PLAN_RESULT(event=TaskNode)` 与 DECLINED 携带即非法;产物与图状态变更同批生效(写入同一原子变更,见 5.1 relay 发布点)。relay 回调 `artifacts` 只收用户显式要求的 url_link/code 最终非文本交付与节点 text/url_link/code 非文件交付,file 交付必须经 object-file 上传登记;relay 通道不启用 output 端文本双轨,`output_patch.result` 仅作为节点轨迹归因事实输出,终态 PLAN_RESULT 的任务级最终结论改由顶层 `final_conclusion` 进入 `TaskExecutionGraph.output`,均不是 artifact 来源 |
 | 集中 pull / 技能 HTTP push | **协议不动**:报文不加 artifacts 字段,`artifact_patch` 恒为 None;文本双轨产物照常经由 `update_task_node_info` fold 生效 |
 | BBS | 协议不动(其 output 为 BBS 编排文本),文本双轨照常生效 |
 
@@ -266,7 +275,7 @@ class CodeContent(ArtifactContent):
 发布动作发生在**图变更闭包内部、fold 之后**,从提交前快照取值,保证版本重放安全:
 
 1. **集中通道**:`update_task_node_info` 中 `node.run_info.output.update(patch.output_patch)`(`task_graph_service.py:658`)及 graph 级 `update_task_graph_info`(`:814`)之后,基于 fold 后 output 快照构造 artifact 集(本期集中通道 `patch.artifact_patch` 恒 None——只有 relay 通道携带产物列表,见 §4;集中通道只发文本双轨产物);
-2. **relay 通道**:`apply_relay_report` 的两处写入(`relay_report.py:250` ACCEPTED EXECUTION_RESULT、`:308` completion)之后,在同一 `_mutate_with_version_retry` 闭包内构造;
+2. **relay 通道**:`apply_relay_report` 的三个产物写入点——`ACCEPTED EXECUTION_RESULT`(`TaskNodePatch.artifact_patch`)、终态完成 `PLAN_RESULT(event=null)`(`TaskReportCommand.artifact_patch`)、终态 HUNG/停止派发 `PLAN_RESULT(event=null)`(同一命令级 patch)——均折叠到图状态后在同一 `_mutate_with_version_retry` 闭包内构造;后继 `PLAN_RESULT(event=TaskNode)` 不得携带产物;
 3. 文本产物(双轨)在发布点由 fold 后 output 派生,归约器**独立新增**(capture 语义,不复用也不改动 `_relay_output_value`):
    - `_artifact_text_value(output)`:output 为**单键** `result` / `markdown` / `output` 且值为非空字符串 → 该字符串(必须含 `output` 键:集中 pull/push 与 BBS 三大主通道的文本都以 `{"output": <str>}` 落库,不纳入则双轨形同虚设);产出 `TEXT` 产物(内容原样入 `TextContent.text`,不标注 markdown/plain 格式),每 attempt 至多一条;
    - 与 relay 投影是**超集且互不影响**:relay 的 `graph.output` 聚合口径、`_relay_output_value`(`task_graph_support.py:184-207`)原地不动,可能出现"节点有文本产物、relay 聚合仍投影为 dict"的合法分叉,这是双轨设计的预期形态而非缺陷;
@@ -380,7 +389,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 (**2026-10-27 修订:此 BCS session-file 协调从 dashboard 三个读口移除,改回纯收数据库 manifest——见下文 §7 末注**):
 
 - `TaskNodeDTO`(`adapters/http/task/schemas.py:305`)新增 optional `artifacts: list[TaskArtifactDescriptorDTO]`,由 dashboard 读路径按 `(task_id, node_id)` 读时富化(取该节点全部 attempt 的产物,attempt 倒序)——协议仍是"只转协议",富化在 service 层;
-- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc)/ attempt / creator / created_at`;
+- Descriptor 只含安全字段:`artifact_id / artifact_name / kind / content(kind-tagged 引用元数据:File 分支 storage_type+storage_id+file_name+file_id+file_type;UrlLink 分支 url+type;Code 分支 code_base_name+code_base_address+pr_link+pr_desc;所有分支含 is_final_artifact 字符串枚举)/ attempt / creator / created_at`;
 - 轨迹 HTML(`trajectory_html.py`)的「产物」块按 Descriptor 渲染文件名,不渲染任何 URL/下载链接(前端自拼);
 - **OpenAPI v1 面的精确口径(方案取舍)**:共享的 `graph_to_dto` 同时供内部看板路由与 `GET /openapi/v1/collaboration/tasks/dashboard`(`openapi_v1/task/router.py:111/:135`)使用,`TaskNodeDTO` 加字段即**自动**出现在公开 OpenAPI 响应模型中——本方案接受这一**附加可选字段**的公开可见(与"看板产物清单可见"是同一诉求),不加新端点、不改任何既有字段的语义;OpenAPI 导出快照与相关导出测试在**同一变更内**更新。若评审认为公开面必须零变更,则替代方案是给 openapi_v1 路由派生独立 DTO——本期不选,理由:使读侧工作量翻倍且两条演化路径在阶段二必然合流。
 - **dashboard session-file 协调**:公开
@@ -392,7 +401,8 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
   caller Bearer 的持有者取值与轨迹会话读取一致:`driver_bot_id` 优先、`assignee`
   兜底。
 - 每条 Ready session file 映射成 `FileContent(storage_type=session_file,
-  storage_id=session_id,file_type=mime_type,file_name,file_id)`;
+  storage_id=session_id,file_type=mime_type,file_name,file_id,
+  is_final_artifact="false")`;
   `mime_type` 缺失时使用 `application/octet-stream`,缺 `file_id`/`file_name` 或非
   Ready 行跳过。以**完整 `FileContent` 值**与该 task 的完整数据库 manifest 做
   task-wide 比较:任一字段不同均视为新增;完整相同表示已识别,忽略。单次请求内不同
@@ -535,7 +545,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 
 ### 13.2 上传/下载/列(list 复用)
 
-- `POST /api/v1/collaboration/tasks/artifacts/object-file`(multipart:task_id/node_id/attempt/artifact_name?/file;`get_current_user`,creator=登录 user.id):**一步原子**——图/节点/attempt 交叉校验(与 `add_artifact` 同口径)→ 派生 key → put(失败 502,**无行**)→ `compose_artifact_record`+`append` 登记(幂等)。
+- `POST /api/v1/collaboration/tasks/artifacts/object-file`(multipart:task_id/node_id/attempt/artifact_name?/is_final_artifact?/file,后者的合法值为字符串 ``"true"``/``"false"`` 且缺省 ``"false"``;`get_current_user`,creator=登录 user.id):**一步原子**——图/节点/attempt 交叉校验(与 `add_artifact` 同口径)→ 派生 key → put(失败 502,**无行**)→ `compose_artifact_record`+`append` 登记(幂等)。
 - `GET /api/v1/collaboration/tasks/artifacts/{artifact_id}/content`(同鉴权口径):按 artifact_id 查行 → 非 object_file 行 422 → key 前缀域校验(`{key_prefix}/{row.task_id}/`,跨任务伪造拒绝 422)→ 读对象(FOUND 200 回发字节 + Content-Disposition 文件名;NOT_FOUND 404;FAILED 502)。插件未绑定整个口 503。
 - **list 不新增路由**:OBJECT_FILE 产物天然出现在既有 `GET /artifacts` 与三处 dashboard Descriptor 中;协议层不留 bucket 级浏览(按需再加)。
 - 错误映射(ENVELOPE_ERRORS,列于 TaskError 基类前):413 超上限 / 404 行未知或对象缺失 / 502 存储失败 / 503 未接线;结构/内容失配沿用 `TaskArtifactContentError` 422。
@@ -562,7 +572,7 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **token 校验**:与 `require_relay_attempt` 同款恒时比对——路由透传 `relay_token` 进 `upload_object_file` / `add_artifact`,服务在既有图/节点/attempt 交叉校验的同一位置对 `node.run_info.extend_props.relay_token` 做 `hmac.compare_digest`;失配/缺失 → `TaskStateError("relay execution attempt has expired")` → 既有 409 映射,不新增错误类型。代次轮转(重试/重派发时重新 mint)即自然吊销。
 - **creator 派生**:取图上该节点的 `run_info.assignee`(claim 时绑定的 bot_id)为 creator;`assignee` 为空(节点已被派发 token 但无人认领)→ `TaskStateError`,拒绝无认领上下文的写入。**两写口的用户分支现状行为逐字节不动**——object-file 用户分支照旧 creator=登录 `user.id`(`TaskArtifactObjectFileService` 入参);`add_artifact` 用户分支照旧现状(creator=`assignee or "system"`,从不看登录用户,`artifact_api_service.py:169` 既有契约),故 `POST /artifacts` 的 relay 分支只新增 token fence,creator 派生零改动。
 - **归属交叉校验不动**:表单/JSON 的 `task_id/node_id/attempt` 与图交叉校验(§12.1 口径)在两分支下一致;relay_token 是代次 fence,不替代也不放宽 attempt 快照对齐。`POST /artifacts` 补录口的 `session_id` 归属校验两分支共用。
-- **上传即交付**(用户定稿):relay 分支上传/登记成功 = 产物行落库、面板可见;不要求该产物再进 `EXECUTION_RESULT` 报文 `artifacts` 列表(与 §4 引用上报互不排斥,报了也不重复落行——幂等键不变)。
+- **上传即交付**(用户定稿):relay 分支上传/登记成功 = 产物行落库、面板可见;该 file 不得再进 `EXECUTION_RESULT` / 终态 `PLAN_RESULT` 的回调 `artifacts` 列表。回调 artifacts 对终态 PLAN_RESULT 只承载用户显式要求的 url_link/code 等非文本交付;最终结论文本走顶层 final_conclusion。
 
 ### 14.3 读口不动(用户定稿)
 
@@ -582,3 +592,14 @@ dashboard 作为中间产物发现入口,在返回清单前协调 BCS session fi
 - **信任模型与配额**:relay 字节口信任级与 relay attach/result 口一致——生产网络白名单准入 + 代次 fence 即凭证强度,**不引入 per-node 上传配额/频控**(anti-goal,本期留 max_upload_mb 单笔上限;滥用面与 relay 报文同数量级,超出再按运维证据增设)。
 - **relay 读分支预不铺**(14.3 已列 anti-goal,此处重申为勘定项):bot 拉取上游产物字节的需求一旦出现,走新 spec,不在本缝上悄悄扩。
 
+
+## 16. 增补(2026-11-03,用户定稿):轨迹输出、文件交付与最终产物双通道
+
+本节为 relay 产物上行协议的最新执行语义,覆盖前文与本节冲突的旧表述。
+
+1. **轨迹输出**: `EXECUTION_RESULT.event.output_patch.result` 是节点轨迹归因、效果分析和后续棒决策的事实输出,不是 artifact 来源;服务端不再从该值派生 relay text artifact 行。
+2. **文件交付**: 文件形态节点交付产物与最终交付产物必须经 `POST /api/v1/collaboration/tasks/artifacts/object-file` 一步上传并登记产物行。上传成功即完成产物挂账;不得把同一 file item 再写入 `/callback/report.artifacts`。
+3. **回调非文件交付**: 节点 `EXECUTION_RESULT` 的 `artifacts[]` 只承载 `text/url_link/code` 等非文件交付产物。终态 `PLAN_RESULT(event=null)` 的 `artifacts[]` 只承载用户显式要求的 `url_link/code`,不得携带最终 `text` item;仅存在文件交付时,回调可省略 `artifacts` 或传 `[]`;任何回调携带 file item,本次整体按 422 拒绝。
+4. **默认文件格式**: 用户未显式指定输出格式时,节点交付和最终交付默认生成业务命名的 Markdown 文件;用户显式指定 PDF/CSV 等格式时按指定扩展名上传。
+5. **最终产物与结论**: 最后一棒默认通过 object-file 以 `is_final_artifact="true"` 上传最终 Markdown 文件,该文件是唯一默认最终交付产物。终态 `PLAN_RESULT(event=null)` 必须同时携带顶层 `final_conclusion`;它是面向轨迹归因与效果分析的任务级结论文本,本协议不限制其长度。用户可见回复的长度限制由 task-loop S6 指令约束。服务端把它写入 `TaskExecutionGraph.output["final_conclusion"]`,只用于轨迹追踪与效果分析,不创建最终 `text` artifact。
+6. **命名**: 节点交付产物和最终交付产物的 `artifact_name` 必须是业务用户可读的短标题,建议 `<业务对象> <结论/交付类型>`;禁止数字文件名、内部 ID、attempt、Relay/S1~S6 等无业务语义名称。

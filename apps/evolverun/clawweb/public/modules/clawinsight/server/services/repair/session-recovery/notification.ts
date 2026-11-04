@@ -10,14 +10,49 @@ import { logRepairEvent, repairLogError } from "../common/logging.js";
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
 
+function ownerNotificationEnabled(raw: string, enabled: number, input: Parameters<RecoveryTaskNotifier["notify"]>[0]): boolean {
+  let value;
+  try { value = JSON.parse(raw); }
+  catch { throw new Error("Invalid recovery owner notification JSON"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some(key => key !== "bot_overrides")
+    || value.bot_overrides !== undefined && !Array.isArray(value.bot_overrides)) {
+    throw new Error("Invalid recovery owner notification configuration");
+  }
+  const targets = new Set<string>();
+  let matched: boolean | undefined;
+  for (const item of value.bot_overrides ?? []) {
+    if (!item || typeof item !== "object" || Array.isArray(item)
+      || Object.keys(item).some(key => !["bot_id", "entity_id", "env", "enabled"].includes(key))
+      || typeof item.bot_id !== "string" || !item.bot_id.trim() || item.bot_id !== item.bot_id.trim()
+      || typeof item.entity_id !== "string" || !item.entity_id.trim() || item.entity_id !== item.entity_id.trim()
+      || !["pre", "prod"].includes(item.env) || typeof item.enabled !== "boolean") {
+      throw new Error("Invalid recovery owner notification Bot override");
+    }
+    const key = JSON.stringify([item.bot_id, item.entity_id, item.env]);
+    if (targets.has(key)) throw new Error("Duplicate recovery owner notification Bot override");
+    targets.add(key);
+    if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
+  }
+  return matched ?? (enabled === 1);
+}
+
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   constructor(private readonly sender: Pick<DingTalkNotificationSender, "sendNotification"> | null | undefined,
     private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore) {}
 
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
     const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-    if (!row || row.enabled === 0) return false;
-    if (row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+    if (!row) return false;
+    try {
+      if (row.enabled !== 0 && row.enabled !== 1) throw new Error("Invalid recovery owner notification state");
+      if (!ownerNotificationEnabled(row.config_json, row.enabled, input)) return false;
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_notification", "configuration_invalid", {
+        taskId: input.taskId, botId: input.botId, targetEnvironment: input.targetEnvironment, operation: input.kind, ...repairLogError(error),
+      });
+      return false;
+    }
     if (!this.sender) throw new Error("Notification unavailable");
     const recovered = input.kind === "result" && input.effect === "recovered";
     const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";

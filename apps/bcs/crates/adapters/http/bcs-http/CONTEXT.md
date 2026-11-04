@@ -101,6 +101,20 @@ encode caller identity; route policy declares allowed principals explicitly.
 
 Provider Bot registration and list responses expose the saved optional webhook_url. PATCH maps omitted/null/string to the application endpoint change contract; the application rejects mixing URL and capability writes. URL inheritance is decided in BotCore, not the HTTP adapter.
 
+## Bot avatar wire mapping (bot-avatar plan)
+
+`mapping/bot_profile.rs` translates the protocol presence-aware
+`AvatarField` into the service-api `AvatarChange` transitions: omitted →
+Keep, `""` → Clear, string → Set; wire rejection of `null`/non-strings
+happens at deserialization, in the adapter's DTOs, not in the
+application. Legacy surface freeze (design §5.1): no legacy route
+serializes participant avatars — the PATCH `/groups/{id}` response maps
+the shared V1 `GroupDetail` through an explicit legacy participant DTO
+(`routes/groups/projections.rs`), so the avatar column and any future V1
+participant field cannot leak into legacy JSON; list/detail keep their
+pre-avatar projections. V1 surfaces under `/openapi/v1/collaboration`
+are served by `bcs-api-http` and do carry `avatar_url`.
+
 ## Service Session policy retirement
 
 Service Sessions retain creation, authorization, completion, completion events,

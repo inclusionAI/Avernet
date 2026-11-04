@@ -35,6 +35,7 @@ bcs-storage-api = { workspace = true }
 bcs-test-support = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }

@@ -102,3 +102,45 @@ def knowledge(tmp_path):
         BotKnowledgeScope("bot", "owner", "dev"),
     )
     engine.dispose()
+
+
+@pytest.fixture
+def observation(knowledge):
+    from agentclaw.community.core.bot_knowledge.publication_selection import (
+        BotKnowledgePublicationSelection,
+    )
+    from agentclaw.community.core.repository.implementations.config.bot_common_config import (
+        BotCommonConfigRepository,
+    )
+    from agentclaw.community.core.service_bot.repository.models import (
+        BotPublishModel,
+        PublishStatus,
+    )
+
+    db, _, current, scope = knowledge
+    current.catalog.authorized = ("kb", "kb-b")
+    # Seed with the normal current selection path before becoming a service Bot.
+    current.set_enabled(
+        scope=scope, actor_id="owner", kb_id="kb", enabled=True, expected_revision=0
+    )
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == 1).update({"bot_type": "service"})
+        session.add(
+            BotPublishModel(
+                id=101,
+                source_bot_pk=1,
+                source_bot_id="bot",
+                publish_bot_id="botpub1",
+                name="Bot",
+                owner_id="legacy-owner",
+                status=PublishStatus.BUILDING,
+                version=1,
+                env="dev",
+                permission_owner="owner",
+            )
+        )
+    return (
+        db,
+        BotKnowledgePublicationSelection(db, BotCommonConfigRepository(db)),
+        scope,
+    )

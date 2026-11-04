@@ -35,12 +35,16 @@ class OutboundRuleProvider(Plugin, Protocol):
         owner_id: str = "",
         agent_pass_token: str = "",
         agent_code: str = "",
+        engine_type: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
         extra_properties: dict[str, object] | None = None,
     ) -> OutBoundOperationRule:
         """The full outbound-header rule set for a bot.
 
-        ``bot_type_resolver(bolt_id, owner_id) -> bot_type | None`` lets the impl
+        ``engine_type`` identifies the runtime whose egress is being configured.
+        Implementations may use it for engine-scoped, non-secret routing or
+        observability headers. ``bot_type_resolver(bolt_id, owner_id) -> bot_type
+        | None`` lets the impl
         pick a bot-type-specific policy; impls that need no such split ignore it.
         ``extra_properties`` is a transient, generic envelope resolved by the
         engine strategy. Returns an empty rule where the runtime applies no
@@ -53,8 +57,11 @@ class OutboundRuleProvider(Plugin, Protocol):
         *,
         agent_pass_token: str = "",
     ) -> "OutBoundOperationRule | None":
-        """An identity-authorization-only outbound rule (the teclaw path), or
-        ``None`` when no token / no egress mutation applies."""
+        """The Teclaw outbound rule, or ``None`` when no egress mutation applies.
+
+        Implementations may combine identity authorization with static,
+        Teclaw-scoped observability headers.
+        """
         ...
 
     def build_caller_rule(

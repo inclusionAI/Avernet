@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { PanelHandle } from '@tc-chat/core';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -664,7 +664,7 @@ describe('GroupChatBubble edit action', () => {
 });
 
 describe('GroupChatBubble copy action reveal', () => {
-  it('仅最后一条回复默认展示操作行；用户消息与非末尾回复 hover 时才展示', () => {
+  it('仅最后一条回复默认展示操作行；用户消息与非末尾回复 hover 时才展示', async () => {
     mockBubbleRenders.length = 0;
     const onCopy = jest.fn();
     render(
@@ -707,8 +707,11 @@ describe('GroupChatBubble copy action reveal', () => {
     expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(3);
 
     // 默认隐藏不等于不可用：hover 态只是视觉显隐，按钮始终可触发。
-    fireEvent.click(screen.getByTestId('message-copy-action-m-user-copy').querySelector('button') as HTMLButtonElement);
+    // 等待复制成功反馈，避免异步 setCopyFeedback 离开 act 作用域产生警告。
+    const userCopyAction = screen.getByTestId('message-copy-action-m-user-copy');
+    fireEvent.click(userCopyAction.querySelector('button') as HTMLButtonElement);
     expect(onCopy).toHaveBeenCalledWith('用户问题');
+    expect(await within(userCopyAction).findByRole('button', { name: '已复制' })).toBeInTheDocument();
   });
 });
 

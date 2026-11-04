@@ -42,9 +42,7 @@ function renderItem(
       sessionTab="all"
       onSessionTabChange={jest.fn()}
       favoriteSessionIds={[]}
-      selectedGroupId={null}
       selectedSessionId={null}
-      onSelectGroup={jest.fn()}
       onToggleGroupExpanded={jest.fn()}
       onSelectSession={jest.fn()}
       onToggleFavorite={jest.fn()}

@@ -1,5 +1,17 @@
 # bcs-service-api Context
 
+## Version 2.0.0: avatar source compatibility
+
+The avatar extension adds fields to public Rust structs, including
+`AdminBotOnboardCommand`, `RegisterProviderBotCommand`, `Actor`, `Participant`,
+`SessionParticipant` and Group/Session summaries. Existing external struct
+literals must supply the new fields, so this is a major Rust API version change
+even though the JSON fields are additive and serde accepts their omission.
+Consumers should use `AvatarChange::Keep` for omitted write intent, `None` for
+unknown display avatars, and construct the new participant summary vectors.
+All workspace consumers use path dependencies and rebuild together. HTTP clients
+retain the existing v1 routes, and no additional database migration is required.
+
 `A2aBotManagementService::register_provider_bot` orchestrates Provider-admin
 Card-aware creation using the existing Provider command/response. Its
 `A2aProviderRegistrationCoreService` dependency owns reauthorization and the
@@ -538,13 +550,23 @@ connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mod
 is an internal optional claim copied only from a verified Token, not an HTTP
 parameter. The core checks a present value against current Provider configuration
 before mutations; None preserves historical v2 compatibility. Consumers and test
-fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
+fakes must rebuild against 1.0.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
 binding fallback and then performs channel cleanup; it never accesses the metadata
 repository directly. A missing metadata identity returns None, but storage and
 authorization errors propagate and must not trigger the fallback.
+
+`BotRepoPort` adds the existing-only Bot profile contracts (bot-avatar
+plan, Task 3): `update_profile_existing`/`update_avatar_existing`
+(`ExistingProfileUpdate` over `AvatarChange` Keep/Clear/Set, classified as
+`ProfileWrite::Updated|Missing`) and the bounded `read_avatar_batch`
+(≤256 deduplicated ids, `BotAvatarMap`) for display-face reads. The
+compatibility defaults fail closed ("not configured"); the Memory and
+persistent bot stores implement them over the record's dedicated avatar
+field, with `AvatarChange::Keep` never reaching a storage SET clause and
+tombstoned identities refusing every write.
 
 BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
 for this flow. It is atomic, preserves existing active/deleted identities and
