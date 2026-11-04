@@ -38,7 +38,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
 )
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.frontend_url import (

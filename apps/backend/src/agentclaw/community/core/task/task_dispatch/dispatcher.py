@@ -304,8 +304,7 @@ class TaskDispatcher:
                 # REQ-2 DISPATCH rationale —— 策略 apply 填充,经 ``dataclasses.asdict``
                 # 写入 ``node.run_info.extend_props["_dispatch_rationale"]`` 透给引擎
                 # DISPATCH 闸门(此为唯一 carrier,无 contextvar)。``None``/异常 → 不写
-                # (引擎 gate 防御读取 → ``ext_info=None``)。派发策略不再执行 claim-join
-                # 后置过滤；这里仅透传仍保留的轨迹兼容字段。
+                # (引擎 gate 防御读取 → ``ext_info=None``)。这里仅透传仍保留的轨迹兼容字段。
                 if getattr(result, "rationale", None) is not None:
                     try:
                         node.run_info.extend_props["_dispatch_rationale"] = (
@@ -624,7 +623,7 @@ class TaskDispatcher:
 
                 # Static nodes use the YAML-bound bot directly; skip catalog search
 
-                # and claim-join so dependencies are never dispatched ahead of time
+                # so dependencies are never dispatched ahead of time
 
                 # and the bound bot_id (e.g. strategy_approval/implementation) is
 
@@ -660,7 +659,7 @@ class TaskDispatcher:
 
         type=collaboration → pending_group_formation → form_coop_group。
 
-        不进 dispatcher.dispatch / 不查 catalog / 不做 claim_join,故未 ready 的依赖节点
+        不进 dispatcher.dispatch / 不查 catalog,故未 ready 的依赖节点
 
         (strategy_approval/implementation)不会被提前搜推成 MISS/claim_mode_off,且 YAML 绑定
 
