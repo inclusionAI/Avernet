@@ -98,7 +98,7 @@ describe('BotTable 表格结构', () => {
       'Bot 标签',
       '操作',
     ]);
-    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1132px]');
+    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1088px]');
     expect(screen.getByRole('columnheader', { name: '操作' })).toHaveClass('sticky', 'right-0');
   });
 
@@ -110,7 +110,7 @@ describe('BotTable 表格结构', () => {
     renderTable(longDescriptionBot);
 
     expect(screen.getByRole('columnheader', { name: '描述' })).toBeInTheDocument();
-    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1132px]');
+    expect(screen.getByRole('table', { name: 'Bot 列表' })).toHaveClass('min-w-[1088px]');
   });
 
   test('数据行固定 h-18（dmore 稿 72px）行高并带 hover 反馈', () => {
