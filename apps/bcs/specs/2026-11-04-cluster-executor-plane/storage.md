@@ -49,12 +49,10 @@ majority". (MySQL therefore requires lossless semi-synchronous replication.)
   partition count, in one **table group**, so a fenced transaction stays on
   one partition. Otherwise every fenced write is a distributed (two-phase)
   transaction.
-- New tables get session-keyed primary keys, e.g. `(env, session_id)` for
-  leases. Existing tables with lone auto-increment `id` primary keys cannot
-  be partitioned by session without primary-key changes — DBA work outside
-  item 1.
+- Per-session tables use session-keyed primary keys (e.g. `(env, session_id)`
+  for leases), because a partition key must be part of the primary key.
 - Default isolation is READ COMMITTED; the design relies only on the row lock
   taken by `UPDATE … WHERE fencing_token = n`, which behaves the same.
 - Avoid hot rows (any cluster-wide counter touched per request).
 - Handle unknown commit outcomes during leader switches by reading back
-  ([design §8.4](design.md#84-fenced-writes-d1) rule 5).
+  ([design §5.5](design.md#55-fenced-writes)).

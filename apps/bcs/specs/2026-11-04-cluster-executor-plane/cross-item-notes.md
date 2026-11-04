@@ -1,74 +1,68 @@
-# Cluster Executor Plane — Notes for Sibling Items
+# Cluster Executor Plane — What Sibling Items Must Provide
 
 [简体中文](cross-item-notes.zh-CN.md) · Part of the [cluster executor plane design](design.md)
 
-Recorded so they are not lost; none are built by item 1.
+The executor plane relies on a few properties it does not build itself.
+They are listed here so each sibling item can design for them.
 
-**Item 2 (connections and forwarding)**
+## Item 2 — connections and forwarding
 
-- Relay each bot event to the session's **current** owner, looked up per
-  event (hint + `NOT_OWNER`), never cached for the life of a run.
-- A draining state for sockets; a "please reconnect" control frame (like
-  HTTP/2 `GOAWAY`) supported by the bot plugins.
-- Cluster-wide bot reachability ("where is X connected?"), replacing today's
-  process-local `is_available`.
-- A delivery wait state for "bot reconnecting" (wait, bounded) instead of
-  today's failure after the startup grace.
-- Wake the owners that have queued deliveries when a bot reconnects
-  (peer channel), to keep poll latency out of TTFT.
-- The registry may live in Redis (soft state).
-- Plugin behavior on reconnect differs: the DeepSeek Harness plugin buffers
-  events while disconnected (up to 1,000 events / 16 MiB) and flushes after
-  reconnect; no equivalent buffer was found in the OpenClaw plugin
-  (unverified end to end).
-- Tracking issue [inclusionAI/Avernet#3506](https://github.com/inclusionAI/Avernet/issues/3506)
-  (owner nudge) is superseded by D6's forwarding ([design §9](design.md#9-routing-a-round-to-its-owner-d6)).
+- **Relay each bot event to the session's current owner**, looked up per
+  event (hint cache + `NOT_OWNER` redirect), never remembered for the life of
+  a run. This is what lets a session be handed off without touching the
+  bot's socket.
+- **Cluster-wide bot reachability:** "which node holds bot X's socket?" must
+  be answerable from any node. This registry is soft state (rebuilt when bots
+  reconnect, verified by forwarding), so a fast store such as Redis is fine.
+- **Draining sockets:** a socket on a draining node takes no new work; once
+  its in-flight runs end, the node sends a "please reconnect" control frame
+  (like HTTP/2 `GOAWAY`) and the bot redials elsewhere.
+- **Waiting, not failing:** work for a bot that is reconnecting waits as a
+  durable delivery owned by the session's owner, with a bound, and the owner
+  is woken when the bot is reachable again.
+- **Bots should buffer events while disconnected** and resend them after
+  reconnecting, so a socket drop does not lose a run's output.
 
-**Item 3 (execution correctness)**
+## Item 3 — execution correctness
 
-- `bcs_message_deliveries` already has most of Doc 03's dispatch record
-  (`run_id`, `idempotency_key`, `attempt_no`, per-attempt `request_id`,
-  `may_have_been_sent`, a never-auto-resent `unknown` state, CAS versions).
-  Decide explicitly whether to extend it to the state-machine flow or build
-  `bcs_dispatch_records`, to avoid two overlapping ledgers.
-- Dispatch side-effecting steps with streaming or `return_immediately =
-  true`, so the task id is recorded at once; require side-effecting steps to
-  be answered with a Task (a Message response leaves nothing to query).
-- Consider setting A2A `messageId` = the deterministic `idem_key`, so vanilla
-  agents that dedup by `messageId` (the spec's MAY) benefit for free.
-- Dispatch records must record the response kind; a recorded Message is
-  terminal.
-- The dedup retention window formula includes "lease TTL"; with D5 that is
-  the claim threshold — size it from the same configuration.
-- All dispatch-record writes use the fence builder.
+- **Use the fence step** in every dispatch-record transaction.
+- **Reuse one delivery ledger.** Dispatch intent records should extend the
+  existing per-delivery ledger rather than create a second one with
+  overlapping meaning.
+- **Record the agent's task id immediately:** dispatch side-effecting steps
+  with streaming or `return_immediately = true`, and require them to be
+  answered with a Task (a bare Message leaves nothing to query after a
+  failover). A recorded Message response is terminal.
+- **Make `messageId` the idempotency key** (deterministic per run, step and
+  attempt), so even agents that only dedup on `messageId` benefit.
+- **Size the dedup window from the claim threshold**, which is this design's
+  effective lease TTL.
 
-**Item 4 (BCN A2A profile)**
+## Item 4 — the BCN A2A profile
 
-- State that closing a connection does not cancel a task.
-- Ask agents to stream progress into task artifacts, so a successor's
-  re-subscribe does not leave a token gap.
-- Retention floor for tasks and the key seen-set.
+- Closing a connection must not cancel a task.
+- Agents should stream progress into task artifacts, so a successor that
+  re-subscribes sees no gap.
+- A retention floor for tasks and for the key seen-set.
 
-**Item 5 (PA-facing surface)**
+## Item 5 — the personal-agent surface
 
-- BCN always answers `SendMessage` with a Task; callers use
-  `return_immediately = true` or streaming (a blocking call would be held
-  open for the whole run).
-- Require the PA to **reuse `messageId` on retry**; dedup on
-  `(principal, session_id, messageId)`, atomically, in the shared store.
-  Without a stable client key, exactly-once is impossible on this hop, and
-  downstream dedup cannot help (a duplicate round becomes a new run with new
-  keys).
-- Structure money-spending steps as approvals of server-issued proposals
+- **BCN always answers `SendMessage` with a Task**; callers use
+  `return_immediately = true` or streaming (a blocking call would stay open
+  for the whole run).
+- **The PA must reuse `messageId` when it retries.** BCN dedups on
+  `(caller, session, messageId)` atomically in the shared store. Without a
+  stable client key, exactly-once is impossible on this hop, and downstream
+  dedup cannot help: a duplicate round becomes a new run with new keys.
+- **Make money-spending steps approvals of server-issued proposals**
   ("approve P-123"), which are idempotent by construction.
-- Define what a round arriving during an active run means (input to the run,
-  queued, or rejected as busy).
-- Transports (gRPC, JSON-RPC, REST, SOFA): one protocol-neutral dedup
-  implementation; thin adapters extract the key and principal, hash the
-  normalized request for conflict detection, and map outcomes to native
-  errors. Framework retries (gRPC hedging, SOFA failover) make concurrent
-  and cross-node duplicates normal. SOFA is a custom binding we must specify.
-- Wording for "exactly once": *at-least-once delivery on every hop;
+- **Decide what a round arriving during an active run means:** input to the
+  run, queued, or rejected as busy.
+- **One dedup implementation for every transport** (gRPC, JSON-RPC, REST,
+  SOFA): adapters only extract the key and caller, hash the normalized
+  request for conflict detection, and map outcomes to native errors.
+  Framework retries (gRPC hedging, SOFA failover) make concurrent and
+  cross-node duplicates normal.
+- **Wording for "exactly once":** *at-least-once delivery on every hop;
   effectively-once side effects for profile-verified agents within the dedup
-  retention window; outcomes that cannot be determined are surfaced, never
-  guessed.*
+  window; outcomes that cannot be determined are surfaced, never guessed.*

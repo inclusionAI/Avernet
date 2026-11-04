@@ -55,5 +55,5 @@
   <text x="44" y="408" font-size="11.5" fill="#1c2420">• Until then A starts no new work on it, but still relays events, allows chat.abort for in-flight runs, and answers the bot's own requests.</text>
   <text x="44" y="428" font-size="11.5" fill="#1c2420">• New work for X is never queued at A: it stays a durable delivery row owned by the session's owner, dispatched once X is reachable elsewhere.</text>
   <text x="44" y="448" font-size="11.5" fill="#1c2420">• Then A sends "please reconnect" (or closes); X redials through the LB and lands on a non-draining node.</text>
-  <text x="44" y="476" font-size="11" fill="#b3402e">Not built today: offline bots fail after a 10 s grace; state-machine runs bypass the managed queue; bot availability is a process-local check (item 2).</text>
+  <text x="44" y="476" font-size="11" fill="#b3402e">Requires item 2: per-event relay to the current owner, cluster-wide bot reachability, and a "please reconnect" frame.</text>
 </svg>

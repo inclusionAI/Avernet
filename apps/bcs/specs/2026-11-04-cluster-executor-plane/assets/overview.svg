@@ -69,7 +69,7 @@
 
   <!-- DB -->
   <rect x="40" y="400" width="890" height="170" rx="12" fill="#eef2fa" stroke="#2457a6" stroke-width="1.6"/>
-  <text x="485" y="556" font-size="14" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared HA database (OceanBase / MySQL; SQLite in singlebox) — the only place nodes meet</text>
+  <text x="485" y="556" font-size="14" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared HA database (OceanBase; SQLite in single-node mode) — the only place nodes meet</text>
   <rect x="64" y="414" width="260" height="106" rx="8" fill="#ffffff" stroke="#2457a6"/>
   <text x="194" y="436" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">bcs_node_roster</text>
   <text x="80" y="458" font-size="11" fill="#1c2420">node_id · member_name · state</text>

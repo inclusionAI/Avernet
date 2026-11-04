@@ -31,7 +31,7 @@
   <text x="276" y="306" font-size="11" fill="#5c6a62">COMMIT (successor is warm)</text>
   <rect x="480" y="184" width="210" height="156" rx="8" fill="#ffffff" stroke="#9a6b0a"/>
   <text x="585" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#9a6b0a">Non-resumable step</text>
-  <text x="494" y="230" font-size="11" fill="#1c2420">Provider 2.0 SSE, Message-only</text>
+  <text x="494" y="230" font-size="11" fill="#1c2420">e.g. an SSE stream with no resume,</text>
   <text x="494" y="246" font-size="11" fill="#1c2420">agent: output only on that stream</text>
   <text x="494" y="270" font-size="11.5" font-weight="bold" fill="#9a6b0a">→ finish the step, then hand off</text>
   <text x="494" y="290" font-size="11" fill="#5c6a62">A stays owner meanwhile and</text>

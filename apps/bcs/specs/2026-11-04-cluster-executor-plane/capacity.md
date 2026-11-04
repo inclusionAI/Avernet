@@ -13,10 +13,12 @@
 | Release / transfer | 1 | per drain or rebalance |
 | Inbound round persist | 1 | per round (required by write-before-ack) |
 | Owner pickup of fallback input | 1 indexed query **per node per tick**, never per session | per node per tick |
-| Failure discovery | 1 paginated query per survivor per dead node | per death |
+| Failure discovery | 1 indexed query per survivor per dead node per roster poll (usually empty) | while a node is dead |
 
-These counts become `RecordingDb` regression tests, so a later change cannot
-silently turn a per-node query into a per-session one.
+The rule behind every row: costs scale with **nodes**, never with
+**sessions**, except for work a session actually does. These counts should be
+pinned by tests so a later change cannot turn a per-node query into a
+per-session one.
 
 ## 2. Two scenarios
 
@@ -30,15 +32,13 @@ Little's law: in-flight sessions = arrival rate × average run duration.
 | Binding constraint | none | storage write throughput and volume |
 
 At the 100 k scale: OceanBase with co-partitioning; fewer statements per
-round (the repeated full reads flagged in
-`specs/2026-09-21-nested-fixed-loops/capacity.md`); micro-batching inbound
-writes; persist chunks or final output, not every token; L3 retention and
+round; micro-batching inbound writes; persist chunks or final output, not every token; L3 retention and
 compaction become mandatory; size the tenant by load test. These figures
 are estimates, not measurements.
 
 ## 3. How to replace estimates with measurements
 
-1. Count statements per operation with `RecordingDb`.
+1. Count statements per operation in tests.
 2. Load-test one node against real storage (release build) to find its knee.
 3. Load-test the storage tenant at the measured statement mix.
 4. Kill a node at load to measure the rehydration spike.

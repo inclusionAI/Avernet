@@ -6,12 +6,12 @@
   </defs>
   <rect x="0" y="0" width="960" height="480" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">A fenced write is one transaction: check the token, then write</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">Built from bcs-db-api's scripted transaction; ExecuteChecked aborts the whole script if a step touches the wrong number of rows.</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Step 1 must touch exactly one row; if it doesn't, the whole transaction is rolled back.</text>
 
   <rect x="24" y="74" width="560" height="250" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
-  <text x="44" y="98" font-size="13" font-weight="bold" fill="#2457a6">DbTransaction (one connection, atomic)</text>
+  <text x="44" y="98" font-size="13" font-weight="bold" fill="#2457a6">One transaction (atomic)</text>
   <rect x="44" y="112" width="520" height="92" rx="8" fill="#e3f0e9" stroke="#157a55"/>
-  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · ExecuteChecked(expected_affected_rows = 1)</text>
+  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · check the token (must affect exactly 1 row)</text>
   <text x="60" y="156" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420">UPDATE bcs_task_leases SET write_seq = write_seq + 1</text>
   <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE env = ? AND session_id = ? AND fencing_token = :mine </text>
   <text x="60" y="194" font-size="10.5" fill="#5c6a62">verifies the token AND takes the lease-row lock</text>
@@ -29,7 +29,7 @@
   <text x="626" y="180" font-size="10.5" fill="#5c6a62">write_seq also tells a handoff successor what changed</text>
   <rect x="610" y="206" width="326" height="118" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
   <text x="626" y="230" font-size="13" font-weight="bold" fill="#b3402e">Token is stale (someone claimed S)</text>
-  <text x="626" y="252" font-size="11.5" fill="#1c2420">step 1 touches 0 rows → whole script rolls back</text>
+  <text x="626" y="252" font-size="11.5" fill="#1c2420">step 1 touches 0 rows → whole transaction rolls back</text>
   <text x="626" y="274" font-size="11.5" fill="#1c2420">caller gets LeaseLost →</text>
   <text x="626" y="292" font-size="11.5" font-weight="bold" fill="#b3402e">stop driving S, evict it, never retry</text>
   <line x1="584" y1="160" x2="606" y2="140" stroke="#5c6a62" marker-end="url(#ar)"/>
