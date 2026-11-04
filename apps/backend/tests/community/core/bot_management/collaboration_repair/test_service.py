@@ -188,6 +188,7 @@ async def test_managers_replacement_uses_fresh_facts(repair_case):
         "e",
         CURRENT_OWNER,
         (CollaboratorFact("updated-1", "member", True),),
+        bot_type="service",
     )
     repair_case.managers_reader.read_facts.return_value = fresh
     report = await repair_case.service.repair(repair_case.command)
@@ -373,8 +374,8 @@ async def test_fresh_committed_owner_is_adopted_and_repair_continues():
     fresh_owner = "owner-b"
     case = make_repair_case(
         facts=facts,
-        ownership_facts=OwnershipFacts(KEY, "b", "e", fresh_owner),
-        manager_facts=SyncFacts(KEY, "b", "e", fresh_owner, ()),
+        ownership_facts=OwnershipFacts(KEY, "b", "e", fresh_owner, bot_type="service"),
+        manager_facts=SyncFacts(KEY, "b", "e", fresh_owner, (), bot_type="service"),
     )
     report = await case.service.repair(case.command)
     (snapshot,) = [
@@ -521,7 +522,7 @@ async def test_profile_env_gate_precondition_becomes_item_failure(repair_case):
 
 @pytest.mark.asyncio
 async def test_owner_drift_after_ownership_write_skips_stale_managers(repair_case):
-    drifted = SyncFacts(KEY, "b", "e", "owner-newer", ())
+    drifted = SyncFacts(KEY, "b", "e", "owner-newer", (), bot_type="service")
     repair_case.managers_reader.read_facts.return_value = drifted
     report = await repair_case.service.repair(repair_case.command)
 
@@ -541,7 +542,7 @@ async def test_owner_drift_after_ownership_write_skips_stale_managers(repair_cas
 
 @pytest.mark.asyncio
 async def test_owner_drift_with_no_caller_keeps_not_applicable(repair_case):
-    drifted = SyncFacts(KEY, "b", "e", "owner-newer", ())
+    drifted = SyncFacts(KEY, "b", "e", "owner-newer", (), bot_type="service")
     repair_case.managers_reader.read_facts.return_value = drifted
     repair_case.reader.read_facts.return_value = default_repair_facts(caller=None)
     report = await repair_case.service.repair(repair_case.command)
@@ -623,7 +624,7 @@ async def test_ownership_facts_error_raises_before_any_write(repair_case):
 async def test_ownership_identity_unresolved_mid_flight_raises(repair_case):
     """A stable address that moved between reads is an identity error."""
     repair_case.ownership_reader.read_facts.return_value = OwnershipFacts(
-        KEY, "b", "e2", CURRENT_OWNER
+        KEY, "b", "e2", CURRENT_OWNER, bot_type="service"
     )
     with pytest.raises(
         RepairFactsError, match="collaboration_bot_identity_unresolved"
@@ -635,7 +636,7 @@ async def test_ownership_identity_unresolved_mid_flight_raises(repair_case):
 @pytest.mark.asyncio
 async def test_managers_identity_unresolved_mid_flight_reports_failure(repair_case):
     repair_case.managers_reader.read_facts.return_value = SyncFacts(
-        KEY, "b", "e2", CURRENT_OWNER, ()
+        KEY, "b", "e2", CURRENT_OWNER, (), bot_type="service"
     )
     report = await repair_case.service.repair(repair_case.command)
     assert _items(report)["managers"] == (
@@ -654,7 +655,7 @@ async def test_foreign_manager_facts_are_identity_not_benign_drift(repair_case):
     ``skipped_dependency``/owner_drift on ours.
     """
     repair_case.managers_reader.read_facts.return_value = SyncFacts(
-        KEY, "b", "e2", "owner-newer", ()
+        KEY, "b", "e2", "owner-newer", (), bot_type="service"
     )
     report = await repair_case.service.repair(repair_case.command)
     assert _items(report)["managers"] == (
@@ -703,7 +704,7 @@ async def test_empty_owner_only_roster_is_a_successful_repair(repair_case):
     empty replace is simply success.
     """
     repair_case.managers_reader.read_facts.return_value = SyncFacts(
-        KEY, "b", "e", CURRENT_OWNER, ()
+        KEY, "b", "e", CURRENT_OWNER, (), bot_type="service"
     )
     report = await repair_case.service.repair(repair_case.command)
     (snapshot,) = [

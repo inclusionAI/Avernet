@@ -236,7 +236,7 @@ class Settings(Module):
         )
         binder.bind(
             OwnershipSyncReadRepository,
-            to=_reader(OwnershipFacts(KEY, "b", "e", CURRENT_OWNER)),
+            to=_reader(OwnershipFacts(KEY, "b", "e", CURRENT_OWNER, bot_type="service")),
             scope=singleton,
         )
         binder.bind(

@@ -133,6 +133,7 @@ def default_manager_facts(
             CollaboratorFact("ineligible", "member", False),
             CollaboratorFact("collab-1", "member", True),
         ),
+        bot_type="service",
     )
 
 
@@ -194,7 +195,11 @@ def make_repair_case(
     if ownership_facts is None:
         bot_id, entity_id = split_stable(stable)
         ownership_facts = OwnershipFacts(
-            key, bot_id, entity_id, effective_owner
+            key,
+            bot_id,
+            entity_id,
+            effective_owner,
+            bot_type="service",
         )
 
     reader = Mock(spec=CollaborationRepairReadRepository)
