@@ -23,7 +23,7 @@ class CardWrite(BaseModel):
 
 class Saved(BaseModel):
     saved: Literal[True] = True
-    saved_revision: int
+    card_version: int
 
 
 class Deleted(BaseModel):
@@ -33,20 +33,30 @@ class Deleted(BaseModel):
 class CardDetails(BaseModel):
     card: dict[str, JsonValue]
     resource_type: Literal["agent", "group"]
-    saved_revision: int
+    card_version: int
 
 
 class CardStatus(BaseModel):
+    # Translate internal synchronization names only at the HTTP boundary.
     agent_id: str
-    saved_revision: int
+    card_version: int = Field(validation_alias="saved_revision")
     deleted: bool
-    prepared: bool
-    preparation_error: str
+    doc_ready: bool = Field(
+        validation_alias="prepared", description="当前 Card 版本的 Doc 是否已生成"
+    )
+    doc_error: str = Field(
+        validation_alias="preparation_error", description="当前索引版本的 Doc 构建错误"
+    )
     instance_id: str
     environment: str
     index_key: str
-    local_applied_revision: int
-    local_error: str
+    indexed_card_version: int = Field(
+        validation_alias="local_applied_revision",
+        description="当前实例最近成功同步的 Card 版本；不是实时查询 Qdrant",
+    )
+    index_error: str = Field(
+        validation_alias="local_error", description="当前实例的索引同步错误"
+    )
 
 
 class ErrorBody(BaseModel):
@@ -90,7 +100,7 @@ def create_card_router(
             raise HTTPException(400, "invalid Card management metadata") from error
         except Exception as error:
             raise HTTPException(503, "Card persistence unavailable") from error
-        return Saved(saved_revision=row.revision)
+        return Saved(card_version=row.revision)
 
     @router.delete("/{agent_id}", status_code=202, response_model=Deleted)
     async def delete(
@@ -139,7 +149,7 @@ def create_card_router(
         return CardDetails(
             card=business_card(row.card),
             resource_type=row.card.resource_type,
-            saved_revision=row.revision,
+            card_version=row.revision,
         )
 
     return router
