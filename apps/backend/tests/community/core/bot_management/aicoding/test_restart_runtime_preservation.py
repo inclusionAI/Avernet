@@ -23,6 +23,7 @@ async def test_admission_keeps_old_runtime_active(setup):
     assert accepted['binding_id'] == 7
     assert accepted['restart']['status'] == 'RUNNING'
     assert s.repo.bot['ext']['start_status'] == 'SUCCEEDED'
+    assert s.repo.bot['ext']['unrelated'] == {'keep': True}
     s.service.restart_bot.assert_not_called()
 
 
@@ -33,6 +34,8 @@ async def test_backup_veto_keeps_runtime_ready_and_reports_operation_failure(set
     s.repo.bot['ext'].update(start_status='SUCCEEDED', start_message='ready')
     s.repo.bot['template_type'] = template
     await submit(s)
+    # An unrelated JSON writer racing the transition must survive the CAS retry.
+    s.repo.conflict = True
     mock_lifecycle(s, backup_error=RestartBackupBlocked('backup_failed'))
     assert isinstance(s.handler.handle(task(s).payload), Fail)
     view = s.service.get_bot('b', 'o')
@@ -41,6 +44,8 @@ async def test_backup_veto_keeps_runtime_ready_and_reports_operation_failure(set
     assert s.binding['status'] == 'ACTIVE'
     assert view['ext']['start_status'] == 'SUCCEEDED'
     assert view['ext']['start_message'] == 'ready'
+    assert view['ext']['unrelated'] == {'keep': True}
+    assert view['ext']['concurrent'] == 1
     assert is_bot_ready(view)
     progress = s.strategy.get_restart_status(ext=view['ext'])
     assert progress['status'] == 'FAILED'
@@ -102,7 +107,10 @@ async def test_explicit_new_published_attempt_does_not_reuse_failed_receipt(publ
     from tests.community.core.bot_management.aicoding.test_restart_backup import partial_response
 
     svc, _, baas, build, record = published
+    record.ext.setdefault('restart', {})['custom'] = {'keep': [1, 2]}
     first = svc.restart_bot(1, 'operator')['operation_id']
+    assert record.ext['unrelated'] == {'keep': True}
+    assert record.ext['restart']['custom'] == {'keep': [1, 2]}
     execute = executor([response('failed', operation_id=first)])
     baas.post_bots_api = Mock(side_effect=lambda **kw: execute(kw['payload']['cmd']))
     assert not (await svc.execute_restart(1, 'online', 'operator', operation_id=first))['success']
@@ -113,12 +121,16 @@ async def test_explicit_new_published_attempt_does_not_reuse_failed_receipt(publ
     second = svc.restart_bot(1, 'operator')['operation_id']
     assert second != first
     assert record.ext['restart']['phase'] == 'QUEUED'
+    assert record.ext['unrelated'] == {'keep': True}
+    assert record.ext['restart']['custom'] == {'keep': [1, 2]}
     assert svc.sync_restart_progress(1).restart['status'] == 'RUNNING'
     execute = executor([partial_response(operation_id=second)] * 3)
     baas.post_bots_api.side_effect = lambda **kw: execute(kw['payload']['cmd'])
     build.upgrade_async = AsyncMock(return_value={'success': True, 'publish_id': 902})
     assert (await svc.execute_restart(1, 'online', 'operator', operation_id=second))['success']
     assert record.status == 'success'
+    assert record.ext['unrelated'] == {'keep': True}
+    assert record.ext['restart']['custom'] == {'keep': [1, 2]}
     assert resolve_published_restart_status(record, progress={'status': 'SUCCESS'})['status'] == 'SUCCEEDED'
 
 
