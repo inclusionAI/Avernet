@@ -134,9 +134,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                     }}
                   >
                     {canGeneralConfig ? (
-                      '通用配置'
+                      '公开设置'
                     ) : (
-                      <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
+                      <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>公开设置</ActionHelp>
                     )}
                   </Button>
                 ) : null}

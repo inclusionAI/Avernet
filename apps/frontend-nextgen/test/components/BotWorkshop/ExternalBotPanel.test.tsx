@@ -24,10 +24,10 @@ jest.mock('@/components/Workspace/IdentitySelector/BotRegistrationDialog', () =>
 
 afterEach(() => jest.resetAllMocks());
 
-it('外部 Bot 的通用配置入口明确使用外部配置模式', async () => {
+it('外部 Bot 的公开设置入口明确使用外部配置模式', async () => {
   jest.mocked(externalBotService.list).mockResolvedValue([{ id: 'external-1', name: '外部助手' }]);
   render(<ExternalBotPanel active />);
-  fireEvent.click(await screen.findByRole('button', { name: '通用配置' }));
+  fireEvent.click(await screen.findByRole('button', { name: '公开设置' }));
   expect(screen.getByText('外部 Bot 配置')).toBeInTheDocument();
 });
 

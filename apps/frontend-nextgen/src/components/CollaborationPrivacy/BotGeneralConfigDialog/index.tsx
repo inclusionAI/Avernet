@@ -1,5 +1,5 @@
 /**
- * BotWorkshop「通用配置」弹窗（collab-permission-entry-migration）：
+ * BotWorkshop「公开设置」弹窗（collab-permission-entry-migration）：
  * Bot管理列表行「更多」菜单入口，按单个 Bot 维度配置协作权限（发布审批 / Bot 可见性 / Bot 好友审批 / 协作能力）。
  * 数据面经 useCollaborationPrivacy({ fixedBotId }) 走 activeBot 按需加载；分组组件与协作权限页面共享。
  * 发布审批组仅 internal × 团队空间 Bot 渲染，并通过 lifecycle/approval OpenAPI 持久化；
@@ -46,7 +46,7 @@ const sectionCardClass = 'rounded-xl border border-border/60 bg-card px-5 py-4';
 
 function DialogLoadingState() {
   return (
-    <div aria-label="正在加载通用配置" className={sectionCardClass}>
+    <div aria-label="正在加载公开设置" className={sectionCardClass}>
       <Skeleton.Card />
     </div>
   );
@@ -97,7 +97,7 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
     >
       <ModalContent size="xl">
         <ModalHeader>
-          <ModalTitle>通用配置</ModalTitle>
+          <ModalTitle>公开设置</ModalTitle>
           <ModalDescription>管理该 Bot 在 BCN 网络中的协作状态及好友审批策略。</ModalDescription>
         </ModalHeader>
         {/* 身份带：全弹窗唯一填充面（bg-muted/40），锚定「这是哪个 Bot 的配置」；左缘与下方分区卡片内容对齐。 */}
@@ -133,7 +133,7 @@ export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: 
         ) : privacy.error ? (
           <div className={sectionCardClass}>
             <Empty
-              title="通用配置加载失败"
+              title="公开设置加载失败"
               description={privacy.error}
               icon={<ShieldCheck className="h-5 w-5" aria-hidden />}
               action={
