@@ -307,7 +307,7 @@ jobs:
   backend:
     name: Backend unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 25
     env:
       # PR: compare against the checked-out merge commit's exact base tree.
       # push/dispatch: compare against dev (repo default branch) instead.
@@ -358,16 +358,26 @@ jobs:
           enable-cache: true
           cache-dependency-glob: apps/backend/uv.lock
 
-      - name: Run unit tests with coverage
+      - name: Run unit tests and Legacy Skill compatibility gates
         if: steps.changes.outputs.skip != 'true'
-        # ci_test.sh runs pytest with coverage and enforces the case-pass-rate /
-        # line-coverage / changed-line-coverage gates via scripts/ci/report_check.py.
-        run: bash scripts/ci_test.sh --base "$BACKEND_BASE_REF"
-
-      - name: Enforce Legacy Skill compatibility gate
-        if: steps.changes.outputs.skip != 'true'
-        working-directory: ${{ github.workspace }}
-        run: bash singlebox/ci/legacy_skill_compatibility.sh
+        # Install once before running both independent gates; both must pass.
+        # Running them together preserves the job's bounded execution time.
+        shell: bash
+        run: |
+          uv sync --frozen
+          set +e
+          BACKEND_CI_SKIP_INSTALL=1 bash scripts/ci_test.sh --base "$BACKEND_BASE_REF" &
+          unit_pid=$!
+          UV_NO_SYNC=1 bash ../../singlebox/ci/legacy_skill_compatibility.sh &
+          legacy_pid=$!
+          wait "$unit_pid"
+          unit_status=$?
+          wait "$legacy_pid"
+          legacy_status=$?
+          if [ "$unit_status" -ne 0 ] || [ "$legacy_status" -ne 0 ]; then
+            echo "Backend unit gate: $unit_status; Legacy Skill gate: $legacy_status" >&2
+            exit 1
+          fi
 
       - name: Upload backend test results
         if: always() && steps.changes.outputs.skip != 'true'
