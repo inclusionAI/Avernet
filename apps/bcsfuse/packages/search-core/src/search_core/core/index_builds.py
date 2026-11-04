@@ -130,13 +130,13 @@ class IndexBuildService:
 
         try:
             sources = list(self._sources(renew))
-            total = len(sources)
+            total = sum(not deleted for _, _, deleted in sources)
             with self.embedding_factory(
                 cfg.embedding_model, cfg.embedding_dimension
             ) as model:
                 if model.dimension != cfg.embedding_dimension:
                     raise ValueError("build model dimension mismatch")
-                for key, revision in sources:
+                for key, revision, deleted in sources:
                     if stop is not None and stop.is_set():
                         self.builds.finish(
                             cfg.build_id, token, "pending", done, total, ""
@@ -152,16 +152,19 @@ class IndexBuildService:
                             self.source.rebuild(key, cfg, model, self.lease_seconds)
                         except IndexBuildConflict:
                             continue  # Updated source or another producer; next pass retries.
-                    done += 1
+                    done += int(not deleted)
             # Recount against source revisions, not just work attempted.
             done, total = 0, 0
-            for key, revision in self._sources(renew):
+            all_current = True
+            for key, revision, deleted in self._sources(renew):
                 renew()
-                total += 1
-                done += int(
-                    self.source.prepared_revision(cfg.index_key, key) == revision
-                )
-            status = "completed" if done == total else "pending"
+                current = self.source.prepared_revision(cfg.index_key, key) == revision
+                all_current = all_current and current
+                if not deleted:
+                    total += 1
+                    done += int(current)
+            # Deletion work must finish even though it is excluded from counters.
+            status = "completed" if all_current else "pending"
             if not self.builds.finish(cfg.build_id, token, status, done, total, ""):
                 return
             logger.info(

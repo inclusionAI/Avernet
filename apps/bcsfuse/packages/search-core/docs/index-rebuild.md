@@ -22,7 +22,7 @@ import TC, Alipay, a platform SDK or an application Card model.
 factory, `conversion_version` and `filter_fields`. The source interface has three
 operations:
 
-- `page(after, limit)`: sorted source IDs and revisions, including deletion records.
+- `page(after, limit)`: sorted `(source_id, revision, deleted)` tuples, including deletion records. `deleted` is operational state, not a business Card field.
 - `prepared_revision(index_key, source_id)`: the source revision already published
   in this generation, or `None` when no artifact exists.
 - `rebuild(source_id, config, model, lease_seconds)`: prepare and atomically publish
@@ -33,6 +33,17 @@ The service reuses matching published revisions and verifies current source
 revisions before marking a build completed. The model factory is a context manager
 receiving model name and dimension; it owns model-client cleanup. Configuration
 models use Pydantic, available through the package's `models` extra.
+
+`total_count` counts nondeleted sources in the build pass; `completed_count`
+counts those with a matching published source revision. Final verification
+refreshes both counts, excluding sources deleted during the build. Tombstones
+are still processed and must be current before a task can complete: an all-deleted
+source set finishes as `completed` with `0/0`, without embedding deleted sources.
+The counts are saved task progress, not current Qdrant inventory. Completed tasks
+are not recounted after later source changes. Previously completed task records
+retain their historical counts; this counting rule applies to subsequent build runs.
+Hosts implementing `IndexBuildSource.page` must provide the operational deletion
+flag along with each ID and revision.
 
 Generation builds should rerun business conversion and reuse vectors only when
 the model/dimension key and resulting search-text hash match a valid stored

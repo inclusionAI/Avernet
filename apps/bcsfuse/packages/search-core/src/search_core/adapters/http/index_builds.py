@@ -27,8 +27,12 @@ class BuildStatus(BaseModel):
     conversion_version: str
     filter_fields: tuple[str, ...]
     status: str
-    completed_count: int | None = None
-    total_count: int | None = None
+    completed_count: int | None = Field(
+        default=None, description="本次构建已完成的未删除 Card 数量；不是实时索引数量"
+    )
+    total_count: int | None = Field(
+        default=None, description="本次构建的未删除 Card 总数；删除记录仍处理但不计数"
+    )
     error_code: str
 
 
