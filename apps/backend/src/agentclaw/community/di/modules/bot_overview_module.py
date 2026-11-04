@@ -14,7 +14,10 @@ from agentclaw.community.core.bot_overview.engines.aicoding import (
 )
 from agentclaw.community.core.bot_overview.provider import BotOverviewProviderRegistry
 from agentclaw.community.core.bot_overview.service import BotOverviewService
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotRepository,
+    TemplateRepository,
+)
 
 
 class BotOverviewModule(Module):
@@ -22,9 +25,12 @@ class BotOverviewModule(Module):
 
     @singleton
     @provider
-    def provide_bot_overview_provider_registry(self) -> BotOverviewProviderRegistry:
+    def provide_bot_overview_provider_registry(
+        self,
+        template_repo: TemplateRepository,
+    ) -> BotOverviewProviderRegistry:
         registry = BotOverviewProviderRegistry()
-        aicoding = AICodingBotOverviewProvider()
+        aicoding = AICodingBotOverviewProvider(template_repo=template_repo)
         registry.register(AICODING_ENGINE_TYPE, aicoding)
         registry.register(CLAUDE_CODE_ENGINE_TYPE, aicoding)
         return registry
