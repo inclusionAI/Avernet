@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2457a6"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#157a55"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="600" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Cluster executor plane: who talks to whom</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">North-south traffic goes through the load balancer; east-west traffic goes node to node at advertise_addr.</text>
+
+  <!-- PA and LB -->
+  <rect x="40" y="80" width="170" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="125" y="102" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Personal agent</text>
+  <text x="125" y="119" font-size="11" text-anchor="middle" fill="#5c6a62">A2A SendMessage / stream</text>
+  <rect x="290" y="80" width="170" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="375" y="102" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Load balancer</text>
+  <text x="375" y="119" font-size="11" text-anchor="middle" fill="#5c6a62">any ready node</text>
+  <line x1="210" y1="105" x2="286" y2="105" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <line x1="375" y1="130" x2="160" y2="196" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="300" y="168" font-size="11" fill="#5c6a62">north-south</text>
+
+  <!-- Nodes -->
+  <rect x="40" y="200" width="230" height="130" rx="10" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="155" y="224" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">Node B — entry node</text>
+  <text x="56" y="248" font-size="11.5" fill="#1c2420">1. hint cache or HRW(S) → guess A</text>
+  <text x="56" y="266" font-size="11.5" fill="#1c2420">2. forward the round to A</text>
+  <text x="56" y="284" font-size="11.5" fill="#1c2420">3. proxy A's token stream to the PA</text>
+  <text x="56" y="310" font-size="11" fill="#5c6a62">no DB read on this path</text>
+
+  <rect x="365" y="200" width="250" height="130" rx="10" fill="#e3f0e9" stroke="#157a55" stroke-width="1.6"/>
+  <text x="490" y="224" font-size="14" font-weight="bold" text-anchor="middle" fill="#157a55">Node A — owner of session S</text>
+  <text x="381" y="248" font-size="11.5" fill="#1c2420">holds S's lease (token n) in memory</text>
+  <text x="381" y="266" font-size="11.5" fill="#1c2420">S is warm (episode)</text>
+  <text x="381" y="284" font-size="11.5" fill="#1c2420">every durable write for S is fenced</text>
+  <text x="381" y="310" font-size="11" fill="#5c6a62">drives runs, dispatches steps</text>
+
+  <rect x="700" y="200" width="230" height="130" rx="10" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="815" y="224" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">Node C — socket holder</text>
+  <text x="716" y="248" font-size="11.5" fill="#1c2420">bot X's WebSocket landed here</text>
+  <text x="716" y="266" font-size="11.5" fill="#1c2420">relays X's events to the</text>
+  <text x="716" y="284" font-size="11.5" fill="#1c2420">session's current owner (item 2)</text>
+  <text x="716" y="310" font-size="11" fill="#5c6a62">transport only, owns nothing</text>
+
+  <!-- east-west arrows -->
+  <line x1="270" y1="250" x2="361" y2="250" stroke="#2457a6" stroke-width="1.8" marker-end="url(#ab)"/>
+  <line x1="361" y1="290" x2="274" y2="290" stroke="#2457a6" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ab)"/>
+  <text x="316" y="242" font-size="10.5" text-anchor="middle" fill="#2457a6">round</text>
+  <text x="316" y="306" font-size="10.5" text-anchor="middle" fill="#2457a6">tokens</text>
+  <line x1="615" y1="250" x2="696" y2="250" stroke="#2457a6" stroke-width="1.8" marker-end="url(#ab)"/>
+  <line x1="696" y1="290" x2="619" y2="290" stroke="#2457a6" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ab)"/>
+  <text x="656" y="242" font-size="10.5" text-anchor="middle" fill="#2457a6">dispatch</text>
+  <text x="656" y="306" font-size="10.5" text-anchor="middle" fill="#2457a6">events</text>
+
+  <!-- supply agents -->
+  <rect x="740" y="80" width="190" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="835" y="102" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Bot X (dial-in)</text>
+  <text x="835" y="119" font-size="11" text-anchor="middle" fill="#5c6a62">opened a WebSocket to BCS</text>
+  <line x1="815" y1="134" x2="815" y2="196" stroke="#5c6a62" stroke-width="1.6" marker-start="url(#ar)" marker-end="url(#ar)"/>
+  <rect x="500" y="80" width="200" height="50" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="600" y="102" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">Provider / A2A agent</text>
+  <text x="600" y="119" font-size="11" text-anchor="middle" fill="#5c6a62">BCS dials out to it</text>
+  <line x1="560" y1="196" x2="580" y2="134" stroke="#5c6a62" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- DB -->
+  <rect x="40" y="400" width="890" height="170" rx="12" fill="#eef2fa" stroke="#2457a6" stroke-width="1.6"/>
+  <text x="485" y="556" font-size="14" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared HA database (OceanBase / MySQL; SQLite in singlebox) — the only place nodes meet</text>
+  <rect x="64" y="414" width="260" height="106" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="194" y="436" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">bcs_node_roster</text>
+  <text x="80" y="458" font-size="11" fill="#1c2420">node_id · member_name · state</text>
+  <text x="80" y="475" font-size="11" fill="#1c2420">last_heartbeat_at · advertise_addr</text>
+  <text x="80" y="500" font-size="10.5" fill="#5c6a62">advisory: membership, placement</text>
+  <rect x="352" y="414" width="260" height="106" rx="8" fill="#e3f0e9" stroke="#157a55" stroke-width="1.6"/>
+  <text x="482" y="436" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">bcs_task_leases</text>
+  <text x="368" y="458" font-size="11" fill="#1c2420">session_id · node_id · fencing_token</text>
+  <text x="368" y="475" font-size="11" fill="#1c2420">expires_at · write_seq</text>
+  <text x="368" y="500" font-size="10.5" fill="#157a55">authoritative: who owns each session</text>
+  <rect x="640" y="414" width="266" height="106" rx="8" fill="#ffffff" stroke="#2457a6"/>
+  <text x="773" y="436" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#1c2420">Session data</text>
+  <text x="656" y="458" font-size="11" fill="#1c2420">rounds · runs · node runs · checkpoints</text>
+  <text x="656" y="475" font-size="11" fill="#1c2420">deliveries / dispatch records</text>
+  <text x="656" y="500" font-size="10.5" fill="#5c6a62">written only through the fence</text>
+
+  <line x1="155" y1="330" x2="155" y2="410" stroke="#5c6a62" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+  <text x="163" y="372" font-size="10.5" fill="#5c6a62">heartbeat (every node)</text>
+  <line x1="470" y1="330" x2="470" y2="410" stroke="#157a55" stroke-width="1.8" marker-end="url(#ag)"/>
+  <line x1="530" y1="330" x2="730" y2="410" stroke="#157a55" stroke-width="1.8" marker-end="url(#ag)"/>
+  <text x="478" y="372" font-size="10.5" fill="#157a55">fence step +</text>
+  <text x="478" y="386" font-size="10.5" fill="#157a55">durable writes, one txn</text>
+  <line x1="815" y1="330" x2="815" y2="410" stroke="#5c6a62" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+  <text x="823" y="372" font-size="10.5" fill="#5c6a62">heartbeat</text>
+</svg>
