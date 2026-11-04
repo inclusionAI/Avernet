@@ -146,7 +146,8 @@ embedding:
     query_batch_peak_wait_seconds: 0.15
     query_batch_peak_threshold: 8
     max_query_batch_workers: 4
-  request_dimensions: false
+  # The efficient 4B/1024 profile is non-native, so explicitly request it.
+  request_dimensions: true
   # All embedding service credentials MUST come from env vars
 
 reranker:
@@ -173,6 +174,11 @@ llm:
   # All LLM service credentials MUST come from env vars
 
 search:
+  # A single semantic serving Pod must admit a 200-request burst while
+  # native embedding batches absorb model pressure.
+  capacity:
+    max_inflight: 256
+    max_queue: 256
   result_cache:
     enabled: true
     max_entries: 10000

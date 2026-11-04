@@ -279,6 +279,9 @@ def test_runtime_composition_layers_batch_cache_circuit_and_http() -> None:
     )
     provider = registry.get("agent_online_embedding_provider")
     assert isinstance(provider.backend, AsyncBatchingEmbeddingProvider)
+    # The serving profile allows 32 upstream inputs and the deployment YAML
+    # declares 32. A missing profile file must not silently halve cold capacity.
+    assert provider.backend.max_batch_size == 32
     token_pool = provider.backend.backend
     assert isinstance(token_pool, AsyncEmbeddingTokenPoolProvider)
     assert isinstance(
@@ -325,3 +328,51 @@ def test_native_async_batching_does_not_send_partial_batches_while_workers_are_a
     assert provider.stats["backend_batch_calls"] == 16
     assert provider.stats["batched_queries"] == 512
     assert [len(call) for call in backend.calls] == [32] * 16
+
+
+
+def test_partial_tail_waits_for_the_configured_arrival_window() -> None:
+    """A tail batch must use batch_wait_seconds, not a fixed one-millisecond hold."""
+    import asyncio
+
+    from app.infra.public.embedding.async_batching_embedding_provider import (
+        AsyncBatchingEmbeddingProvider,
+    )
+
+    release_initial_batch = asyncio.Event()
+
+    class FullThenTailBackend(_BatchBackend):
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            self.calls.append(list(texts))
+            await release_initial_batch.wait()
+            return [
+                [float(index), float(len(texts))] for index, _ in enumerate(texts)
+            ]
+
+    backend = FullThenTailBackend()
+    provider = AsyncBatchingEmbeddingProvider(
+        backend,
+        max_batch_size=2,
+        batch_wait_seconds=0.15,
+        max_workers=1,
+    )
+
+    async def scenario() -> None:
+        initial = [asyncio.create_task(provider.embed(f"full query {i}")) for i in range(2)]
+        await asyncio.sleep(0.17)
+        assert len(backend.calls) == 1
+        tail = asyncio.create_task(provider.embed("tail query"))
+        await asyncio.sleep(0)
+        release_initial_batch.set()
+        await asyncio.gather(*initial)
+
+        await asyncio.sleep(0.05)
+        assert len(backend.calls) == 1, (
+            "partial tail must not be dispatched before batch_wait_seconds elapses"
+        )
+
+        await asyncio.sleep(0.18)
+        assert len(backend.calls) == 2
+        await tail
+
+    asyncio.run(scenario())

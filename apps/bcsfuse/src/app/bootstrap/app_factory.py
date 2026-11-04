@@ -522,6 +522,10 @@ def create_bcsfuse_app(
     readiness_cache = ReadinessProbeCache()
     app.state.readiness_probe_cache = readiness_cache
 
+    from app.bootstrap.http_admission import (
+        HTTPAdmissionMiddleware,
+        HTTPAdmissionSettings,
+    )
     from app.bootstrap.search_capacity import (
         SearchCapacityMiddleware,
         SearchCapacitySettings,
@@ -660,6 +664,12 @@ def create_bcsfuse_app(
         shared_cache_writer=recommend_cache_writer,
     )
     app.add_middleware(TraceIdMiddleware)
+    http_admission_settings = HTTPAdmissionSettings.from_context(context)
+    app.add_middleware(
+        HTTPAdmissionMiddleware,
+        max_concurrency=http_admission_settings.max_concurrency,
+        retry_after_seconds=http_admission_settings.retry_after_seconds,
+    )
 
     # Store context in app state
     app.state.context = context

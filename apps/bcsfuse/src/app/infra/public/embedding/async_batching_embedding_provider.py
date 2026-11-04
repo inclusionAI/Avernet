@@ -138,7 +138,7 @@ class AsyncBatchingEmbeddingProvider:
                             now = loop.time()
                             if partial_idle_at is None:
                                 partial_idle_at = now
-                            if now - partial_idle_at < 0.001:
+                            if now - partial_idle_at < self.batch_wait_seconds:
                                 hold_tail = True
                             else:
                                 selected = [
@@ -159,7 +159,7 @@ class AsyncBatchingEmbeddingProvider:
 
                 if hold_tail:
                     await asyncio.sleep(
-                        max(0.001, partial_idle_at - loop.time())
+                        max(0.001, partial_idle_at + self.batch_wait_seconds - loop.time())
                         if partial_idle_at is not None
                         else 0.001
                     )

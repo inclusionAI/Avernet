@@ -180,7 +180,7 @@ def run_server(args: list[str] | None = None) -> None:
         reload=args.reload,
         workers=args.workers,
         backlog=args.backlog,
-        limit_concurrency=args.limit_concurrency,
+        limit_concurrency=None,
     )
 
 

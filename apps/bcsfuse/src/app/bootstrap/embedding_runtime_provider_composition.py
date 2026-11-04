@@ -189,7 +189,7 @@ def register_embedding_runtime_providers(
             async_lanes,
             max_failover_attempts=max_failover_attempts,
         ),
-        max_batch_size=_int(config, "embedding.cache.max_query_batch_size", 16),
+        max_batch_size=_int(config, "embedding.cache.max_query_batch_size", 32),
         batch_wait_seconds=_float(
             config,
             "embedding.cache.query_batch_wait_seconds",

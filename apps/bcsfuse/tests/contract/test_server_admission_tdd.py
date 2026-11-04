@@ -17,7 +17,7 @@ def _fake_uvicorn_run(monkeypatch) -> dict:
     return captured
 
 
-def test_opensource_server_limits_admission_by_default(monkeypatch) -> None:
+def test_opensource_server_disables_raw_uvicorn_admission_by_default(monkeypatch) -> None:
     import main
 
     captured = _fake_uvicorn_run(monkeypatch)
@@ -26,11 +26,13 @@ def test_opensource_server_limits_admission_by_default(monkeypatch) -> None:
 
     main.run_server(["--host", "127.0.0.1", "--port", "9999"])
 
-    assert captured["kwargs"]["limit_concurrency"] == 256
+    assert captured["kwargs"]["limit_concurrency"] is None
     assert captured["kwargs"]["backlog"] == 2048
 
 
-def test_server_admission_limits_can_be_overridden(monkeypatch) -> None:
+def test_server_raw_admission_stays_disabled_when_limits_are_overridden(
+    monkeypatch,
+) -> None:
     import main
 
     captured = _fake_uvicorn_run(monkeypatch)
@@ -39,7 +41,7 @@ def test_server_admission_limits_can_be_overridden(monkeypatch) -> None:
 
     main.run_server(["--host", "127.0.0.1", "--port", "9999"])
 
-    assert captured["kwargs"]["limit_concurrency"] == 512
+    assert captured["kwargs"]["limit_concurrency"] is None
     assert captured["kwargs"]["backlog"] == 4096
 
 

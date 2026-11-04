@@ -235,6 +235,10 @@ def test_runtime_composition_reads_the_split_keyword_cluster(monkeypatch) -> Non
     monkeypatch.setenv("QDRANT_PREFER_GRPC", "false")
     monkeypatch.setenv("QDRANT_KEYWORD_PREFER_GRPC", "false")
     monkeypatch.delenv("QDRANT_KEYWORD_MODE", raising=False)
+    monkeypatch.setenv(
+        "BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH",
+        "/var/lib/bcsfuse/bcsfuse-contract-snapshot.json",
+    )
 
     registry = build_opensource_provider_registry(mode="runtime")
     vector_store = registry.get("vector_store")
@@ -296,3 +300,57 @@ def test_ready_reports_dense_and_keyword_qdrant_modes_separately(
         assert payload["index_size"] == 1
     finally:
         store.close()
+
+
+def test_keyword_response_handling_error_retries_once(monkeypatch) -> None:
+    """A transient Qdrant response-handling failure is retried exactly once."""
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    from app.infra.public.vectorstores import qdrant_mysql_vector_store as module
+
+    store = split_store()
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def search(*args: Any, **kwargs: Any):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise ResponseHandlingException(RuntimeError("transient response handling"))
+        return [VectorSearchHit(id="bot:python:default:full", score=0.9)]
+
+    monkeypatch.setattr(store._keywords, "search", search)
+    monkeypatch.setattr(module.time, "sleep", lambda value: sleeps.append(value))
+    try:
+        hits = store.text_search("python assistant", 3)
+    finally:
+        store.close()
+
+    assert [hit.id for hit in hits] == ["bot:python:default:full"]
+    assert len(calls) == 2
+    assert sleeps == [0.02]
+
+
+def test_keyword_connection_failure_is_not_retried(monkeypatch) -> None:
+    """Reply-level failures are retried; unreachable keyword Qdrant is not."""
+    import pytest
+
+    from app.infra.public.vectorstores import qdrant_mysql_vector_store as module
+
+    store = split_store()
+    calls: list[int] = []
+    sleeps: list[float] = []
+
+    def search(*args: Any, **kwargs: Any):
+        calls.append(len(calls))
+        raise ConnectionError("keyword cluster unreachable")
+
+    monkeypatch.setattr(store._keywords, "search", search)
+    monkeypatch.setattr(module.time, "sleep", lambda value: sleeps.append(value))
+    try:
+        with pytest.raises(ConnectionError, match="keyword cluster unreachable"):
+            store.text_search("python assistant", 3)
+    finally:
+        store.close()
+
+    assert len(calls) == 1
+    assert sleeps == []

@@ -29,8 +29,14 @@ class YamlEnvConfigProvider:
     def _load_config(self, config_path: Optional[str]) -> None:
         """Load configuration from YAML file."""
         if config_path is None:
+            config_path = os.getenv("BCSFUSE_CONFIG_PATH")
+        if config_path is None:
             profile = os.getenv("STARTUP_PROFILE", "opensource")
-            config_path = f"configs/application-{profile}.yaml"
+            profile_path = f"configs/application-{profile}.yaml"
+            base_path = "configs/application.yaml"
+            config_path = (
+                profile_path if os.path.exists(profile_path) else base_path
+            )
 
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
@@ -109,6 +115,15 @@ class YamlEnvConfigProvider:
             ],
             "BCSFUSE_SEARCH_RESULT_CACHE_TTL_SECONDS": [
                 "search", "result_cache", "ttl_seconds",
+            ],
+            "BCSFUSE_SERVER_LIMIT_CONCURRENCY": [
+                "http", "capacity", "max_concurrency",
+            ],
+            "BCSFUSE_HTTP_ADMISSION_MAX_CONCURRENCY": [
+                "http", "capacity", "max_concurrency",
+            ],
+            "BCSFUSE_HTTP_ADMISSION_RETRY_AFTER_SECONDS": [
+                "http", "capacity", "retry_after_seconds",
             ],
             "WORKER_REGISTRY_DATABASE_MODE": ["database", "mode"],
             "WORKER_REGISTRY_SQLITE_DB_PATH": ["database", "sqlite", "path"],

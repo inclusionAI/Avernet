@@ -60,6 +60,9 @@ from app.application.services.agent_search_provider_selection import (
 from app.infra.trace_context import get_trace_id
 from app.application.utils.drm_config_helper import get_recommend_min_score
 from app.infra.config.feature_flags import FeatureFlags
+from app.infra.public.observability.search_stage_metrics import (
+    search_stage_metrics,
+)
 
 from app.domain.services.retrieval_logging import log_stage, log_candidates
 
@@ -107,16 +110,35 @@ def _final_recommendation_projection(
 
 
 def _enrich_trust_level(response: BotRecommendationResponse) -> None:
-    """从 Worker Registry 补充推荐结果中的 trust_level 到 profile_tags。"""
+    """从 Worker Registry 批量补充推荐结果中的 trust_level 到 profile_tags。"""
     try:
         from app.adapters.http.dependencies.worker_dependencies import get_registry_store
         store = get_registry_store()
         if store is None:
             return
-        for rec in response.recommendations:
-            if "trust_level" in rec.profile_tags:
-                continue
-            worker = store.get_by_id(rec.worker_id)
+
+        pending = [
+            rec
+            for rec in response.recommendations
+            if "trust_level" not in rec.profile_tags
+        ]
+        if not pending:
+            return
+
+        # The registry port already provides a bounded batch read. Deduplicate
+        # worker IDs and keep the first appearance order to avoid one durable
+        # lookup per recommendation and duplicate worker rows.
+        worker_ids = list(dict.fromkeys(rec.worker_id for rec in pending))
+        batch_get = getattr(store, "get_by_ids", None)
+        if callable(batch_get):
+            workers = (batch_get(worker_ids) or {}).copy()
+        else:
+            workers = {}
+            for worker_id in worker_ids:
+                workers[worker_id] = store.get_by_id(worker_id)
+
+        for rec in pending:
+            worker = workers.get(rec.worker_id)
             if worker and worker.state and worker.state.trust_level:
                 rec.profile_tags = {**rec.profile_tags, "trust_level": worker.state.trust_level.value}
     except Exception:
@@ -460,16 +482,18 @@ async def recommend_bots(
 
         # Registry reads may reach a synchronous durable store. Keep them off
         # the request event loop while retaining the bounded search worker budget.
-        await run_search_in_threadpool(_enrich_trust_level, response)
+        with search_stage_metrics("recommend", "trust_enrichment"):
+            await run_search_in_threadpool(_enrich_trust_level, response)
 
         from app.adapters.http.recommend_response_cache import (
             store_v1_recommendation_response,
         )
-        store_v1_recommendation_response(
-            result_cache=result_cache,
-            request=request,
-            response=response,
-        )
+        with search_stage_metrics("recommend", "cache_publication"):
+            store_v1_recommendation_response(
+                result_cache=result_cache,
+                request=request,
+                response=response,
+            )
 
         top_rec = response.recommendations[0] if response.recommendations else None
         log_stage(

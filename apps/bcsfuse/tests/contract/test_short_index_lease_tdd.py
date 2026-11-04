@@ -140,6 +140,10 @@ def test_runtime_composition_uses_short_lease_defaults(monkeypatch) -> None:
     monkeypatch.setenv("QDRANT_MODE", "server")
     monkeypatch.setenv("QDRANT_URL", "http://127.0.0.1:6333")
     monkeypatch.setenv("QDRANT_PREFER_GRPC", "false")
+    monkeypatch.setenv(
+        "BCSFUSE_LITERAL_FALLBACK_SNAPSHOT_PATH",
+        "/var/lib/bcsfuse/bcsfuse-contract-snapshot.json",
+    )
 
     registry = build_opensource_provider_registry(mode="runtime")
     vector_store = registry.get("vector_store")

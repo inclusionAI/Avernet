@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, List, Optional
 
+from qdrant_client.http.exceptions import ResponseHandlingException
 from search_core.config.qdrant import LOCAL_QDRANT, QdrantConnection
 from search_core.core.index_sync import apply_change_pages, apply_snapshot_pages
 from search_core.providers.index_lock import IndexLock
@@ -49,6 +50,12 @@ from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Qdrant HTTP can occasionally fail while handling a healthy response after
+# successful request admission. Retry only that narrow transport stage once;
+# connection failures and explicit server errors still fail degrades quickly.
+KEYWORD_TRANSIENT_RETRIES = 1
+KEYWORD_TRANSIENT_RETRY_SECONDS = 0.02
 
 
 class QdrantMySQLVectorStore(VectorStoreAdapter):
@@ -516,7 +523,13 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 call.lock_wait_seconds = time.perf_counter() - lock_started_at
                 if not self._keywords_ready:
                     raise RuntimeError("keyword index requires rebuild")
-                return self._keywords.search(query, top_k, filters)
+                for retry in range(KEYWORD_TRANSIENT_RETRIES + 1):
+                    try:
+                        return self._keywords.search(query, top_k, filters)
+                    except ResponseHandlingException:
+                        if retry == KEYWORD_TRANSIENT_RETRIES:
+                            raise
+                        time.sleep(KEYWORD_TRANSIENT_RETRY_SECONDS)
 
     def batch_text_search(
         self,
