@@ -120,7 +120,9 @@ def _level(
 ) -> PermissionLevel:
     """The user's operable level, ``NONE`` only when no Bot is at the address."""
     try:
-        context = BotAddressResolver(bots).resolve(bot_id=bot_id, entity_id=entity_id)
+        context = BotAddressResolver(bots).resolve(
+            bot_id=bot_id, entity_id=entity_id, allow_unique_bot_id=True
+        )
     except BotAddressNotFoundError:
         return PermissionLevel.NONE
     # Exceptions from the collaborator lookup propagate (→ 500) by design.
