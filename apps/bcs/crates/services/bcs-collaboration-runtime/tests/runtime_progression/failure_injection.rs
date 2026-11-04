@@ -398,6 +398,10 @@ async fn replayed_failure_event_is_consumed_without_a_second_effect() {
 #[tokio::test]
 async fn late_artifact_after_failure_cannot_advance_or_write_chat() {
     let (mut h, _runs) = harness(&[]).await;
+    // This scenario exercises history persistence rather than repository faults;
+    // use the inner store so atomic history acceptance is available.
+    let store = h.store.clone();
+    install_runtime(&mut h, store, &[]).await;
     let channel = Arc::new(DeliveryChannel::default());
     let messages = Arc::new(RecordingMessages::default());
     // History persistence is on and the message repository is observable, so a
