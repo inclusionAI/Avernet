@@ -105,6 +105,27 @@ def test_other_runner_resumes_failed_work_without_repeating_finished_sources(tmp
     assert source.calls.count("document-2") == 2
 
 
+def test_legacy_source_pairs_build_and_resume_with_original_counts(tmp_path):
+    source, repo, service = world(tmp_path)
+    source.page = lambda after, limit: sorted(
+        (key, rev) for key, rev in source.revisions.items() if key > after
+    )[:limit]
+    source.deleted.add("document-2")
+    source.fail = "document-2"
+    service.create("legacy", "model", 2)
+    service.run_once()
+    assert repo.get("legacy").status == "failed"
+
+    source.fail = ""
+    service.create("legacy", "model", 2)
+    service.run_once()
+    result = repo.get("legacy")
+    assert result.status == "completed"
+    assert result.completed_count == result.total_count == 2
+    assert source.calls == ["document-1", "document-2", "document-2"]
+    assert source.prepared[("legacy", "document-2")] == 1
+
+
 def test_zero_counts_do_not_complete_until_deleted_sources_are_published(tmp_path):
     from search_core.api.index_builds import IndexBuildConflict
 

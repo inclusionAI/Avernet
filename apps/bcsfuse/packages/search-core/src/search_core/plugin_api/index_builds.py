@@ -42,8 +42,14 @@ class IndexBuildSource(Protocol):
     raises IndexBuildConflict; other failures must propagate.
     """
 
-    def page(self, after: str, limit: int) -> list[tuple[str, int, bool]]:
-        """Return (source_id, revision, deleted); deleted rows are processed but not counted."""
+    def page(
+        self, after: str, limit: int
+    ) -> list[tuple[str, int, bool]] | list[tuple[str, int]]:
+        """Return (source_id, revision, deleted); deleted rows are processed but not counted.
+
+        Legacy (source_id, revision) rows remain supported and count every row,
+        as before. Hosts must provide the deletion flag to exclude tombstones.
+        """
         ...
 
     def prepared_revision(self, index_key: str, source_id: str) -> int | None: ...

@@ -97,7 +97,9 @@ class IndexBuildService:
         while True:
             check()
             rows = self.source.page(after, 100)
-            yield from rows
+            for row in rows:
+                # Older hosts supplied only ID/revision and counted every row.
+                yield (*row, False) if len(row) == 2 else row
             if len(rows) < 100:
                 return
             after = rows[-1][0]
