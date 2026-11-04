@@ -3,7 +3,10 @@
 // - TC-G005 门禁拆分:自 ConversationBotItem 迁出,不改任何既有 UI/行为;
 // - 「更多操作」菜单开关随本组件内聚,检索开关(searchInputOpen)留在父级(显隐计算依赖);
 // - 不可用 Bot(FAILED/PENDING)的「更多操作」常驻显示(2026-10-21 运维直达),菜单仅「Bot 管理」;
-// - 菜单打开期间经触发器 data-state=open 在行容器上钉住操作区显隐与标题让位(group-has 变体)。
+// - 菜单打开期间经触发器 data-state=open 在行容器上钉住操作区显隐与标题让位(group-has 变体);
+// - 显隐下沉到 icon 级(2026-11-04 重构):操作组仅 hover/键盘/触屏显示,展开态不再整组钉住;
+//   激活了特殊条件的单个 icon 常显(🔍 检索/实例标记、归属/范围筛选非默认项),其余 hover 才出现。
+//   容器不再整体 opacity(父子相乘会把常显 icon 一并隐藏),群发条件逐 icon 重复保持等价语义。
 import type { ConversationOrigin, ConversationSessionScope } from '@/domain/conversation/types';
 import { Button, IconButton } from '@/components/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
@@ -25,11 +28,11 @@ export interface ConversationBotItemActionsProps {
   isOthers: boolean;
   /** Bot 非可用态(FAILED/PENDING):会话类入口不渲染;「更多操作」入口常驻显示(2026-10-21 运维直达)。 */
   unavailable?: boolean;
-  /** 展开或任一筛选/检索激活:操作区钉住可见(仅可用 Bot 生效)。 */
-  actionsPinned: boolean;
+  /** 归属/范围筛选激活(非默认项):筛选 icon 常显(2026-11-04 显隐重构,随操作组仅 hover 的例外)。 */
+  filterActive: boolean;
   /** 检索入口可见(仅 all 范围)。 */
   searchVisible: boolean;
-  /** 检索激活标记:品牌蓝圆点与图标点亮,Bot 收起时仍可见。 */
+  /** 检索激活标记:品牌蓝圆点与图标点亮,Bot 收起时仍可见;激活时该 icon 常显(含实例指定标记)。 */
   searchMarked: boolean;
   /** 筛选入口可见(managed 或可收藏好友 Bot)。 */
   showFilter: boolean;
@@ -63,7 +66,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     expanded,
     isOthers,
     unavailable,
-    actionsPinned,
+    filterActive,
     searchVisible,
     searchMarked,
     showFilter,
@@ -82,6 +85,11 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
   } = props;
   // 「更多操作」菜单开关(随本组件内聚;菜单项点击后关闭)。
   const [menuOpen, setMenuOpen] = React.useState(false);
+  // icon 级显隐群发类(2026-11-04 重构):与原容器级语义逐项等价——
+  // 行 hover/行内键盘聚焦/触屏,以及「更多操作」菜单打开期间(data-state=open,鼠标
+  // 移出行不塌缩)整组显示;容器不再整体 opacity(父子相乘会连带隐藏常显 icon)。
+  const iconVisibility =
+    'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 group-has-[[data-state=open]]:opacity-100';
   return (
     <div
       className={cn(
@@ -92,17 +100,12 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         // 名称行内元素;按钮间保持 gap-0.5 一致的 2px 间隙)。
         // 渐隐区 20px→10px(2026-11-03 紧凑化):4 按钮让位 122→112px、3 按钮 96→86px,
         // 让出的宽度归还名称(用户反馈 hover/展开后名称近零)。
-        'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
-        // 展开或任一筛选(归属/范围/会话ID检索)激活时钉住可见;
-        // 生效中的检索在 Bot 收起时仍可见(🔍 按钮激活态圆点);
-        // 「更多操作」菜单打开期间同样钉住(触发器 data-state=open,鼠标移出行不塌缩)。
-        actionsPinned && 'opacity-100',
-        'group-has-[[data-state=open]]:opacity-100',
-        // 不可用 Bot:「更多操作」入口常驻显示,不随 hover 变化(2026-10-21 运维直达)。
-        unavailable && 'opacity-100',
+        // 容器常渲染不整体隐藏(2026-11-04 显隐下沉 icon 级,激活 icon 常显需要父级透明)。
       )}
     >
-      {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。 */}
+      {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。
+          2026-11-04 显隐重构修正:收起指示器是展开状态的行级指示(icon 常显),
+          不随操作组 hover 规则收起——用户反馈 hover 别处时它消失,失去收起入口。 */}
       {expanded && !unavailable && (
         <IconButton
           label="收起会话列表"
@@ -121,7 +124,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           label="新建会话"
           size="sm"
           icon={<Plus className="h-3.5 w-3.5" />}
-          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          className={cn('h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground', iconVisibility)}
           onClick={(event) => {
             event.stopPropagation();
             Tracert.click(Points.workspaceChat.newSession, { bot_id: bot.botId });
@@ -129,9 +132,15 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           }}
         />
       )}
+      {/* 🔍 激活(检索生效/实例指定标记)时常显——用户始终知道该 Bot 有生效条件(2026-11-04 显隐重构)。 */}
       {!unavailable && searchVisible && (
-        <ConversationSessionSearchIconButton marked={searchMarked} onToggle={onSearchToggle} />
+        <ConversationSessionSearchIconButton
+          marked={searchMarked}
+          onToggle={onSearchToggle}
+          triggerClassName={cn(iconVisibility, searchMarked && 'opacity-100')}
+        />
       )}
+      {/* 筛选激活(归属/范围非默认项)时常显——同 🔍 标记语义,始终提示生效条件(2026-11-04 显隐重构)。 */}
       {!unavailable && showFilter && (
         <ConversationOriginFilter
           botId={bot.botId}
@@ -140,6 +149,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           supportsOrigin={supportsOrigin}
           supportsFavorites={supportsFavorites}
           othersDisabled={othersDisabled}
+          triggerClassName={cn(iconVisibility, filterActive && 'opacity-100')}
           onOriginChange={onOriginChange}
           onScopeChange={onScopeChange}
         />
@@ -153,7 +163,12 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
               label="更多操作"
               size="sm"
               icon={<MoreHorizontal className="h-3.5 w-3.5" />}
-              className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              className={cn(
+                'h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
+                iconVisibility,
+                // 不可用 Bot:「更多操作」入口常驻显示,不随 hover 变化(2026-10-21 运维直达)。
+                unavailable && 'opacity-100',
+              )}
             />
           </PopoverTrigger>
           <PopoverContent align="end" className="w-44 p-1">

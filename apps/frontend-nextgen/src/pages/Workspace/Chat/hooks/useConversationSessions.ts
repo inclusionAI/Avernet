@@ -1,4 +1,4 @@
-// 会话列表 Hook:管理/团队 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
+// 会话列表 Hook:管理/团队空间 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
 // origin=others 由 useManagedBotOthers 负责；列表首拉/分页与写操作互斥。
 // 缓存态拼装/写复用 ./conversationSessionCache;分页请求生命周期(代次/去重/写回校验)
 // 拆至 ./conversationSessionPageRequest(文件大小阈值,行为不变)。

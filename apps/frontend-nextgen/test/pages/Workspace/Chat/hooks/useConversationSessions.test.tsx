@@ -542,7 +542,7 @@ it('a late response only caches the collapsed Bot without re-expanding it', asyn
   expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions.items).toHaveLength(1);
 });
 
-describe('团队 Bot 复用管理会话', () => {
+describe('团队空间 Bot 复用管理会话', () => {
   const teamBot: ConversationBotView = { ...managedBot, section: 'team' };
   it('展开走管理列表；切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
     listManagedSessions.mockResolvedValue(okPage(['first']));

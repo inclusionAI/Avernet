@@ -29,7 +29,7 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
-  /** 「通用协作能力」能力集只读查看装配（我的/团队 Bot 非空；好友 Bot 为 null，
+  /** 「通用协作能力」能力集只读查看装配（我的/团队空间 Bot 非空；好友 Bot 为 null，
    *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
   capabilitySets: ComposerCapabilitySetsState | null;
 }
@@ -100,7 +100,11 @@ export function useBotSessionFilesFeature(
   }, [upload.removeTask, upload.tasks]);
 
   const handleSelectSkill = useCallback((skillName: string) => {
-    senderRef.current?.insert(`/${skillName} `, 'end');
+    // 选中后的文本插入由命令面板默认替换完成（subConfig.format 定制 `/${name}`，触发
+    // token 被整段替换为 `/task-loop `）。此处不再 insert('end')：它基于受控回流前的
+    // 旧 DOM 追加，会覆盖面板的替换结果，造成 '/s/task-loop' 残留（2026-11-04 实测
+    // 反馈修复）；签名保留供 buildBotSessionCommandItems 的 subConfig.onSelect 调用。
+    void skillName;
     senderRef.current?.focus?.();
   }, []);
 
