@@ -85,6 +85,31 @@ def test_budget_returns_keyword_without_waiting_for_slow_embedding_or_rerank():
         asyncio.run(run(executor))
 
 
+def test_successful_index_sync_is_info_but_failures_remain_warnings(caplog):
+    import json
+    import logging
+
+    from search_core.core.observation import EventSummaries
+
+    caplog.set_level(logging.INFO, logger="search_core.events")
+    summaries = EventSummaries(interval=60)
+    summaries.record("search_index_sync", "reconcile", "applied", scanned=52, changed=0)
+    summaries.record("search_index_sync", "incremental", "applied", documents=1)
+    summaries.record("search_index_sync", "reconcile", "dependency_error")
+    summaries.record("search_request", "embedding", "timeout")
+    summaries.flush(force=True)
+    records = [r for r in caplog.records if r.name == "search_core.events"]
+    assert [r.levelno for r in records] == [
+        logging.INFO,
+        logging.INFO,
+        logging.WARNING,
+        logging.WARNING,
+    ]
+    payload = json.loads(records[0].message)
+    assert payload["sample"]["scanned"] == 52
+    assert payload["sample"]["changed"] == 0
+
+
 def test_failure_logs_count_every_event_and_do_not_log_queries(caplog):
     import json
 
@@ -134,7 +159,7 @@ def test_record_never_writes_slow_log_sink(monkeypatch):
         raise AssertionError("request path must not write to sink")
 
     with monkeypatch.context() as patch:
-        patch.setattr(logger, "warning", blocked_sink)
+        patch.setattr(logger, "log", blocked_sink)
         summaries = EventSummaries()
         for _ in range(1000):
             summaries.record("search_stage_failure", "embedding", "timeout")
