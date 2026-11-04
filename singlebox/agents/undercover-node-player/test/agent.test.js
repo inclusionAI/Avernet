@@ -108,3 +108,23 @@ test("真实 referee 遗言复用本 session 的座位和词，不引用自己�
   });
   assert.equal(otherOutput, "我比较在意6号那句「早上先吃一餐」。");
 });
+
+test("真实 referee 遗言不会把公开历史中的 clue 当作私有词", async () => {
+  const content = refereeLastWord.message.replace(
+    "第1轮 5号 玩家5：「每天都吃早餐。」",
+    "第1轮 5号 玩家5：「【日常】有些场合会用到」",
+  );
+  assert.notEqual(content, refereeLastWord.message);
+
+  const agent = new UndercoverNodeAgent();
+  const sessionKey = "grp-node-player:session-public-clue";
+  await agent.decide({
+    content: speechPrompt(1, { seat: 5, word: "早餐" }),
+    sessionKey,
+  });
+
+  const output = await agent.decide({ content, sessionKey });
+  assert.equal(output, "我没有更多补充，请大家继续核对公开发言。");
+  assert.equal(parseNodeTask(content).word, "");
+  assert.equal(validateSpeech(output, { maxChars: 35, word: "早餐" }).valid, true);
+});

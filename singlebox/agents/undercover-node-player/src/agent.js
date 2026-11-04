@@ -86,7 +86,8 @@ export function parseNodeTask(content) {
     : raw;
 
   const seatMatch = /你是\s*(\d+)\s*号/.exec(instruction);
-  const wordMatch = /词是【(.+?)】|【(.+?)】/.exec(instruction);
+  // Public history may contain bracketed clues; only an explicit own-word marker is private.
+  const wordMatch = /词是【(.+?)】/.exec(outerInstruction(instruction));
   const roundMatch = /第\s*(\d+)\s*轮/.exec(instruction);
   const bluntnessMatch = /(?:钝度|钝到|至少)\s*(\d+)/.exec(instruction);
   const maxCharsMatch = /不超过\s*(\d+)\s*字/.exec(instruction);
@@ -114,7 +115,7 @@ export function parseNodeTask(content) {
     instruction,
     rawContent: raw,
     seat: seatMatch ? Number(seatMatch[1]) : null,
-    word: wordMatch ? (wordMatch[1] || wordMatch[2]) : "",
+    word: wordMatch?.[1] || "",
     roundNumber,
     bluntness: bluntnessMatch ? Number(bluntnessMatch[1]) : bluntnessForRound(roundNumber),
     maxChars: maxCharsMatch ? Number(maxCharsMatch[1]) : MAX_SPEECH_CHARS,
