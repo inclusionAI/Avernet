@@ -6,6 +6,7 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { FanoutStateRepository } from "./fanout-state-repository.js";
 
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -129,7 +130,11 @@ export type FindWorkflowTypesPageResult = {
 };
 
 export class FlowRunRepository {
-  constructor(private db: IDatabase) {}
+  readonly fanoutState: FanoutStateRepository;
+
+  constructor(private db: IDatabase) {
+    this.fanoutState = new FanoutStateRepository(db);
+  }
 
   insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
     return registerRunRequest(this.db, body, async tx => {
@@ -549,17 +554,7 @@ export class FlowRunRepository {
    * the DB maintains it (manual assignment was rejected on pre).
    */
   async updateStateJson(flowId: string, stateJson: string): Promise<boolean> {
-    try {
-      const result = await this.db.exec(
-        "UPDATE flow_runs SET state_json = ? WHERE flow_id = ?",
-        [stateJson, flowId],
-      );
-      return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateStateJson failed: ${msg} (dbType=${this.db.dbType}, flowId=${flowId}, bytes=${stateJson.length})`);
-      return false;
-    }
+    return this.fanoutState.updateMirror(flowId, stateJson);
   }
 
   /** Read back the mirrored TaskFlow stateJson, or null when absent. */

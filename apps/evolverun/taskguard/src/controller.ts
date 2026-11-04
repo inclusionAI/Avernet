@@ -118,7 +118,8 @@ import {
   getLegacyExecutorType,
 } from "./legacy-runtime.js";
 import { RequiredSkillNotFoundError, resolveRequiredSkill } from "./skill-resolver.js";
-import { buildChildFlowState, type SubworkflowCompletionResult } from "./executors/subworkflow.js";
+import { buildChildFlowState, executeSubworkflow, type SubworkflowCompletionResult } from "./executors/subworkflow.js";
+import { snapshotWorkflowDependencies } from "./workflow-dependencies.js";
 import {
   buildWorkflowStartedMessage,
   buildNodeStartedMessage,
@@ -1015,8 +1016,8 @@ async function asyncAwareExecuteLoop(
     return { status: "running", message: "异步引擎已启动" };
   }
 
-  // Sync mode: await executeLoop directly (original behavior)
-  return executeLoop(deps, workflow, state, flowId, revision);
+  // Resume/recovery must bind this flow's fanout host and pinned dependencies too.
+  return executeWorkflowForTest({ deps, workflow, state, flowId, revision, runStartHooks: false });
 }
 
 /**
@@ -3971,11 +3972,21 @@ async function runNodeSuccessHooks(
 
 export async function executeWorkflowForTest(
   params: ExecuteWorkflowForTestParams,
-): Promise<void> {
+): Promise<ExecuteLoopOutcome> {
   const state = ensureFlowStateDefaults(params.state);
   state.flowHooks ??= {};
+  if (state.subworkflowDependencies === undefined) state.subworkflowDependencies = snapshotWorkflowDependencies(params.workflow);
+  state.runInitiator ??= { ...params.deps.user, source: "delivery-context" };
+  // Only the idempotent collector may be re-entered after an interrupted call.
+  // Its durable intent/child IDs are authoritative; ordinary running business
+  // nodes must NOT be reset here because their external side effects may be unknown.
+  for (const node of params.workflow.nodes) {
+    if (node.executor.type === "subworkflow" && node.executor.fanout && state.nodeStates[node.id]?.status === "running") {
+      state.nodeStates[node.id].status = "pending";
+    }
+  }
 
-  if (!params.deps.subworkflowDeps && (params.deps.resolvedWorkflows || params.deps.workflowSpecApiRepo || (params.deps.db && params.deps.db.dbType !== "noop"))) {
+  if (params.deps.createFanoutRuntime || (!params.deps.subworkflowDeps && (params.deps.resolvedWorkflows || params.deps.workflowSpecApiRepo || (params.deps.db && params.deps.db.dbType !== "noop")))) {
     params.deps.subworkflowDeps = buildSubworkflowDepsForExecution(
       params.deps,
       state,
@@ -3992,11 +4003,26 @@ export async function executeWorkflowForTest(
       flowId: params.flowId,
       revision: params.revision,
     });
-    if (outcome.blocked) return;
+    if (outcome.blocked) return { status: "blocked" };
   }
 
-  await executeLoop(
-    params.deps,
+  // Fanout uses this invocation's durable host rather than an executor closure
+  // captured for the parent session. Legacy node dispatch remains unchanged.
+  const executionDeps = params.deps.subworkflowDeps ? {
+    ...params.deps,
+    executeNode: async (node: WorkflowNode, context: TemplateContext, current: FlowState, flowId: string) => {
+      if (params.workflow.nodes.some(n => n.executor.type === "subworkflow" && n.executor.fanout)
+        && params.deps.subworkflowDeps!.fanoutRuntime) {
+        const status = await params.deps.subworkflowDeps!.fanoutRuntime.parentStatus(flowId);
+        if (!["running", "waiting", "blocked"].includes(status)) throw new Error(`Fanout parent is no longer active (${status})`);
+      }
+      return node.executor.type === "subworkflow" && node.executor.fanout
+        ? executeSubworkflow(node, context, current, flowId, params.deps.subworkflowDeps!)
+        : params.deps.executeNode(node, context, current, flowId);
+    },
+  } : params.deps;
+  return executeLoop(
+    executionDeps,
     params.workflow,
     state,
     params.flowId,
@@ -4062,6 +4088,10 @@ export type ControllerDeps = {
     options?: { surface?: WorkflowCommandSurface },
   ) => string;
   subworkflowDeps?: import("./executors/subworkflow.js").SubworkflowDeps;
+  /** Installed by a platform composition root; core never selects persistence/transport. */
+  createFanoutRuntime?: (
+    state: FlowState, flowId: string, executeWorkflow: typeof executeWorkflowForTest,
+  ) => import("./executors/subworkflow-fanout-types.js").FanoutRuntime;
   flowControl?: import("./flow-control/service.js").FlowControlService;
   /** Transport mode for this session — "stdio" (MCP) or "http-sse" (Hermes). Used for logging and conditional logic. */
   transportMode?: "stdio" | "http-sse";
@@ -5016,6 +5046,8 @@ function buildSubworkflowDepsForExecution(
   debug?: boolean,
 ): import("./executors/subworkflow.js").SubworkflowDeps {
   return {
+    fanoutRuntime: deps.createFanoutRuntime?.(parentFlowState, parentFlowId, executeWorkflowForTest),
+    abortSignal: deps.abortSignal,
     resolvedWorkflows: deps.resolvedWorkflows,
     workflowSpecRepo: deps.workflowSpecApiRepo ?? (deps.db && deps.db.dbType !== "noop" ? new WorkflowSpecRepository(deps.db) : undefined),
     debug,
