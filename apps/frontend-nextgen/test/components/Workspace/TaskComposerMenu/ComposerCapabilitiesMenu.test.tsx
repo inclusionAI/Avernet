@@ -84,7 +84,7 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     expect(capabilityTrigger).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('未安装 task-intent-recognition 时任务行仍可见但禁用', async () => {
+  it('未安装 task-intake 时任务行仍可见但禁用', async () => {
     const onDynamicSelected = jest.fn();
     const user = userEvent.setup();
     render(
