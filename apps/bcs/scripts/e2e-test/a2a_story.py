@@ -52,7 +52,7 @@ class Peer:
                 self.wfile.write(encoded)
 
             def authenticated(self):
-                valid = self.headers.get("Authorization") == "Bearer " + peer.bearer
+                valid = self.headers.get("Authorization") is None
                 valid = valid and self.headers.get("A2A-Version") == "1.0"
                 if not valid:
                     self.json_response(401, {"error": {"message": "Authentication required"}})
@@ -224,8 +224,7 @@ class Peer:
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.base = "http://127.0.0.1:" + str(self.server.server_port)
-        self.card = {"securitySchemes": {"auth": {"httpAuthSecurityScheme": {"scheme": "bearer"}}},
-                     "securityRequirements": [{"schemes": {"auth": {"list": []}}}],
+        self.card = {
                      "name": "A2A public E2E", "description": "Initial description", "version": "1",
                      "supportedInterfaces": [{"url": self.base + "/a2a", "protocolBinding": "HTTP+JSON",
                                               "protocolVersion": "1.0"}],
@@ -270,15 +269,19 @@ class A2aStory(Story):
         self.peer.bearer = provider["bcs_to_provider_token"]
         admin = provider["provider_admin_token"]
         prefix = "/providers/" + provider["provider_id"] + "/bots"
-        bot = self.request("POST", prefix, {"provider_bot_ref": "remote", "owners": [self.owner],
-                           "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin)
+        registered = self.request("POST", "/a2a/agents", {"owners": [self.owner],
+            "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
+        assert set(registered) == {"provider_name", "agent_name", "bot_id", "agent_card_url", "agent_card"}
+        assert registered["agent_name"] == self.peer.card["name"]
+        bot_id = registered["bot_id"]
+        bindings = self.request("GET", prefix, token=admin)
+        bot = next(item for item in bindings["items"] if item["bot_uuid"] == bot_id)
         self.bots.append((provider, bot))
-        bot_id = bot["bot_uuid"]
         control = prefix + "/" + bot_id + "/a2a"
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] == self.peer.base + "/agent-card.json"
         assert record["revision"] == 1
-        names = {"provider_name": provider_name, "bot_name": record["agent_card"]["name"]}
+        names = {"agent_name": record["agent_card"]["name"]}
         named = self.request("GET", "/a2a/agent-card?" + urlencode(names), token=admin)
         assert named["agent_card"] == record["agent_card"]
         assert not ({"provider_id", "bot_uuid", "provider_bot_ref", "revision"} & named.keys())
@@ -290,6 +293,7 @@ class A2aStory(Story):
         assert not self.peer.requests, "Registration must not submit a probe task"
         named_refresh = self.request("POST", "/a2a/agent-card/refresh", names, token=admin)
         assert named_refresh["agent_card"] == record["agent_card"]
+        record = self.request("GET", control, token=admin)
         unchanged = self.request("POST", control + "/card:refresh", {}, token=admin)
         assert unchanged == record, "Unchanged refresh must preserve the admin revision"
         with self.peer.lock:
@@ -303,6 +307,8 @@ class A2aStory(Story):
         assert named["agent_card"] == inline and named["agent_card_url"] is None
         record = self.request("GET", control, token=admin)
         assert record["agent_card_url"] is None
+        missing_url = self.request("POST", "/a2a/agent-card/refresh", names, token=admin, status=409)
+        assert missing_url["error"]["code"] == "CARD_URL_REQUIRED"
         assert record["revision"] == revision + 1
         self.request("PUT", control, {"agent_card": inline, "expected_revision": revision}, token=admin, status=409)
         self.request("POST", control + "/card:refresh", {}, token=admin, status=400)

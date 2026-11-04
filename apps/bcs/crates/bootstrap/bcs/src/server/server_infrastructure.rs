@@ -76,7 +76,7 @@ impl BcsServer {
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc=super::a2a_wiring::build_bot_core(
-            bot_repo,&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone());
+            bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone());
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -160,7 +160,7 @@ impl BcsServer {
             );
         let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
-            provider_core.clone(), bot_registry.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+            provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
         )?;
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),

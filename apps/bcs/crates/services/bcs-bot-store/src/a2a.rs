@@ -5,7 +5,7 @@ use bcs_db_api::{DbPlugin, DbStatement, DbValue, DbSqlFlavor};
 use bcs_service_api::{ServiceError, ServiceResult};
 use bcs_service_api::port::repo::a2a_bot::{A2aBotAvailability, A2aBotRecord, A2aBotRepoPort};
 
-pub struct DbA2aBotStore { db: Arc<dyn DbPlugin>, env: String, flavor:DbSqlFlavor }
+pub struct DbA2aBotStore { db: Arc<dyn DbPlugin>, env: String, flavor:DbSqlFlavor, registry:Option<std::sync::Weak<crate::PersistentBotRepo>> }
 
 fn error(error: impl std::fmt::Display) -> ServiceError {
     ServiceError::InternalError(format!("A2A Bot persistence failed: {error}"))
@@ -18,7 +18,11 @@ fn parse_card(raw: &str) -> ServiceResult<serde_json::Value> {
 }
 
 impl DbA2aBotStore {
-    pub fn new(db: Arc<dyn DbPlugin>, env: String, flavor:DbSqlFlavor) -> Self { Self { db, env, flavor } }
+    pub fn new(db: Arc<dyn DbPlugin>, env: String, flavor:DbSqlFlavor) -> Self { Self { db, env, flavor, registry:None } }
+    /// Share the live registry only for post-commit metadata invalidation.
+    pub fn with_registry(mut self, registry:&Arc<crate::PersistentBotRepo>)->Self {
+        self.registry=Some(Arc::downgrade(registry));self
+    }
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self { Self::new(db,env,DbSqlFlavor::Sqlite) }
 }
 
@@ -170,7 +174,13 @@ impl DbA2aBotStore {
                 "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
         ]).await.map_err(|failure|if failure.is_duplicate_key() {ServiceError::Conflict("Bot name is already in use in this Provider".into())} else {error(failure)})?;
         match results.last() {
-            Some(DbTransactionStepResult::Rows(rows)) if rows.len()==1=>Ok(Some(decode(&rows[0])?)),
+            Some(DbTransactionStepResult::Rows(rows)) if rows.len()==1=>{
+                let committed=decode(&rows[0])?;
+                if let Some(registry)=self.registry.as_ref().and_then(std::sync::Weak::upgrade) {
+                    registry.invalidate_card_metadata(&self.env,&record.bot_uuid).await;
+                }
+                Ok(Some(committed))
+            },
             Some(DbTransactionStepResult::Executed(value)) if value.affected_rows==0=>{
                 crate::a2a_source::check_available(self.db.as_ref(),self.flavor,&self.env,record).await?;
                 Ok(None)

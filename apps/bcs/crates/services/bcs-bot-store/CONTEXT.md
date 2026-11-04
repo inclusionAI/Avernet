@@ -324,3 +324,13 @@ replacement; local replacement retries at most three times. Registration adds
 source preflight and two transaction reads to the existing ownership composite.
 All failures roll back or propagate; network fetches happen before transactions.
 A source conflict is distinct from the deferred name-index preflight guarantee.
+
+A successful Card write invalidates same-process registry metadata through the
+shared live registry wired at bootstrap. It does not evict connections, tokens or
+heartbeat state. Invalidated Bots use durable metadata for single and batched
+registry reads for the remaining process lifetime; delayed lifecycle writes cannot
+repopulate stale names. Single reads add one indexed row lookup; batches retain
+100-ID chunks rather than per-Bot queries. Card writes add no DB queries for
+invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
+not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
+Card-owned name even when a caller carries an older capabilities snapshot.

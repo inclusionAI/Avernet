@@ -17,7 +17,7 @@ use bcs_test_support::contract::bot_registration_chain::{registration_chain, Reg
     owner_relation, committed_profile};
 use serde_json::json;
 
-struct Fetcher {calls: AtomicUsize, fail: AtomicBool, providers: Arc<dyn ProviderCoreService>, revoke: AtomicBool,
+struct Fetcher {calls: AtomicUsize, fail: AtomicBool, providers: Arc<ProviderCore>, revoke: AtomicBool,
     parallel:AtomicBool, barrier:tokio::sync::Barrier}
 #[async_trait]
 impl A2aCardPort for Fetcher {
@@ -49,7 +49,7 @@ fn command() -> RegisterProviderBotCommand {
         avatar:AvatarChange::Keep}
 }
 async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
-    let chain=registration_chain().await;
+    let mut chain=registration_chain().await;
 
     chain.db.execute(DbStatement::with_params("UPDATE bcs_providers SET config=? WHERE provider_id='provider-a'",
         vec![json!({"downlink":{"enabled":true,"auth_mode":"static_bearer"}}).to_string().into()])).await.unwrap();
@@ -58,8 +58,10 @@ async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aPr
         credentials.insert_credential(ProviderCredential {provider_id:"provider-a".into(),credential_kind:kind.into(),
             secret_value:secret.into(),disabled:false,created_at:0,updated_at:0}).await.unwrap();
     }
+    let cards=Arc::new(DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()).with_registry(&chain.bot_repo));
+    chain.registry_core=Arc::new(bcs_bot::BotCore::with_repo(chain.bot_repo.clone())
+        .with_bot_provider_repo(chain.provider_repo.clone()).with_a2a_cards(cards.clone()));
     let providers=Arc::new(ProviderCore::new(chain.provider_repo.clone(),credentials,chain.provider_repo.clone(),chain.registry_core.clone()).with_a2a_anonymous(true));
-    let cards=Arc::new(DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()));
     let core=Arc::new(A2aBotCore::new(cards,chain.provider_repo.clone()));
     let registration=Arc::new(A2aProviderRegistrationCore::new(providers.clone(),chain.provider_repo.clone()));
     let fetcher=Arc::new(Fetcher {calls:AtomicUsize::new(0),fail:AtomicBool::new(false),providers:providers.clone(),revoke:AtomicBool::new(false),
@@ -340,3 +342,26 @@ async fn new_provider_reference_cannot_register_an_existing_card_name() {
 
 #[path = "support/public_management.rs"]
 mod public_management;
+
+#[tokio::test]
+async fn renamed_card_invalidates_warm_metadata_before_partial_provider_patch() {
+    use bcs_service_api::{BotRepoPort, ProviderBotCoreService};
+    use bcs_service_api::application::a2a_bot::ConfigureA2aBotCommand;
+    let (chain,service,fetcher,_)=fixture().await;
+    let created=service.register_provider_bot(command(),A2aCardSource::Inline(validated().raw),1000).await.unwrap();
+    let id=created.bot_uuid;
+    let caps=chain.bot_repo.try_get(&id).await.unwrap().unwrap().capabilities;
+    chain.bot_repo.register(id.clone(),caps).await.unwrap();
+    assert_eq!(chain.bot_repo.try_get(&id).await.unwrap().unwrap().capabilities.name.as_deref(),Some("Remote"));
+    let mut raw=validated().raw;raw["name"]=json!("Renamed Agent");
+    service.configure(ConfigureA2aBotCommand {provider_id:"provider-a".into(),provider_admin_token:"test-admin".into(),
+        bot_uuid:id.clone(),source:A2aCardSource::Inline(raw),expected_revision:None,now_ms:2000}).await.unwrap();
+    let result=fetcher.providers.update_provider_bot("provider-a","test-admin","remote",None,
+        Some("New summary".into()),None,None,None,Some("public".into())).await.unwrap();
+    assert_eq!(result.capabilities.name.as_deref(),Some("Renamed Agent"));
+    assert_eq!(result.capabilities.summary.as_deref(),Some("New summary"));
+    assert_eq!(chain.bot_repo.try_get_many(&[id.clone()]).await.unwrap()[0].capabilities.name.as_deref(),Some("Renamed Agent"));
+    assert_eq!(chain.bot_repo.get_including_deleted(&id).await.unwrap().capabilities.name.as_deref(),Some("Renamed Agent"));
+    assert!(fetcher.providers.update_provider_bot("provider-a","test-admin","remote",Some("Unauthorized rename".into()),
+        None,None,None,None,None).await.is_err());
+}
