@@ -77,13 +77,13 @@ it('reports clipboard failure without claiming that the link was copied',async()
 it('approves an assigned task in the workbench and refreshes the list',async()=>{
  const detail={id:1,flowId:'flow-1',nodeId:'review',workflowId:'expense',workflowTitle:'费用审批',approvalType:null,message:'请确认',cardFields:[],approverIds:['00123'],approverNames:['审批人'],approvalPolicy:'any',approvedBy:[],rejectedBy:[],status:'pending',deliveryMode:'card-web',createdAt:100,resolvedAt:null,canAct:true}
  const fetcher=vi.fn(async (url:string,options?:RequestInit)=>{
-  if(url.includes('/workbench/1/resolve')) return {ok:true,json:async()=>({ok:true,status:'approved'})}
+  if(url.includes('/api/approval/1/resolve/session')) return {ok:true,json:async()=>({ok:true,status:'approved'})}
   if(url.includes('/workbench/')) return {ok:true,json:async()=>detail}
   return {ok:true,json:async()=>({items,nextCursor:null})}
  });vi.stubGlobal('fetch',fetcher)
  render(<ApprovalWorkbench isAdmin={false}/>);fireEvent.click(await screen.findByRole('button',{name:'进行审批'}))
  const button=await screen.findByRole('button',{name:'通过'});fireEvent.click(button)
- await waitFor(()=>expect(fetcher.mock.calls.some(([url,options])=>String(url).includes('/workbench/1/resolve') && options?.method==='POST')).toBe(true))
+ await waitFor(()=>expect(fetcher.mock.calls.some(([url,options])=>String(url).includes('/api/approval/1/resolve/session') && options?.method==='POST')).toBe(true))
  await waitFor(()=>expect(fetcher.mock.calls.filter(([url])=>String(url).includes('/search?')).length).toBeGreaterThan(1))
 })
 it('does not offer approval actions when the viewer is not an approver',async()=>{

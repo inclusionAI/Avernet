@@ -72,12 +72,10 @@ ID 倒序，先按个人和条件过滤再分页。`approvalUrl` 使用宿主配
 ## 详情与审批（路由工厂合同）
 
 在同一挂载前提下，`GET /api/approval/workbench/:id` 只允许实际审批人或
-管理员查看详情，并返回 `canAct`。`POST /api/approval/workbench/:id/resolve`
+管理员查看详情，并返回 `canAct`。`POST /api/approval/:id/resolve/session`
 的 JSON 请求体使用 `action: "approve" | "reject"`，可附字符串 `comment`
 （UTF-8 最多 10000 字节）和对象 `detail`（序列化后最多 64000 字节）。
-服务端从认证上下文取得操作人，不信任请求中的工号。提交要求配置
-`publicBaseUrl`，且 `Origin` 与其 origin 一致；若提供 `Sec-Fetch-Site`，
-必须为 `same-origin`。缺失身份、非审批人、卡片不存在或状态冲突分别返回
+提交与运行概览使用同一个 session 解析端点，服务端从认证上下文取得操作人，不信任请求中的工号。缺失身份、非审批人、卡片不存在或状态冲突分别返回
 401、403、404 或 409；服务不可用或结果未确认返回 503，应刷新后确认，
 不要假定失败或成功。详情和动作响应同样禁止缓存。
 
