@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from threading import RLock
 
 from search_core.core.memory_cache import MemoryCache
+from search_core.core.timing import stage_timing
 
 logger = logging.getLogger(__name__)
 _MANUAL_REASONS = {"keyword_disabled", "vector_disabled", "reranker_disabled"}
@@ -141,26 +142,32 @@ class CachedRetrieval:
         revision = self.state.revision()
         if revision is None or not self.cache.enabled:
             return await self.retrieval.retrieve(request)
-        # Search/recommend currently share identical validated default semantics.
-        # None (unrestricted) and an empty authorization set remain distinct.
-        key = _key(
-            [
-                revision,
-                self.namespace,
-                request.query,
-                request.limit,
-                {k: sorted(v) for k, v in request.filters.items()},
-                None if request.allowed_ids is None else sorted(request.allowed_ids),
-            ]
-        )
-        hit = self.cache.get(key)
-        if hit is not None and self.state.revision() == revision:
-            return hit
+        with stage_timing("result_cache_read") as stage:
+            # Search/recommend currently share identical validated default semantics.
+            # None (unrestricted) and an empty authorization set remain distinct.
+            key = _key(
+                [
+                    revision,
+                    self.namespace,
+                    request.query,
+                    request.limit,
+                    {k: sorted(v) for k, v in request.filters.items()},
+                    None
+                    if request.allowed_ids is None
+                    else sorted(request.allowed_ids),
+                ]
+            )
+            hit = self.cache.get(key)
+            if hit is not None and self.state.revision() == revision:
+                stage["cache"] = "hit"
+                return hit
+            stage["cache"] = "miss"
         result = await self.retrieval.retrieve(request)
         if (result.status == "ok" or result.reasons) and set(
             result.reasons
         ) <= _MANUAL_REASONS:
-            self.state.put_result(self.cache, revision, key, result)
+            with stage_timing("result_cache_write"):
+                self.state.put_result(self.cache, revision, key, result)
         return result
 
 
@@ -173,10 +180,13 @@ class CachedEmbedding:
         self.embedding_key = embedding_key
 
     async def embed(self, text):
-        key = _key([self.embedding_key, self.dimension, text])
-        hit = self.cache.get(key)
-        if hit is not None:
-            return list(hit)
+        with stage_timing("embedding_cache_read") as stage:
+            key = _key([self.embedding_key, self.dimension, text])
+            hit = self.cache.get(key)
+            if hit is not None:
+                stage["cache"] = "hit"
+                return list(hit)
+            stage["cache"] = "miss"
         if inspect.iscoroutinefunction(self.provider.embed):
             values = await self.provider.embed(text)
         else:
@@ -184,5 +194,6 @@ class CachedEmbedding:
         if len(values) != self.dimension or any(not math.isfinite(v) for v in values):
             raise ValueError("invalid query embedding")
         values = tuple(values)
-        self.cache.put(key, values)
+        with stage_timing("embedding_cache_write"):
+            self.cache.put(key, values)
         return list(values)

@@ -228,6 +228,37 @@ flush. Abrupt process loss can lose the last in-memory window; these logs are
 operational diagnostics, not a durable audit trail. Hosts retain responsibility
 for log rotation, retention and collection.
 
+### Search stage timings
+
+`CatalogSearchApplication` emits `search_timing` through that same background
+sink for HTTP and TR callers. Each five-second window is grouped by `reason`
+(`ok`, `degraded`, `error`, `cancelled`), with `count`, `avg_ms`, `max_ms` and
+the **slowest request** in `sample`. The first observation may emit separately.
+`sample.request_id` correlates failures; `sample.elapsed_ms` measures service
+execution, and `sample.stages` contains each executed stage's `elapsed_ms` and
+`outcome`, plus bounded counts or cache-hit annotations. When configured,
+`config_version` and `retrieval` identify the request's effective policy.
+
+Stages cover configuration/validation, result and embedding cache reads/writes,
+Embedding, keyword/vector recall, recall filtering/deduplication (`recall_merge`),
+RRF (`fusion`), reranking, result construction, Card hydration (`card_metadata`,
+including `card_fetch` for database reads), eligibility and authorization.
+Default TopK records `default_candidates`, including cache/refresh wait time.
+Optional business extensions can use `stage_timing` with fixed stage names.
+
+Times include waiting, not just CPU or upstream service time. `recall` spans the
+parallel keyword and Embedding/vector branches; parent and child durations
+overlap and **must not be summed**. A missing stage did not execute, e.g. a cache
+hit, a disabled branch, or no reranking candidates. Card hydration reports hit/
+miss counts; cache hits never reuse a previous request's timings.
+
+This is service diagnostics, not a per-request access log or latency percentile
+metric. It excludes transport authentication/parsing, response serialization
+and network time. Requests rejected before the service retain the existing
+admission/transport logs. Query text, Cards, resource IDs, vectors and credentials are
+never timing fields. No new switch, sink, task or per-candidate logging is added;
+TC's legacy orchestration is unchanged.
+
 ## 可选召回分支
 
 `HybridRetrievalService` 组合参数新增 `keyword_enabled`、`vector_enabled`，默认均为 true，现有 TC 调用不变。向量关闭时跳过查询 Embedding 和向量调用；关键词关闭时跳过关键词调用；至少开启一路。主动关闭的分支在结果 reasons 中记为 `keyword_disabled` / `vector_disabled`，结果为 degraded。关闭分支不算成功兜底：唯一开启的分支失败仍返回检索不可用；成功但无匹配则允许空结果。参数是服务组装能力，不开放给 HTTP 调用方，也不引入 DRM 依赖。

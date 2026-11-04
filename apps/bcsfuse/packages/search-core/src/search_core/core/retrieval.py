@@ -16,6 +16,7 @@ from search_core.api.models import (
     StageScore,
 )
 from search_core.core.ranking import reciprocal_rank_fusion
+from search_core.core.timing import stage_timing
 from search_core.plugin_api.embedding import AsyncEmbeddingProvider, EmbeddingProvider
 from search_core.plugin_api.execution import CallExecutor
 from search_core.plugin_api.reranker import AsyncReranker, Reranker
@@ -110,91 +111,117 @@ class HybridRetrievalService:
             nonlocal query_vector
             if not self._vector_enabled:
                 return None
-            vector = await self._call("embedding", self._embedding.embed, request.query)
-            if not vector or any(not math.isfinite(v) for v in vector):
-                raise _StageFailure("embedding_unavailable")
-            query_vector = tuple(vector)
-            return await self._call(
-                "vector",
-                self._index.vector_search,
-                vector,
-                self._recall_limit,
-                request.filters,
-                request.allowed_ids,
-            )
+            with stage_timing("embedding") as stage:
+                vector = await self._call(
+                    "embedding", self._embedding.embed, request.query
+                )
+                if not vector or any(not math.isfinite(v) for v in vector):
+                    raise _StageFailure("embedding_unavailable")
+                query_vector = tuple(vector)
+                stage["dimension"] = len(vector)
+            with stage_timing("vector"):
+                return await self._call(
+                    "vector",
+                    self._index.vector_search,
+                    vector,
+                    self._recall_limit,
+                    request.filters,
+                    request.allowed_ids,
+                )
 
         async def keyword():
             if not self._keyword_enabled:
                 return None
-            return await self._call(
-                "keyword",
-                self._index.keyword_search,
-                request.query,
-                self._recall_limit,
-                request.filters,
-                request.allowed_ids,
-            )
+            with stage_timing("keyword"):
+                return await self._call(
+                    "keyword",
+                    self._index.keyword_search,
+                    request.query,
+                    self._recall_limit,
+                    request.filters,
+                    request.allowed_ids,
+                )
 
-        results = await asyncio.gather(
-            semantic(),
-            keyword(),
-            return_exceptions=True,
-        )
-        reasons, branches = [], []
-        available = False
-        for position, result in enumerate(results):
-            if not (self._vector_enabled, self._keyword_enabled)[position]:
-                reasons.append(
-                    "vector_disabled" if position == 0 else "keyword_disabled"
+        with stage_timing("recall") as stage:
+            results = await asyncio.gather(
+                semantic(),
+                keyword(),
+                return_exceptions=True,
+            )
+            failed = sum(isinstance(result, Exception) for result in results)
+            if failed:
+                stage["outcome"] = (
+                    "unavailable"
+                    if failed == self._vector_enabled + self._keyword_enabled
+                    else "degraded"
                 )
-                branches.append(())
-                continue
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, Exception):
-                if not self._allow_partial:
-                    raise SearchUnavailable("retrieval dependency failed") from result
-                reason = (
-                    result.reason
-                    if isinstance(result, _StageFailure)
-                    else (
-                        "vector_unavailable" if position == 0 else "keyword_unavailable"
+        with stage_timing("recall_merge") as stage:
+            reasons, branches = [], []
+            available = False
+            for position, result in enumerate(results):
+                if not (self._vector_enabled, self._keyword_enabled)[position]:
+                    reasons.append(
+                        "vector_disabled" if position == 0 else "keyword_disabled"
                     )
-                )
-                if reason == "index_unavailable":
+                    branches.append(())
+                    continue
+                if isinstance(result, asyncio.CancelledError):
+                    raise result
+                if isinstance(result, Exception):
+                    if not self._allow_partial:
+                        raise SearchUnavailable(
+                            "retrieval dependency failed"
+                        ) from result
                     reason = (
-                        "vector_unavailable" if position == 0 else "keyword_unavailable"
+                        result.reason
+                        if isinstance(result, _StageFailure)
+                        else (
+                            "vector_unavailable"
+                            if position == 0
+                            else "keyword_unavailable"
+                        )
                     )
-                reasons.append(reason)
-                branches.append(())
-            else:
-                available = True
-                hits = tuple(result)
-                if request.allowed_ids is not None and any(
-                    self._identity(h) not in request.allowed_ids for h in hits
-                ):
-                    raise SearchUnavailable("index returned an unauthorized candidate")
-                threshold = self._thresholds[position]
-                if threshold is not None:
-                    hits = tuple(
-                        h
-                        for h in hits
-                        if math.isfinite(h.score) and h.score >= threshold
-                    )
-                if self._group_by_source:
-                    unique = {}
-                    for h in sorted(hits, key=lambda h: (-h.score, h.id)):
-                        source = self._identity(h)
-                        unique.setdefault(source, h.model_copy(update={"id": source}))
-                    hits = tuple(unique.values())
-                branches.append(hits)
-        return RecallResult(
-            branches[0],
-            branches[1],
-            query_vector,
-            tuple(dict.fromkeys(reasons)),
-            available,
-        )
+                    if reason == "index_unavailable":
+                        reason = (
+                            "vector_unavailable"
+                            if position == 0
+                            else "keyword_unavailable"
+                        )
+                    reasons.append(reason)
+                    branches.append(())
+                else:
+                    available = True
+                    hits = tuple(result)
+                    if request.allowed_ids is not None and any(
+                        self._identity(h) not in request.allowed_ids for h in hits
+                    ):
+                        raise SearchUnavailable(
+                            "index returned an unauthorized candidate"
+                        )
+                    threshold = self._thresholds[position]
+                    if threshold is not None:
+                        hits = tuple(
+                            h
+                            for h in hits
+                            if math.isfinite(h.score) and h.score >= threshold
+                        )
+                    if self._group_by_source:
+                        unique = {}
+                        for h in sorted(hits, key=lambda h: (-h.score, h.id)):
+                            source = self._identity(h)
+                            unique.setdefault(
+                                source, h.model_copy(update={"id": source})
+                            )
+                        hits = tuple(unique.values())
+                    branches.append(hits)
+            stage.update(vector_count=len(branches[0]), keyword_count=len(branches[1]))
+            return RecallResult(
+                branches[0],
+                branches[1],
+                query_vector,
+                tuple(dict.fromkeys(reasons)),
+                available,
+            )
 
     def _identity(self, hit):
         if not self._group_by_source:
@@ -209,71 +236,79 @@ class HybridRetrievalService:
     ) -> SearchResult:
         if not recall.available:
             raise SearchUnavailable("all recall paths unavailable")
-        hits = {h.id: h for h in [*recall.keyword_hits, *recall.vector_hits]}
-        ranking = reciprocal_rank_fusion(
-            [[h.id for h in recall.vector_hits], [h.id for h in recall.keyword_hits]]
-        )[: self._candidate_limit]
-        scores = [(r.item_id, r.score) for r in ranking]
-        keyword_scores = _stage_scores((h.id, h.score) for h in recall.keyword_hits)
-        vector_scores = _stage_scores((h.id, h.score) for h in recall.vector_hits)
-        fusion_scores = _stage_scores(scores)
+        with stage_timing("fusion") as stage:
+            hits = {h.id: h for h in [*recall.keyword_hits, *recall.vector_hits]}
+            ranking = reciprocal_rank_fusion(
+                [
+                    [h.id for h in recall.vector_hits],
+                    [h.id for h in recall.keyword_hits],
+                ]
+            )[: self._candidate_limit]
+            scores = [(r.item_id, r.score) for r in ranking]
+            keyword_scores = _stage_scores((h.id, h.score) for h in recall.keyword_hits)
+            vector_scores = _stage_scores((h.id, h.score) for h in recall.vector_hits)
+            fusion_scores = _stage_scores(scores)
+            stage["candidate_count"] = len(ranking)
         reranker_scores = {}
         reasons = list(recall.reasons)
         score_source = "rrf"
         if self._reranker is not None and ranking:
             try:
-                reranked = await self._call(
-                    "reranker",
-                    self._reranker.rerank,
-                    request.query,
-                    [
-                        {
-                            "id": r.item_id,
-                            "text": str(
-                                hits[r.item_id].payload.get("rerank_text")
-                                or hits[r.item_id].payload.get("search_text")
-                                or hits[r.item_id].payload.get("content")
-                                or ""
-                            ),
-                        }
-                        for r in ranking
-                    ],
-                    request.limit,
-                )
-                ids = [r.candidate_id for r in reranked]
-                if len(ids) != len(set(ids)) or not set(ids) <= {
-                    r.item_id for r in ranking
-                }:
-                    raise ValueError("invalid reranker candidate identities")
-                if any(not math.isfinite(r.score) for r in reranked):
-                    raise ValueError("non-finite reranker score")
-                scores = [(r.candidate_id, r.score) for r in reranked]
-                reranker_scores = _stage_scores(scores)
-                score_source = "reranker"
+                with stage_timing("reranker") as stage:
+                    reranked = await self._call(
+                        "reranker",
+                        self._reranker.rerank,
+                        request.query,
+                        [
+                            {
+                                "id": r.item_id,
+                                "text": str(
+                                    hits[r.item_id].payload.get("rerank_text")
+                                    or hits[r.item_id].payload.get("search_text")
+                                    or hits[r.item_id].payload.get("content")
+                                    or ""
+                                ),
+                            }
+                            for r in ranking
+                        ],
+                        request.limit,
+                    )
+                    ids = [r.candidate_id for r in reranked]
+                    if len(ids) != len(set(ids)) or not set(ids) <= {
+                        r.item_id for r in ranking
+                    }:
+                        raise ValueError("invalid reranker candidate identities")
+                    if any(not math.isfinite(r.score) for r in reranked):
+                        raise ValueError("non-finite reranker score")
+                    scores = [(r.candidate_id, r.score) for r in reranked]
+                    reranker_scores = _stage_scores(scores)
+                    score_source = "reranker"
+                    stage.update(input_count=len(ranking), result_count=len(scores))
             except Exception as exc:
                 if not self._allow_partial:
                     raise SearchUnavailable("reranker failed") from exc
                 reasons.append("reranker_unavailable")
-        return SearchResult(
-            items=tuple(
-                SearchItem(
-                    item_id=key,
-                    name=str(hits[key].payload.get("name") or ""),
-                    summary=str(hits[key].payload.get("content") or ""),
-                    score=score,
-                    score_source=score_source,
-                    score_details=ScoreDetails(
-                        keyword=keyword_scores.get(key),
-                        vector=vector_scores.get(key),
-                        rrf=fusion_scores.get(key),
-                        reranker=reranker_scores.get(key),
-                    ),
-                )
-                for key, score in scores[: request.limit]
-            ),
-            status="degraded" if reasons else "ok",
-            reasons=tuple(dict.fromkeys(reasons)),
-        )
+        with stage_timing("result_build"):
+            return SearchResult(
+                items=tuple(
+                    SearchItem(
+                        item_id=key,
+                        name=str(hits[key].payload.get("name") or ""),
+                        summary=str(hits[key].payload.get("content") or ""),
+                        score=score,
+                        score_source=score_source,
+                        score_details=ScoreDetails(
+                            keyword=keyword_scores.get(key),
+                            vector=vector_scores.get(key),
+                            rrf=fusion_scores.get(key),
+                            reranker=reranker_scores.get(key),
+                        ),
+                    )
+                    for key, score in scores[: request.limit]
+                ),
+                status="degraded" if reasons else "ok",
+                reasons=tuple(dict.fromkeys(reasons)),
+            )
 
     async def retrieve(self, request: RetrievalRequest) -> SearchResult:
         return await self.rank(request, await self.recall(request))

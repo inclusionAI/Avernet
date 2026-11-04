@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 from search_core.core.observation import events
+from search_core.core.timing import stage_timing
 
 
 def card_metadata(card):
@@ -37,6 +38,17 @@ class CardMetadataRetrieval:
 
     async def retrieve(self, request):
         result = await self.retrieval.retrieve(request)
+        with stage_timing("card_metadata") as stage:
+            stage["input_count"] = len(result.items)
+            enriched = await self._enrich(result, stage)
+            stage["result_count"] = len(enriched.items)
+            if "card_metadata_unavailable" in enriched.reasons:
+                stage["outcome"] = "unavailable"
+            elif "card_metadata_missing" in enriched.reasons:
+                stage["outcome"] = "missing"
+            return enriched
+
+    async def _enrich(self, result, stage):
         if not result.items:
             return result
         revision = self.state.revision()
@@ -47,11 +59,13 @@ class CardMetadataRetrieval:
                 missing.append(item.item_id)
             else:
                 cards[item.item_id] = cached
+        stage.update(cache_hits=len(cards), cache_misses=len(missing))
         try:
             if missing:
-                fetched = await self.execution.call(
-                    self.repository.get_many_cards, missing
-                )
+                with stage_timing("card_fetch"):
+                    fetched = await self.execution.call(
+                        self.repository.get_many_cards, missing
+                    )
                 for key, card in fetched.items():
                     value = self.project_card(card)
                     cards[key] = value
