@@ -641,8 +641,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # operation contributes no path/query bot_id parameter.
 # Catalogue profile addresses the bot by ``bot_uuid`` in the path, a different
 # spelling from the ``bot_id`` parameter this rule counts.
+# The owner-scoped collaboration repair adds one path-addressed, user-scoped
+# operation; the non-user Bot overview stays path-addressed in the same total.
 # The relay-session task read is account-level and carries no bot_id parameter.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 144}
+_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 144}
+
 
 
 def _schema() -> dict:
@@ -853,7 +856,9 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 291
+    # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
+    # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
+    assert len(taking) == 292
 
 
 def test_the_exempt_operations_take_none():
