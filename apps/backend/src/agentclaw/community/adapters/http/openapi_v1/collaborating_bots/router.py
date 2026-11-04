@@ -31,6 +31,7 @@ from agentclaw.community.di import Injected
 from fastapi import APIRouter, Query, Request
 
 from .schemas import CollaboratingBot, CollaborationSummary
+from agentclaw.community.core.bot_management.avatar import bot_avatar_url
 
 router = APIRouter(
     prefix="/openapi/v1/bots/collaborations",
@@ -49,6 +50,7 @@ def _to_item(
     engine = bot.get("active_engine") or ""
     return CollaboratingBot(
         bcn_bot_id=bcn_bot_reference(bot),
+        avatar_url=bot_avatar_url(bot),
         bot_id=bot["bot_id"],
         bot_name=bot.get("bot_name") or "",
         bot_desc=bot.get("bot_desc") or "",

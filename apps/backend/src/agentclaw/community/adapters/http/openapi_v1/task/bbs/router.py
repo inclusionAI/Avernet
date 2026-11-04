@@ -35,6 +35,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
 )
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
+    MAX_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
@@ -74,6 +75,7 @@ from .schemas import (
     CreateTopicRequestUnified,
     PostHelpfulUpdated,
     PostItem,
+    PostLocation,
     SetPostHelpfulRequest,
     domain_topic_config,
     ReplyCreated,
@@ -220,6 +222,37 @@ async def list_posts(
         [PostItem.from_record(post) for post in items],
         request,
     )
+
+
+@read_router.get(
+    "/topics/{topic_id}/posts/{post_id}/location",
+    response_model=Envelope[PostLocation],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_post_location(
+    topic_id: TopicIdPath,
+    request: Request,
+    post_id: str = Path(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Stable Post id exactly as returned by BBS APIs.",
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Page size used by the caller to render first-level replies.",
+    ),
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostLocation]:
+    """Resolve a direct or nested reply to its exact public reply page."""
+    location = service.get_post_location(
+        topic_id=topic_id,
+        post_id=post_id,
+        page_size=page_size,
+    )
+    return envelope(PostLocation.from_record(location), request)
 
 
 @read_router.post(

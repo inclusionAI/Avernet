@@ -55,6 +55,9 @@ class Passport:
     def query_agent_passport(self, *args, **kwargs):
         return dict(self.current)
 
+    def query_handoff_passport(self, **kwargs):
+        return None
+
     def reissue_agent_credentials(self, **kwargs):
         assert (
             kwargs["entity_id"],
@@ -666,3 +669,48 @@ def test_configured_admin_can_handoff_for_absent_owner_and_is_audited(world):
     assert result["actor_id"] == "ops"
     assert result["old_owner_id"] == "A"
     assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "B"
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_handoff_with_expired_history_preserves_existing_flow(world, monkeypatch, expired):
+    snapshot = MagicMock(return_value={"credential_id": "old"})
+    monkeypatch.setattr(world.passport, "query_handoff_passport", snapshot)
+    original = world.passport.query_agent_passport
+    def current(*args, **kwargs):
+        if expired and world.passport.current.get("credential_id") == "old":
+            return None
+        return original(*args, **kwargs)
+    monkeypatch.setattr(world.passport, "query_agent_passport", current)
+    op = begin(world)
+    drain(world, op)
+    assert world.repo.get(op)["phase"] == "SUCCEEDED"
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "B"
+    assert len(world.passport.issues) == 1
+    assert world.passport.issues[0]["expected_credential_id"] == "old"
+    if expired:
+        snapshot.assert_called_once_with(bot_id="service", owner_workno="A", entity_id="A")
+    else:
+        snapshot.assert_not_called()
+
+
+def test_missing_history_stays_queued_without_issuing_or_changing_owner(world, monkeypatch):
+    monkeypatch.setattr(world.passport, "query_agent_passport", lambda *a, **k: None)
+    monkeypatch.setattr(world.passport, "query_handoff_passport", lambda **k: None)
+    op = begin(world)
+    assert not world.service().step(op)
+    row = world.repo.get(op)
+    assert row["phase"] == "QUEUED"
+    assert row["error_code"] == "CURRENT_PASSPORT_REQUIRED"
+    assert world.bots.get_by_pk(world.bot["id"])["owner_id"] == "A"
+    assert not world.passport.issues
+
+
+def test_expired_snapshot_failure_does_not_issue_credentials(world, monkeypatch):
+    monkeypatch.setattr(world.passport, "query_agent_passport", lambda *a, **k: None)
+    def fail(**kwargs):
+        raise RuntimeError("snapshot unavailable")
+    monkeypatch.setattr(world.passport, "query_handoff_passport", fail)
+    op = begin(world)
+    assert not world.service().step(op)
+    assert world.repo.get(op)["error_code"] == "HANDOFF_EXTERNAL_ERROR"
+    assert not world.passport.issues

@@ -555,6 +555,7 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
                 "online_available": None,
                 "live_version": None,
                 "conversation_stage": "draft",
+                "avatar_url": None,
             }
         ],
     }

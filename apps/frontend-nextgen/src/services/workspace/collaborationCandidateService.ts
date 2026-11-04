@@ -84,6 +84,7 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
   return {
     id,
     name: dto.bot_name || dto.bot_id,
+    avatarUrl: dto.avatar_url?.trim() || undefined,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: 'online',
     // 实例运行状态透传(2026-10-21):不再在视图层丢弃,FAILED/PENDING 供行级禁用与悬停提示感知。

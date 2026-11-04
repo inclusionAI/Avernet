@@ -314,6 +314,16 @@ class PassportPlugin(Plugin, Protocol):
         """
         ...
 
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        """Handoff-only metadata, permitting expired but not deleted history.
+
+        Never a usable credential or an authentication result. None means no
+        recoverable history or no remote capability; ordinary queries stay strict.
+        """
+        ...
+
     def owner_handoff_supported(
         self, *, bot_id: str, owner_workno: str, entity_id: str
     ) -> bool:

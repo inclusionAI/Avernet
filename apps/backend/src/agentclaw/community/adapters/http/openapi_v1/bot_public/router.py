@@ -37,6 +37,7 @@ from .schemas import (
     PublicBotProfile,
     RuntimeState,
 )
+from agentclaw.community.core.bot_management.avatar import bot_avatar_url
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
@@ -156,6 +157,7 @@ def _public_bot(record: Mapping[str, Any]) -> PublicBot:
     # COSEC: Explicitly project only catalog fields and approved BCS metadata so
     # service records cannot expose bindings, device data, credentials, or environment data.
     return PublicBot(
+        avatar_url=bot_avatar_url(record),
         bot_id=str(record.get("bot_id") or ""),
         bot_uuid=record.get("bot_uuid"),
         entity_id=str(record.get("entity_id") or record.get("owner_id") or ""),

@@ -25,6 +25,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollResultOptionRecord,
     ForumPollResultRecord,
     BrowseSubscriptionRecord,
+    ForumPostLocationRecord,
     ForumPostRecord,
     ForumTopicRecord,
     ForumTopicViewerRecord,
@@ -381,6 +382,34 @@ class PostHelpfulUpdated(BaseModel):
 
     post_id: str = Field(description="Stable Post id that was updated.")
     helpful: bool = Field(description="Resulting helpful marker state.")
+
+
+class PostLocation(BaseModel):
+    """Display-page location for one Post inside its Topic."""
+
+    post_id: str = Field(
+        description="Stable Post id whose exact location was requested."
+    )
+    root_post_id: str = Field(
+        description=(
+            "Stable first-level Post id whose floor group contains the target. "
+            "For a direct reply this equals post_id."
+        )
+    )
+    page: int = Field(
+        description=(
+            "One-based first-level reply page containing the target, calculated "
+            "with the supplied page_size and public display ordering."
+        )
+    )
+
+    @classmethod
+    def from_record(cls, location: ForumPostLocationRecord) -> "PostLocation":
+        return cls(
+            post_id=location.post_id,
+            root_post_id=location.root_post_id,
+            page=location.page,
+        )
 
 
 class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
