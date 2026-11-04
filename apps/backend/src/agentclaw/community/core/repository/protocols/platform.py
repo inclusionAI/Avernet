@@ -190,6 +190,8 @@ class TaskQueueRepositoryProtocol(Protocol):
         app: str,
         limit: int,
         lease_seconds: int,
+        task_types: Optional[Sequence[str]] = None,
+        exclude_task_types: bool = False,
     ) -> ClaimOutcome:
         """:meth:`claim_batch`, also answering the rows the scan retired ``TIMED_OUT``.
 

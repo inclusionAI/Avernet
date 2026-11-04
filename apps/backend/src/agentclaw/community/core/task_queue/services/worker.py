@@ -31,12 +31,16 @@ connection (local/test) stays safe without sacrificing handler parallelism.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
+import itertools
 import math
 import os
 import random
 import socket
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
@@ -60,6 +64,7 @@ from agentclaw.community.plugin_api.tracer import TracerPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
+ISOLATED_SHUTDOWN_SECONDS = 30
 
 
 def _make_worker_id() -> str:
@@ -102,6 +107,11 @@ class TaskWorker(LifecycleBase):
         # giving up handler concurrency; on a prod connection pool it costs
         # only negligible serialization of fast writes.
         self._db_lock = asyncio.Lock()
+        self._isolated_types = tuple(config.isolated_task_types)
+        self._db_requests = None
+        self._sequence = itertools.count()
+        self._handler_executors = {}
+        self._db_executor = None
 
     # ── lifecycle ───────────────────────────────────────────────────────
     async def startup(self) -> None:
@@ -110,12 +120,28 @@ class TaskWorker(LifecycleBase):
                 "[TaskWorker] disabled (task_queue_worker.enabled=false) — not starting"
             )
             return
+        if self._task and not self._task.done():
+            raise RuntimeError('previous task worker is still draining')
+        unknown = [name for name in self._isolated_types if self._registry.get(name) is None]
+        if unknown:
+            raise ValueError(f'isolated task types are not registered: {unknown}')
         self._running = True
         # Capture the loop for cross-thread wake-ups. ``startup()`` runs *on*
         # the loop, which is the only place ``get_running_loop()`` works — a
         # handler thread signalling later cannot look it up for itself.
         self._wakeup.bind(asyncio.get_running_loop())
-        self._task = asyncio.create_task(self._loop())
+        if self._isolated_types:
+            isolated = self._config.isolated_concurrency
+            normal = self._config.max_concurrency - isolated
+            self._handler_executors = {
+                'isolated': ThreadPoolExecutor(max_workers=isolated, thread_name_prefix='queue-isolated'),
+                'normal': ThreadPoolExecutor(max_workers=normal, thread_name_prefix='queue-normal'),
+            }
+            self._db_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='queue-db')
+            self._db_requests = asyncio.PriorityQueue()
+            self._task = asyncio.create_task(self._run_isolated(normal, isolated))
+        else:
+            self._task = asyncio.create_task(self._loop())
         logger.info(
             "[TaskWorker] started worker_id=%s env=%s app=%s batch=%d poll=%.1fs lease=%ds",
             self._worker_id,
@@ -133,11 +159,17 @@ class TaskWorker(LifecycleBase):
         # scheduled onto a loop that is going away.
         self._wakeup.unbind()
         if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            if self._isolated_types:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._task), timeout=ISOLATED_SHUTDOWN_SECONDS)
+                except asyncio.TimeoutError:
+                    logger.warning('[TaskWorker] shutdown timed out; handlers and leases are still draining')
+            else:
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
         logger.info("[TaskWorker] stopped worker_id=%s", self._worker_id)
 
     # ── loop ────────────────────────────────────────────────────────────
@@ -158,6 +190,68 @@ class TaskWorker(LifecycleBase):
             # only the ordinary interval.
             await self._wakeup.wait(self._idle_delay())
 
+    async def _run_isolated(self, normal: int, isolated: int) -> None:
+        db_worker = asyncio.create_task(self._drain_db_requests())
+        try:
+            await asyncio.gather(
+                self._pool_loop(normal, exclude=True),
+                self._pool_loop(isolated, exclude=False),
+            )
+        finally:
+            await self._db_requests.put((2, next(self._sequence), None))
+            await db_worker
+            self._db_requests = None
+            for executor in self._handler_executors.values():
+                executor.shutdown(wait=False)
+            self._handler_executors = {}
+            self._db_executor.shutdown(wait=False)
+            self._db_executor = None
+
+    async def _pool_loop(self, capacity: int, *, exclude: bool) -> None:
+        # Independent polling avoids sharing a clear-on-wait latch between
+        # pools. The configured poll interval remains the idle latency bound.
+        while self._running:
+            try:
+                claimed = await self._run_pool_once(capacity, exclude=exclude)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception('[TaskWorker] isolated poll tick failed')
+                claimed = 0
+            if self._running and claimed < capacity:
+                await asyncio.sleep(self._idle_delay())
+
+    async def _run_pool_once(self, capacity: int, *, exclude: bool) -> int:
+        claimed, retired = await self._db(
+            self._repo.claim_batch_reporting_retired,
+            worker_id=self._worker_id, env=self._env, app=self._app,
+            limit=capacity, lease_seconds=self._config.lease_seconds,
+            task_types=self._isolated_types, exclude_task_types=exclude,
+        )
+        for task in retired:
+            await self._give_up(task)
+        await asyncio.gather(*(self._run_guarded(task) for task in claimed))
+        return len(claimed)
+
+    async def _drain_db_requests(self) -> None:
+        while True:
+            _priority, _seq, request = await self._db_requests.get()
+            if request is None:
+                return
+            future, fn, kwargs, context = request
+            if future.cancelled():
+                continue
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    self._db_executor, context.run, functools.partial(fn, **kwargs)
+                )
+            except Exception as error:
+                if not future.done():
+                    future.set_exception(error)
+            else:
+                if not future.done():
+                    future.set_result(result)
+
     def _idle_delay(self) -> float:
         jitter = self._config.poll_jitter_seconds
         delta = random.uniform(-jitter, jitter) if jitter else 0.0
@@ -166,6 +260,12 @@ class TaskWorker(LifecycleBase):
     async def _db(self, fn, /, **kwargs):
         """Run a synchronous repository call off the event loop, serialized
         against this worker's other DB statements (see ``_db_lock``)."""
+        if self._db_requests is not None:
+            future = asyncio.get_running_loop().create_future()
+            priority = 0 if getattr(fn, '__name__', '') == 'renew_lease' else 1
+            await self._db_requests.put((priority, next(self._sequence),
+                                         (future, fn, kwargs, contextvars.copy_context())))
+            return await future
         async with self._db_lock:
             return await asyncio.to_thread(fn, **kwargs)
 
@@ -323,7 +423,14 @@ class TaskWorker(LifecycleBase):
         # the handler returns (or the lease is lost to another worker).
         heartbeat = asyncio.create_task(self._heartbeat(task.id))
         try:
-            outcome = await asyncio.to_thread(handler.handle, task.payload)
+            if self._handler_executors:
+                pool = 'isolated' if task.task_type in self._isolated_types else 'normal'
+                context = contextvars.copy_context()
+                outcome = await asyncio.get_running_loop().run_in_executor(
+                    self._handler_executors[pool], context.run, handler.handle, task.payload
+                )
+            else:
+                outcome = await asyncio.to_thread(handler.handle, task.payload)
         except Exception as exc:  # handler raising == implicit Retry with backoff
             logger.warning(
                 "[TaskWorker] handler raised for task id=%s type=%s: %r",

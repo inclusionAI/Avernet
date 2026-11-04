@@ -23,6 +23,7 @@ from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.task_queue_worker_config import parse_task_queue_worker
 from agentclaw.community.di.modules.ecb_config import resource_ready_settings
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -957,44 +958,5 @@ class ConfigModule(Module):
     @singleton
     @provider
     def task_queue_worker(self) -> cfg.TaskQueueWorkerConfig:
-        """In-process distributed-task-queue worker policy.
-
-        YAML shape under ``user_config.task_queue_worker``::
-
-            task_queue_worker:
-              enabled: false              # default off; flip per-env once a
-                                          #   handler is wired + table exists
-              poll_interval_seconds: 2.0
-              poll_jitter_seconds: 0.5
-              lease_seconds: 60
-              batch_size: 10
-              max_concurrency: 10
-              retry_backoff_min_seconds: 1.0
-              retry_backoff_max_seconds: 60.0
-
-        Any omitted key falls back to the ``TaskQueueWorkerConfig`` default.
-        Numeric keys are typed (``int``/``float``) — do NOT set them to YAML
-        ``null`` (omit the key to take the default instead). Operational note:
-        keep ``lease_seconds`` comfortably above the longest expected handler
-        runtime, else a slow handler's outcome write loses to a reclaim.
-        """
-        block = _block("task_queue_worker")
-        defaults = cfg.TaskQueueWorkerConfig()
-        return cfg.TaskQueueWorkerConfig(
-            enabled=bool(block.get("enabled", defaults.enabled)),
-            poll_interval_seconds=float(
-                block.get("poll_interval_seconds", defaults.poll_interval_seconds)
-            ),
-            poll_jitter_seconds=float(
-                block.get("poll_jitter_seconds", defaults.poll_jitter_seconds)
-            ),
-            lease_seconds=int(block.get("lease_seconds", defaults.lease_seconds)),
-            batch_size=int(block.get("batch_size", defaults.batch_size)),
-            max_concurrency=int(block.get("max_concurrency", defaults.max_concurrency)),
-            retry_backoff_min_seconds=float(
-                block.get("retry_backoff_min_seconds", defaults.retry_backoff_min_seconds)
-            ),
-            retry_backoff_max_seconds=float(
-                block.get("retry_backoff_max_seconds", defaults.retry_backoff_max_seconds)
-            ),
-        )
+        """Read the worker policy, including optional capacity isolation."""
+        return parse_task_queue_worker(_block("task_queue_worker"))

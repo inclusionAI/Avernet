@@ -22,6 +22,42 @@ a handler that reschedules itself until done, bounded by a wall-clock deadline.
 - `services/worker.py` — `TaskWorker`, the Lifecycle that polls, claims, runs handlers, and applies outcomes. It also re-establishes each task's enqueuing trace around its execution (see "Request correlation").
 - `examples.py` — `NoopTaskHandler` + `PollUntilTerminalExampleHandler` (not wired in prod).
 
+## Optional worker capacity isolation
+
+The worker defaults to its original single pool. A deployment may opt in to
+separate capacity for a set of registered task types:
+
+```yaml
+user_config:
+  task_queue_worker:
+    batch_size: 10
+    max_concurrency: 10
+    isolated_task_types: ["example.slow"]
+    isolated_concurrency: 5
+```
+
+The isolated and normal pools use independent bounded handler executors, while
+queue database calls and lease renewals have a separate serialized executor.
+Renewals are prioritized among waiting calls; a database call already in
+progress cannot be preempted. A stalled database can still cause lease loss.
+The normal pool has `max_concurrency - isolated_concurrency` slots; capacity is
+not borrowed between pools. Each pool polls independently, so opt-in enqueue
+wakes fall back to the configured poll interval plus jitter in isolation mode.
+Types must be registered and consistent across every worker consuming the same
+app/environment. Pool sizes must be positive and fit the configured batch.
+
+Stopping an isolated worker stops issuing new claim queries and waits up to 30
+seconds for handlers and any already-started claim to drain. If that expires,
+it reports the in-flight work and keeps the
+drain running while its event loop remains alive; it cannot cancel synchronous
+handler threads or promise they survive process shutdown. After a lease is
+reclaimed the queue is still at-least-once: the old holder's outcome CAS cannot
+overwrite the new holder, but external side effects need their own safeguards.
+Do not enable longer-running handlers until every consumer has the isolation
+configuration, capacity and rollout/rollback procedures have been verified.
+Mixed-version workers can still claim any type, so one node's configuration
+does not establish fleet-wide isolation.
+
 ## App scoping
 
 The `ac_task_queue` table is shared with a second, independently deployed

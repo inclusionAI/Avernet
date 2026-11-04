@@ -670,7 +670,7 @@ class TaskQueueRepository(
 
     # ── claim (the single-winner CAS) ───────────────────────────────────
 
-    def _read_candidates(self, db, env: str, app: str, limit: int) -> List[int]:
+    def _read_candidates(self, db, env: str, app: str, limit: int, type_filter=None) -> List[int]:
         """The claim scan: both eligibility branches, each riding its own index,
         in **one** statement.
 
@@ -708,6 +708,8 @@ class TaskQueueRepository(
         """
 
         def _arm(where, order_col, priority: int):
+            if type_filter is not None:
+                where = and_(where, type_filter)
             bounded = (
                 select(self.Model.id.label("id"), order_col.label("k"))
                 .where(where)
@@ -757,15 +759,20 @@ class TaskQueueRepository(
         app: str,
         limit: int,
         lease_seconds: int,
+        task_types: Optional[tuple[str, ...]] = None,
+        exclude_task_types: bool = False,
     ) -> ClaimOutcome:
         if limit <= 0:
             return ClaimOutcome([], [])
         won: List[TaskRecord] = []
         retired: List[TaskRecord] = []
+        type_filter = self.Model.task_type.in_(task_types) if task_types is not None else None
+        if type_filter is not None and exclude_task_types:
+            type_filter = ~type_filter
         with self._db.orm_session() as db:
             # 1) Read candidates (cheap, no lock) -- one query per eligibility
             #    branch, reclaimable rows first. See _read_candidates.
-            candidate_ids = self._read_candidates(db, env, app, limit)
+            candidate_ids = self._read_candidates(db, env, app, limit, type_filter)
 
             for task_id in candidate_ids:
                 # 2a) Claim it — but only while still eligible AND within
@@ -776,6 +783,7 @@ class TaskQueueRepository(
                     .filter(
                         self.Model.id == task_id,
                         self._eligible(env, app),
+                        *([type_filter] if type_filter is not None else []),
                         self.Model.deadline_at > func.now(),
                     )
                     .update(
@@ -803,6 +811,7 @@ class TaskQueueRepository(
                 timed_out = db.query(self.Model).filter(
                     self.Model.id == task_id,
                     self._eligible(env, app),
+                    *([type_filter] if type_filter is not None else []),
                     self.Model.deadline_at <= func.now(),
                 ).update(
                     {

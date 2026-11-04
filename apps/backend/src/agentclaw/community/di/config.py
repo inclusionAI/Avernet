@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.di.task_queue_worker_config import TaskQueueWorkerConfig as TaskQueueWorkerConfig
 from agentclaw.community.di.task_dispatch_config import (
     TaskDispatchConfig as TaskDispatchConfig,
 )
@@ -856,40 +857,6 @@ class TaskQueueConfig:
 # Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
 # out to keep this monolith under the 1000-line architecture cap); its DI provider
 # is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
-
-
-@dataclass(frozen=True)
-class TaskQueueWorkerConfig:
-    """In-process distributed-task-queue worker policy.
-
-    Sourced from the ``task_queue_worker`` block of ``user_config``.
-
-    BaaS and Teclaw production handlers are registered. The worker remains
-    disabled by default until an environment provisions ``ac_task_queue`` and
-    explicitly sets ``enabled: true``.
-
-    - ``poll_interval_seconds`` / ``poll_jitter_seconds`` — idle cadence when a
-      poll returns a non-full batch (jitter avoids fleet lockstep stampedes).
-    - ``lease_seconds`` — claim lease; a crashed worker's task is reclaimable
-      after this. Must exceed the longest expected handler runtime.
-    - ``batch_size`` — max tasks claimed per poll; a full batch triggers an
-      immediate re-poll so a backlog drains at fleet speed.
-    - ``max_concurrency`` — in-flight handler cap per worker (<= batch_size).
-    - ``retry_backoff_min_seconds`` / ``retry_backoff_max_seconds`` —
-      exponential backoff floor and cap for the error-retry path. The first
-      retry waits ``min``; each subsequent retry doubles, capped at ``max``.
-      (There is no max-attempts cap — retries are bounded by the task's
-      deadline, enforced DB-side.)
-    """
-
-    enabled: bool = False
-    poll_interval_seconds: float = 2.0
-    poll_jitter_seconds: float = 0.5
-    lease_seconds: int = 60
-    batch_size: int = 10
-    max_concurrency: int = 10
-    retry_backoff_min_seconds: float = 1.0
-    retry_backoff_max_seconds: float = 60.0
 
 
 # ── Economy / Governance ────────────────────────────────────────────────
