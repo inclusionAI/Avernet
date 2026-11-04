@@ -1,0 +1,23 @@
+apps/bcs/scripts/e2e-runner/retained-file.md
+  s_cecdc98e721f4b::t_e43e0861c45159 59-60,270-276
+apps/bcs/scripts/e2e-runner/retained-remote.md
+  s_cecdc98e721f4b::t_748dc8dce07f37 8-13,27-39,120-122,687-689
+apps/bcs/scripts/e2e-runner/retention-contracts.md
+  s_cecdc98e721f4b::t_651b0290654a1f 21-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3858b6bf40ebeec7066eefdb0d006e8a8c41c485",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

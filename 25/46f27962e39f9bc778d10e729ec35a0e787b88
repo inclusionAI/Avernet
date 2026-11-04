@@ -1,0 +1,20 @@
+apps/bcsfuse/src/app/infra/public/embedding/async_circuit_breaker_provider.py
+  h_5686002b4ce7b9 44-56,242,266-268,282-284
+apps/bcsfuse/src/app/infra/public/embedding/async_embedding_token_pool_provider.py
+  h_5686002b4ce7b9 5,71-73,85-98
+apps/bcsfuse/tests/contract/test_async_embedding_provider_tdd.py
+  h_5686002b4ce7b9 518-583
+apps/bcsfuse/tests/contract/test_embedding_token_pool_tdd.py
+  h_5686002b4ce7b9 607-665
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2546f27962e39f9bc778d10e729ec35a0e787b88",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_89ee1c722ef961::t_97d0d6a7585379 26,36,40,42,44-49,53-54,56-59,103,152
+  s_89ee1c722ef961::t_18703d0d811347 55
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/card_diagnostics.py
+  s_89ee1c722ef961::t_34225c362e8b13 1-39
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  s_89ee1c722ef961::t_1b258d45e02583 1-34,36-53,55-77,79-103,106-151
+  s_89ee1c722ef961::t_ae751e525723ce 35,54,78,104-105
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_89ee1c722ef961::t_97d0d6a7585379 25,53,78,86,90,196,216
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_89ee1c722ef961::t_34225c362e8b13 9,26-32,34
+  s_89ee1c722ef961::t_97d0d6a7585379 35-36,38-40,42,53
+  s_89ee1c722ef961::t_b0059eddf70156 33,37,41
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_89ee1c722ef961::t_fbca470cc806cf 202-204
+  s_89ee1c722ef961::t_34225c362e8b13 21,222-223
+apps/bcsfuse/packages/search-core/src/search_core/catalog/inspection.py
+  s_89ee1c722ef961::t_34225c362e8b13 1-21,23-59,61-62
+  s_89ee1c722ef961::t_fbca470cc806cf 22
+  s_89ee1c722ef961::t_1afd3c11e0da2a 60
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_89ee1c722ef961::t_34225c362e8b13 180-222
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_89ee1c722ef961::t_3290ff2b38b82f 136-137,139-140,144-180
+  s_89ee1c722ef961::t_6c579beeaaa31b 66,69,117,121,132,134-135,190
+  s_89ee1c722ef961::t_98550a8d7cf563 181
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_89ee1c722ef961::t_6c579beeaaa31b 42
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_89ee1c722ef961::t_6c579beeaaa31b 58
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_89ee1c722ef961::t_3030accd74f3ce 182-203,206-247
+  s_89ee1c722ef961::t_03797d2c874d01 204-205
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/retrieval.py
+  s_89ee1c722ef961::t_34225c362e8b13 8,43-53
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  s_89ee1c722ef961::t_1afd3c11e0da2a 81-96
+  s_89ee1c722ef961::t_4a41636d18aa30 97-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "127197a22c7e92ff0e0f4fa4724835c367e6d1a7",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
