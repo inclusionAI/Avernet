@@ -373,13 +373,16 @@ def test_complete_success_and_offline_overlap_converges(
     db = _ConcurrentDatabase(tmp_path / "publication-offline.db")
     space_id, skill_id, attempt_id, version_id = _seed_published_materialization(db)
     complete_holds_skill_version = Event()
+    release_complete = Event()
     failures: list[BaseException] = []
     original = publication_repository_module.lock_skill_then_exact_version
 
     def _pause_after_skill_version_lock(session, **kwargs):
         locked = original(session, **kwargs)
         complete_holds_skill_version.set()
-        assert db.offline_begin_attempted.wait(timeout=2)
+        # The controller releases us only after the competing writer starts.
+        # Its finally block also releases on failure, so no worker is orphaned.
+        release_complete.wait()
         return locked
 
     monkeypatch.setattr(
@@ -411,12 +414,18 @@ def test_complete_success_and_offline_overlap_converges(
             failures.append(exc)
 
     completer = Thread(target=_complete, name="complete")
-    completer.start()
-    assert complete_holds_skill_version.wait(timeout=2)
     offliner = Thread(target=_offline, name="offline")
-    offliner.start()
-    completer.join(timeout=5)
-    offliner.join(timeout=5)
+    try:
+        completer.start()
+        assert complete_holds_skill_version.wait(timeout=10), failures
+        offliner.start()
+        assert db.offline_begin_attempted.wait(timeout=10), failures
+    finally:
+        release_complete.set()
+        if completer.ident is not None:
+            completer.join(timeout=10)
+        if offliner.ident is not None:
+            offliner.join(timeout=10)
 
     assert failures == []
     assert not completer.is_alive() and not offliner.is_alive()
@@ -433,6 +442,7 @@ def test_mark_failed_and_begin_materialization_overlap_serializes_to_failed(
     db = _ConcurrentDatabase(tmp_path / "publication-failure-begin.db")
     _space_id, skill_id, attempt_id = _seed_waiting_publication(db)
     fail_holds_skill = Event()
+    release_failure = Event()
     failures: list[BaseException] = []
     expected_begin_errors: list[RuntimeError] = []
     lock_threads: list[str] = []
@@ -443,7 +453,7 @@ def test_mark_failed_and_begin_materialization_overlap_serializes_to_failed(
         lock_threads.append(current_thread().name)
         if current_thread().name == "fail":
             fail_holds_skill.set()
-            assert db.materialization_begin_attempted.wait(timeout=2)
+            release_failure.wait()
         return skill
 
     monkeypatch.setattr(
@@ -478,12 +488,18 @@ def test_mark_failed_and_begin_materialization_overlap_serializes_to_failed(
             failures.append(exc)
 
     failure = Thread(target=_fail, name="fail")
-    failure.start()
-    assert fail_holds_skill.wait(timeout=2)
     materialization = Thread(target=_begin, name="begin")
-    materialization.start()
-    failure.join(timeout=5)
-    materialization.join(timeout=5)
+    try:
+        failure.start()
+        assert fail_holds_skill.wait(timeout=10), failures
+        materialization.start()
+        assert db.materialization_begin_attempted.wait(timeout=10), failures
+    finally:
+        release_failure.set()
+        if failure.ident is not None:
+            failure.join(timeout=10)
+        if materialization.ident is not None:
+            materialization.join(timeout=10)
 
     assert failures == []
     assert not failure.is_alive() and not materialization.is_alive()

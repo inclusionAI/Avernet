@@ -188,6 +188,12 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             "token": f"mock_token_reissued_{bot_id}",
         }
 
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        # Local Passport has no durable credential history or handoff capability.
+        return None
+
     def owner_handoff_supported(
         self, *, bot_id: str, owner_workno: str, entity_id: str
     ) -> bool:
