@@ -111,6 +111,7 @@ export function DetailPanelContent({
     <DwsHostingPanel key={`${bot.id}:${bot.ownerId}`} botId={bot.id} />
   ) : tab === 'capability' ? (
     <CapabilityPanel
+      compact={compact}
       desktop={bot.deployment === 'local'}
       onLocalToggle={editor.toggleSkill}
       onLocalDelete={editor.deleteSkill}
