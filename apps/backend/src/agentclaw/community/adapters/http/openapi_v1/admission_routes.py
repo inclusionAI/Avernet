@@ -48,6 +48,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/links/{resource_id}",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/collaboration/repair",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/local/start-progress",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,

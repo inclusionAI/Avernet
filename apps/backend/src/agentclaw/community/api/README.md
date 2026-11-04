@@ -104,6 +104,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
   - BotOwnershipSyncProtocol
+  - CollaborationRepairServiceProtocol   # defined in its owning core module, re-exported by collaboration_repair_service.py
   - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/community/architecture/test_service_api_conformance.py"
@@ -228,6 +229,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_inventory.bot_inventory_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_inventory.local_bot_workflow_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.bot_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.collaboration_repair.service_protocol  # Protocol defined in its owning core module, re-exported here (collaboration repair v1)
   - agentclaw.community.core.bot_management.bot_space_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.create_bot_for_others_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here

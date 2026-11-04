@@ -53,6 +53,7 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceModel,
 )
 from agentclaw.community.kernel.bot_manager_sync import (
+    BOT_NOT_FOUND_CODE,
     CollaboratorFact,
     SnapshotTooLarge,
     SnapshotUnavailable,
@@ -65,7 +66,8 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 #: Stable machine reasons for :class:`SnapshotUnavailable`.
-BOT_NOT_FOUND = "bot_not_found"
+#: ``BOT_NOT_FOUND_CODE`` is the kernel-owned shared reason (consumers
+#: compare against it); the two below are specific to this reader.
 SPACE_UNAVAILABLE = "space_unavailable"
 READ_ERROR = "read_error"
 
@@ -112,7 +114,7 @@ class SqlManagerSyncReadRepository(ManagerSyncReadRepository):
             .one_or_none()
         )
         if bot is None:
-            raise SnapshotUnavailable(BOT_NOT_FOUND)
+            raise SnapshotUnavailable(BOT_NOT_FOUND_CODE)
 
         rows = (
             session.query(
@@ -371,7 +373,7 @@ def _batched(values: Sequence[str], size: int) -> Iterator[Sequence[str]]:
 
 
 __all__ = [
-    "BOT_NOT_FOUND",
+    "BOT_NOT_FOUND_CODE",
     "MAX_ELIGIBLE_USER_IDS",
     "MAX_PAGE_LIMIT",
     "MEMBERSHIP_BATCH_SIZE",

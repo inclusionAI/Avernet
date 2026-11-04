@@ -161,7 +161,20 @@ class TestMaintenanceLoopLifecycle:
 
         asyncio.run(main())
 
-    def test_reaper_sweeps_on_its_own_cadence(self, db):
+    @pytest.mark.parametrize("sweep_delay", [0.0, 0.35])
+    def test_reaper_sweeps_on_its_own_cadence(self, db, monkeypatch, sweep_delay):
+        # A slow executor must not make the test shut down before a sweep commits.
+        sweep = AgentSwarmWorker._sweep_once
+        sweep_completed = asyncio.Event()
+
+        async def delayed_sweep(worker):
+            await asyncio.sleep(sweep_delay)
+            acted = await sweep(worker)
+            if acted:
+                sweep_completed.set()
+            return acted
+
+        monkeypatch.setattr(AgentSwarmWorker, "_sweep_once", delayed_sweep)
         env = _build_env(
             db, [], FakeFactory(), config=_reaper_config(),
             llm=RepeatingLLMProvider(
@@ -176,7 +189,7 @@ class TestMaintenanceLoopLifecycle:
                 # poll parked far away: only the maintenance path may act
                 # inside the wait window, so the dispatch row stays READY.
                 _reaper_config().orchestration,
-                poll_interval=5.0, poll_jitter=0.0,
+                poll_interval=60.0, poll_jitter=0.0,
             )
             config = AgentSwarmConfig(
                 orchestration=orch,
@@ -186,8 +199,10 @@ class TestMaintenanceLoopLifecycle:
             )
             worker = _mk_worker(env, config)
             await worker.startup()
-            await asyncio.sleep(0.3)
-            await worker.shutdown()
+            try:
+                await asyncio.wait_for(sweep_completed.wait(), timeout=5.0)
+            finally:
+                await worker.shutdown()
 
         asyncio.run(main())
 
