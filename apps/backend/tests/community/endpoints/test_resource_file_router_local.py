@@ -13,11 +13,21 @@ workspace dir on disk.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.services.resource_file_service import ResourceFileService
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.devices import make_active_arca_device
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    bind_failing_method,
+    endpoint_test,
+)
 
 _OWNER = "u_resfile_local"
 _BOT = "bot_resfile_local"
@@ -239,3 +249,34 @@ def _assert_mkdir(response, world) -> None:
 )
 def local_mkdir():
     """mkdir creates the directory via a .keep placeholder on disk."""
+
+
+# ── download while the device connection is briefly unavailable ──────────────
+
+
+def _seed_download_device_unavailable(world) -> None:
+    _seed_local_bot(world)
+    bind_failing_method(
+        world,
+        ResourceFileService,
+        "read_file",
+        DeviceConnectionUnavailableError("private binding=91"),
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/resources/files/download",
+    scenario="error_local_download_device_unavailable",
+    input=CaseInput(
+        query_params={"path": "data/report.csv", "bot_id": _BOT, "owner_id": _OWNER},
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_download_device_unavailable,
+    expect=ExpectError(
+        status=503,
+        json_contains={"detail": "Device connection is temporarily unavailable"},
+    ),
+)
+def local_download_device_unavailable():
+    """A live BaaS connectivity failure does not surface as an unpredictable 500."""
