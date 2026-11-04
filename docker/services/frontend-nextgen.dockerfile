@@ -14,6 +14,9 @@ COPY packages/a2a-chat-client/ ./packages/a2a-chat-client/
 COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./apps/frontend-nextgen/
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG A2A_CLIENT_DEFAULT=false
+# 装配形态（spec 2026-11-03-collab-form）：open（默认）/ collab（协作群极简站）。
+# 构建协作群极简站镜像：docker/build-image.sh services/frontend-nextgen.dockerfile --build-arg FRONTEND_FORM=collab
+ARG FRONTEND_FORM=open
 RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
     cd apps/frontend-nextgen && npm ci \
       --registry="${NPM_REGISTRY}" \
@@ -28,6 +31,7 @@ RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked 
 
 COPY apps/frontend-nextgen/ ./apps/frontend-nextgen/
 ENV A2A_CLIENT_DEFAULT=${A2A_CLIENT_DEFAULT}
+ENV FRONTEND_FORM=${FRONTEND_FORM}
 RUN cd apps/frontend-nextgen && npm run build
 
 ########## Runtime ##########

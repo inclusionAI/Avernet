@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+// 槽位真实装配必须先于 hook 模块求值（useGroupChatHeaderPanels 在模块作用域解析槽位）：import 按声明序求值。
+import '../../../helpers/registerOpenTaskPanelBootstrapSlot';
 import type { SessionView } from '@/domain/collaboration';
 import { useGroupChatHeaderPanels } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';

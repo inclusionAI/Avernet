@@ -1,4 +1,4 @@
-import { externalBotService, type ExternalBotDomain } from '@/services/botWorkshop/externalBotService';
+import { externalBotService, type ExternalBotDomain } from '@/services/externalBots/externalBotService';
 import { useCallback, useEffect, useState } from 'react';
 
 export function useExternalBots(enabled: boolean) {

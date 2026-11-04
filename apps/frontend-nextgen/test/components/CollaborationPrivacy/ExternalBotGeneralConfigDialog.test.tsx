@@ -4,7 +4,7 @@ import { applyExternalViewScopeToBot } from '@/domain/collaborationPrivacy/exter
 import type { CollaborationBot } from '@/domain/collaborationPrivacy/types';
 import * as identityModule from '@/hooks/useHumanIdentity';
 import type { CollaborationBotDto } from '@/services/backendApi';
-import { externalBotToGeneralConfig } from '@/services/botWorkshop/externalBotService';
+import { externalBotToGeneralConfig } from '@/services/externalBots/externalBotService';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { mapBotDtoToDomain } from '@/services/collaborationPrivacy/mappers';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';

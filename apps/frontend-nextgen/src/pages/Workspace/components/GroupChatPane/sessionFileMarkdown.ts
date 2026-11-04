@@ -1,7 +1,8 @@
-// markdown-it 为 @alipay/bigfish 传递依赖（src/assets/TaskPanel/MarkdownCell 同款 import 先例）；
+// markdown-it 为直接依赖（package.json），渲染＋DOMPurify 白名单净化管线与 src/shared/html
+// sanitizeHtml 头注释同口径（MarkdownCell 同款 import 先例）；
 // html:false 禁止内联 HTML（XSS 安全），breaks 换行转 <br>，linkify 自动链接。
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
 import { getFileExt } from '@/services/workspace/sessionFileUtils';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import MarkdownIt from 'markdown-it';
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true });

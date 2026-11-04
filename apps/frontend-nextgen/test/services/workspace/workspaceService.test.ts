@@ -5,7 +5,7 @@ import {
   buildPrivateWebsocketUrl,
   mapPrivateHistoryMessages,
   resolvePrivateWebsocketPath,
-} from '@/services/workspace';
+} from '@/services/workspace/supportProvider';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { OpenClawProvider } from '@tc-chat/adapters';
 

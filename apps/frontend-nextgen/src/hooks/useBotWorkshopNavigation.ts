@@ -5,7 +5,7 @@ import {
   isDraftOrPrestableServiceCodingBot,
 } from '@/services/botWorkshop/botPolicy';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
-import { workspaceService } from '@/services/workspace';
+import { workspaceService } from '@/services/workspace/workspaceService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback } from 'react';

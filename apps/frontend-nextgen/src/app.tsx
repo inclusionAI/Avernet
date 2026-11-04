@@ -3,11 +3,11 @@ import { ExternalLoginPromptModal } from '@/components/ExternalLoginPromptModal'
 import { InviteCodeBindingModal } from '@/components/InviteCodeBindingModal';
 import { Toaster } from '@/components/ui/sonner';
 import { appExtension, registerSidePanelWiring } from '@/extensions';
+import { getExtensionSlots } from '@/extensions/slots';
 import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
 import { useGatewayLoginRedirect } from '@/hooks/useGatewayLoginRedirect';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { history } from '@umijs/max';
-import { useTaskSessionNavigationObserver } from '@/pages/Workspace/Chat/hooks/taskSessionNavigation';
 import React from 'react';
 
 extendCapabilities(appExtension.capabilities);
@@ -71,20 +71,16 @@ function ErrorNotifyObserver() {
   return null;
 }
 
-/** 任务副屏 V2 会话联动观察者(task-panel-v2 P4):无 UI,消费 pendingNavigation 跳会话 + 时间窗消息定位。 */
-function TaskSessionNavigationObserver() {
-  useTaskSessionNavigationObserver();
-  return null;
-}
-
 export function rootContainer(container: React.ReactNode) {
+  // 任务会话联动观察者经槽位装配：collab 形态为 null（无任务栈），Open/internal 为真实观察者。
+  const TaskObserver = getExtensionSlots().taskSessionNavigationObserver;
   return React.createElement(
     React.Fragment,
     null,
     container,
     React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
-    React.createElement(TaskSessionNavigationObserver),
+    TaskObserver ? React.createElement(TaskObserver) : null,
     React.createElement(ExternalLoginPromptModal),
     React.createElement(InviteCodeBindingModal),
     React.createElement(Toaster),

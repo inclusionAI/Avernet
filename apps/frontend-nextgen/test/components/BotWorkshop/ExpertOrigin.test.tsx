@@ -2,7 +2,7 @@
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { listBotInventory } from '@/services/backendApi/bots/botController';
 import { useIdentityStore } from '@/stores/identityStore';
-import { mapBotList, mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotList, mapBotDto } from '@/services/bots/botMapper';
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 

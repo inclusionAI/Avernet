@@ -13,7 +13,11 @@ import {
 } from '@/domain/conversation';
 import type { ChatMessage } from '@tc-chat/core';
 
-export type { SessionMessageSearchQuery, SessionMessageSearchResult } from '@/domain/conversation';
+export type {
+  SessionMessageSearchQuery,
+  SessionMessageSearchResult,
+  UseSessionHistorySearchModel,
+} from '@/domain/conversation';
 
 /** 检索数据源指示：面板据此呈现降级态说明（仅已载入消息）。 */
 export type ConversationSearchSource = 'local';

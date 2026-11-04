@@ -3,10 +3,9 @@ import { resolveTaskMainSessionId } from '@/hooks/useTaskSwitcherTasks';
 import { isEnvelopeFailure, listMyTasks, normalizeMyTaskPage } from '@/services/myTask';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
-import type { PanelHandle, PanelTab } from '@tc-chat/core';
+import type { PanelTab } from '@tc-chat/core';
+import type { TaskPanelBootstrapArgs } from '@/extensions/contracts/taskPanelBootstrap';
 import { useEffect, useRef } from 'react';
-
-type PanelRef = React.RefObject<PanelHandle | null>;
 
 function parseTaskTime(value: string | undefined): number {
   // list API 返回 `YYYY-MM-DD HH:mm:ss`；补 T 兼容 Safari。
@@ -56,15 +55,13 @@ export function buildSessionTaskPanelTab(record: TaskListItem, userId: string): 
  * 历史消息中的 <AixUI type="panel"> 只有进入已加载分页后才渲染；长会话里任务消息
  * 可能还在更早分页，不能作为默认进入时的副屏触发源。此 hook 以 list_tasks 为主数据源。
  */
+// 入参契约已上移至 src/extensions/contracts/taskPanelBootstrap.ts（collab-form Task 17 源切片类型完备），
+// 本实现反向注解契约，签名漂移在 typecheck 阶段失配。
 export function useSessionTaskPanelBootstrap({
   sessionId,
   userId,
   panelRef,
-}: {
-  sessionId: string | null;
-  userId: string | null;
-  panelRef: PanelRef;
-}): void {
+}: TaskPanelBootstrapArgs): void {
   const bootstrapKeyRef = useRef<string | null>(null);
 
   useEffect(() => {

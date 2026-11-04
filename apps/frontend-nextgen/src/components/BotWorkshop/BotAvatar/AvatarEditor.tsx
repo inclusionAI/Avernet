@@ -1,17 +1,14 @@
 import { notifyError } from '@/components/ui';
 import { Button } from '@/components/ui/Button';
 import { generateBotAvatarBatch } from '@/services/botWorkshop/botAvatarGenerator';
+import type { AvatarEditorProps } from '@/extensions/contracts/avatar';
 import { ImageUp } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
-export interface BotAvatarEditorProps {
-  value: string;
-  onChange: (url: string) => void;
-  seed: string;
-  disabled?: boolean;
-}
-export default function AvatarEditor({ value, onChange, seed, disabled }: BotAvatarEditorProps) {
+// props 契约已上移至 src/extensions/contracts/avatar.ts（collab-form Task 17 源切片类型完备），
+// 本文件反向 import 契约注解，签名漂移在 typecheck 阶段失配。
+export default function AvatarEditor({ value, onChange, seed, disabled }: AvatarEditorProps) {
   const [batch, setBatch] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const variants = useMemo(() => generateBotAvatarBatch(seed, batch), [seed, batch]);

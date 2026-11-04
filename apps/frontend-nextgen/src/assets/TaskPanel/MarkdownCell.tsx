@@ -1,11 +1,11 @@
 // @asset-migrated: teamclaw 自研资产
 /** 轻量 markdown 渲染单元格：输出摘要、根节点产物等长文本按 markdown 格式渲染。
  *  内容较多时默认折叠（max-height 截断 + 渐变遮罩），点击「展开全部」查看全文，避免淹没其它字段。 */
+import { SafeHtml } from '@/shared/html/SafeHtml';
+import { sanitizeMarkdownHtml } from '@/shared/html/sanitizeHtml';
 import MarkdownIt from 'markdown-it';
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import { SafeHtml } from './SafeHtml';
-import { sanitizeMarkdownHtml } from './sanitizeHtml';
 import { C } from './tokens';
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true });

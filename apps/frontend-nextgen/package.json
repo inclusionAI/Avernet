@@ -13,13 +13,16 @@
     "dev": "max dev",
     "dev:local": "cross-env PRESET=local MOCK=none max dev",
     "build": "max build",
+    "dev:collab": "cross-env FRONTEND_FORM=collab max dev",
+    "build:collab": "cross-env FRONTEND_FORM=collab max build",
+    "check:collab-closure": "node scripts/check-collab-closure.cjs",
     "setup": "max setup",
     "postinstall": "max setup",
     "typecheck": "tsc --noEmit",
     "lint": "max lint",
     "test": "jest",
     "ci:guardrails": "node scripts/ci-guardrails.mjs",
-    "ci": "npm run ci:guardrails && npm run typecheck && npm run lint && npm test -- --runInBand && npm run build",
+    "ci": "npm run ci:guardrails && npm run typecheck && npm run lint && npm test -- --runInBand && node --test scripts/check-collab-closure.test.cjs && npm run check:collab-closure && npm run build",
     "check:open-core": "node scripts/check-open-core.cjs ."
   },
   "dependencies": {

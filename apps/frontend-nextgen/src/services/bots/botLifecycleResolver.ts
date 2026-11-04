@@ -1,6 +1,6 @@
 import { hasServiceDraftEvidence } from '@/domain/botEngineVersion';
+import type { BotLifecycle } from '@/domain/botWorkshop';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
-import type { BotLifecycle } from './types';
 
 const DISPLAY_STATE_LIFECYCLE: Record<string, BotLifecycle> = {
   running: 'running', pending: 'deploying', failed: 'failed', dormant: 'offline',

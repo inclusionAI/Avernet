@@ -1,14 +1,14 @@
 import { Button } from '@/components/ui';
-import type { SessionView } from '@/domain/collaboration';
 import { isTerminalTask, taskIdentity } from '@/domain/groupTasks/projection';
+import type { ManagerWorkerTasksProps } from '@/extensions/contracts/groupTasks';
 import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
 import * as Dialog from '@radix-ui/react-dialog';
-import type { ChatMessage } from '@tc-chat/core';
 import { Check, ChevronRight, ChevronUp, CircleHelp, Clock3, LoaderCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { GroupTaskRow } from './GroupTaskRow';
 
-export function ManagerWorkerTasks({ session, messages, connected = true }: { session: SessionView; messages: ChatMessage[]; connected?: boolean }) {
+// props 契约已上移至 src/extensions/contracts/groupTasks.ts（collab-form Task 17 源切片类型完备）。
+export function ManagerWorkerTasks({ session, messages, connected = true }: ManagerWorkerTasksProps) {
   const model = useManagerWorkerTasks(session.sessionId, messages, session.participants, connected);
   const [open, setOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);

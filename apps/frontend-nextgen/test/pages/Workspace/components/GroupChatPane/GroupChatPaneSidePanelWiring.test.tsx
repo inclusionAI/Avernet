@@ -2,6 +2,8 @@
 // 协作群 SDK 副屏接线回归（最小聚焦）：只验证 GroupChatPane → ChatLayoutPanelSlot 的
 // 传参契约（宽 480 / 点外不收起）与 ChatLayout 对单聊同款 1px 分隔线样式的挂载类，
 // 不复制主测试文件的全量夹具；插槽以捕获桩替换，空会话路径不触发 Sender/消息列表等 SDK 渲染。
+// 槽位真实装配必须先于 GroupChatPane 模块求值（组件在模块作用域解析槽位）：import 按声明序求值。
+import '../../../../helpers/registerOpenGroupTaskSlots';
 import { GroupChatPane } from '@/pages/Workspace/components/GroupChatPane';
 import type { GroupView } from '@/domain/collaboration';
 import type { UseChatResult } from '@tc-chat/adapters';

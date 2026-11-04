@@ -1,5 +1,5 @@
 import { botDormantService } from '@/services/botWorkshop/botDormantService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 
 const bot = mapBotDto({
   bot_id: 'b1',

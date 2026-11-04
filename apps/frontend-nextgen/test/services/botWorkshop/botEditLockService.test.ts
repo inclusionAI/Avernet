@@ -1,6 +1,6 @@
 import { botEditorController } from '@/services/backendApi/bots/botEditorController';
 import { botEditLockService } from '@/services/botWorkshop/botEditLockService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 
 jest.mock('@/services/backendApi/bots/botEditorController', () => ({
   botEditorController: { acquireEditLock: jest.fn(), stealEditLock: jest.fn(), releaseEditLock: jest.fn() },

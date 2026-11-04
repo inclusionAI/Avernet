@@ -1,4 +1,4 @@
-import { TEST_USER_SUPPORT_TARGET_ID } from '@/services/workspace';
+import { TEST_USER_SUPPORT_TARGET_ID } from '@/services/workspace/testUser';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 
 /** 测试用户身份下的客服测试会话 target（isTestUser 时 botChatTarget 兜底返回）。 */

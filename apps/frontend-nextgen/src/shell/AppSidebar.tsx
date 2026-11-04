@@ -36,13 +36,14 @@ export function AppSidebar({
   onToggleCollapsed,
   currentUser,
 }: AppSidebarProps) {
-  // 全局搜索弹窗（设计稿 artboard-016）：入口固定在通知中心左侧，形态无关、不经 capability 下发。
+  // 全局搜索弹窗（设计稿 artboard-016）：入口固定在通知中心左侧；可见性经 capability
+  // （getShellVisibility.globalSearch，collab 形态隐藏：搜索结果会深链到该形态不含的页面）。
   const [searchOpen, setSearchOpen] = useState(false);
   // 品牌语义经 capability 解析：Open Core = Avernet 横版 wordmark；internal = 现状「蓝底色块 + TeamClaw」。
   const brand = getCapabilities().getProductBrand().value;
   // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认展示；
   // 隐藏形态下未读数轮询随组件不挂载自然停止，通知 service 层不改。
-  const { notificationBell } = getCapabilities().getShellVisibility().value;
+  const { notificationBell, globalSearch } = getCapabilities().getShellVisibility().value;
 
   const shell = (
     <>
@@ -56,16 +57,18 @@ export function AppSidebar({
           加大至 16px，大于分组间 8px 留白，形成与导航区的视觉断层。展开态品牌行维持原 52px 图标组不在此例。 */}
       {collapsed ? (
         <div className="flex flex-col items-center gap-1 px-2 pb-2 pt-3.5">
-          <IconButton
-            size="sm"
-            className="text-muted-foreground"
-            label="搜索"
-            icon={<Search className="h-4 w-4" />}
-            onClick={() => {
-              Tracert.click(Points.shell.globalSearchOpen);
-              setSearchOpen(true);
-            }}
-          />
+          {globalSearch && (
+            <IconButton
+              size="sm"
+              className="text-muted-foreground"
+              label="搜索"
+              icon={<Search className="h-4 w-4" />}
+              onClick={() => {
+                Tracert.click(Points.shell.globalSearchOpen);
+                setSearchOpen(true);
+              }}
+            />
+          )}
           {notificationBell && <NotificationBell size="sm" className="text-muted-foreground" />}
           {onToggleCollapsed && (
             <IconButton
@@ -81,10 +84,12 @@ export function AppSidebar({
         <div className="flex h-[52px] items-center px-3">
           <brand.Logo compact />
           <span className="ml-auto flex shrink-0 items-center gap-0">
-            <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => {
-              Tracert.click(Points.shell.globalSearchOpen);
-              setSearchOpen(true);
-            }} />
+            {globalSearch && (
+              <IconButton label="搜索" icon={<Search className="h-4 w-4" />} onClick={() => {
+                Tracert.click(Points.shell.globalSearchOpen);
+                setSearchOpen(true);
+              }} />
+            )}
             {notificationBell && <NotificationBell />}
             {onToggleCollapsed && (
               <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />
@@ -93,7 +98,7 @@ export function AppSidebar({
         </div>
       )}
 
-      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      {globalSearch ? <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} /> : null}
 
       <SidebarNavList activePath={activePath} items={items} onNavigate={onNavigate} collapsed={collapsed} />
 

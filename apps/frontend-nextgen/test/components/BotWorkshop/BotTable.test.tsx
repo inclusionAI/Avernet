@@ -4,7 +4,7 @@ import BotTable from '@/components/BotWorkshop/BotCard';
 import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';

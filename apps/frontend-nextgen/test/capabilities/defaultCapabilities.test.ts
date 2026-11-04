@@ -176,10 +176,10 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getPartialFriendApprovalEnabled()).toEqual({ status: 'available', value: false });
   });
 
-  test('getShellVisibility 默认 notificationBell=true、spaceSwitcher=false（Open Core 展示通知中心，不展示空间切换器；adminEntry 已随管理后台导航项退役移除）', () => {
+  test('getShellVisibility 默认 notificationBell=true、spaceSwitcher=false、globalSearch=true（Open Core 展示通知中心与搜索入口，不展示空间切换器；adminEntry 已随管理后台导航项退役移除）', () => {
     const r = defaultCapabilities.getShellVisibility();
     expect(r.status).toBe('available');
-    expect(r.value).toEqual({ spaceSwitcher: false, notificationBell: true });
+    expect(r.value).toEqual({ spaceSwitcher: false, notificationBell: true, globalSearch: true });
   });
 
   test('getAdminSections 默认 spaces=false/workOrders=true（Open Core 隐藏空间管理 Tab，仅留工单中心）', () => {

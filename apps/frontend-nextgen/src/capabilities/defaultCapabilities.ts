@@ -224,6 +224,9 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core 默认不暴露内部侧栏导航项（能力工坊/能力市场），符合 open-core-export-plan §5.2
   // 「导航中的内部入口」按开源模式分隔的强约束。internal overlay 经 extensions/internal.ts 覆盖注入。
   getInternalNavigationItems: () => ({ status: 'available', value: [] }),
+  // Open Core 默认 null = 沿用 shell/navigation 基线导航数组（不 import 该模块，避免依赖环）；
+  // collab 形态经 src/extensions/collab.ts 覆盖为两项。
+  getPrimaryNavigationItems: () => ({ status: 'available', value: null }),
   // Open Core 默认不收录内部 route meta（/capability-workshop/*、/market/* 已从 routeMetaList 剥离）。
   getInternalRouteMetas: () => ({ status: 'available', value: [] }),
   // Open Core 引擎可选清单：OpenClaw + 原生 Claude Code 直建入口（阿里云部署依赖原生 claude_code
@@ -327,14 +330,19 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
-  // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true），
-  // 不展示侧栏空间切换器（spaceSwitcher=false）；空间数据链路（initSpaceContext / 默认个人空间）
-  // 与此开关无关，不受本默认值影响。internal overlay 覆盖为两项全 true（extensions/internal.ts）。
+  // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true）与
+  // 侧栏品牌区搜索入口（globalSearch=true），不展示侧栏空间切换器（spaceSwitcher=false）；
+  // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
+  // internal overlay 覆盖为三项全 true（extensions/internal.ts）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { spaceSwitcher: false, notificationBell: true },
+    value: { spaceSwitcher: false, notificationBell: true, globalSearch: true },
   }),
+  // Open Core 空间上下文双初始化（挂载 ensurePersonalSpaceOnAppEntry + Bot 分组 initSpaceContext）
+  // 默认开启（现状行为零变化）；collab 装配（src/extensions/collab.ts）覆盖为 false，
+  // 两条链路在请求发起前整体短路。与 spaceSwitcher 可见性开关正交（见 AppShell 消费用例）。
+  getSpaceContextInitializationEnabled: () => ({ status: 'available', value: true }),
   // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【通知中心】
   // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。
   // internal overlay 覆盖为 { spaces:true, workOrders:true }（extensions/internal.ts），内部形态两 Tab 均在。

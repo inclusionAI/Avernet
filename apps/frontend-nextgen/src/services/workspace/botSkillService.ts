@@ -1,11 +1,12 @@
 /** botSkillService — 查询 Bot 的 Skill 列表 + 「任务」入口的意图识别 Skill 探针。 */
 import { listBotSkillsByBot, type BotSkillDto } from '@/services/backendApi/bots/botSkillController';
+import type { ChatBotView } from './botSessionService';
 import { resolveBotFriendPlatform } from '@/domain/botFriendPlatform';
 import { matchTaskConfig } from '@/services/backendApi/tasks/taskConfigController';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { unwrapEnvelope } from '@/services/tasks/taskMapper';
-import { resolveUserId, type ChatBotView } from './botSessionService';
 import type { DomainError, DomainResult } from './identityService';
+import { resolveUserId } from './resolveUserId';
 
 export interface BotSkillView {
   skillId: string;

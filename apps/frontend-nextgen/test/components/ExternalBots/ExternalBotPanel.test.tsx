@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
-import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
-import { externalBotService } from '@/services/botWorkshop/externalBotService';
+import { ExternalBotPanel } from '@/components/ExternalBots/ExternalBotPanel';
+import { externalBotService } from '@/services/externalBots/externalBotService';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-jest.mock('@/services/botWorkshop/externalBotService', () => ({
-  ...jest.requireActual('@/services/botWorkshop/externalBotService'),
+jest.mock('@/services/externalBots/externalBotService', () => ({
+  ...jest.requireActual('@/services/externalBots/externalBotService'),
   externalBotService: { list: jest.fn() },
 }));
 jest.mock('@/components/CollaborationPrivacy/BotGeneralConfigDialog', () => ({

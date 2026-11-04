@@ -9,7 +9,9 @@ import { Button, Input } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { ChatMessage } from '@tc-chat/core';
 import { Search } from 'lucide-react';
-import type { UseSessionHistorySearchModel } from '../hooks/useChatHeaderPanels';
+// 历史搜索模型经 conversationSearchService 的纯模型 re-export 供给（collab-form Task 17 源切片类型完备）：
+// chat 侧 header hook 属 pages/Workspace/Chat 裁剪面，本组件在 collab 切片中不得 type-only 依赖它。
+import type { UseSessionHistorySearchModel } from '@/services/workspace/conversationSearchService';
 
 export interface SessionHistorySearchPanelProps {
   search: UseSessionHistorySearchModel;

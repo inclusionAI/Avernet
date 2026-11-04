@@ -3,7 +3,7 @@
  * 从 groupChatProvider.ts 拆出，便于独立单测并控制 Provider 文件体积。
  */
 import type { GroupChatInput } from '@tc-chat/adapters';
-import { resolveUserId } from './botSessionService';
+import { resolveUserId } from './resolveUserId';
 import type { GroupChatRequest } from './groupChatProvider';
 
 /** human 身份的 WS `bot_uuid`：mine 返回的 human bot_id 已带 human 前缀则原样使用，否则补前缀。 */

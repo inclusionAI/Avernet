@@ -2,7 +2,7 @@
 import { BotEngineVersionMenuItems } from '@/components/BotWorkshop/BotCard/BotEngineVersionMenuItems';
 import { useBotTableEngineVersions } from '@/hooks/useBotTableEngineVersions';
 import { botEngineVersionService } from '@/services/botWorkshop/botEngineVersionService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
+import { mapBotDto } from '@/services/bots/botMapper';
 import { render, renderHook, waitFor } from '@testing-library/react';
 
 const observation = {

@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 槽位真实装配必须先于 GroupChatCollabPanel 模块求值（组件在模块作用域解析任务栏槽位）：import 按声明序求值。
+import '../../../../helpers/registerOpenGroupTaskSlots';
 import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
 import { GroupTaskRow } from '@/pages/Workspace/components/GroupChatPane/GroupTaskRow';
 import { GroupChatCollabPanel } from '@/pages/Workspace/components/GroupChatPane/GroupChatCollabPanel';

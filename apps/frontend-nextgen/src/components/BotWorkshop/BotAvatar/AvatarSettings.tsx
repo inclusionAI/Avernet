@@ -15,6 +15,8 @@ export function AvatarSettings({
 }) {
   const avatar = useBotAvatar(botId);
   const Editor = appExtension.avatarEditor;
+  // collab 形态无 BotWorkshop，avatarEditor 槽位为 null：整块不渲染（头像按钮/编辑器/保存按钮）。
+  if (!Editor) return null;
   return (
     <Popover>
       <PopoverTrigger asChild>

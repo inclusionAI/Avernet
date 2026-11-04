@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+// 槽位真实装配必须先于 GroupChatPane 模块求值（组件在模块作用域解析槽位）：import 按声明序求值。
+import '../../helpers/registerOpenGroupTaskSlots';
 import { getMessageSpacingClass } from '@/components/Workspace/messagePresentation';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { GroupQuestionInteraction } from '@/domain/collaboration/groupQuestions';

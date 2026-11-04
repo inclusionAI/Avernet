@@ -11,17 +11,23 @@
  *   toggle 仅乐观翻转、随后由真实态事件纠偏；副屏打开路径共享 chat 侧
  *   reopenSidePaneTabsFromMessages（按消息标记幂等重建，防 autoCloseWhenEmpty 弹回），
  *   图标判空共享 sessionHasSidePaneContent。
+ * - 任务副屏 bootstrap 经 taskPanelBootstrap 槽位装配（collab 形态注册 null：不重放任务面板
+ *   页签、不拉任务栈，spec §5）；chat 孪生仍直接 import 真实实现，本 hook 的静态闭包
+ *   因此不含任务引擎链。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { SessionView } from '@/domain/collaboration';
-import type { UseSessionHistorySearchModel } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
-import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
+import { getExtensionSlots } from '@/extensions/slots';
+import type { AppExtensionSlots } from '@/extensions/contract';
+import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from '@/pages/Workspace/Chat/hooks/sidePaneContent';
+// 历史搜索模型改经 conversationSearchService 的纯模型 re-export 供给（collab-form Task 17 源切片类型完备）：
+// chat 侧 header hook 属 pages/Workspace/Chat 裁剪面，本保留链（collab）不得 type-only 依赖它。
+import type { UseSessionHistorySearchModel } from '@/services/workspace/conversationSearchService';
 import {
   markTaskNavigationRouteHydrated,
   shouldPreserveTaskPanelForSession,
 } from '@/services/tasks/taskConversationNavigation';
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
-import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -89,11 +95,18 @@ function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: num
 
 const HIGHLIGHT_TIMEOUT_MS = 3000;
 
+// 任务副屏 bootstrap 槽位（collab 形态注册 null）：hook 身份按构建恒定，不违反 hooks 规则。
+// collab 下不重放任务面板页签、不发起 services/myTask 拉取（spec §5：任务引擎不进本形态运行时面）。
+// 模块图不变量（见 src/extensions/slots.ts）：本文件解析的是「求值时刻」的注册表，不得被
+// src/extensions 装配图静态引达（否则会捕获全 null 默认槽位，静默丢弃 Open 任务副屏 bootstrap）。
+const useNullTaskPanelBootstrap: NonNullable<AppExtensionSlots['taskPanelBootstrap']> = () => undefined;
+const useResolvedTaskPanelBootstrap = getExtensionSlots().taskPanelBootstrap ?? useNullTaskPanelBootstrap;
+
 export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOptions): UseGroupChatHeaderPanelsResult {
   const { session, messages, panelRef } = options;
   const sessionId = session?.sessionId ?? null;
 
-  useSessionTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
+  useResolvedTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
 
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。

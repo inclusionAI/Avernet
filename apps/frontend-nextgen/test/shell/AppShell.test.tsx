@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { extendCapabilities, getCapabilities } from '@/capabilities';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -105,6 +106,20 @@ it('挂载即初始化一次个人空间（不等进入 Bot 分组）', async ()
   await waitFor(() => expect(mockEnsurePersonalSpaceOnAppEntry).toHaveBeenCalledTimes(1));
 });
 
+// 空间上下文初始化总开关（getSpaceContextInitializationEnabled，collab-form）默认 true 消费方断言：
+// 与 getShellVisibility.spaceSwitcher（默认 false）正交——切换器隐藏不影响双初始化，
+// 防回归把门错绑到 spaceSwitcher（会让本用例变红）。两个 mock 均为文件级共享，先清再断言。
+it('默认形态：spaceSwitcher=false 不拦初始化，挂载直入 Bot 分组两个初始化均在场', async () => {
+  expect(getCapabilities().getShellVisibility().value.spaceSwitcher).toBe(false);
+  expect(getCapabilities().getSpaceContextInitializationEnabled()).toEqual({ status: 'available', value: true });
+  mockInitSpaceContext.mockClear();
+  mockEnsurePersonalSpaceOnAppEntry.mockClear();
+  mockPathname = '/bot-workshop'; // Bot 分组路由直入：挂载即同时覆盖两条初始化链路
+  render(<AppShell>Bot 内容</AppShell>);
+  await waitFor(() => expect(mockEnsurePersonalSpaceOnAppEntry).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(mockInitSpaceContext).toHaveBeenCalledTimes(1));
+});
+
 it('将 mine 返回的 Human 身份传给侧栏底部用户行', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
 
@@ -180,4 +195,28 @@ it('路由离开任务导航目标时通知持久副屏释放旧任务面板，�
   window.history.pushState({}, '', '/work/my-task');
   act(() => view.rerender(<AppShell>任务列表</AppShell>));
   await waitFor(() => expect(useTaskConversationNavigationStore.getState().staleRouteReleaseSignal).toBe(1));
+});
+
+// extendCapabilities 合并后无法恢复，capability override 用例置于文件末尾。
+// collab 形态（Task 12 落 src/extensions/collab.ts）把空间上下文初始化开关覆盖为 false：
+// 语义是「请求发起前整体短路」而非「失败后吞错降级」（spec：吞错时 HTTP 层可能已挂起错误 toast）。
+// 两个 mock 均为文件级共享，先清再断言；/external-bots 属 Task 11，Bot 分组用现有 /bot-workshop 等价触发。
+it('空间初始化开关 false 形态：挂载与进入 Bot 分组路由均不触发两个初始化', async () => {
+  mockInitSpaceContext.mockClear();
+  mockEnsurePersonalSpaceOnAppEntry.mockClear();
+  extendCapabilities({
+    getSpaceContextInitializationEnabled: () => ({ status: 'available', value: false }),
+  });
+  mockPathname = '/workspace/collaboration';
+  const view = render(<AppShell>协作群内容</AppShell>);
+  // 正控：壳与侧栏确已挂载（排除「全局未渲染」的假阴性）
+  expect(view.getByTestId('app-sidebar')).toBeInTheDocument();
+  expect(mockEnsurePersonalSpaceOnAppEntry).not.toHaveBeenCalled();
+  expect(mockInitSpaceContext).not.toHaveBeenCalled();
+
+  // 离开协作路由、进入 Bot 分组路由：第二条初始化链路同样不触发
+  mockPathname = '/bot-workshop';
+  act(() => view.rerender(<AppShell>Bot 内容</AppShell>));
+  expect(mockInitSpaceContext).not.toHaveBeenCalled();
+  expect(mockEnsurePersonalSpaceOnAppEntry).not.toHaveBeenCalled();
 });
