@@ -148,6 +148,7 @@ async fn lifecycle(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
 struct ProbeDb {
     inner: Arc<dyn DbPlugin>,
     fail_template: std::sync::atomic::AtomicBool,
+    before_transaction: Mutex<Vec<DbTransactionStep>>,
     transactions: Mutex<Vec<Vec<String>>>,
 }
 #[async_trait]
@@ -156,6 +157,10 @@ impl DbPlugin for ProbeDb {
     async fn execute(&self, s: DbStatement) -> DbResult<DbExecuteResult> { self.inner.execute(s).await }
     async fn health_check(&self) -> DbResult<DbHealth> { self.inner.health_check().await }
     async fn transaction(&self, mut steps: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> {
+        // Deterministically commit a competing write after the caller has read
+        // its routing snapshot but before it executes the guarded transaction.
+        let competing = std::mem::take(&mut *self.before_transaction.lock().unwrap());
+        if !competing.is_empty() { self.inner.transaction(competing).await?; }
         let sql = steps.iter().map(|step| match step {
             DbTransactionStep::Execute(s) | DbTransactionStep::Query(s) | DbTransactionStep::ExecuteChecked { statement: s, .. } => s.sql().to_owned(),
         }).collect::<Vec<_>>();
@@ -173,7 +178,7 @@ impl DbPlugin for ProbeDb {
 
 async fn failures_and_cost(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
     use std::sync::atomic::Ordering::SeqCst;
-    let probe = Arc::new(ProbeDb { inner: db.clone(), fail_template: false.into(), transactions: Mutex::new(vec![]) });
+    let probe = Arc::new(ProbeDb { inner: db.clone(), fail_template: false.into(), before_transaction: Mutex::new(vec![]), transactions: Mutex::new(vec![]) });
     let repo = store(probe.clone(), flavor, ENV);
     let mut g = group("rollback", GroupStrategy::ManagerWorker);
     probe.fail_template.store(true, SeqCst);
@@ -280,4 +285,45 @@ async fn concurrent_renames_cas_and_invalid_json_preserve_consistency() {
     assert!(fresh.update_label("concurrent", Some("must rollback".into())).await.is_err());
     let reloaded = store(db.clone(), DbSqlFlavor::Sqlite, ENV).try_get("concurrent").await.unwrap().unwrap();
     assert_eq!(reloaded.label.as_deref(), Some("event name"));
+}
+
+#[tokio::test]
+async fn label_routing_cas_distinguishes_conflict_from_deletion_and_invalidates_cache() {
+    use bcs_service_api::{DefaultDelivery, RoutingMode, RoutingPolicy, ServiceError};
+    let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    let probe = Arc::new(ProbeDb {
+        inner: db.clone(), fail_template: false.into(),
+        before_transaction: Mutex::new(vec![]), transactions: Mutex::new(vec![]),
+    });
+    let repo = store(probe.clone(), DbSqlFlavor::Sqlite, ENV);
+    let id = "label-routing-cas";
+    repo.upsert(group(id, GroupStrategy::ManagerWorker)).await.unwrap();
+    let original = card(db.as_ref(), ENV, id).await.unwrap();
+    let policy = RoutingPolicy {
+        mode: RoutingMode::Mention, default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: Default::default(),
+    };
+    let policy_json = serde_json::to_string(&policy).unwrap();
+    *probe.before_transaction.lock().unwrap() = vec![DbTransactionStep::Execute(DbStatement::with_params(
+        "UPDATE bcs_groups SET routing_policy_json = ? WHERE env = ? AND group_id = ?",
+        vec![policy_json.into(), ENV.into(), id.into()],
+    ))];
+    let patch = GroupMutableFieldsPatch {
+        label: Some("must not persist".into()),
+        default_bot_final_delivery: Some(DefaultDelivery::InjectObservers), ..Default::default()
+    };
+    assert!(matches!(repo.patch_mutable_fields(id, patch.clone()).await, Err(ServiceError::Conflict(_))));
+    let reloaded = repo.try_get(id).await.unwrap().unwrap();
+    assert_eq!(reloaded.label.as_deref(), Some("协作群"));
+    assert_eq!(serde_json::to_value(reloaded.routing_policy).unwrap(), serde_json::to_value(policy).unwrap());
+    assert_eq!(card(db.as_ref(), ENV, id).await.unwrap(), original);
+
+    *probe.before_transaction.lock().unwrap() = ["bcs_group_participants", "bcs_group_agent_cards", "bcs_groups"]
+        .into_iter().map(|table| DbTransactionStep::Execute(DbStatement::with_params(
+            format!("DELETE FROM {table} WHERE env = ? AND group_id = ?"), vec![ENV.into(), id.into()],
+        ))).collect();
+    assert!(matches!(repo.patch_mutable_fields(id, patch).await, Err(ServiceError::GroupNotFound(missing)) if missing == id));
+    assert!(repo.try_get(id).await.unwrap().is_none(), "deleted Group must not survive in the cache");
+    assert!(card(db.as_ref(), ENV, id).await.is_none(), "CAS failure must not recreate the template");
 }

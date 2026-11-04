@@ -309,25 +309,17 @@ impl MySqlGroupStore {
             } else {
                 DbTransactionStep::Execute(statement)
             };
-            let result = self.db.plugin().transaction(vec![
+            match self.db.plugin().transaction(vec![
                 write, self.card_template_upsert_step(id)?,
-            ]).await;
-            let results = match result {
-                Ok(results) => results,
-                Err(DbError::ConditionFailed { .. }) if guard_routing_policy => {
-                    self.cache.write().await.remove(id);
-                    if self.try_get(id).await?.is_none() {
-                        return Err(ServiceError::GroupNotFound(id.to_string()));
-                    }
-                    return Err(ServiceError::Conflict(format!(
-                        "Group '{id}' routing policy changed concurrently"
-                    )));
-                }
+            ]).await {
+                Ok(results) => match results.first() {
+                    Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
+                    _ => return Err(ServiceError::InternalError("Missing Group patch result".into())),
+                },
+                // The transaction has rolled back. Reuse the zero-row path
+                // below to invalidate cache and distinguish deletion from CAS conflict.
+                Err(DbError::ConditionFailed { .. }) if guard_routing_policy => 0,
                 Err(error) => return Err(ServiceError::InternalError(error.to_string())),
-            };
-            match results.first() {
-                Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
-                _ => return Err(ServiceError::InternalError("Missing Group patch result".into())),
             }
         } else {
             self.db.execute_with(&self.logical_db, &sql, params).await

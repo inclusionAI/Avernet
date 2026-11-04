@@ -26,9 +26,16 @@ fn path_segment(id: &str) -> String {
     encoded
 }
 
-fn template(id: &str, name: &str, kind: &str, prefix: &str) -> JsonValue {
+fn template(id: &str, group_kind: GroupKind, strategy: GroupStrategy, label: Option<&str>) -> Option<JsonValue> {
+    if group_kind != GroupKind::Normal { return None; }
+    let (kind, prefix) = match strategy {
+        GroupStrategy::ManagerWorker => ("manager_worker", MW_DESCRIPTION),
+        GroupStrategy::StateMachine => ("state_machine", SM_DESCRIPTION),
+        GroupStrategy::Chat => return None,
+    };
+    let name = label.filter(|label| !label.is_empty()).unwrap_or(id);
     let description = format!("{prefix}{name}");
-    json!({
+    Some(json!({
         "name": name,
         "description": description,
         "supportedInterfaces": [{
@@ -46,23 +53,12 @@ fn template(id: &str, name: &str, kind: &str, prefix: &str) -> JsonValue {
         "defaultOutputModes": ["text/plain"],
         "skills": [{"id": "group.execute", "name": name,
             "description": description, "tags": [kind]}]
-    })
-}
-
-pub(crate) fn group_template(group: &Group) -> Option<JsonValue> {
-    if group.group_kind != GroupKind::Normal { return None; }
-    let (kind, prefix) = match group.group_strategy {
-        GroupStrategy::ManagerWorker => ("manager_worker", MW_DESCRIPTION),
-        GroupStrategy::StateMachine => ("state_machine", SM_DESCRIPTION),
-        GroupStrategy::Chat => return None,
-    };
-    let name = group.label.as_deref().filter(|label| !label.is_empty()).unwrap_or(&group.id);
-    Some(template(&group.id, name, kind, prefix))
+    }))
 }
 
 // The caller holds the groups write lock as well: groups and templates commit together.
 pub(crate) fn update_memory_template(cards: &mut HashMap<String, JsonValue>, group: &Group) {
-    if let Some(fresh) = group_template(group) {
+    if let Some(fresh) = template(&group.id, group.group_kind, group.group_strategy, group.label.as_deref()) {
         match cards.get_mut(&group.id) {
             Some(card) => {
                 card["name"] = fresh["name"].clone();
@@ -113,10 +109,12 @@ impl MySqlGroupStore {
              AND g.group_kind = 'normal' AND g.group_strategy IN ('manager_worker', 'state_machine') \
              {conflict}"
         );
-        let encode = |kind, prefix| serde_json::to_string(&template(id, id, kind, prefix))
+        // Both fixed strategies produce Some(Card); serde serializes Some as the
+        // Card itself. Share eligibility, type and display defaults with memory.
+        let encode = |strategy| serde_json::to_string(&template(id, GroupKind::Normal, strategy, None))
             .map(Value::from).map_err(|error| ServiceError::InternalError(format!("serialize Group Card template: {error}")));
         Ok(DbTransactionStep::Execute(DbStatement::with_params(sql, vec![
-            encode("manager_worker", MW_DESCRIPTION)?, encode("state_machine", SM_DESCRIPTION)?,
+            encode(GroupStrategy::ManagerWorker)?, encode(GroupStrategy::StateMachine)?,
             Value::from(MW_DESCRIPTION), Value::from(SM_DESCRIPTION),
             Value::from(MW_DESCRIPTION), Value::from(SM_DESCRIPTION),
             Value::from(self.env.as_str()), Value::from(id),
@@ -148,7 +146,7 @@ mod tests {
             let mut group = Group::new(id, "manager", vec![]);
             group.group_strategy = strategy;
             group.label = Some(expected["name"].as_str().unwrap().into());
-            assert_eq!(group_template(&group).unwrap(), expected);
+            assert_eq!(template(&group.id, group.group_kind, group.group_strategy, group.label.as_deref()).unwrap(), expected);
         }
     }
 
@@ -158,14 +156,14 @@ mod tests {
         group.group_strategy = GroupStrategy::StateMachine;
         for label in [None, Some(String::new())] {
             group.label = label;
-            let card = group_template(&group).unwrap();
+            let card = template(&group.id, group.group_kind, group.group_strategy, group.label.as_deref()).unwrap();
             assert_eq!(card["name"], group.id);
             assert_eq!(card["supportedInterfaces"][0]["url"], "local://groups/%2E%2E%2F%E7%BE%A4%2F%3F%23%25");
         }
         group.group_strategy = GroupStrategy::Chat;
-        assert!(group_template(&group).is_none());
+        assert!(template(&group.id, group.group_kind, group.group_strategy, group.label.as_deref()).is_none());
         group.group_strategy = GroupStrategy::ManagerWorker;
         group.group_kind = GroupKind::Dm;
-        assert!(group_template(&group).is_none());
+        assert!(template(&group.id, group.group_kind, group.group_strategy, group.label.as_deref()).is_none());
     }
 }
