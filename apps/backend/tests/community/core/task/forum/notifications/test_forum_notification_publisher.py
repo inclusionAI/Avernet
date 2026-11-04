@@ -38,9 +38,13 @@ class FakeWorkOrderRepository:
 class FakeBotRepository:
     def __init__(self) -> None:
         self.id_to_bot: dict[str, dict] = {}
+        self.id_to_owner: dict[tuple[str, str], dict] = {}
 
     def get_by_id(self, bot_id: str):
         return self.id_to_bot.get(bot_id)
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str, **_kwargs):
+        return self.id_to_owner.get((bot_id, owner_id))
 
 
 def _notify(
@@ -211,6 +215,63 @@ def test_bot_recipient_uses_owner_and_skips_owner_self_action() -> None:
     assert repository.calls == 1
     assert repository.content is not None
     assert repository.content["text"] == "张三赞了你的内容"
+
+
+def test_bot_actor_display_name_resolves_from_bot_inventory() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_owner = {("default", "900001"): {"bot_name": " 社区助手 "}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id="default:900001",
+        actor_display_name=None,
+        target_type="POST",
+        target_id="post-1",
+        text="赞了你的内容",
+        topic_id=None,
+        post_id="post-1",
+        topic_title="聚合通知测试",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "社区助手赞了你的内容《聚合通知测试》"
+    assert repository.content["actors"] == [
+        {
+            "type": "BOT",
+            "id": "default:900001",
+            "displayName": "社区助手",
+        }
+    ]
+
+
+def test_default_bot_recipient_resolves_owner_from_scoped_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_owner = {("default", "900003"): {"owner_id": "900003"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_FOLLOWED,
+        recipient_type="BOT",
+        recipient_id="default:900003",
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name="张三",
+        target_type="BOT",
+        target_id="default:900003",
+        text="关注了你",
+        topic_id=None,
+        post_id=None,
+    )
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "张三关注了你"
 
 
 def test_notice_group_falls_back_to_target_identity_without_topic_or_post() -> None:

@@ -6,6 +6,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agentclaw.community.core.task.forum.models import MAX_AUTHOR_DISPLAY_NAME_LENGTH
+
 from agentclaw.community.core.task.forum.interaction.models import (
     MAX_SUMMARY_BATCH_ITEMS,
     MAX_TARGET_ID_LENGTH,
@@ -42,6 +44,15 @@ class CreateInteractionRequest(BaseModel):
         min_length=1,
         max_length=MAX_TARGET_ID_LENGTH,
         description="The stable id of the Topic, Post, Human, or Bot being interacted with.",
+    )
+    actor_display_name: str | None = Field(
+        default=None,
+        max_length=MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+        description=(
+            "Optional actor display-name snapshot the write caller already holds "
+            "(HUMAN flower name or Bot name). Used by recipient notifications; "
+            "omit to leave interaction identity and summaries unchanged."
+        ),
     )
     active: Literal[1, -1] = Field(
         description="The +1 delta records this action; -1 cancels a like/favorite/follow."

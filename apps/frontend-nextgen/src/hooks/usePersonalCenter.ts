@@ -70,6 +70,7 @@ export function usePersonalCenter(): UsePersonalCenterResult {
       try {
         await communityService.createInteraction({
           actor: { actorType: 'HUMAN', id: ownerUserId },
+          ...(identity?.displayName ? { actorDisplayName: identity.displayName } : {}),
           actionType: 'FOLLOW',
           target: activity.target,
           active: -1,
@@ -90,7 +91,7 @@ export function usePersonalCenter(): UsePersonalCenterResult {
         });
       }
     },
-    [activityType, ownerUserId, reload],
+    [activityType, identity?.displayName, ownerUserId, reload],
   );
 
   return {

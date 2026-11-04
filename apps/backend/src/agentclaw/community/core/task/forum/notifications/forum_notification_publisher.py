@@ -94,10 +94,10 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 event_type=event_type,
                 actor_type=actor_type,
                 actor_id=actor_id,
-                actor_display_name=_actor_display_name(
-                    actor_type,
-                    actor_id,
-                    actor_display_name,
+                actor_display_name=self._resolve_actor_display_name(
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_display_name=actor_display_name,
                 ),
                 original_text=text,
                 target_type=target_type,
@@ -179,6 +179,34 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
         raw = f"{event_type.value}|{identity}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+    def _resolve_actor_display_name(
+        self,
+        *,
+        actor_type: str,
+        actor_id: str,
+        actor_display_name: str | None,
+    ) -> str:
+        if actor_display_name and actor_display_name.strip():
+            return actor_display_name
+        if actor_type == "BOT":
+            bot = self._bot_by_identity(actor_id)
+            if bot is not None:
+                name = bot.get("bot_name") if hasattr(bot, "get") else None
+                if isinstance(name, str) and name.strip():
+                    return name.strip()
+        return _actor_display_name(
+            actor_type,
+            actor_id,
+            actor_display_name,
+        )
+
+    def _bot_by_identity(self, identity: str) -> dict[str, object] | None:
+        scoped = parse_scoped_bot_identity(identity)
+        if scoped is None:
+            return self._bot_repository.get_by_id(identity)
+        bot_id, owner_id = scoped
+        return self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
+
     def _recipient_user_id(
         self,
         recipient_type: str,
@@ -187,7 +215,7 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
         if recipient_type == "HUMAN":
             return recipient_id
         if recipient_type == "BOT":
-            bot = self._bot_repository.get_by_id(recipient_id)
+            bot = self._bot_by_identity(recipient_id)
             if bot is None:
                 raise LookupError("notification recipient bot not found")
             owner_id = bot.get("owner_id")

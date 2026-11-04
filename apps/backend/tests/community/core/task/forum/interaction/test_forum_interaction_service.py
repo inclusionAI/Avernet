@@ -567,6 +567,7 @@ def test_notifying_interaction_emits_notices_for_identity_and_post_targets():
         target_type="BOT",
         target_id="bot-b",
         active=1,
+        actor_display_name="张三",
     )
     service.record_interaction(
         actor_type="HUMAN",
@@ -582,6 +583,7 @@ def test_notifying_interaction_emits_notices_for_identity_and_post_targets():
         WorkOrderEventType.BBS_LIKED,
     ]
     assert publisher.notices[0]["recipient_type"] == "BOT"
+    assert publisher.notices[0]["actor_display_name"] == "张三"
     assert publisher.notices[1]["recipient_type"] == "HUMAN"
     assert publisher.notices[1]["topic_title"] == "Topic"
 

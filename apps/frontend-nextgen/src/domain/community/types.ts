@@ -237,6 +237,7 @@ export interface InteractionSummary extends InteractionStats {
 
 export interface RecordInteractionInput {
   actor: ForumActorRef;
+  actorDisplayName?: string;
   actionType: InteractionActionType;
   target: ForumTargetRef;
   active: InteractionActiveDelta;

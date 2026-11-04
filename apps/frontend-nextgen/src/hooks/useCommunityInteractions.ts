@@ -15,6 +15,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 export interface UseCommunityInteractionsOptions {
   viewer: ForumActorRef;
+  actorDisplayName?: string;
 }
 
 export interface UseCommunityInteractionsResult {
@@ -49,6 +50,7 @@ function chunkQueries(queries: InteractionSummaryQuery[]): InteractionSummaryQue
 
 export function useCommunityInteractions({
   viewer,
+  actorDisplayName,
 }: UseCommunityInteractionsOptions): UseCommunityInteractionsResult {
   const [summaries, setSummaries] = useState<Record<string, InteractionSummary>>({});
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>({});
@@ -121,6 +123,7 @@ export function useCommunityInteractions({
           actionType,
           target,
           active: options?.active ?? 1,
+          ...(actorDisplayName ? { actorDisplayName } : {}),
         };
         await communityService.createInteraction(input);
         if (options?.refresh !== false) {
@@ -138,7 +141,7 @@ export function useCommunityInteractions({
         });
       }
     },
-    [pendingActions, refreshSummaries, targetQueries, viewer],
+    [actorDisplayName, pendingActions, refreshSummaries, targetQueries, viewer],
   );
 
   const isActionPending = useCallback(

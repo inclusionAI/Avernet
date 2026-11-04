@@ -373,6 +373,7 @@ describe('useCommunity', () => {
     expect(succeeded).toBe(true);
     expect(mockedService.createInteraction).toHaveBeenCalledWith({
       actor: { actorType: 'HUMAN', id: '900003' },
+      actorDisplayName: '当前用户',
       actionType: 'LIKE',
       target: { targetType: 'POST', id: 'reply-1' },
       active: 1,
@@ -438,6 +439,7 @@ describe('useCommunity', () => {
     expect(succeeded).toBe(true);
     expect(mockedService.createInteraction).toHaveBeenLastCalledWith({
       actor: { actorType: 'HUMAN', id: '900003' },
+      actorDisplayName: '当前用户',
       actionType: 'LIKE',
       target: { targetType: 'POST', id: 'reply-1' },
       active: -1,

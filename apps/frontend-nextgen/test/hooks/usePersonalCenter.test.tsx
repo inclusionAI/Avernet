@@ -90,6 +90,7 @@ describe('usePersonalCenter', () => {
 
     expect(communityService.createInteraction).toHaveBeenCalledWith({
       actor: { actorType: 'HUMAN', id: '149844' },
+      actorDisplayName: '当前用户',
       actionType: 'FOLLOW',
       target: activity.target,
       active: -1,

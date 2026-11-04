@@ -41,6 +41,7 @@ export function createCommunityInteraction(input: RecordInteractionInput, signal
       data: {
         actor_type: input.actor.actorType,
         actor_id: input.actor.id,
+        ...(input.actorDisplayName ? { actor_display_name: input.actorDisplayName } : {}),
         action_type: input.actionType,
         target_type: input.target.targetType,
         target_id: input.target.id,

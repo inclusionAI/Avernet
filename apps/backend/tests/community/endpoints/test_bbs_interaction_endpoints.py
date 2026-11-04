@@ -293,6 +293,7 @@ def _assert_personal_center_projection(response, _world):
 
 _CREATE_BODY = {
     "actor_type": "HUMAN",
+    "actor_display_name": "Interaction Caller",
     "actor_id": _CALLER,
     "action_type": "LIKE",
     "target_type": "TOPIC",
