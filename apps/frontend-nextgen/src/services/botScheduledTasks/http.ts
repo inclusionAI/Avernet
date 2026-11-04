@@ -11,7 +11,7 @@ export async function sendRoutineRequest<T>(url: string, options: BackendRequest
     const response = await backendRequest<BackendApiEnvelope<T>>(url, { ...options, retryOnTransient: false });
     const code = Number(response.code);
     const status = Math.floor(code / 1000);
-    if (!Number.isFinite(code) || status < 200 || status >= 300 || response.data == null)
+    if (!Number.isFinite(code) || status < 200 || status >= 300 || response.data === null || response.data === undefined)
       throw new RoutineRequestError(
         `${response.message || '任务接口未返回有效结果'}${
           [502, 504].includes(status) ? '；结果可能尚未确认，请先刷新核实，不要重复提交' : ''

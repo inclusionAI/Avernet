@@ -140,8 +140,8 @@ export function addressFromKey(key: string | null, scope: RoutineScope): Routine
     const [owner, bot, stage, device, operator, id] = JSON.parse(key);
     if (bot !== scope.botId || owner !== (scope.entityId ?? scope.userId) || typeof id !== 'string' || !id)
       return undefined;
-    if (stage != null && !isStage(stage)) return undefined;
-    if ((device != null && typeof device !== 'string') || (operator != null && typeof operator !== 'string'))
+    if (stage !== null && stage !== undefined && !isStage(stage)) return undefined;
+    if ((device !== null && device !== undefined && typeof device !== 'string') || (operator !== null && operator !== undefined && typeof operator !== 'string'))
       return undefined;
     return {
       id,

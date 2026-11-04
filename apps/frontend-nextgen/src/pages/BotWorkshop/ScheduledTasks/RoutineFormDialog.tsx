@@ -81,7 +81,7 @@ export function RoutineFormDialog({
   }, [original, context.caller_mode, form.runtime_stage]);
   let targetError = '';
   try {
-    original ? undefined : validateCreateTarget(context, form, 'current-user');
+    if (!original) validateCreateTarget(context, form, 'current-user');
   } catch (reason) {
     targetError = (reason as Error).message;
   }
