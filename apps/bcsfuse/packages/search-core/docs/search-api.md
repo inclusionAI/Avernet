@@ -279,9 +279,16 @@ that wraps retrieval owns complete cache keys, trusted scope separation, data
 revision invalidation, successful-result admission and final eligibility checks.
 Hosts must keep authentication and overload protection outside cache shortcuts.
 
-With query-embedding caching enabled, `CachedEmbedding` also shares overlapping
-calls for the same model configuration, dimension and exact query within one
-instance/event loop. The first call starts immediately; there is no batch window.
+`EmergencyPolicy.embedding_singleflight_enabled` controls sharing overlapping
+query-embedding calls and defaults to `true`. Hosts using DRM set this top-level
+field in the existing `emergencyConfig` JSON; other required fields remain required.
+It is independent of cache TTL: disabling caches does not disable coalescing.
+Set it to `false` to restore separate model calls while retaining any configured
+vector cache. Updates affect new requests; existing requests keep their snapshot.
+
+`CachedEmbedding` shares calls for the same model configuration, dimension and
+exact query within one instance/event loop. The first call starts immediately;
+there is no batch window.
 Each caller keeps its own deadline and receives a separate result list. Cancelling
 one caller does not cancel peers; the last departing caller cancels and drains
 unfinished async work. Failed or invalid vectors are not cached. Running
