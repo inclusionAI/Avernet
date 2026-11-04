@@ -24,7 +24,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
       {loading ? (
         <p role="status">正在加载专家详情…</p>
       ) : error ? (
-        <div role="alert" className="rounded-xl border border-input p-6">
+        <div role="alert" className="rounded-2xl border border-divider p-6">
           <p className="mb-3 text-destructive">专家详情加载失败：{error}</p>
           <Button variant="outline" onClick={reload}>
             重试详情
@@ -33,7 +33,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
       ) : (
         expert && (
           <>
-            <header className="rounded-xl border border-input bg-card p-6">
+            <header className="rounded-2xl border border-divider bg-card p-6">
               <span className="text-sm text-primary">{expert.category}</span>
               <h1 className="mt-2 text-2xl font-semibold text-foreground">{expert.name}</h1>
               <p className="mt-3 whitespace-pre-wrap break-words text-muted-foreground">{expert.description}</p>
@@ -53,7 +53,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
               <section className="space-y-4" aria-label="专家身份介绍">
                 <h2 className="text-lg font-semibold text-foreground">身份介绍</h2>
                 {expert.identity.map((identity, index) => (
-                  <article key={`${identity.type}-${index}`} className="rounded-xl border border-input bg-card p-5">
+                  <article key={`${identity.type}-${index}`} className="rounded-2xl border border-divider bg-card p-5">
                     <h3 className="mb-3 text-sm font-medium text-muted-foreground">{identity.type}</h3>
                     <div
                       className="prose max-w-none break-words text-foreground"
@@ -67,7 +67,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
               <section aria-label="专家技能" className="space-y-3">
                 <h2 className="text-lg font-semibold text-foreground">专业技能</h2>
                 {expert.skills.map((skill) => (
-                  <article key={skill.name} className="rounded-xl border border-input bg-card p-5">
+                  <article key={skill.name} className="rounded-2xl border border-divider bg-card p-5">
                     <h3 className="font-medium text-foreground">{skill.name}</h3>
                     <span className="text-xs text-muted-foreground">Local Skill</span>
                     <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{skill.description}</p>
@@ -80,7 +80,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
                 <h2 className="text-lg font-semibold text-foreground">模板声明的 MCP</h2>
                 <p className="text-sm text-muted-foreground">创建时沿现有权限与用户授权处理，实际配置可在 Bot 管理中查看。</p>
                 {expert.mcp?.map((mcp) => (
-                  <article key={mcp.server_code} className="rounded-xl border border-input bg-card p-5">
+                  <article key={mcp.server_code} className="rounded-2xl border border-divider bg-card p-5">
                     <h3 className="font-medium text-foreground">{mcp.server_code}</h3>
                   </article>
                 ))}
@@ -97,7 +97,7 @@ export function ExpertDetails({ expertId, onBack }: { expertId: string; onBack: 
                   <p className="text-sm text-muted-foreground">模板声明清理资源，不写入新文件。</p>
                 ) : (
                   expert.resources.map((resource) => (
-                    <article key={resource.path} className="rounded-xl border border-input bg-card p-5">
+                    <article key={resource.path} className="rounded-2xl border border-divider bg-card p-5">
                       <h3 className="break-all font-mono text-sm text-foreground">{resource.path}</h3>
                     </article>
                   ))

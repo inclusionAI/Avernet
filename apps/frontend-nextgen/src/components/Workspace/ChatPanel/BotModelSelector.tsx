@@ -1,4 +1,4 @@
-import { Badge, Button, Spin } from '@/components/ui';
+import { Badge, Button, Spin, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
 import type { BotChatSessionView, BotModelView, ChatBotView } from '@/services/workspace/botSessionService';
@@ -36,45 +36,53 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
           )}
         >
           <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="max-w-[120px] truncate">{label}</span>
+          <span className="whitespace-nowrap">{label}</span>
           <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 p-1">
+      {/* 宽度随最长模型名自适应（min-w 保底、max-w 兜底防爆屏），名称超宽截断时由 tooltip 补全。 */}
+      <PopoverContent align="end" className="w-auto min-w-64 max-w-[360px] p-1">
         {loading ? (
           <Spin tip="加载模型列表..." />
         ) : models.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-muted-foreground">暂无可用模型</p>
         ) : (
-          <div className="max-h-72 overflow-y-auto">
-            {models.map((model) => {
-              const selected = model.modelId === activeModelId;
-              return (
-                <Button
-                  key={model.modelId}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setOpen(false);
-                    onSelect(model.modelId);
-                  }}
-                  className={cn(
-                    'h-auto w-full justify-between rounded-md px-3 py-2 text-left text-sm font-normal',
-                    selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
-                  )}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Bot className="h-4 w-4 flex-none text-muted-foreground" />
-                    <span className="min-w-0 truncate">{model.name}</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    {model.provider ? <Badge tone="neutral">{model.provider}</Badge> : null}
-                    {selected ? <Check className="h-4 w-4 text-primary" /> : null}
-                  </span>
-                </Button>
-              );
-            })}
-          </div>
+          <TooltipProvider delayDuration={200}>
+            <div className="max-h-72 overflow-y-auto">
+              {models.map((model) => {
+                const selected = model.modelId === activeModelId;
+                return (
+                  <Button
+                    key={model.modelId}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setOpen(false);
+                      onSelect(model.modelId);
+                    }}
+                    className={cn(
+                      'h-auto w-full justify-between rounded-md px-3 py-2 text-left text-sm font-normal',
+                      selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Bot className="h-4 w-4 flex-none text-muted-foreground" />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="min-w-0 truncate">{model.name}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>{model.name}</TooltipContent>
+                      </Tooltip>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      {model.provider ? <Badge tone="neutral">{model.provider}</Badge> : null}
+                      {selected ? <Check className="h-4 w-4 text-primary" /> : null}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+          </TooltipProvider>
         )}
       </PopoverContent>
     </Popover>

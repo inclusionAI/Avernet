@@ -36,7 +36,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
         aria-label={`当前协作身份：${identity.name}`}
         className={cn(
           inlineLayout
-            ? 'h-9 min-w-0 flex-1 justify-between gap-2 rounded-lg px-2.5 text-left text-xs'
+            ? 'h-8 min-w-0 w-full justify-between gap-1.5 rounded-lg px-2 text-left font-normal'
             : collapsedLayout
             ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
             : sidebarChipLayout
@@ -95,15 +95,16 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
           <>
             <IdentityAvatar
               identity={identity}
-              size={inlineLayout || sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
+              size={inlineLayout ? 'xxs' : sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
               userAvatarUrl={userAvatarUrl}
             />
             {inlineLayout ? (
               <>
+                {/* dmore Frame 2（页头身份选择器 222×32）：16px 头像 + 13px 名称 + 引擎/用户小标签。 */}
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="min-w-0 flex-1 truncate">{identity.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{identity.name}</span>
                     </TooltipTrigger>
                     <TooltipContent>{identity.name}</TooltipContent>
                   </Tooltip>
@@ -112,7 +113,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
                   <TooltipProvider delayDuration={200}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="max-w-[40%] shrink-0 truncate rounded-md bg-muted px-2 py-0.5 text-xs font-normal text-foreground">
+                        <span className="max-w-[40%] shrink-0 truncate rounded-[4px] bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                           {getBotEngineLabel(identity.engine) || '引擎类型暂无'}
                         </span>
                       </TooltipTrigger>
@@ -120,7 +121,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                  <span className="shrink-0 rounded-[4px] bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                     用户
                   </span>
                 )}
