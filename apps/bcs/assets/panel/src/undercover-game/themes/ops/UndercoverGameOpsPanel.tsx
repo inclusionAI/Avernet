@@ -594,6 +594,16 @@ function OpsPanel({
   );
   const fallback = snapshotRef.current?.runId === params.runId ? snapshotRef.current.model : null;
   const shown = error ? (fallback ?? model) : model;
+  const currentResult = publishedResult?.runId === params.runId
+    && publishedResult.value.gameSessionId === (params.gameSessionId ?? params.sessionId)
+    && publishedResult.value.hostActorId === params.host.actorId
+    && publishedResult.value.round === params.round
+    && publishedResult.value.attempt === params.attempt
+    ? publishedResult.value : undefined;
+  const result = useMemo(
+    () => (currentResult ? publicGameResultView(currentResult, params) : resultError?.blocking ? undefined : gameResult(shown)),
+    [currentResult, params, resultError, shown],
+  );
 
   // Width classification for ≤360px support.
   useEffect(() => {
@@ -622,7 +632,7 @@ function OpsPanel({
   const actionKey = pendingHumanNode ? `${params.runId}:${pendingHumanNode.node_id}:${pendingHumanNode.attempt ?? params.attempt}:${actionKind}` : '';
   const isPk = params.phase.startsWith('pk_');
   const allowAbstain = !isPk && (parsed.context?.action !== 'vote' || parsed.context.allowAbstain);
-  const canAct = Boolean(pendingHumanNode && !submitted && !stale && !parsed.error);
+  const canAct = Boolean(!result && pendingHumanNode && !submitted && !stale && !parsed.error);
 
   const upstream = useMemo(
     () => normalizeCurrentRoundUpstream(pendingHumanNode?.upstream_artifacts, params),
@@ -643,20 +653,9 @@ function OpsPanel({
     [params.voteCandidates, params.currentViewerActorId, isPk, params.pkCandidates],
   );
 
-  const currentResult = publishedResult?.runId === params.runId
-    && publishedResult.value.gameSessionId === (params.gameSessionId ?? params.sessionId)
-    && publishedResult.value.hostActorId === params.host.actorId
-    && publishedResult.value.round === params.round
-    && publishedResult.value.attempt === params.attempt
-    ? publishedResult.value : undefined;
-  const result = useMemo(
-    () => (currentResult ? publicGameResultView(currentResult, params) : resultError?.blocking ? undefined : gameResult(shown)),
-    [currentResult, params, resultError, shown],
-  );
-
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!pendingHumanNode || submitting || submitted || stale || parsed.error) return;
+    if (result || !pendingHumanNode || submitting || submitted || stale || parsed.error) return;
     let content: string;
     let interactionAction: 'speech' | 'vote' | 'abstain';
     if (actionKind === 'vote') {
@@ -696,7 +695,7 @@ function OpsPanel({
   const recover = async () => {
     if (!onAction) return;
     if (typeof window.confirm === 'function' && !window.confirm('确认告诉主持人“卡住了”？')) return;
-    try { await onAction({ type: 'send_message', content: '卡住了' }); setStale(false); onInteraction?.({ type: 'recovery', runId: params.runId }); }
+    try { await onAction({ type: 'send_message', content: '卡住了' }); onInteraction?.({ type: 'recovery', runId: params.runId }); }
     catch { setError('通知主持人失败，请重试。'); }
   };
 
@@ -766,7 +765,7 @@ function OpsPanel({
         <HostBroadcast model={shown} palette={palette} />
         <PublicHistory model={shown} palette={palette} />
 
-        {pendingHumanNode && (
+        {!result && pendingHumanNode && (
           <Panel $left={actionKind === 'vote' ? 'good' : 'accent'}>
             <PanelTitle>{actionKind === 'vote' ? (isPk ? 'PK 投票' : '投票') : '你的发言'} · 请求输入</PanelTitle>
             {params.openingAnnouncement && graph?.run?.run_id === params.runId && shown.status === 'running' && graph.nodes.some(node => node.node_id === 'vote_start' && node.status === 'completed') && (

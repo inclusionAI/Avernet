@@ -372,6 +372,106 @@ try {
     await act(async () => opening.unmount());
   }
 
+  // 4f) A recovery message does not revalidate a conflicted action; only a successful refresh does.
+  {
+    const conflictPosts = [];
+    const recoveryActions = [];
+    let graphReads = 0;
+    let refreshAvailable = false;
+    globalThis.fetch = async (url, init = {}) => {
+      const path = new URL(url, 'http://local.test').pathname;
+      if (init.method === 'POST' && path.endsWith('/respond')) {
+        conflictPosts.push(JSON.parse(init.body));
+        return response({ message: 'already handled' }, 409);
+      }
+      if (path.endsWith('/graph')) {
+        graphReads += 1;
+        if (graphReads > 1 && !refreshAvailable) return response({ message: 'refresh unavailable' }, 503);
+        return env({ data: { run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'speech-d', status: 'ready' }] }, enveloped: true });
+      }
+      if (path.endsWith('/pending-human-nodes')) {
+        return env({ data: [{ node_id: 'speech-d', attempt: 1, instruction: speechInstruction, upstream_artifacts: [] }], enveloped: true });
+      }
+      throw new Error(`Unexpected ${path}`);
+    };
+    let conflicted;
+    await act(async () => {
+      conflicted = mount({ ...base, onAction: async (action) => { recoveryActions.push(action); } });
+      await settle(8);
+    });
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(conflicted.container.querySelector('textarea'), '冲突前的发言');
+      conflicted.container.querySelector('textarea').dispatchEvent(new window.Event('input', { bubbles: true }));
+      await settle();
+      conflicted.container.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+      await settle(8);
+    });
+    assert.equal(conflictPosts.length, 1);
+    assert.equal(conflicted.container.querySelector('form'), null, 'conflict disables the cached action while refresh fails');
+    await act(async () => { button(conflicted, '卡住了？告诉主持人').click(); await settle(8); });
+    assert.deepEqual(recoveryActions, [{ type: 'send_message', content: '卡住了' }]);
+    const unlockedForm = conflicted.container.querySelector('form');
+    if (unlockedForm) {
+      await act(async () => {
+        unlockedForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+        await settle(8);
+      });
+    }
+    assert.equal(conflictPosts.length, 1, 'recovery delivery must not unlock resubmission of the stale action');
+    assert.equal(conflicted.container.querySelector('form'), null, 'stale guard survives a successful recovery message');
+    refreshAvailable = true;
+    await act(async () => { button(conflicted, '刷新').click(); await settle(8); });
+    assert.ok(conflicted.container.querySelector('form'), 'a successful refresh revalidates and unlocks the pending action');
+    await act(async () => conflicted.unmount());
+  }
+
+  // 4g) A late finale suppresses the pending snapshot from the earlier parallel reads.
+  {
+    const lateResultFile = 'undercover-result-v1-r1-a1.json';
+    const lateResult = { kind: 'undercover.game-result', version: 1, status: 'finished', gameSessionId: 'game', hostActorId: 'host', round: 1, attempt: 1, winner: 'civilian', reason: '卧底全部出局', summary: '终局已经发布，旧操作必须关闭。' };
+    const finaleRacePosts = [];
+    let resultReady = false;
+    globalThis.fetch = async (url, init = {}) => {
+      const path = new URL(url, 'http://local.test').pathname;
+      if (init.method === 'POST' && path.endsWith('/respond')) {
+        finaleRacePosts.push(JSON.parse(init.body));
+        return env({ data: { accepted: true }, enveloped: true });
+      }
+      if (path.endsWith('/graph')) return env({ data: { run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'speech-d', status: 'ready' }] }, enveloped: true });
+      if (path.endsWith('/pending-human-nodes')) return env({ data: [{ node_id: 'speech-d', attempt: 1, instruction: speechInstruction, upstream_artifacts: [] }], enveloped: true });
+      if (path.endsWith('/files')) {
+        const items = resultReady ? [{ file_id: 'late-result', session_id: 'session', file_name: lateResultFile, status: 'Ready', size: 600, owner: { actor_kind: 'Bot', actor_id: 'host' } }] : [];
+        return response({ code: 20000, data: { items, total: items.length } });
+      }
+      if (path.endsWith('/files/late-result/content')) return response({ code: 20000, data: lateResult });
+      throw new Error(`Unexpected ${path}`);
+    };
+    let finaleRace;
+    await act(async () => { finaleRace = mount({ ...base, resultFile: lateResultFile }); await settle(8); });
+    assert.ok(finaleRace.container.querySelector('form'), 'pending action is available before the finale is published');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(finaleRace.container.querySelector('textarea'), '终局前的草稿');
+      finaleRace.container.querySelector('textarea').dispatchEvent(new window.Event('input', { bubbles: true }));
+      await settle();
+    });
+    resultReady = true;
+    await act(async () => { button(finaleRace, '刷新').click(); await settle(8); });
+    assert.ok(finaleRace.container.querySelector('[data-region="ops-finale-summary"]'), 'late authenticated finale is visible');
+    const staleActionForm = finaleRace.container.querySelector('form');
+    if (staleActionForm) {
+      await act(async () => {
+        staleActionForm.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+        await settle(8);
+      });
+    }
+    assert.equal(finaleRacePosts.length, 0, 'a finale blocks submission from the earlier pending snapshot');
+    assert.equal(finaleRace.container.querySelector('form'), null, 'pending form is suppressed when the finale is available');
+    assert.equal(finaleRace.container.querySelector('[data-ops-panel="true"]').getAttribute('data-action-active'), 'false');
+    await act(async () => finaleRace.unmount());
+  }
+
   // 5) Finale: structured host verdict opens a result card, no raw private.
   const resultFile = 'undercover-result-v1-r1-a1.json';
   const result = { kind: 'undercover.game-result', version: 1, status: 'finished', gameSessionId: 'game', hostActorId: 'host', round: 1, attempt: 1, winner: 'civilian', reason: '卧底全部出局', summary: '平民胜利！公开词对：平民 苹果 · 卧底 梨。' };
