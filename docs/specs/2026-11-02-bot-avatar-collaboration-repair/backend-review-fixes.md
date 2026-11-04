@@ -36,11 +36,13 @@ No production retry, configuration, or CI threshold changes are intended.
 
 ## Validation follow-up
 
-Backend full gate now passes on the final working tree: **29,295 passed, 40
-skipped, 6 subtests passed**; line coverage **90.95%**, changed-line coverage
-**86.66%**. The review-time clustered `TestOverTheWire` setup errors were
+Backend full gate now passes on the final rebased tree: **29,591 passed, 40
+skipped, 6 subtests passed**; line coverage **90.99%**, changed-line coverage
+**87.26%**. The review-time clustered `TestOverTheWire` setup errors were
 resource contention with a concurrent Singlebox stack and pass both in isolation
-(12/12) and in the final serial full gate.
+(12/12) and in the final serial full gate. The post-rebase run also absorbed
+`origin/dev`'s new required `bot_type` facts and the split `bot_service`
+metadata-pair change, with all repair/HTTP/DI suites green.
 
 The credentialless live stories would never execute the repair core, so the
 coverage assembly adds an acceptance-only ephemeral BCS Provider, registers the
@@ -49,8 +51,11 @@ pre-exist, and keeps public defaults unchanged. Fresh focused run:
 `core=71.11% router=100% plugin=100%`; fresh all-module run:
 `singlebox coverage gate passed`, collaboration_repair again
 `core=71.11% router=100% plugin=100%`, BCS endpoint/CLI coverage 100%/100%.
-The artifact verifier passed on `pr3569-final-v3/reports`, and the runner's
-EXIT trap removed the temporary Provider credential.
+The artifact verifier passed on `pr3569-final-rebased-v2/reports`, and the
+runner's EXIT trap removed the temporary Provider credential. The first rebased
+Singlebox rerun exposed only a local ARCA port-range exhaustion; after clearing
+worktree sandbox listeners, the full module set passed again without modifying
+queue records or thresholds.
 
 The earlier BCS story failure came from pending delivery records in a reused
 runtime created the previous day. Preserve that evidence and use a new coverage

@@ -11,9 +11,9 @@
   200 部分报告、取消后的迟到数据库结果均有断言。读取自身抛出的未分类
   TimeoutError 保持传播，不误报请求截止时间耗尽。
 - Backend 全量门禁最终工作树实测：`BACKEND_CI_SKIP_INSTALL=1
-  BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`：**29,295 passed /
-  40 skipped / 6 subtests passed**，行覆盖率 **90.95%**，变更行覆盖
-  **86.66%（2580/2977，≥80）**。最终提交后 pre-push/远端 CI 会以提交内容为
+  BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`：**29,591 passed /
+  40 skipped / 6 subtests passed**，行覆盖率 **90.99%**，变更行覆盖
+  **87.26%（2720/3117，≥80）**。最终提交后 pre-push/远端 CI 会以提交内容为
   边界重跑同一门禁。
 - 原失败 CI 的两个测试有独立调度故障复现：逐实例解析延迟 0/50/100ms
   重现文件计数最大并发 1；LLM 额外延迟 600ms 重现 fencing 场景 reschedule。
@@ -23,6 +23,13 @@
   36% 门槛；BCS 旧目录残留前一天未结算队列，正确触发 queue_draining，
   导致两个后续端点未执行。保留该失败记录；后续使用新的运行目录和真实
   Provider 验收装配，不调整覆盖率阈值。
+- Rebase 到 `origin/dev f555d126` 后保留原拆分并吸收 dev 增量：metadata
+  pair resolution 入 `bot_service_parts/queries.py`，ownership/manager facts 全链
+  补齐必填 `bot_type`，HTTP allowlist 与 operation placement 计数同时包含
+  catalog/metadata 与 repair。首轮全量门禁暴露 42 个旧构造签名错误并已全部
+  修复；首轮单盒复跑到 harness 时本地 ARCA 18800-18899 端口耗尽（BaaS 明确
+  `No free port available`），清理 60 个本 worktree 残留沙箱进程后全新复跑转绿，
+  未把环境问题计入代码失败。
 
 - 日期：2026-11-03 至 2026-11-04（实测运行跨日）。
 - 分支：`feat/bot-avatar-backend`（未推送、无远端跟踪）。Task 9 开始时基线 =
@@ -55,10 +62,10 @@
 | 命令 | 退出码 | 关键数字 |
 | --- | --- | --- |
 | `pt tests/community/core/bot_management/services tests/community/core/bot_management/collaboration_repair tests/community/core/bot_collaborator/manager_sync tests/community/contracts/test_bcs_collaboration_metadata.py tests/community/contracts/test_bcs_ownership.py tests/community/contracts/test_bcs_managers.py tests/community/architecture -q`（`pt` 即 `(cd apps/backend && DEPLOY_PROFILE=test SERVER_ENV=dev uv run --frozen pytest ...)`，最终代码状态复跑两次） | 0 | **1780 passed / 0 failed**（61.40s） |
-| `BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`（最终复审修复树） | 0 | **backend CI gate passed**；**29,295 passed、40 skipped、6 subtests passed**；行覆盖率 **90.95%**（≥75）；变更行覆盖率 **86.66%（2580/2977，≥80）** |
+| `BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`（最终复审修复树） | 0 | **backend CI gate passed**；**29,591 passed、40 skipped、6 subtests passed**；行覆盖率 **90.99%**（≥75）；变更行覆盖率 **87.26%（2720/3117，≥80）** |
 | `bash singlebox/ci/singlebox_coverage.sh --module collaboration_repair --coverage-root singlebox/.dependencies/coverage/pr3569-focused-v3`（final focused） | 0 | **singlebox coverage gate passed**；acceptance **5 passed**；`collaboration_repair coverage: core=71.11% router=100.00% plugin=100.00%`；BCS E2E coverage gate passed、endpoint **173/173=100%**、bcs-cli **66/66=100%**；临时 Provider 凭据已清理 |
-| `bash singlebox/ci/singlebox_coverage.sh --coverage-root singlebox/.dependencies/coverage/pr3569-final-v3`（最终默认全部模块） | 0 | **`singlebox coverage gate passed`**；Backend acceptance **70 passed / 0 failed**（456.65s，含本模块 5 story）；**14 个模块**非回归全部达标（数字见 §3.3）；BCS E2E coverage gate passed、endpoint **173/173**、bcs-cli **66/66** |
-| `python singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/pr3569-final-v3/reports` | 0 | **`singlebox coverage artifacts verified`**；backend **49.73%**（≥38）、BaaS **45.94%**（≥45）、BCS runtime line/method/router/cli **54.12%/48.00%/100.00%/100.00%**、backend router 命中 **1093**/plugin 证据 **13**、BaaS router 命中 **296** |
+| `bash singlebox/ci/singlebox_coverage.sh --coverage-root singlebox/.dependencies/coverage/pr3569-final-rebased-v2`（rebase 后最终默认全部模块） | 0 | **`singlebox coverage gate passed`**；Backend acceptance **71 passed / 0 failed**（547.96s，含本模块 5 story）；**14 个模块**非回归全部达标（数字见 §3.3）；BCS E2E coverage gate passed、endpoint **173/173**、bcs-cli **66/66** |
+| `python singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/pr3569-final-rebased-v2/reports` | 0 | **`singlebox coverage artifacts verified`**；backend **49.72%**（≥38）、BaaS **45.95%**（≥45）、BCS runtime line/method/router/cli **54.18%/48.07%/100.00%/100.00%**、backend router 命中 **1257**/plugin 证据 **13**、BaaS router 命中 **297** |
 
 ### 1.1 首次全量回归发现并修复的既有缺陷
 
@@ -269,12 +276,12 @@ binding + 已建立 caller revision 作为 fixture 前置，才断言整单
 | files | 69.39%（≥63.52） |
 | harness | 50.75%（≥40.86） |
 
-既有模块阈值未改动、未弱化；BCS E2E 汇总：line **54.12%**（≥41）、method
-**48.00%**（≥36）、endpoint **173/173=100%**、bcs-cli **66/66=100%**。
-随后对 `pr3569-final-v3/reports` 执行 `verify_singlebox_coverage_artifacts.py`：
-**exit 0**，`singlebox coverage artifacts verified`（backend **49.73%** ≥38、
-BaaS **45.94%** ≥45、BCS router/cli 100%/100%、backend router 命中
-**1093**/plugin 证据 **13**、BaaS router 命中 **296**）。临时 Provider 凭据文件
+既有模块阈值未改动、未弱化；BCS E2E 汇总：line **54.18%**（≥41）、method
+**48.07%**（≥36）、endpoint **173/173=100%**、bcs-cli **66/66=100%**。
+随后对 `pr3569-final-rebased-v2/reports` 执行 `verify_singlebox_coverage_artifacts.py`：
+**exit 0**，`singlebox coverage artifacts verified`（backend **49.72%** ≥38、
+BaaS **45.95%** ≥45、BCS router/cli 100%/100%、backend router 命中
+**1257**/plugin 证据 **13**、BaaS router 命中 **297**）。临时 Provider 凭据文件
 已由 runner 清理，确认不存在后再结束。
 
 多模块共享栈下的相互干扰检查（AGENTS.md 要求）：默认全部模块的同一栈上，本模块
