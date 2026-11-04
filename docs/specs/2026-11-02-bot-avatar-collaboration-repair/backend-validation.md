@@ -23,13 +23,14 @@
   36% 门槛；BCS 旧目录残留前一天未结算队列，正确触发 queue_draining，
   导致两个后续端点未执行。保留该失败记录；后续使用新的运行目录和真实
   Provider 验收装配，不调整覆盖率阈值。
-- Rebase 到 `origin/dev f555d126` 后保留原拆分并吸收 dev 增量：metadata
+- Rebase 到最新 `origin/dev 4c5d568` 后保留原拆分并吸收 dev 增量：metadata
   pair resolution 入 `bot_service_parts/queries.py`，ownership/manager facts 全链
   补齐必填 `bot_type`，HTTP allowlist 与 operation placement 计数同时包含
-  catalog/metadata 与 repair。首轮全量门禁暴露 42 个旧构造签名错误并已全部
-  修复；首轮单盒复跑到 harness 时本地 ARCA 18800-18899 端口耗尽（BaaS 明确
-  `No free port available`），清理 60 个本 worktree 残留沙箱进程后全新复跑转绿，
-  未把环境问题计入代码失败。
+  catalog/metadata/non-user overview 与 repair；最新 dev 已缩到 862 行的
+  OpenAPI bots router 从 oversized allowlist 删除。首轮全量门禁暴露 42 个旧构造
+  签名错误并已全部修复；首轮单盒复跑到 harness 时本地 ARCA 18800-18899 端口耗尽
+  （BaaS 明确 `No free port available`），清理 60 个本 worktree 残留沙箱进程后
+  全新复跑转绿，未把环境问题计入代码失败。
 
 - 日期：2026-11-03 至 2026-11-04（实测运行跨日）。
 - 分支：`feat/bot-avatar-backend`（未推送、无远端跟踪）。Task 9 开始时基线 =
