@@ -19,11 +19,11 @@ export interface PublicBotTransport {
 }
 export interface BotProfileTransport {
   bot_id: string;
-  bot_uuid?: string;
+  bot_uuid?: string | null;
   bot_name: string;
-  owner_name: string;
-  description?: string;
-  engine_name?: string;
+  owner_name?: string | null;
+  description?: string | null;
+  engine_name?: string | null;
   capabilities?: Array<{ capability_id: string; display_name: string }>;
   [key: string]: unknown;
 }
@@ -284,11 +284,12 @@ export function mapBotTransport(value: PublicBotTransport): PublicBot {
 
 export function mapBotProfileTransport(value: BotProfileTransport): PublicBotProfile {
   return {
-    id: nonEmpty(value.bot_uuid, value.bot_id),
+    id: nonEmpty(value.bot_uuid ?? undefined, value.bot_id),
     name: value.bot_name,
-    ownerName: value.owner_name,
+    // 后端 BotOwner 展示名缺失（BCS-only）时序列化为 null/缺省，统一回退「未公开」。
+    ownerName: value.owner_name ?? '未公开',
     description: value.description ?? '',
-    engine: value.engine_name,
+    engine: value.engine_name ?? undefined,
     capabilities: Array.isArray(value.capabilities)
       ? value.capabilities
           .filter((item) => item?.capability_id && item?.display_name)

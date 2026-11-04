@@ -30,7 +30,8 @@ describe('SquareBotCard', () => {
     );
 
     const description = screen.getByText(longDescription, { selector: 'p' });
-    expect(description).toHaveClass('line-clamp-2', 'min-h-10', 'break-words');
+    // dmore：12px/18px 两行截断，行高 36px。
+    expect(description).toHaveClass('line-clamp-2', 'min-h-9', 'break-words', 'text-xs', 'leading-[18px]');
 
     await user.hover(description);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(longDescription);
@@ -85,9 +86,14 @@ describe('SquareBotCard', () => {
     expect(shareButton).toHaveClass('text-foreground');
     const primaryButton = screen.getByRole('button', { name: '申请好友权限' });
     expect(shareButton.parentElement).toBe(primaryButton.parentElement);
-    expect(shareButton.parentElement).toHaveClass('mt-auto', 'justify-end');
+    // dmore Frame 9：操作组贴卡片右上角，而非底部操作条。
+    expect(shareButton.parentElement).toHaveClass('ml-auto', 'justify-end');
     expect(shareButton.parentElement?.parentElement?.lastElementChild).toBe(shareButton.parentElement);
     expect(shareButton).not.toHaveClass('absolute', 'md:opacity-0');
+    expect(shareButton).toHaveClass('h-8', 'w-8', 'rounded-lg');
+    // 主操作默认无背景（不 hover 不出底），hover 才出灰底（ghost 原生 hover:bg-accent）。
+    expect(primaryButton).not.toHaveAttribute('style');
+    expect(primaryButton).toHaveClass('hover:bg-accent');
     await user.click(primaryButton);
     expect(onPrimaryAction).toHaveBeenCalledWith(bot);
     await user.click(screen.getByRole('button', { name: `分享 ${bot.name}` }));
@@ -109,7 +115,8 @@ describe('SquareBotCard', () => {
     expect(onPrimaryAction).toHaveBeenCalledTimes(1);
     rerender(<SquareBotCard {...props} bot={{ ...bot, relationshipStatus: 'applying' }} />);
     expect(screen.getByText('申请中')).toBeInTheDocument();
-    expect(screen.getByText('申请中').parentElement).toHaveClass('ml-auto', 'justify-end');
+    // dmore「申请中」chip：右上角 32px 高、6px 圆角、警示橙软底。
+    expect(screen.getByText('申请中')).toHaveClass('bg-warning/10', 'text-warning', 'rounded-md');
     expect(screen.queryByRole('button', { name: '申请好友权限' })).not.toBeInTheDocument();
     rerender(<SquareBotCard {...props} bot={bot} busy />);
     expect(screen.getByRole('button', { name: '申请好友权限' })).toBeDisabled();
