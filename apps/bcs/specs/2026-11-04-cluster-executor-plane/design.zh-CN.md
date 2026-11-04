@@ -307,12 +307,14 @@ SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_
 -- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
 -- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
--- RELEASE (no successor; next claimer bumps the token). Conditional on no pending
--- work, so it serializes with fallback writes on the lease-row lock (§9.4);
--- 0 rows → keep or TRANSFER instead.
-UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
+-- RELEASE (no successor; next claimer bumps the token). Every write that sets
+-- has_pending_work also increments pending_seq; the release (and any clear of the
+-- flag) is conditional on pending_seq still equalling :seen, the value the owner
+-- read when it confirmed it had processed everything. It serializes with fallback
+-- writes on the lease-row lock (§9.4); 0 rows → new input arrived: keep or TRANSFER.
+UPDATE bcs_task_leases SET node_id = '', expires_at = NOW(), has_pending_work = FALSE
  WHERE env = :env AND session_id = :s AND node_id = :me AND fencing_token = :mine
-   AND has_pending_work = FALSE
+   AND pending_seq = :seen
 
 -- TRANSFER (handoff to a chosen successor; only the live holder can do this)
 UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
@@ -451,7 +453,7 @@ PA 在重试时复用 `messageId`([跨项备注](cross-item-notes.zh-CN.md))。
 
 若所有者不可达,入口节点在 S 的租约行上执行一个事务:若租约可认领,它**自己认领 S**
 并服务(放置只是一种偏好);否则把该轮作为未处理的输入持久记录(不加围栏 —— 它是会话
-的输入,不是所有者的推进),在租约行上置 `has_pending_work = TRUE`,然后确认。由于该标记
+的输入,不是所有者的推进),在租约行上置 `has_pending_work = TRUE` 并递增 `pending_seq`,然后确认。由于该标记
 是在租约行锁下设置的,而释放要求它为假(§8.3),并发的空闲释放不会让这条输入落空。该轮会被所有者的待处理输入查询拾取;若所有者已死,则由每次花名册轮询都会重复的
 死亡节点查询拾取(§10.1)。
 此时首 token 时延等于接管时间;没有办法做得更好,因为在 S 的租约仍有效时,其他
@@ -768,8 +770,9 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 `bcs_task_leases` —— 约定列:`session_id`(键)、`node_id`、`fencing_token`
 (单调递增的 BIGINT)、`expires_at`。含义变化:`expires_at` 持有期间为 NULL,在
 释放/交接时设置(D5)。新增:`env`、`write_seq`(围栏步骤与交接时的增量检测)、
-`has_pending_work`(所有者有工作时由其设置,回退写入时也会设置;由所有者在围栏下清除;
-约束释放,见 §8.3 与 §9.4;与 `(env, node_id)` 一起建索引,供
+`has_pending_work` + `pending_seq`(无论所有者还是回退写入,每次置位都递增 `pending_seq`;
+清除既要过围栏,**也**要满足 `pending_seq = :seen`,因此绝不会抹掉尚未处理的输入;约束释放,
+见 §8.3 与 §9.4;与 `(env, node_id)` 一起建索引,供
 [§10.1](#101-触发-1--花名册检测到死亡随后一次定向查询) 使用)。
 
 为 MySQL、SQLite 和 OceanBase(带分区子句和表组)新增编号迁移;已提交的迁移

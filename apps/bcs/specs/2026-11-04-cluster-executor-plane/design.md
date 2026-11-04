@@ -342,12 +342,14 @@ SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_
 -- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
 -- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
--- RELEASE (no successor; next claimer bumps the token). Conditional on no pending
--- work, so it serializes with fallback writes on the lease-row lock (§9.4);
--- 0 rows → keep or TRANSFER instead.
-UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
+-- RELEASE (no successor; next claimer bumps the token). Every write that sets
+-- has_pending_work also increments pending_seq; the release (and any clear of the
+-- flag) is conditional on pending_seq still equalling :seen, the value the owner
+-- read when it confirmed it had processed everything. It serializes with fallback
+-- writes on the lease-row lock (§9.4); 0 rows → new input arrived: keep or TRANSFER.
+UPDATE bcs_task_leases SET node_id = '', expires_at = NOW(), has_pending_work = FALSE
  WHERE env = :env AND session_id = :s AND node_id = :me AND fencing_token = :mine
-   AND has_pending_work = FALSE
+   AND pending_seq = :seen
 
 -- TRANSFER (handoff to a chosen successor; only the live holder can do this)
 UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
@@ -506,7 +508,7 @@ If the owner is unreachable, the entry node runs one transaction on S's lease
 row: if the lease is claimable it **claims S itself** and serves (placement is
 only a preference); otherwise it records the round as unprocessed input
 (unfenced — input to the session, not owner progress), sets
-`has_pending_work = TRUE` on the lease row, and acks. Because the marker is set
+`has_pending_work = TRUE` and increments `pending_seq` on the lease row, and acks. Because the marker is set
 under the lease-row lock and release requires it to be false (§8.3), a
 concurrent idle release cannot strand the input. The round is picked up by the owner's pending-input
 query or, if the owner is dead, by the dead-node query, which repeats every
@@ -875,9 +877,11 @@ index on `(env, advertise_addr)` is needed.
 `bcs_task_leases` — pinned: `session_id` (key), `node_id`, `fencing_token`
 (monotonic BIGINT), `expires_at`. Changed meaning: `expires_at` is NULL while
 held and set on release/handoff (D5). Added: `env`, `write_seq` (fence step
-and handoff delta detection), `has_pending_work` (set by the owner while it
-has work and by fallback writes; cleared by the owner, fenced; guards
-release, §8.3 and §9.4; indexed with `(env, node_id)` for §10.1).
+and handoff delta detection), `has_pending_work` + `pending_seq` (every set
+of the flag, by the owner or a fallback write, increments `pending_seq`; a
+clear is fenced **and** conditional on `pending_seq = :seen`, so it can never
+erase input it has not processed; guards release, §8.3 and §9.4; indexed
+with `(env, node_id)` for §10.1).
 
 New numbered migrations for MySQL, SQLite and OceanBase (with partition
 clause and table group); committed migrations are never edited.
@@ -987,10 +991,8 @@ One PR at a time on one branch, each targeting `totalfrank`:
   systems" (OSDI 2006) — sessions, grace periods after master failover
 - D. Thaler, C. Ravishankar, "Using name-based mappings to increase hit
   rates" (1998) — rendezvous hashing
-- V. Mirrokni, M. Thorup, M. Zadimoghaddam, "Consistent Hashing with Bounded
-  Loads" (2017)
-- J. Saltzer, D. Reed, D. Clark, "End-to-end arguments in system design"
-  (1984)
+- V. Mirrokni, M. Thorup, M. Zadimoghaddam, "Consistent Hashing with Bounded Loads" (2017)
+- J. Saltzer, D. Reed, D. Clark, "End-to-end arguments in system design" (1984)
 - In repo: `apps/bcs/docs/bcs-provider-2.0-sse-protocol.md`,
   `apps/bcs/docs/message-delivery-service-api.md`,
   `apps/bcs/specs/2026-09-21-nested-fixed-loops/capacity.md`,
