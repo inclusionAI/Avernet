@@ -113,9 +113,13 @@ stale(D) = max(last_heartbeat_at over all rows) − last_heartbeat_at(D)
 对会话 S,每个存活节点得到一个分数:
 
 ```
-score(node) = xxh3(user_id ‖ session_id ‖ node.member_name)      -- fixed seed
+bucket(S)    = xxh3(user_id ‖ session_id) mod 4096               -- fixed seed, stored on the lease row
+score(node)  = xxh3(bucket(S) ‖ node.member_name)
 preferred(S) = the active node with the highest score
 ```
+
+对会话的**桶**(bucket)而不是会话本身做哈希,下面所有性质都保持不变(4096 个桶远多于
+节点数,均衡不受影响),同时让故障转移可以用一个带索引的列来切分死亡节点的会话(§8)。
 
 每个节点都能在微秒级算出同样的排名,无需协调。节点加入或离开时,只有胜者发生变化
 的会话会移动 —— 这是最小可能的比例(1/N)—— 离开节点的会话会均匀分散,各自去往
@@ -146,8 +150,8 @@ preferred(S) = the active node with the highest score
 ### 5.2 租约行
 
 `bcs_task_leases` 每个会话一行:`node_id`(所有者;释放后为 `''`)、`fencing_token`
-(只增不减)、`expires_at`(持有期间为 NULL)、`write_seq`,以及 `has_pending_work` +
-`pending_seq`(§5.4)。
+(只增不减)、`expires_at`(持有期间为 NULL)、`assigned_at`(`node_id` 最近一次变化的时间)、`bucket`(§4)、`write_seq`,以及
+`has_pending_work` + `pending_seq`(§5.4)。
 
 **租约可认领**的条件是:它已被释放,或其所有者的心跳陈旧(并满足上面的恢复宽限期),
 或已知其所有者的运行已死(同一地址重启)。没有逐租约续期:一次节点心跳就让该节点
@@ -276,13 +280,17 @@ TARGET NODE
 
 ![故障转移:节点 D 停止心跳;一旦 D 的租约可认领,每个幸存者在每次花名册轮询时查询 D 名下有待处理工作的会话,并认领 HRW 分给自己的那些;空闲会话由其下一轮请求按需认领。](assets/failover-discovery.svg)
 
-1. **花名册轮询发现死亡节点,随后一次定向查询。** 每次心跳时每个节点本来就会读花名册。
-   只要 D 是死的,每个幸存者就执行
-   `SELECT … FROM bcs_task_leases WHERE node_id = :D AND has_pending_work`
-   (有索引,通常为空),并认领在去掉 D 后把自己排在第一的那些会话;其他节点等待一个
-   短暂的宽限期,以防首选节点也宕了。所有人算出同样的排名,所以负载在无需协调的情况
-   下均匀分摊。由于查询每次轮询都会重复,之后才变为待处理的工作(一轮回退请求)也能
-   被找到。
+1. **花名册轮询发现死亡节点,随后进行有界、分片的查询。** 每次心跳时每个节点本来就会
+   读花名册。只要 D 是死的,每个幸存者就算出去掉 D 后把自己排在第一的那些桶,并只分页
+   读取这些桶:
+   `SELECT … FROM bcs_task_leases WHERE node_id = :D AND has_pending_work
+   AND bucket IN (:mine) LIMIT :batch`(索引为 `node_id, has_pending_work, bucket`)。
+   因此每个幸存者只读自己那一份,绝不读整个集合。每次轮询最多认领一批(默认 2,000),
+   只要还有积压就每 1 s 轮询一次,遇到存储错误就退避。有未处理输入的会话优先。首选节点
+   也宕掉的桶,会在短暂宽限期后由排名下一位的节点接手。由于查询每次轮询都会重复,之后
+   才变为待处理的工作(一轮回退请求)也能被找到。一个持有 30 万个待处理会话的节点,由
+   19 个幸存者分摊,不到 10 s 即可全部认领;认领本身很便宜,因为状态是在首次使用时才惰性
+   重新加载的。
 2. **按需认领。** 空闲会话根本不扫描:它的下一轮请求发现所有者已死,首选幸存者认领它
    —— 一次普通的冷启动。
 3. **兜底扫描**,每 30–60 s 一次,捞起遗漏的一切。
@@ -323,7 +331,10 @@ TARGET NODE
    - **即将开始新的一步** → 先交接,让这一步在后继节点上开始。
 3. **Bot socket 最后处理**(§9.4)。
 4. 继续中继已打开的 PA 流,并回复 `NOT_OWNER` 重定向。
-5. **截止时间**(25 s,在平台停止超时之内):把剩下的全部转移给各自的后继。
+5. **截止时间**(25 s,在平台停止超时之内):把剩下的全部转移给各自的后继。仍在一条
+   无法恢复的流上运行的步骤会被取消,并**由后继节点重新执行**。这是安全的,因为这类流
+   只承载只读或幂等的步骤:有副作用的步骤只会派发给拥有持久、可查询任务的智能体(第 3
+   项与第 6 项)。代价只是该步骤的时间,绝不影响正确性。
 6. 删除花名册行并退出。重启时:相同地址和 `member_name`,新的 `node_id` → 遗留租约
    立即可认领,节点拿回原来的放置。
 
@@ -341,7 +352,9 @@ TARGET NODE
 5. A 转发它暂存的一切;之后到达的请求得到 `NOT_OWNER(B)`。
 
 S 的空窗是一次数据库写加一次网络往返。中途任何一步失败,都有现成规则兜底:B 死了 →
-普通接管;COMMIT 丢了 → B 下一次认领的回读显示它拥有 S;A 在转移之后写入 → 被围栏挡掉。
+普通接管;COMMIT 丢了 → B 仍会发现 S,因为每个节点每次心跳都会读取新分配给它的租约
+(`WHERE node_id = :me AND assigned_at > :last`,有索引,通常为空);同一次读取也覆盖了
+没有 PREPARE 的转移(排空截止时间、看门狗);A 在转移之后写入 → 被围栏挡掉。
 
 ### 9.3 什么时候可以在运行中途移动它?
 
@@ -353,7 +366,7 @@ S 的空窗是一次数据库写加一次网络往返。中途任何一步失败
 | 等待一个已记录任务 id 的智能体任务 | ✓ —— 后继读取或重新订阅该任务 |
 | 等待一个拨入的 Bot | ✓ —— socket 所在节点把事件中继给 S 当前的所有者 |
 | 正在发送一次派发 | 先把发送做完(几毫秒) |
-| 等待一个无法恢复的流 | ✗ —— 等这一步结束;它的输出只存在于那条流上 |
+| 等待一个无法恢复的流 | ✗ —— 等这一步结束(它的输出只存在于那条流上);到截止时间则由后继节点重新执行(§9.1) |
 | 等待一个定时器 | ✓ —— 前提是定时器截止时间已持久化 |
 
 ### 9.4 Bot socket:第二份、独立的工作
@@ -406,6 +419,7 @@ S 的空窗是一次数据库写加一次网络往返。中途任何一步失败
 | 观察者恢复宽限期 | 15 s(= 认领阈值) |
 | 自我围栏余量 | 2 s |
 | 非首选节点的认领宽限期 | 3 s |
+| 故障发现:每次轮询的批量 / 仍有积压时的轮询间隔 | 2,000 行 / 1 s |
 | 兜底扫描 | 30–60 s |
 | 排空截止时间 | 25 s |
 | 活跃期空闲驱逐 | 10 分钟 |
@@ -419,8 +433,8 @@ S 的空窗是一次数据库写加一次网络往返。中途任何一步失败
 
 - `bcs_node_roster`:`node_id`、`member_name`、`state`、`started_at`、
   `last_heartbeat_at`、`advertise_addr`、`build_version`。
-- `bcs_task_leases`:`session_id`、`node_id`、`fencing_token`、`expires_at`、
-  `write_seq`、`has_pending_work`、`pending_seq`。
+- `bcs_task_leases`:`session_id`、`bucket`、`node_id`、`fencing_token`、`expires_at`、
+  `assigned_at`、`write_seq`、`has_pending_work`、`pending_seq`。
 
 **接口**(与协议无关,每个都有数据库实现、单节点实现和 no-op 实现):
 

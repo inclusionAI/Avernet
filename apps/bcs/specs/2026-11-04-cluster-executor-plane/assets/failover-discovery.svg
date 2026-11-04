@@ -28,12 +28,12 @@
 
   <!-- trigger 1 -->
   <rect x="24" y="160" width="440" height="200" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
-  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">Trigger 1 · roster detects death → targeted query, every poll</text>
-  <text x="44" y="208" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT session_id, fencing_token</text>
-  <text x="44" y="224" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">  FROM bcs_task_leases</text>
-  <text x="44" y="240" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE node_id = :D AND has_pending_work</text>
-  <text x="44" y="264" font-size="11.5" fill="#1c2420">for each S:  HRW(S, live − D) == me → claim now</text>
-  <text x="44" y="282" font-size="11.5" fill="#1c2420">                    otherwise → claim after the 3 s grace</text>
+  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">Trigger 1 · roster detects death → bounded, split query</text>
+  <text x="44" y="208" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT … FROM bcs_task_leases</text>
+  <text x="44" y="224" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE node_id = :D AND has_pending_work</text>
+  <text x="44" y="240" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">   AND bucket IN (:mine) LIMIT 2000</text>
+  <text x="44" y="264" font-size="11.5" fill="#1c2420">:mine = buckets ranking me first without D</text>
+  <text x="44" y="282" font-size="11.5" fill="#1c2420">1 batch per poll (1 s while backlog); 3 s grace</text>
   <text x="44" y="306" font-size="11" fill="#5c6a62">pending work = non-terminal run · queued delivery ·</text>
   <text x="44" y="322" font-size="11" fill="#5c6a62">durable timer · unprocessed inbound input</text>
   <text x="44" y="344" font-size="11" fill="#5c6a62">idle sessions are left alone</text>

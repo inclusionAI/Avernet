@@ -128,9 +128,14 @@ to be wrong).
 For session S, every live node gets a score:
 
 ```
-score(node) = xxh3(user_id ‖ session_id ‖ node.member_name)      -- fixed seed
+bucket(S)    = xxh3(user_id ‖ session_id) mod 4096               -- fixed seed, stored on the lease row
+score(node)  = xxh3(bucket(S) ‖ node.member_name)
 preferred(S) = the active node with the highest score
 ```
+
+Hashing the session's **bucket** rather than the session itself keeps every
+property below (4096 buckets ≫ nodes, so balance is unaffected) and lets
+failover split a dead node's sessions with an indexed column (§8).
 
 Every node computes the same ranking in microseconds with no coordination.
 When a node joins or leaves, only the sessions whose winner changed move —
@@ -167,7 +172,8 @@ every owner write carries its token, and the database refuses a stale one.
 
 `bcs_task_leases` has one row per session: `node_id` (owner, or `''` when
 released), `fencing_token` (only ever increases), `expires_at` (NULL while
-held), `write_seq`, and `has_pending_work` + `pending_seq` (§5.4).
+held), `assigned_at` (when `node_id` last changed), `bucket` (§4),
+`write_seq`, and `has_pending_work` + `pending_seq` (§5.4).
 
 **A lease is claimable** when it is released, or its owner's heartbeat is
 stale (with the recovery grace above), or its owner's run is known dead
@@ -318,14 +324,21 @@ dead node's sessions and split them without talking to each other.
 
 ![Failover: node D stops heart-beating; once D's leases are claimable, each survivor queries D's sessions with pending work at every roster poll and claims those HRW assigns to it; idle sessions are claimed on demand by their next round.](assets/failover-discovery.svg)
 
-1. **Roster poll finds a dead node, then a targeted query.** Every heartbeat
-   each node already reads the roster. While D is dead, each survivor runs
-   `SELECT … FROM bcs_task_leases WHERE node_id = :D AND has_pending_work`
-   (indexed, usually empty) and claims the sessions that rank it first
-   without D; others wait a short grace in case the first choice is also
-   down. Everyone computes the same ranking, so load spreads evenly with no
-   coordination. Because the query repeats every poll, work that becomes
-   pending later (a fallback round) is found too.
+1. **Roster poll finds a dead node, then bounded, split queries.** Every
+   heartbeat each node already reads the roster. While D is dead, each
+   survivor computes which buckets rank it first without D, and reads only
+   those, in bounded pages:
+   `SELECT … FROM bcs_task_leases WHERE node_id = :D AND has_pending_work
+   AND bucket IN (:mine) LIMIT :batch` (index on `node_id, has_pending_work,
+   bucket`). So each survivor reads only its own share, never the whole set.
+   Per poll it claims at most one batch (default 2,000), polls every 1 s
+   while a backlog remains, and backs off on storage errors. Sessions with
+   unprocessed input are taken first. Buckets whose first choice is also
+   down are picked up after a short grace by the next-ranked node. Because
+   the query repeats every poll, work that becomes pending later (a fallback
+   round) is found too. A node holding 300 k pending sessions spread over 19
+   survivors is claimed in under 10 s; claiming is cheap because state is
+   reloaded lazily on first use.
 2. **Claim on demand.** Idle sessions are not scanned at all: the next round
    for one finds the owner dead and the preferred survivor claims it — a
    normal cold start.
@@ -376,7 +389,11 @@ the move.** Draining never means refusing work.
 3. **Bot sockets last** (§9.4).
 4. Keep relaying open PA streams and answering `NOT_OWNER` redirects.
 5. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
-   is left to its successors.
+   is left to its successors. A step still running on a non-resumable stream
+   is cancelled and **re-run by the successor**. That is safe because such
+   streams only ever carry read-only or idempotent steps: side-effecting
+   steps are dispatched only to agents with durable, queryable tasks (items
+   3 and 6). The cost is the step's time, never correctness.
 6. Delete the roster row and exit. On restart: same address and
    `member_name`, new `node_id` → leftovers are claimable at once and the node
    gets its old placement back.
@@ -399,8 +416,10 @@ can mark a whole group draining at once, double moves disappear entirely.
 
 The gap for S is one database write plus one network round trip. If anything
 fails midway, existing rules cover it: B dies → ordinary takeover; the COMMIT
-is lost → B's next claim read-back shows it owns S; A writes after the
-transfer → fenced out.
+is lost → B finds S anyway, because every node reads, each heartbeat, the
+leases newly assigned to it (`WHERE node_id = :me AND assigned_at > :last`,
+indexed, usually empty); A writes after the transfer → fenced out. The same
+read covers transfers made without a PREPARE (drain deadline, watchdog).
 
 ### 9.3 When is it safe to move a run mid-flight?
 
@@ -413,7 +432,7 @@ in the database. The cases that need care:
 | Waiting on an agent task whose id is recorded | ✓ — the successor reads or re-subscribes to the task |
 | Waiting on a dial-in bot | ✓ — the socket's node relays events to whoever owns S now |
 | In the middle of sending a dispatch | Finish the send first (milliseconds) |
-| Waiting on a stream that can't be resumed | ✗ — wait for that step to end; its output exists only on that stream |
+| Waiting on a stream that can't be resumed | ✗ — wait for that step to end (its output exists only on that stream); at the deadline it is re-run by the successor (§9.1) |
 | Waiting on a timer | ✓ — provided timer deadlines are stored durably |
 
 ### 9.4 Bot sockets: a second, independent job
@@ -479,6 +498,7 @@ All configurable; defaults sized for a ≤ 30 s takeover.
 | Observer recovery grace | 15 s (= claim threshold) |
 | Self-fence margin | 2 s |
 | Claim grace for non-preferred nodes | 3 s |
+| Failure discovery: batch per poll / poll interval while backlog remains | 2,000 rows / 1 s |
 | Safety-net sweep | 30–60 s |
 | Drain deadline | 25 s |
 | Episode idle eviction | 10 min |
@@ -492,8 +512,8 @@ All configurable; defaults sized for a ≤ 30 s takeover.
 
 - `bcs_node_roster`: `node_id`, `member_name`, `state`, `started_at`,
   `last_heartbeat_at`, `advertise_addr`, `build_version`.
-- `bcs_task_leases`: `session_id`, `node_id`, `fencing_token`, `expires_at`,
-  `write_seq`, `has_pending_work`, `pending_seq`.
+- `bcs_task_leases`: `session_id`, `bucket`, `node_id`, `fencing_token`,
+  `expires_at`, `assigned_at`, `write_seq`, `has_pending_work`, `pending_seq`.
 
 **Interfaces** (protocol-neutral, each with a database implementation, a
 single-node implementation and a no-op one):
