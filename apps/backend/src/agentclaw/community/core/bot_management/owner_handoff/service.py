@@ -244,6 +244,12 @@ class OwnerHandoffService:
                 old = self._metadata(row)
                 old_id = old.get("credential_id")
                 if not old_id:
+                    snapshot = self._passport.query_handoff_passport(
+                        bot_id=row["bot_id"], owner_workno=row["old_owner_id"],
+                        entity_id=row["entity_id"],
+                    ) or {}
+                    old_id = snapshot.get("credential_id")
+                if not old_id:
                     raise HandoffError("CURRENT_PASSPORT_REQUIRED")
                 # The durable intent is committed BEFORE the remote call. A
                 # subsequent invocation only reconciles; it never reissues.

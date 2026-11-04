@@ -38,9 +38,10 @@ _ANON = AuthenticatedUser(id="anonymous", staffId="anonymous", operatorName="ano
 
 
 class DictOnlyResult:
-    def __init__(self, status=PublishStatus.SUCCESS, message="ok"):
+    def __init__(self, status=PublishStatus.SUCCESS, message="ok", *, success=True):
         self.status = status
         self.message = message
+        self.success = success
 
     def dict(self):
         return {"status": str(self.status), "message": self.message}
@@ -493,6 +494,18 @@ async def test_restart_status_success_and_errors():
     resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
     assert resp.success is True
     flow.sync_restart_progress.assert_called_once_with(publish_id=1)
+
+    from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+    progress = {"aicoding": {"restart": {"status": "FAILED", "message": "backup veto"}}}
+    flow.sync_restart_progress.return_value = PublishFlowResult(
+        publish_id=1, status="success", success=False, message="backup veto", ext=progress,
+    )
+    resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
+    assert resp.success is False
+    assert resp.data["status"] == "success"
+    assert resp.data["ext"] == progress
+    assert "success" not in resp.data  # Internal operation outcome is not a new wire field.
+    assert "restart" not in resp.data
 
     flow.sync_restart_progress.return_value = DictOnlyResult(status=PublishStatus.FAILED, message="failed")
     resp = await router_publish.restart_status(1, user=_USER, flow_service=flow)
