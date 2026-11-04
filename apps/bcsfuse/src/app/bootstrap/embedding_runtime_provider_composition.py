@@ -30,14 +30,18 @@ def _settings(
     model: str,
     dimension: int,
     request_dimensions: bool,
+    timeout_ms: int | None = None,
 ) -> EmbeddingSettings:
-    return EmbeddingSettings(
-        base_url=base_url,
-        auth_token=token,
-        model=model,
-        dimension=dimension,
-        request_dimensions=request_dimensions,
-    )
+    data = {
+        "base_url": base_url,
+        "auth_token": token,
+        "model": model,
+        "dimension": dimension,
+        "request_dimensions": request_dimensions,
+    }
+    if timeout_ms is not None:
+        data["timeout_ms"] = timeout_ms
+    return EmbeddingSettings(**data)
 
 
 def _capacity_key(model: str, token: str) -> str:
@@ -67,6 +71,10 @@ def register_embedding_runtime_providers(
         )
 
     token_pool = resolve_embedding_token_pool(config, os.environ)
+    online_timeout_ms = int(
+        _float(config, "search.execution.embedding_timeout_seconds", 1.50)
+        * 1000
+    )
     settings_pool = [
         _settings(
             base_url=embedding_base_url,
@@ -74,6 +82,18 @@ def register_embedding_runtime_providers(
             model=embedding_model,
             dimension=embedding_dimension,
             request_dimensions=embedding_request_dimensions,
+        )
+        for token in token_pool
+    ]
+
+    async_settings_pool = [
+        _settings(
+            base_url=embedding_base_url,
+            token=token,
+            model=embedding_model,
+            dimension=embedding_dimension,
+            request_dimensions=embedding_request_dimensions,
+            timeout_ms=online_timeout_ms,
         )
         for token in token_pool
     ]
@@ -182,7 +202,7 @@ def register_embedding_runtime_providers(
             capacity_key=_capacity_key(embedding_model, settings.auth_token),
             metric_key=_capacity_key(embedding_model, settings.auth_token),
         )
-        for settings in settings_pool
+        for settings in async_settings_pool
     ]
     batched_provider = AsyncBatchingEmbeddingProvider(
         AsyncEmbeddingTokenPoolProvider(

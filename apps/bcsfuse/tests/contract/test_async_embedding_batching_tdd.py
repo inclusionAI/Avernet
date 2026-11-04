@@ -376,3 +376,59 @@ def test_partial_tail_waits_for_the_configured_arrival_window() -> None:
         await tail
 
     asyncio.run(scenario())
+
+
+def test_runtime_composition_binds_async_http_deadline_to_search_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The online HTTP deadline must not silently outlive the search stage."""
+
+    from app.bootstrap.embedding_runtime_provider_composition import (
+        register_embedding_runtime_providers,
+    )
+    from app.bootstrap.provider_registry import ProviderRegistry
+    from app.infra.public.embedding.async_batching_embedding_provider import (
+        AsyncBatchingEmbeddingProvider,
+    )
+    from app.infra.public.embedding.async_embedding_token_pool_provider import (
+        AsyncEmbeddingTokenPoolProvider,
+    )
+    from search_core.providers.embedding import AsyncHttpEmbedding
+
+    class Config:
+        def get(self, key: str, default: Any = None) -> Any:
+            if key == "embedding.auth_token":
+                return "test-only"
+            return default
+
+        def get_int(self, key: str, default: int) -> int:
+            return default
+
+        def get_float(self, key: str, default: float) -> float:
+            if key == "search.execution.embedding_timeout_seconds":
+                return 1.25
+            return default
+
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://127.0.0.1:1/v1")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-only")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bounded-http-runtime")
+    monkeypatch.setenv("EMBEDDING_DIMENSION", "1024")
+    monkeypatch.setenv("EMBEDDING_TIMEOUT_MS", "30000")
+
+    registry = ProviderRegistry()
+    register_embedding_runtime_providers(
+        registry,
+        Config(),
+        embedding_base_url="http://127.0.0.1:1/v1",
+        embedding_model="bounded-http-runtime",
+        embedding_dimension=1024,
+        embedding_request_dimensions=False,
+    )
+    provider = registry.get("agent_online_embedding_provider")
+
+    assert isinstance(provider.backend, AsyncBatchingEmbeddingProvider)
+    token_pool = provider.backend.backend
+    assert isinstance(token_pool, AsyncEmbeddingTokenPoolProvider)
+    lane = token_pool.lanes[0]
+    assert isinstance(lane.backend, AsyncHttpEmbedding)
+    assert lane.backend._settings.timeout_ms == 1250

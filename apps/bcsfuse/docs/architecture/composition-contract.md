@@ -882,6 +882,12 @@ coalescing controls: `embedding.cache.query_batch_wait_seconds` (default 0.05),
 The cache key contains the exact model, dimension and a conservative normalized
 query: Unicode NFKC plus whitespace collapsing. Case folding and alias rewriting
 are not performed here. The backend receives the original text.
+The runtime composition also binds the native online `AsyncHttpEmbedding` timeout to
+`search.execution.embedding_timeout_seconds`, so the transport deadline expires
+inside the model provider and the embedding circuit observes a normal
+`TimeoutError`. `EMBEDDING_TIMEOUT_MS` remains the independently configured
+deadline for indexing and synchronous embedding work; it must not silently make
+an online query batch outlive its serving-stage budget.
 
 Concurrent identical queries share one in-flight backend call. Concurrent
 unique query misses are grouped into bounded batches before crossing the
