@@ -7,7 +7,7 @@ generation; handlers are stubs (a later pass wires them to services).
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -101,6 +101,18 @@ class Envelope[T](BaseModel):
     )
     request_id: str = Field(
         description="Trace id; mirrors the X-Trace-Id response header."
+    )
+
+
+class RestartStatus(BaseModel):
+    """An operation result, independent of the serving runtime's readiness."""
+    operation_id: str = Field(description="Identity of this restart attempt.")
+    status: Literal['RUNNING', 'SUCCEEDED', 'FAILED'] = Field(
+        description="RUNNING means in progress; SUCCEEDED or FAILED is terminal."
+    )
+    phase: str = Field(description="Current execution phase, or the phase that failed.")
+    message: str | None = Field(
+        default=None, description="Actionable restart failure guidance, when available."
     )
 
 

@@ -30,6 +30,23 @@ before querying any old workflow. Legacy/default strategies contribute nothing;
 the old JSON shape is retained when there is no restart view. No database schema
 or configuration change is required.
 
+The published OpenAPI surface uses `POST /openapi/v1/bots/{bot_id}/lifecycle/restart`
+with `stage=online` or `prestable` (and the existing `staging` alias). Its
+202 acknowledgement retains `data.operation_id` from the accepted restart.
+`GET /openapi/v1/bots/{bot_id}/lifecycle` exposes the same four-field restart
+view on the matching `data.items[].restart`, independently of that card's
+`status`/`internal_status`/`deployment`. A veto keeps a running card running;
+it is not a new publication failure. Different version cards never share the
+restart result. The GET is a read-only projection; the existing background
+restart poll persists provider terminal results, so GET adds no workflow I/O.
+
+The lifecycle facade calls the strategy dispatcher without interpreting coding
+metadata. Its public projection asks the coding policy for stable, actionable
+failure guidance; raw helper/provider diagnostics, credentials and physical
+container identifiers are not exposed. Legacy/non-coding cards omit `restart`,
+and acknowledgements without an operation ID omit that optional field rather
+than adding a null key. No existing required request field or HTTP status changes.
+
 Frontend restart polling must correlate operation_id. ACTIVE while a restart is
 RUNNING is not operation success, and restart FAILED must not disconnect the
 serving Bot. Do not clear a serving binding at admission. Only deployment/runtime

@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
+
+from agentclaw.community.adapters.http.openapi_v1.contracts import RestartStatus
 
 
 _STRICT = ConfigDict(extra="forbid")
@@ -91,6 +93,16 @@ class ServicePublication(BaseModel):
     ] = Field(description="Commands currently valid for the caller and state.")
     created_at: datetime = Field(description="Publication creation timestamp.")
     updated_at: datetime = Field(description="Last publication update timestamp.")
+    restart: RestartStatus | None = Field(
+        default=None, description="Latest restart result, independent of the publication state."
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if self.restart is None:
+            data.pop("restart", None)
+        return data
 
 
 class ServicePublicationList(BaseModel):
@@ -122,6 +134,16 @@ class ServicePublicationOperation(BaseModel):
     approval: ServiceApproval | None = Field(
         default=None, description="Approval state when the command requires it."
     )
+    operation_id: str | None = Field(
+        default=None, description="Restart attempt identity to correlate lifecycle queries."
+    )
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if self.operation_id is None:
+            data.pop("operation_id", None)
+        return data
 
 
 class ServiceBotConfig(BaseModel):

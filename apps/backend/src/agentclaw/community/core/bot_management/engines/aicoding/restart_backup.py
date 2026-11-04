@@ -582,11 +582,20 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
-    def get_restart_status(self, *, ext, published=False, progress=None, precondition_only=False):
+    def get_restart_status(self, *, ext, published=False, progress=None, precondition_only=False, public=False):
         from .restart_state import restart_status
         result = restart_status(ext, published=published, progress=progress)
         if precondition_only and (result is None or result['phase'] not in {'QUEUED', 'BACKING_UP'}):
             return None
+        if public and result is not None:
+            # Public callers get an actionable reason, never raw helper/provider output.
+            result['message'] = None
+            if result['status'] == 'FAILED':
+                result['message'] = (
+                    '快盘备份失败，本次重启已终止，旧容器未销毁；请查看 Bot 日志。'
+                    if result['phase'] == 'BACKING_UP'
+                    else '本次重启失败，请查看 Bot 日志。'
+                )
         return result
 
     def observe_published_restart(self, *, record, progress, mutate_ext):

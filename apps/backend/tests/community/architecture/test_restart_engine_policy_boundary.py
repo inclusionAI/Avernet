@@ -13,6 +13,7 @@ _SHARED_PATHS = (
     _FLOW + 'progress_sync_mixin.py',
     _FLOW + 'operation_runner.py',
     _FLOW + 'tasks.py',
+    'service_bot/services/service_publication_facade.py',
     'bot_management/engines/provisioning.py',
     'bot_management/engines/restart_contract.py',
 )

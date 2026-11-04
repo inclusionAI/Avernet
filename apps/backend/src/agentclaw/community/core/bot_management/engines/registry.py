@@ -606,7 +606,7 @@ def resolve_restart_status(bot: dict):
     return strategy.get_restart_status(ext=bot.get('ext') or {})
 
 
-def resolve_published_restart_status(record, *, progress=None, precondition_only=False):
+def resolve_published_restart_status(record, *, progress=None, precondition_only=False, public=False):
     """Read only captured engine metadata; legacy/default engines add no I/O."""
     ext = record.ext or {}
     engine = (ext.get('restart') or {}).get('engine')
@@ -615,7 +615,7 @@ def resolve_published_restart_status(record, *, progress=None, precondition_only
     _, strategy = resolve_restart_strategy({
         'bot_id': record.source_bot_id, 'owner_id': record.owner_id, 'active_engine': engine,
     })
-    return strategy.get_restart_status(ext=ext, published=True, progress=progress, precondition_only=precondition_only)
+    return strategy.get_restart_status(ext=ext, published=True, progress=progress, precondition_only=precondition_only, public=public)
 
 
 def observe_published_restart_status(record, *, progress, mutate_ext):

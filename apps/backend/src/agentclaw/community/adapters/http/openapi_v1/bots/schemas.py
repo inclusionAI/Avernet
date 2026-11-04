@@ -19,6 +19,7 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.contracts import RestartStatus as RestartStatus
 from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
@@ -76,14 +77,6 @@ _BOT_STATUS_DESC = (
 )
 
 
-class RestartStatus(BaseModel):
-    """An operation result, independent of the serving runtime's readiness."""
-    operation_id: str
-    status: Literal['RUNNING', 'SUCCEEDED', 'FAILED']
-    phase: str
-    message: str | None = None
-
-
 class Bot(BaseModel):
     """An agent (bot) record."""
 
@@ -99,7 +92,9 @@ class Bot(BaseModel):
             data.pop('restart', None)
         return data
 
-    restart: RestartStatus | None = None
+    restart: RestartStatus | None = Field(
+        default=None, description="Latest restart result, independent of runtime readiness."
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -477,7 +472,9 @@ class BotStatus(BaseModel):
             data.pop('restart', None)
         return data
 
-    restart: RestartStatus | None = None
+    restart: RestartStatus | None = Field(
+        default=None, description="Latest restart result, independent of runtime readiness."
+    )
     status: str = Field(description=_BOT_STATUS_DESC)
     is_ready: bool = Field(
         description="True once the bot can actually take work. Stricter than "

@@ -280,8 +280,8 @@ class EngineProvisioningStrategy(ABC):
         """
         yield {}
 
-    def get_restart_status(self, *, ext: dict, published: bool = False, progress=None, precondition_only=False):
-        """Optional operation-only status projection; default has no I/O or metadata."""
+    def get_restart_status(self, *, ext: dict, published: bool = False, progress=None, precondition_only=False, public=False):
+        """Optional projection; public views omit raw diagnostics. Default has no I/O."""
         return None
 
     def observe_published_restart(self, *, record, progress, mutate_ext):

@@ -7,7 +7,12 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class ServicePublicationFacadeProtocol(Protocol):
-    """Resolve, authorize and orchestrate service-Bot publication operations."""
+    """Resolve, authorize and orchestrate service-Bot publication operations.
+
+    Restart acknowledgements may carry an operation_id. Lifecycle cards may
+    carry a separate restart projection without changing their product status.
+    Missing engine-owned progress preserves the original response shape.
+    """
 
     def list_publications(
         self, bot_id: str, *, actor_id: str, owner_id: str
