@@ -20,7 +20,7 @@ export interface ConversationPresentation {
 
 const STANDARD_PRESENTATION: ConversationPresentation = {
   variant: 'standard',
-  composerPlaceholder: '可使用 /file 引用文件、/link 引用链接、/skill 调用能力',
+  composerPlaceholder: '可使用 /file 引用文件、/skill 调用能力',
   composerExtensions: true,
   taskComposer: true,
   modelSelector: true,
