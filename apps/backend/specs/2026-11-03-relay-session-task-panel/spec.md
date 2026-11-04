@@ -143,6 +143,9 @@ task 测试用),`@envelope_errors` 映射 404;命中 → `envelope(by_session_re
 复用现有会话深链:单 bot `/workspace/chat?section=...&bot=...&session=<sessionId>`;群
 `/workspace/collaboration?group=<gid>&session=<sessionId>&...`。**不加** `?openTaskPanel=1`;
 命中与否完全由后端 `by_session` 判定(只有 `session_id` 在 `task_node_run_info` 有行才返回命中,普通会话天然不命中 → 前端落回原逻辑)。
+单 bot 已会话与群会话共用同一 bootstrap hook。发任务的既有单 bot 会话在初始化根节点时把
+`execution_config.main_session_id` 写入 root `run_info.session_id`,后续第二棒节点也由 dispatch 写入自身执行
+session;两者都能命中 `by_session`。
 
 ### 测试
 
@@ -171,7 +174,10 @@ task 测试用),`@envelope_errors` 映射 404;命中 → `envelope(by_session_re
   `useTaskSidePanelStore.getState().activeTaskId === taskId`)。
 - "by_session 未命中 → 落回 listMyTasks 兜底(现有用例保持)"。
 - mock 模式照现有 `jest.mock('@/services/myTask', ...)` + `makePanelRef()` stub `openTab`;
-  `window.history.pushState` 设 URL(参考 `test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts`)。
+  `window.history.pushState` 设 URL。
+- `test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts` 固化单 bot 已会话集成路径:
+  打开既有 session 时使用 `by_session`,命中即 `openTab`,且不再调用 `listMyTasks`。
+- 本功能不提供前端 mock endpoint;开发代理直接透传到 Backend 的真实接口。
 
 ## 留给 builder 的
 
@@ -197,6 +203,7 @@ task 测试用),`@envelope_errors` 映射 404;命中 → `envelope(by_session_re
 - 后端:`cd apps/backend && DEPLOY_PROFILE=test uv run pytest tests/community/endpoints/test_openapi_task_endpoints.py
   tests/community/adapters/http/openapi_v1/test_explicit_user_id.py tests/community/adapters/http/openapi_v1/test_schema_docs.py
   tests/community/framework/test_coverage_gate.py -q`(全绿)。
-- 前端:`cd apps/frontend-nextgen && npm run check:open-core && npm run typecheck && npx jest test/hooks/useSessionTaskPanelBootstrap.test.tsx`。
+- 前端:`cd apps/frontend-nextgen && npm run check:open-core && npm run typecheck &&
+  npx jest test/hooks/useSessionTaskPanelBootstrap.test.tsx test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts`。
 - 手测(singlebox / pre env):打开第二棒会话深链 → 副屏自动弹 + 整图 TaskPanel;普通单 bot 会话 / 群会话 deep-link 打开
   行为不变(无 task 副屏或按 listMyTasks 如旧)。
