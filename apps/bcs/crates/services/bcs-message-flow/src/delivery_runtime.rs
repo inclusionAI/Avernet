@@ -608,7 +608,7 @@ impl DeliveryRuntime {
                             command.transport_context_json = Some(prepared.transport_context_json);
                             command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
                                 row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
-                            } else { now_ms().saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
+                            } else { command.now_ms.saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
                             let Some(started) = storage!(self.transition(command.clone())) else { continue; };
                             // §7.2.1 delegation-only lineage (review batch-3
                             // §3.1): an ORDINARY Started row carrying the
