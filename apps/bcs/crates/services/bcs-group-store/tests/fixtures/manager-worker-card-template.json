@@ -1,0 +1,39 @@
+{
+  "name": "数据库诊断协作群",
+  "description": "Manager–Worker 群：数据库诊断协作群",
+  "supportedInterfaces": [
+    {
+      "url": "local://groups/group-mw-001",
+      "protocolBinding": "LOCAL",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery composition",
+        "required": true,
+        "params": {
+          "groupKind": "manager_worker"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "group.execute",
+      "name": "数据库诊断协作群",
+      "description": "Manager–Worker 群：数据库诊断协作群",
+      "tags": [
+        "manager_worker"
+      ]
+    }
+  ]
+}

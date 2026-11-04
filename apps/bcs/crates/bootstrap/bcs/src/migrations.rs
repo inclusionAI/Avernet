@@ -157,6 +157,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 38, name: "task_handle_lookup" },
     SqliteMigration { version: 39, name: "bot_a2a" },
     SqliteMigration { version: 40, name: "bot_avatar" },
+    SqliteMigration { version: 41, name: "group_agent_cards" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -537,6 +538,13 @@ async fn apply_sqlite_migration_body(
             .await?;
             Ok(())
         }
+        41 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/041_group_agent_cards.sql"))
+                .into_iter()
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -672,3 +680,7 @@ mod eventing_migration_tests;
 #[cfg(test)]
 #[path = "migrations/a2a_tests.rs"]
 mod a2a_tests;
+
+#[cfg(test)]
+#[path = "migrations/group_card_tests.rs"]
+mod group_card_tests;
