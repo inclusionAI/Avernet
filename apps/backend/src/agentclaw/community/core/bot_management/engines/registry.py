@@ -600,6 +600,34 @@ def resolve_restart_strategy(bot):
     )
 
 
+def resolve_restart_status(bot: dict):
+    """Project optional restart progress through the registered engine policy."""
+    _, strategy = resolve_restart_strategy(bot)
+    return strategy.get_restart_status(ext=bot.get('ext') or {})
+
+
+def resolve_published_restart_status(record, *, progress=None, precondition_only=False):
+    """Read only captured engine metadata; legacy/default engines add no I/O."""
+    ext = record.ext or {}
+    engine = (ext.get('restart') or {}).get('engine')
+    if not engine:
+        return None
+    _, strategy = resolve_restart_strategy({
+        'bot_id': record.source_bot_id, 'owner_id': record.owner_id, 'active_engine': engine,
+    })
+    return strategy.get_restart_status(ext=ext, published=True, progress=progress, precondition_only=precondition_only)
+
+
+def observe_published_restart_status(record, *, progress, mutate_ext):
+    """Dispatch operation observation without sharing engine state-machine policy."""
+    engine = ((record.ext or {}).get('restart') or {}).get('engine')
+    if engine:
+        _, strategy = resolve_restart_strategy({
+            'bot_id': record.source_bot_id, 'owner_id': record.owner_id, 'active_engine': engine,
+        })
+        strategy.observe_published_restart(record=record, progress=progress, mutate_ext=mutate_ext)
+
+
 async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any,
                                   operation_id: str | None = None,
                                   restart_key: str | None = None) -> None:
@@ -618,6 +646,9 @@ async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime:
 
 __all__ = [
     "prepare_instance_restart",
+    "resolve_restart_status",
+    "resolve_published_restart_status",
+    "observe_published_restart_status",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",

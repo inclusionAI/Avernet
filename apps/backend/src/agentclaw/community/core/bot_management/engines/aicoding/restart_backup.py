@@ -582,22 +582,55 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
+    def get_restart_status(self, *, ext, published=False, progress=None, precondition_only=False):
+        from .restart_state import restart_status
+        result = restart_status(ext, published=published, progress=progress)
+        if precondition_only and (result is None or result['phase'] not in {'QUEUED', 'BACKING_UP'}):
+            return None
+        return result
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        result = self.get_restart_status(ext=record.ext or {}, published=True, progress=progress)
+        if result is None or result['status'] not in {'SUCCEEDED', 'FAILED'}:
+            return
+        def complete(ext):
+            state = ext.get('restart') or {}
+            if (state.get('operation_id') == result['operation_id']
+                    and state.get('phase') == 'WAITING_READY'):
+                state.update(status=result['status'], message=result['message'])
+        mutate_ext(publish_id=record.id, mutator=complete)
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage, operation_id):
+        def accept(ext):
+            restart = ext.setdefault('restart', {})
+            restart.update(engine=ctx.active_engine, operation_id=operation_id,
+                           stage=stage, status='RUNNING', phase='QUEUED', message=None)
+            restart.pop('precondition_error', None)
+            restart.pop('restarting', None)
+            restart.pop('guard', None)
+        services.mutate_ext(publish_id=publish_id, mutator=accept)
+
     @contextmanager
     def published_restart_scope(
         self, ctx, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
     ) -> Iterator[dict]:
         if str(ctx.active_engine or "").strip().lower() not in ENGINES:
             yield {}
             return
 
-        from agentclaw.community.core.service_bot.repository.models import PublishStatus
-
         record = services.get_record(publish_id)
         if record is None:
             raise RuntimeError(f"Publish record not found: {publish_id}")
         blocked = ((record.ext or {}).get("restart") or {}).get("precondition_error") or {}
-        if record.status == PublishStatus.FAILED.value and blocked.get("stage") == stage:
+        previous = (record.ext or {}).get('restart') or {}
+        if (operation_id and previous.get('operation_id') != operation_id
+                and previous.get('phase') == 'QUEUED'):
+            yield {'success': False, 'message': '本次重启已被更新的请求替代'}
+            return
+        if (blocked.get('stage') == stage and (
+                operation_id is None or previous.get('operation_id') == operation_id)):
             # A queue redelivery must not forget a terminal backup veto.
             yield {"success": False, "message": blocked["message"]}
             return
@@ -609,12 +642,20 @@ class AicodingRestartBackupMixin:
             state["guard"] = {
                 "id": guard_id, "binding_id": binding_id, "status": source_status,
             }
+            state.update(engine=ctx.active_engine, operation_id=operation_id or guard_id,
+                         stage=stage, status='RUNNING', phase='BACKING_UP', message=None)
+            state.pop('failure_phase', None)
             state.pop("precondition_error", None)
 
         services.mutate_ext(publish_id=publish_id, mutator=claim)
         outcome = {}
         try:
             yield outcome
+            def submitted(ext):
+                state = ext.get('restart') or {}
+                if (state.get('guard') or {}).get('id') == guard_id:
+                    state['phase'] = 'WAITING_READY'
+            services.mutate_ext(publish_id=publish_id, mutator=submitted)
         except RestartBackupBlocked as error:
             log_restart_failure(error, bot_id=ctx.bot_id, phase="published_restart", owner_id=ctx.owner_id,
                                 publish_id=publish_id, binding_id=binding_id)
@@ -646,12 +687,11 @@ class AicodingRestartBackupMixin:
         restart.pop("restarting", None)
         restart.pop("guard", None)
         restart["precondition_error"] = {"stage": stage, "message": message}
+        restart.update(status='FAILED', phase='BACKING_UP', message=message)
         ext.pop("retry", None)
-        ext["error_message"] = message
-        ext["source_status"] = record.status
         # Persistence/CAS errors propagate: never claim the failure was saved.
         services.update_status(
-            publish_id=publish_id, target_status=PublishStatus.FAILED,
+            publish_id=publish_id, target_status=PublishStatus(record.status),
             source_status=PublishStatus(record.status), ext=ext,
             expected_ext=expected_ext,
         )

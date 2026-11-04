@@ -1,7 +1,7 @@
 """Coding-only restart journal, CAS transitions and per-invocation backup fence.
 
-The journal is stored in Bot.ext; terminal failures also use the existing
-Bot status and start_status/start_message fields consumed by status polling. A ContextVar
+The journal is stored in Bot.ext. Pre-mutation failures never change runtime
+status/startup markers; post-mutation failures keep the existing lifecycle fields. A ContextVar
 carries the durable operation through the *synchronous* legacy restart callback;
 it never changes that callback's public signature or affects instance restarts.
 """
@@ -45,6 +45,27 @@ def journal(bot: dict) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def restart_status(ext: dict, *, published=False, progress=None):
+    record = ext.get('restart' if published else KEY)
+    if not isinstance(record, dict) or not isinstance(record.get('operation_id'), str):
+        return None
+    phase = record.get('phase')
+    status = record.get('status') if published else (
+        phase if phase in TERMINAL else 'RUNNING' if phase in IN_PROGRESS else None
+    )
+    if status not in {'RUNNING', 'FAILED', 'SUCCEEDED'}:
+        return None
+    if published and status == 'RUNNING' and phase == 'WAITING_READY' and progress:
+        status = {'SUCCESS': 'SUCCEEDED', 'FAILED': 'FAILED'}.get(progress.get('status'), 'RUNNING')
+    return {
+        'operation_id': record['operation_id'], 'status': status,
+        'phase': record.get('failure_phase', phase),
+        'message': record.get('error_message') or record.get('message') or (
+            '容器重启失败，请检查部署日志' if status == 'FAILED' else None
+        ),
+    }
+
+
 class RestartSuperseded(RuntimeError):
     """This delivery no longer owns the journal; it must not issue side effects."""
 
@@ -77,10 +98,18 @@ class RestartState:
                 # Monotone across concurrent deliveries and CAS retries.
                 ext[KEY]['fastdisk_targets'] = sorted(set(old.get('fastdisk_targets', []))
                                                     | set(changes['fastdisk_targets']))
+            if changes.get('phase') == 'RESTARTING':
+                # Startup markers belong to the replacement only after mutation
+                # is authorized; backup-only failures preserve the old markers.
+                ext.pop('start_status', None)
+                ext.pop('start_message', None)
             failed = changes.get("phase") == "FAILED"
-            # Reuse the existing public startup-error contract. The journal's
-            # copy remains an operation-scoped audit/recovery record, not a new
-            # status response field. Never mark a replacement instance failed.
+            if failed:
+                ext[KEY]['failure_phase'] = old.get('phase')
+                ext[KEY]['runtime_preserved'] = old.get('phase') in {'QUEUED', 'BACKING_UP'}
+            # Only post-submission failures use the runtime startup-error
+            # contract. The journal independently exposes operation progress.
+            # Never mark a concurrently replaced instance failed.
             target_binding = old.get("handoff", {}).get(
                 "binding_id", old.get("binding_id")
             )
@@ -91,7 +120,7 @@ class RestartState:
                 and bot.get("active_engine") == old.get("engine", bot.get("active_engine"))
                 and bot.get("binding_id") == target_binding
             )
-            if failed and owns_target:
+            if failed and owns_target and not ext[KEY]['runtime_preserved']:
                 ext["start_status"] = "FAILED"
                 ext["start_message"] = changes["error_message"]
             updated = self.repository.compare_and_set_ext(
@@ -109,8 +138,8 @@ class RestartState:
 
         Queue dedup is the admission authority. The monotonic task row ID prevents
         a delayed submitter overwriting a subsequent operation or its outcome.
-        Admission writes PENDING before enqueue; ensure only repairs the journal
-        and terminal FAILED status, never initializes PENDING.
+        Admission preserves the serving state; ensure repairs only the journal
+        and post-mutation failure status.
         """
         for _ in range(12):
             bot = self.read()
@@ -138,10 +167,6 @@ class RestartState:
             }
             ext = deepcopy(bot.get("ext") or {})
             ext[KEY] = record
-            if matches:
-                # A previous startup/restart error must not stop the new poll.
-                ext.pop("start_status", None)
-                ext.pop("start_message", None)
             result = self.repository.compare_and_set_ext(
                 bot_id=self.bot_id,
                 owner_id=self.owner_id,
@@ -162,7 +187,7 @@ class RestartState:
         """
         record = journal(bot)
         phase = record.get("phase")
-        if phase != "FAILED":
+        if phase != "FAILED" or record.get("runtime_preserved") is True:
             return bot
         target = record.get("failed_binding_id", record.get("binding_id"))
         current = self.read()
@@ -246,6 +271,12 @@ class RestartExecution:
             raise RuntimeError("重启目标已变化，禁止替换")
         self.state.update({"BACKING_UP"}, phase="RESTARTING")
         self.fenced = True
+        # The old runtime is retained through backup. Only the mutation owner
+        # enters the existing deployment state, immediately before provider I/O.
+        if self.state.repository.update_by_owner(
+            self.state.bot_id, self.state.owner_id, {'status': 'PENDING'}
+        ) is None:
+            raise RestartSuperseded('Bot disappeared before restart submission')
 
 
 current_restart: ContextVar[RestartExecution | None] = ContextVar(

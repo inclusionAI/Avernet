@@ -10,6 +10,7 @@ _CORE = Path(__file__).resolve().parents[3] / 'src/agentclaw/community/core'
 _FLOW = 'service_bot/services/publish_flow/'
 _SHARED_PATHS = (
     _FLOW + 'restart_mixin.py',
+    _FLOW + 'progress_sync_mixin.py',
     _FLOW + 'operation_runner.py',
     _FLOW + 'tasks.py',
     'bot_management/engines/provisioning.py',

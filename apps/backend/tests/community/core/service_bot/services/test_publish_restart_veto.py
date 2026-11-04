@@ -63,9 +63,10 @@ async def test_real_fastdisk_veto_persists_failure_and_finishes_task(published, 
     queue = Mock()
     handler = PublishRestartHandler(flow=svc, task_queue_service=queue)
     assert isinstance(await handler._run(1, 'online', 'operator'), Fail)
-    assert record.status == PublishStatus.FAILED.value
-    assert '快盘' in record.ext['error_message']
-    assert record.ext['source_status'] == PublishStatus.SUCCESS.value
+    assert record.status == PublishStatus.SUCCESS.value
+    assert '快盘' in record.ext['restart']['message']
+    assert 'error_message' not in record.ext
+    assert 'source_status' not in record.ext
     assert 'restarting' not in record.ext['restart']
     assert record.ext['binding'] == {'online': 42}
     assert record.ext['unrelated'] == {'keep': True}

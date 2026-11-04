@@ -1,6 +1,7 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
+import uuid
 from functools import partial
 
 from agentclaw.community.core.bot_management.engines.registry import (
@@ -133,7 +134,10 @@ class RestartMixin:
 
         # Resolve + validate the restart target (record → stage → binding → bot →
         # artifact). On any failure ``error`` is the response dict to return.
-        error, stage, bot_uuid = self._resolve_restart_request(publish_id)
+        restart_operation_id = uuid.uuid4().hex
+        error, stage, bot_uuid = self._resolve_restart_request(
+            publish_id, operation_id=restart_operation_id,
+        )
         if error is not None:
             return error
 
@@ -149,7 +153,7 @@ class RestartMixin:
             publish_id=publish_id,
             stage=stage.value,
             operator=operator,
-            in_place=in_place,
+            in_place=in_place, operation_id=restart_operation_id,
         )
 
         logger.info(
@@ -163,10 +167,11 @@ class RestartMixin:
             "message": f"Restart task submitted, stage: {stage.value}",
             "stage": stage.value,
             "bot_uuid": bot_uuid,
+            "operation_id": restart_operation_id,
         }
 
-    def _resolve_restart_request(self, publish_id: int):
-        """Validate + resolve a restart request from ``publish_id``.
+    def _resolve_restart_request(self, publish_id: int, *, operation_id=None):
+        """Validate/resolve a restart and optionally admit its engine-owned operation.
 
         Returns ``(error, stage, bot_uuid)``: on failure ``error`` is the response
         dict (``success=False`` + message) and stage/bot_uuid are None; on success
@@ -259,6 +264,14 @@ class RestartMixin:
                 "message": f"Publish record is missing build artifact: publish_id={publish_id}",
             }, None, None
 
+        if operation_id is not None:
+            ctx, strategy = resolve_restart_strategy(bot)
+            strategy.accept_published_restart(
+                ctx, services=PublishedRestartServices(
+                    get_record=self._publish_service.get_publish_by_id,
+                    mutate_ext=self._mutate_and_update_ext, update_status=self._update_publish_status,
+                ), publish_id=publish_id, stage=stage.value, operation_id=operation_id,
+            )
         return None, stage, bot_uuid
 
     async def execute_restart(
@@ -267,6 +280,7 @@ class RestartMixin:
         stage: str,
         operator: str,
         in_place: bool = False,
+        operation_id: str | None = None,
     ) -> dict:
         """Durable Bot restart work (#197): re-deploy the existing bot via the
         upgrade interface, through the operation runner so a crash-resume adopts
@@ -321,7 +335,7 @@ class RestartMixin:
                 update_status=self._update_publish_status,
             ),
             publish_id=publish_id, stage=stage, binding_id=binding_id,
-            source_status=publish_record.status,
+            source_status=publish_record.status, operation_id=operation_id,
         ) as policy_result:
             if policy_result:
                 return policy_result
@@ -397,6 +411,7 @@ class RestartMixin:
                             device_id=bot_uuid,
                             target_runtime=self._baas_service,
                             restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                            **({'operation_id': operation_id} if operation_id else {}),
                         )
                         destroy_publish_id = self._build_service.retire_superseded_bot(
                             bot_uuid, operator=operator
@@ -439,6 +454,7 @@ class RestartMixin:
                 await prepare_instance_restart(
                     bot=bot, device_id=bot_uuid, target_runtime=self._baas_service,
                     restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                    **({'operation_id': operation_id} if operation_id else {}),
                 )
                 return await self._build_service.upgrade_async(
                     bot_uuid=bot_uuid,
@@ -500,6 +516,7 @@ class RestartMixin:
                         device_id=bot_uuid,
                         target_runtime=self._baas_service,
                         restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                        **({'operation_id': operation_id} if operation_id else {}),
                     )
                     destroy_publish_id = self._build_service.retire_superseded_bot(
                         bot_uuid, operator=operator

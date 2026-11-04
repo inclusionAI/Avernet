@@ -803,10 +803,12 @@ async def get_bot_status(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""
+    from agentclaw.community.core.bot_management.engines.registry import resolve_restart_status
     bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
     return envelope(
         BotStatus(
+            restart=resolve_restart_status(bot),
             status=bot.get("status") or "",
             # Shared policy: an application bot is not ready until its repo
             # checkout reports SUCCEEDED, so ACTIVE alone is not enough.

@@ -269,6 +269,7 @@ class EngineProvisioningStrategy(ABC):
     def published_restart_scope(
         self, ctx: BotProvisioningContext, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
     ) -> Iterator[dict]:
         """Keep shared orchestration in place; engines own entry/exit policy.
 
@@ -278,6 +279,16 @@ class EngineProvisioningStrategy(ABC):
         The default performs no I/O and never suppresses exceptions.
         """
         yield {}
+
+    def get_restart_status(self, *, ext: dict, published: bool = False, progress=None, precondition_only=False):
+        """Optional operation-only status projection; default has no I/O or metadata."""
+        return None
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        """Persist engine-owned operation progress; default has no I/O."""
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage, operation_id):
+        """Record engine-owned admission before enqueue; default is a no-op."""
 
     async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
         """Keep the runner's exact operation identity and crash/adoption contract."""

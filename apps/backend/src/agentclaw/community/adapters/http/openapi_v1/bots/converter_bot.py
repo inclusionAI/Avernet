@@ -78,6 +78,7 @@ def _to_bot(
     return Bot(
         entity_id=d.get("entity_id") or "",
         bcn_bot_id=bcn_bot_reference(d),
+        restart=d.get("restart"),
         avatar_url=bot_avatar_url(d),
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",

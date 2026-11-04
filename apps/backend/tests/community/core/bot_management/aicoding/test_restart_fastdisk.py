@@ -217,10 +217,10 @@ async def test_durable_failure_uses_existing_ui_fields_without_destroying_old_ta
     s.service.start_bot.assert_not_called()
     assert not s.queue.provider_tasks
     assert s.repo.bot['binding_id'] == 7
-    assert s.repo.bot['status'] == 'FAILED'
-    assert s.repo.bot['ext']['start_status'] == 'FAILED'
-    assert '快盘' in s.repo.bot['ext']['start_message']
-    assert '未执行销毁或替换' in s.repo.bot['ext']['start_message']
+    assert s.repo.bot['status'] == 'ACTIVE'
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert '快盘' in journal(s.repo.bot)['error_message']
+    assert '未执行销毁或替换' in journal(s.repo.bot)['error_message']
     assert journal(s.repo.bot)['phase'] == 'FAILED'
     assert s.repo.bot['ext']['unrelated'] == {'keep': True}
     failures = [r.getMessage() for r in caplog.records if '[AICODING_RESTART_FAILED]' in r.getMessage()]
@@ -361,8 +361,8 @@ async def test_real_baas_final_receipt_gates_update_submission(lifecycle, final_
     if final_failure:
         assert isinstance(outcome, Fail)
         assert not updates
-        assert '快盘备份失败' in s.repo.bot['ext']['start_message']
-        assert '提交前准备失败' not in s.repo.bot['ext']['start_message']
+        assert '快盘备份失败' in s.repo.bot['ext']['coding_restart']['error_message']
+        assert '提交前准备失败' not in s.repo.bot['ext']['coding_restart']['error_message']
         assert s.repo.bot['binding_id'] == 7
     else:
         assert isinstance(outcome, Reschedule)
