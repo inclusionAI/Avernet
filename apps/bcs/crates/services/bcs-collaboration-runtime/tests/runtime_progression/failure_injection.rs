@@ -21,9 +21,10 @@
 //! `DeliveryChannel` is the notification double. It freezes one real recipient
 //! in `prepare_state_machine_terminal` and records every
 //! `deliver_terminal_notification` the runtime actually performs. The shared
-//! `RecordingSessionChannelOutbound::terminal_events` recorder only observes
-//! `finish_state_machine_terminal`, which is the post-completion cleanup
-//! callback, so it cannot prove that a manager notification was sent.
+//! `RecordingSessionChannelOutbound::terminal_events` recorder observes the
+//! post-completion cleanup callback (`finish_state_machine_terminal`) and the
+//! legacy publish shim, so it cannot prove that a manager notification was
+//! sent through the frozen-recipient delivery path.
 
 use super::*;
 use std::sync::atomic::Ordering;
