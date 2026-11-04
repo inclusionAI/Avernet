@@ -1,0 +1,27 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained.py
+  s_cecdc98e721f4b::t_b10f7e9f51caa5 148
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_file_remote.py
+  s_cecdc98e721f4b::t_f0aaa06ef0bf67 19-20,37,40,49-52,120-121,144,149
+apps/bcs/scripts/e2e-runner/bcs_e2e/retained_remote.py
+  s_cecdc98e721f4b::t_d310a1d8dca87d 37-66,73-74,79-80,91-94,143-146,148-152,159,164
+apps/bcs/scripts/e2e-runner/tests/test_retained_file_remote.py
+  s_cecdc98e721f4b::t_0c7cb564129035 397-460
+apps/bcs/scripts/e2e-runner/tests/test_retained_remote.py
+  s_cecdc98e721f4b::t_f2b5b409176b7c 51-54,388-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a40161950a178a4596114dcb582b8452e4cff62c",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
