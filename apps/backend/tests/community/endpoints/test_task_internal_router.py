@@ -659,7 +659,7 @@ def scheduled_trigger_error():
     pass
 
 
-# ── 任务认领 grant/revoke + claim_on JOIN 灰度开关(internal /api/v1 face)─────────
+# ── 任务认领 grant/revoke(internal /api/v1 face)─────────
 _GRANT_BODY = {"bcs_bot_id": "bot-endpoint-1:ent"}
 
 
