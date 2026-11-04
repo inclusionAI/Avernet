@@ -17,12 +17,16 @@ from urllib.parse import unquote, urlsplit, urlencode, quote
 
 from provider_scope_story import Story
 from a2a_workbench import abort_task
+from a2a_management_cases import exercise as exercise_management
+from a2a_rpc_peer import dispatch as dispatch_rpc, envelope as rpc_envelope
 
 TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
 
 
 class Peer:
-    def __init__(self):
+    def __init__(self, binding="HTTP+JSON"):
+        self.binding = binding
+        self.rpc_methods = set()
         self.bearer = ""
         self.requests = []
         self.tasks = {}
@@ -44,7 +48,7 @@ class Peer:
                 pass  # HTTP credentials and protocol messages are never logged.
 
             def json_response(self, status, body):
-                encoded = json.dumps(body, ensure_ascii=False).encode()
+                encoded = json.dumps(rpc_envelope(self, body), ensure_ascii=False).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
@@ -78,6 +82,8 @@ class Peer:
                     self.json_response(404, {})
 
             def do_POST(self):
+                if dispatch_rpc(self, peer):
+                    return
                 path = urlsplit(self.path).path
                 if path.startswith("/a2a/tasks/") and path.endswith(":cancel"):
                     if not self.authenticated():
@@ -199,7 +205,7 @@ class Peer:
                         "artifact": {"artifactId": "answer", "parts": [{"text": "unsupported replacement"}]},
                         "append": False}}]
                 # recover mode closes after the initial Task; GetTask supplies the final snapshot.
-                frames = [("data:" + json.dumps(event, ensure_ascii=False) + "\n\n").encode()
+                frames = [("data:" + json.dumps(rpc_envelope(self, event), ensure_ascii=False) + "\n\n").encode()
                           for event in events]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -226,7 +232,7 @@ class Peer:
         self.base = "http://127.0.0.1:" + str(self.server.server_port)
         self.card = {
                      "name": "A2A public E2E", "description": "Initial description", "version": "1",
-                     "supportedInterfaces": [{"url": self.base + "/a2a", "protocolBinding": "HTTP+JSON",
+                     "supportedInterfaces": [{"url": self.base + "/a2a", "protocolBinding": self.binding,
                                               "protocolVersion": "1.0"}],
                      "capabilities": {"streaming": True, "extensions": [{"uri": TOOLS, "required": False}]}, "defaultInputModes": ["text/plain"],
                      "defaultOutputModes": ["text/plain"], "skills": [{"id": "e2e", "name": "Query",
@@ -421,6 +427,7 @@ class A2aStory(Story):
         self.request("PUT", control, {"agent_card": poll_card}, token=admin)
         self.poll_rounds(group, bot_id)
         self.named_rounds(provider, provider_name, poll_card)
+        exercise_management(self, provider, poll_card)
         print(f"A2A story: {self.checks} live boundary assertions, thirteen stream and five polling deliveries passed")
 
     def named_rounds(self, provider, provider_name, card):
@@ -579,13 +586,16 @@ if __name__ == "__main__":
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--owner", required=True)
     args = parser.parse_args()
-    peer = Peer()
-    peer.start()
-    story = A2aStory(args.base_url, args.owner, peer)
-    try:
-        story.run()
-    finally:
+    for binding in ("HTTP+JSON", "JSONRPC"):
+        peer = Peer(binding)
+        peer.start()
+        story = A2aStory(args.base_url, args.owner, peer)
         try:
-            story.cleanup()
+            story.run()
+            if binding == "JSONRPC":
+                assert peer.rpc_methods == {"SendMessage", "SendStreamingMessage", "GetTask", "CancelTask", "SubscribeToTask"}
         finally:
-            peer.close()
+            try:
+                story.cleanup()
+            finally:
+                peer.close()

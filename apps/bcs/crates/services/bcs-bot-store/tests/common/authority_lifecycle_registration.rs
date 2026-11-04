@@ -750,7 +750,7 @@ pub async fn trusted_v2_registration_commits_binding_owner_and_authority(fixture
         .provider_repo
         .create_provider_bot_with_ownership(
             provider_record_ref("bot_prov2", BotConnectionMode::Plugin, "ref-2"),
-            capabilities(),
+            BotCapabilities { name: Some("Plugin bot".into()), ..capabilities() },
             "11111111",
             "bot-token-p2",
             mutation("11111111"),
@@ -762,7 +762,7 @@ pub async fn trusted_v2_registration_commits_binding_owner_and_authority(fixture
         .provider_repo
         .create_provider_bot_with_ownership(
             provider_record_ref("bot_prov3", BotConnectionMode::Plugin, "ref-1"),
-            capabilities(),
+            BotCapabilities { name: Some("Duplicate ref bot".into()), ..capabilities() },
             "11111111",
             "bot-token-p3",
             mutation("11111111"),
