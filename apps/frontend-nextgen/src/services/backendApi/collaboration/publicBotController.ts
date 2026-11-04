@@ -155,6 +155,12 @@ export interface PublicBotCapabilityDto {
   display_name: string;
 }
 
+/** Bot 画像（bot-catalog profile）技能条目 DTO：skill_id + display_name。 */
+export interface PublicBotSkillDto {
+  skill_id: string;
+  display_name: string;
+}
+
 /** 好友申请弹窗消费的公开 Bot 画像 DTO（后端 `PublicBotProfile` 契约）。 */
 export interface PublicBotProfileDto {
   bot_id: string;
@@ -164,6 +170,8 @@ export interface PublicBotProfileDto {
   description?: string | null;
   engine_name?: string | null;
   capabilities: PublicBotCapabilityDto[];
+  /** 已公开技能清单；旧 envelope / BCS-only 画像可能缺省，Mapper 统一回退空列表。 */
+  skills?: PublicBotSkillDto[];
   // 线上 envelope 允许携带未知扩展键；未知键不进 Mapper 投影。
   [key: string]: unknown;
 }
