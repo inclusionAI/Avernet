@@ -274,6 +274,21 @@ class ForumPostPage:
     items: tuple[ForumPostRecord, ...]
 
 
+@dataclass(frozen=True)
+class ForumPostLocationRecord:
+    """Display-page location of one Post inside its Topic.
+
+    ``root_post_id`` is the first-level Post whose floor group contains the
+    target. For a direct floor it equals ``post_id``. ``page`` uses the same
+    page-size and helpful-first ordering as the public reply list, so a caller
+    can load that page and scroll to the exact Post.
+    """
+
+    post_id: str
+    root_post_id: str
+    page: int
+
+
 ForumPollProjectionCalculator = Callable[
     [ForumPollProjectionInput], ForumTopicAnalysisRecord
 ]

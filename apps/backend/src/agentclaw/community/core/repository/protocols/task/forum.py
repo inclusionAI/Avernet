@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
+        ForumPostLocationRecord,
         ForumPostPage,
         ForumPostRecord,
         ForumReplyCreateResult,
@@ -66,6 +67,22 @@ class ForumRepositoryProtocol(Protocol):
         ``offset``/``limit`` and the returned total apply only to direct
         Topic replies. Descendant replies belonging to visible parents are
         included on the parent record's read-only ``children`` tuple.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> Optional[ForumPostLocationRecord]:
+        """Resolve one Post's root floor and one-based display page.
+
+        ``page`` follows the public first-level reply ordering, including
+        HELP helpful-first order. ``None`` means the Topic or Post is not
+        visible, the Post belongs to another Topic, or its parent chain is
+        malformed.
         """
 
     @abstractmethod
