@@ -108,7 +108,9 @@ def test_receipt_failure_after_confirmed_fastdisk_never_downgrades(failure):
 ])
 def test_detection_failure_or_nonfastdisk_retains_best_effort(detected, caplog):
     execute = executor([response('failed')], detected=detected)
-    attempt(execute)()
+    with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
+        attempt(execute)()
+    warn.assert_not_called()
     assert execute.call_args_list[0].args == (detection_command(),)
     assert execute.call_count == 2
     assert 'action=continue_restart' in caplog.text
@@ -422,8 +424,10 @@ def test_disabled_guard_keeps_five_minute_fastdisk_budget(caplog):
 
 def test_disabled_guard_keeps_final_receipt_best_effort(caplog):
     execute = executor([committed(), response('failed')])
-    backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
-                           blocking_enabled=lambda: False)()
+    with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
+        backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
+                               blocking_enabled=lambda: False)()
+    warn.assert_called_once_with(OPERATION)
     assert execute.call_count == 3
     assert 'action=continue_restart' in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
@@ -522,10 +526,24 @@ async def test_durable_restart_accepts_nonblocking_failure_or_valid_partial(life
     if outcome == 'partial_success':
         assert 'phase=verify status=partial_success' in caplog.text
     assert journal(s.repo.bot)['phase'] == 'WAITING_READY'
+    progress = strategy.project_status_ext(ext=s.repo.bot['ext'], response_ext={})['aicoding']['restart']
+    if outcome == 'failed':
+        assert progress['status'] == 'RUNNING'
+        assert progress['warning']['code'] == 'backup_failed_continue'
+        assert '不阻断' in progress['warning']['message']
+        assert '数据丢失风险' in progress['warning']['message']
+        assert s.repo.bot['ext']['unrelated'] == {'keep': True}
+    else:
+        assert 'warning' not in progress  # A valid partial backup remains success.
     assert s.repo.bot['ext'].get('start_status') != 'FAILED'
     assert 'action=continue_restart' in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
     config.get_value.assert_called_once()
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartState
+    RestartState(s.repo, 'b', 'o', op).update({'WAITING_READY'}, phase='SUCCEEDED')
+    completed = strategy.project_status_ext(ext=s.repo.bot['ext'], response_ext={})['aicoding']['restart']
+    assert completed['status'] == 'SUCCEEDED'
+    assert completed.get('warning') == progress.get('warning')
 
 
 def test_disabled_guard_still_blocks_arca_binding_change():
@@ -578,3 +596,30 @@ def test_unconfigured_or_unavailable_guard_does_not_block_fastdisk_failure(confi
     assert 'private config error' not in caplog.text
     if configuration == 'unavailable':
         assert 'action=keep_nonblocking' in caplog.text
+
+
+def test_nonblocking_warning_write_failure_escapes_nested_baas_policy():
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+
+    state = Mock()
+    state.read.return_value = {'ext': {}}
+    state.update.side_effect = RuntimeError('database unavailable')
+    restart_scope = current_restart.set(SimpleNamespace(
+        state=state, operation_id=OPERATION,
+        payload={'started_at': backup.time.time(), 'device_id': 'old', 'provider': 'baas'},
+    ))
+    runtime = runtime_with(executor([response('failed')]))
+    devices = Mock()
+    devices.get_device.return_value = dict(device_id='old', device_provider='baas')
+    try:
+        with pytest.raises(backup.RestartBackupBlocked) as raised:
+            AicodingProvisioningStrategy('aicoding')._prepare_restart(
+                BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
+                binding_id=7, device_service=devices, bot_repository=Mock(),
+                restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
+                blocking_enabled=lambda: False,
+            )
+        assert raised.value.reason == 'warning_unavailable'
+        assert isinstance(raised.value.__cause__, RuntimeError)
+    finally:
+        current_restart.reset(restart_scope)

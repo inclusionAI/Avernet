@@ -78,6 +78,40 @@ stop-before-backup bundle cannot be made non-disruptive by changing status JSON.
 Backend timeout does not imply worker exit. Do not delete barriers or alter
 production container processes as part of this state-contract fix.
 
+## Non-blocking backup failure warning (2026-11-04)
+
+A confirmed fastdisk backup failure with `fastdisk_fail_block` disabled continues
+restart and adds an optional warning to `ext.aicoding.restart` on the ordinary,
+published and OpenAPI status projections:
+
+```json
+{
+  "status": "RUNNING",
+  "warning": {
+    "code": "backup_failed_continue",
+    "message": "快盘备份失败，当前配置不阻断重启，存在数据丢失风险。"
+  }
+}
+```
+
+This warning is not a failure status: consumers show a warning once per polling
+session for the current operation and keep polling until its terminal result.
+It remains visible in SUCCEEDED/FAILED so a consumer that first observes a
+terminal result does not miss the risk. A new manual operation clears the old
+warning; queue redelivery of that same operation retains it. Normal Bot polling
+correlates operation_id; the existing published page polls by publish_id.
+A blocking backup failure instead returns FAILED with its existing sanitized
+message: stop polling, show an error, and retain the old runtime.
+
+The coding strategy persists only a fixed warning code, merging the existing
+journal/ext atomically. It exposes no helper output, credentials or physical
+container IDs. Warning persistence failures propagate rather than returning a
+restart success with a silently missing risk notice. Non-fastdisk/failed initial
+detection and non-coding engines do not gain this warning. Valid partial backup
+receipts still count as success and retain their distinct logs without a new
+backup-failure toast. The shared lifecycle and generic response schemas are
+unchanged.
+
 ## Confirmed-fastdisk policy (2026-10-30)
 
 Backend sends the embedded publication detector. Unknown/failed initial detection

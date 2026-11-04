@@ -24,6 +24,11 @@ TERMINAL = frozenset({"SUCCEEDED", "FAILED"})
 BACKUP_TIMEOUT = 1500
 BUSINESS_TIMEOUT = BACKUP_TIMEOUT + 600
 TASK_DEADLINE = 86400
+BACKUP_WARNING = 'backup_failed_continue'
+BACKUP_WARNING_MESSAGE = '快盘备份失败，当前配置不阻断重启，存在数据丢失风险。'
+published_backup_warning: ContextVar[Callable[[], None] | None] = ContextVar(
+    'coding_published_backup_warning', default=None,
+)
 
 
 def supports(bot: dict) -> bool:
@@ -64,6 +69,8 @@ def restart_status(ext: dict, *, published=False, progress=None, public=False):
             '容器重启失败，请检查部署日志' if status == 'FAILED' else None
         ),
     }
+    if record.get('backup_warning') == BACKUP_WARNING:
+        result['warning'] = {'code': BACKUP_WARNING, 'message': BACKUP_WARNING_MESSAGE}
     if public:
         result['message'] = None
         if status == 'FAILED':
@@ -98,6 +105,30 @@ def published_restart_result(record):
         message=restart['message'] or '重启前置检查进行中',
         ext=project_status_ext(record.ext or {}, response_ext={}, published=True),
     )
+
+
+def record_nonblocking_backup_warning(operation_id):
+    """Persist only a confirmed fastdisk backup failure that was allowed through."""
+    execution = current_restart.get()
+    if execution is not None:
+        if execution.operation_id != operation_id:
+            raise RestartSuperseded('Backup warning belongs to another restart')
+        if journal(execution.state.read()).get('backup_warning') != BACKUP_WARNING:
+            execution.state.update(IN_PROGRESS, backup_warning=BACKUP_WARNING)
+    else:
+        report = published_backup_warning.get()
+        if report is not None:
+            report()
+
+
+def published_warning_reporter(services, *, publish_id, guard_id):
+    def report():
+        def warn(ext):
+            state = ext.get('restart') or {}
+            if (state.get('guard') or {}).get('id') == guard_id:
+                state['backup_warning'] = BACKUP_WARNING
+        services.mutate_ext(publish_id=publish_id, mutator=warn)
+    return report
 
 
 class RestartSuperseded(RuntimeError):
