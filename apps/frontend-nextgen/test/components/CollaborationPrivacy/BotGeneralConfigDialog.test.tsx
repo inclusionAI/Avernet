@@ -88,7 +88,7 @@ afterAll(() => {
   jest.restoreAllMocks();
 });
 
-describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-migration AC-04~05/09~11）', () => {
+describe('BotGeneralConfigDialog 公开设置弹窗（collab-permission-entry-migration AC-04~05/09~11）', () => {
   it('弹窗展示标题、副标题与 Bot 基础信息头，并渲染三组配置分区', async () => {
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
 
@@ -97,7 +97,7 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText('通用配置')).toBeInTheDocument();
+    expect(screen.getByText('公开设置')).toBeInTheDocument();
     expect(screen.getByText('管理该 Bot 在 BCN 网络中的协作状态及好友审批策略。')).toBeInTheDocument();
     expect(screen.getByText('通用配置助手')).toBeInTheDocument();
     expect(screen.getByText('openclaw')).toBeInTheDocument();
@@ -114,12 +114,12 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
     expect(screen.queryByText('Dream Mode')).not.toBeInTheDocument();
   });
 
-  it('加载中展示骨架占位（无障碍标签：正在加载通用配置）', async () => {
+  it('加载中展示骨架占位（无障碍标签：正在加载公开设置）', async () => {
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockImplementation(() => new Promise(() => {}) as never);
 
     render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
 
-    expect(screen.getByLabelText('正在加载通用配置')).toBeInTheDocument();
+    expect(screen.getByLabelText('正在加载公开设置')).toBeInTheDocument();
   });
 
   it('主接口失败时展示整窗错误态与重试入口', async () => {
@@ -127,7 +127,7 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
 
     render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
 
-    await waitFor(() => expect(screen.getByText('通用配置加载失败')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('公开设置加载失败')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
   });
 
@@ -138,7 +138,7 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
 
     await waitFor(() => expect(screen.getByText('未获取到该 Bot 的协作配置')).toBeInTheDocument());
     expect(screen.getByText('该 Bot 可能尚未加入 BCN 协作网络；可稍后重试。')).toBeInTheDocument();
-    expect(screen.queryByText('通用配置加载失败')).not.toBeInTheDocument();
+    expect(screen.queryByText('公开设置加载失败')).not.toBeInTheDocument();
   });
 
   it('未加入 BCN 的 Bot 展示只读横幅', async () => {
