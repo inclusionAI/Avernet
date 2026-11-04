@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
+import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -10,7 +11,7 @@ import {
   type PublicBot,
 } from '@/domain/collaborationSquare/types';
 import { cn } from '@/utils/cn';
-import { Bot, Hash, MessageCircleMore, Plus, Share2, UserRound } from 'lucide-react';
+import { Hash, MessageCircleMore, Plus, Share2, UserRound } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 // dmore 公开Bot 卡片（Bot卡片 362.67×122.5）：白底、16px 圆角、双层软阴影；无描边。
@@ -88,7 +89,7 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
       {/* 头部行：40px 圆角头像 + 名称/身份元信息 + 右侧操作（dmore Container@(17,17)）。 */}
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Bot aria-hidden className="h-6 w-6" />
+          <Avatar name={bot.name} src={bot.avatarUrl} size={40} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">

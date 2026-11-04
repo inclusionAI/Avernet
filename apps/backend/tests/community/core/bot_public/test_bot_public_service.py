@@ -1536,7 +1536,7 @@ class TestSearchPublicBotsByKeyword:
 
         result = svc.search_catalog_public_bots_by_keyword(
             search="agent",
-            page=3,
+            page=1,
             page_size=20,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
@@ -1559,8 +1559,8 @@ class TestSearchPublicBotsByKeyword:
         }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
-            page=3,
-            page_size=20,
+            page=1,
+            page_size=100,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
         )
@@ -1614,7 +1614,7 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"][1]["bot_desc"] == "BCS fallback"
         assert result["items"][1]["entity_id"] == "BCS-owner"
 
-    def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
+    def test_catalog_search_counts_actual_catalog_rows_instead_of_stale_bcs_total(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = _metadata_page(
             [BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot")],
@@ -1634,7 +1634,7 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-bcs-total",
         )
 
-        assert result["total"] == 21
+        assert result["total"] == 1
         assert len(result["items"]) == 1
 
     def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
@@ -1769,7 +1769,7 @@ class TestSearchPublicBotsByKeyword:
             caller=BotCatalogCaller("tenant-1", None, 7), request_id="trace-2"
         )
 
-        assert result["total"] == 3
+        assert result["total"] == 2
         assert [bot["entity_id"] for bot in result["items"]] == [
             "entity-a",
             "entity-b",

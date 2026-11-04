@@ -119,6 +119,7 @@ export interface CollaborationSquarePage<T> {
 }
 
 export interface PublicBot {
+  avatarUrl?: string;
   /** 公开 Bot Catalog 的 canonical target；有 bot_uuid 时使用复合值，缺失时回退 Bot ID。 */
   id: string;
   /** 兼容缺少 bot_uuid 的历史数据时使用的好友申请 actor id。 */

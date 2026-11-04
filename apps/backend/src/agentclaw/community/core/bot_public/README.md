@@ -42,6 +42,15 @@ internal_dependencies:
 
 Owns visible-to-other-users state; bugs here can leak unpublished bots or block legitimate publication. The approval callback path crosses with core/antprocess.
 
+Catalog Search intersects BCS visibility/order with Backend service Bot
+`online_available` before public pagination. Joins are bounded to 100 candidates
+per batch; exact totals scan the matching catalog and retain only the requested
+window. Personal and BCS-native Bots keep their existing inclusion rules.
+Display projections include only the saved avatar URL, not raw extension data.
+`publication_actions` and `friend_catalog_actions` contain the publication and
+friend/catalog responsibilities composed by `BotPublicService`; shared errors
+remain import-compatible through the original service module.
+
 ### BCSFuse publication synchronization
 
 - Legacy `POST /api/bots/{bot_id}/public` syncs user publication through

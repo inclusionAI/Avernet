@@ -115,6 +115,7 @@ def test_lists_only_collaborations_and_keeps_entity_and_owner_separate():
     assert data["items"] == [
         {
             "bcn_bot_id": "shared-1:owner-1",
+            "avatar_url": None,
             "bot_id": "shared-1",
             "bot_name": "Shared Bot",
             "bot_desc": "Works together",
