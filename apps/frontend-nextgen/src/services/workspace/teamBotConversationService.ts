@@ -132,7 +132,7 @@ export const teamBotConversationService = {
     } catch {
       return {
         ok: false,
-        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队 Bot 失败，请稍后重试。', canRetry: true },
+        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队空间 Bot 失败，请稍后重试。', canRetry: true },
       };
     }
   },
