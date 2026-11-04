@@ -182,6 +182,14 @@ BCN 必须以 N 个活跃节点运行在同一个共享的高可用数据库之�
 `advertise_addr` 默认取自配置或环境变量(例如通过 Kubernetes downward API 取得的
 pod IP),回退到现有的 `get_local_ip()`。在容器里单靠枚举网卡并不可靠。
 
+**取代同一地址上的上一次运行。** 节点注册时,在写入自身行的同一个事务里,把所有
+`(env, advertise_addr)` 相同的其他花名册行的 `last_heartbeat_at` 置为 NULL。两个进程
+不可能监听同一个地址,所以这样的行属于已死的运行。该行会被保留,幸存者仍能用旧的
+`node_id` 执行发现查询(§10.1);它只是不再新鲜,于是认领谓词(§8.3)立刻把它的租约
+视为可认领,相对陈旧度(§6.3)也会忽略它。§10.4 的提前接管就是这样表达的,无需修改
+认领语句。前提是 `advertise_addr` 对每个存活进程唯一(不能共用 NAT 地址);陈旧的行
+大约一小时后被回收。
+
 ### 6.3 只用一个时钟,并采用相对陈旧度
 
 所有时间比较都使用数据库的 `NOW()`,从不使用节点时钟,因此跨节点时钟偏差不会让
@@ -279,12 +287,15 @@ ranked(S)      = all candidates sorted by score (fallback order)
 
 ```sql
 -- CLAIM (CAS first; 1 statement in the common cold case)
-UPDATE bcs_task_leases l
-   SET l.fencing_token = :n + 1, l.node_id = :me, l.expires_at = NULL
- WHERE l.env = :env AND l.session_id = :s AND l.fencing_token = :n
-   AND ( l.node_id = ''
+-- Dialect-neutral sketch: SET columns are unqualified (SQLite rejects
+-- qualified SET targets); the SQL store renders the statement per flavor.
+UPDATE bcs_task_leases
+   SET fencing_token = :n + 1, node_id = :me, expires_at = NULL
+ WHERE env = :env AND session_id = :s AND fencing_token = :n
+   AND ( node_id = ''
          OR NOT EXISTS (SELECT 1 FROM bcs_node_roster r
-                         WHERE r.node_id = l.node_id AND <r is fresh>) )
+                         WHERE r.node_id = bcs_task_leases.node_id
+                           AND <r is fresh>) )
 -- affected = 1 → owner with token n+1;  affected = 0 → read the row to learn who owns it
 
 -- RELEASE (no successor; next claimer bumps the token)
@@ -491,7 +502,7 @@ CAS 裁决。
 
 | 证据 | 接管时机 | 状态 |
 | --- | --- | --- |
-| **相同 `advertise_addr`、新的 `node_id`** —— 进程原地重启;两个进程不可能监听同一地址 | 一看到新运行的花名册行就立即接管 | **纳入**(同时消除 singlebox 崩溃后的延迟) |
+| **相同 `advertise_addr`、新的 `node_id`** —— 进程原地重启;两个进程不可能监听同一地址 | 一看到新运行的花名册行就立即接管 | **纳入**:新运行在注册时把旧行的心跳置为 NULL(§6.2);同时消除 singlebox 崩溃后的延迟 |
 | panic / 关停钩子中释放 | 立即 | **纳入**,尽力而为(对 OOM kill 或 `kill -9` 无效) |
 | 更短的阈值 | 如 1 s / 3 s → RTO ~5 s | 可调;相对陈旧度([§6.3](#63-只用一个时钟并采用相对陈旧度))使其能抵御存储抖动 |
 | 基础设施信号(pod 删除事件) | 快 | 以后作为可选插件,放在带 Noop 默认实现的端口之后 |
@@ -752,8 +763,9 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 | 卡住会话看门狗 | ~5 分钟 | 按运行类型 |
 | 提示缓存 | 有界 LRU | 花名册变化或重定向时丢弃条目 |
 
-最坏情况的崩溃 RTO ≈ 认领阈值(15)+ 花名册轮询(≤ 5)+ 宽限期(首选节点为 0,
-其余为 3)+ 再水合(1–3)≈ 18–23 s。
+崩溃 RTO ≈ 认领阈值(15)+ 花名册轮询(≤ 5)+ 宽限期(首选节点为 0,其余为 3)
++ 再水合(1–3):首选节点认领时通常 ≈ 18–23 s;非首选节点认领时最坏 ≈ 26 s
+(15 + 5 + 3 + 3)—— 仍在 30 s 目标之内,余量约 4 s。
 
 ---
 
@@ -764,7 +776,8 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 `bcs_node_roster` —— 约定列:`node_id`、`state`(`active`|`draining`)、
 `started_at`、`last_heartbeat_at`。本设计新增并给出理由的列:`env`、`member_name`
 (稳定的放置身份)、`advertise_addr`(东西向地址)、`build_version`(滚动发布与
-诊断)。
+诊断)。注册中的节点会把与自身 `(env, advertise_addr)` 相同的行的
+`last_heartbeat_at` 置为 NULL(§6.2),因此需要 `(env, advertise_addr)` 上的索引。
 
 `bcs_task_leases` —— 约定列:`session_id`(键)、`node_id`、`fencing_token`
 (单调递增的 BIGINT)、`expires_at`。含义变化:`expires_at` 持有期间为 NULL,在

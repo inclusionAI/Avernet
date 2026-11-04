@@ -197,6 +197,18 @@ Identity is split deliberately ([D3](#17-deviations-from-doc-02), [D7](#17-devia
 the pod IP via the Kubernetes downward API), falling back to the existing
 `get_local_ip()`. Interface enumeration alone is unreliable in containers.
 
+**Superseding a previous run at the same address.** When a node registers, in
+the same transaction as its own upsert it sets `last_heartbeat_at = NULL` on
+every other roster row with the same `(env, advertise_addr)`. Two processes
+cannot listen on one address, so such a row belongs to a dead run. The row is
+kept, so survivors can still run the discovery query (§10.1) with the old
+`node_id`; it is simply no longer fresh, so the claim predicate (§8.3) treats
+its leases as claimable at once and relative staleness (§6.3) ignores it.
+This is how the early takeover in §10.4 is expressed without changing the
+claim statement. It requires `advertise_addr` to be unique per live process
+(no shared NAT addresses); stale rows are garbage-collected after about an
+hour.
+
 ### 6.3 One clock, and relative staleness
 
 All time comparisons use the database's `NOW()`, never node clocks, so
@@ -306,12 +318,15 @@ task session is created, so the claim path is always a single `UPDATE`.
 
 ```sql
 -- CLAIM (CAS first; 1 statement in the common cold case)
-UPDATE bcs_task_leases l
-   SET l.fencing_token = :n + 1, l.node_id = :me, l.expires_at = NULL
- WHERE l.env = :env AND l.session_id = :s AND l.fencing_token = :n
-   AND ( l.node_id = ''
+-- Dialect-neutral sketch: SET columns are unqualified (SQLite rejects
+-- qualified SET targets); the SQL store renders the statement per flavor.
+UPDATE bcs_task_leases
+   SET fencing_token = :n + 1, node_id = :me, expires_at = NULL
+ WHERE env = :env AND session_id = :s AND fencing_token = :n
+   AND ( node_id = ''
          OR NOT EXISTS (SELECT 1 FROM bcs_node_roster r
-                         WHERE r.node_id = l.node_id AND <r is fresh>) )
+                         WHERE r.node_id = bcs_task_leases.node_id
+                           AND <r is fresh>) )
 -- affected = 1 → owner with token n+1;  affected = 0 → read the row to learn who owns it
 
 -- RELEASE (no successor; next claimer bumps the token)
@@ -544,7 +559,7 @@ trade-off, and evidence can replace waiting:
 
 | Evidence | Takeover | Status |
 | --- | --- | --- |
-| **Same `advertise_addr`, new `node_id`** — the process restarted in place; two processes cannot listen on one address | Immediately when the new run's roster row is seen | **Included** (also removes singlebox's post-crash delay) |
+| **Same `advertise_addr`, new `node_id`** — the process restarted in place; two processes cannot listen on one address | Immediately when the new run's roster row is seen | **Included**: the new run nulls the old row's heartbeat at registration (§6.2); also removes singlebox's post-crash delay |
 | Release on panic / shutdown hook | Immediate | **Included**, best effort (no help for OOM kill or `kill -9`) |
 | Shorter thresholds | e.g. 1 s / 3 s → ~5 s RTO | Tunable; relative staleness (§6.3) makes it safe against storage hiccups |
 | Infrastructure signals (pod deletion events) | Fast | Later, as an optional plugin behind a port with a Noop default |
@@ -839,8 +854,10 @@ All configurable; defaults chosen for RTO ≤ 30 s.
 | Stuck-session watchdog | ~5 min | Per run type |
 | Hint cache | bounded LRU | Entries dropped on roster change or redirect |
 
-Worst-case crash RTO ≈ claim threshold (15) + roster poll (≤ 5) + grace (0
-for the preferred node, 3 otherwise) + rehydrate (1–3) ≈ 18–23 s.
+Crash RTO ≈ claim threshold (15) + roster poll (≤ 5) + grace (0 for the
+preferred node, 3 otherwise) + rehydrate (1–3): typically ≈ 18–23 s when the
+preferred node claims; worst case ≈ 26 s (15 + 5 + 3 + 3) when a non-preferred
+node claims — inside the 30 s target, with ~4 s of headroom.
 
 ---
 
@@ -851,7 +868,9 @@ for the preferred node, 3 otherwise) + rehydrate (1–3) ≈ 18–23 s.
 `bcs_node_roster` — pinned: `node_id`, `state` (`active`|`draining`),
 `started_at`, `last_heartbeat_at`. Added and justified here: `env`,
 `member_name` (stable placement identity), `advertise_addr` (east-west
-address), `build_version` (rollouts and diagnostics).
+address), `build_version` (rollouts and diagnostics). A registering node nulls
+`last_heartbeat_at` on rows with its own `(env, advertise_addr)` (§6.2), so an
+index on `(env, advertise_addr)` is needed.
 
 `bcs_task_leases` — pinned: `session_id` (key), `node_id`, `fencing_token`
 (monotonic BIGINT), `expires_at`. Changed meaning: `expires_at` is NULL while
