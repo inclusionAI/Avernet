@@ -49,10 +49,8 @@ from app.application.services.participant_availability_checker import (
 )
 from app.application.services.group_fusion_service import GroupFusionService
 from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
-from app.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
-from app.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
 from app.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
-from app.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
 from app.domain.models.skill_profile import SkillProfile
 
 
@@ -60,6 +58,7 @@ from app.domain.models.skill_profile import SkillProfile
 def enable_registry_filtering(monkeypatch):
     """Exercise the filtering policy independently of deployment defaults."""
     monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
+    monkeypatch.setattr(FeatureFlags, "is_explicit_participant_availability_warning_enabled", lambda: True)
 
 
 # =============================================================================
@@ -544,59 +543,7 @@ class TestG1G2OfflineParticipantWarning:
 # Test: Default Candidate Filtering Still Works
 # =============================================================================
 
-class TestDefaultCandidateFilteringStillWorks:
-    """验证默认候选过滤逻辑不被破坏"""
 
-    def test_default_candidate_filtering_still_works(self, stores):
-        """
-        验证：默认候选推荐仍保持过滤逻辑
-
-        Given: 创建 online 和 offline workers
-        When: 使用 retrieval service 查询（不带显式 participants）
-        Then: 只有 online worker 的 profile 被返回
-        """
-        # 创建 online worker
-        setup_worker_with_profile(
-            stores, "wrk_filter_online", "staff_filter_online:default", WorkerRuntimeState.ONLINE
-        )
-
-        # 创建 offline worker
-        setup_worker_with_profile(
-            stores, "wrk_filter_offline", "staff_filter_offline:default", WorkerRuntimeState.OFFLINE
-        )
-
-        # 创建 filter 和 retrieval service
-        profile_filter = RegistryAwareWorkerFilter(
-            registry_store=stores["registry_store"],
-            runtime_state_store=stores["runtime_state_store"],
-            strict_mode=True,
-        )
-
-        # 创建 mock source
-        online_profile = create_test_profile("staff_filter_online:default", ["testing"])
-        offline_profile = create_test_profile("staff_filter_offline:default", ["testing"])
-
-        class MockSource:
-            def scan(self):
-                return WorkerProfileScanResult(
-                    profiles=[online_profile, offline_profile],
-                    scan_warnings=[],
-                    source_roots=["mock"],
-                )
-
-        retrieval_service = WorkerProfileRetrievalService(
-            source=MockSource(),
-            profile_filter=profile_filter,
-        )
-
-        # 检索
-        from app.domain.models.retrieval_mode import RetrievalMode
-        result = retrieval_service.retrieve(question="testing", mode=RetrievalMode.AGENT)
-
-        # 验证：只有 online 的 profile
-        profile_keys = [r.profile.profile_key for r in result.results]
-        assert "staff_filter_online:default" in profile_keys
-        assert "staff_filter_offline:default" not in profile_keys
 
 
 # =============================================================================

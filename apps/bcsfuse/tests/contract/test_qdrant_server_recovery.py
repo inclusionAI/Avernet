@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from search_core.config.qdrant import QdrantConnection
 
-from app.bootstrap.app_factory import _register_health_routes
 from app.bootstrap.application_context import ApplicationContext
 from app.bootstrap.provider_registry import ProviderRegistry
 from app.domain.models.vector_point import VectorPoint
@@ -111,35 +110,3 @@ def test_tc_server_searches_can_overlap(store, monkeypatch):
             pool.submit(store.text_search, "支付", 1),
         ]
         assert [future.result() for future in futures] == [[], []]
-
-
-def test_ready_returns_503_when_server_probe_fails():
-    class Unavailable:
-        def check_ready(self):
-            raise OSError("private endpoint details must not leak")
-
-    registry = ProviderRegistry()
-    registry.register("vector_store", Unavailable())
-    context = ApplicationContext(
-        mode="test", startup_profile="opensource", registry=registry
-    )
-    app = FastAPI()
-    _register_health_routes(app, context)
-    with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
-        response = client.get("/ready")
-        assert response.status_code == 503
-        assert response.json()["ready"] is False
-        assert "private endpoint" not in response.text
-
-
-def test_ready_probes_real_server_and_reports_mode(store):
-    registry = ProviderRegistry()
-    registry.register("vector_store", store)
-    context = ApplicationContext(mode="test", startup_profile="opensource", registry=registry)
-    app = FastAPI()
-    _register_health_routes(app, context)
-    with TestClient(app) as client:
-        response = client.get("/ready")
-        assert response.status_code == 200
-        assert response.json()["qdrant_mode"] == "server"

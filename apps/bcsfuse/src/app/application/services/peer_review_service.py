@@ -7,20 +7,20 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.domain.models.verify_dto import (
+    PeerReviewer,
     PeerReviewItem,
     PeerReviewResult,
-    PeerReviewer,
     VerifyData,
 )
 from app.domain.models.worker import TrustLevel, Worker
 
 if TYPE_CHECKING:
+    from app.application.services.verify_executor import VerifyExecutor
     from app.domain.services.adapters.worker_registry_store_adapter import (
         WorkerRegistryStoreAdapter,
     )
-    from app.application.services.verify_executor import VerifyExecutor
-    from app.application.services.worker_candidate_recommendation_impl import (
-        WorkerCandidateRecommendationImpl,
+    from app.domain.services.worker_candidate_recommendation_service import (
+        WorkerCandidateRecommendationService,
     )
 
 logger = logging.getLogger(__name__)
@@ -87,14 +87,14 @@ _PEER_EVAL_PROMPT = """
 class PeerReviewService:
     """召回相似 bot 并让其对被测 bot 进行 peer review 面试。
 
-    使用 WorkerCandidateRecommendationImpl.recommend() 进行语义相似度召回，
+    使用 WorkerCandidateRecommendationService.recommend() 进行语义相似度召回，
     """
 
     def __init__(
         self,
         executor: VerifyExecutor,
         worker_repo: WorkerRegistryStoreAdapter,
-        recommendation_service: WorkerCandidateRecommendationImpl,
+        recommendation_service: WorkerCandidateRecommendationService,
         top_k: int = 2,
         min_similarity: float = 0.5,
     ) -> None:
@@ -120,7 +120,7 @@ class PeerReviewService:
     ) -> list[PeerReviewer]:
         """通过推荐服务召回相似 bot 作为 peer reviewer。
 
-        使用 WorkerCandidateRecommendationImpl 的语义检索能力，
+        使用 WorkerCandidateRecommendationService 的语义检索能力，
         以被测 bot 的能力描述作为 query 搜索相似 bot，
         然后过滤：排除自身、排除无 external_id 的、低于阈值的。
         """

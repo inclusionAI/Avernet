@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 
 from app.domain.models.candidate_recommendation import CandidateRecommendationResponse
 
@@ -119,7 +119,7 @@ class BotRecommendation(BaseModel):
     Attributes:
         profile_key: Profile 唯一键
         worker_id: Worker ID (staff_id)
-        score: 推荐分数 (0-1)
+        score: 检索或模型原始有限分数
         reasons: 推荐理由列表
         short_profile: 精简画像（30字以内）
     """
@@ -134,11 +134,7 @@ class BotRecommendation(BaseModel):
         description="Worker ID (staff_id)",
     )
 
-    score: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="推荐分数 (0-1)",
-    )
+    score: FiniteFloat = Field(description="检索或模型原始分数，有限数值")
 
     reasons: list[Union[str, dict[str, Any]]] = Field(
         default_factory=list,

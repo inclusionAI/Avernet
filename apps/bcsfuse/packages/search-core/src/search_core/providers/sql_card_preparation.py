@@ -7,11 +7,13 @@ from search_core.providers.sql_index_documents import TABLE
 class CardPreparation:
     """Methods mixed into the environment-bound SQL Card repository."""
 
+    document_table = TABLE
+
     def _retire_documents(self, cursor, agent_id, revision):
         """Publish removal to all generations in the source deletion transaction."""
         self._execute(
             cursor,
-            f"UPDATE {TABLE} SET is_deleted=1, source_revision=?, version=version+1, "
+            f"UPDATE {self.document_table} SET is_deleted=1, source_revision=?, version=version+1, "
             f"gmt_modify={self._next_modified} WHERE environment=? AND source_id=?",
             (revision, self.environment, agent_id),
         )
@@ -24,6 +26,7 @@ class CardPreparation:
             environment=self.environment,
             index_key=index_key,
             placeholder=self.placeholder,
+            table=self.document_table,
         )
 
     @property
@@ -40,7 +43,7 @@ class CardPreparation:
                 SET gmt_modify=gmt_modify, preparation_token=?, preparation_key=?, lease_until={self._now}+?
                 WHERE environment=? AND agent_id=? AND revision=?
                 AND (preparation_token='' OR lease_until<{self._now})
-                AND (?=1 OR NOT EXISTS (SELECT 1 FROM {TABLE} d WHERE d.environment=?
+                AND (?=1 OR NOT EXISTS (SELECT 1 FROM {self.document_table} d WHERE d.environment=?
                     AND d.index_key=? AND d.id=? AND d.source_revision=?))""",
                 (
                     token,
@@ -126,7 +129,7 @@ class CardPreparation:
             store = self.index_documents(index_key)
             self._execute(
                 cur,
-                f"SELECT {store.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+                f"SELECT {store.columns} FROM {self.document_table} WHERE environment=? AND index_key=? AND id=?",
                 (*store.scope, source),
             )
             previous_main = store.decode(cur.fetchone())
@@ -136,14 +139,14 @@ class CardPreparation:
                 marks = ",".join("?" for _ in ids)
                 self._execute(
                     cur,
-                    f"SELECT {store.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id IN ({marks})",
+                    f"SELECT {store.columns} FROM {self.document_table} WHERE environment=? AND index_key=? AND id IN ({marks})",
                     (*store.scope, *ids),
                 )
                 previous = [store.decode(row) for row in cur.fetchall()]
             for item in [*documents, *retired_documents(previous, documents)]:
                 self._execute(
                     cur,
-                    f"SELECT {store.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+                    f"SELECT {store.columns} FROM {self.document_table} WHERE environment=? AND index_key=? AND id=?",
                     (*store.scope, item.id),
                 )
                 existing = store.decode(cur.fetchone())

@@ -16,6 +16,7 @@ from search_core.plugin_api.index_documents import (
     IndexDocument,
 )
 from search_core.plugin_api.vector_point import VectorPoint
+from search_core.providers.card_schema import validate_card_table
 
 TABLE = "search_index_documents"
 COLUMNS = "id, vector, payload, source_revision, extra, is_deleted, version, gmt_modify, filters"
@@ -36,7 +37,16 @@ def validate_environment(value):
 
 
 class SqlIndexDocuments:
-    def __init__(self, connect, *, environment: str, index_key: str, placeholder="%s"):
+    def __init__(
+        self,
+        connect,
+        *,
+        environment: str,
+        index_key: str,
+        placeholder="%s",
+        table=TABLE,
+    ):
+        self.table = validate_card_table(table)
         self.environment = validate_environment(environment)
         if not isinstance(index_key, str) or not index_key or len(index_key) > 64:
             raise ValueError("index_key of 1-64 characters required")
@@ -105,7 +115,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+                f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND index_key=? AND id=?",
                 (*self.scope, id),
             )
             return self.decode(cur.fetchone())
@@ -121,7 +131,7 @@ class SqlIndexDocuments:
             marks = ",".join("?" for _ in ids)
             self._execute(
                 cur,
-                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id IN ({marks})",
+                f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND index_key=? AND id IN ({marks})",
                 (*self.scope, *ids),
             )
             documents = [self.decode(row) for row in cur.fetchall()]
@@ -132,7 +142,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND source_id=?",
+                f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND index_key=? AND source_id=?",
                 (*self.scope, source_id),
             )
             return [self.decode(row) for row in cur.fetchall()]
@@ -150,7 +160,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT MAX(id) FROM {TABLE} WHERE environment=? AND index_key=?",
+                f"SELECT MAX(id) FROM {self.table} WHERE environment=? AND index_key=?",
                 self.scope,
             )
             upper = cur.fetchone()[0]
@@ -161,7 +171,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"SELECT {self._read_columns(VERSION_COLUMNS)} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    f"SELECT {self._read_columns(VERSION_COLUMNS)} FROM {self.table} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
                     (*self.scope, after, upper, batch_size),
                 )
                 rows = cur.fetchall()
@@ -182,7 +192,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND id=? ORDER BY gmt_modify DESC LIMIT 1",
+                f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND id=? ORDER BY gmt_modify DESC LIMIT 1",
                 (self.environment, id),
             )
             return self.decode(cur.fetchone())
@@ -192,7 +202,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND source_id=? AND is_deleted=0 ORDER BY gmt_modify DESC, index_key",
+                f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND source_id=? AND is_deleted=0 ORDER BY gmt_modify DESC, index_key",
                 (self.environment, source_id),
             )
             candidates = []
@@ -212,7 +222,7 @@ class SqlIndexDocuments:
         """
         self._execute(
             cur,
-            f"SELECT {self._read_columns('source_revision, version, gmt_modify')} FROM {TABLE} WHERE environment=? AND index_key=? AND id=?",
+            f"SELECT {self._read_columns('source_revision, version, gmt_modify')} FROM {self.table} WHERE environment=? AND index_key=? AND id=?",
             (*self.scope, document.id),
         )
         current = cur.fetchone()
@@ -250,13 +260,13 @@ class SqlIndexDocuments:
         if current is None:
             self._execute(
                 cur,
-                f"INSERT INTO {TABLE} (source_id,vector,payload,extra,filters,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,{self._time_parameter},?,?,?)",
+                f"INSERT INTO {self.table} (source_id,vector,payload,extra,filters,source_revision,version,is_deleted,gmt_modify,environment,index_key,id) VALUES (?,?,?,?,?,?,?,?,{self._time_parameter},?,?,?)",
                 (*values, *self.scope, document.id),
             )
         else:
             self._execute(
                 cur,
-                f"UPDATE {TABLE} SET source_id=?,vector=?,payload=?,extra=?,filters=?,source_revision=?,version=?,is_deleted=?,gmt_modify={self._time_parameter} WHERE environment=? AND index_key=? AND id=?",
+                f"UPDATE {self.table} SET source_id=?,vector=?,payload=?,extra=?,filters=?,source_revision=?,version=?,is_deleted=?,gmt_modify={self._time_parameter} WHERE environment=? AND index_key=? AND id=?",
                 (*values, *self.scope, document.id),
             )
         return True
@@ -265,7 +275,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT {('MAX(gmt_modify)' if self.placeholder == '?' else 'UNIX_TIMESTAMP(MAX(gmt_modify))')} FROM {TABLE} WHERE environment=? AND index_key=?",
+                f"SELECT {('MAX(gmt_modify)' if self.placeholder == '?' else 'UNIX_TIMESTAMP(MAX(gmt_modify))')} FROM {self.table} WHERE environment=? AND index_key=?",
                 self.scope,
             )
             row = cur.fetchone()
@@ -277,7 +287,7 @@ class SqlIndexDocuments:
         with self._cursor() as cur:
             self._execute(
                 cur,
-                f"SELECT MAX(id) FROM {TABLE} WHERE environment=? AND index_key=?",
+                f"SELECT MAX(id) FROM {self.table} WHERE environment=? AND index_key=?",
                 self.scope,
             )
             upper = cur.fetchone()[0]
@@ -288,7 +298,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"SELECT {self.columns} FROM {TABLE} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
+                    f"SELECT {self.columns} FROM {self.table} WHERE environment=? AND index_key=? AND id>? AND id<=? ORDER BY id LIMIT ?",
                     (*self.scope, after, upper, batch_size),
                 )
                 rows = cur.fetchall()
@@ -309,7 +319,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"SELECT id,version FROM {TABLE} WHERE environment=? AND index_key=? AND id>? ORDER BY id LIMIT ?",
+                    f"SELECT id,version FROM {self.table} WHERE environment=? AND index_key=? AND id>? ORDER BY id LIMIT ?",
                     (*self.scope, after, batch_size),
                 )
                 rows = cur.fetchall()
@@ -346,7 +356,7 @@ class SqlIndexDocuments:
             with self._cursor() as cur:
                 self._execute(
                     cur,
-                    f"""SELECT {columns} FROM {TABLE}
+                    f"""SELECT {columns} FROM {self.table}
                     WHERE environment=? AND index_key=? AND gmt_modify>={stamp} AND gmt_modify<={stamp}
                     AND (gmt_modify>{stamp} OR (gmt_modify={stamp} AND id>?))
                     ORDER BY gmt_modify,id LIMIT ?""",
@@ -371,41 +381,44 @@ class SqlIndexDocuments:
                 return
 
 
-def initialize_sqlite_documents(conn):
-    conn.execute(SQLITE_SCHEMA)
-    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
+def initialize_sqlite_documents(conn, *, table=TABLE):
+    table = validate_card_table(table)
+    conn.execute(SQLITE_SCHEMA.replace(TABLE, table, 1))
+    index_prefix = "idx_search_documents" if table == TABLE else f"idx_{table}"
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     if "filters" not in columns:
-        conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN filters TEXT")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN filters TEXT")
     if "source_id" not in columns:
         conn.execute(
-            f"ALTER TABLE {TABLE} ADD COLUMN source_id TEXT NOT NULL DEFAULT ''"
+            f"ALTER TABLE {table} ADD COLUMN source_id TEXT NOT NULL DEFAULT ''"
         )
-        cursor = conn.execute(f"SELECT environment,index_key,id,payload FROM {TABLE}")
+        cursor = conn.execute(f"SELECT environment,index_key,id,payload FROM {table}")
         while rows := cursor.fetchmany(100):
             conn.executemany(
-                f"UPDATE {TABLE} SET source_id=? WHERE environment=? AND index_key=? AND id=?",
+                f"UPDATE {table} SET source_id=? WHERE environment=? AND index_key=? AND id=?",
                 [
                     (json.loads(row[3]).get("source_id", row[2]), *row[:3])
                     for row in rows
                 ],
             )
     conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_search_documents_sync ON {TABLE}(environment,index_key,gmt_modify,id)"
+        f"CREATE INDEX IF NOT EXISTS {index_prefix}_sync ON {table}(environment,index_key,gmt_modify,id)"
     )
     conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_search_documents_source ON {TABLE}(environment,index_key,source_id)"
+        f"CREATE INDEX IF NOT EXISTS {index_prefix}_source ON {table}(environment,index_key,source_id)"
     )
 
 
-def sqlite_index_documents(path, *, environment, index_key):
+def sqlite_index_documents(path, *, environment, index_key, table=TABLE):
     store = SqlIndexDocuments(
         lambda: sqlite3.connect(path, timeout=10),
         environment=environment,
         index_key=index_key,
         placeholder="?",
+        table=table,
     )
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
-        initialize_sqlite_documents(conn)
+        initialize_sqlite_documents(conn, table=table)
     store.path = path
     return store

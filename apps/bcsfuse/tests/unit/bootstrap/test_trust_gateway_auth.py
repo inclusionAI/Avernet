@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.bootstrap.application_context import ApplicationContext
-from app.bootstrap.oss_business_routes import _trust_gateway_enabled, require_oss_auth
 from app.bootstrap.provider_registry import ProviderRegistry
+from app.tc.auth import _trust_gateway_enabled, require_oss_auth
 
 
 class ContractAuthProvider:

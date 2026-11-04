@@ -3,19 +3,15 @@ ProfileMergeService
 
 G9: Profile Merge 模式
 
-基于原始 MD 文件的 Profile 融合服务（简化版）。
+基于当前 TC 资料的 Profile 融合服务。
 
 核心流程：
-1. 收集原始 Profile 内容
+1. 收集名称、description、有效生成画像和独立技能描述
 2. 简单 MD5 去重（相同内容跳过）
 3. 一次性调用 LLM 生成超级 BOT Profile（6 项输出）
 4. 超级 BOT Profile 作为后续对话的 System Prompt
 
-只融合：
-- soul.md, identity.md, memory.md, name, description, skills
-
-不融合：
-- agents.md, tools.md 及其他扩展文件
+历史 MD 只归档，不参与新融合输入或去重。
 
 存储策略：
 - 必须注入 FusedProfileStorageService（包含 L1 内存缓存 + L2 持久化）
@@ -41,6 +37,7 @@ from app.domain.models.profile_fusion.fused_profile import ProfileFusionResult
 from app.domain.models.llm_request import LLMRequest
 from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType, Complexity, CostSensitivity
 from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.utils.fuse_util import worker_profile_to_dict
 
 if TYPE_CHECKING:
     from app.domain.services.adapters.worker_profile_content_store_adapter import WorkerProfileContentStoreAdapter
@@ -186,20 +183,6 @@ class ProfileMergeService:
         self._llm_executor = llm_executor
         logger.info("[ProfileFusion] 使用 FusedProfileStorageService 存储服务")
 
-    def _check_llm_queue_available(self) -> bool:
-        """
-        检查 LLM 线程池队列是否有空位
-
-        Returns:
-            bool: True 表示可以提交任务，False 表示队列有等待任务（快速失败）
-        """
-        if self._llm_executor is None:
-            # 没有传入线程池，不做并发控制
-            return True
-        # 获取线程池内部队列长度
-        queue_size = self._llm_executor._work_queue.qsize()
-        return queue_size == 0
-
     def set_llm_executor(self, executor: ThreadPoolExecutor) -> None:
         """
         设置 LLM 线程池（用于并发控制）
@@ -239,15 +222,10 @@ class ProfileMergeService:
         errors: list[str] = []
         logger.info("[ProfileFusion] 使用外部传入的 profiles: %d 个", len(profiles))
 
-        # 统计 Profile 内容大小
+        # 只统计本次融合输入，不读取归档 MD。
         total_profile_size = 0
         for i, p in enumerate(profiles):
-            profile_size = 0
-            if p.soul_md:
-                profile_size += len(p.soul_md)
-            for content in p.contents.values() if p.contents else []:
-                if isinstance(content, str):
-                    profile_size += len(content)
+            profile_size = len(json.dumps(worker_profile_to_dict(p), ensure_ascii=False))
             total_profile_size += profile_size
             logger.debug("[ProfileFusion] Profile[%d]: worker_id=%s, size=%d chars",
                         i, p.worker_id, profile_size)
@@ -406,71 +384,17 @@ class ProfileMergeService:
 
         for profile in profiles:
             pid = profile.worker_id
-
-            # 收集 soul.md
-            if profile.soul_md:
-                md5 = self._compute_md5(profile.soul_md)
-                if md5 not in seen_hashes["soul"]:
-                    seen_hashes["soul"].add(md5)
-                    collected["soul"].append((pid, profile.soul_md))
-                else:
-                    dedup_count += 1
-
-            # 收集 identity.md
-            identity = profile.contents.get("identity.md")
-            if identity:
-                md5 = self._compute_md5(identity)
-                if md5 not in seen_hashes["identity"]:
-                    seen_hashes["identity"].add(md5)
-                    collected["identity"].append((pid, identity))
-                else:
-                    dedup_count += 1
-
-            # 收集 memory.md
-            memory = profile.contents.get("memory.md")
-            if memory:
-                md5 = self._compute_md5(memory)
-                if md5 not in seen_hashes["memory"]:
-                    seen_hashes["memory"].add(md5)
-                    collected["memory"].append((pid, memory))
-                else:
-                    dedup_count += 1
-
-            # 收集 tools.md
-            tools = profile.contents.get("tools.md")
-            if tools:
-                md5 = self._compute_md5(tools)
-                if md5 not in seen_hashes["tools"]:
-                    seen_hashes["tools"].add(md5)
-                    collected["tools"].append((pid, tools))
-                else:
-                    dedup_count += 1
-
-            # 收集 agents.md
-            agents = profile.contents.get("agents.md")
-            if agents:
-                md5 = self._compute_md5(agents)
-                if md5 not in seen_hashes["agents"]:
-                    seen_hashes["agents"].add(md5)
-                    collected["agents"].append((pid, agents))
-                else:
-                    dedup_count += 1
-
-            # 收集 description
-            if profile.description:
-                md5 = self._compute_md5(profile.description)
-                if md5 not in seen_hashes["description"]:
-                    seen_hashes["description"].add(md5)
-                    collected["description"].append((pid, profile.description))
-                else:
-                    dedup_count += 1
-
-            # 收集 name (display_name)
-            if profile.display_name:
-                md5 = self._compute_md5(profile.display_name)
-                if md5 not in seen_hashes["name"]:
-                    seen_hashes["name"].add(md5)
-                    collected["name"].append((pid, profile.display_name))
+            current = worker_profile_to_dict(profile)
+            for field in ("display_name", "description", "profile", "skills"):
+                content = current[field]
+                if not content:
+                    continue
+                if field == "skills":
+                    content = json.dumps(content, ensure_ascii=False, sort_keys=True)
+                md5 = self._compute_md5(content)
+                if md5 not in seen_hashes[field]:
+                    seen_hashes[field].add(md5)
+                    collected[field].append((pid, content))
                 else:
                     dedup_count += 1
 
@@ -504,10 +428,6 @@ class ProfileMergeService:
         estimated_tokens = prompt_size // 3  # 取中间值
         logger.info("[ProfileFusion] Step4-LLM: 估算输入 token 数: ~%d tokens", estimated_tokens)
 
-        # Prompt 预览（前 500 字符）
-        prompt_preview = prompt[:500] if len(prompt) > 500 else prompt
-        logger.info("[ProfileFusion] Step4-LLM: prompt 预览 (前500字符):\n%s...", prompt_preview)
-
         # 调用 LLM
         task_spec = LLMTaskSpec(
             task_type=TaskType.PROFILE_FUSION,
@@ -533,32 +453,20 @@ class ProfileMergeService:
         logger.info("[ProfileFusion] Step4-LLM: system_prompt=%d chars, user_prompt=%d chars, total=%d chars (%.1f KB)",
                    system_prompt_size, prompt_size, total_prompt_size, total_prompt_size / 1024)
         logger.info("[ProfileFusion] Step4-LLM: max_tokens=4096, temperature=0.3, latency_budget_ms=60000")
-        # 完整打印 prompt 用于调试
-        logger.info("[ProfileFusion] Step4-LLM: system_prompt 完整内容:\n%s", system_prompt)
-        logger.info("[ProfileFusion] Step4-LLM: user_prompt 完整内容:\n%s", prompt)
 
-        # 检查队列是否有等待任务（如果传入了线程池）
-        if not self._check_llm_queue_available():
-            llm_elapsed = time.time() - llm_start
-            error_msg = "LLM 服务当前负载过高，请稍后重试。如问题持续，请联系开发人员增加资源配置。"
-            logger.warning("[ProfileFusion] Step4-LLM: %s", error_msg)
-            result = self._fallback_fusion(profiles, collected)
-            result.fusion_strategy = "fallback_queue_full"
-            return result
-
+        # The owning GroupFusionService bounds this work with its executor and
+        # deadline. A queued sibling summary does not establish model overload.
         try:
             response = self._llm_gateway.generate(request)
             llm_elapsed = time.time() - llm_start
             logger.info("[ProfileFusion] Step4-LLM: ✅ LLM 响应完成: latency=%dms, 实际耗时=%.3fs",
                        response.latency_ms, llm_elapsed)
 
-            # 调试：打印响应内容
+            # 只记录大小，不将模型生成的资料写入日志。
             if response.raw_text:
                 raw_text_size = len(response.raw_text)
-                preview = response.raw_text[:500] if raw_text_size > 500 else response.raw_text
                 logger.info("[ProfileFusion] Step4-LLM: raw_text 大小: %d chars (%.1f KB)",
                            raw_text_size, raw_text_size / 1024)
-                logger.info("[ProfileFusion] Step4-LLM: raw_text 预览 (前500字符):\n%s...", preview)
             if response.structured_data:
                 logger.info("[ProfileFusion] Step4-LLM: structured_data 存在, keys=%s",
                            list(response.structured_data.keys()) if isinstance(response.structured_data, dict) else type(response.structured_data))
@@ -596,48 +504,37 @@ class ProfileMergeService:
         """构建专家信息字符串（用于 Prompt）"""
         parts = []
 
-        for i, profile in enumerate(profiles, 1):
+        for i, profile in enumerate(sorted(profiles, key=lambda p: p.worker_id), 1):
+            current = worker_profile_to_dict(profile)
             expert_parts = []
-            name = profile.display_name or profile.worker_id
+            name = current["display_name"]
             expert_parts.append(f"### 专家 {i}: {name}")
-
-            # soul.md
-            if profile.soul_md:
-                soul_preview = profile.soul_md[:800]
-                expert_parts.append(f"**核心身份(Soul)**:\n{soul_preview}")
-
-            # identity.md
-            identity = profile.contents.get("identity.md")
-            if identity:
-                identity_preview = identity[:500]
-                expert_parts.append(f"**身份(Identity)**:\n{identity_preview}")
-
-            # memory.md
-            memory = profile.contents.get("memory.md")
-            if memory:
-                memory_preview = memory[:500]
-                expert_parts.append(f"**经验(Memory)**:\n{memory_preview}")
-
-            # tools.md
-            tools = profile.contents.get("tools.md")
-            if tools:
-                tools_preview = tools[:500]
-                expert_parts.append(f"**工具(Tools)**:\n{tools_preview}")
-
-            # agents.md
-            agents = profile.contents.get("agents.md")
-            if agents:
-                agents_preview = agents[:500]
-                expert_parts.append(f"**工作空间(Agents)**:\n{agents_preview}")
-
-            # 技能
-            if profile.skill_sets:
-                skill_names = [s.name for s in profile.skill_sets[:10]]
-                expert_parts.append(f"**技能**: {', '.join(skill_names)}")
+            if current["description"]:
+                expert_parts.append(f"**描述**:\n{current['description']}")
+            if current["profile"]:
+                expert_parts.append(f"**能力画像**:\n{current['profile']}")
+            if current["skills"]:
+                skills = "\n".join(
+                    f"- {skill['name']}: {skill['description']}" for skill in current["skills"]
+                )
+                expert_parts.append(f"**技能**:\n{skills}")
 
             parts.append("\n".join(expert_parts))
 
         return "\n\n---\n\n".join(parts)
+
+    def _current_expert_profile(self, profile: WorkerProfileContent) -> ExpertProfile:
+        """Keep result fields compatible without reintroducing archived MD."""
+        current = worker_profile_to_dict(profile)
+        return ExpertProfile(
+            worker_id=profile.worker_id,
+            display_name=current["display_name"],
+            description=current["description"],
+            role=current["display_name"],
+            contents={"profile": current["profile"]} if current["profile"] else {},
+            skills=[skill["name"] for skill in current["skills"]],
+            metadata=dict(profile.metadata),
+        )
 
     def _parse_fusion_response(
         self,
@@ -645,8 +542,6 @@ class ProfileMergeService:
         profiles: list[WorkerProfileContent],
     ) -> FusedProfile:
         """解析 LLM 返回的结构化 JSON"""
-        from app.domain.models.profile_fusion import ExpertProfile
-
         participant_ids = [p.worker_id for p in profiles]
 
         # 解析 skills - 直接使用字符串列表
@@ -658,29 +553,7 @@ class ProfileMergeService:
             elif isinstance(s, dict) and "name" in s:
                 skills.append(s["name"])
 
-        # 构建专家 profile 列表（保存完整信息，用于后续引用）
-        expert_profiles = []
-        for profile in profiles:
-            expert = ExpertProfile(
-                worker_id=profile.worker_id,
-                display_name=profile.display_name,
-                description=profile.description,
-                role=profile.display_name,
-                # 核心 Markdown 内容
-                soul=profile.soul_md,
-                agents=profile.agents_md,
-                tools=profile.tools_md,
-                # 扩展内容（包含所有 .md 文件）
-                contents=dict(profile.contents) if profile.contents else {},
-                # 常用字段便于直接访问
-                identity=profile.contents.get("identity.md") if profile.contents else None,
-                memory=profile.contents.get("memory.md") if profile.contents else None,
-                # 技能
-                skills=[s.name for s in profile.skill_sets],
-                # 元数据
-                metadata=dict(profile.metadata) if profile.metadata else {},
-            )
-            expert_profiles.append(expert)
+        expert_profiles = [self._current_expert_profile(profile) for profile in profiles]
 
         # 解析 persona（新格式）或兼容旧格式
         persona = data.get("persona")
@@ -740,9 +613,7 @@ class ProfileMergeService:
         profiles: list[WorkerProfileContent],
         collected: dict,
     ) -> FusedProfile:
-        """降级融合策略：简单拼接"""
-        from app.domain.models.profile_fusion import ExpertProfile
-
+        """降级融合策略：拼接与模型使用相同的当前资料。"""
         participant_ids = [p.worker_id for p in profiles]
 
         # 生成名称
@@ -755,34 +626,8 @@ class ProfileMergeService:
         else:
             name = f"专家团队：{'+'.join(unique_names[:3])}等{len(unique_names)}位专家"
 
-        # 简单拼接各内容
-        soul_parts = [c[1] for c in collected.get("soul", [])]
-        identity_parts = [c[1] for c in collected.get("identity", [])]
-        memory_parts = [c[1] for c in collected.get("memory", [])]
-
-        # 合并 soul + identity 为 persona
-        persona_parts = []
-        if soul_parts:
-            persona_parts.append("## 核心身份定位\n" + "\n\n---\n\n".join(soul_parts))
-        if identity_parts:
-            persona_parts.append("## 身份与背景\n" + "\n\n---\n\n".join(identity_parts))
-        persona = "\n\n".join(persona_parts) if persona_parts else None
-
-        # 构建专家 profile 列表（用于后续引用）
-        expert_profiles = []
-        for profile in profiles:
-            expert = ExpertProfile(
-                worker_id=profile.worker_id,
-                display_name=profile.display_name,
-                role=profile.display_name,
-                soul=profile.soul_md,
-                identity=profile.contents.get("identity.md"),
-                memory=profile.contents.get("memory.md"),
-                tools=profile.contents.get("tools.md"),
-                agents=profile.contents.get("agents.md"),
-                skills=[s.name for s in profile.skill_sets],
-            )
-            expert_profiles.append(expert)
+        persona = self._build_experts_info(profiles, collected) or None
+        expert_profiles = [self._current_expert_profile(profile) for profile in profiles]
 
         return FusedProfile(
             fused_profile_id=f"fused-{uuid.uuid4().hex[:8]}",
@@ -790,7 +635,6 @@ class ProfileMergeService:
             name=name,
             description=f"由 {len(profiles)} 位专家能力融合而成的超级 BOT",
             persona=persona,
-            memory="\n\n---\n\n".join(memory_parts) if memory_parts else None,
             skills=self._merge_skills(profiles),
             expert_profiles=expert_profiles,
             participant_count=len(profiles),
@@ -831,21 +675,7 @@ class ProfileMergeService:
             elif isinstance(s, dict) and "name" in s:
                 skills.append(s["name"])
 
-        # 构建 expert_profiles
-        expert_profiles = []
-        for profile in profiles:
-            expert = ExpertProfile(
-                worker_id=profile.worker_id,
-                display_name=profile.display_name,
-                role=profile.display_name,
-                soul=profile.soul_md,
-                identity=profile.contents.get("identity.md") if profile.contents else None,
-                memory=profile.contents.get("memory.md") if profile.contents else None,
-                tools=profile.contents.get("tools.md") if profile.contents else None,
-                agents=profile.contents.get("agents.md") if profile.contents else None,
-                skills=[s.name for s in profile.skill_sets] if profile.skill_sets else [],
-            )
-            expert_profiles.append(expert)
+        expert_profiles = [self._current_expert_profile(profile) for profile in profiles]
 
         # 解析 persona（新格式）或兼容旧格式
         persona = fuse_detail.get("persona")

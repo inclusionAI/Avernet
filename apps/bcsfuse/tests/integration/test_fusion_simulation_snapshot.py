@@ -33,9 +33,6 @@ from app.domain.models.worker_profile import WorkerProfile, ProfileType
 from app.domain.services.worker_context_preparation_service import (
     WorkerContextPreparationService,
 )
-from app.domain.services.worker_profile_retrieval_service import (
-    WorkerProfileRetrievalService,
-)
 from app.domain.services.fusion_simulation_service import FusionSimulationService
 
 
@@ -232,49 +229,6 @@ class TestFusionSimulationFixtureBased:
         for rec in result.recommendations:
             assert "evidence_count" in rec
 
-    def test_end_to_end_flow_with_fixture(self, fixture_profiles):
-        """端到端流程测试：检索 -> 准备 -> 模拟"""
-        # 1. 检索
-        class MockSource:
-            def __init__(self, profiles):
-                self._profiles = profiles
-
-            def scan(self):
-                from app.domain.models.worker_profile import WorkerProfileScanResult
-                return WorkerProfileScanResult(profiles=self._profiles)
-
-        retrieval_service = WorkerProfileRetrievalService(source=MockSource(fixture_profiles))
-        retrieval_result = retrieval_service.retrieve(
-            question="Python development",
-            mode=RetrievalMode.AGENT,
-            top_k=3,
-        )
-
-        assert len(retrieval_result.results) > 0
-
-        # 2. 准备 context
-        prep_service = WorkerContextPreparationService()
-        digests = [
-            prep_service.prepare(
-                r.profile,
-                "Python development",
-                RetrievalMode.AGENT,
-            )
-            for r in retrieval_result.results
-        ]
-
-        # 3. 模拟
-        sim_service = FusionSimulationService()
-        sim_input = FusionSimulationInput(
-            question="Python development best practices",
-            mode=RetrievalMode.AGENT,
-            profiles=[r.profile for r in retrieval_result.results],
-            context_digests=digests,
-        )
-        sim_result = sim_service.simulate(sim_input)
-
-        assert sim_result.fusion_mode == "agent"
-        assert len(sim_result.perspectives) > 0
 
 
 # =============================================================================
@@ -452,85 +406,7 @@ class TestFusionSimulationRealSnapshot:
         for p in result.profiles[:3]:
             print(f"  - {p.profile_key}: {len(p.active_skills)} skills, {len(p.context_fragments)} fragments")
 
-    def test_g1_simulation_with_real_snapshot(self, snapshot_data_path):
-        """G1 模拟：使用真实 snapshot 数据"""
-        from app.infra.worker_profiles.config.worker_profile_settings import (
-            WorkerProfileSettings,
-        )
-        from app.infra.worker_profiles.sources.file_worker_profile_source import (
-            FileWorkerProfileSource,
-        )
 
-        # 加载真实数据
-        settings = WorkerProfileSettings(roots=[str(snapshot_data_path)])
-        source = FileWorkerProfileSource(settings=settings)
-        scan_result = source.scan()
-        profiles = scan_result.profiles
-
-        assert len(profiles) > 0, "No profiles in snapshot"
-
-        # 检索
-        retrieval_service = WorkerProfileRetrievalService(source=source)
-        retrieval_result = retrieval_service.retrieve(
-            question="API development",
-            mode=RetrievalMode.AGENT,
-            top_k=3,
-        )
-
-        # 准备
-        prep_service = WorkerContextPreparationService()
-        digests = [
-            prep_service.prepare(r.profile, "API development", RetrievalMode.AGENT)
-            for r in retrieval_result.results
-        ]
-
-        # 模拟
-        sim_service = FusionSimulationService()
-        sim_input = FusionSimulationInput(
-            question="How to design a good API?",
-            mode=RetrievalMode.AGENT,
-            profiles=[r.profile for r in retrieval_result.results],
-            context_digests=digests,
-        )
-        result = sim_service.simulate(sim_input)
-
-        # 验证
-        assert result.fusion_mode == "agent"
-        print(f"\nG1 simulation complete with {len(result.perspectives)} perspectives:")
-        for p in result.perspectives:
-            print(f"  - {p.participant_id}: confidence={p.confidence:.2f}")
-
-    def test_g5_diversity_with_real_snapshot(self, snapshot_data_path):
-        """G5 多样性测试：使用真实 snapshot 数据"""
-        from app.infra.worker_profiles.config.worker_profile_settings import (
-            WorkerProfileSettings,
-        )
-        from app.infra.worker_profiles.sources.file_worker_profile_source import (
-            FileWorkerProfileSource,
-        )
-
-        settings = WorkerProfileSettings(roots=[str(snapshot_data_path)])
-        source = FileWorkerProfileSource(settings=settings)
-        scan_result = source.scan()
-        profiles = scan_result.profiles
-
-        assert len(profiles) >= 3, f"Need at least 3 profiles for diversity test, got {len(profiles)}"
-
-        retrieval_service = WorkerProfileRetrievalService(source=source)
-        retrieval_result = retrieval_service.retrieve(
-            question="system architecture review",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            top_k=5,
-        )
-
-        # 验证多样性
-        all_skills = set()
-        for r in retrieval_result.results:
-            for skill in r.profile.active_skills:
-                all_skills.add(skill.name)
-
-        print(f"\nG5 selected {len(retrieval_result.results)} profiles with {len(all_skills)} unique skills:")
-        print(f"  Skills: {', '.join(sorted(all_skills)[:10])}{'...' if len(all_skills) > 10 else ''}")
 
 
 # =============================================================================

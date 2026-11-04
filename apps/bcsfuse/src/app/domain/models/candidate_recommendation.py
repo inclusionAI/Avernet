@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 
 from app.domain.models.domain_coverage import DomainCoverage
 from app.domain.models.profile_match_score import ProfileMatchScore
@@ -45,7 +45,7 @@ class CandidateRecommendation(BaseModel):
     Attributes:
         profile_key: Profile 唯一键
         worker_id: Worker ID (staff_id)
-        score: 推荐分数 (0-1)
+        score: 检索或模型原始有限分数
         reasons: 推荐理由列表
         domain: 推断的领域
         domain_confidence: 领域推断置信度 (0-1)
@@ -66,11 +66,7 @@ class CandidateRecommendation(BaseModel):
     )
 
     # 推荐分数
-    score: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="推荐分数 (0-1)",
-    )
+    score: FiniteFloat = Field(description="检索或模型原始分数，有限数值")
 
     # 推荐理由（支持字符串或结构化对象）
     reasons: list[Union[str, dict[str, Any]]] = Field(
