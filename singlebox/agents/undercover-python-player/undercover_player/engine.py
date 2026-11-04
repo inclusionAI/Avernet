@@ -87,6 +87,8 @@ class PeterPlayerEngine:
         self._request_seq = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._connect_fut: Optional[asyncio.Future] = None
+        # connect 响应之前到达的服务端请求；握手成功后按原顺序派发。
+        self._pre_handshake_requests: list[dict] = []
         self._closed = asyncio.Event()
         self._stop = False
 
@@ -171,6 +173,8 @@ class PeterPlayerEngine:
         此刻 ``_read_loop`` 还没启动，不能走 ``_request()``：那个 future 只有
         ``_read_loop`` 里的 ``_handle_frame`` 才能完成，先等 ACK 会死锁到超时。
         """
+        # 每次连接只派发本连接缓存的请求，避免失败握手留下跨连接任务。
+        self._pre_handshake_requests = []
         params: dict[str, Any] = {"protocol_version": PROTOCOL_VERSION,
                                   "client_kind": self.client_kind}
         if self._token:
@@ -208,6 +212,12 @@ class PeterPlayerEngine:
                 self.bot_uuid, _http_base(self.ws_url), self.bot_uuid, self.bot_name,
             )
 
+        # _open_ws 返回前 self._ws 尚未赋值；ACK 需要在这里先绑定当前连接。
+        self._ws = ws
+        buffered, self._pre_handshake_requests = self._pre_handshake_requests, []
+        for frame in buffered:
+            await self._handle_frame(frame)
+
 
     async def _await_response(self, ws, req_id: str, timeout: float = 30) -> dict:
         """在启动读循环前，直接读取与 ``req_id`` 匹配的响应帧。"""
@@ -225,7 +235,11 @@ class PeterPlayerEngine:
                 continue
             if frame.get("type") == "res" and frame.get("id") == req_id:
                 return frame
-            # 握手阶段服务端不应先派请求；记录后继续等握手回包。
+            if frame.get("type") == "req":
+                # BCS 在 send_ok 之前就公布连接，chat.send 可能先到这里。
+                self._pre_handshake_requests.append(frame)
+                log.debug("buffer pre-handshake request: %s", frame.get("method"))
+                continue
             log.debug("ignore pre-handshake frame: %.120s", raw)
 
     # ------------------------------------------------------------------ #

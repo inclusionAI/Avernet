@@ -45,7 +45,7 @@ def _public_histories(task: NodeTask) -> str:
     return "\n".join(parts)
 
 
-def _history_speeches(text: str) -> list[tuple[int, str]]:
+def _decode_history(text: str) -> tuple[list[tuple[int, str]], bool]:
     """解码主持人 run.input 里的结构化 history。
 
     `undercover.py::prepare_vote_run` 把 `public_history()` 直接放进
@@ -55,25 +55,30 @@ def _history_speeches(text: str) -> list[tuple[int, str]]:
                       "speeches": [{"seat": 1, "player": "1号 阿和",
                                     "text": "要通电"}]}]}
     这里必须按对象读取 seat/text，不能把整个 JSON 当普通文本。
+
+    返回 ``(speeches, decoded)``：``decoded`` 表示这段文本确实是结构化
+    history（哪怕是空列表），调用方据此跳过 legacy 文本正则，避免把 JSON
+    里的发言正文再解析一遍、凭空造出一条发言。
     """
     if not text or "{" not in text:
-        return []
+        return [], False
     data = None
     try:
         data = json.loads(text)
     except (ValueError, TypeError):
         # [Input] 正常就是纯 JSON；兼容前后带说明文字的输入。
         start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                data = json.loads(text[start:end + 1])
-            except (ValueError, TypeError):
-                return []
+        if start == -1 or end <= start:
+            return [], False
+        try:
+            data = json.loads(text[start:end + 1])
+        except (ValueError, TypeError):
+            return [], False
     if not isinstance(data, dict):
-        return []
+        return [], False
     history = data.get("history")
     if not isinstance(history, list):
-        return []
+        return [], False
     out: list[tuple[int, str]] = []
     for entry in history:
         if not isinstance(entry, dict):
@@ -92,7 +97,19 @@ def _history_speeches(text: str) -> list[tuple[int, str]]:
                 continue
             body = re.sub(r"^\d+\s*号\s*[:：]\s*", "", body.strip())
             out.append((seat, body))
-    return out
+    return out, True
+
+
+def _history_speeches(text: str) -> list[tuple[int, str]]:
+    return _decode_history(text)[0]
+
+
+# 遗言任务（cmd_render_ping）里的 history_block 行：
+#     第1轮 1号 阿和：「要通电」
+#     第1轮 PK 2号 老陈：「亮」
+_EULOGY_HISTORY_RE = re.compile(
+    r"第\s*\d+\s*轮(?:\s*PK)?\s*(\d+)\s*号\s*[^\s：:「]+：「(.*?)」"
+)
 
 
 
@@ -112,22 +129,19 @@ class UndercoverPlayer:
         out: list[tuple[int, str]] = []
         for text in (task.input, task.upstream_outputs):
             # 真实 run.input 的 JSON history（referee 生成）
-            out.extend(_history_speeches(text))
-            # 形如 [speak_1]\n内容  或 [speak_1]\n1号：内容
-            for m in re.finditer(r"\[speak_(\d+)\]\s*\n(.*?)(?=\n\[|$)", text, re.S):
-                seat = int(m.group(1))
-                body = m.group(2).strip()
-                if not body:
-                    continue
-                # 去掉可能的 "N号：" 前缀
-                body = re.sub(r"^\d+\s*号\s*[:：]\s*", "", body)
-                out.append((seat, body))
-            # 形如 3号：xxx
-            for m in re.finditer(r"(\d+)\s*号\s*[:：]\s*(.+)", text):
-                seat = int(m.group(1))
+            speeches, decoded = _decode_history(text)
+            out.extend(speeches)
+            if decoded:
+                # JSON 里的发言正文已经按 seat/text 读过；再跑 legacy 正则会把
+                # 「3号：亮。」这类正文当成一条新发言，凭空归给 3 号。
+                continue
+            out.extend(self._legacy_speeches(text))
+        # 遗言/预备是纯文本 bcs_assign_task：历史只嵌在 instruction 里。
+        if task.phase == NodePhase.WILL or "全场说过的话" in task.instruction:
+            for m in _EULOGY_HISTORY_RE.finditer(task.instruction):
                 body = m.group(2).strip()
                 if body:
-                    out.append((seat, body))
+                    out.append((int(m.group(1)), body))
         # 同一段话可能同时被 JSON 和文本正则命中：按出现顺序去重。
         deduped: list[tuple[int, str]] = []
         seen: set[tuple[int, str]] = set()
@@ -138,14 +152,54 @@ class UndercoverPlayer:
             deduped.append(entry)
         return deduped
 
+    @staticmethod
+    def _legacy_speeches(text: str) -> list[tuple[int, str]]:
+        out: list[tuple[int, str]] = []
+        # 形如 [speak_1]\n内容  或 [speak_1]\n1号：内容
+        for m in re.finditer(r"\[speak_(\d+)\]\s*\n(.*?)(?=\n\[|$)", text, re.S):
+            seat = int(m.group(1))
+            body = m.group(2).strip()
+            if not body:
+                continue
+            # 去掉可能的 "N号：" 前缀
+            body = re.sub(r"^\d+\s*号\s*[:：]\s*", "", body)
+            out.append((seat, body))
+        # 形如 3号：xxx
+        for m in re.finditer(r"(\d+)\s*号\s*[:：]\s*(.+)", text):
+            seat = int(m.group(1))
+            body = m.group(2).strip()
+            if body:
+                out.append((seat, body))
+        return out
+
+    def _eligible_targets(self, task: NodeTask) -> set[int] | None:
+        """当前任务允许投的席位；None 表示任务没给出任何约束。
+
+        PK 任务的「可以投：…」只列本次 PK 名单，[Input].alive 列的是存活席位：
+        两者都要遵守，且自己永远不能投。历史发言人本身不等于合法目标——他可能
+        已经出局，也可能不在本次 PK 名单里。
+        """
+        pools: list[set[int]] = []
+        if task.allowed_targets:
+            pools.append(set(task.allowed_targets))
+        if task.alive_seats:
+            pools.append(set(task.alive_seats))
+        if not pools:
+            return None
+        eligible = set(pools[0])
+        for pool in pools[1:]:
+            eligible &= pool
+        if task.seat is not None:
+            eligible.discard(task.seat)
+        return eligible
+
     def _candidates(self, task: NodeTask) -> list[int]:
         """合法投票目标：出现过发言、可投、且不是自己的座位。"""
         seen = {seat for seat, _ in self._speaks(task)}
-        if task.allowed_targets:
-            seen &= set(task.allowed_targets)
-        elif task.alive_seats:
-            seen &= set(task.alive_seats)
-        if task.seat in seen:
+        eligible = self._eligible_targets(task)
+        if eligible is not None:
+            seen &= eligible
+        if task.seat is not None:
             seen.discard(task.seat)
         return sorted(seen)
 
@@ -175,28 +229,34 @@ class UndercoverPlayer:
         """返回「我投N号」/「我弃权」/ None(无票面)。"""
         need_pk = task.is_pk
         allow_abs = task.allow_abstain and not need_pk
-        cands = self._candidates(task)
-        if not cands and allow_abs:
-            return "我弃权"
-        if not cands and not allow_abs:
-            # PK 必须投，但无可投合法目标 —— 主持人脚本会把无票当作超时，
-            # 此时回退投给 [Input]/[Upstream] 名字里提到的合法存活号。
-            return "我弃权"  # 但 PK 禁止弃权；由 validate 转成错误处理
+        candidate_set = self._candidates(task)
+        if not candidate_set:
+            if allow_abs:
+                return "我弃权"
+            # PK 禁止弃权：不能拿「我弃权」蒙混过关（会绕过 validate_vote，
+            # 引擎原样发布后被裁判判「PK 禁止弃权」）。从任务给出的合法
+            # 非自身席位里兜底选一个。
+            eligible = self._eligible_targets(task)
+            if not eligible:
+                return None
+            target = sorted(eligible)[0]
+            ok, _reason, ballot = validate_vote(target, False, eligible, task.seat)
+            return ballot if ok else None
         # 选一个相对最可疑：简单规则 — 话最短 + 最后一个说话偏嫌疑
         speaks = self._speaks(task)
         if speaks:
             # 最短发言者
-            shortest = min((s for s in speaks if s[0] in cands),
+            shortest = min((s for s in speaks if s[0] in candidate_set),
                            key=lambda x: len(x[1]), default=None)
-            target = shortest[0] if shortest else cands[0]
+            target = shortest[0] if shortest else candidate_set[0]
         else:
-            target = cands[0]
+            target = candidate_set[0]
         if not allow_abs:
             # PK 禁止弃权：一定给票号
-            target = target if target not in (task.seat,) else (cands[0] if cands else None)
+            target = target if target not in (task.seat,) else (candidate_set[0] if candidate_set else None)
             if target is None:
                 return None
-        ok, reason, ballot = validate_vote(target, allow_abs, set(cands), task.seat)
+        ok, reason, ballot = validate_vote(target, allow_abs, set(candidate_set), task.seat)
         if not ok:
             if not allow_abs and ballot:
                 return ballot
@@ -213,8 +273,12 @@ class UndercoverPlayer:
         if task.phase == NodePhase.WILL:
             # 遗言：一句表达怀疑，引用一处原话，不编造，不泄词
             speaks = self._speaks(task)
-            target = speaks[-1] if speaks else None
-            if target and target[0] != task.seat:
+            target = None
+            for entry in reversed(speaks):
+                if task.seat is None or entry[0] != task.seat:
+                    target = entry
+                    break
+            if target:
                 return f"我比较在意{target[0]}号那句「{target[1][:12]}」。"
             return "我还没想好，先投一票看看。"
         # SPEECH / PREP / 默认

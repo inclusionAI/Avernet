@@ -155,6 +155,23 @@ def _extract_allowed_targets(instruction: str) -> tuple[int, ...]:
     return tuple(sorted({int(n) for n in re.findall(r"(\d+)\s*号", m.group(1))}))
 
 
+def _split_sections(text: str) -> dict[str, str]:
+    """按独立行上的固定节段标题切分，忽略 JSON 字符串里的同名文本。"""
+    header_re = re.compile(
+        r"^[ \t]*(\[(?:Input|Upstream Outputs|Instruction)\])[ \t]*\r?$",
+        re.MULTILINE,
+    )
+    headers = list(header_re.finditer(text))
+    sections: dict[str, str] = {}
+    for index, header in enumerate(headers):
+        start = header.end()
+        if text[start:start + 1] == "\n":
+            start += 1
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        sections[header.group(1)] = text[start:end].strip()
+    return sections
+
+
 def parse_node_task(content: str) -> NodeTask:
     """把 BCS 下发的 chat.send message.content 解析成结构化 NodeTask。
 
@@ -167,39 +184,14 @@ def parse_node_task(content: str) -> NodeTask:
         display_m = re.search(r"display_name:\s*(.+)", rest)
         node_id = node_id_m.group(1) if node_id_m else "unknown"
         display_name = display_m.group(1).strip() if display_m else ""
-
-        def _section(tag: str) -> str:
-            # 只在「行首 + 紧跟的 [Tag]」处切分，避免 instruction 正文里
-            # 提到 "[Input]/[Upstream Outputs]/[Instruction]" 被误截。
-            if tag not in rest:
-                return ""
-            start = rest.index(tag) + len(tag)
-            follow = rest[start:]
-            end = len(follow)
-            for t2 in ("[Upstream Outputs]", "[Instruction]"):
-                # 只匹配出现在开头的完整段头（行首、前有空行，且后跟换行）
-                idx = -1
-                search_from = 0
-                while True:
-                    i = follow.find(t2, search_from)
-                    if i == -1:
-                        break
-                    before = follow[i - 1] if i > 0 else "\n"
-                    # 段头是 "[Upstream Outputs]\n..." 一整行
-                    if before == "\n":
-                        idx = i
-                        break
-                    search_from = i + 1
-                if idx != -1 and idx < end:
-                    end = idx
-            return follow[:end].strip()
+        sections = _split_sections(rest)
 
         task = NodeTask(
             node_id=node_id,
             display_name=display_name,
-            input=_section("[Input]"),
-            upstream_outputs=_section("[Upstream Outputs]"),
-            instruction=_section("[Instruction]"),
+            input=sections.get("[Input]", ""),
+            upstream_outputs=sections.get("[Upstream Outputs]", ""),
+            instruction=sections.get("[Instruction]", ""),
             raw_content=content,
         )
     else:
