@@ -193,6 +193,20 @@ export function ComposerCapabilitiesMenu({
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   const [capabilityOpen, setCapabilityOpen] = useState(false);
+  // 已激活能力集入口（2026-11-04 需求）：挂载预载一次，入口初见即显示真实激活集名
+  // 而非默认占位（load 自带 in-flight 去重；气泡打开时的重拉由 onOpenChange 既有逻辑承载）。
+  const capabilitySetsRef = useRef(capabilitySets);
+  useEffect(() => {
+    capabilitySetsRef.current?.load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载预载，引用变化不重复拉取。
+  }, []);
+  // 入口文案（2026-11-04 需求）：显示真实激活集名称；多集时首个名称 + 个数徽标；
+  // 未加载/空回落默认「通用协作能力」（保持既有可见入口不消失）。
+  const activeSets = capabilitySets?.sets ?? [];
+  const capabilitySetName = activeSets.length ? activeSets[0].name : '通用协作能力';
+  const capabilityEntryLabel =
+    activeSets.length > 1 ? `${capabilitySetName} 等 ${activeSets.length} 个能力集` : capabilitySetName;
+  const activeSetTitle = activeSets.map((set) => set.name).join('、');
   const pickWorkflow = (w: WorkflowPanelItem) => {
     onWorkflowSelected?.(w);
     close();
@@ -267,12 +281,26 @@ export function ComposerCapabilitiesMenu({
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
-                  aria-label="通用协作能力"
+                  aria-label={capabilityEntryLabel}
                   aria-haspopup="menu"
                   aria-expanded={capabilityOpen}
                   className="h-7 gap-0 px-0"
                 >
-                  <span className="text-[13px] font-normal leading-none text-foreground">通用协作能力</span>
+                  {/* 真实名称可能较长：截断保护 + title 悬停全显（多集名称列表）。 */}
+                  <span
+                    className="max-w-40 truncate text-[13px] font-normal leading-none text-foreground"
+                    title={activeSetTitle}
+                  >
+                    {capabilitySetName}
+                  </span>
+                  {activeSets.length > 1 && (
+                    <span
+                      aria-hidden="true"
+                      className="ml-1 rounded bg-muted px-1 text-[10px] font-normal leading-4 text-muted-foreground"
+                    >
+                      {activeSets.length}
+                    </span>
+                  )}
                   <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
                 </Button>
               </PopoverTrigger>
