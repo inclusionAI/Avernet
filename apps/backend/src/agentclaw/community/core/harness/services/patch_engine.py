@@ -174,23 +174,31 @@ class PatchEngine(PatchEngineProtocol):
 
         # 2. Apply each operation
         for op in operations:
-            if op.op == "update_md":
-                dst_content = op.detail.get("dst_content") if op.detail else None
-                if dst_content:
-                    doc = MarkdownDocument.parse(dst_content, bot_id=bot_id, file_type=op.target)
-                    await self._bot_profile.write_file(
-                        entity_type, entity_id, bot_id, op.target, doc, operator_id,
-                        publish_id=publish_id,
-                    )
-            elif op.op == "update_file":
-                dst_content = op.detail.get("dst_content") if op.detail else None
-                if dst_content:
-                    await self._write_file_content(
-                        op, dst_content, entity_type, entity_id, bot_id, operator_id, publish_id,
-                    )
-            else:
-                # TODO: 预留其他操作类型的口子（如 rewrite_section, insert_after 等）
-                raise PatchEngineError("apply", f"Unsupported operation: {op.op}")
+            try:
+                if op.op == "update_md":
+                    dst_content = op.detail.get("dst_content") if op.detail else None
+                    if dst_content:
+                        doc = MarkdownDocument.parse(dst_content, bot_id=bot_id, file_type=op.target)
+                        await self._bot_profile.write_file(
+                            entity_type, entity_id, bot_id, op.target, doc, operator_id,
+                            publish_id=publish_id,
+                        )
+                elif op.op == "update_file":
+                    dst_content = op.detail.get("dst_content") if op.detail else None
+                    if dst_content:
+                        await self._write_file_content(
+                            op, dst_content, entity_type, entity_id, bot_id, operator_id, publish_id,
+                        )
+                else:
+                    # TODO: 预留其他操作类型的口子（如 rewrite_section, insert_after 等）
+                    raise PatchEngineError("apply", f"Unsupported operation: {op.op}")
+            except PatchEngineError:
+                raise
+            except Exception as exc:
+                raise PatchEngineError(
+                    "apply",
+                    f"Device write failed for {op.target}: {exc}",
+                ) from exc
 
         record.status = PatchStatus.APPLIED
         record.applied_by = operator_id
