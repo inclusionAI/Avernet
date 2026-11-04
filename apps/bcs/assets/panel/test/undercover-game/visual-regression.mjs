@@ -36,6 +36,22 @@ await act(async()=>{
 assert.ok(document.querySelector('[aria-label="游戏结束"]'),'?mode=finished must render the club finale dialog');
 assert.match(document.getElementById('root').textContent,/平民阵营获胜|平民胜利/,'finished alias uses the completed finale fixture');
 previewDom.window.close();
-console.log('Visual regression baseline passed: deterministic wide/medium/narrow geometry, non-overlap, appearance, output priority, short Dock, reduced motion, and finished-preview alias.');
+
+// Observer-only speech previews must not turn the completed human speech into an action.
+const bubblesDom=new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>',{url:'http://local.test/?width=560&height=950&mode=bubbles&bubbleSeat=2&theme=club'});
+Object.assign(globalThis,{window:bubblesDom.window,document:bubblesDom.window.document,location:bubblesDom.window.location,HTMLElement:bubblesDom.window.HTMLElement,Node:bubblesDom.window.Node,HTMLTextAreaElement:bubblesDom.window.HTMLTextAreaElement,HTMLInputElement:bubblesDom.window.HTMLInputElement,getComputedStyle:bubblesDom.window.getComputedStyle,IS_REACT_ACT_ENVIRONMENT:true});
+HTMLElement.prototype.attachEvent=function(){};HTMLElement.prototype.detachEvent=function(){};
+globalThis.ResizeObserver=class{observe(){}disconnect(){}};window.ResizeObserver=globalThis.ResizeObserver;
+const bubblesModule={exports:{}};
+await act(async()=>{
+ new Function('require','module','exports',previewCompiled)(previewRequire,bubblesModule,bubblesModule.exports);
+ await new Promise((resolve)=>setTimeout(resolve,25));
+});
+assert.equal(document.querySelector('[data-actor-id="human"]')?.getAttribute('data-player-state'),'completed_speech','bubble preview keeps seat 2 speech displayable');
+assert.match(document.querySelector('[data-region="speech-bubble"]')?.textContent??'',/最新 · 2号 你/,'bubbleSeat=2 selects the completed seat 2 speech');
+assert.notEqual(document.querySelector('[data-panel-viewport]')?.getAttribute('data-action-active'),'true','observer-only bubble preview must not activate the action dock');
+assert.equal(document.querySelector('[data-region="action-dock"] form'),null,'observer-only bubble preview must not render an action form');
+bubblesDom.window.close();
+console.log('Visual regression baseline passed: deterministic wide/medium/narrow geometry, non-overlap, appearance, output priority, short Dock, reduced motion, finished-preview alias, and observer-only speech preview.');
 
 await import('./speech-layout.mjs');

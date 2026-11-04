@@ -112,7 +112,7 @@ globalThis.fetch = async (url, init) => {
     });
   }
   if (path.endsWith('/pending-human-nodes')) {
-    if (mode === 'observe' || mode === 'finished' || finale || submitted || mode === 'eliminated') return response([]);
+    if (mode === 'observe' || mode === 'finished' || finale || submitted || mode === 'eliminated' || mode === 'bubbles' || mode === 'markers') return response([]);
     const action = voting ? 'vote' : 'speech';
     const instruction = '[UNDERCOVER_UI_CONTEXT_V1]' + JSON.stringify(
       action === 'vote'
