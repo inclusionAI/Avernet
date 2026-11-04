@@ -310,6 +310,26 @@ try {
   assert.doesNotMatch(text(hh), /本轮计票完成/, 'host text not rendered when hidden');
   await act(async () => hh.unmount());
 
+  let hostRefreshFails = false;
+  const hostFetch = fetchFor([hostSnapshot()], []);
+  globalThis.fetch = async (url, init = {}) => {
+    const path = new URL(url, 'http://local.test').pathname;
+    if (hostRefreshFails && path.endsWith('/graph')) return response({ message: 'refresh unavailable' }, 503);
+    return hostFetch(url, init);
+  };
+  let staleHost;
+  await act(async () => { staleHost = mount(hostParams); await settle(8); });
+  await act(async () => {
+    staleHost.render({ ...hostParams, display: { showHostOutput: false } });
+    await settle(8);
+  });
+  hostRefreshFails = true;
+  await act(async () => { button(staleHost, '刷新').click(); await settle(8); });
+  assert.match(text(staleHost), /刷新失败/, 'stale host fixture retained its last successful snapshot');
+  assert.equal(staleHost.container.querySelector('[data-region="ops-host-broadcast"]'), null, 'stale host content honors the current showHostOutput=false');
+  assert.doesNotMatch(text(staleHost), /本轮计票完成/, 'failed refresh cannot reveal cached host text');
+  await act(async () => staleHost.unmount());
+
   // 4c) Accumulated public speech history stays reachable in the Ops view.
   const historyParams = {
     ...voteParams,
@@ -424,6 +444,33 @@ try {
     await act(async () => { button(conflicted, '刷新').click(); await settle(8); });
     assert.ok(conflicted.container.querySelector('form'), 'a successful refresh revalidates and unlocks the pending action');
     await act(async () => conflicted.unmount());
+  }
+
+  // 4f2) Recovery delivery is single-flight and its footer control stays disabled while pending.
+  {
+    const recoveryActions = [];
+    let releaseRecovery;
+    const delivery = new Promise((resolve) => { releaseRecovery = resolve; });
+    globalThis.fetch = fetchFor([snapshot({ run: { run_id: 'ops-run', status: 'running' }, nodes: [] }, [])], []);
+    let recovering;
+    await act(async () => {
+      recovering = mount({ ...base, onAction: (action) => { recoveryActions.push(action); return delivery; } });
+      await settle(8);
+    });
+    const recoveryButton = button(recovering, '卡住了？告诉主持人');
+    await act(async () => {
+      recoveryButton.click();
+      recoveryButton.click();
+      await settle();
+    });
+    assert.deepEqual(recoveryActions, [{ type: 'send_message', content: '卡住了' }], 'rapid confirmation sends one recovery request');
+    assert.equal(recoveryButton.disabled, true, 'recovery button is disabled during delivery');
+    assert.match(recoveryButton.textContent, /正在通知/);
+    await act(async () => { recoveryButton.click(); await settle(); });
+    assert.equal(recoveryActions.length, 1, 'pending delivery cannot be duplicated');
+    await act(async () => { releaseRecovery(); await settle(8); });
+    assert.equal(recoveryButton.disabled, false, 'recovery button unlocks after delivery settles');
+    await act(async () => recovering.unmount());
   }
 
   // 4g) A late finale suppresses the pending snapshot from the earlier parallel reads.

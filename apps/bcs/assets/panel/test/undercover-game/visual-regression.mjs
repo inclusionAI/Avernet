@@ -2,6 +2,8 @@ import { sixPlayerFixtures } from './fixtures/six-player.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { JSDOM } from 'jsdom';
+import ts from 'typescript';
 const require=createRequire(import.meta.url);const api=require('../../dist/index.umd.js');
 const baseline=JSON.parse(readFileSync(new URL('./fixtures/visual-baseline.json',import.meta.url),'utf8'));
 assert.deepEqual(Object.keys(sixPlayerFixtures),['wideSpeaking','mediumHumanSpeech','mediumVoting','narrowRoster','laterRoundElimination','shortHeightDock','reducedMotion']);
@@ -12,6 +14,28 @@ assert.equal(api.roomComposition(baseline.narrow.width),'narrow');assert.equal(a
 const stable=api.assignBotAppearances(ids);assert.deepEqual(stable,api.assignBotAppearances(ids));assert.equal(api.botAppearanceIndex('bot-a'),api.botAppearanceIndex('bot-a'));for(let i=1;i<ids.length;i++)assert.notEqual(stable[ids[i-1]],stable[ids[i]],'adjacent variants should differ');
 const actors=[{actor:{actorId:'a'},kind:'player',state:'completed_speech',latestOutput:{sequence:1},outputHistory:[],publicHistory:[]},{actor:{actorId:'b'},kind:'player',state:'completed_speech',latestOutput:{sequence:2},outputHistory:[],publicHistory:[]},{actor:{actorId:'c'},kind:'player',state:'active_speech',latestOutput:{sequence:0},outputHistory:[],publicHistory:[]}];assert.equal(api.primaryOutputActor(actors),'c');actors[2].latestOutput=undefined;assert.equal(api.primaryOutputActor(actors),'b');
 assert.equal(baseline.shortHeight.dockFooter,'visible');assert.equal(baseline.reducedMotion.staticMarkers,true);
-console.log('Visual regression baseline passed: deterministic wide/medium/narrow geometry, non-overlap, appearance, output priority, short Dock, and reduced motion.');
+
+// The documented club-theme finale URL must render the completed preview, not a running graph.
+const previewSource=readFileSync(new URL('./visual-preview.tsx',import.meta.url),'utf8');
+const previewCompiled=ts.transpileModule(previewSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const previewDom=new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>',{url:'http://local.test/?mode=finished&theme=club'});
+Object.assign(globalThis,{window:previewDom.window,document:previewDom.window.document,location:previewDom.window.location,HTMLElement:previewDom.window.HTMLElement,Node:previewDom.window.Node,HTMLTextAreaElement:previewDom.window.HTMLTextAreaElement,HTMLInputElement:previewDom.window.HTMLInputElement,getComputedStyle:previewDom.window.getComputedStyle,IS_REACT_ACT_ENVIRONMENT:true});
+HTMLElement.prototype.attachEvent=function(){};HTMLElement.prototype.detachEvent=function(){};
+globalThis.ResizeObserver=class{observe(){}disconnect(){}};window.ResizeObserver=globalThis.ResizeObserver;
+const previewRequire=(id)=>{
+ if(id==='../../src/undercover-game/UndercoverGamePanel')return{__esModule:true,default:api.UndercoverGamePanel};
+ if(id==='../../src/undercover-game/themes/ops')return{UndercoverGameOpsPanel:api.UndercoverGameOpsPanel};
+ return require(id);
+};
+const {act}=await import('react');
+const previewModule={exports:{}};
+await act(async()=>{
+ new Function('require','module','exports',previewCompiled)(previewRequire,previewModule,previewModule.exports);
+ await new Promise((resolve)=>setTimeout(resolve,25));
+});
+assert.ok(document.querySelector('[aria-label="游戏结束"]'),'?mode=finished must render the club finale dialog');
+assert.match(document.getElementById('root').textContent,/平民阵营获胜|平民胜利/,'finished alias uses the completed finale fixture');
+previewDom.window.close();
+console.log('Visual regression baseline passed: deterministic wide/medium/narrow geometry, non-overlap, appearance, output priority, short Dock, reduced motion, and finished-preview alias.');
 
 await import('./speech-layout.mjs');

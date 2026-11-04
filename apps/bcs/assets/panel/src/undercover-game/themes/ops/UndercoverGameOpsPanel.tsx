@@ -384,8 +384,8 @@ function VoteTally({ model, palette }: { model: UndercoverGameViewModel; palette
 /* ------------------------------------------------------------------ *
  *  Host public broadcasts
  * ------------------------------------------------------------------ */
-function HostBroadcast({ model, palette }: { model: UndercoverGameViewModel; palette: FlavorPalette }) {
-  if (model.params.display?.showHostOutput === false) return null;
+function HostBroadcast({ model, palette, showHostOutput }: { model: UndercoverGameViewModel; palette: FlavorPalette; showHostOutput: boolean }) {
+  if (!showHostOutput) return null;
   const host = model.actors.find((actor) => actor.kind === 'host');
   const history = (host?.outputHistory ?? []).filter((event) => Boolean(event.text?.trim()) && !event.pending);
   if (!history.length) return null;
@@ -481,6 +481,7 @@ function OpsPanel({
   const [confirmed, setConfirmed] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [recoverySending, setRecoverySending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [showWord, setShowWord] = useState(false);
@@ -489,6 +490,7 @@ function OpsPanel({
   const rootRef = useRef<HTMLElement | null>(null);
   const focusedActionRef = useRef('');
   const requestRef = useRef<AbortController | null>(null);
+  const recoverySendingRef = useRef(false);
   const snapshotRef = useRef<{ runId: string; model: UndercoverGameViewModel } | null>(null);
   const outputCacheRef = useRef(new Map<string, PublicOutputEvent>());
   const outputRequestsRef = useRef(new Map<string, Promise<PublicOutputEvent | undefined>>());
@@ -693,10 +695,17 @@ function OpsPanel({
   };
 
   const recover = async () => {
+    if (recoverySendingRef.current) return;
     if (!onAction) return;
     if (typeof window.confirm === 'function' && !window.confirm('确认告诉主持人“卡住了”？')) return;
-    try { await onAction({ type: 'send_message', content: '卡住了' }); onInteraction?.({ type: 'recovery', runId: params.runId }); }
-    catch { setError('通知主持人失败，请重试。'); }
+    recoverySendingRef.current = true;
+    setRecoverySending(true);
+    try {
+      const actionPayload: PanelAction = { type: 'send_message', content: '卡住了' };
+      await onAction(actionPayload);
+      onInteraction?.({ type: 'recovery', runId: params.runId });
+    } catch { setError('通知主持人失败，请重试。'); }
+    finally { recoverySendingRef.current = false; setRecoverySending(false); }
   };
 
   if (loading && !fallback) {
@@ -762,7 +771,7 @@ function OpsPanel({
 
         <Roster model={shown} palette={palette} currentViewer={params.currentViewerActorId} />
         <VoteTally model={shown} palette={palette} />
-        <HostBroadcast model={shown} palette={palette} />
+        <HostBroadcast model={shown} palette={palette} showHostOutput={params.display?.showHostOutput !== false} />
         <PublicHistory model={shown} palette={palette} />
 
         {!result && pendingHumanNode && (
@@ -873,7 +882,7 @@ function OpsPanel({
         <MonoBtn type="button" data-primary={Boolean(canAct)} onClick={() => { if (canAct) void (rootRef.current?.querySelector('[data-ops-vote-choice], textarea') as HTMLElement | null)?.focus(); }}>
           我的回合
         </MonoBtn>
-        <MonoBtn type="button" onClick={() => void recover()}>卡住了？告诉主持人</MonoBtn>
+        <MonoBtn type="button" onClick={() => void recover()} disabled={recoverySending}>{recoverySending ? '正在通知…' : '卡住了？告诉主持人'}</MonoBtn>
         {error && <span role="alert" style={{ color: palette.bad }}>{error}</span>}
       </Footer>
     </RootShell>
