@@ -1,0 +1,19 @@
+apps/backend/specs/2026-11-03-relay-session-task-panel/spec.md
+  s_bd0bcfef0e8f99::t_ac112289346116 1-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6bd4bb85c8a5649bd87a1cdccb4e9ab1d23c270d",
+  "prompts": {},
+  "sessions": {
+    "s_bd0bcfef0e8f99": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a9e52d73-cd84-45d1-9518-6fcc1c7b41ff",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
