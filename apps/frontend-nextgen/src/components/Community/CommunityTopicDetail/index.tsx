@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { TopicFirstFloor } from './TopicFirstFloor';
 import type {
   CommunityAuthor,
+  CommunityPostLocation,
   CommunityReply,
   CommunityTopic,
   ForumTargetRef,
@@ -54,6 +55,9 @@ export interface CommunityTopicDetailProps {
   replyPageCount: number;
   replyPageSize: number;
   onGoToReplyPage: (page: number) => void;
+  /** Initial navigation target resolved by the backend for personal-center links. */
+  pendingPostLocation?: CommunityPostLocation | null;
+  onClearPendingPostLocation?: () => void;
 }
 
 export function CommunityTopicDetail({
@@ -93,6 +97,8 @@ export function CommunityTopicDetail({
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
+  pendingPostLocation = null,
+  onClearPendingPostLocation,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
   const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
@@ -119,7 +125,8 @@ export function CommunityTopicDetail({
     if (!element) return;
     element.scrollIntoView({ block: 'center', behavior: 'smooth' });
     element.classList.add('bg-primary/10');
-    window.setTimeout(() => element.classList.remove('bg-primary/10'), 1200);
+    const clearOnNextClick = () => element.classList.remove('bg-primary/10');
+    window.setTimeout(() => window.addEventListener('click', clearOnNextClick, { once: true }), 0);
   }, []);
 
   const toggleThreadReplies = useCallback((postId: string) => {
@@ -141,6 +148,29 @@ export function CommunityTopicDetail({
   useEffect(() => {
     setExpandedReplyIds({});
   }, [replyPage]);
+  useEffect(() => {
+    if (!pendingPostLocation) return;
+    if (pendingPostLocation.postId === pendingPostLocation.rootPostId) return;
+    setExpandedReplyIds((previous) => ({
+      ...previous,
+      [pendingPostLocation.rootPostId]: true,
+    }));
+  }, [pendingPostLocation]);
+
+  useEffect(() => {
+    if (!pendingPostLocation || loading) return;
+    const element = replyElementsRef.current.get(pendingPostLocation.postId);
+    if (!element) return;
+    locateTargetReply(pendingPostLocation.postId);
+    onClearPendingPostLocation?.();
+  }, [
+    expandedReplyIds,
+    loading,
+    locateTargetReply,
+    onClearPendingPostLocation,
+    pendingPostLocation,
+    replies,
+  ]);
 
   return (
     <div className="flex h-full flex-col bg-background">

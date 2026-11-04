@@ -48,6 +48,12 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "tenant-wide BBS reply read; no addressed bot"
     ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): NoCheck(
+        "tenant-wide BBS reply location read; no addressed bot"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "public BBS write; author declared in the body, no addressed bot"
     ),
