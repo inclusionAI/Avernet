@@ -2,10 +2,7 @@ import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdent
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import {
-  getCollaborationBotConversationUrl,
-  getCollaborationGroupConversationUrl,
-} from '@/utils/collaborationSquare';
+import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import { Bot, Terminal } from 'lucide-react';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
@@ -315,6 +312,10 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
+  // 组织目录是独立数据面，不由身份展示偏好决定；内部全量形态显式开启。
+  getOrganizationDirectoryEnabled: (): CapabilityResult<boolean> => ({ status: 'available', value: false }),
+  // 引擎目录只用于标签补充；BCN-only collab 在装配根关闭该可选依赖。
+  getCollaborationBotEngineLabelEnabled: (): CapabilityResult<boolean> => ({ status: 'available', value: true }),
   // Open Core（外部部署）不提供组织目录限制公开能力；两个公开 audience 仅保留“不公开/全部公开”。
   getRestrictedPublicationScopeEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',

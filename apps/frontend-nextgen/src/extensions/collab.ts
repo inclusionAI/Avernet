@@ -1,8 +1,8 @@
 // collab（协作群极简站）装配：capabilities 覆盖 + 副屏接线精简（保留 UMD 轨，无任务面板轨）。
 // 本文件绝不 import 任务栈/TC 选路实现——槽位置 null，相关源码不进 collab 产物。
 // 形态差异只许出现在本文件、config/routes.collab.ts 与 config/config.ts 的 FRONTEND_FORM 分支。
-import { defaultCapabilities } from '@/capabilities';
 import type { AppCapabilities, CapabilityResult, ShellVisibility } from '@/capabilities';
+import { defaultCapabilities } from '@/capabilities';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import '@/services/workspace/chatBridge';
 import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
@@ -36,6 +36,8 @@ const collabNavigationItems: NavigationItem[] = [
 // 未列出的 capability 一律沿用 Open Core 默认（spread 继承）；新增能力需复核 collab 经营面是否收纳。
 const collabCapabilities: AppCapabilities = {
   ...defaultCapabilities,
+  // BCN-only 不接入组织目录（继承默认 false），也不查询引擎资产目录补充标签。
+  getCollaborationBotEngineLabelEnabled: () => ({ status: 'available', value: false }),
   getSpaceContextInitializationEnabled: () => ({ status: 'available', value: false }),
   getPrimaryNavigationItems: (): CapabilityResult<NavigationItem[] | null> => ({
     status: 'available',

@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import {
   getCollaborationBot,
   listBots,
@@ -254,5 +255,8 @@ export const collaborationPrivacyApiAdapter = createCollaborationPrivacyApiAdapt
   listMyBots,
   getCollaborationBot,
   patchCollaborationBot,
-  listBots,
+  // 在请求时解析：模块加载早于扩展注册，不能在顶层捕获 Open Core 默认能力。
+  get listBots() {
+    return getCapabilities().getCollaborationBotEngineLabelEnabled().value ? listBots : undefined;
+  },
 });

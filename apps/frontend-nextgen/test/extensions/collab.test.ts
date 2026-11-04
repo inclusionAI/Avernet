@@ -1,8 +1,18 @@
-import { describe, expect, it } from '@jest/globals';
+import { defaultCapabilities } from '@/capabilities';
 import { appExtension, registerSidePanelWiring } from '@/extensions/collab';
 import { getExtensionSlots } from '@/extensions/slots';
+import { describe, expect, it } from '@jest/globals';
 
 describe('collab 装配', () => {
+  it('BCN-only 通用配置不依赖组织目录与 engine 目录', () => {
+    expect(defaultCapabilities.getOrganizationDirectoryEnabled().value).toBe(false);
+    expect(defaultCapabilities.getCollaborationBotEngineLabelEnabled().value).toBe(true);
+    expect(appExtension.capabilities.getOrganizationDirectoryEnabled().value).toBe(false);
+    expect(appExtension.capabilities.getCollaborationBotEngineLabelEnabled().value).toBe(false);
+    expect(appExtension.capabilities.getPartialFriendApprovalEnabled().value).toBe(false);
+    expect(appExtension.capabilities.getRestrictedPublicationScopeEnabled().value).toBe(false);
+  });
+
   it('导航覆盖为「协作群 + 外部 Bot」两项', () => {
     const items = appExtension.capabilities.getPrimaryNavigationItems().value;
     expect(items?.map((item) => [item.id, item.path])).toEqual([
