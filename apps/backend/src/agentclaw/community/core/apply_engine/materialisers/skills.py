@@ -42,6 +42,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
     ChecksSetSupply,
@@ -133,8 +134,11 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),),
                        removals=("retired-skill",))
-        write   -> (EntryResult(Category.SKILLS, "quality-check",
-                                EntryOutcome.CREATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.SKILLS, "quality-check",
+                                EntryOutcome.CREATED),),
+            removals=("retired-skill",),
+        )
     """
 
     construct = Category.SKILLS
@@ -263,7 +267,7 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
         confirmed_write = False
@@ -349,7 +353,7 @@ class SkillsMaterialiser(Materialiser, ChecksSetSupply):
                 ) from None
             raise
         self._refresh_actual_dependency_codes(ctx)
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
     def _area(self, ctx: ApplyContext) -> dict[str, Any]:
         """The active set by name — the reader's flush-then-read for this bot."""

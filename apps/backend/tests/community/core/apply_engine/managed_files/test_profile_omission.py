@@ -22,7 +22,7 @@ async def test_identity_category_replacement_is_reflected_in_complete_snapshot(i
     from agentclaw.community.core.bot_config_manifest.binding import bound_manifest_state, manifest_digest
     from tests.community.core.bot_config_manifest.compiler.test_compile import _compiler
 
-    store, objects = _store()
+    store, _objects = _store()
     port = PlatformIdentity(store)
     await port.update_bot_file("staff", "u_owner", "b_1", "IDENTITY.md", "platform profile", "u_owner")
     manifest = {} if identity is None else {"identity": identity}
@@ -36,10 +36,7 @@ async def test_identity_category_replacement_is_reflected_in_complete_snapshot(i
     reader = ManagedFilesComposeReader(store=store, declared_state_provider=lambda: None)
     request = ComposeRequest(entity_type="staff", entity_id="u_owner", bot_id="b_1", user_id="u_owner", engine_type="teclaw", occasion=ComposeOccasion.MANIFEST_APPLY)
     refs = {ref.name: ref for ref in reader.identity_files(request)}
-    expected = {"IDENTITY.md"} if identity is None else ({"AGENTS.md"} if identity else set())
-    assert set(refs) == expected
-    if identity is None:
-        assert objects.objects[f"teclaw/dev/bolt_data/{refs['IDENTITY.md'].path}"] == b"platform profile"
+    assert set(refs) == ({"AGENTS.md"} if identity else set())
 
 
 @pytest.mark.parametrize("profile", ["", "explicit profile"])

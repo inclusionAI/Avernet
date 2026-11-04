@@ -1,20 +1,8 @@
-"""One write-intent contract, independent of the configuration value's shape.
+"""Apply intent for a Bot MCP override: a value replaces it, None clears it."""
 
-A value replaces the override; None clears it; PreserveMcpConfig leaves it
-untouched. Compilers use typed McpOverride values; persistence ports use dicts.
-These are in-process instructions, never serialized to YAML or Genome.
-"""
-
-from dataclasses import dataclass
 from typing import TypeAlias, TypeVar
 
-__all__ = ["PreserveMcpConfig", "McpConfigWriteIntent"]
-
-
-@dataclass(frozen=True, slots=True)
-class PreserveMcpConfig:
-    """No configuration write, including when an intent is copied or restored."""
-
+__all__ = ["McpConfigWriteIntent"]
 
 _Config = TypeVar("_Config")
-McpConfigWriteIntent: TypeAlias = _Config | None | PreserveMcpConfig
+McpConfigWriteIntent: TypeAlias = _Config | None

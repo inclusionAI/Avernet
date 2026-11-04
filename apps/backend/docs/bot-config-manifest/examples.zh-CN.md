@@ -338,7 +338,7 @@ bot 当前引擎校验并明确报错，而不是 apply 时静默跳过。
 `FileRef{name, store, path}` 进 `identity_files[]`。
 
 **提醒**：`MEMORY.md` 不可声明且永不移除。`IDENTITY.md` 在原引擎白名单允许时
-可显式写入并按普通文件参与集合替换：identity 类目缺省不操作、[] 清空、非空列表完整替换
+可显式写入并按普通文件参与集合替换：identity 类目缺省或显式 [] 都清空、非空列表完整替换
 （schema §3.5）。Claude Code 仍只接受
 `CLAUDE.md`，由专家编排确定性合并多文件，不扩展原生白名单。
 
@@ -400,7 +400,7 @@ resources:
 - **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
   文件在 apply 时被清除（含手工添加的）；平台侧解包到临时位置，保证坏归档
   到不了 bot，但下发只有「删树 + 逐文件写」，中间窗口真实存在——中途失败该
-  条目记 `failed`，报告说明这棵树状态未知（schema §3.2）；目录之外完全不碰；
+  条目记 `failed`，报告说明这棵树状态未知（schema §3.2）。同次 Apply 也会清理 workspace 中其他非保护且未声明的条目；
 - **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（所有权
   无法定义），PUT 时拒绝；
 - **权限拍平**：源里的可执行位不保留——可执行物必须走 `cli_tools`；
@@ -546,13 +546,13 @@ Manifest 显式协议必须能在 Center 的对应环境中找到，不能 fallb
 **apply 做什么**：校验注册、权限及 Center 端点组合 → 在同一事务中收敛该 Bot
 的 MCP 安装关系和 override 配置 → best-effort 投影。配置字段优先级是
 Manifest/Bot > user config > Center/default。
-条目省略 `config` 会保留已保存的 Bot override，仅声明供应；`config: {}`
+条目省略 `config` 等价于 `config: {}`；两者都
 明确清除完整 override，非空对象则完整替换。父条目从 Direct/非 Set 配置管理
 范围内移除时仍清 override；当前 Set 供应不被省略清理。
 
 ```yaml
 mcp:
-  - server_code: mcp.ant.homistudio.meetmcp  # 沿用当前 Bot override
+  - server_code: mcp.ant.homistudio.meetmcp  # 清除 Bot override，使用继承配置
   - server_code: mcp.example.reset
     config: {}                            # 清 override，恢复继承来源
 ```
