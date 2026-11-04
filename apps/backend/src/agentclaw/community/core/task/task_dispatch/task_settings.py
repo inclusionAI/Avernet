@@ -1,9 +1,4 @@
-"""Generic task feature switches backed by the system-config KV store.
-
-The task settings service owns the supported switch names and their storage
-keys. ``TaskClaimJoinGate`` remains a compatibility adapter for legacy callers;
-the dispatch strategy no longer invokes the claim-join post-filter.
-"""
+"""Generic task feature switches backed by the system-config KV store."""
 
 from __future__ import annotations
 
@@ -19,13 +14,9 @@ from agentclaw.community.utils.env_utils import get_current_env
 logger = get_logger()
 
 CATEGORY = "task"
-CLAIM_JOIN_FILTER = "claim_join_filter"
 SEARCH_SKILL = "search_skill"
 SKILL_REPORT = "skill_report_enabled"
 RELAY_EXECUTION = "relay_execution"
-CLAIM_JOIN_FILTER_KEY = "claim_join_filter_enabled"
-# Backward-compatible names used by existing tests and callers.
-KEY = CLAIM_JOIN_FILTER_KEY
 SEARCH_SKILL_KEY = "search_skill_enabled"
 SKILL_REPORT_KEY = "skill_report_enabled"
 RELAY_EXECUTION_KEY = "relay_execution_enabled"
@@ -33,7 +24,6 @@ RELAY_EXECUTION_KEY = "relay_execution_enabled"
 HARNESS_POLLER = "harness_poller"
 HARNESS_POLLER_KEY = "harness_poller_enabled"
 _SETTING_KEYS = {
-    CLAIM_JOIN_FILTER: CLAIM_JOIN_FILTER_KEY,
     SEARCH_SKILL: SEARCH_SKILL_KEY,
     SKILL_REPORT: SKILL_REPORT_KEY,
     RELAY_EXECUTION: RELAY_EXECUTION_KEY,
@@ -90,7 +80,6 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
         # skill_report 默认 True(走 skill HTTP 上报链路);关闭后任务统一改走
         # poller 拉取链路(predict：bot POST /callback/report),与 poller 互斥(不并存)。
         self._defaults = {
-            CLAIM_JOIN_FILTER: False,
             SEARCH_SKILL: False,
             SKILL_REPORT: True,
             RELAY_EXECUTION: False,
@@ -196,44 +185,3 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
             operator,
         )
         return bool(enabled)
-
-
-@runtime_checkable
-class TaskClaimJoinGateProtocol(Protocol):
-    """Compatibility contract for the claim_on JOIN post-filter."""
-
-    def is_enabled(self) -> bool: ...
-
-    def get_enabled(self, *, env: str) -> bool: ...
-
-    def set_enabled(
-        self, *, enabled: bool, env: str, operator: str | None = None
-    ) -> bool: ...
-
-
-class TaskClaimJoinGate(TaskClaimJoinGateProtocol):
-    """Compatibility adapter over the generic task settings service."""
-
-    @inject
-    def __init__(
-        self,
-        config: _SystemConfigStore | None = None,
-        settings: TaskSettingsServiceProtocol | None = None,
-    ) -> None:
-        self._settings = settings or TaskSettingsService(config=config)
-
-    def is_enabled(self) -> bool:
-        return self._settings.is_enabled(CLAIM_JOIN_FILTER)
-
-    def get_enabled(self, *, env: str) -> bool:
-        return self._settings.get_enabled(setting_type=CLAIM_JOIN_FILTER, env=env)
-
-    def set_enabled(
-        self, *, enabled: bool, env: str, operator: str | None = None
-    ) -> bool:
-        return self._settings.set_enabled(
-            setting_type=CLAIM_JOIN_FILTER,
-            enabled=enabled,
-            env=env,
-            operator=operator,
-        )

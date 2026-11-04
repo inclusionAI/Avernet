@@ -372,7 +372,7 @@ async def _on_harness_collect(
             status_to=Status.PENDING,
         )
     # static plan:harness 重派走 static prepare(只派发 readiness.ready 的绑定 bot),
-    # 不进搜推/claim_join,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
+    # 不进搜推,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
     # 派给 catalog 命中的错误 bot(如 default:35983)。
     _static_runtime = self._static_runtime(task_id)
     if _static_runtime is not None:
