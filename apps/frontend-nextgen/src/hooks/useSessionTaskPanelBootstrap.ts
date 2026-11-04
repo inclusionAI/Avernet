@@ -8,6 +8,17 @@ import { useEffect, useRef } from 'react';
 
 type PanelRef = React.RefObject<PanelHandle | null>;
 
+/**
+ * 解析会话归属人工号（session_id 末尾 :user:<owner>）。
+ *
+ * 副屏自动恢复要按会话归属人的任务列表查任务；但打开后的 panel 交互身份仍需用
+ * 当前登录人。无 :user: 段（测试/旧会话）时退回当前登录人。
+ */
+export function resolveSessionOwnerUserId(sessionId: string | null, fallbackUserId: string | null): string | null {
+  const owner = sessionId?.match(/:user:([^:]+)$/)?.[1]?.trim();
+  return owner || fallbackUserId;
+}
+
 function parseTaskTime(value: string | undefined): number {
   // list API 返回 `YYYY-MM-DD HH:mm:ss`；补 T 兼容 Safari。
   if (!value?.trim()) return Number.NEGATIVE_INFINITY;
@@ -72,14 +83,16 @@ export function useSessionTaskPanelBootstrap({
     // 任务列表「进入对话」是显式焦点切换，必须优先于已有活跃任务；普通进入才沿用当前副屏。
     const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
     if (!requestedTaskId && useTaskSidePanelStore.getState().activeTaskId) return undefined;
-    const bootstrapKey = `${userId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
+    const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
+    if (!sessionOwnerUserId) return undefined;
+    const bootstrapKey = `${sessionOwnerUserId}:${sessionId}:${requestedTaskId ?? 'latest'}`;
     if (bootstrapKeyRef.current === bootstrapKey) return undefined;
     bootstrapKeyRef.current = bootstrapKey;
     let cancelled = false;
 
     void (async () => {
       try {
-        const result = await listMyTasks({ user_id: userId });
+        const result = await listMyTasks({ user_id: sessionOwnerUserId });
         if (cancelled) return;
         if (requestedTaskId) useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(requestedTaskId);
         if (isEnvelopeFailure(result) || !result.data) return;
