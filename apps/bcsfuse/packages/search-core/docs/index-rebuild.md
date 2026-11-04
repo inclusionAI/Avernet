@@ -141,5 +141,5 @@ ownership, not global activation: compare it with the responding instance's
 TC's current tables, recommend/Fuse entrypoints, model defaults and task lifecycle
 remain unchanged. To adopt this capability later, TC supplies its own source
 adapter and conversion/publisher rather than importing an Alipay implementation.
-The HTTP create/retry/status contract remains `PUT /api/v1/index-builds/{build_id}`
-and `GET /api/v1/index-builds/{build_id}`; it is mounted only by opting-in hosts.
+The HTTP create/retry/status contract remains `PUT /api/v2/index-builds/{build_id}`
+and `GET /api/v2/index-builds/{build_id}`; it is mounted only by opting-in hosts.

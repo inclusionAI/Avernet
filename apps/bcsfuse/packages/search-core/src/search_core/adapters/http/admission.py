@@ -20,7 +20,7 @@ class SearchAdmissionMiddleware:
             not in {
                 "/api/v2/search",
                 "/api/v2/recommend",
-                "/api/v1/agent-cards/preview",
+                "/api/v2/agent-cards/preview",
             }
         ):
             await self.app(scope, receive, send)

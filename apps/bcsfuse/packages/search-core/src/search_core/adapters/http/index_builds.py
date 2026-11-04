@@ -53,7 +53,7 @@ def response(row):
 def create_index_build_router(
     service: IndexBuildManagement, authorize_operator: Authenticator
 ):
-    router = APIRouter(prefix="/api/v1/index-builds", tags=["index-builds"])
+    router = APIRouter(prefix="/api/v2/index-builds", tags=["index-builds"])
 
     @router.put(
         "/{build_id}",
