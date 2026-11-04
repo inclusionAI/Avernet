@@ -1,3 +1,4 @@
+use bcs_network_tracing::RequestBuilderExt;
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -137,7 +138,7 @@ impl bcs_service_api::port::CallerContainerGatewayPort for HttpProviderTransport
             .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
             .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
             .json(&body)
-            .send();
+            .send_traced();
         let response_result = tokio::time::timeout(
             Duration::from_millis(CALLER_ENSURE_TOTAL_TIMEOUT_MS),
             request_fut,

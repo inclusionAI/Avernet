@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/plugin-api/bcs-tracing-api",
+    "crates/auxiliary/bcs-network-tracing",
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
@@ -141,6 +143,8 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
+bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }

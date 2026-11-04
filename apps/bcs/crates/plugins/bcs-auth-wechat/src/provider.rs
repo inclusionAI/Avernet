@@ -1,5 +1,6 @@
 //! WeChat OAuth provider implementation.
 
+use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_auth_api::{OAuthError, OAuthProvider, OAuthToken, ProviderUserInfo};
 use serde::Deserialize;
@@ -85,7 +86,7 @@ impl OAuthProvider for WeChatOAuthProvider {
         let resp = self
             .http
             .get(&url)
-            .send()
+            .send_traced()
             .await
             .map_err(|e| OAuthError::TokenExchangeFailed(e.to_string()))?;
 
@@ -145,7 +146,7 @@ impl OAuthProvider for WeChatOAuthProvider {
         let resp = self
             .http
             .get(&url)
-            .send()
+            .send_traced()
             .await
             .map_err(|e| OAuthError::UserInfoFailed(e.to_string()))?;
 

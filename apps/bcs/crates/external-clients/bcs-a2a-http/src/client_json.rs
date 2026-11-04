@@ -1,4 +1,5 @@
 //! REST resource-path encoding and bounded Task snapshots. Models are SDK types.
+use bcs_network_tracing::RequestBuilderExt;
 use a2a::{A2AError, Task, TypedDetail};
 
 pub(super) fn task_url(base: &str, id: &str, suffix: &str) -> Result<String, A2AError> {
@@ -13,7 +14,7 @@ pub(super) async fn task_response(request: reqwest::RequestBuilder) -> Result<Ta
 
 pub(super) async fn json_response<T:serde::de::DeserializeOwned>(request: reqwest::RequestBuilder) -> Result<T, A2AError> {
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        let mut response = request.header("A2A-Version", "1.0").send().await
+        let mut response = request.header("A2A-Version", "1.0").send_traced().await
             .map_err(|_|A2AError::internal("A2A Task request interrupted"))?;
         let status = response.status();
         let mut body = Vec::new();

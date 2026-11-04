@@ -351,7 +351,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                     run_id = %run_id,
                     "provider downlink: 2.0 SSE stream accepted; spawning reader"
                 );
-                tokio::spawn(async move {
+                tokio::spawn(bcs_network_tracing::in_current_context(async move {
                     stream_and_drive(
                         resp,
                         spawn_run_id,
@@ -361,7 +361,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                         interaction_context,
                     )
                     .await;
-                });
+                }));
                 return Ok(BotDeliveryResult {
                     target_bot_id,
                     delivered: true,

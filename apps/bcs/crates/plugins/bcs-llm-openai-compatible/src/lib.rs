@@ -1,3 +1,4 @@
+use bcs_network_tracing::ClientExt;
 use std::{env, error::Error, time::Instant};
 
 use async_trait::async_trait;
@@ -99,7 +100,7 @@ impl LlmChatCompletionPort for OpenAiCompatibleLlmClient {
         let started_at = Instant::now();
         let response = self
             .client
-            .execute(http_request)
+            .execute_traced(http_request)
             .await
             .map_err(|error| {
                 let elapsed_ms = elapsed_ms(started_at);

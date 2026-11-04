@@ -376,7 +376,8 @@ impl BcsServer {
                     .allow_methods(AllowMethods::mirror_request())
                     .allow_headers(AllowHeaders::mirror_request())
                     .allow_credentials(true),
-            ))
+            )
+            .layer(middleware::from_fn(bcs_network_tracing::http_server)))
     }
 
     async fn initialize_lifecycle(&self) -> Result<()> {

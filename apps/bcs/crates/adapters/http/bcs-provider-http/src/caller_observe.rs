@@ -1,4 +1,5 @@
 //! Observe-only delivery through the existing Provider envelope.
+use bcs_network_tracing::RequestBuilderExt;
 use std::time::Duration;
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
@@ -129,7 +130,7 @@ impl bcs_service_api::port::ObserveInjectPort for HttpObserveInjector {
             .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
             .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
             .json(&body)
-            .send();
+            .send_traced();
         let deadline = tokio::time::Instant::now() + Duration::from_millis(OBSERVE_INJECT_TOTAL_TIMEOUT_MS);
         let mut response = tokio::time::timeout_at(
             deadline,

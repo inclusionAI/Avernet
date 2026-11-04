@@ -1,5 +1,6 @@
 //! GitHub OAuth provider implementation.
 
+use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_auth_api::{OAuthError, OAuthProvider, OAuthToken, ProviderUserInfo};
 use serde::Deserialize;
@@ -88,7 +89,7 @@ impl OAuthProvider for GitHubOAuthProvider {
                 ("redirect_uri", redirect_uri.to_string()),
                 ("grant_type", "authorization_code".to_string()),
             ])
-            .send()
+            .send_traced()
             .await
             .map_err(|e| OAuthError::TokenExchangeFailed(e.to_string()))?;
 
@@ -121,7 +122,7 @@ impl OAuthProvider for GitHubOAuthProvider {
             .http
             .get(GITHUB_USERINFO_URL)
             .bearer_auth(&token.access_token)
-            .send()
+            .send_traced()
             .await
             .map_err(|e| OAuthError::UserInfoFailed(e.to_string()))?;
 

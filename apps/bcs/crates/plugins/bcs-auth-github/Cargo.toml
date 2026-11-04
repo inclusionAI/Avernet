@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-network-tracing.workspace = true
 async-trait = { workspace = true }
 axum = { workspace = true }
 bcs-auth-api = { workspace = true }

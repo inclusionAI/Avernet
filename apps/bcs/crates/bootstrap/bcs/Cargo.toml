@@ -28,6 +28,7 @@ prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = []
 
 [dependencies]
+bcs-network-tracing.workspace = true
 bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime

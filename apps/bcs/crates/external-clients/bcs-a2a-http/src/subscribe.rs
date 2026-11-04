@@ -1,4 +1,5 @@
 //! Canonical POST subscription for A2A 1.0.1, without legacy URL/method fallback.
+use bcs_network_tracing::RequestBuilderExt;
 use a2a::{A2AError, StreamResponse};
 use futures::{stream::{self, BoxStream}, StreamExt};
 
@@ -59,7 +60,7 @@ pub(super) async fn post_stream_with_rpc<T: serde::Serialize + ?Sized>(
 ) -> Result<BoxStream<'static, Result<StreamResponse, A2AError>>, A2AError> {
     let response = tokio::time::timeout(std::time::Duration::from_secs(15),
         http.post(url).header("A2A-Version", "1.0").header("Accept", "text/event-stream")
-            .json(request).send()).await
+            .json(request).send_traced()).await
         .map_err(|_|A2AError::internal("A2A subscription header timeout"))?
         .map_err(|_|A2AError::internal("A2A subscription connection failed"))?;
     let status = response.status();

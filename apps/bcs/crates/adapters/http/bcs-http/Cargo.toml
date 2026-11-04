@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-network-tracing.workspace = true
 bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
 bcs-channel-api = { workspace = true }
