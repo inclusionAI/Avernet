@@ -61,6 +61,7 @@ vi.mock('../../api/hooks', () => ({
   }),
 }))
 
+vi.mock('../../utils/use-recovered-flow-events', () => ({ useRecoveredFlowEvents: () => ({ data: [] }) }))
 vi.mock('../../components/RunSummaryHeader', () => ({ default: () => <div>运行摘要</div> }))
 vi.mock('../../components/SubworkflowLinks', () => ({ default: () => null, UnattributedSubworkflowLinks: () => null, SubworkflowProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../../components/NodeExecutionList', () => ({ default: () => <div>节点列表</div> }))
