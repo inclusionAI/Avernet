@@ -10,6 +10,9 @@ export interface ConversationComposerContext {
   sessionId: string;
   spaceId?: string;
   botType?: string;
+  /** 好友 Bot（他人分享、非 owner/协作者身份）会话标记：平台注入层据此收敛能力
+   *  提示（如 /skill、/knowledge 等仅 owner/协作者可用的命令不在好友会话提示）。 */
+  isFriendBot?: boolean;
   runtimeStage: 'draft' | 'verify' | 'online';
 }
 export interface ConversationComposerValue {
