@@ -508,6 +508,9 @@ allow_loopback = false
 token_secret = "replace-with-invite-token-secret"
 public_claim_enabled = false
 public_claim_max_count = 1000
+# Explicitly authorize manual issuance; empty denies /api/v1/.../invite-codes/init.
+# Use user_id from /openapi/v1/auth/user, never provider IDs, usernames or human_ IDs.
+issuer_user_ids = []
 default_ttl_seconds = 86400
 base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"

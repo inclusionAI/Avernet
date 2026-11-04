@@ -150,3 +150,11 @@ OAuth facade when `[api.auth]` is absent. Only `GET /openapi/v1/auth/user`
 uses it; protected V1 routes retain `principal_verifier`. The adapter selects
 one verifier before authentication, never retries another source on failure.
 Explicit chains do not install this override.
+
+## Invite-code issuance
+
+The internal init route forwards the verified caller in `InitInviteCodes` rather
+than discarding it. Application enforces the configured issuer-user allowlist;
+being under `/api/v1` or passing the Cookie Origin check is not authorization.
+The request body remains count-only, and authorization denial maps to 403 with
+no authentication-source fallback.

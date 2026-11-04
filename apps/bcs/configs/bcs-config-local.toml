@@ -293,6 +293,9 @@ allow_loopback = false
 token_secret = "local-development-only-token-secret"
 public_claim_enabled = false
 public_claim_max_count = 1000
+# Explicitly authorize manual issuance; empty denies /api/v1/.../invite-codes/init.
+# Use user_id from /openapi/v1/auth/user, never provider IDs, usernames or human_ IDs.
+issuer_user_ids = []
 default_ttl_seconds = 86400
 base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"

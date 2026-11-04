@@ -249,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn invite_code_service_helpers_and_state_impls_are_exercised() {
         let service = CountingInviteCodeService { allow_access: true, ..Default::default() };
-        assert_eq!(service.init_invite_codes(bcs_service_api::application::v1::InitInviteCodes { count: 0 }).await.expect("init").codes, Vec::<String>::new());
+        assert_eq!(service.init_invite_codes(bcs_service_api::application::v1::InitInviteCodes { caller: caller(), count: 0 }).await.expect("init").codes, Vec::<String>::new());
         assert!(service.bind_invite_code(bcs_service_api::application::v1::BindInviteCode { caller: caller(), code: "ABC123".to_string() }).await.expect("bind").bound);
         assert_eq!(service.get_my_invite_code_binding(bcs_service_api::application::v1::GetMyInviteCodeBinding { caller: caller() }).await.expect("binding").bound_at, Some(1));
         assert!(service.ensure_invite_code_access(&caller()).await.is_ok());

@@ -7,7 +7,9 @@ import tempfile
 from provider_stub import provider_stub
 from harness import Environment
 from config_cases import invalid_configs
-from regressions import default_environment, rollback_modes, unlisted_provider_does_not_block_gateway
+from regressions import (default_environment, rollback_modes,
+                         unlisted_provider_does_not_block_gateway,
+                         invite_code_issuance_requires_authorization)
 from flows import lifecycle, browser_binding, rejection_and_precedence, compatibility, concurrent_refresh, pending_capacity
 
 
@@ -37,6 +39,8 @@ def main():
                 result['scenarios'].append('compatibility-and-chain-selection')
                 unlisted_provider_does_not_block_gateway(env)
                 result['scenarios'].append('unlisted-provider')
+                invite_code_issuance_requires_authorization(env)
+                result['scenarios'].append('invite-code-issuance-authorization')
                 default_environment(env)
                 result['scenarios'].append('default-environment')
                 rollback_modes(env)

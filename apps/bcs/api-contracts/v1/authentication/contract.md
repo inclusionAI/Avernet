@@ -282,3 +282,32 @@ spec and in provider/migration notes that presumed unconditional
 binaries. See also
 [../gateway-principal/contract.md](../gateway-principal/contract.md) for
 the typed gateway principal that remains the first-class production source.
+
+### Invite-code issuance authorization
+
+Authentication success is not permission to issue invite codes.
+`POST /api/v1/collaboration/invite-codes/init` forwards the verified caller to
+`InviteCodeService::init_invite_codes`, which requires an exact match of
+`caller.user.id` in the deployment's `[invite].issuer_user_ids` allowlist.
+The default empty list denies all issuance with HTTP 403 / `forbidden`.
+The same policy applies to OAuth and Gateway users; a Bot/App/AccessKey identity
+alone is not an issuer. Usernames, provider account IDs, Origin and an existing
+invite-code binding do not confer issuance authority. No later authentication
+source is retried when application authorization fails.
+
+Operators must explicitly configure the authorized users before using manual
+issuance. For OAuth, use the internal `user_id` returned by
+`GET /openapi/v1/auth/user`, not a provider ID or the `human_` Actor ID. Config
+changes take effect on restart. This intentionally tightens the former behavior
+that allowed any authenticated caller to issue codes; existing code/binding
+records and anonymous public-claim limits are unchanged. Neither disabling
+`invite_code_gate_enabled` nor exhausting `public_claim_max_count` bypasses
+issuance authorization. Authorized manual issuance is independent of that
+public quota and records `human_<user_id>` as its creator.
+
+This is a source-level Service API change: `InitInviteCodes` now requires the
+verified `caller`; HTTP clients still send only `{ "count": N }`. The application
+checks the in-memory allowlist before generation or repository access, adding no
+DB round trips; successful generation retains the existing per-code insert and
+collision retry behavior. The auth chain still performs its normal single
+strict-session read for OAuth requests.

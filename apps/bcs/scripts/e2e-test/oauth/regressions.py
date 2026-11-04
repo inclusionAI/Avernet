@@ -81,3 +81,51 @@ def unlisted_provider_does_not_block_gateway(env):
         body, _, _ = browser.request('POST', base + V1 + '/refresh', 403, {'Origin': base})
         assert body['data']['error_code'] == 'session_forbidden'
         user(env.browser(), base, 'invalid', 401, extra={'x-avernet-principal': env.gateway()})
+
+
+def invite_code_issuance_requires_authorization(env):
+    # Real provider login, strict session, router, application and SQLite store.
+    # The first deployment denies all manual issuance, including Gateway users.
+    config, root, base = env.config()
+    config['invite'].update(invite_code_gate_enabled=True, public_claim_enabled=True,
+                            public_claim_max_count=0, issuer_user_ids=[])
+    init = base + '/api/v1/collaboration/invite-codes/init'
+    public = base + '/openapi/v1/collaboration/invite-codes/'
+    headers = {'Origin': base, 'Content-Type': 'application/json'}
+    with env.server(config, root, base):
+        ordinary, issuer = env.browser(), env.browser()
+        ordinary.login(base, user='ordinary-invite-user')
+        issuer.login(base, user='authorized-invite-issuer')
+        issuer_id = user(issuer, base)['user_id']
+        for browser in (ordinary, issuer):
+            body, _, _ = browser.request('GET', public + 'me')
+            assert body['data']['bound'] is False
+            browser.request('POST', public + 'claim', 429)
+            body, _, _ = browser.request('POST', init, 403, headers, {'count': 1})
+            assert body['data']['error_code'] == 'forbidden'
+        env.browser().request('POST', init, 403,
+            {**headers, 'x-avernet-principal': env.gateway()}, {'count': 1})
+        env.browser().request('POST', init, 401, headers, {'count': 1})
+
+    # Restart the same database with one explicitly authorized verified user ID.
+    config['invite']['issuer_user_ids'] = [issuer_id]
+    with env.server(config, root, base):
+        # A later Gateway identity must not replace the first successful OAuth
+        # identity when application authorization rejects that OAuth user.
+        ordinary.request('POST', init, 403,
+            {**headers, 'x-avernet-principal': env.gateway(issuer_id)}, {'count': 1})
+        body, _, _ = ordinary.request('GET', public + 'me')
+        assert body['data']['bound'] is False
+        body, _, _ = issuer.request('POST', init, 200, headers, {'count': 1})
+        code = body['data']['codes'][0]
+        ordinary.request('POST', public + 'bind', 200, headers, {'code': code})
+        body, _, _ = ordinary.request('GET', public + 'me')
+        assert body['data']['bound'] is True
+        ordinary.request('POST', init, 403, headers, {'count': 1})
+        ordinary.request('POST', public + 'claim', 429)
+
+    # Turning off the binding gate must not turn off issuance authorization.
+    config['invite']['invite_code_gate_enabled'] = False
+    with env.server(config, root, base):
+        ordinary.request('POST', init, 403, headers, {'count': 1})
+        issuer.request('POST', init, 200, headers, {'count': 1})

@@ -256,3 +256,11 @@ Explicit OAuth selection resolves its signing secret once and rejects a mismatch
 with a configured legacy OAuth session reader/writer's `auth.oauth.jwt_secret`.
 Both entries share one Cookie and session scope; independent signing keys are
 not independent namespaces. Errors identify the configuration fields, not keys.
+
+## Invite-code issuer policy
+
+Bootstrap injects `[invite].issuer_user_ids` (default empty) into the invite-code
+application facade. Only exact verified user IDs are authorized for manual
+issuance, regardless of authentication source or the binding-gate switch.
+Configuration changes require restart; policy enforcement and creator audit
+metadata stay in application, not the router or authentication verifier.

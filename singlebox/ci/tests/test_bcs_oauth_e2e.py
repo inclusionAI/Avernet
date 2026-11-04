@@ -29,8 +29,17 @@ class OAuthE2eTest(unittest.TestCase):
                 untrusted = build_opener(proxy, HTTPSHandler(context=ssl.create_default_context()))
                 with self.assertRaises(URLError):
                     untrusted.open('https://api.github.com/user', timeout=5)
-                trusted = build_opener(proxy, HTTPSHandler(context=ssl.create_default_context(
-                    cafile=str(state.root / 'ca.pem'))))
+                context = ssl.create_default_context(cafile=str(state.root / 'ca.pem'))
+                # Python 3.13 defaults to strict verification; exercise it on
+                # earlier Python versions too, without disabling hostname checks.
+                context.verify_flags |= ssl.VERIFY_X509_STRICT
+                self.assertTrue(context.check_hostname)
+                self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+                for filename in ('ca.conf', 'extensions'):
+                    extensions = (state.root / filename).read_text()
+                    self.assertIn('subjectKeyIdentifier=hash', extensions)
+                    self.assertIn('authorityKeyIdentifier=keyid:always', extensions)
+                trusted = build_opener(proxy, HTTPSHandler(context=context))
                 with patch.dict(os.environ, {'NO_PROXY': '*', 'no_proxy': '*'}):
                     with self.assertRaises(HTTPError) as error:
                         trusted.open('https://api.github.com/user', timeout=5)

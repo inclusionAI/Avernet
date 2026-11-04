@@ -144,6 +144,12 @@ async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
             .len(),
         1
     );
+    assert_eq!(
+        invite_code_service.init_invite_codes_calls.lock().unwrap()[0]
+            .caller.user.as_ref().unwrap().id,
+        "staff-1",
+        "issuance must forward the verified caller to application authorization",
+    );
     assert!(
         bot_service
             .candidates

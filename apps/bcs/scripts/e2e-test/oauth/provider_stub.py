@@ -67,14 +67,14 @@ class State:
         self.lock = threading.Lock()
         self.secret = uuid.uuid4().hex
         self.errors = []
-        (root / 'ca.conf').write_text('[req]\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n')
+        (root / 'ca.conf').write_text('[req]\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n')
         openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
                 '-subj', '/CN=BCS OAuth E2E ephemeral CA', '-keyout', str(root / 'ca.key'),
                 '-out', str(root / 'ca.pem'), '-config', str(root / 'ca.conf'))
         openssl('req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=github.com',
                 '-keyout', str(root / 'server.key'), '-out', str(root / 'server.csr'))
         (root / 'extensions').write_text('subjectAltName=' + ','.join('DNS:' + h for h in HOSTS)
-            + '\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\n')
+            + '\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid:always\n')
         openssl('x509', '-req', '-in', str(root / 'server.csr'), '-CA', str(root / 'ca.pem'),
                 '-CAkey', str(root / 'ca.key'), '-CAcreateserial', '-days', '1',
                 '-extfile', str(root / 'extensions'), '-out', str(root / 'server.pem'))

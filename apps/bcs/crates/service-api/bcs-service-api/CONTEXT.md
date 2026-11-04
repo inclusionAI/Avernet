@@ -749,3 +749,12 @@ into this contract; the HTTP adapter encodes `BrowserCookieChange` into
 separate `Set-Cookie` headers and the rest of BCS keeps consuming
 `AuthenticatedCaller` unchanged. Wire contract:
 `api-contracts/v1/authentication/contract.md`.
+
+## Invite-code issuance caller
+
+`InitInviteCodes` requires the verified `AuthenticatedCaller`; application
+implementations must authorize issuance before repository access. The bootstrap
+allowlist uses exact user IDs and defaults to denying all callers. Gateway or
+OAuth authentication, a binding and non-user identities do not implicitly grant
+issuance. HTTP request bodies remain count-only; Rust callers must provide the
+caller when rebuilding. No persistence schema changes are required.
