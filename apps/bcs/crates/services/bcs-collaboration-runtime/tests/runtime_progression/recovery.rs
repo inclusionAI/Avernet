@@ -9,6 +9,9 @@ use bcs_service_api::{MarkHumanNodeRunningCommand, FailStateMachineNodeAttempt, 
 #[path = "failure_recovery.rs"]
 mod failure_recovery_tests;
 
+#[path = "failure_injection.rs"]
+mod failure_injection_tests;
+
 #[path = "judge_recovery.rs"]
 mod judge_recovery_tests;
 
