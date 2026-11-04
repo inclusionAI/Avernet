@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/devices/services/arca_error_classifier.py
+  s_1abcd28efa8777::t_72c9471a208179 5,17,29-31,37-42,44-73,80,100,111,125,132,139,146,155,162
+apps/backend/tests/community/core/devices/services/test_arca_error_classifier.py
+  s_1abcd28efa8777::t_d2388ca0083dab 4-5,24,28-31,37,41-80,104-127,275-301
+apps/backend/tests/community/core/devices/services/test_device_filesystem_dispatcher_arca_wrap.py
+  s_1abcd28efa8777::t_b4104f25df707a 1-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4495b6a3bd5eb23502a97dbe13d91a843d933631",
+  "prompts": {},
+  "sessions": {
+    "s_1abcd28efa8777": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a13c-54b9-7391-add1-2dc8174b1d0b",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

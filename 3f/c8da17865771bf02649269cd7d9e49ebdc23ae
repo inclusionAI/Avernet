@@ -1,0 +1,27 @@
+docs/superpowers/plans/2026-11-03-caller-dispatch-stage-timeouts.md
+  s_ec329e2b8ae9bc::t_ddb7c12a222664 267
+  s_ec329e2b8ae9bc::t_076507d1492007 173
+  s_ec329e2b8ae9bc::t_249ce008b49991 959
+  s_ec329e2b8ae9bc::t_0f211f9df2686f 1-172,174-266,268-425,427-528,530-559,561-920,922-938,940-958,960
+  s_ec329e2b8ae9bc::t_23be0b378d4a09 921
+  s_ec329e2b8ae9bc::t_3865560d4abf1c 426
+  s_ec329e2b8ae9bc::t_a79a92a7488bca 939
+  s_ec329e2b8ae9bc::t_2189393fbf4164 560
+  s_ec329e2b8ae9bc::t_fa8cf171a0346c 529
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3fc8da17865771bf02649269cd7d9e49ebdc23ae",
+  "prompts": {},
+  "sessions": {
+    "s_ec329e2b8ae9bc": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "134f343e-3d10-4322-a5b5-6382cbcc9062",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
