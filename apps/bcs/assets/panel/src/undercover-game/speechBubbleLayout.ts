@@ -1,7 +1,7 @@
 export interface SpeechRect { x:number; y:number; width:number; height:number }
 export interface BubblePlacement extends SpeechRect { side:'left'|'right'|'above'|'below'; tail:number }
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
-const overlap=(a:SpeechRect,b:SpeechRect)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width+4)-Math.max(a.x,b.x-4))*Math.max(0,Math.min(a.y+a.height,b.y+b.height+4)-Math.max(a.y,b.y-4));
+const overlap=(a:SpeechRect,b:SpeechRect)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width+10)-Math.max(a.x,b.x-10))*Math.max(0,Math.min(a.y+a.height,b.y+b.height+10)-Math.max(a.y,b.y-10));
 
 /** Keep one expanded bubble near its speaker, clear of the measured player labels. */
 export function placeSpeechBubble(room:SpeechRect,speaker:SpeechRect,obstacles:SpeechRect[]):BubblePlacement {

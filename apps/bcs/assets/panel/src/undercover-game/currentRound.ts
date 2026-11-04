@@ -7,6 +7,35 @@ import type {
   UpstreamArtifact,
 } from './types';
 
+export function isStructuredVote(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+  try {
+    const value = JSON.parse(trimmed) as Record<string, unknown> | null;
+    return Boolean(value && typeof value === 'object' && value.kind === 'vote');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Protocol-preserving public output sanitizer.
+ *
+ * During vote collection a non-host artifact has always been reduced to the
+ * neutral "已投票" marker (player reasoning and raw ballots are never public);
+ * that behavior is unchanged for every payload shape. The only addition is a
+ * defense-in-depth guard for host artifacts: a structured ballot is not public
+ * prose, so it is dropped instead of rendered as raw text. Host tally prose and
+ * all non-voting output remain untouched.
+ */
+export function sanitizePublicOutput(raw: string | undefined, voting: boolean, isHost: boolean): string | undefined {
+  const text = raw?.trim();
+  if (!text) return undefined;
+  if (!voting) return text;
+  if (!isHost) return '已投票';
+  return isStructuredVote(text) ? undefined : text;
+}
+
 export interface LabeledUpstreamArtifact {
   nodeId: string;
   actorId: string;
@@ -60,28 +89,15 @@ export function publicEventFromNodeDetail(
 
   const voting = params.phase.toLowerCase().includes('vot');
   const isHost = actorId === params.host.actorId;
-  if (voting && !isHost) {
-    return {
-      identity: `${params.gameSessionId ?? 'phase'}:${params.runId}:${node.node_id}:${attempt}`,
-      runId: params.runId,
-      nodeId: node.node_id,
-      attempt,
-      actorId,
-      text: '已投票',
-      pending: false,
-      timestamp: node.completed_at,
-      source: 'node-detail',
-    };
-  }
-  if (isHost && params.display?.showHostOutput === false) return undefined;
-
+  const text = sanitizePublicOutput(raw, voting, isHost);
+  if (!text || (isHost && params.display?.showHostOutput === false)) return undefined;
   return {
     identity: `${params.gameSessionId ?? 'phase'}:${params.runId}:${node.node_id}:${attempt}`,
     runId: params.runId,
     nodeId: node.node_id,
     attempt,
     actorId,
-    text: raw.trim(),
+    text,
     pending: false,
     timestamp: node.completed_at,
     source: 'node-detail',

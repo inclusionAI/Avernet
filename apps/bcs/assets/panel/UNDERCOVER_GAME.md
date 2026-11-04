@@ -83,33 +83,47 @@ The panel does not assume that manager-worker one-shot node outputs are copied i
 
 The panel root is its own bounded viewport. The room scrolls inside the scene region, while the Action Dock uses a fixed header, internally scrollable context body, and non-scrolling footer for submit/confirmation and recovery controls. Actor details use an absolute panel-local overlay, close with Escape, and restore focus to the invoking seat or bubble. Automatic refresh is run-owned and continues after unchanged non-terminal snapshots; it stops on terminal state, run replacement, disabled refresh, or unmount.
 
-## Asset-backed pixel room
+## Night-banquet view layer
 
-The component renders a local, atlas-backed indoor game room. The wall/floor, rug, oval table, directional chairs, host podium, window, lamp, shelf, plant, frames, clock, character variants, portraits, bubbles, cards, and lifecycle markers are embedded into the single UMD bundle; the panel makes no runtime image request to an asset host.
+The side panel renders the delivered 夜宴 (midnight banquet) art: an embedded 836×470 WebP hall backdrop, a judge/host portrait, and six art-calibrated seat slots around the oval table. Every image is embedded in the single UMD bundle; the panel makes no runtime request to an asset host.
 
-The room has three container-driven compositions:
+### Real table data only
 
-- **wide (≥680px):** landscape room, host, full oval table, and six depth-sorted seats;
-- **medium (460–679px):** portrait room retaining the host, table, all seats, labels, and current action;
-- **narrow (<460px):** indoor vignette followed by a sprite-backed participant roster.
+The view is a presentation layer over the existing panel parameters and the BCS state-machine graph. It never invents game data:
 
-Crossing a threshold changes presentation only. Speech drafts, vote selection and confirmation, focus restoration, polling, and the fixed Action Dock footer remain owned by the persistent panel component.
+- **Seats:** `seatOrder` order plus each player's public `seatNumber`, `displayName`, and state. The six-seat ring is art layout only; other player counts receive a deterministic ring.
+- **Public speech:** `publicHistory` and completed `nodeActorMap` node-detail outputs fetched by the existing refresh loop. Player speech is hidden while votes are collected.
+- **Current action and private word:** the pending HumanInput node and its viewer-private `UNDERCOVER_UI_CONTEXT_V1` block. The word is hidden until the viewer reveals it and is never placed in public params, storage, URLs, or the rendered public graph.
+- **Candidates:** `voteCandidates` / `pkCandidates` with the existing eligibility, no-self-vote, PK restriction, and abstention rules.
+- **Timing:** only server deadlines (`pending.timeout_deadline_ms`, `currentAction.deadlineAt`, `params.deadlineAt`) produce a `mm:ss` countdown. Without a deadline the panel shows guidance text; there is no fabricated countdown.
+- **Results:** the existing public result file and host finale parsing feed `GameOverDialog`. The view never derives roles or words itself.
 
-### Public state legend
+No static demo roster, demo word, sample speech, fixed room number, or `location.href` navigation is used.
 
-- `（你）` plus the framed portrait: current viewer identity;
-- `!` triangle: Human action required;
-- waveform: Bot speaking;
-- clickable small speech bubble: completed public speech; no separate check marker;
-- sealed envelope: private vote submitted (never a target);
-- cross: eliminated, with the original seat retained;
-- circular arrow / warning: retry or error.
+### Static pages as view states
 
-Every state includes readable text or a distinct shape and remains understandable with color removed. `prefers-reduced-motion: reduce` stops attention animation while retaining the static marker.
+The six supplied static pages map onto the one live panel:
+
+| static page | live view |
+| --- | --- |
+| `lobby.html` | seat ring plus the "第一章 · 夜宴" dialogue in the Action Dock while waiting for the host |
+| `word.html` | parchment word card in the Action Dock, hidden until the viewer reveals it |
+| `describe.html` | speaker dialogue in the Action Dock, speech bubble, private-word input, and the existing validation |
+| `discuss.html` | public history and upstream speech details in the Action Dock |
+| `vote.html` | candidate cards with portraits, selection reticle, explicit confirmation, and abstain when allowed |
+| `result.html` | night-themed `GameOverDialog` with the public winner and summary |
+
+The HUD step row (发词 · 描述 · 讨论 · 投票) is derived from `phase` plus real completed/turn counts. `display.showTimer === false` hides the deadline box.
+
+### Layout
+
+- **wide (≥680px):** stage, full seat ring, and Action Dock; the dialogue view from the static describe/discuss pages renders inside the Action Dock while no input is required.
+- **medium (460–679px):** the same stage with smaller portraits, a labeled roster below it (per-seat plates are wide-only), and the same dock dialogue.
+- **narrow (<460px):** stage vignette plus the labeled roster; the fixed Action Dock still owns dialogue, submit, confirmation, and recovery.
 
 ### Provenance and visual verification
 
-Selected CC0 source pixels and retained licenses are under `assets/source/`. Exact source files/cells, transformations, rejected references, and bridge-art rules are documented in `assets/THIRD_PARTY_NOTICES.md`, `assets/SELECTION.md`, and `assets/ASSET_GUIDE.md`.
+Night-banquet source pixels, crop boxes, and retained licenses are recorded in `assets/THIRD_PARTY_NOTICES.md`, `assets/SELECTION.md`, `assets/ASSET_GUIDE.md`, and `assets/source/night-banquet/README.md`. The committed daily build work is:
 
 ```bash
 node scripts/generate-atlases.mjs
@@ -122,23 +136,29 @@ The scan enforces complete provenance, no tracked source-pack archives, a 120 Ki
 
 ### Local design preview
 
-Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open
-`http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic
-players and local mock responses; submissions do not affect a real game.
-Use `width=320&height=600&mode=speech` or `width=560&height=600&mode=vote`
-in the query string to inspect input layouts; `mode=observe` shows the waiting
-state. The panel preserves pixel room art while using readable typography,
-a round progress bar, independent host broadcasts, and a persistent action footer.
+Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open `http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic players and local mock responses; submissions do not affect a real game. Use `width=320&height=600&mode=speech`, `width=560&height=600&mode=vote`, `mode=observe`, `mode=bubbles`, `mode=markers`, `mode=finished`, `mode=pk-vote`, or `mode=pk-speech` in the query string to inspect the view states.
+
+### Host portrait and speech status
+
+The host/judge appears as a framed portrait above the table with a public nameplate. During speech collection a running player shows only the waveform marker, even if partial public text is already available. Completed, non-pending public speech can expand into a speech bubble; other completed speakers keep clickable small bubbles. Lifecycle markers (vote, eliminated, retry, action required) remain distinct. Preview `?width=760&height=900&mode=markers` to inspect a running speaker alongside completed speeches in the wide composition.
+
+### Player actions
+
+The persistent Action Dock is independent of the actor details:
+
+- speech: private word reveal/hide, real deadline, upstream speeches, public history, Unicode count, empty/length/own-word validation, and one HumanInput submission;
+- vote: eligible seat/name cards with portraits, an explicit selection reticle, explicit abstain when the private context allows it, confirmation, and canonical content:
+  - `{"kind":"vote","target_actor_id":"player-b"}`
+  - `{"kind":"vote","abstain":true}`
+- recovery: confirmed `onAction({type:'send_message', content:'卡住了'})` through the existing host bridge.
+
+Server-side HumanInput validation remains authoritative. Expired or conflicting submissions become stale and trigger a refresh. Vote targets and raw structured vote output remain hidden during active collection, including structured ballots that arrive as host node artifacts; host tally prose and the authorized phase-end result remain public.
 
 ### Club room and game finale
 
-The room uses original paneled walls, parquet, brass-trimmed green felt, a geometric rug and warm window lighting with the existing CC0 characters. All art remains embedded in the UMD bundle.
+The room uses the night-banquet hall, oval table, banners, night windows, and candle lighting delivered for this view, with generated portrait medallions for the six seats. All art remains embedded in the UMD bundle.
 
-New vote panels may specify `resultFile: "undercover-result-v1-r<round>-a<attempt>.json"`.
-The referee's `reveal` command generates and uploads that immutable public JSON
-using the existing Session File API. This is a versioned game-to-panel payload,
-not a new BCS Service API or Plugin API. BCS owns file storage and membership;
-the game script owns verdicts and disclosure, and the panel owns presentation.
+New vote panels may specify `resultFile: "undercover-result-v1-r<round>-a<attempt>.json"`. The referee's `reveal` command generates and uploads that immutable public JSON using the existing Session File API. This is a versioned game-to-panel payload, not a new BCS Service API or Plugin API. BCS owns file storage and membership; the game script owns verdicts and disclosure; the panel owns presentation.
 
 The V1 payload has these required fields:
 
@@ -157,110 +177,47 @@ The V1 payload has these required fields:
 }
 ```
 
-Only an exact-name, ready file owned by the current host Bot in the current
-session is consumed. Session, host, round and vote-render attempt must match
-panel params. The filename is scoped by the authenticated session and changes
-on every new round or re-render; no result filename or private result is carried
-by speech panels. Legacy `Bot`/`Ready` and V1 `bot`/`ready` metadata are supported.
-Other owners and other sessions are ignored before reading content. Malformed,
-unsupported, mismatched or conflicting results show a recoverable error, without
-falling back to prose. Files are limited to 64 KiB. Duplicate identical results
-are accepted for upload-response recovery.
+Only an exact-name, ready file owned by the current host Bot in the current session is consumed. Session, host, round, and vote-render attempt must match panel params. The filename is scoped by the authenticated session and changes on every new round or re-render; no result filename or private result is carried by speech panels. Legacy `Bot`/`Ready` and V1 `bot`/`ready` metadata are supported. Other owners and other sessions are ignored before reading content. Malformed, unsupported, mismatched, or conflicting results show a recoverable error without falling back to prose. Files are limited to 64 KiB. Duplicate identical results are accepted for upload-response recovery.
 
-Both list and content use the configured `apiBaseUrl` and existing
-`/sessions/{sessionId}/files` routes. Content is read with same-origin credentials:
-BCS receives the current login, while redirected presigned storage reads do not
-send cookies. Presign backends must allow browser reads from the application's
-origin via their existing CORS configuration; no new proxy endpoint is assumed.
-Transient network failures display an error and retain conservative prose
-compatibility. A successfully parsed structured result takes precedence.
+Both list and content use the configured `apiBaseUrl` and the existing `/sessions/{sessionId}/files` routes. Content is read with same-origin credentials: BCS receives the current login, while redirected presigned storage reads do not send cookies. Presign backends must allow browser reads from the application's origin via their existing CORS configuration; no new proxy endpoint is assumed. Transient network failures display an error and retain conservative prose compatibility. A successfully parsed structured result takes precedence.
 
-A published result represents a finished game independently of the run and chat
-session closing. A failed `finish` does not remove it. Polling continues for up
-to five terminal snapshots when a result file is absent or unavailable, then
-stops; manual refresh can recover a later publication. Completed outputs and a
-successfully loaded immutable result are cached per mounted run. Panels without
-`resultFile` make no file requests.
+A published result represents a finished game independently of the run and chat session closing. A failed `finish` does not remove it. Polling continues for up to five terminal snapshots when a result file is absent or unavailable, then stops; manual refresh can recover a later publication. Completed outputs and a successfully loaded immutable result are cached per mounted run. Panels without `resultFile` make no file requests.
 
-For old games, a completed run still needs an explicit final phase or a
-non-pending mapped host output containing both an end declaration and a victory
-verdict. Compatibility includes `终局揭晓`, `本局结束——平民赢了`, and verdicts
-followed by a separate explanatory sentence, such as
-`平民胜利！卧底在第一轮就被精准揪出。`. Ordinary phase completion, player claims,
-unmapped artifacts, conditional rules, quoted verdicts and contradictory winners
-do not trigger the dialog.
+For old games, a completed run still needs an explicit final phase or a non-pending mapped host output containing both an end declaration and a victory verdict. Compatibility includes `终局揭晓`, `本局结束——平民赢了`, and verdicts followed by a separate explanatory sentence, such as `平民胜利！卧底在第一轮就被精准揪出。`. Ordinary phase completion, player claims, unmapped artifacts, conditional rules, quoted verdicts, and contradictory winners do not trigger the dialog.
 
-The dialog honors `showPublicReveal` and `showHostOutput`, traps focus, supports
-Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to
-the mounted game session and survives refreshes and phase updates.
+The dialog honors `showPublicReveal` and `showHostOutput`, traps focus, supports Escape and "回到圆桌", and can be reopened via "查看终局". Dismissal is scoped to the mounted game session and survives refreshes and phase updates.
 
-Release the compatible panel first, then activate the updated referee profile
-for new games. Existing games keep using prose compatibility. This change does
-not require a BCS server or database migration. The final review can still be
-read in the host broadcast; the structured dialog summary comes directly from
-script facts, independently of the model's prose.
+Release the compatible panel first, then activate the updated referee profile for new games. Existing games keep using prose compatibility. This change does not require a BCS server or database migration. The final review can still be read in the host broadcast; the structured dialog summary comes directly from script facts, independently of the model's prose.
 
 Preview `?width=760&height=660&mode=finished` for the finale fixture, or `?width=900&height=950&mode=observe` for the club room.
 
 ### Character speech bubbles
 
-The table has no text overlay. A single expanded pixel speech bubble follows its
-speaker, using original nine-slice frame and directional tail SVG assets. Placement
-uses measured player/host bounds and chooses a nearby clear position, shrinking
-the frame when needed. Latest output expands automatically; older output stays in
-small speech markers that can be clicked to review in place. Clicking the expanded
-bubble opens the full public speech. Text previews are limited to two lines. A new
-latest output resets manual review; unchanged refreshes retain it. Voting continues
-to hide player speech bubbles and vote targets. Narrow panels retain the labeled
-roster, and reduced-motion preferences suppress bubble entrance animation.
+The stage has no baked text overlay. A single expanded pixel speech bubble follows its speaker, using the original nine-slice frame and directional tail SVG assets. Placement uses measured player/host bounds and chooses a nearby clear position, shrinking the frame when needed. Latest output expands automatically; older output stays in small speech markers that can be clicked to review in place. Clicking the expanded bubble opens the full public speech. Text previews are limited to two lines. A new latest output resets manual review; unchanged refreshes retain it. Voting continues to hide player speech bubbles and vote targets. The floating bubble and clickable speech markers are used in the wide composition; medium and narrow panels surface the same public speech through the Action Dock dialogue and the actor detail view, where the stage has no room for a clear bubble. Reduced-motion preferences suppress bubble entrance animation.
 
-Use `?width=560&height=950&mode=bubbles&bubbleSeat=5` to preview all speech
-markers; `bubbleSeat=1` through `6` selects the newest speaker for layout checks.
+When no player input is required, the Action Dock shows the latest public speech or host broadcast with a portrait, nameplate, and public-recipient note so the static description page remains readable inside the live panel.
 
-### Host sculpture and speech status
-
-The host is an original stone knight centered against the north wall, with a
-pedestal and a compact plaque beneath the club sign. Narrow layouts use a smaller
-sculpture alongside the plaque. The host still opens the same public detail view.
-
-During speech collection, a running player has only the waveform marker, even if
-partial public text is already available. Completed, non-pending public speech can
-expand into a bubble; other completed speakers have clickable small bubbles. The
-completed-speech check sprite and check prefix are removed. Other lifecycle markers
-(vote, eliminated, retry, action required) remain distinct. Preview `mode=markers`
-to inspect a running speaker alongside completed speeches.
+Use `?width=760&height=900&mode=bubbles&bubbleSeat=5` to preview all speech markers in the wide composition; `bubbleSeat=1` through `6` selects the newest speaker for layout checks. Medium and narrow widths intentionally render no floating bubble or markers and surface speech in the Action Dock dialogue instead.
 
 ### Tie-break PK contract
 
-`pk_speaking` and `pk_voting` are subphases of the existing `round`.
-`attempt` remains a retry counter within the current subphase. PK is never a retry
-of the ordinary vote and does not invalidate the first ballot.
+`pk_speaking` and `pk_voting` are subphases of the existing `round`. `attempt` remains a retry counter within the current subphase. PK is never a retry of the ordinary vote and does not invalidate the first ballot.
 
-- `pkCandidates?: string[]` contains the tied players' actor IDs. PK phases require
-  at least two distinct living candidates. The original `seatOrder` is unchanged.
-- In PK speech, `turnOrder` and player `nodeActorMap` entries contain only PK
-  speakers. A non-PK Human watches without an input task. PK voting uses all living
-  players; `voteCandidates` contains only PK candidates other than the voter.
-- The private vote context has `allowAbstain: false`; PK never displays an
-  abstention option. The referee independently rejects abstention, self-votes and
-  non-PK targets, without requesting replacement votes.
-- `publicHistory[].stage?: 'regular' | 'pk'` distinguishes two speech groups in
-  the same round. Omitted stage means regular. Both histories remain inspectable.
-- `voteHistory?: Array<{ round, stage, votes, counts }>` carries **already tallied**
-  ballots only. `stage` is `regular` or `pk`; each vote is
-  `{ seatNumber, displayName, text }`, where text is the referee's normalized
-  ballot, and each count is `{ seatNumber, votes }`. These records contain no raw
-  vote reasoning, words or roles. The next phase carries previous tallies; the
-  current tally is visible through the host broadcast. Terminal summaries include
-  both ballots. In-flight player artifacts still display only “已投票”.
+- `pkCandidates?: string[]` contains the tied players' actor IDs. PK phases require at least two distinct living candidates. The original `seatOrder` is unchanged.
+- In PK speech, `turnOrder` and player `nodeActorMap` entries contain only PK speakers. A non-PK Human watches without an input task. PK voting uses all living players; `voteCandidates` contains only PK candidates other than the voter.
+- The private vote context has `allowAbstain: false`; PK never displays an abstention option. The referee independently rejects abstention, self-votes, and non-PK targets without requesting replacement votes.
+- `publicHistory[].stage?: 'regular' | 'pk'` distinguishes two speech groups in the same round. Omitted stage means regular. Both histories remain inspectable.
+- `voteHistory?: Array<{ round, stage, votes, counts }>` carries **already tallied** ballots only. `stage` is `regular` or `pk`; each vote is `{ seatNumber, displayName, text }`, where text is the referee's normalized ballot, and each count is `{ seatNumber, votes }`. These records contain no raw vote reasoning, words, or roles. The next phase carries previous tallies; the current tally is visible through the host broadcast. Terminal summaries include both ballots. In-flight player artifacts still display only "已投票".
 
-PK final files use `undercover-result-v1-r<round>-pk-a<attempt>.json` and include
-`stage: 'pk'`. The parser matches stage as well as session, host, round and attempt;
-a missing stage means regular for existing results. The ordinary file name and
-existing v1 fields stay compatible. Publish the updated panel before activating
-this profile for new games; hot migration of an in-flight old collaboration is
-not validated. No BCS server, shared collaboration protocol or database change
-is required.
+PK final files use `undercover-result-v1-r<round>-pk-a<attempt>.json` and include `stage: 'pk'`. The parser matches stage as well as session, host, round, and attempt; a missing stage means regular for existing results. The ordinary file name and existing v1 fields stay compatible. Publish the updated panel before activating this profile for new games; hot migration of an in-flight old collaboration is not validated. No BCS server, shared collaboration protocol, or database change is required.
 
-Preview PK with `?width=560&height=800&mode=pk-vote` or
-`?width=360&height=600&mode=pk-speech`; these fixtures use simulated API responses.
+The night-banquet view renders PK seats with a `PK` badge, keeps the original seat order, and suppresses abstention; the ordinary vote/tally logic, target secrecy, and confirmation behavior are unchanged.
+
+Preview PK with `?width=560&height=800&mode=pk-vote` or `?width=360&height=600&mode=pk-speech`; these fixtures use simulated API responses.
+
+### Scope limits in this phase
+
+- The night-banquet view is verified through jsdom component tests, deterministic atlas checks, and the local Vite preview; it has not been visually regression-tested in a real browser against a live BCS deployment here.
+- PK uses the existing contract and is covered by the focused/component fixtures, but only limited PK visual QA was performed in this phase.
+- Narrow layout keeps the vignette/roster fallback; the full stage is optimized for wide/medium containers.
+- No new workflow/state-machine visualization, BCS Service API, Plugin API, referee script, database, or migration change is introduced.
