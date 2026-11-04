@@ -43,7 +43,9 @@ from agentclaw.community.core.engine_runtime.stage import (
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
-from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.devices.services import device_info as device_info_lookup
 from agentclaw.community.di.modules.skill_center_module import (
     DeviceFilesystemDispatcher,
@@ -304,6 +306,14 @@ class IdentityService(IdentityFilePort):
     # a bot with no resolvable device context is a bug and surfaces as the
     # resolver's error (fail early, never silently touch a dead local path).
 
+    # ``list_bot_files`` still reads the same 16 identity files, but it keeps their
+    # transport probes bounded so one bot cannot fan out 16 HTTP reads at once.
+    # Retries cover only the server-side provider blips that production observed.
+    # A 404 remains the same "absent" contract; every other status is preserved.
+    _LIST_PROBE_CONCURRENCY = 3
+    _LIST_PROBE_RETRY_DELAYS = (0.1, 0.2)
+    _RETRYABLE_PROBE_STATUS_CODES = frozenset({502, 503, 504})
+
     def _identity_device_fs(
         self,
         *,
@@ -386,6 +396,33 @@ class IdentityService(IdentityFilePort):
                 return ""
             raise
         return content_bytes.decode("utf-8") if content_bytes else ""
+
+    @classmethod
+    async def _read_probe_with_transient_retry(
+        cls,
+        device_fs,
+        file_type: str,
+    ) -> str:
+        """Same contract as :meth:`_read_through`, but with transient 5xx retries."""
+
+        for delay_seconds in (*cls._LIST_PROBE_RETRY_DELAYS, None):
+            try:
+                return await cls._read_through(device_fs, file_type)
+            except httpx.HTTPStatusError as e:
+                if (
+                    delay_seconds is None
+                    or e.response.status_code not in cls._RETRYABLE_PROBE_STATUS_CODES
+                ):
+                    raise
+                logger.warning(
+                    "[IdentityService._read_probe_with_transient_retry] transient "
+                    "HTTPStatusError: status=%d file_type=%s; retrying in %.1fs",
+                    e.response.status_code,
+                    file_type,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+        raise AssertionError("identity probe retry loop must return or raise")
 
     async def _device_write(
         self,
@@ -813,22 +850,22 @@ class IdentityService(IdentityFilePort):
             stage=stage,
         )
 
-        # Probe all 16 identity files concurrently: each read is a device
-        # round-trip (baas/arca = a network hop), so gathering instead of a
-        # serial loop cuts this list endpoint's tail latency from 16× to ~1×.
+        # Probe all 16 identity files concurrently, but keep the device HTTP
+        # fan-out bounded. A single request used to issue 16 reads at once, which
+        # production observed as a 502 during manifest apply; a small cap retains
+        # the "all probes live at once" benefit without the pathological fan-out.
         # Only bool(content) is needed; VALID_IDENTITY_FILES order is preserved.
-        #
-        # ⚠️ PUBLIC-READINESS GATE: openapi_v1 is NOT PUBLIC-READY today
-        # (require_principal=None → 401, zero real traffic). This is a 16-way
-        # device_fs fan-out PER call. Before exposing externally, confirm
-        # (a) the device_fs read path tolerates ≥16 concurrent reads per bot
-        # (arca HTTP connection pool / baas rate limit), and (b) prefer an
-        # existence probe over pulling each file's full content. If a per-call
-        # cap is needed, wrap the gather in asyncio.Semaphore.
+        sem = asyncio.Semaphore(self._LIST_PROBE_CONCURRENCY)
+
+        async def _probe_bounded(file_type: str) -> str:
+            async with sem:
+                return await self._read_probe_with_transient_retry(
+                    device_fs,
+                    file_type,
+                )
+
         ordered = list(VALID_IDENTITY_FILES)
-        contents = await asyncio.gather(
-            *(self._read_through(device_fs, ft) for ft in ordered)
-        )
+        contents = await asyncio.gather(*(_probe_bounded(ft) for ft in ordered))
         return list(zip(ordered, [bool(c) for c in contents]))
 
     async def _read_from_publish_device(
