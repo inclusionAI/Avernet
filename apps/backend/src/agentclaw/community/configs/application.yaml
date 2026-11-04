@@ -218,7 +218,8 @@ user_config:
     # the undocumented GET /openapi/v1/bots/{bot_id}/access. Empty = nobody.
     # A renamed app loses access; two apps sharing a name are both admitted.
     bot_access_check:
-      allowed_app_names: []
+      allowed_app_names:
+        - acmng
 
   # 浏览器 CORS allow-list — 中性默认仅 localhost origin。corp env overlay 追加
   # 公司前端 origin + envspot/tern-dev 正则；community 在

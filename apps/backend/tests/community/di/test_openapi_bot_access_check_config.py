@@ -89,11 +89,11 @@ def test_the_user_id_bypass_module_accepts_the_shared_block(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("profile", sorted(PROFILE_PAIRS))
-def test_every_deploy_profile_merges_to_an_empty_allowlist(profile):
+def test_every_deploy_profile_merges_to_the_shipped_allowlist(profile):
     base, overlay = PROFILE_PAIRS[profile]
     merged = compute_effective_config(base, overlay)["raw_user_config"]
 
-    assert merged[BLOCK][KEY][APP_NAMES] == []
+    assert merged[BLOCK][KEY][APP_NAMES] == ["acmng"]
 
 
 @pytest.mark.unit
@@ -101,7 +101,7 @@ def test_build_injector_resolves_it(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "dev")
     injector = build_injector(profile=DeployProfile.TEST)
 
-    assert injector.get(OpenApiBotAccessCheckConfig).app_names == frozenset()
+    assert injector.get(OpenApiBotAccessCheckConfig).app_names == frozenset({"acmng"})
 
 
 @pytest.mark.unit
