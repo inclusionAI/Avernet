@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,12 @@ class _McpPortMixin:
         path = self._mcporter_config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         text = json.dumps(root, ensure_ascii=False, indent=2) + "\n"
-        path.write_text(text, encoding="utf-8")
+        # Atomic write: prevent a partial file being visible for immediate readers; concurrent writers are not serialized
+        # by this operation.
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_path, path)
 
     @staticmethod
     def _mcp_serialize_entry(
