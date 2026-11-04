@@ -14,7 +14,7 @@ from search_core.api.models import VerifiedIdentity
 from search_core.core.card_management import CardManagementService
 from search_core.providers.sql_cards import sqlite_card_repository
 
-PATH = "/api/v1/agent-cards/example:one"
+PATH = "/api/v2/agent-cards/example:one"
 
 
 class Management(CardManagementService):

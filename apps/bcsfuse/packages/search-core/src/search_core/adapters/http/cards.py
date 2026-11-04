@@ -70,7 +70,7 @@ def create_card_router(
     status_model: type[CardStatus] = CardStatus,
 ):
     router = APIRouter(
-        prefix="/api/v1/agent-cards",
+        prefix="/api/v2/agent-cards",
         tags=["agent-cards"],
         responses={403: {"model": ErrorBody}, 503: {"model": ErrorBody}},
     )

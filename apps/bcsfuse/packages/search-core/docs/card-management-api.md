@@ -1,5 +1,9 @@
 # Card 通用运维接口
 
+新 Card、索引运维和搜索接口统一使用 `/api/v2`。原 `/api/v1/agent-cards`
+和 `/api/v1/index-builds` 路径不再挂载，调用方需随服务升级修改 URL；
+请求体、响应字段和业务逻辑保持不变。TC 现有旧接口不受影响。
+
 实现归属：Avernet 的 `search-core` 包。OCB 复用这份实现；TC 当前未接入，
 现有 sync/Worker/Profile 接口不变，后续迁移时再由 TC 显式启用。
 
@@ -10,11 +14,11 @@ Card 是完整业务 JSON。下列字段只是示例，不是白名单；新增�
 
 | 用途 | 方法与路径 |
 | --- | --- |
-| 创建或更新 | PUT `/api/v1/agent-cards/{id}` |
-| 删除 | DELETE `/api/v1/agent-cards/{id}` |
-| 读取完整 Card | GET `/api/v1/agent-cards/{id}` |
-| 查询索引加工状态 | GET `/api/v1/agent-cards/{id}/index-status` |
-| 修复当前版本的一张 Card | POST `/api/v1/agent-cards/{id}/rebuild` |
+| 创建或更新 | PUT `/api/v2/agent-cards/{id}` |
+| 删除 | DELETE `/api/v2/agent-cards/{id}` |
+| 读取完整 Card | GET `/api/v2/agent-cards/{id}` |
+| 查询索引加工状态 | GET `/api/v2/agent-cards/{id}/index-status` |
+| 修复当前版本的一张 Card | POST `/api/v2/agent-cards/{id}/rebuild` |
 
 Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空白字符。
 调用方不传保存版本。202 只确认数据已提交，索引由应用的后台任务处理。
@@ -22,7 +26,7 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 
 ## 1. 创建或更新 Card
 
-`PUT /api/v1/agent-cards/test:billing`
+`PUT /api/v2/agent-cards/test:billing`
 
 新建示例：
 
@@ -70,7 +74,7 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 
 同一 ID 的并发更新由服务端处理，未提供的字段仍保留；同时修改同一字段时，以数据库最终提交顺序为准。服务能阻止内部旧加工任务覆盖新数据，但无法自行识别上游网络迟到的旧业务请求。
 
-Group 创建示例：`PUT /api/v1/agent-cards/bcs_grp_example`
+Group 创建示例：`PUT /api/v2/agent-cards/bcs_grp_example`
 
 ```json
 {
@@ -85,7 +89,7 @@ Group 创建示例：`PUT /api/v1/agent-cards/bcs_grp_example`
 
 ## 2. 删除 Card
 
-`DELETE /api/v1/agent-cards/test:billing`
+`DELETE /api/v2/agent-cards/test:billing`
 
 不需要请求体，也不需要版本参数。成功返回 **202**：
 
@@ -106,7 +110,7 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 
 ## 3. 读取 Card
 
-`GET /api/v1/agent-cards/test:billing`
+`GET /api/v2/agent-cards/test:billing`
 
 成功返回 **200**：
 
@@ -122,7 +126,7 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 
 ## 4. 查看索引加工状态
 
-`GET /api/v1/agent-cards/test:billing/index-status`
+`GET /api/v2/agent-cards/test:billing/index-status`
 
 成功返回 **200**。该接口需要额外读取索引产物表，因此与读取 Card 分开；正常读 Card 只查 Card 表，不加载向量或索引产物。常用字段如下：
 
@@ -185,7 +189,7 @@ point payload 都保存所属 `index_key`，由系统在写入和恢复时补充
 
 ## 5. 修复当前版本的一张 Card
 
-`POST /api/v1/agent-cards/test:billing/rebuild`，请求体 `{"index_key":"default"}`。
+`POST /api/v2/agent-cards/test:billing/rebuild`，请求体 `{"index_key":"default"}`。
 先从本实例状态取得 index_key；接口只修复响应实例当前加载的版本，不能用它选择或切换版本。
 成功返回 200：`{"published":true,"index_key":"default","card_version":1}`。
 这表示中心产物已提交，Qdrant 随后台同步生效；原始业务 Card 不改写。

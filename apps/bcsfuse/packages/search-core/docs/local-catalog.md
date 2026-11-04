@@ -28,7 +28,7 @@ python -m venv .venv-search
 创建 Card：
 
 ```bash
-curl -X PUT http://127.0.0.1:8877/api/v1/agent-cards/demo \
+curl -X PUT http://127.0.0.1:8877/api/v2/agent-cards/demo \
   -H 'Content-Type: application/json' \
   -d '{"card":{"name":"账单助手","description":"查询消费账单"}}'
 ```
@@ -36,7 +36,7 @@ curl -X PUT http://127.0.0.1:8877/api/v1/agent-cards/demo \
 返回 202 表示已保存。后台加工后才能搜索；查询本实例状态：
 
 ```bash
-curl http://127.0.0.1:8877/api/v1/agent-cards/demo/index-status
+curl http://127.0.0.1:8877/api/v2/agent-cards/demo/index-status
 ```
 
 等待 `indexed_card_version` 等于 `card_version` 且没有 `index_error`，再搜索：
@@ -49,9 +49,9 @@ curl -X POST http://127.0.0.1:8877/api/v2/search \
 新 Card 应用只提供 `/api/v2/search`，不挂载重复的 recommend 或 preview 入口。部分更新只传需要修改的字段：
 
 ```bash
-curl -X PUT http://127.0.0.1:8877/api/v1/agent-cards/demo \
+curl -X PUT http://127.0.0.1:8877/api/v2/agent-cards/demo \
   -H 'Content-Type: application/json' -d '{"card":{"description":"查询账单和消费明细"}}'
-curl -X DELETE http://127.0.0.1:8877/api/v1/agent-cards/demo
+curl -X DELETE http://127.0.0.1:8877/api/v2/agent-cards/demo
 ```
 
 删除同样由后台同步到索引；删除标记保留用于恢复和同步。详细语义见 [Card 接口](card-management-api.md)。

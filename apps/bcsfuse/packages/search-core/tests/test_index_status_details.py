@@ -12,7 +12,7 @@ from search_core.plugin_api.vector_point import VectorPoint
 from search_core.providers.qdrant_index import QdrantRetrievalIndex
 from search_core.providers.sql_catalog import sqlite_catalog_repository
 
-PATH = "/api/v1/agent-cards/demo/index-status"
+PATH = "/api/v2/agent-cards/demo/index-status"
 
 
 @pytest.fixture
