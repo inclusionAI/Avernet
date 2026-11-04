@@ -207,3 +207,24 @@ prepare_bcs_runtime_config
 assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
 assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
 echo 'PASS: QwenWork authorization survives regeneration'
+
+# A coverage-only Provider fixture affects generated runtime copies, never the
+# tracked template, and the initial start is allowed before provisioning.
+unset SINGLEBOX_QWENWORK_PROVIDER_STATE
+write_local_template
+export SINGLEBOX_COVERAGE=1
+export SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE="${TEST_ROOT}/repair-provider.json"
+prepare_bcs_runtime_config
+printf '{"provider_id":"prv_repair_coverage","provider_admin_token":"test-token"}' > "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE"
+prepare_bcs_runtime_config
+prepare_bcs_runtime_config
+assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'allowed_switch_provider_ids = ["prv_repair_coverage"]'
+assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'allowed_switch_provider_ids = ["prv_repair_coverage"]'
+assert_not_contains "${BCS_DIR}/configs/bcs-config-local.toml" 'prv_repair_coverage'
+assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'test-token'
+unset SINGLEBOX_COVERAGE
+if prepare_bcs_runtime_config >/dev/null 2>&1; then
+    fail "Provider fixture must be rejected outside coverage mode"
+fi
+unset SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE
+printf 'PASS: coverage-only collaboration repair Provider runtime configuration\n'

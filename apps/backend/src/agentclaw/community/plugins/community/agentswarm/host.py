@@ -438,6 +438,10 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             # READY/APPLY_FAILED are answerable from the report even then
             # (a later explicit apply — "how is the bot configured now" —
             # is not read here).
+            if report.status is ApplyStatus.RUNNING:
+                # An active container can precede its post-container apply.
+                # Keep polling instead of killing a still-provisioning bot.
+                return BotState.PROVISIONING.value
             if report.status is ApplyStatus.SUCCEEDED:
                 if bot_status_ in _BOT_UP:
                     return BotState.READY.value

@@ -64,6 +64,27 @@ modules:
       router_min_percent: 100
 YAML
   chmod +x "${tmp}/singlebox/ci/singlebox_coverage.sh"
+  # Provisioning is network-free in this orchestration test; the helper's
+  # real HTTP, security and parsing behavior has its own focused unit suite.
+  cat > "${tmp}/singlebox/ci/collaboration_repair_provider.py" <<'PYTEST'
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("action")
+parser.add_argument("--bcs-url")
+parser.add_argument("--mock-url")
+parser.add_argument("--fixture", type=Path, required=True)
+args = parser.parse_args()
+assert os.environ["SINGLEBOX_COVERAGE"] == "1"
+assert args.action == "provision"
+assert args.bcs_url == "http://127.0.0.1:21000"
+assert args.mock_url == "http://127.0.0.1:39090"
+args.fixture.write_text(json.dumps({"provider_id": "prv_fixture", "provider_admin_token": "test-token"}))
+args.fixture.chmod(0o600)
+PYTEST
   cat > "${tmp}/apps/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
 #!/usr/bin/env bash
 bcs_e2e_mock_start() {
@@ -100,6 +121,14 @@ printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
 if [ "$*" = "--standalone setup all" ] && [ "${BCS_SKIP_DEBUG_BUILD:-}" != "1" ]; then
   echo "singlebox coverage setup should skip the unused non-instrumented BCS build" >&2
   exit 17
+fi
+if [ "$*" = "--standalone --with-bcs-coverage restart bcs" ]; then
+  [ "${BCS_BIN:-}" = "${PWD}/apps/bcs/target/cov-e2e/llvm-cov-target/debug/bcs" ] || exit 24
+  [ "${BCS_CLI_BIN:-}" = "${PWD}/apps/bcs/target/cov-e2e/llvm-cov-target/debug/bcs-cli" ] || exit 25
+  [ "${LLVM_PROFILE_FILE:-}" = "${PWD}/apps/bcs/target/cov-e2e/llvm-cov-target/bcs-%m-%p.profraw" ] || exit 26
+  [ "${SINGLEBOX_COVERAGE:-}" = "1" ] || exit 18
+  [ -s "${SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE:?}" ] || exit 19
+  [ ! -f "${PWD}/fail-bcs-restart" ] || exit 20
 fi
 if [ "$*" = "--standalone --with-bcs-coverage start all" ]; then
   mkdir -p "${SINGLEBOX_COVERAGE_DIR:?}/backend" "${SINGLEBOX_COVERAGE_DIR:?}/baas"
@@ -168,6 +197,7 @@ SH
 set -euo pipefail
 printf '%s\n' "$*" >> "${UV_STUB_LOG:?}"
 if [ "${1:-}" = "run" ] && [ "${2:-}" = "pytest" ]; then
+  [ -s "${SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE:?}" ] || exit 23
   junit=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -249,8 +279,12 @@ test_default_mode_runs_real_singlebox() {
       "${tmp}/singlebox/ci/singlebox_coverage.sh" >/dev/null
   )
 
+  [ ! -e "${tmp}/singlebox/.dependencies/coverage/singlebox/collaboration-repair-provider.json" ] || \
+    fail "normal cleanup must remove Provider credentials before artifacts are uploaded"
   grep -Fx -- "--standalone --with-bcs-coverage start all" "$log" >/dev/null || \
     fail "default coverage mode should start instrumented BCS in the full standalone stack"
+  grep -Fx -- "--standalone --with-bcs-coverage restart bcs" "$log" >/dev/null || \
+    fail "coverage should restart only BCS after Provider provisioning"
   grep -Fx -- "--standalone stop all" "$log" >/dev/null || \
     fail "default coverage mode should stop the full standalone singlebox stack"
   grep -F "run pytest tests/community/acceptance/devices tests/community/acceptance/cron" "$uv_log" >/dev/null || \
@@ -282,6 +316,30 @@ assert summary["systems"]["bcs"]["method"]["percent"] == 40.0
 assert summary["systems"]["bcs"]["router_api"]["percent"] == 100.0
 assert summary["systems"]["bcs"]["cli_command"]["percent"] == 100.0
 PY
+}
+
+test_failed_restart_trap_removes_provider_fixture() {
+  local tmp log uv_log rc
+  tmp="$(mktemp -d)"
+  log="${tmp}/singlebox.log"
+  uv_log="${tmp}/uv.log"
+  make_fake_repo "$tmp"
+  touch "${tmp}/fail-bcs-restart"
+  set +e
+  (
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
+      SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
+      "${tmp}/singlebox/ci/singlebox_coverage.sh" >/dev/null 2>&1
+  )
+  rc=$?
+  set -e
+  [ "$rc" -eq 20 ] || fail "BCS restart failure must retain its exit status"
+  [ ! -e "${tmp}/singlebox/.dependencies/coverage/singlebox/collaboration-repair-provider.json" ] || \
+    fail "EXIT trap must remove Provider credentials after failed startup"
+  grep -Fx -- "--standalone stop all" "$log" >/dev/null || \
+    fail "failed startup must stop the stack before artifact collection"
 }
 
 test_model_config_mode_can_use_home() {
@@ -333,6 +391,8 @@ test_bcs_e2e_failure_preserves_reports_and_fails_gate() {
   set -e
 
   [ "$rc" -eq 7 ] || fail "BCS E2E failure should be the final gate status"
+  [ ! -e "${tmp}/singlebox/.dependencies/coverage/singlebox/collaboration-repair-provider.json" ] || \
+    fail "failed coverage cleanup must remove Provider credentials"
   grep -F "BCS e2e failed with exit code 7" <<<"$output" >/dev/null || \
     fail "BCS E2E failure should be reported"
   [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/backend-coverage.json" ] || \
@@ -457,6 +517,25 @@ assert devices["plugin_api"]["status"] == "not_applicable"
 PY
 }
 
+test_relative_coverage_root_is_absolutized() {
+  local tmp output
+  tmp="$(mktemp -d)"
+  make_fake_repo "$tmp"
+
+  (
+    cd "$tmp"
+    PATH="${tmp}/fake-bin:$PATH"       PYTHON="${ROOT}/apps/backend/.venv/bin/python"       SINGLEBOX_STUB_LOG="${tmp}/singlebox.log"       UV_STUB_LOG="${tmp}/uv.log"       "${tmp}/singlebox/ci/singlebox_coverage.sh"         --coverage-root relative-cov >"${tmp}/run.log"
+  )
+  output="$(cat "${tmp}/run.log")"
+
+  # Generated service configs embed this root while the launchers cd into
+  # module directories; it must never stay relative to the caller's cwd.
+  grep -Fx "coverage_root: ${tmp}/relative-cov" <<<"$output" >/dev/null || \
+    fail "relative --coverage-root must be absolutized before use"
+  [ -f "${tmp}/relative-cov/reports/summary.json" ] || \
+    fail "reports must be written under the requested coverage root"
+}
+
 test_reporter_selection_failure_is_preserved() {
   local tmp output rc
   tmp="$(mktemp -d)"
@@ -484,12 +563,14 @@ YAML
 }
 
 test_default_mode_runs_real_singlebox
+test_failed_restart_trap_removes_provider_fixture
 test_model_config_mode_can_use_home
 test_bcs_e2e_failure_preserves_reports_and_fails_gate
 test_bcs_e2e_failure_without_artifacts_preserves_original_status
 test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status
 test_mock_mode_is_not_supported
 test_module_mode_reports_device_metrics
+test_relative_coverage_root_is_absolutized
 test_reporter_selection_failure_is_preserved
 
 printf 'PASS: singlebox coverage gate tests\n'

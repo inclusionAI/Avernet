@@ -59,7 +59,10 @@ _MAX_LINES = 1000
 _ALLOWLIST: dict[str, str] = {
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py": "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
-    "core/bot_management/services/bot_service.py": "~2894 lines — central bot service; handles create/get/update/delete + engine resolution.",
+    # PR #3569 retains this pre-existing exemption with maintainer approval;
+    # avatar projection and repair remain separate. Full service extraction
+    # is deferred to a dedicated lifecycle refactor, not this feature PR.
+    "core/bot_management/services/bot_service.py": "~6358 legacy lines — central bot service; lifecycle extraction deferred.",
     "core/bot_management/services/data_init_service.py": "~1111 lines — bot data initialization service.",
     # ── skill_center cluster ─────────────────────────────────────────
     "core/skill_center/services/skill_service.py": "~2444 lines — central skill service; CRUD, market, install, parameters, members.",

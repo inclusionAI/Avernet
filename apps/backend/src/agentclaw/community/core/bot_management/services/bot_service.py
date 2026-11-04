@@ -154,6 +154,9 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
+from agentclaw.community.core.bot_management.collaboration_repair.profile import (
+    outbound_avatar_from_record,
+)
 
 logger = get_logger()
 
@@ -1702,6 +1705,9 @@ class BotService(BotServiceProtocol):
                     bot_name=resolved_bot_name or bot_id,
                     bot_summary=bot_desc or "",
                     connection_mode=connection_mode,
+                    avatar_url=outbound_avatar_from_record(
+                        bot_record, log_context="[bot_service.create_bot]"
+                    ),
                     **provider_address_kwargs(bot_data),
                     respect_drm=False,
                 )
@@ -3366,8 +3372,14 @@ class BotService(BotServiceProtocol):
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # Sync to BCN if bot_name or bot_desc was updated
-            if sync_to_bcn and (bot_name is not None or bot_desc is not None):
+            # Sync to BCN if bot_name, bot_desc, or the avatar field was
+            # updated. Avatar presence in the request ext is the signal — not a
+            # stored-value comparison, which cannot distinguish an explicit
+            # clear ("") from a missing field.
+            avatar_changed = ext is not None and "avatar_url" in ext
+            if sync_to_bcn and (
+                bot_name is not None or bot_desc is not None or avatar_changed
+            ):
                 sync_kwargs = {
                     "bot_id": bot_id,
                     "owner_id": user_id,
@@ -3707,9 +3719,14 @@ class BotService(BotServiceProtocol):
         bot_desc: Optional[str] = None,
         request_headers: Optional[Dict[str, str]] = None,
     ) -> None:
-        """Sync bot name and summary to BCN.
+        """Sync bot name, summary and avatar projection to BCN.
 
         服务 Bot 使用稳定 entity 后缀；个人/桌面 Bot 保留 owner 后缀，例如 "20260421_gfdsz5vi:85020"。
+
+        头像投影取自已保存记录（resolver 重新读取），不使用本次请求的
+        partial ext —— 请求未携带的 ext 字段不能覆盖已持久化数据。投影
+        读取失败（字段类型非法 / ext JSON 损坏）则省略 ``avatar_url`` 字段，
+        BCN 保留远端旧值；绝不伪造空串把读不出来的数据变成"显式清空"。
 
         Args:
             bot_id: TC 页面上的 bot_id
@@ -3740,12 +3757,33 @@ class BotService(BotServiceProtocol):
             }
             if request_headers:
                 onboard_kwargs["request_headers"] = request_headers
-            self._bcn_service.onboard_bot(**onboard_kwargs)
-
-            logger.info(
-                f"[bot_service._sync_bot_to_bcn] Synced to BCN: "
-                f"bot_id={bcn_bot_id}, name={final_name}"
+            avatar_url = outbound_avatar_from_record(
+                bot, log_context="[bot_service._sync_bot_to_bcn]"
             )
+            if avatar_url is not None:
+                onboard_kwargs["avatar_url"] = avatar_url
+            result: Dict[str, Any] = self._bcn_service.onboard_bot(**onboard_kwargs)
+
+            if result.get("skipped") is True:
+                logger.warning(
+                    f"[bot_service._sync_bot_to_bcn] BCN sync skipped: "
+                    f"bot_id={bcn_bot_id}, name={final_name}"
+                )
+            elif result.get("onboarded") is not True:
+                # Project only documented onboard-response fields, matching the
+                # register path's log convention (raw payloads stay private).
+                logger.warning(
+                    f"[bot_service._sync_bot_to_bcn] BCN did not confirm onboarding: "
+                    f"bot_id={bcn_bot_id}, "
+                    f"bot_uuid={result.get('bot_uuid')!r}, "
+                    f"onboarded={result.get('onboarded')!r}, "
+                    f"message={result.get('message')!r}"
+                )
+            else:
+                logger.info(
+                    f"[bot_service._sync_bot_to_bcn] Synced to BCN: "
+                    f"bot_id={bcn_bot_id}, name={final_name}"
+                )
 
         except BcnServiceError as e:
             # BCN 同步失败不影响主流程，只记录警告日志
@@ -3780,12 +3818,18 @@ class BotService(BotServiceProtocol):
         *,
         respect_drm: bool = True,
         provider_bot_ref: str | None = None,
+        avatar_url: str | None = None,
     ) -> None:
         """Register with BCN best effort.
 
         Create/start/restart pass ``respect_drm=False`` so every legal lifecycle
         execution attempts registration. Environment credential checks remain
         owned by BcnService. Success only persists ``bcn_registered=True``.
+
+        ``avatar_url`` 是可省略的边界参数：``None`` 不发送该字段（BCN 保留
+        旧值），``""`` 显式清空远端头像。实际 Backend 调用方必须始终传调用点
+        已持有记录的当前投影（``outbound_avatar_from_record``）—— 投影读不
+        出来时以 ``None`` 省略，而不是伪造空串。
         """
         if respect_drm and not self._is_claude_code_bcn_register_enabled():
             logger.info(
@@ -3807,6 +3851,8 @@ class BotService(BotServiceProtocol):
                 register_kwargs["provider_bot_ref"] = provider_bot_ref
             if connection_mode is not None:
                 register_kwargs["connection_mode"] = connection_mode
+            if avatar_url is not None:
+                register_kwargs["avatar_url"] = avatar_url
             result = self._bcn_service.register_provider_bot(
                 **register_kwargs,
             )
@@ -4692,6 +4738,9 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            avatar_url=outbound_avatar_from_record(
+                bot, log_context="[bot_service.start_bot]"
+            ),
             **provider_address_kwargs(bot),
             respect_drm=False,
         )
@@ -5193,6 +5242,9 @@ class BotService(BotServiceProtocol):
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            avatar_url=outbound_avatar_from_record(
+                bot, log_context="[bot_service._restart_bot_baas]"
+            ),
             **provider_address_kwargs(bot),
             respect_drm=False,
         )
