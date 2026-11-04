@@ -135,7 +135,7 @@ preferred(S) = the active node with the highest score
 
 Hashing the session's **bucket** rather than the session itself keeps every
 property below (4096 buckets ≫ nodes, so balance is unaffected) and lets
-failover split a dead node's sessions with an indexed column (§8).
+failover split a dead node's sessions with an indexed column (§7).
 
 Every node computes the same ranking in microseconds with no coordination.
 When a node joins or leaves, only the sessions whose winner changed move —
@@ -152,7 +152,7 @@ coordinator.
 **Placement is not ownership.** Placement only decides *who should claim* a
 session that nobody owns. After a node joins, the hash may say D while the
 lease still says A — existing leases don't move. So the hash is a guess that
-the target node checks (§7).
+the target node checks (§6).
 
 ---
 
@@ -200,7 +200,7 @@ was lost.
 
 **Release** — give S up with no successor (only for sessions with nothing to
 do). **Transfer** — hand S directly to a chosen successor with token + 1
-(only the current holder can do this; used by drain, §9).
+(only the current holder can do this; used by drain, §8).
 
 Rules:
 
@@ -210,7 +210,7 @@ Rules:
 - **Expiry decides who may claim; the token decides who may write.** A late
   owner whose lease nobody has claimed can still write safely.
 - **Pending work is never released, only transferred.** A released lease is
-  invisible to failure discovery (§8), so a session that still needs a driver
+  invisible to failure discovery (§7), so a session that still needs a driver
   must always have one.
 
 ### 5.4 The pending-work flag
@@ -259,22 +259,7 @@ stops driving and fails its readiness probe, shrinking the zombie window.
 
 ---
 
-## 6. Why the database, not a lock service
-
-| Option | Fencing token? | Checked where the data lives? | Verdict |
-| --- | --- | --- | --- |
-| **Lease row in the shared database** | ✓ | ✓ same transaction | **Chosen** |
-| etcd / ZooKeeper | ✓ | ✗ — the database would still need its own lease row | Rejected |
-| Redis lock / Redlock | ✗ | ✗ | Rejected (safety depends on clocks and pause length) |
-
-**Put the lock in the same store as the data it protects.** The store must
-acknowledge a write only once a majority of replicas have it — otherwise a
-storage failover can hand the same token to two owners (see
-[storage.md](storage.md)).
-
----
-
-## 7. Routing a round to its owner
+## 6. Routing a round to its owner
 
 Personal-agent rounds are latency-sensitive, so a round must not sit in the
 database waiting for the owner's next poll. The entry node guesses in memory
@@ -307,7 +292,7 @@ TARGET NODE
 **Durable fallback** — one transaction on S's lease row: if the lease is
 claimable, the entry node claims S itself and serves (placement is only a
 preference); otherwise it records the round as input, sets the pending-work
-flag, and acknowledges. Recovery (§8) picks it up.
+flag, and acknowledges. Recovery (§7) picks it up.
 
 The entry node proxies the owner's token stream back to the PA, which only
 ever talks to the load balancer. Nothing here depends on the load balancer:
@@ -317,7 +302,7 @@ just makes forwarding rarer.
 
 ---
 
-## 8. Failover: when a node crashes
+## 7. Failover: when a node crashes
 
 There is no handoff message after a crash. Survivors must **discover** the
 dead node's sessions and split them without talking to each other.
@@ -353,7 +338,7 @@ blindly resend), and resume.
 safe, evidence can replace waiting: a restart at the same address frees the
 old run's leases at once; a process that panics marks its own roster row
 dead on the way out (heartbeat set to NULL) and keeps its leases, so
-survivors find them through the normal dead-node query (§8, step 1) at once —
+survivors find them through the normal dead-node query (§7, step 1) at once —
 pending work is never released. A node that is alive but silently unreachable gives no evidence —
 for it, wait the claim threshold.
 
@@ -365,7 +350,7 @@ for it, wait the claim threshold.
 
 ---
 
-## 9. Planned drain and deploy
+## 8. Planned drain and deploy
 
 Deploy model: a group G of nodes is restarted in place, one group at a time.
 
@@ -374,7 +359,7 @@ the move.** Draining never means refusing work.
 
 ![Drain timeline: stop signal; roster draining and readiness red; sessions released or handed off cheapest first; non-resumable steps finish then hand off; bot sockets emptied last; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
 
-### 9.1 The sequence for node A
+### 8.1 The sequence for node A
 
 1. **Stop signal:** roster `state = draining` (peers stop placing on A),
    readiness fails (the load balancer stops sending new connections), stop
@@ -388,8 +373,14 @@ the move.** Draining never means refusing work.
      hand off (A stays owner meanwhile and does not start the next step);
    - **about to start a new step** → hand off first, so the step starts on
      the successor.
-3. **Bot sockets last** (§9.4).
-4. Keep relaying open PA streams and answering `NOT_OWNER` redirects.
+3. **Bot sockets last** (§8.4).
+4. **Finish what is already flowing through A.** A PA round whose token
+   stream passes through A (A was its entry node) keeps streaming — owner →
+   A → PA — until that round ends or the deadline. A asks clients to open new
+   connections (HTTP/2 `GOAWAY` / `Connection: close`); A is out of the load
+   balancer, so those land on other nodes, and an interrupted stream is
+   resumed from its last sequence number through another node. Peers that
+   still guess A for a session get a `NOT_OWNER` redirect.
 5. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
    is left to its successors. A step still running on a non-resumable stream
    is cancelled and **re-run by the successor**. That is safe because such
@@ -404,7 +395,7 @@ Successors must be outside G, or a session would move twice: a draining node
 refuses a handoff and the next-ranked node is tried. If the deploy platform
 can mark a whole group draining at once, double moves disappear entirely.
 
-### 9.2 Handoff
+### 8.2 Handoff
 
 ![Handoff: A sends PREPARE; B loads S and replies READY; A pauses writes for S; A transfers the lease to B with token n+1; A sends COMMIT; B checks write_seq and drives S; A forwards held rounds and redirects later ones.](assets/handoff-sequence.svg)
 
@@ -432,7 +423,7 @@ late can't be skipped: an unadopted row stays visible until it is adopted.
 The same read covers transfers made without a PREPARE (drain deadline,
 watchdog).
 
-### 9.3 When is it safe to move a run mid-flight?
+### 8.3 When is it safe to move a run mid-flight?
 
 A run can move between any two durable writes, because its whole position is
 in the database. The cases that need care:
@@ -443,10 +434,10 @@ in the database. The cases that need care:
 | Waiting on an agent task whose id is recorded | ✓ — the successor reads or re-subscribes to the task |
 | Waiting on a dial-in bot | ✓ — the socket's node relays events to whoever owns S now |
 | In the middle of sending a dispatch | Finish the send first (milliseconds) |
-| Waiting on a stream that can't be resumed | ✗ — wait for that step to end (its output exists only on that stream); at the deadline it is re-run by the successor (§9.1) |
+| Waiting on a stream that can't be resumed | ✗ — wait for that step to end (its output exists only on that stream); at the deadline it is re-run by the successor (§8.1) |
 | Waiting on a timer | ✓ — provided timer deadlines are stored durably |
 
-### 9.4 Bot sockets: a second, independent job
+### 8.4 Bot sockets: a second, independent job
 
 A dial-in bot keeps one WebSocket open to whichever node it connected to.
 That node is just **transport**: it relays the bot's events to the owner of
@@ -465,7 +456,7 @@ each run's session, wherever that owner is.
   durable delivery owned by the session's owner, dispatched once the bot is
   reachable again.
 
-### 9.5 Rolling out safely
+### 8.5 Rolling out safely
 
 - **Probes:** liveness ("is the process stuck?") stays green while draining;
   readiness ("send me work?") is red while draining, self-fenced or starting.
@@ -480,7 +471,7 @@ each run's session, wherever that owner is.
 
 ---
 
-## 10. Episodes: warm state is only a cache
+## 9. Episodes: warm state is only a cache
 
 - An episode starts when a node claims or receives S (loading lazily) and
   ends on release, lease loss, or 10 minutes idle.
@@ -497,7 +488,7 @@ each run's session, wherever that owner is.
 
 ---
 
-## 11. Parameters
+## 10. Parameters
 
 All configurable; defaults sized for a ≤ 30 s takeover.
 
@@ -517,7 +508,7 @@ All configurable; defaults sized for a ≤ 30 s takeover.
 
 ---
 
-## 12. Contracts
+## 11. Contracts
 
 **Tables** (names pinned for sibling items):
 
@@ -542,7 +533,7 @@ takeover path is exercised everywhere.
 
 ---
 
-## 13. Deviations from Doc 02
+## 12. Deviations from Doc 02
 
 | # | Doc 02 says | This design | Why |
 | --- | --- | --- | --- |
@@ -556,7 +547,7 @@ takeover path is exercised everywhere.
 
 ---
 
-## 14. Open decisions
+## 13. Open decisions
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
@@ -568,7 +559,7 @@ takeover path is exercised everywhere.
 
 ---
 
-## 15. Alternatives we rejected
+## 14. Alternatives we rejected
 
 | Alternative | Why not |
 | --- | --- |
@@ -576,6 +567,7 @@ takeover path is exercised everywhere.
 | Active/standby | Caps throughput at one node; deploys become outages |
 | Sticky sessions at the load balancer | Ties placement to infrastructure; useless for background work |
 | etcd / ZooKeeper / gossip for membership | Not needed; the lease already lives next to the data |
+| A lock service (etcd, ZooKeeper, Redlock) for ownership | The fencing check must run in the same transaction as the data it protects; Redlock has no fencing token at all |
 | A message queue (e.g. a consistent-hash exchange) on the request path | A third membership view, lost ordering on rebalance, a second lease mechanism, and the reply stream still needs node-to-node addressing |
 | Redis as the system of record | Asynchronous replication can lose acknowledged writes and reissue a token |
 | Per-session lease renewal | O(sessions) writes per tick |
@@ -583,7 +575,7 @@ takeover path is exercised everywhere.
 
 ---
 
-## 16. References
+## 15. References
 
 - M. Kleppmann, "How to do distributed locking" (2016) — fencing tokens
 - M. Burrows, "The Chubby lock service" (OSDI 2006) — sessions, grace periods
