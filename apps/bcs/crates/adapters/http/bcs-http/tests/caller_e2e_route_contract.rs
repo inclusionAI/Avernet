@@ -86,6 +86,27 @@ impl AuthPlugin for WindowlessAuthPlugin {
     fn priority(&self) -> u8 { 100 }
 }
 
+/// Yields a principal carrying BOTH a human user id and a bot uuid — the
+/// ownership-bound login shape. The display identity still resolves a Human
+/// caller (user_id present), but strict caller extraction refuses it
+/// (machine principals are never human callers), landing the routes on the
+/// closed-relay warn path instead of a silent ingress skip.
+struct BotTaggedAuthPlugin;
+
+#[async_trait::async_trait]
+impl AuthPlugin for BotTaggedAuthPlugin {
+    fn name(&self) -> &'static str { "bot-tagged" }
+    fn can_authenticate(&self, _h: &axum::http::HeaderMap) -> bool { true }
+    async fn authenticate(&self, _h: &axum::http::HeaderMap) -> Result<Option<AuthPrincipal>, AuthError> {
+        let mut p = AuthPrincipal::default();
+        p.user_id = Some("12345678".to_string());
+        p.user_name = Some("Alice".to_string());
+        p.bot_uuid = Some("bot-external".to_string());
+        Ok(Some(p))
+    }
+    fn priority(&self) -> u8 { 100 }
+}
+
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
@@ -226,6 +247,12 @@ async fn caller_app(
         reserve_ttl_ms: 30_000,
     });
     let participants = fixture.group.get("group-1").await.unwrap().participants.clone();
+    // One session store shared by the message flow and the route-visible
+    // Services container, so /sessions/{sid}/chat reads the same session
+    // (group-1:e2e) the flow's own seam resolves.
+    let static_sessions = Arc::new(StaticSessionManagement::new(test_session(
+        "group-1:e2e", "group-1", participants,
+    )));
     // The Human-speaking-for-an-owned-Bot path consults the bot authority
     // hook (upstream §10.13.4); failing to wire one is a 500, so give the
     // fixture the shared lazy-seeded authority chain and grant the
@@ -242,9 +269,7 @@ async fn caller_app(
     .with_message_repo(message_repo as Arc<dyn MessageRepoPort>)
     .with_managed_deliveries(managed.clone() as Arc<dyn ManagedMessageDeliveryService>)
     .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".to_string(), 100)]))
-    .with_session_management(Arc::new(StaticSessionManagement::new(test_session(
-        "group-1:e2e", "group-1", participants,
-    ))))
+    .with_session_management(static_sessions.clone())
     .with_bot_authority_hook(Some(authority.hook.clone()));
     flow.caller_admission = Some(deps);
 
@@ -258,6 +283,7 @@ async fn caller_app(
         .routing(fixture.routing.clone() as Arc<dyn RoutingCoreService>)
         .registry(fixture.registry.clone() as Arc<dyn BotRegistryCoreService>)
         .message_flow(Arc::new(flow) as Arc<dyn MessageFlowService>)
+        .session_management(static_sessions)
         .build_for_test();
     let state = HttpAppState::new(services)
         .with_user_identity(user_identity)
@@ -274,13 +300,26 @@ async fn post_chat_from(
     message: &str,
     from: Option<&str>,
 ) -> (StatusCode, Value) {
+    post_uri(app, "/groups/group-1/chat", message, from).await
+}
 
+/// POST a chat message to the session-pinned route (`/sessions/{sid}/chat`).
+async fn post_session_chat(app: &Router, sid: &str, message: &str) -> (StatusCode, Value) {
+    post_uri(app, &format!("/sessions/{sid}/chat"), message, None).await
+}
+
+async fn post_uri(
+    app: &Router,
+    uri: &str,
+    message: &str,
+    from: Option<&str>,
+) -> (StatusCode, Value) {
     let response = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/groups/group-1/chat")
+                .uri(uri)
                 .header("content-type", "application/json")
                 .header("cookie", "bcs_session=e2e-cookie")
                 .body(Body::from(
@@ -372,6 +411,45 @@ async fn caller_disabled_bot_stays_completely_ordinary_with_strict_ingress() {
 async fn human_speaking_for_an_owned_bot_does_not_carry_human_ingress() {
     let app = caller_app(Box::new(WindowedAuthPlugin), false, false).await;
     let (status, body) = post_chat_from(&app.app, "hello as owned bot", Some("bot-driver:12345678")).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let rows = app.managed.snapshot(None).await.expect("snapshot");
+    assert!(rows.iter().all(|row| {
+        row.semantic_projection_json.get("caller_required").is_none()
+    }));
+}
+
+#[tokio::test]
+async fn group_chat_extraction_failure_closes_the_relay_capture_but_not_the_chat() {
+    // A bot-tagged principal resolves a Human display caller, so the message
+    // runs its ordinary course — but strict extraction refuses the machine
+    // principal, leaving the session relay capture closed for this message.
+    // The route must NOT fail the request on an extraction refusal.
+    let app = caller_app(Box::new(BotTaggedAuthPlugin), false, false).await;
+    let (status, body) = post_chat(&app.app, "hello from a bot-tagged principal").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let rows = app.managed.snapshot(None).await.expect("snapshot");
+    assert!(rows.iter().all(|row| {
+        row.semantic_projection_json.get("caller_required").is_none()
+    }));
+}
+
+#[tokio::test]
+async fn session_chat_with_a_resolved_human_attaches_the_extracted_ingress() {
+    // The session route runs the same strict extraction as group_chat and
+    // attaches the extracted ingress when the chain yields a Human: the
+    // message lands through the session-pinned seam.
+    let app = caller_app(Box::new(WindowedAuthPlugin), false, false).await;
+    let (status, body) = post_session_chat(&app.app, "group-1:e2e", "hello session").await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["session_id"], "group-1:e2e", "body: {body}");
+}
+
+#[tokio::test]
+async fn session_chat_extraction_failure_closes_the_relay_capture_but_not_the_chat() {
+    // Same closed-relay rationale as group_chat on the session route: the
+    // ordinary chat continues while the relay capture stays closed.
+    let app = caller_app(Box::new(BotTaggedAuthPlugin), false, false).await;
+    let (status, body) = post_session_chat(&app.app, "group-1:e2e", "hello closed relay").await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let rows = app.managed.snapshot(None).await.expect("snapshot");
     assert!(rows.iter().all(|row| {

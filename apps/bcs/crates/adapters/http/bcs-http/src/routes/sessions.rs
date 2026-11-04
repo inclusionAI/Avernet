@@ -1597,11 +1597,23 @@ pub async fn session_chat(
         .map(|d| d.as_millis() as i64)
         .unwrap_or_default();
     let caller_ingress = match (&state.caller_ingress_source, &caller) {
-        (Some(source), GroupChatCaller::Human(_)) => source
-            .extract_caller_request(&headers, now_ms)
-            .await
-            .ok()
-            .map(|request| request.ingress),
+        (Some(source), GroupChatCaller::Human(_)) => {
+            match source.extract_caller_request(&headers, now_ms).await {
+                Ok(request) => Some(request.ingress),
+                Err(error) => {
+                    // Same rationale as group_chat: the ordinary path
+                    // continues, but the relay capture silently starves
+                    // without the refusal kind in the log.
+                    tracing::warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        session_id = %sid,
+                        reason = ?error,
+                        "caller ingress extraction failed; the session relay capture stays closed for this message"
+                    );
+                    None
+                }
+            }
+        }
         _ => None,
     };
     let cmd = GroupChatCommand {

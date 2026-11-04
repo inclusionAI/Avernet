@@ -17,6 +17,7 @@ const CFG: GroupDingTalkConfig = {
   cardTemplateId: '',
   groupChatScope: 'conversation_shared',
   outboundVisibility: 'lead_only',
+  groupContextDelivery: 'send',
 };
 
 it('buildDingTalkConfigPayload: 普通模式编码 send_mode 为 normal/markdown, trim robotCode/appKey, 不 trim secret', () => {
@@ -26,6 +27,7 @@ it('buildDingTalkConfigPayload: 普通模式编码 send_mode 为 normal/markdown
     client_id: 'key-1',
     client_secret: 'secret-1',
     send_mode: { mode: 'normal', message_type: 'markdown' },
+    group_context_delivery: 'send',
   });
 });
 
@@ -83,6 +85,7 @@ it('mapBindingToView: 回填 robotCode/appKey, appSecret 恒空(后端 <redacted
       cardTemplateId: 'tpl-9',
       groupChatScope: 'conversation_shared',
       outboundVisibility: 'lead_only',
+      groupContextDelivery: 'send',
     },
   });
 });
@@ -106,6 +109,7 @@ it('mapBindingToView: 缺 config.send_mode 时按普通模式回填, robotCode �
     cardTemplateId: '',
     groupChatScope: 'per_sender',
     outboundVisibility: 'full_transcript',
+    groupContextDelivery: 'send',
   });
   expect(view.status).toBe('disabled');
 });
@@ -199,6 +203,28 @@ it('mapBindingToView: 历史绑定字段异常时降级为可渲染的默认值'
       cardTemplateId: '',
       groupChatScope: 'per_sender',
       outboundVisibility: 'full_transcript',
+      groupContextDelivery: 'send',
     },
   });
+});
+
+it.each(['send', 'inject'] as const)('binding config round-trips group_context_delivery=%s', (delivery) => {
+  const config = buildDingTalkConfigPayload({ ...CFG, groupContextDelivery: delivery });
+  expect(config.group_context_delivery).toBe(delivery);
+  expect(
+    buildCreateDingTalkBindingPayload('grp-1', { ...CFG, groupContextDelivery: delivery }).config
+      .group_context_delivery,
+  ).toBe(delivery);
+  const view = mapBindingToView({
+    id: 'binding-context',
+    channel_type: 'dingtalk',
+    account_ref: 'robot-1',
+    target: { group: { group_id: 'grp-1' } },
+    outbound_visibility: 'full_transcript',
+    env: '',
+    status: 'active',
+    config,
+  });
+  expect(view.config.groupContextDelivery).toBe(delivery);
+  expect(buildDingTalkConfigPayload(view.config).group_context_delivery).toBe(delivery);
 });

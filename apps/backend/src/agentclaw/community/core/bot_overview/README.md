@@ -14,9 +14,14 @@ provides:
   - "EngineBotOverviewProvider seam + registry"
 consumes:
   - "BotRepository (Bot record: active_engine, status)"
+  - "TemplateRepository (per-Bot template snapshot row: ext carries template_config)"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.workspace
+  - agentclaw.community.core.bot_management.utils    # public template_config extractors + knowledge-key constants (DevFlow workflow, code-repo URLs); Yuque URL extraction is inlined in the aicoding provider
+  - agentclaw.community.core.bot_management.capabilities
+  - agentclaw.community.core.bot_management.services.aicoding.dima_workspace_capability
+  - agentclaw.community.log
 ```
 
 ### Change impact
@@ -38,5 +43,17 @@ own policy, such as "any conversation in the last two weeks".
 3. Register it for each persisted `active_engine` value in
    `di/modules/bot_overview_module.py`.
 
-`aicoding` and `claude_code` share `AICodingBotOverviewProvider`, which is a
-draft returning only the empty `AICodingEnginePayload`; its owner fills the rest.
+`aicoding` and `claude_code` share `AICodingBotOverviewProvider`. It fills
+`AICodingEnginePayload` from the Bot record's coding-template fields:
+`template_type` and `bot_type` from the record itself, and — from the
+`template_config` snapshot, resolved the way every AICoding capability reads
+it (Bot record top level, then `bot.ext.template_config`, then the template
+repository row) — the template version, the template-factory identity, the
+hosted-workspace capability flag, the DevFlow workflow name, and the
+code-repo / Yuque knowledge-base URLs. It also fills the neutral
+`default_model` from the snapshot's `model` field — the relay default model
+the runtime consumes as `RELAY_DEFAULT_MODEL`. Credentials that ride along in
+the snapshot (CodeFuse `token`, Yuque team tokens) are never surfaced. The
+remaining engine-neutral fields (`skills`, `mcps`, `sessions`) stay at their
+"nothing reported" defaults; the last-session source is an async BaaS call
+behind this synchronous seam, so filling `sessions` is deliberately deferred.

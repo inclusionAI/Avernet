@@ -4,8 +4,7 @@
 //! `<GroupContext>` message delivered to all bot participants, with
 //! `chat.send` for the driver/manager and `chat.inject` for other
 //! participants. The driver's delivery can be overridden to `chat.inject`
-//! via the event's `driver_delivery` field (except in ManagerWorker groups,
-//! which always deliver to the manager via `chat.send`).
+//! via the event's `driver_delivery` field for both Chat and ManagerWorker groups.
 //!
 //! Free-chat (`Chat`) and manager-worker (`ManagerWorker`) groups share the
 //! same `<GroupContext>` shell and section order; the mode label and a few
@@ -73,15 +72,7 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
             let is_driver = is_lead_participant(&render_group, participant);
             let is_manager_worker = render_group.group_strategy == GroupStrategy::ManagerWorker;
             let delivery_type = if is_driver {
-                // ManagerWorker groups intentionally ignore the
-                // `driver_delivery` (group_context_delivery) override: the
-                // manager is expected to actively pick up and dispatch the
-                // task, so its context is always delivered via `chat.send`.
-                if is_manager_worker {
-                    DeliveryType::Send
-                } else {
-                    driver_delivery.unwrap_or(DeliveryType::Send)
-                }
+                driver_delivery.unwrap_or(DeliveryType::Send)
             } else {
                 DeliveryType::Inject
             };
@@ -96,7 +87,6 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                     session_id,
                     reason,
                     participant,
-                    delivery_type,
                     task_input_text.as_deref(),
                     task_ledger.as_ref(),
                     &coordination_surface,
@@ -216,7 +206,6 @@ fn manager_worker_initial_message(
     session_id: &str,
     topic: &str,
     recipient: &Participant,
-    delivery_type: DeliveryType,
     task_input: Option<&str>,
     task_ledger: Option<&LedgerSummary>,
     coordination_surface: &CoordinationSurface,
@@ -229,7 +218,6 @@ fn manager_worker_initial_message(
     };
     let mut instruction = manager_worker_coordination_instruction(
         is_manager,
-        delivery_type,
         coordination_surface,
         &status_line,
     );
@@ -364,7 +352,6 @@ pub(super) fn routing_instruction_block(use_at_mention_routing: bool) -> &'stati
 
 fn manager_worker_coordination_instruction(
     is_manager: bool,
-    delivery_type: DeliveryType,
     surface: &CoordinationSurface,
     status_line: &str,
 ) -> String {
@@ -390,7 +377,7 @@ fn manager_worker_coordination_instruction(
         ),
         CoordinationMode::Disabled | CoordinationMode::LegacyUpstream => {
             legacy_manager_worker_instruction(
-                delivery_type,
+                is_manager,
                 status_line,
                 surface.worker_send_task_message_enabled,
             )
@@ -458,16 +445,16 @@ fn native_tool_instruction(
 }
 
 fn legacy_manager_worker_instruction(
-    delivery_type: DeliveryType,
+    is_manager: bool,
     status_line: &str,
     _worker_send_task_message_enabled: bool,
 ) -> String {
-    match delivery_type {
-        DeliveryType::Send => format!(
+    match is_manager {
+        true => format!(
             "本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)，可并行派发多个。不要用引擎自带的发送工具向群里发消息。{}",
             status_line
         ),
-        DeliveryType::Inject => {
+        false => {
             "本群为任务群，你是子 Bot。收到主 Bot 派发的任务后直接处理并正常回复，BCS 自动回传结果；信息不足时说明缺少什么并结束本轮。不要用引擎自带的发送工具向群里发消息。".to_string()
         }
     }
