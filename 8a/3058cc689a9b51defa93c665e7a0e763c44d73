@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/recheck_review.py
+  s_cecdc98e721f4b::t_35173546c39fbf 36
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_reconcile.py
+  s_cecdc98e721f4b::t_e6a81e4ca824ae 352,354,357
+apps/bcs/scripts/e2e-runner/tests/test_remote_reconcile.py
+  s_cecdc98e721f4b::t_0621544745deab 357,368-410
+apps/bcs/scripts/e2e-runner/tests/test_retained_recheck.py
+  s_cecdc98e721f4b::t_d8f621963747c6 13,16,19-21,291-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a3058cc689a9b51defa93c665e7a0e763c44d73",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
