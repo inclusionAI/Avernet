@@ -87,13 +87,17 @@ class DeviceFileSystem(Protocol):
         ...
 
     async def list_dir(
-        self, dir_path: str, *, recursive: bool = False
+        self, dir_path: str, *, recursive: bool = False,
+        preserve_errors: bool = False,
     ) -> list[dict[str, Any]] | None:
         """List directory contents.
 
         Args:
             dir_path: Absolute path of the directory.
             recursive: If True, list all descendants recursively.
+            preserve_errors: When True, transport/permission failures are
+                re-raised instead of being silently returned as None. Only
+                a genuinely missing directory (404) still returns None.
 
         Returns:
             List of file info dicts, or None if directory does not exist.
