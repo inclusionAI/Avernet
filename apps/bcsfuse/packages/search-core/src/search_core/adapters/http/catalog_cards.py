@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from search_core.adapters.http.card_diagnostics import DocumentContent, QdrantContent
 from search_core.adapters.http.cards import (
     CardId,
     ErrorBody,
@@ -22,8 +23,23 @@ from search_core.api.models import VerifiedIdentity
 
 
 class CardStatus(SharedCardStatus):
-    document_version: int
-    local_applied_document_version: int
+    documents: list[DocumentContent] = Field(
+        default_factory=list, description="数据库当前版本的 Doc 内容，包含删除记录"
+    )
+    qdrant: QdrantContent = Field(
+        default_factory=lambda: QdrantContent(
+            status="unsupported", error="INDEX_INSPECTION_UNSUPPORTED"
+        ),
+        description="响应实例的 Qdrant 实时内容；两类集合分别读取",
+    )
+    doc_version: int = Field(
+        validation_alias="document_version",
+        description="当前索引版本在数据库中的 Doc 版本",
+    )
+    indexed_doc_version: int = Field(
+        validation_alias="local_applied_document_version",
+        description="当前实例最近成功同步的 Doc 版本；不是实时查询 Qdrant",
+    )
 
 
 class CardRebuildRequest(BaseModel):
@@ -34,7 +50,7 @@ class CardRebuildRequest(BaseModel):
 class CardRebuildResult(BaseModel):
     published: Literal[True] = True
     index_key: str
-    saved_revision: int
+    card_version: int = Field(validation_alias="saved_revision")
 
 
 def create_card_router(service: CardManagement, authorize_operator: Authenticator):

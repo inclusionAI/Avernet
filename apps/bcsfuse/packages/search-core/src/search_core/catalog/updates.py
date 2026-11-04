@@ -18,6 +18,7 @@ from search_core.api.index_builds import IndexBuildConflict
 from search_core.catalog.cards import CardSnapshot
 from search_core.catalog.conversion import DefaultCardDocumentConverter
 from search_core.catalog.documents import build_documents, load_group, source_id
+from search_core.catalog.inspection import inspect_documents, inspect_index
 from search_core.config.index_sync import IndexSyncControl
 from search_core.core.card_management import CardManagementService
 from search_core.core.index_sync import apply_snapshot_pages
@@ -198,7 +199,9 @@ class CardUpdates(CardManagementService):
 
     def status(self, agent_id):
         row = self.read(agent_id)
-        doc = self.documents.load_by_id(agent_id)
+        stored = self.documents.load_by_source(agent_id)
+        doc = next((item for item in stored if item.id == agent_id), None)
+        documents, fields = inspect_documents(stored, self.filter_fields)
         return {
             "agent_id": agent_id,
             "source_version": row.card.source_version,
@@ -216,6 +219,8 @@ class CardUpdates(CardManagementService):
             "local_applied_document_version": self._document_versions.get(agent_id, 0),
             "local_error": self._errors.get(agent_id, ""),
             "operations_text_revision": self._operations_observed.get(agent_id, 0),
+            "documents": documents,
+            "qdrant": inspect_index(self.index, agent_id, fields),
         }
 
     def _apply_documents(self, documents):

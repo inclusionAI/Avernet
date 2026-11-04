@@ -39,7 +39,7 @@ curl -X PUT http://127.0.0.1:8877/api/v1/agent-cards/demo \
 curl http://127.0.0.1:8877/api/v1/agent-cards/demo/index-status
 ```
 
-等待 `local_applied_revision` 等于 `saved_revision` 且没有 `local_error`，再搜索：
+等待 `indexed_card_version` 等于 `card_version` 且没有 `index_error`，再搜索：
 
 ```bash
 curl -X POST http://127.0.0.1:8877/api/v2/search \

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from search_core.plugin_api.vector_point import VectorPoint
     from search_core.plugin_api.vector_search_hit import VectorSearchHit
 
 
@@ -39,3 +40,14 @@ class IndexStatistics(Protocol):
     """
 
     def point_counts(self, index_key: str = "") -> dict[str, int]: ...
+
+
+@runtime_checkable
+class IndexInspection(Protocol):
+    """Read actual vector/keyword points for one source, including stale points.
+
+    Missing points are omitted. Read failures raise rather than masquerading as
+    empty collections. Reads are not an atomic snapshot across collections.
+    """
+
+    def read_source_points(self, source_id: str) -> dict[str, list[VectorPoint]]: ...
