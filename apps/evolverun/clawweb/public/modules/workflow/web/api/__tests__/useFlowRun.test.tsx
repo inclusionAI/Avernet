@@ -2,8 +2,8 @@ import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useFlowRun } from '../../../../../shared/web/api/hooks'
-import type { FlowRunDetail, NodeStatus } from '../../../../../shared/web/types'
+import { useFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
+import type { FlowRunDetail, NodeStatus } from '@avernet/clawweb-shared/web/types'
 
 const api = vi.hoisted(() => ({
   runs: {
@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('../../../../../shared/web/api/client', () => ({ api }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api }))
 
 function detail(
   status: NodeStatus,
