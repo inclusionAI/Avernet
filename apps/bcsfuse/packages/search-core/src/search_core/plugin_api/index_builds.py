@@ -35,14 +35,17 @@ class IndexBuildRepository(Protocol):
 
 
 class IndexBuildSource(Protocol):
-    """Source IDs/revisions include deletion tombstones; ordering must be stable.
+    """Source IDs/revisions/deletion flags include tombstones; ordering is stable.
 
     rebuild publishes an atomic document group only if the observed source and
     execution ownership are still current. A competing producer/source change
     raises IndexBuildConflict; other failures must propagate.
     """
 
-    def page(self, after: str, limit: int) -> list[tuple[str, int]]: ...
+    def page(self, after: str, limit: int) -> list[tuple[str, int, bool]]:
+        """Return (source_id, revision, deleted); deleted rows are processed but not counted."""
+        ...
+
     def prepared_revision(self, index_key: str, source_id: str) -> int | None: ...
     def rebuild(
         self,

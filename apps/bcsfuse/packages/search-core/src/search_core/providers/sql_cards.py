@@ -134,18 +134,22 @@ class SqlCardRepository(CardWrites):
         }
 
     def page(self, after, limit):
+        return [(key, revision) for key, revision, _ in self.page_states(after, limit)]
+
+    def page_states(self, after, limit):
+        """Lightweight source versions with operational deletion, including tombstones."""
         if not 1 <= limit <= 1000:
             raise ValueError("invalid page size")
         with self._cursor() as (_, cur):
             self._execute(
                 cur,
-                f"SELECT agent_id, revision FROM {self.table} WHERE environment=? AND agent_id>? ORDER BY agent_id LIMIT ?",
+                f"SELECT agent_id, revision, is_deleted FROM {self.table} WHERE environment=? AND agent_id>? ORDER BY agent_id LIMIT ?",
                 (self.environment, after, limit),
             )
             return [
-                (row["agent_id"], row["revision"])
+                (row["agent_id"], row["revision"], bool(row["is_deleted"]))
                 if isinstance(row, dict)
-                else tuple(row)
+                else (row[0], row[1], bool(row[2]))
                 for row in cur.fetchall()
             ]
 

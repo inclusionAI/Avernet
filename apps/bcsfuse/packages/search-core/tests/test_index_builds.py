@@ -13,11 +13,14 @@ class Source:
         self.prepared = {}
         self.calls = []
         self.fail = ""
+        self.deleted = set()
 
     def page(self, after, limit):
-        return sorted((key, rev) for key, rev in self.revisions.items() if key > after)[
-            :limit
-        ]
+        return sorted(
+            (key, rev, key in self.deleted)
+            for key, rev in self.revisions.items()
+            if key > after
+        )[:limit]
 
     def prepared_revision(self, index_key, source_id):
         return self.prepared.get((index_key, source_id))
@@ -26,7 +29,8 @@ class Source:
         self.calls.append(source_id)
         if source_id == self.fail:
             raise OSError("synthetic processing failure")
-        assert len(model.embed(source_id)) == config.embedding_dimension
+        if source_id not in self.deleted:
+            assert len(model.embed(source_id)) == config.embedding_dimension
         self.prepared[config.index_key, source_id] = self.revisions[source_id]
 
 
@@ -99,6 +103,42 @@ def test_other_runner_resumes_failed_work_without_repeating_finished_sources(tmp
     assert repo.get("retry").status == "completed"
     assert source.calls.count("document-1") == 1
     assert source.calls.count("document-2") == 2
+
+
+def test_zero_counts_do_not_complete_until_deleted_sources_are_published(tmp_path):
+    from search_core.api.index_builds import IndexBuildConflict
+
+    source, repo, service = world(tmp_path)
+    source.deleted.update(source.revisions)
+    original = source.rebuild
+
+    def conflict(*args):
+        raise IndexBuildConflict("another producer")
+
+    source.rebuild = conflict
+    service.create("deleted", "model", 2)
+    service.run_once()
+    result = repo.get("deleted")
+    assert result.completed_count == result.total_count == 0
+    assert result.status == "pending"
+    source.rebuild = original
+    service.run_once()
+    result = repo.get("deleted")
+    assert result.status == "completed"
+    assert result.completed_count == result.total_count == 0
+    assert len(source.prepared) == 2
+
+
+def test_deleted_source_failure_is_not_hidden_by_zero_counts(tmp_path):
+    source, repo, service = world(tmp_path)
+    source.deleted.update(source.revisions)
+    source.fail = "document-1"
+    service.create("deleted", "model", 2)
+    service.run_once()
+    result = repo.get("deleted")
+    assert result.status == "failed"
+    assert result.error_code == "BUILD_FAILED"
+    assert result.completed_count == result.total_count == 0
 
 
 def test_sql_execution_ownership_and_environment_are_preserved(tmp_path):
