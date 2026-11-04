@@ -112,3 +112,72 @@ fn summary_override_and_card_url_limits_are_explicit() {
     }
     validate_card_url("https://example.org/agents/one/card.json").unwrap();
 }
+
+#[test]
+fn optional_provider_requires_complete_valid_identity_when_present() {
+    for provider in [json!(null), json!([]), json!({}),
+        json!({"organization":"", "url":"https://example.org"}),
+        json!({"organization":42, "url":"https://example.org"}),
+        json!({"organization":"Example", "url":"relative"}),
+        json!({"organization":"Example", "url":"https://"}),
+        json!({"organization":"Example", "url":" https://example.org"}),
+    ] {
+        let mut raw = card();
+        raw["provider"] = provider;
+        let error = validate_management_card(&raw).unwrap_err();
+        assert_eq!(error.code, Code::InvalidCard);
+        assert!(error.field.starts_with("agent_card.provider"));
+    }
+    let mut raw = card();
+    raw["provider"] = json!({"organization":"Example", "url":"https://example.org", "future":true});
+    let original = raw.clone();
+    validate_management_card(&raw).unwrap();
+    assert_eq!(raw, original);
+}
+
+#[test]
+fn optional_card_declarations_reject_malformed_nested_values() {
+    for (field, value) in [
+        ("capabilities", json!({"extensions":{}})),
+        ("capabilities", json!({"extensions":[{"uri":"urn:example:test","description":42}]})),
+        ("capabilities", json!({"extensions":[{"uri":"urn:example:test","required":"yes"}]})),
+        ("capabilities", json!({"extensions":[{"uri":"urn:example:test","params":[]}]})),
+        ("capabilities", json!({"extensions":[{"uri":"urn:example:test"},{"uri":"urn:example:test"}]})),
+        ("signatures", json!({})), ("signatures", json!([42])),
+        ("documentationUrl", json!("relative")), ("iconUrl", json!(7)),
+        ("securitySchemes", json!([])), ("securityRequirements", json!({})),
+        ("securityRequirements", json!([42])),
+        ("securityRequirements", json!([{"schemes":[]}])),
+    ] {
+        let mut raw = card();
+        raw[field] = value;
+        assert_eq!(validate_management_card(&raw).unwrap_err().code, Code::InvalidCard, "{field}: {raw}");
+    }
+    for scopes in [json!([]), json!({"list":42}), json!({"list":[42]})] {
+        let mut raw = card();
+        raw["securitySchemes"] = json!({"auth":{"httpAuthSecurityScheme":{"scheme":"bearer"}}});
+        raw["securityRequirements"] = json!([{"schemes":{"auth":scopes}},{}]);
+        assert_eq!(validate_management_card(&raw).unwrap_err().code, Code::InvalidCard);
+    }
+    let mut raw = card();
+    raw["signatures"] = json!([{"signature":"opaque"}]);
+    raw["skills"][0]["examples"] = json!(["query an order"]);
+    raw["skills"][0]["inputModes"] = json!(["text/plain"]);
+    raw["skills"][0]["outputModes"] = json!(["text/plain"]);
+    validate_management_card(&raw).unwrap();
+}
+
+#[test]
+fn raw_card_parser_preserves_extension_values_and_rejects_ambiguous_json() {
+    use bcs_domain::a2a_management::parse_card_json;
+    let raw = br#"{"future":{"values":[-7,18446744073709551615,1.25,null,true,"text"]}}"#;
+    assert_eq!(parse_card_json(raw).unwrap(), serde_json::from_slice::<Value>(raw).unwrap());
+    for raw in [
+        br#"{"name":"first","name":"second"}"#.as_slice(),
+        br#"{"extensions":[{"params":{"key":1,"key":2}}]}"#.as_slice(),
+        br#"{"name":"one"} {"name":"two"}"#.as_slice(),
+        br#"{"future":1e999}"#.as_slice(),
+    ] {
+        assert!(parse_card_json(raw).is_err());
+    }
+}

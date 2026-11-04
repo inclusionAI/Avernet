@@ -205,8 +205,12 @@ pub fn validate_management_card(card: &Value) -> Result<()> {
             &format!("{prefix}.securityRequirements"),
         )?;
     }
-    if card.get("provider").is_some_and(|v| !v.is_object()) {
-        return Err(invalid("agent_card.provider", "OBJECT_REQUIRED"));
+    if let Some(provider) = card.get("provider") {
+        if !provider.is_object() {
+            return Err(invalid("agent_card.provider", "OBJECT_REQUIRED"));
+        }
+        text(&provider["organization"], "agent_card.provider.organization")?;
+        absolute_url(&provider["url"], "agent_card.provider.url", true)?;
     }
     if let Some(signatures) = card.get("signatures") {
         let signatures = signatures

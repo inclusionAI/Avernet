@@ -592,6 +592,10 @@ if __name__ == "__main__":
         story = A2aStory(args.base_url, args.owner, peer)
         try:
             story.run()
+            with story.http.open(args.base_url + "/metrics", timeout=15) as response:
+                metrics = response.read().decode()
+            assert "bcs_http_requests_total{" in metrics
+            assert "bcs_message_delivery_total{" in metrics
             if binding == "JSONRPC":
                 assert peer.rpc_methods == {"SendMessage", "SendStreamingMessage", "GetTask", "CancelTask", "SubscribeToTask"}
         finally:

@@ -42,3 +42,21 @@ fn omitted_empty_schemes_map_is_a_protojson_anonymous_alternative() {
     assert_eq!(select_authentication(&card,true,false),Ok(A2aAuthentication::Anonymous));
     assert!(select_authentication(&card,false,true).is_err());
 }
+
+#[test]
+fn bearer_cannot_satisfy_scopes_or_malformed_security_alternatives() {
+    for requirements in [
+        json!([{"schemes":{"auth":[]}}]),
+        json!([{"schemes":{"auth":{"list":"read"}}}]),
+        json!([{"schemes":{"auth":{"list":["read"]}}}]),
+        json!([{"schemes":{}}]),
+        json!([{}]),
+    ] {
+        let card = json!({"securitySchemes":{"auth":{"httpAuthSecurityScheme":{"scheme":"bearer"}}},
+            "securityRequirements":requirements});
+        assert!(select_authentication(&card, false, true).is_err());
+    }
+    assert!(select_authentication(&json!(null), true, true).is_err());
+    assert_eq!(A2aAuthentication::Anonymous.credential_kind(), "a2a_anonymous");
+    assert_eq!(A2aAuthentication::ProviderBearer.credential_kind(), "downlink_bcs_to_provider");
+}
