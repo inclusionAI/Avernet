@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from agentclaw.community.core.bot_management.bcn_identity import provider_address_kwargs
+from agentclaw.community.core.bot_management.collaboration_repair.profile import (
+    outbound_avatar_from_record,
+)
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
 )
@@ -149,6 +152,9 @@ class AicodingBaasPreparation:
             bot_name=bot.get("bot_name") or bot_id,
             bot_summary=bot.get("bot_desc") or "",
             connection_mode=connection_mode,
+            avatar_url=outbound_avatar_from_record(
+                bot, log_context="[bot_service._restart_bot_baas]"
+            ),
             **provider_address_kwargs(bot),
             respect_drm=False,
         )

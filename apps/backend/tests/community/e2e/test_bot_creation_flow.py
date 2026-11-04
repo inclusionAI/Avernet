@@ -186,8 +186,8 @@ class TestBotCreationFlow:
 
     def test_create_first_bot(self, bot_service, fake_repo, mock_device_service):
         """首Bot创建成功。"""
-        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
+        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
                 user_id="user_001",
@@ -234,8 +234,8 @@ class TestBotCreationFlow:
             "status": "ACTIVE",
         })
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
+        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
                 user_id="user_001",

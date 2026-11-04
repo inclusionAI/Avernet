@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
-from agentclaw.community.core.bot_management.services import bot_service as bot_service_module
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotService,
@@ -531,7 +530,7 @@ class TestDeleteBot:
         svc._repository.soft_delete_by_owner.return_value = True
         svc._bcn_service.delete_provider_bot.side_effect = RuntimeError("bcn down")
 
-        with patch("agentclaw.community.core.bot_management.services.bot_service.logger") as mock_logger:
+        with patch("agentclaw.community.core.bot_management.services.bot_service_parts.deletion.logger") as mock_logger:
             result = svc.delete_bot("bot001", "user001")
 
         assert result is True
@@ -726,7 +725,7 @@ class TestDeleteBot:
         # in the gap and is found by the second sweep.
         svc._cleanup_service.purge_startup_script.side_effect = [False, True]
 
-        with patch.object(bot_service_module, "logger") as mock_logger:
+        with patch("agentclaw.community.core.bot_management.services.bot_service_parts.deletion.logger") as mock_logger:
             assert svc.delete_bot("mybot", "user001") is True
 
         assert svc._cleanup_service.purge_startup_script.call_count == 2

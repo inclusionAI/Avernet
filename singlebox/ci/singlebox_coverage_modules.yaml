@@ -224,6 +224,58 @@ modules:
       router_min_percent: 100.0
       plugin_min_percent: 100.0
 
+  collaboration_repair:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/collaboration_repair
+    core_paths:
+      # The whole one-shot repair Core package (facts projection + Service API
+      # contract + orchestration) — avatar_from_record/outbound_avatar_from_record
+      # also run inside the real daily edit stories at stack runtime.
+      - src/agentclaw/community/core/bot_management/collaboration_repair/
+    router_api:
+      status: applicable
+      reason: The one owner-scoped repair POST this feature added; legacy queued repair operations are background workflows outside the user-story denominator.
+      items:
+        - POST /openapi/v1/bots/{bot_id}/collaboration/repair
+    plugin_api:
+      status: applicable
+      reason: The request-scoped metadata delivery implementations for the repair route; the production composition adapter (di/bcs_collaboration_metadata_adapter.py) is composition glue over the shared BcnService transport, and the manifest evidence gate accepts the plugins tree implementation.
+      items:
+        - key: BcsCollaborationMetadataPlugin.exists
+          evidence:
+            path: src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py
+            symbol: RecordingBcsCollaborationMetadataPlugin.exists
+        - key: BcsCollaborationMetadataPlugin.update_profile
+          evidence:
+            path: src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py
+            symbol: RecordingBcsCollaborationMetadataPlugin.update_profile
+        - key: BcsCollaborationMetadataPlugin.sync_caller
+          evidence:
+            path: src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py
+            symbol: RecordingBcsCollaborationMetadataPlugin.sync_caller
+        - key: BcsCollaborationMetadataPlugin.aclose
+          evidence:
+            path: src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py
+            symbol: RecordingBcsCollaborationMetadataPlugin.aclose
+    thresholds:
+      # Measured by `singlebox_coverage.sh --module collaboration_repair`
+      # (see docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-validation.md):
+      # router 1/1 live route hit by the three repair stories; core measured
+      # 36.36% with the full story set (floored to 36.0 to absorb run
+      # variance; a partially-aborted first run measured 34.93%); plugin
+      # measured 0.00% because the credential-less public-local stack has no
+      # BCN provider scope, so the composition root's capability gate
+      # answers the live repair route with 503 before a plugin is built.
+      # The stories assert that boundary and the zero-write/zero-creation
+      # outcomes; the adapter/report execution contracts live in the unit,
+      # contract-conformance and route suites. Re-measure and raise plugin
+      # (and core) once the shared stack provisions provider scope.
+      core_min_percent: 36.0
+      router_min_percent: 100.0
+      plugin_min_percent: 0.0
+
+
   cron:
     system: backend
     acceptance_targets:

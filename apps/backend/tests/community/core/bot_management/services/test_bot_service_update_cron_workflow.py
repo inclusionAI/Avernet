@@ -125,7 +125,7 @@ def test_workflow_change_logs_info():
         mock_old_tc.return_value = {"devflow_workflow": {"name": "old-flow"}}
         new_template_config = {"devflow_workflow": {"name": "new-flow"}}
 
-        with patch("agentclaw.community.core.bot_management.services.bot_service.logger") as mock_logger:
+        with patch("agentclaw.community.core.bot_management.services.bot_service_parts.metadata.logger") as mock_logger:
             service.update_bot(
                 bot_id="bot1",
                 user_id="user1",

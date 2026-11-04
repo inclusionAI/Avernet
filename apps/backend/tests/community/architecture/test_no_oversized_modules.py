@@ -59,7 +59,9 @@ _MAX_LINES = 1000
 _ALLOWLIST: dict[str, str] = {
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py": "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
-    "core/bot_management/services/bot_service.py": "~2894 lines — central bot service; handles create/get/update/delete + engine resolution.",
+    "adapters/http/openapi_v1/bots/router.py": "~1137 lines — TC revamp public bots surface; CRUD + /all list + dormant + "
+    "data-init + startup-script + passport + engine-config",
+
     "core/bot_management/services/data_init_service.py": "~1111 lines — bot data initialization service.",
     # ── skill_center cluster ─────────────────────────────────────────
     "core/skill_center/services/skill_service.py": "~2444 lines — central skill service; CRUD, market, install, parameters, members.",
