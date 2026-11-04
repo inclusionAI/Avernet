@@ -1,0 +1,19 @@
+apps/bcsfuse/tests/alipay/test_card_management_boundary.py
+  s_89ee1c722ef961::t_63aa1303b8e3ba 194-209,213-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7019f3046fbf594007a688fbb924e168089944c8",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
