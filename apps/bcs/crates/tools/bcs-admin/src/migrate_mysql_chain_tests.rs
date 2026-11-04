@@ -144,9 +144,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=40\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=41\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=40).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=41).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -209,7 +209,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=20\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=21\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_eq!(db.query(DbStatement::new(retired_group_sql)).await?, retired_group);
         assert_eq!(db.query(DbStatement::new(retired_session_sql)).await?, retired_session);
@@ -265,6 +265,7 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
         ("bcs_providers", vec!["env", "provider_id", "slug"]),
+        ("bcs_group_agent_cards", vec!["id", "gmt_create", "gmt_modified", "env", "group_id", "card_template"]),
         ("bcs_collaboration_drafts", vec!["draft_id", "owner_bot_id", "head_revision", "created_at", "deleted"]),
         ("bcs_collaboration_draft_revisions", vec!["draft_id", "revision", "payload_json", "revoked"]),
         ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
@@ -278,8 +279,11 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_group_sessions", vec!["message_visibility_version", "activation_count", "completed_at", "callback_status", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),
     ] {
-        let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
+        let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
+        if table == "bcs_group_agent_cards" {
+            assert_eq!(actual, columns, "{table} column order");
+        }
         for column in columns { assert!(actual.iter().any(|actual| actual == column), "missing {table}.{column}"); }
         if table.starts_with("bcs_collaboration_draft") {
             assert!(!actual.iter().any(|column| column == "deployment_id"), "obsolete {table}.deployment_id");
@@ -320,6 +324,7 @@ async fn assert_history_lookup_plans(db: &dyn DbPlugin) -> Result<()> {
 async fn assert_direct_queue_indexes(db: &dyn DbPlugin) -> Result<()> {
     for (table, index, non_unique, columns) in [
         ("bcs_providers", "uk_bcs_providers_env_slug", 0, vec!["env", "slug"]),
+        ("bcs_group_agent_cards", "uk_group_agent_card", 0, vec!["env", "group_id"]),
         ("bcs_session_registry", "uk_session_registry", 0, vec!["env", "session_id"]),
         ("bcs_messages", "uk_session_seq", 0, vec!["env", "session_id", "session_seq"]),
         ("bcs_chat_runs", "idx_env_delivery", 1, vec!["env", "delivery_id"]),

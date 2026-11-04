@@ -213,6 +213,9 @@ impl MySqlGroupStore {
                         params,
                     ),
                 ));
+                if patch.label.is_some() {
+                    steps.push(self.card_template_upsert_step(&command.group_id)?);
+                }
             }
             GroupEventfulMutation::UpdateStatus(status) => {
                 steps.push(DbTransactionStep::Execute(
@@ -453,9 +456,10 @@ impl MySqlGroupStore {
             steps.push(DbTransactionStep::Execute(
                 DbStatement::with_transaction_params(
                     "DELETE FROM bcs_groups WHERE env = ? AND group_id = ?",
-                    vec![DbTransactionParam::value(self.env.as_str()), group_id],
+                    vec![DbTransactionParam::value(self.env.as_str()), group_id.clone()],
                 ),
             ));
+            steps.push(self.card_template_delete_step(group_id));
         }
         if let Err(error) = self.db.plugin().transaction(steps).await {
             if provider_scope_guard::public_scope_denied(&error, guard_step) {
