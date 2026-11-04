@@ -12,13 +12,32 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+
 from typing import Any
 
 from app.application.agent_search_cache import AgentSearchResultCache
-from app.application.agent_search_resilience_cache import AgentSearchResilienceCache
+from app.application.agent_search_contracts import (
+    AgentRecommendationCommand,
+    AgentRecommendationOutcome,
+    AgentSearchCommand,
+    AgentSearchOutcome,
+    MAX_RECOMMEND_EXPAND_FACTOR,
+    Offload,
+    default_offload,
+    default_search_filters,
+    normalize_query,
+)
+from app.application.agent_search_resilience_cache import (
+    AgentSearchResilienceCache,
+)
+from app.application.services.agent_search_embedding_executor import (
+    execute_embedding_query,
+)
 from app.application.services.agent_search_execution_budget import (
     AgentSearchExecutionBudget,
+)
+from app.application.services.agent_search_recommendation_embedding import (
+    prepare_recommendation_query_embedding,
 )
 from app.application.services.agent_search_resilience_policy import (
     ensure_search_candidate_source,
@@ -30,8 +49,21 @@ from app.application.services.agent_search_resilience_policy import (
 from app.application.services.search_degradation_reasons import (
     degraded_reasons,
 )
+from app.application.services.search_failure_markers import (
+    mark_candidate_unavailable,
+    mark_retrieval_unavailable,
+    mark_semantic_fallback,
+    mark_terminal_recommendation_fallback,
+    mark_terminal_search_fallback,
+)
 from app.application.services.search_mode_policy import (
     resolve_search_mode_policy,
+)
+from app.application.services.small_scope_search import (
+    DEFAULT_SMALL_SCOPE_POLICY,
+    SmallScopePolicy,
+    small_scope_allows,
+    small_scope_attempt,
 )
 from app.application.services.local_retrieval_snapshot import (
     project_snapshot_hit,
@@ -61,161 +93,8 @@ from app.application.services.semantic_failure_metadata import (
     semantic_failure_metadata,
 )
 from app.domain.models.retrieval_mode import RetrievalMode
-from app.infra.public.observability.search_dependency_metrics import (
-    record_search_fallback_unavailable,
-)
 from app.infra.public.observability.search_stage_metrics import search_stage_metrics
 
-
-def default_search_filters(
-    filters: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    """Merge request filters with the v1 search and recommendation defaults."""
-
-    merged: dict[str, Any] = {}
-    for key, value in (filters or {}).items():
-        # Copy mutable filter arrays without corrupting valid V1 scalar
-        # aliases such as worker_id; ``list("bot:owner")`` would become a
-        # character array and no longer match a payload value.
-        merged[key] = (
-            list(value) if isinstance(value, (list, tuple, set)) else value
-        )
-    merged.setdefault("availability", ["protected", "public"])
-    merged.setdefault("runtime_state", ["online"])
-    return merged
-
-
-@dataclass(frozen=True, slots=True)
-class AgentSearchCommand:
-    """Transport-independent v1 search command."""
-
-    query: str
-    top_k: int
-    mode: str = "auto"
-    min_score: float = 0.0
-    filters: Mapping[str, Any] | None = None
-    reranker_model: str | None = None
-
-
-MAX_RECOMMEND_EXPAND_FACTOR = 3
-
-
-def _mark_semantic_fallback(
-    metadata: dict[str, Any], operation: str
-) -> None:
-    """Mark the terminal bounded-fallback state without inventing candidates."""
-
-    annotate_semantic_failure(metadata)
-    if metadata.get("semantic_unavailable") is not True:
-        return
-    if metadata.get("fallback_unavailable") is True:
-        return
-    metadata["fallback_unavailable"] = True
-    metadata["fallback_reason_code"] = "SEMANTIC_RETRIEVAL_UNAVAILABLE"
-    record_search_fallback_unavailable(
-        operation, metadata["fallback_reason_code"]
-    )
-
-
-def _mark_retrieval_unavailable(
-    metadata: dict[str, Any], error: BaseException
-) -> None:
-    """Record a retrieval dependency failure before bounded recovery."""
-
-    metadata["retrieval_unavailable"] = True
-    metadata["retrieval_error"] = type(error).__name__
-
-
-def _mark_terminal_search_fallback(metadata: dict[str, Any]) -> None:
-    """Turn a terminal search failure into a stable, non-success envelope."""
-
-    if metadata.get("fallback_unavailable") is True:
-        return
-    metadata["fallback_unavailable"] = True
-    metadata["fallback_reason_code"] = "SEARCH_RETRIEVAL_UNAVAILABLE"
-    record_search_fallback_unavailable(
-        "search", metadata["fallback_reason_code"]
-    )
-
-
-def _mark_candidate_unavailable(
-    metadata: dict[str, Any], error_type: str
-) -> None:
-    """Record a recommendation dependency failure before bounded recovery."""
-
-    metadata["candidate_unavailable"] = True
-    metadata["candidate_error"] = error_type
-
-
-def _mark_terminal_recommendation_fallback(
-    metadata: dict[str, Any],
-) -> None:
-    """Turn a terminal recommendation failure into a stable envelope."""
-
-    if metadata.get("fallback_unavailable") is True:
-        return
-    metadata["fallback_unavailable"] = True
-    metadata["fallback_reason_code"] = "CANDIDATE_RETRIEVAL_UNAVAILABLE"
-    record_search_fallback_unavailable(
-        "recommend", metadata["fallback_reason_code"]
-    )
-
-
-
-@dataclass(frozen=True, slots=True)
-class AgentRecommendationCommand:
-    """Transport-independent v1 recommendation command."""
-
-    question: str
-    top_k: int
-    enable_rerank: bool
-    reranker_model: str | None
-    expand_factor: int
-    vector_min_score: float
-    rerank_min_score: float | None
-    min_score_explicit: bool
-    filters: Mapping[str, Any] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class AgentSearchOutcome:
-    """The raw retrieval result plus common execution diagnostics."""
-
-    query: str
-    normalized_query: str
-    top_k: int
-    mode: str
-    results: tuple[Any, ...]
-    metadata: dict[str, Any]
-    config_applied: dict[str, Any]
-    elapsed_ms: float
-
-
-@dataclass(frozen=True, slots=True)
-class AgentRecommendationOutcome:
-    """Candidate response before the HTTP recommendation projection."""
-
-    question: str
-    response: CandidateRecommendationResponse
-    config_applied: dict[str, Any]
-    elapsed_ms: float
-    diagnostics: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-Offload = Callable[[Callable[[], Any]], Awaitable[Any]]
-
-
-async def _default_offload(operation: Callable[[], Any]) -> Any:
-    """Run synchronous search work away from the event loop by default."""
-
-    return await asyncio.to_thread(operation)
-
-
-def normalize_query(query: str) -> str:
-    """Return the stable cache/retrieval representation."""
-
-    return normalize_query_text(query)
 
 
 class AgentSearchService:
@@ -233,7 +112,8 @@ class AgentSearchService:
         index_state_provider: Callable[[], Mapping[str, Any]] | None = None,
         retrieval_dependency_circuit: RetrievalDependencyCircuit | None = None,
         execution_budget: AgentSearchExecutionBudget | None = None,
-        offload: Offload = _default_offload,
+        small_scope_policy: SmallScopePolicy = DEFAULT_SMALL_SCOPE_POLICY,
+        offload: Offload = default_offload,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._embedding_generator = embedding_generator
@@ -254,6 +134,7 @@ class AgentSearchService:
         self._index_state_provider = index_state_provider
         self._retrieval_dependency_circuit = retrieval_dependency_circuit
         self._execution_budget = execution_budget
+        self._small_scope_policy = small_scope_policy
         self._offload = offload
         self._clock = clock
 
@@ -593,6 +474,46 @@ class AgentSearchService:
                         config_applied=direct_config,
                         elapsed_ms=(self._clock() - started) * 1000,
                     )
+            if (
+                self._snapshot_router is not None
+                and query_intent.route != "direct_keyword"
+                and small_scope_allows(
+                    self._small_scope_policy,
+                    query=normalized_query,
+                    snapshot=self._local_snapshot,
+                    mode=command.mode,
+                )
+            ):
+                small_hits, best_score = await self._snapshot_router.keyword_search(
+                    query=normalized_query,
+                    top_k=command.top_k,
+                    filters=filters,
+                )
+                accepted, scope_metadata, scope_config = small_scope_attempt(
+                    self._small_scope_policy,
+                    self._local_snapshot,
+                    hit_count=len(small_hits),
+                    best_score=best_score,
+                    required_score=max(
+                        self._small_scope_policy.min_confidence,
+                        command.min_score,
+                    ),
+                )
+                metadata.update(scope_metadata)
+                runtime_config.update(scope_config)
+                if accepted:
+                    small_config = {**runtime_config, "filters": filters}
+                    self._publish_status(metadata)
+                    return AgentSearchOutcome(
+                        query=command.query,
+                        normalized_query=normalized_query,
+                        top_k=command.top_k,
+                        mode=command.mode,
+                        results=small_hits,
+                        metadata=metadata,
+                        config_applied=small_config,
+                        elapsed_ms=(self._clock() - started) * 1000,
+                    )
             circuit = self._retrieval_dependency_circuit
             if circuit is not None and circuit.should_fail_fast():
                 outcome = await agent_search_terminal_fallback.execute_final_outcome_offloaded(
@@ -616,11 +537,11 @@ class AgentSearchService:
             else:
                 try:
                     with search_stage_metrics("search", "embedding"):
-                        query_embedding = await self._run(
-                            lambda: self._embedding_generator.embed(
-                                normalized_query
-                            ),
+                        query_embedding = await execute_embedding_query(
+                            self._embedding_generator,
+                            normalized_query,
                             self._stage_timeout("embedding"),
+                            self._offload,
                         )
                 except Exception as error:
                     # Preserve provider admission status for the explicit fallback envelope.
@@ -649,7 +570,7 @@ class AgentSearchService:
                 # An admitted request must never disappear behind an opaque
                 # transport 503 once the application has accepted it. Keep the
                 # public envelope explicit and do not expose provider details.
-                _mark_retrieval_unavailable(metadata, error)
+                mark_retrieval_unavailable(metadata, error)
                 results = []
 
             config_applied = dict(runtime_config)
@@ -695,9 +616,9 @@ class AgentSearchService:
                     config_applied["_retrieval"] = retrieval_diagnostic
             if not results:
                 if metadata.get("retrieval_unavailable") is True:
-                    _mark_terminal_search_fallback(metadata)
+                    mark_terminal_search_fallback(metadata)
                 else:
-                    _mark_semantic_fallback(metadata, "search")
+                    mark_semantic_fallback(metadata, "search")
 
             self._publish_status(metadata)
             return AgentSearchOutcome(
@@ -830,6 +751,65 @@ class AgentSearchService:
                         },
                         metadata=metadata,
                     )
+            if (
+                self._snapshot_router is not None
+                and query_intent.route != "direct_keyword"
+                and small_scope_allows(
+                    self._small_scope_policy,
+                    query=normalized_question,
+                    snapshot=self._local_snapshot,
+                    mode="auto",
+                )
+            ):
+                (
+                    small_recommendations,
+                    best_score,
+                ) = await self._snapshot_router.keyword_recommend(
+                    question=normalized_question,
+                    top_k=command.top_k,
+                    filters=filters,
+                )
+                accepted, scope_metadata, scope_config = small_scope_attempt(
+                    self._small_scope_policy,
+                    self._local_snapshot,
+                    hit_count=len(small_recommendations),
+                    best_score=best_score,
+                    required_score=max(
+                        self._small_scope_policy.min_confidence,
+                        command.vector_min_score,
+                    ),
+                )
+                metadata.update(scope_metadata)
+                runtime_config.update(scope_config)
+                if accepted:
+                    response = CandidateRecommendationResponse(
+                        question=normalized_question,
+                        mode=RetrievalMode.EXPERT_DIAGNOSIS,
+                        metadata=metadata,
+                        recommendations=small_recommendations,
+                        total_candidates=len(small_recommendations),
+                        selected_candidates=len(small_recommendations),
+                    )
+                    response.metadata["vector_search_used"] = False
+                    self._publish_status(response.metadata)
+                    metadata.update(
+                        {
+                            "status": response.metadata["status"],
+                            "reasons": response.metadata["reasons"],
+                        }
+                    )
+                    return AgentRecommendationOutcome(
+                        question=command.question,
+                        response=response,
+                        config_applied=dict(runtime_config),
+                        elapsed_ms=(self._clock() - started) * 1000,
+                        diagnostics={
+                            "min_score_explicit": command.min_score_explicit,
+                            "vector_min_score": command.vector_min_score,
+                            "rerank_min_score": command.rerank_min_score,
+                        },
+                        metadata=metadata,
+                    )
             circuit = self._retrieval_dependency_circuit
             if circuit is not None and circuit.dense_outaged is True:
                 runtime_config["dense_failfast"] = True
@@ -852,6 +832,27 @@ class AgentSearchService:
                     reasons=outcome.response.metadata["reasons"],
                 )
                 return outcome
+
+            dense_failfast = circuit is not None and circuit.dense_outaged is True
+            if dense_failfast:
+                query_embedding = []
+                embedding_failure = None
+            else:
+                query_embedding, embedding_failure = (
+                    await prepare_recommendation_query_embedding(
+                        provider=self._embedding_generator,
+                        question=retrieval_question,
+                        timeout_seconds=self._stage_timeout("embedding"),
+                        offload=self._offload,
+                    )
+                )
+
+            if embedding_failure is not None:
+                metadata["semantic_unavailable"] = True
+                metadata.update(embedding_failure)
+                runtime_config["_semantic_failure"] = embedding_failure
+                annotate_semantic_failure(metadata)
+
             try:
                 with search_stage_metrics("recommend", "retrieval"):
                     response = await self._run(
@@ -864,6 +865,7 @@ class AgentSearchService:
                             filters=filters,
                             vector_min_score=command.vector_min_score,
                             rerank_min_score=command.rerank_min_score,
+                            query_embedding=query_embedding,
                         ),
                         self._stage_timeout("retrieval"),
                     )
@@ -875,7 +877,7 @@ class AgentSearchService:
                         (runtime_config.get("_semantic_failure") or {})
                     ),
                 )
-                _mark_candidate_unavailable(response.metadata, type(error).__name__)
+                mark_candidate_unavailable(response.metadata, type(error).__name__)
 
             self._apply_index_state(metadata)
             for key, value in metadata.items():
@@ -911,10 +913,10 @@ class AgentSearchService:
 
             if not response.recommendations:
                 if response.metadata.get("semantic_unavailable") is True:
-                    _mark_semantic_fallback(response.metadata, "recommend")
+                    mark_semantic_fallback(response.metadata, "recommend")
                     response.metadata["candidate_source"] = "fallback_unavailable"
                 elif response.metadata.get("candidate_unavailable") is True:
-                    _mark_terminal_recommendation_fallback(response.metadata)
+                    mark_terminal_recommendation_fallback(response.metadata)
                     response.metadata["candidate_source"] = "fallback_unavailable"
             self._publish_status(response.metadata)
             metadata["status"] = response.metadata["status"]

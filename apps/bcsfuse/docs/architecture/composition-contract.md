@@ -114,6 +114,58 @@ no-provider/error fallback ordering when there are no keyword matches.
 Explicitly disabling rerank without keyword matches retains aggregate-only
 selection and ranking. Storage schemas and durable vectors are unchanged.
 
+### Shared embedding token pool
+
+Token credentials come from the environment at composition time only. A pod may
+receive:
+
+- `EMBEDDING_AUTH_TOKEN`, which defines a one-token pool; or
+- `EMBEDDING_AUTH_TOKENS`, a JSON array (preferred by secret managers) or
+  comma-separated list describing an arbitrarily large pool.
+
+Every Pod in a deployment receives the same pool and constructs the same ordered
+lanes. A one-token deployment is a single-lane pool; a multi-token deployment is
+not token-per-instance. The process remains stateless and horizontally
+scalable: adding Pods spreads traffic over the same token lanes rather than
+reserving a token for one Pod.
+
+The runtime creates equivalent sync and native-async pools. Indexing and online
+search both rotate the lanes. Each lane is independently wrapped with a circuit
+and a durable admission window. The durable capacity key is
+`embedding.model + a short non-reversible lane key`; therefore all Pods
+coordinate the same token at the same key. Circuit and quota metrics also use
+this safe lane-scoped key, so one unhealthy token lane cannot overwrite the
+gauge for another healthy lane. Plaintext credentials, URLs, and
+credential-bearing settings are not written into metrics, logs, the durable
+store, diagnostics, or responses. `EMBEDDING_AUTH_TOKENS` is masked as a
+secret.
+
+`embedding.quota.max_calls_per_minute` is the per-token call-window budget.
+One physically large token can therefore be represented by one lane and that
+token's real budget, while several smaller tokens create independently metered
+lanes whose total is the pool capacity. Batching still consumes one shared
+call per token lane.
+
+On a 429, circuit, or transient lane failure, the in-flight call moves to the
+next healthy lane. `embedding.token_pool.max_failover_attempts` (default 4)
+bounds this failover so a large pool cannot amplify one request into an
+exhaustive scan. If every attempted lane is exhausted, the pool raises the
+stable `embedding_quota_exhausted` contract with the shortest observed retry
+window and search follows its explicit keyword/literal degraded path. Suspect
+lanes remain available to later round-robin requests once their windows recover.
+
+Token rotation is a deployment operation: roll the shared secret, restart or
+replace Pods so all replicas converge on one pool, and drain old replicas. The
+non-secret lane key changes with the credential, intentionally starting a fresh
+owner's quota window instead of carrying another secret's exhaustion state. No
+Pod keeps ownership metadata.
+
+The native-async client supports the same OpenAI-compatible `dimensions` field
+and validates the response count and dimension. Consequently
+`embedding.request_dimensions=true` no longer forces the online path back to a
+synchronous provider; search uses the shared native-async token-pool path in
+both dimension modes.
+
 ### Embedding dimension request contract
 
 The OpenAI-compatible embedding client does not send `dimensions` by default.
@@ -306,6 +358,28 @@ A healthy dense-only result remains ``vector``, a successful dense+keyword merge
 remains ``hybrid``, and a process-local exact lookup remains
 ``direct_snapshot``. A ``direct_keyword`` route alone does not imply that source:
 only an actual direct snapshot hit reports ``candidate_source="direct_snapshot"``.
+
+The application service also has a bounded small-scope fast path for the current
+short-query, small-agent business shape. It is enabled only for ``auto`` and
+``fast`` search modes when the normalized query is at most 100 characters, the
+process snapshot has at most 20 selectable profiles, and a deterministic keyword
+hit reaches both the injected confidence threshold (default 0.30) and the
+request's explicit minimum-score threshold. Such a result uses
+``candidate_source="small_scope_snapshot"`` and
+``score_source="small_scope_snapshot"``, exposes
+``small_scope_attempted=true``, ``small_scope_used=true``,
+``small_scope_rejected=false`` and ``small_scope_best_score``, and remains
+``status="ok"``: it is a normal zero-dependency result, not degradation. It
+never uses deterministic default profiles. When an allowed local attempt is
+empty or falls below the confidence or request threshold, search and
+recommendation retain ``small_scope_attempted=true`` and publish
+``small_scope_used=false`` plus ``small_scope_rejected=true``,
+``small_scope_reject_reason=empty|low_confidence|low_score_or_threshold``, the
+best local score, and ``small_scope_fallback_to_vector=true``; the request then
+continues to the semantic path. Accurate mode, long queries, larger snapshots,
+and a direct-identifier miss are not local attempts. This keeps local
+worker-card matching useful today without making future corpus or query growth a
+behavior regression.
 
 When a completed retrieval pass reports both dense and keyword Qdrant
 dependencies unavailable, the shared application circuit records a terminal
@@ -800,7 +874,7 @@ Runtime and configured dev compositions wrap real embedding with a
 process-local query cache. Configuration comes from composition:
 `embedding.cache.max_entries` (default 10000),
 `embedding.cache.ttl_seconds` (default 300),
-`embedding.cache.max_query_batch_size` (deployment default 16), and adaptive query
+`embedding.cache.max_query_batch_size` (deployment default 32), and adaptive query
 coalescing controls: `embedding.cache.query_batch_wait_seconds` (default 0.05),
 `embedding.cache.query_batch_peak_wait_seconds` (default 0.15),
 `embedding.cache.query_batch_peak_threshold` (default 8), and

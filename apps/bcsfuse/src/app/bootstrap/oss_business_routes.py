@@ -714,11 +714,19 @@ def include_oss_business_routes(app) -> None:
             from app.application.services.search_index_state import (
                 search_index_state_metadata,
             )
+            from app.application.services.agent_search_provider_selection import (
+                select_online_embedding_provider,
+            )
             app_state = getattr(getattr(request, "app", None), "state", None)
             context = getattr(app_state, "context", None)
             registry = getattr(context, "registry", None)
             match_service = _get_vector_match_service()
             embedding_gen = _get_embedding_generator()
+            online_embedding_gen = (
+                select_online_embedding_provider(registry, embedding_gen)
+                if registry is not None
+                else embedding_gen
+            )
             if not match_service:
                 raise RuntimeError("match service not available")
 
@@ -729,7 +737,7 @@ def include_oss_business_routes(app) -> None:
                 app_state, "agent_search_result_cache", None
             )
             agent_search_service = AgentSearchService(
-                embedding_generator=embedding_gen,
+                embedding_generator=online_embedding_gen,
                 vector_match_service=match_service,
                 result_cache=result_cache,
                 resilience_cache=getattr(

@@ -169,6 +169,7 @@ def safe_provider_diagnostics(context: Any) -> Dict[str, Any]:
             "BCSFUSE_AUTH_TOKEN",
             "EMBEDDING_BASE_URL",
             "EMBEDDING_AUTH_TOKEN",
+            "EMBEDDING_AUTH_TOKENS",
             "EMBEDDING_MODEL",
             "EMBEDDING_DIMENSION",
             "RERANKER_BASE_URL",

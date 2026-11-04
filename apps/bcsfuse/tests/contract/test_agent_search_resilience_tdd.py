@@ -16,6 +16,7 @@ from app.application.agent_search_resilience_cache import (
 from app.application.services.agent_search_execution_budget import (
     AgentSearchExecutionBudget,
 )
+from app.application.services.small_scope_search import SmallScopePolicy
 
 
 class RateLimitedEmbedding:
@@ -143,7 +144,12 @@ def budget() -> AgentSearchExecutionBudget:
 
 
 def _search_command() -> AgentSearchCommand:
-    return AgentSearchCommand(query="python search", top_k=3)
+    # These tests exercise downstream dependency failures; accurate mode must
+    # not use the zero-dependency small-scope shortcut.
+    return AgentSearchCommand(query="python search", top_k=3, mode="accurate")
+
+
+DISABLED_SMALL_SCOPE_POLICY = SmallScopePolicy(max_profile_count=0)
 
 
 def _recommend_command() -> AgentRecommendationCommand:
@@ -219,6 +225,7 @@ def test_local_snapshot_fallback_publishes_explicit_source_metadata() -> None:
     recommend_service = AgentSearchService(
         candidate_recommendation_service=FailingRecommendation(),
         local_snapshot=snapshot(),
+        small_scope_policy=DISABLED_SMALL_SCOPE_POLICY,
         execution_budget=budget(),
         resilience_cache=None,
     )
@@ -231,6 +238,7 @@ def test_recommendation_uses_local_snapshot_before_terminal_empty_fallback() -> 
     service = AgentSearchService(
         candidate_recommendation_service=FailingRecommendation(),
         local_snapshot=snapshot(),
+        small_scope_policy=DISABLED_SMALL_SCOPE_POLICY,
         execution_budget=budget(),
         resilience_cache=None,
     )

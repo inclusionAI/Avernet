@@ -203,7 +203,8 @@ class WorkerCandidateRecommendationImpl:
         filters: dict[str, Any] | None = None,
         vector_min_score: float = 0.01,  # Phase B: 向量召回阈值
         rerank_min_score: float | None = None,  # Phase B: rerank 后质量阈值
-        min_score: float | None = None,  # DEPRECATED: Use vector_min_score and rerank_min_score instead
+        min_score: float | None = None,
+        query_embedding: list[float] | None = None,
     ) -> CandidateRecommendationResponse:
         """
         推荐候选人
@@ -290,7 +291,8 @@ class WorkerCandidateRecommendationImpl:
                         filters=filters,
                         vector_min_score=vector_min_score,  # Phase B: 传递向量召回阈值
                         rerank_min_score=rerank_min_score,  # Phase B: 传递 rerank 后质量阈值
-                        min_score=min_score,  # Phase B: 向后兼容
+                        min_score=min_score,
+                        query_embedding=query_embedding,
                     )
 
             # Step 6: 合并推荐（显式在前，补充在后）
@@ -542,7 +544,8 @@ class WorkerCandidateRecommendationImpl:
         filters: dict[str, Any] | None = None,
         vector_min_score: float = 0.01,  # Phase B: 向量召回阈值
         rerank_min_score: float | None = None,  # Phase B: rerank 后质量阈值
-        min_score: float | None = None,  # DEPRECATED: Use vector_min_score and rerank_min_score instead
+        min_score: float | None = None,
+        query_embedding: list[float] | None = None,
     ) -> list[CandidateRecommendation]:
         """
         构建补充推荐
@@ -608,7 +611,8 @@ class WorkerCandidateRecommendationImpl:
                     runtime_config=runtime_config,
                     filters=filters,
                     vector_min_score=vector_min_score,  # Phase B: 传递向量召回阈值
-                    rerank_min_score=rerank_min_score,  # Phase B: 传递 rerank 后质量阈值
+                    rerank_min_score=rerank_min_score,
+                    query_embedding=query_embedding,
                 )
                 if result:
                     recommendations, reranker_called = result
@@ -651,7 +655,8 @@ class WorkerCandidateRecommendationImpl:
         filters: dict[str, Any] | None = None,
         vector_min_score: float = 0.01,  # Phase B: 向量召回阈值
         rerank_min_score: float | None = None,  # Phase B: rerank 后质量阈值
-        min_score: float | None = None,  # DEPRECATED: 向后兼容
+        min_score: float | None = None,
+        query_embedding: list[float] | None = None,
     ) -> tuple[list[CandidateRecommendation], bool] | None:
         """
         尝试使用向量匹配获取补充推荐
@@ -680,7 +685,6 @@ class WorkerCandidateRecommendationImpl:
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
         )
 
-        query_embedding: list[float] = []
         direct_keyword = (
             runtime_config is not None
             and runtime_config.get("query_route") == "direct_keyword"
@@ -690,6 +694,19 @@ class WorkerCandidateRecommendationImpl:
         )
         if direct_keyword or dense_failfast:
             pass
+        elif not FeatureFlags.is_real_embedding_enabled():
+            query_embedding = []
+            logger.warning(
+                "[VectorMatch-Try] EMBEDDING_DISABLED | continuing with lexical retrieval"
+            )
+            if runtime_config is not None:
+                runtime_config["_semantic_failure"] = {
+                    "semantic_error": "EMBEDDING_DISABLED",
+                    "semantic_status_code": 503,
+                }
+        elif query_embedding is not None:
+            # The host resolved this vector outside the worker pool.
+            pass
         elif self._embedding_generator is None:
             logger.warning(
                 "[VectorMatch-Try] EMBEDDING_UNAVAILABLE | continuing with lexical retrieval"
@@ -697,15 +714,6 @@ class WorkerCandidateRecommendationImpl:
             if runtime_config is not None:
                 runtime_config["_semantic_failure"] = {
                     "semantic_error": "EMBEDDING_UNAVAILABLE",
-                    "semantic_status_code": 503,
-                }
-        elif not FeatureFlags.is_real_embedding_enabled():
-            logger.warning(
-                "[VectorMatch-Try] EMBEDDING_DISABLED | continuing with lexical retrieval"
-            )
-            if runtime_config is not None:
-                runtime_config["_semantic_failure"] = {
-                    "semantic_error": "EMBEDDING_DISABLED",
                     "semantic_status_code": 503,
                 }
         else:
@@ -726,6 +734,7 @@ class WorkerCandidateRecommendationImpl:
                 if runtime_config is not None:
                     runtime_config["_semantic_failure"] = metadata
 
+        query_embedding = [] if query_embedding is None else query_embedding
         logger.debug(
             "[VectorMatch-Try] RETRIEVAL_INPUT_READY | "
             f"has_embedding={bool(query_embedding)}, has_vector_match=True"

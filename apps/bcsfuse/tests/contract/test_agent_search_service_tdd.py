@@ -72,7 +72,7 @@ def _service(
     )
 
 
-def test_search_and_recommend_normalize_the_same_query_once() -> None:
+def test_search_and_recommend_use_the_same_normalized_embedding_boundary() -> None:
     core = RecordingCore([], [], [])
     service = _service(core)
     raw_query = "  支付\n  风险\t评估  "
@@ -96,9 +96,11 @@ def test_search_and_recommend_normalize_the_same_query_once() -> None:
     )
 
     normalized = "支付 风险 评估"
-    assert core.embedding_calls == [normalized]
+    assert core.embedding_calls == [normalized, normalized]
     assert core.match_calls[0]["query"] == normalized
     assert core.recommend_calls[0]["question"] == normalized
+    assert core.match_calls[0]["query_embedding"] == [0.5, 0.5]
+    assert core.recommend_calls[0]["query_embedding"] == [0.5, 0.5]
     assert isinstance(search_outcome, AgentSearchOutcome)
     assert search_outcome.normalized_query == normalized
     assert recommend_outcome.response.question == normalized

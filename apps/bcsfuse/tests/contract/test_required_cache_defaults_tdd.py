@@ -72,9 +72,10 @@ def test_runtime_config_selects_query_batch_workers_for_capacity() -> None:
     batch_size = config.get_int("embedding.cache.max_query_batch_size", 0)
     wait_seconds = config.get_float("embedding.cache.query_batch_wait_seconds", -1)
     workers = config.get_int("embedding.cache.max_query_batch_workers", 0)
-    # Smaller parallel batches keep p95 latency bounded while the request fanout can use
-    # the embedding service's throughput. This profile is validated at 100 QPS.
-    assert batch_size == 16
+    # The current public model endpoint accepts at most 32 inputs per batch. A
+    # smaller configured batch would needlessly consume upstream call quota;
+    # values above 32 can be rejected by the model provider.
+    assert batch_size == 32
     assert wait_seconds > 0
     assert workers >= 4
 

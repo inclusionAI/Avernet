@@ -138,26 +138,15 @@ def _index_owner_id() -> str:
 def register_runtime_service_providers(
     registry: "ProviderRegistry", config: "YamlEnvConfigProvider"
 ) -> None:
+    from app.infra.llm.config.llm_settings import LLMSettings
     """Register real public HTTP providers without selecting storage.
 
     Internal compositions use this seam to keep Avernet-owned embedding, LLM,
     and reranker behavior while injecting their own durable stores first.
     """
-    from app.infra.embedding.config.embedding_settings import EmbeddingSettings
-    from app.infra.llm.config.llm_settings import LLMSettings
-    from app.infra.public.embedding.real_embedding_provider import (
-        RealEmbeddingProvider,
-    )
     from app.infra.public.llm.anthropic_compatible_provider import (
         AnthropicCompatibleProvider,
     )
-    from app.infra.public.reranker.http_reranker import HttpReranker
-
-    if not _config_bool(config, "embedding.cache.enabled", True):
-        raise RuntimeError(
-            "embedding.cache.enabled must be true for runtime serving; "
-            "the query cache is a required capacity contract"
-        )
 
     embedding_base_url = (
         os.getenv("EMBEDDING_BASE_URL")
@@ -169,98 +158,30 @@ def register_runtime_service_providers(
     embedding_dimension = embedding_defaults.dimension
     embedding_request_dimensions = embedding_defaults.request_dimensions
 
-    logger.info(
-        "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
-        "base_url_host=%s model=%s dimension=%s request_dimensions=%s env_base_url_present=%s env_model_present=%s "
-        "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
-        "runtime",
-        True,
-        "RealEmbeddingProvider",
-        _safe_host(embedding_base_url),
-        embedding_model,
-        embedding_dimension,
-        embedding_request_dimensions,
-        "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
-        "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
-        "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
-        "YES" if os.getenv("EMBEDDING_DIMENSION") else "NO",
-        "YES"
-        if not os.getenv("EMBEDDING_BASE_URL")
-        and not config.get("embedding.base_url")
-        else "NO",
+    from app.bootstrap.embedding_runtime_provider_composition import (
+        register_embedding_runtime_providers,
     )
 
-    from app.infra.public.embedding.cached_embedding_provider import (
-        CachedEmbeddingProvider,
-    )
-    from app.infra.public.embedding.circuit_breaker_provider import (
-        CircuitBreakerEmbeddingProvider,
+    register_embedding_runtime_providers(
+        registry,
+        config,
+        embedding_base_url=embedding_base_url,
+        embedding_model=embedding_model,
+        embedding_dimension=embedding_dimension,
+        embedding_request_dimensions=embedding_request_dimensions,
     )
 
-    backend_embedding_provider = RealEmbeddingProvider(
-        settings=EmbeddingSettings(
-            base_url=embedding_base_url,
-            auth_token=os.getenv("EMBEDDING_AUTH_TOKEN")
-            or config.get("embedding.auth_token"),
-            model=embedding_model,
-            dimension=embedding_dimension,
-            request_dimensions=embedding_request_dimensions,
-        )
-    )
-    circuit_embedding_provider = CircuitBreakerEmbeddingProvider(
-        backend_embedding_provider,
-        failure_threshold=_config_int(
-            config, "embedding.circuit.failure_threshold", 3
-        ),
-        recovery_timeout_seconds=_config_float(
-            config, "embedding.circuit.recovery_seconds", 10.0
-        ),
-        capacity_store=registry.get("embedding_capacity_store"),
-        quota_recovery_seconds=_config_float(
-            config, "embedding.quota.recovery_seconds", 60.0
-        ),
-        max_calls_per_minute=_config_int(
-            config, "embedding.quota.max_calls_per_minute", 30
-        ),
-        quota_period_seconds=_config_float(
-            config, "embedding.quota.period_seconds", 60.0
-        ),
-    )
-    registry.register(
-        "embedding_provider",
-        CachedEmbeddingProvider(
-            circuit_embedding_provider,
-            max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
-            ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
-            max_query_batch_size=_config_int(
-                config, "embedding.cache.max_query_batch_size", 32
-            ),
-            query_batch_wait_seconds=_config_float(
-                config, "embedding.cache.query_batch_wait_seconds", 0.05
-            ),
-            query_batch_peak_wait_seconds=_config_float(
-                config,
-                "embedding.cache.query_batch_peak_wait_seconds",
-                0.15,
-            ),
-            query_batch_peak_threshold=_config_int(
-                config, "embedding.cache.query_batch_peak_threshold", 8
-            ),
-            max_query_batch_workers=_config_int(
-                config, "embedding.cache.max_query_batch_workers", 1
-            ),
-        ),
-    )
     from app.infra.public.reranker.http_reranker import get_reranker
 
     registry.register("reranker_provider", get_reranker())
-    registry.register(
-        "llm_provider",
-        AnthropicCompatibleProvider(
+
+    llm_base_url = os.getenv("LLM_BASE_URL") or config.get("llm.base_url")
+    llm_auth_token = os.getenv("LLM_AUTH_TOKEN") or config.get("llm.auth_token")
+    if llm_base_url and llm_auth_token:
+        llm_provider = AnthropicCompatibleProvider(
             settings=LLMSettings(
-                base_url=os.getenv("LLM_BASE_URL") or config.get("llm.base_url"),
-                auth_token=os.getenv("LLM_AUTH_TOKEN")
-                or config.get("llm.auth_token"),
+                base_url=llm_base_url,
+                auth_token=llm_auth_token,
                 fast_model=(
                     os.getenv("LLM_FAST_MODEL")
                     or config.get("llm.fast_model")
@@ -272,8 +193,15 @@ def register_runtime_service_providers(
                     or "claude-3-opus"
                 ),
             )
-        ),
-    )
+        )
+    else:
+        from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
+
+        llm_provider = FakeLLMProvider()
+        logger.warning(
+            "LLM is not configured; falling back to the deterministic fake provider"
+        )
+    registry.register("llm_provider", llm_provider)
 
 
 @dataclass(frozen=True)
@@ -566,11 +494,6 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
     from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
     from app.infra.public.audit.sqlite_worker_audit_log_store import SQLiteWorkerAuditLogStore
     from app.infra.public.vectorstores.qdrant_sqlite_vector_store import QdrantSQLiteVectorStore
-    from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-    from app.infra.public.reranker.http_reranker import HttpReranker
-    from app.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
-    from app.infra.embedding.config.embedding_settings import EmbeddingSettings
-    from app.infra.llm.config.llm_settings import LLMSettings
 
     embedding_defaults = resolve_embedding_runtime_defaults(config, os.environ)
 
@@ -652,170 +575,28 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         registry.require("startup_provider"), vector_store,
     ))
 
-    # Real embedding provider (HTTP)
-    # Log embedding config resolution for parity diagnosis
-    # Priority: env var > config value > default
-    embedding_base_url = (
-        os.getenv("EMBEDDING_BASE_URL")
-        or config.get("embedding.base_url")
-        or ""
-    )
-    embedding_auth_token = (
-        os.getenv("EMBEDDING_AUTH_TOKEN")
-        or config.get("embedding.auth_token")
-    )
-    embedding_request_dimensions = embedding_defaults.request_dimensions
-
     from app.infra.public.stores.sqlite_embedding_capacity_store import (
         SQLiteEmbeddingCapacityStore,
     )
 
-    capacity_db_path = os.getenv("BCSFUSE_CAPACITY_SQLITE_PATH") or config.get(
-        "database.sqlite.capacity_path",
-        str(Path(vector_db_path).with_name(
-            f"{Path(vector_db_path).stem}-embedding-capacity{Path(vector_db_path).suffix}"
-        )),
+    vector_path_for_capacity = Path(vector_db_path)
+    default_capacity_path = vector_path_for_capacity.with_name(
+        f"{vector_path_for_capacity.stem}-embedding-capacity"
+        f"{vector_path_for_capacity.suffix}"
+    )
+    capacity_db_path = (
+        os.getenv("BCSFUSE_CAPACITY_SQLITE_PATH")
+        or config.get("database.sqlite.capacity_path", str(default_capacity_path))
     )
     registry.register(
         "embedding_capacity_store",
         SQLiteEmbeddingCapacityStore(capacity_db_path),
     )
 
-    logger.info(
-        "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
-        "base_url_host=%s model=%s dimension=%s request_dimensions=%s env_base_url_present=%s env_model_present=%s "
-        "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
-        "dev",
-        True,
-        "RealEmbeddingProvider",
-        _safe_host(embedding_base_url),
-        embedding_model,
-        embedding_dimension,
-        embedding_request_dimensions,
-        "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
-        "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
-        "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
-        "YES" if os.getenv("EMBEDDING_DIMENSION") else "NO",
-        "YES" if (not os.getenv("EMBEDDING_BASE_URL") and not config.get("embedding.base_url")) else "NO",
-    )
-
-    embedding_settings = EmbeddingSettings(
-        base_url=embedding_base_url,
-        auth_token=embedding_auth_token,
-        model=embedding_model,
-        dimension=embedding_dimension,
-        request_dimensions=embedding_request_dimensions,
-    )
-    if embedding_settings.is_configured():
-        from app.infra.public.embedding.cached_embedding_provider import (
-            CachedEmbeddingProvider,
-        )
-
-        from app.infra.public.embedding.circuit_breaker_provider import (
-            CircuitBreakerEmbeddingProvider,
-        )
-
-        embedding_provider = CachedEmbeddingProvider(
-            CircuitBreakerEmbeddingProvider(
-                RealEmbeddingProvider(settings=embedding_settings),
-                failure_threshold=_config_int(
-                    config, "embedding.circuit.failure_threshold", 3
-                ),
-                recovery_timeout_seconds=_config_float(
-                    config, "embedding.circuit.recovery_seconds", 10.0
-                ),
-                capacity_store=registry.get("embedding_capacity_store"),
-                quota_recovery_seconds=_config_float(
-                    config, "embedding.quota.recovery_seconds", 60.0
-                ),
-                max_calls_per_minute=_config_int(
-                    config, "embedding.quota.max_calls_per_minute", 30
-                ),
-                quota_period_seconds=_config_float(
-                    config, "embedding.quota.period_seconds", 60.0
-                ),
-            ),
-            max_entries=_config_int(config, "embedding.cache.max_entries", 10000),
-            ttl_seconds=_config_float(config, "embedding.cache.ttl_seconds", 300.0),
-            max_query_batch_size=_config_int(
-                config, "embedding.cache.max_query_batch_size", 32
-            ),
-            query_batch_wait_seconds=_config_float(
-                config, "embedding.cache.query_batch_wait_seconds", 0.05
-            ),
-            query_batch_peak_wait_seconds=_config_float(
-                config,
-                "embedding.cache.query_batch_peak_wait_seconds",
-                0.15,
-            ),
-            query_batch_peak_threshold=_config_int(
-                config, "embedding.cache.query_batch_peak_threshold", 8
-            ),
-            max_query_batch_workers=_config_int(
-                config, "embedding.cache.max_query_batch_workers", 1
-            ),
-        )
-        registry.register("embedding_provider", embedding_provider)
-    else:
-        missing = embedding_settings.missing_config()
-        logger.warning(
-            "Embedding not configured (missing: %s). Falling back to FakeEmbeddingProvider. "
-            "Semantic search will return deterministic but meaningless results.",
-            ", ".join(missing),
-        )
-        from app.infra.embedding.providers.fake_provider import FakeEmbeddingProvider
-        embedding_provider = FakeEmbeddingProvider(dimension=embedding_dimension)
-        registry.register("embedding_provider", embedding_provider)
-
-    # HTTP reranker
-    from app.infra.reranker import get_circuit_breaker_reranker
-
-    reranker_provider = get_circuit_breaker_reranker()
-    registry.register("reranker_provider", reranker_provider)
-
-    # Anthropic-compatible LLM provider (HTTP) — fallback to FakeLLMProvider if not configured
-    llm_base_url = (
-        os.getenv("LLM_BASE_URL")
-        or config.get("llm.base_url")
-        or ""
-    )
-    llm_auth_token = (
-        os.getenv("LLM_AUTH_TOKEN")
-        or config.get("llm.auth_token")
-        or ""
-    )
-    llm_api_type = (
-        os.getenv("LLM_API_TYPE")
-        or config.get("llm.api_type")
-        or "anthropic"
-    ).lower()
-    if llm_base_url and llm_auth_token:
-        llm_settings = LLMSettings(
-            base_url=llm_base_url,
-            auth_token=llm_auth_token,
-            fast_model=config.get("llm.fast_model", "claude-3-sonnet"),
-            reasoning_model=config.get("llm.reasoning_model", "claude-3-opus"),
-        )
-        if llm_api_type in ("openai", "openai-completions"):
-            from app.infra.public.llm.openai_compatible_provider import OpenAICompatibleProvider
-            llm_provider = OpenAICompatibleProvider(settings=llm_settings)
-            logger.info(f"[OSS LLM] Using OpenAI-compatible provider: {llm_base_url}")
-        else:
-            llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
-            logger.info(f"[OSS LLM] Using Anthropic-compatible provider: {llm_base_url}")
-        registry.register("llm_provider", llm_provider)
-    else:
-        logger.warning(
-            "LLM not configured (missing: %s). Falling back to FakeLLMProvider. "
-            "LLM-dependent features (fusion, question-rewrite, etc.) will use echo responses.",
-            ", ".join(filter(None, [
-                "LLM_BASE_URL" if not llm_base_url else None,
-                "LLM_AUTH_TOKEN" if not llm_auth_token else None,
-            ])),
-        )
-        from app.infra.public.llm.fake_llm_provider import FakeLLMProvider
-        llm_provider = FakeLLMProvider()
-        registry.register("llm_provider", llm_provider)
+    # Use the same runtime provider composition as production. This preserves
+    # the shared token pool, native-async search path, durable capacity store,
+    # bounded retry and circuit behavior across runtime and real-model dev.
+    register_runtime_service_providers(registry, config)
 
 
 def _build_dev_smoke_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:

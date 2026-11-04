@@ -196,7 +196,11 @@ def test_upgrade_5_dependency_failure_still_returns_bounded_snapshot() -> None:
             total_timeout_seconds=0.15,
         ),
     )
-    outcome = asyncio.run(service.search(AgentSearchCommand(query="python", top_k=3)))
+    outcome = asyncio.run(
+        service.search(
+            AgentSearchCommand(query="python", top_k=3, mode="accurate")
+        )
+    )
 
     assert outcome.results
     assert outcome.metadata["local_snapshot_used"] is True

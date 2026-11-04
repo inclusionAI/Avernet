@@ -81,6 +81,8 @@ class CircuitBreakerEmbeddingProvider:
         max_calls_per_minute: int = 0,
         quota_period_seconds: float = 60.0,
         clock: Callable[[], float] = time.time,
+        capacity_key: str | None = None,
+        metric_key: str | None = None,
     ) -> None:
         if failure_threshold <= 0:
             raise ValueError("embedding circuit failure_threshold must be positive")
@@ -106,18 +108,20 @@ class CircuitBreakerEmbeddingProvider:
         self.failure_threshold = failure_threshold
         self.recovery_timeout_seconds = recovery_timeout_seconds
         self.capacity_store = capacity_store
-        self.quota_recovery_seconds = quota_recovery_seconds
-        self.state = "closed"
-        self._failed_attempts = 0
-        self._state_changed_at = 0.0
-        self._lock = threading.RLock()
         settings = getattr(backend, "_settings", None)
         self.model = str(
             getattr(backend, "model", None)
             or getattr(settings, "model", None)
             or "unknown"
         )
-        set_embedding_circuit_open(self.model, open_=False)
+        self.capacity_key = str(capacity_key or self.model)
+        self.metric_key = str(metric_key or capacity_key or self.model)
+        self.quota_recovery_seconds = quota_recovery_seconds
+        self.state = "closed"
+        self._failed_attempts = 0
+        self._state_changed_at = 0.0
+        self._lock = threading.RLock()
+        set_embedding_circuit_open(self.metric_key, open_=False)
 
     @property
     def dimension(self) -> int:
@@ -131,11 +135,11 @@ class CircuitBreakerEmbeddingProvider:
         self._state_changed_at = self.clock()
         if failed_attempts is not None:
             self._failed_attempts = failed_attempts
-        record_embedding_circuit_transition(self.model, from_state, to_state)
-        set_embedding_circuit_open(self.model, open_=to_state != "closed")
+        record_embedding_circuit_transition(self.metric_key, from_state, to_state)
+        set_embedding_circuit_open(self.metric_key, open_=to_state != "closed")
 
     def _reject(self) -> None:
-        record_embedding_circuit_rejection(self.model)
+        record_embedding_circuit_rejection(self.metric_key)
         raise EmbeddingCircuitOpenError(
             "embedding circuit is open; retry after the recovery timeout"
         )
@@ -144,7 +148,7 @@ class CircuitBreakerEmbeddingProvider:
         if self.capacity_store is None:
             return ("available", 0.0)
         try:
-            reason, expires_at = self.capacity_store.observe(self.model)
+            reason, expires_at = self.capacity_store.observe(self.capacity_key)
             return (str(reason or "available"), float(expires_at or 0.0))
         except Exception as error:
             logger.warning(
@@ -152,7 +156,7 @@ class CircuitBreakerEmbeddingProvider:
                 self.model,
                 type(error).__name__,
             )
-            record_embedding_capacity_store_error(self.model, "observe")
+            record_embedding_capacity_store_error(self.metric_key, "observe")
             return ("available", 0.0)
 
     def _publish_shared_capacity(
@@ -162,7 +166,7 @@ class CircuitBreakerEmbeddingProvider:
             return blocked_until_epoch_seconds
         try:
             _, expires_at = self.capacity_store.mark_exhausted(
-                self.model,
+                self.capacity_key,
                 blocked_until_epoch_seconds=blocked_until_epoch_seconds,
                 reason_code=reason_code,
             )
@@ -173,7 +177,7 @@ class CircuitBreakerEmbeddingProvider:
                 self.model,
                 type(error).__name__,
             )
-            record_embedding_capacity_store_error(self.model, "mark_exhausted")
+            record_embedding_capacity_store_error(self.metric_key, "mark_exhausted")
             return blocked_until_epoch_seconds
 
     def _before_local_call(self) -> None:
@@ -202,7 +206,7 @@ class CircuitBreakerEmbeddingProvider:
         now = self.clock()
         try:
             allowed, retry_after, reason = reserve(
-                self.model,
+                self.capacity_key,
                 now_epoch_seconds=now,
                 max_calls=self.max_calls_per_minute,
                 period_seconds=self.quota_period_seconds,
@@ -213,12 +217,12 @@ class CircuitBreakerEmbeddingProvider:
                 self.model,
                 type(error).__name__,
             )
-            record_embedding_capacity_store_error(self.model, "reserve")
+            record_embedding_capacity_store_error(self.metric_key, "reserve")
             return
         if allowed:
             return
         reason = str(reason or "embedding_rate_limit_admission_rejected")
-        record_embedding_quota_rejection(self.model, reason)
+        record_embedding_quota_rejection(self.metric_key, reason)
         raise EmbeddingQuotaExhaustedError(
             "embedding model call budget is exhausted; retry after the window",
             retry_after_seconds=max(0.001, float(retry_after or 1.0)),
@@ -229,7 +233,7 @@ class CircuitBreakerEmbeddingProvider:
     def _before_call(self) -> None:
         reason, expires_at = self._observe_shared_capacity()
         if expires_at > self.clock():
-            record_embedding_quota_rejection(self.model, reason)
+            record_embedding_quota_rejection(self.metric_key, reason)
             raise EmbeddingQuotaExhaustedError(
                 "embedding model quota is exhausted; retry after the shared expiry",
                 retry_after_seconds=max(0.001, expires_at - self.clock()),

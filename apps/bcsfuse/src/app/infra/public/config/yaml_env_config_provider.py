@@ -51,6 +51,7 @@ class YamlEnvConfigProvider:
             "LLM_ENABLED": ["llm", "enabled"],
             "EMBEDDING_BASE_URL": ["embedding", "base_url"],
             "EMBEDDING_AUTH_TOKEN": ["embedding", "auth_token"],
+            "EMBEDDING_AUTH_TOKENS": ["embedding", "auth_tokens"],
             "EMBEDDING_MODEL": ["embedding", "model"],
             "EMBEDDING_DIMENSION": ["embedding", "dimension"],
             "EMBEDDING_REQUEST_DIMENSIONS": [

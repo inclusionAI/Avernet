@@ -54,6 +54,9 @@ from app.application.agent_search_service import (
     AgentRecommendationCommand,
     AgentSearchService,
 )
+from app.application.services.agent_search_provider_selection import (
+    select_online_embedding_provider,
+)
 from app.infra.trace_context import get_trace_id
 from app.application.utils.drm_config_helper import get_recommend_min_score
 from app.infra.config.feature_flags import FeatureFlags
@@ -312,6 +315,17 @@ async def recommend_bots(
     context = getattr(app_state, "context", None)
     registry = getattr(context, "registry", None)
     try:
+        from app.adapters.http.dependencies.fusion_dependencies import (
+            _get_embedding_generator,
+        )
+
+        embedding_gen = _get_embedding_generator()
+        online_embedding_gen = (
+            select_online_embedding_provider(registry, embedding_gen)
+            if registry is not None
+            else embedding_gen
+        )
+
         # 获取服务
         candidate_service = get_candidate_recommendation_service()
 
@@ -347,6 +361,7 @@ async def recommend_bots(
 
         agent_search_service = AgentSearchService(
             candidate_recommendation_service=candidate_service,
+            embedding_generator=online_embedding_gen,
             result_cache=result_cache,
             resilience_cache=getattr(
                 app_state, "agent_search_resilience_cache", None

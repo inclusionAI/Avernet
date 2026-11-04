@@ -84,23 +84,41 @@ class AsyncHttpEmbedding:
         return self._settings.dimension
 
     async def embed(self, text: str) -> list[float]:
+        return (await self.embed_batch([text]))[0]
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+
+        payload = {"input": texts, "model": self._settings.model}
+        if bool(getattr(self._settings, "request_dimensions", False)):
+            payload["dimensions"] = self.dimension
         response = await self._client.post_json(
             f"{self._settings.base_url}/embeddings",
-            headers={"Authorization": f"Bearer {self._settings.auth_token}"},
-            json={"input": [text], "model": self._settings.model},
+            headers={
+                "Authorization": f"Bearer {self._settings.auth_token}",
+                "Accept": "application/json",
+            },
+            json=payload,
         )
         data = response.get("data", [])
-        if len(data) != 1:
-            raise ValueError("embedding response must contain one query vector")
-        vector = data[0].get("embedding", [])
-        if len(vector) != self.dimension or any(
-            isinstance(value, bool)
-            or not isinstance(value, (float, int))
-            or not math.isfinite(value)
-            for value in vector
-        ):
-            raise ValueError("embedding dimension or values are invalid")
-        return vector
+        if len(data) != len(texts):
+            raise ValueError("embedding response must contain one vector per input")
+
+        vectors: list[list[float]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                raise ValueError("embedding response contains an invalid result")
+            vector = item.get("embedding", [])
+            if len(vector) != self.dimension or any(
+                isinstance(value, bool)
+                or not isinstance(value, (float, int))
+                or not math.isfinite(value)
+                for value in vector
+            ):
+                raise ValueError("embedding dimension or values are invalid")
+            vectors.append(vector)
+        return vectors
 
     async def aclose(self) -> None:
         await self._client.aclose()

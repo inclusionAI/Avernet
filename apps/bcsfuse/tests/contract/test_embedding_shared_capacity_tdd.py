@@ -224,7 +224,7 @@ def test_provider_composition_uses_shared_capacity_store(monkeypatch):
     registry.register("embedding_capacity_store", store)
     register_runtime_service_providers(registry, config)
 
-    circuit = registry.get("embedding_provider").backend
+    circuit = registry.get("embedding_provider").backend.lanes[0]
     assert circuit.capacity_store is store
     assert circuit.quota_recovery_seconds == 45.0
 
@@ -466,7 +466,7 @@ def test_runtime_composes_cluster_call_rate_limit(monkeypatch: pytest.MonkeyPatc
     config = YamlEnvConfigProvider(config_path="/tmp/nonexistent-bcsfuse.yaml")
     register_runtime_service_providers(registry, config)
 
-    circuit = registry.get("embedding_provider").backend
+    circuit = registry.get("embedding_provider").backend.lanes[0]
     assert circuit.max_calls_per_minute == 7
     assert circuit.quota_period_seconds == 60.0
 

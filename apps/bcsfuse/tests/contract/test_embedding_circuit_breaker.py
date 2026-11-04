@@ -212,6 +212,9 @@ def test_runtime_composition_inserts_breaker_between_cache_and_real_backend(
     from app.infra.public.embedding.circuit_breaker_provider import (
         CircuitBreakerEmbeddingProvider,
     )
+    from app.infra.public.embedding.embedding_token_pool_provider import (
+        EmbeddingTokenPoolProvider,
+    )
     from app.infra.public.embedding.real_embedding_provider import (
         RealEmbeddingProvider,
     )
@@ -246,12 +249,17 @@ def test_runtime_composition_inserts_breaker_between_cache_and_real_backend(
 
     assert isinstance(provider, CachedEmbeddingProvider)
     assert isinstance(provider, RealEmbeddingProvider)
-    assert isinstance(provider.backend, CircuitBreakerEmbeddingProvider)
-    assert provider.backend.failure_threshold == 4
-    assert provider.backend.recovery_timeout_seconds == 12.0
+    assert isinstance(provider.backend, EmbeddingTokenPoolProvider)
+    circuit = provider.backend.lanes[0]
+    assert isinstance(circuit, CircuitBreakerEmbeddingProvider)
+    assert circuit.failure_threshold == 4
+    assert circuit.recovery_timeout_seconds == 12.0
 
 def test_yaml_config_maps_embedding_circuit_environment_overrides(monkeypatch):
     from app.bootstrap.opensource import register_runtime_service_providers
+    from app.infra.public.embedding.circuit_breaker_provider import (
+        CircuitBreakerEmbeddingProvider,
+    )
     from app.bootstrap.provider_registry import ProviderRegistry
     from app.infra.public.config.yaml_env_config_provider import (
         YamlEnvConfigProvider,
@@ -269,8 +277,9 @@ def test_yaml_config_maps_embedding_circuit_environment_overrides(monkeypatch):
     registry = ProviderRegistry()
     register_runtime_service_providers(registry, config)
 
-    provider = registry.get("embedding_provider").backend
+    provider = registry.get("embedding_provider").backend.lanes[0]
 
+    assert isinstance(provider, CircuitBreakerEmbeddingProvider)
     assert provider.failure_threshold == 2
     assert provider.recovery_timeout_seconds == 11.0
 

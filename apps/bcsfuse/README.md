@@ -178,6 +178,8 @@ export BCSFUSE_VECTOR_SQLITE_PATH="/tmp/bcsfuse_vectors.db"
 # Embedding Provider (optional)
 export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
 export EMBEDDING_AUTH_TOKEN="your-embedding-token-here"
+# Production alternative: inject the same JSON token pool into every Pod.
+# export EMBEDDING_AUTH_TOKENS='["token-1","token-2"]'
 export EMBEDDING_MODEL="Qwen3-Embedding-4B"
 export EMBEDDING_DIMENSION="1024"
 # Required for Qwen3 non-native dimensions; the runtime default selects the
@@ -191,8 +193,12 @@ export EMBEDDING_RETRY_BUDGET_MS="2000"
 # EMBEDDING_QUOTA_RECOVERY_SECONDS=60 is the fallback window after a remote
 # model 429 when the provider does not return Retry-After. Runtime replicas share
 # the resulting exhausted state through MySQL bcsfuse_embedding_capacity_states.
+# EMBEDDING_AUTH_TOKENS defines the deployment-wide token pool. Every Pod
+# receives the same list and rotates identical, independently metered lanes; no
+# Pod owns a token. EMBEDDING_AUTH_TOKEN remains the one-token form.
 # EMBEDDING_QUOTA_MAX_CALLS_PER_MINUTE=30 is a proactive cluster-wide upstream
-# call limit. It counts provider calls, not unique queries. The capacity profile
+# call limit per token lane. It counts provider calls, not unique queries. The
+# capacity profile
 # uses batch=16 so cold bursts complete while bounded p95 stays low; set the
 # call quota from the actual model quota. 0 disables proactive admission.
 # EMBEDDING_QUOTA_PERIOD_SECONDS=60 defines the shared call window.

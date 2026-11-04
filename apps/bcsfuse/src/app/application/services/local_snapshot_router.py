@@ -77,6 +77,42 @@ class LocalSnapshotRouter:
             strategy=strategy,
         )
 
+    async def keyword_search(
+        self, *, query: str, top_k: int, filters: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], float]:
+        """Return only confident keyword matches; never publish defaults."""
+
+        with search_stage_metrics("search", "small_scope_snapshot"):
+            hits = await self._run(
+                lambda: self._snapshot.keyword_search(
+                    query, top_k, filters, None
+                ),
+                self._timeout("local_snapshot"),
+            )
+        results = tuple(project_snapshot_hit(hit) for hit in hits)
+        return results, max(
+            (float(getattr(hit, "score", 0.0)) for hit in hits), default=0.0
+        )
+
+    async def keyword_recommend(
+        self, *, question: str, top_k: int, filters: dict[str, Any]
+    ) -> tuple[list[Any], float]:
+        """Return only confident keyword recommendations and their score."""
+
+        with search_stage_metrics("recommend", "small_scope_snapshot"):
+            hits = await self._run(
+                lambda: self._snapshot.keyword_search(
+                    question, top_k, filters, None
+                ),
+                self._timeout("local_snapshot"),
+            )
+        recommendations = [
+            project_snapshot_recommendation(hit) for hit in hits
+        ]
+        return recommendations, max(
+            (float(getattr(hit, "score", 0.0)) for hit in hits), default=0.0
+        )
+
     async def direct_search(
         self, *, query: str, top_k: int, filters: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:

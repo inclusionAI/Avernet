@@ -177,7 +177,10 @@ and drain the executor before closing provider clients.
 
 `AsyncHttpEmbedding` and `AsyncHttpReranker` share a persistent `aiohttp`
 HTTP/1.1 session per provider, finite total network timeouts and no retry/sleep
-loop. Cancellation closes only the affected request's socket. Idle connections
+loop. `AsyncHttpEmbedding.embed_batch(texts)` sends the inputs in one wire
+request and validates exactly one finite, dimension-correct vector per input;
+hosts use it to batch concurrent cache misses while preserving the upstream call
+budget. Cancellation closes only the affected request's socket. Idle connections
 expire using the client's default keepalive timeout; no active connection or
 per-host admission limit is imposed (`limit=0`, `limit_per_host=0`). Session
 creation is lazy on first async use; hosts await `aclose()` after requests finish.

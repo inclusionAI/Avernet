@@ -185,7 +185,7 @@ def test_terminal_search_service_uses_dedicated_local_workers() -> None:
         await asyncio.sleep(0.05)
         outcome = await asyncio.wait_for(
             service.search(
-                AgentSearchCommand(query="python vector search", top_k=1)
+                AgentSearchCommand(query="python vector search", top_k=1, mode="accurate")
             ),
             timeout=0.5,
         )
