@@ -383,8 +383,14 @@ describe("createTempRepo", () => {
     expect(repo.startsWith(tempDir)).toBe(true); expect(statSync(repo).isDirectory()).toBe(true);
     rmSync(repo, { recursive: true, force: true });
   });
+  it("falls back to TMPDIR when CLAWWEB_TEMP_DIR is absent", async () => {
+    vi.unstubAllEnvs(); vi.stubEnv("TMPDIR", tempDir);
+    const repo = await gitClient.createTempRepo();
+    expect(repo.startsWith(tempDir)).toBe(true);
+    rmSync(repo, { recursive: true, force: true });
+  });
   it("throws a clear error when the configured temp dir parent is missing", async () => {
     vi.stubEnv("CLAWWEB_TEMP_DIR", path.join(tempDir, "missing", "deep"));
-    await expect(gitClient.createTempRepo()).rejects.toThrow("临时 git 目录的父路径不存在");
+    await expect(gitClient.createTempRepo()).rejects.toThrow("临时目录不可用或配置无效");
   });
 });

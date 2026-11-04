@@ -216,6 +216,51 @@ it('blocks Editor after AutoHeal loses its acknowledgement and the editor remoun
   expect(await screen.findByText(/本浏览器存在未确认的部署/)).toBeInTheDocument()
   expect(mocks.deploy).toHaveBeenCalledTimes(1)
 })
+it('explicitly clears only the requested workflow marker after manual reconciliation', async () => {
+  const markerPrefix = 'clawweb.autoheal.review-blocked.v1.'
+  const workflowId = `manual-recovery-${++sequence}`
+  const currentKey = markerPrefix + encodeURIComponent(workflowId)
+  const otherKey = markerPrefix + 'other-workflow'
+  localStorage.setItem(currentKey, '1')
+  localStorage.setItem(otherKey, '1')
+  const { id } = setup('draft', false, workflowId)
+  await act(async () => {})
+
+  fireEvent.click(screen.getByRole('button', { name: '我已人工核对，清除当前工作流标记…' }))
+  const confirm = screen.getByRole('button', { name: '清除当前工作流标记' })
+  expect(confirm).toBeDisabled()
+  fireEvent.click(screen.getByRole('checkbox', { name: /我已人工核对 Git 和数据库/ }))
+  fireEvent.click(confirm)
+
+  expect(await screen.findByText(/已清除工作流/)).toBeInTheDocument()
+  expect(localStorage.getItem(currentKey)).toBeNull()
+  expect(localStorage.getItem(otherKey)).toBe('1')
+  expect(screen.queryByRole('alert', { name: '部署人工核对标记' })).not.toBeInTheDocument()
+})
+
+it('offers manual reconciliation when a successful deployment cannot clear its marker', async () => {
+  const { id } = setup()
+  mocks.deploy.mockResolvedValue({ ok: true, deployed: true, workflowId: id, packId: 'pack', deployNumber: 3, version: 3, tagName: 'wf-tag-3' })
+  fireEvent.click(screen.getByRole('button', { name: '部署' }))
+  const confirm = await screen.findByRole('button', { name: '确认部署' })
+  const marker = `clawweb.autoheal.review-blocked.v1.${encodeURIComponent(id)}`
+  const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {})
+  fireEvent.click(confirm)
+
+  const recovery = await screen.findByRole('button', { name: '我已人工核对，清除当前工作流标记…' })
+  expect(screen.getByRole('alert', { name: '部署操作' })).toHaveTextContent('部署已确认成功，但无法清除浏览器核对标记')
+  expect(localStorage.getItem(marker)).toBe('1')
+  removeItemSpy.mockRestore()
+
+  fireEvent.click(recovery)
+  const clearConfirm = screen.getByRole('button', { name: '清除当前工作流标记' })
+  fireEvent.click(screen.getByRole('checkbox', { name: /我已人工核对 Git 和数据库/ }))
+  fireEvent.click(clearConfirm)
+  expect(await screen.findByText(new RegExp(`已清除工作流 ${id}`))).toBeInTheDocument()
+  expect(localStorage.getItem(marker)).toBeNull()
+  expect(screen.queryByRole('alert', { name: '部署操作' })).not.toBeInTheDocument()
+})
+
 it('does not dispatch when the browser cannot persist the marker', async () => {
   setup()
   fireEvent.click(screen.getByRole('button', { name: '部署' }))

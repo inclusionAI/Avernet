@@ -11,11 +11,11 @@
  *   annotation:   version=N\naction=deploy\nworkflowIds={workflowId}
  */
 import { executeGit } from "@avernet/clawweb-shared/server/services/git-execution";
+import { createConfiguredTemporaryDirectory } from "@avernet/clawweb-shared/server/env";
 import { packVersionGitEnvironment } from "./pack-version-git-env.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { TextDecoder } from "node:util";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { stringify as stringifyYaml, parse as parseYaml, parseDocument, isSeq, isAlias, isNode, visit } from "yaml";
 import { normalizeWorkflowSpec, type WorkflowSpec } from "../workflow.js";
@@ -112,23 +112,8 @@ async function writeCredentials(authDir: string, contents: string): Promise<stri
   return credentialHelper(credentialsPath);
 }
 
-function getTempRepoPrefix(): string {
-  const configured = process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || tmpdir();
-  return path.join(configured, "cw-autoheal-");
-}
-
 export async function createTempRepo(): Promise<string> {
-  const prefix = getTempRepoPrefix();
-  const parent = path.dirname(prefix);
-  if (!existsSync(parent)) {
-    throw new Error(`临时 git 目录的父路径不存在: ${parent} (CLAWWEB_TEMP_DIR/TMPDIR=${process.env.CLAWWEB_TEMP_DIR || process.env.TMPDIR || ""})`);
-  }
-  try {
-    return await mkdtemp(prefix);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`无法创建临时 git 目录: ${message} (prefix=${prefix})`);
-  }
+  return createConfiguredTemporaryDirectory("cw-autoheal");
 }
 
 export async function removeTempRepo(repoDir: string): Promise<void> {
