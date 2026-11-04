@@ -84,7 +84,7 @@ from agentclaw.community.core.task.task_center.task_recovery import (
     RelayRecoveryStrategy,
     TaskRecoveryCoordinator,
 )
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
+from agentclaw.community.core.task.task_dispatch.task_settings import RELAY_EXECUTION
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 logger = logging.getLogger("task.service")
@@ -114,7 +114,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         task_node_run_info_repo: TaskNodeRunInfoRepositoryProtocol | None = None,
         bot_service=None,
         staff_dept: StaffDeptPlugin | None = None,
-        task_auth_gate=None,
         task_search_skill_enabled: bool = False,
         task_settings=None,
         api_base_url: str | None = None,
@@ -142,7 +141,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         self._bot_service = bot_service
         self._staff_dept = staff_dept
         self._api_base_url = api_base_url
-        self._task_auth_gate = task_auth_gate
         self._task_search_skill_enabled = task_search_skill_enabled
         self._task_settings = task_settings
         self._bot_token_provider = bot_token_provider
@@ -152,7 +150,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
         self._task_context_service = task_context_service
         self._delivery_intents = delivery_intents
         self._intake_handler = intake_handler
-        # claim_on JOIN 经 self._task_auth_gate 传入 dispatcher(不进签名,保持覆写 seam)。
         self._centralized_adapter = self._build_centralized_adapter(
             bot=bot, bcs=bcs, discover=discover
         )
@@ -257,7 +254,6 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             discover=discover,
             bcn=self._bcn,
             bcs_identity=self._bcs_identity,
-            auth_gate=self._task_auth_gate,
             task_search_skill_enabled=self._task_search_skill_enabled,
             task_settings=self._task_settings,
             api_base_url=self._api_base_url,

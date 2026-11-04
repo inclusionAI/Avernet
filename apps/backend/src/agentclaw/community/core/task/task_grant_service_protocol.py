@@ -2,7 +2,7 @@
 
 前端开启「任务认领」时调本服务:grant/revoke 经 ``OpenApiBotPort`` 透传人类 Cookie/Referer
 到 secbaas admin 端点;api-key 由服务端持有(``OpenApiBotPort`` 内部),不暴露给前端,亦不落本地表。
-派发侧的 claim_on JOIN 改用 BCS ``list_bots_by_task_modes`` 名单(不查 secbaas、不读本地表)。
+任务授权仅服务于前端任务认领的 grant/revoke 操作，不参与任务派发决策。
 
 命名(api-contract §0):``bcs_bot_id``=real:entity ``bot_id:owner_user_id``(/mine 的 bot.id 原值,
 secbaas body 字段仍叫 ``bot_id``);``bot_id``=无冒号产品 ID(派发 assignee / JOIN key)。

@@ -19,7 +19,7 @@ def test_candidate_dispatch_ids_prefers_bot_uuid():
     assert _candidate_dispatch_ids(candidates) == ["market:owner-a", "market:owner-b"]
 
 
-def test_candidate_dispatch_ids_composes_legacy_identity_without_claim_roster():
+def test_candidate_dispatch_ids_composes_legacy_identity_without_roster():
     candidates = [
         {"bot_id": "market", "owner_id": "owner-a"},
         {"bot_id": "research"},
@@ -42,14 +42,14 @@ def test_offpath_empty_candidates_misses():
     assert result.miss_reason == "no_candidates"
 
 
-def test_offpath_one_or_two_candidates_selects_single_without_claim_filter():
+def test_offpath_one_or_two_candidates_selects_single_directly():
     result = _offpath_normal(["unregistered:1", "unregistered:2"])
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "unregistered:1"
     assert result.owner_id == "1"
 
 
-def test_offpath_three_or_more_candidates_forms_group_without_claim_filter():
+def test_offpath_three_or_more_candidates_forms_group_directly():
     result = _offpath_normal(["a:1", "b:2", "c:3", "d:4"])
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation.bot_ids == ["a:1", "b:2", "c:3"]
