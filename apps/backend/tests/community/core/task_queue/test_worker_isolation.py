@@ -777,3 +777,94 @@ def test_cancelled_lifespan_drain_does_not_run_teardown(monkeypatch):
         assert events == []
 
     asyncio.run(scenario())
+
+
+def test_executor_submit_racing_drain_keeps_started_handler_alive():
+    from concurrent.futures import ThreadPoolExecutor
+
+    async def scenario():
+        world = _world(batch_size=2, max_concurrency=2, lease_seconds=3,
+                       isolated_task_types=('slow',), isolated_concurrency=1,
+                       poll_interval_seconds=0.02, poll_jitter_seconds=0)
+        entered, release = threading.Event(), threading.Event()
+        drain_started = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        drains = []
+
+        class RacingExecutor(ThreadPoolExecutor):
+            def submit(self, fn, /, *args, **kwargs):
+                def start_drain():
+                    drains.append(asyncio.create_task(world.worker.drain_before_shutdown()))
+                    drain_started.set()
+                loop.call_soon_threadsafe(start_drain)
+                return super().submit(fn, *args, **kwargs)
+
+        class Slow:
+            task_type = 'slow'
+
+            def handle(self, payload):
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError('test did not release handler')
+                return Complete()
+
+        world.registry.register(Slow())
+        task = world.enqueue('slow')
+        await world.worker.startup()
+        original = world.worker._handler_executors['isolated']
+        replacement = RacingExecutor(max_workers=1)
+        world.worker._handler_executors['isolated'] = replacement
+        original.shutdown(wait=True)
+        try:
+            await asyncio.wait_for(drain_started.wait(), 5)
+            assert await asyncio.to_thread(entered.wait, 4)
+            assert not drains[0].done()
+            release.set()
+            await asyncio.wait_for(drains[0], 5)
+            assert world.status_of(task.id) == TaskStatus.SUCCEEDED
+        finally:
+            release.set()
+            if drains:
+                await drains[0]
+            else:
+                await world.worker.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_expiry_hook_exception_does_not_stop_claimed_task_heartbeat():
+    async def scenario():
+        world = _world(batch_size=4, max_concurrency=4, lease_seconds=3,
+                       isolated_task_types=('slow',), isolated_concurrency=2,
+                       poll_interval_seconds=0.02, poll_jitter_seconds=0)
+        hook_failed, run_started, release = threading.Event(), threading.Event(), threading.Event()
+
+        class Slow:
+            task_type = 'slow'
+
+            def handle(self, payload):
+                run_started.set()
+                if not release.wait(10):
+                    raise TimeoutError('test did not release handler')
+                return Complete()
+
+            def on_give_up(self, task):
+                hook_failed.set()
+                raise RuntimeError('expected hook failure')
+
+        world.registry.register(Slow())
+        world.enqueue('slow', deadline_seconds=0)
+        task = world.enqueue('slow')
+        await world.worker.startup()
+        try:
+            assert await asyncio.to_thread(hook_failed.wait, 4)
+            assert await asyncio.to_thread(run_started.wait, 4)
+            await asyncio.sleep(3.2)
+            assert world.status_of(task.id) == TaskStatus.RUNNING
+            assert world.repo.get_by_id(task.id).attempts == 1
+        finally:
+            release.set()
+            await world.worker.shutdown()
+        assert world.status_of(task.id) == TaskStatus.SUCCEEDED
+
+    asyncio.run(scenario())
