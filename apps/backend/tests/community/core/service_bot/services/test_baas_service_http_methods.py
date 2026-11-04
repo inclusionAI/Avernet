@@ -356,7 +356,7 @@ class TestBaasServiceHttpMethods:
         with pytest.raises(BaasServiceError, match="device not found"):
             service.get_http_info(bind_id=1, port=20010)
 
-    # ── update_device_outbound_rule retry tests ──
+        # ── update_device_outbound_rule retry tests ──
 
     def test_update_device_outbound_rule_retries_on_500_and_succeeds(self, monkeypatch):
         """AC-1: 连续 2 次 500 后第 3 次 200 成功，日志含重试记录。"""
@@ -366,22 +366,26 @@ class TestBaasServiceHttpMethods:
         test_logger = MagicMock()
         monkeypatch.setattr(baas_mod, "logger", test_logger)
 
-        fail1 = MagicMock()
-        fail1.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "server error", request=MagicMock(), response=MagicMock(status_code=500, text="PLATFORM_ERROR")
-        )
-        fail2 = MagicMock()
-        fail2.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "server error", request=MagicMock(), response=MagicMock(status_code=500, text="PLATFORM_ERROR")
-        )
-        success = MagicMock()
-        success.raise_for_status.return_value = None
-        success.status_code = 200
-        success.json.return_value = {"code": 0, "message": "ok", "data": {}}
+        call_count = [0]
 
-        http.set_response("put", fail1)
-        http.set_response("put", fail2)
-        http.set_response("put", success)
+        def _sequential_put(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                resp = MagicMock()
+                resp.status_code = 500
+                resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "server error",
+                    request=MagicMock(),
+                    response=MagicMock(status_code=500),
+                )
+                return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.raise_for_status.return_value = None
+            resp.json.return_value = {"code": 0, "message": "ok", "data": {}}
+            return resp
+
+        http.set_override("put", _sequential_put)
 
         import time as _time
         monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
@@ -411,11 +415,17 @@ class TestBaasServiceHttpMethods:
 
         service, http = _make_service()
 
-        fail = MagicMock()
-        fail.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "bad request", request=MagicMock(), response=MagicMock(status_code=400, text="Bad Request")
-        )
-        http.set_response("put", fail)
+        def _fail_400(*args, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 400
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "bad request",
+                request=MagicMock(),
+                response=MagicMock(status_code=400),
+            )
+            return resp
+
+        http.set_override("put", _fail_400)
 
         import time as _time
         monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
@@ -436,12 +446,17 @@ class TestBaasServiceHttpMethods:
 
         service, http = _make_service()
 
-        for _ in range(3):
-            fail = MagicMock()
-            fail.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "server error", request=MagicMock(), response=MagicMock(status_code=500, text="PLATFORM_ERROR")
+        def _always_500(*args, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 500
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "server error",
+                request=MagicMock(),
+                response=MagicMock(status_code=500),
             )
-            http.set_response("put", fail)
+            return resp
+
+        http.set_override("put", _always_500)
 
         import time as _time
         monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
@@ -455,3 +470,4 @@ class TestBaasServiceHttpMethods:
 
         # 3 calls — all retries exhausted
         assert len(http.calls_to("put")) == 3
+
