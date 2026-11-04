@@ -12,7 +12,7 @@ from agentclaw.community.core.errors import (
 from agentclaw.community.core.repository.protocols.task.forum_interaction import (
     ForumInteractionRepositoryProtocol,
 )
-from agentclaw.community.core.task.domain.identity import is_bare_default_bot_identity
+from agentclaw.community.core.task.domain.identity import parse_scoped_bot_identity
 from agentclaw.community.core.task.forum.interaction.models import (
     INTERACTION_TARGET_MATRIX,
     ForumActorRef,
@@ -69,13 +69,11 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         active: int,
     ) -> ForumInteractionRecord:
         actor = self._normalize_actor(actor_type, actor_id)
-        if actor.type is ForumActorType.BOT and is_bare_default_bot_identity(actor.id):
-            raise ValidationError(
-                "BOT actor_id cannot be the shared id 'default'; use 'default:<work_no>'"
-            )
+        self._validate_interaction_bot_id(actor, "actor_id")
         action_delta = self._normalize_active(active)
         action = self._normalize_action(action_type)
         target = self._normalize_target(target_type, target_id)
+        self._validate_interaction_bot_id(target, "target_id")
         if target.type not in INTERACTION_TARGET_MATRIX[action]:
             raise ValidationError(f"{action} is not allowed for target {target.type}")
 
@@ -202,20 +200,44 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
     def _validate_summary_actor(
         self, query: ForumInteractionSummaryQuery
     ) -> ForumActorRef | None:
+        if (
+            query.actor_type is None
+            and query.actor_id is None
+            and query.actor_id_alias is not None
+        ):
+            raise ValidationError("actor_id_alias must be provided with actor_type and actor_id")
         if (query.actor_type is None) != (query.actor_id is None):
             raise ValidationError("actor_type and actor_id must be provided together")
         if query.actor_type is None or query.actor_id is None:
             return None
-        return self._normalize_actor(query.actor_type, query.actor_id)
+        actor = self._normalize_actor(
+            query.actor_type,
+            query.actor_id,
+            identity_alias=query.actor_id_alias,
+        )
+        self._validate_interaction_bot_id(actor, "actor_id")
+        return actor
 
     def _validate_summary_target(
         self, query: ForumInteractionSummaryQuery
     ) -> ForumTargetRef | None:
+        if (
+            query.target_type is None
+            and query.target_id is None
+            and query.target_id_alias is not None
+        ):
+            raise ValidationError("target_id_alias must be provided with target_type and target_id")
         if (query.target_type is None) != (query.target_id is None):
             raise ValidationError("target_type and target_id must be provided together")
         if query.target_type is None or query.target_id is None:
             return None
-        return self._normalize_target(query.target_type, query.target_id)
+        target = self._normalize_target(
+            query.target_type,
+            query.target_id,
+            identity_alias=query.target_id_alias,
+        )
+        self._validate_interaction_bot_id(target, "target_id")
+        return target
 
     @staticmethod
     def _normalize_active(value: int) -> int:
@@ -240,13 +262,20 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
             )
         return normalized
 
-    def _normalize_actor(self, actor_type: str, actor_id: str) -> ForumActorRef:
+    def _normalize_actor(
+        self, actor_type: str, actor_id: str, identity_alias: str | None = None
+    ) -> ForumActorRef:
         normalized_type = self._required_text(actor_type, "actor_type", 16).upper()
         if normalized_type not in AUTHOR_TYPES:
             allowed = ", ".join(sorted(AUTHOR_TYPES))
             raise ValidationError(f"actor_type must be one of: {allowed}")
         normalized_id = self._required_text(actor_id, "actor_id", MAX_AUTHOR_ID_LENGTH)
-        return ForumActorRef(type=ForumActorType(normalized_type), id=normalized_id)
+        normalized_alias = self._normalized_identity_alias(
+            ForumActorType(normalized_type), normalized_id, identity_alias, "actor_id_alias"
+        )
+        return ForumActorRef(
+            type=ForumActorType(normalized_type), id=normalized_id, id_alias=normalized_alias
+        )
 
     def _normalize_action(self, value: str) -> ForumInteractionActionType:
         normalized = self._required_text(value, "action_type", 16).upper()
@@ -256,7 +285,9 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
             allowed = ", ".join(item.value for item in ForumInteractionActionType)
             raise ValidationError(f"action_type must be one of: {allowed}") from None
 
-    def _normalize_target(self, target_type: str, target_id: str) -> ForumTargetRef:
+    def _normalize_target(
+        self, target_type: str, target_id: str, identity_alias: str | None = None
+    ) -> ForumTargetRef:
         normalized_type = self._required_text(target_type, "target_type", 16).upper()
         try:
             normalized_target_type = ForumInteractionTargetType(normalized_type)
@@ -266,4 +297,68 @@ class ForumInteractionService(ForumInteractionServiceProtocol):
         normalized_id = self._required_text(
             target_id, "target_id", MAX_TARGET_ID_LENGTH
         )
-        return ForumTargetRef(type=normalized_target_type, id=normalized_id)
+        normalized_alias = self._normalized_identity_alias(
+            normalized_target_type, normalized_id, identity_alias, "target_id_alias"
+        )
+        return ForumTargetRef(
+            type=normalized_target_type, id=normalized_id, id_alias=normalized_alias
+        )
+
+    def _validate_interaction_bot_id(
+        self,
+        identity: ForumActorRef | ForumTargetRef,
+        field_name: str,
+    ) -> None:
+        if isinstance(identity, ForumActorRef):
+            if identity.type is not ForumActorType.BOT:
+                return
+        elif identity.type is not ForumInteractionTargetType.BOT:
+            return
+
+        scoped = parse_scoped_bot_identity(identity.id)
+        if scoped is None and identity.id == "default":
+            raise ValidationError(
+                f"BOT {field_name} must be an owner-scoped bot_uuid; the shared "
+                "id 'default' is ambiguous; use 'default:<work_no>'"
+            )
+        if scoped is None:
+            raise ValidationError(
+                f"BOT {field_name} must be an owner-scoped bot_uuid; "
+                "a bare bot_id is not accepted"
+            )
+
+    def _normalized_identity_alias(
+        self,
+        identity_type: ForumActorType | ForumInteractionTargetType,
+        identity_id: str,
+        identity_alias: str | None,
+        field_name: str,
+    ) -> str | None:
+        is_bot = (
+            identity_type is ForumActorType.BOT
+            if isinstance(identity_type, ForumActorType)
+            else identity_type is ForumInteractionTargetType.BOT
+        )
+        if identity_alias is None or not is_bot:
+            if identity_alias is None:
+                return None
+            if not is_bot:
+                raise ValidationError(f"{field_name} is only allowed when the identity type is BOT")
+
+        scoped = parse_scoped_bot_identity(identity_id)
+        if scoped is None:
+            raise ValidationError(
+                f"BOT identity id must be an owner-scoped bot_uuid when {field_name} is supplied"
+            )
+        canonical_bot_id, _owner_id = scoped
+        normalized_alias = self._required_text(identity_alias, field_name, MAX_TARGET_ID_LENGTH)
+        if canonical_bot_id == "default":
+            raise ValidationError(
+                f"{field_name} cannot be the ambiguous bare id 'default'; "
+                "query 'default:<work_no>' directly"
+            )
+        if normalized_alias != canonical_bot_id:
+            raise ValidationError(
+                f"{field_name} must match the BOT id in the canonical bot_uuid"
+            )
+        return normalized_alias
