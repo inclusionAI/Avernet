@@ -3028,6 +3028,8 @@ async def get_bot_status(
             "ext": response_ext,  # 添加扩展字段
         }
 
+        from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
+        result['ext'] = resolve_status_ext(bot, response_ext=response_ext)
         return ApiResponse(
             success=True,
             data=result,
