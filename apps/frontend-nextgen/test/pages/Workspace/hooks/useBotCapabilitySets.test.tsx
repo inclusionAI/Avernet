@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 /** useBotCapabilitySets 单测（add-composer-capability-set-viewer）：
  * 装配资格（好友 Bot 不装配）、已激活过滤 + 默认集命名/置顶、in-flight 去重、
- * 明细 skills 拉取映射与失败容错、团队 Bot 显式 ownerId。 */
+ * 明细 skills 拉取映射与失败容错、团队空间 Bot 显式 ownerId。 */
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { useBotCapabilitySets, isCapabilitySetBot } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { botEditorController } from '@/services/backendApi/bots/botEditorController';

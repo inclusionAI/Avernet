@@ -35,7 +35,7 @@ export function DataTableRow<Row>({ row, rowIndex, columns, rowHeight, onClick }
       }
     >
       {columns.map((column) => (
-        <DataTableCell key={column.id} width={column.width} align={column.align} className={column.className}>
+        <DataTableCell key={column.id} width={column.width} align={column.align} className={column.className} sticky={column.sticky}>
           {column.cell(row, rowIndex)}
         </DataTableCell>
       ))}
