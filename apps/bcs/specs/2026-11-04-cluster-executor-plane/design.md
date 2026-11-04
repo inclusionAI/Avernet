@@ -572,7 +572,7 @@ trade-off, and evidence can replace waiting:
 | --- | --- | --- |
 | **Same `advertise_addr`, new `node_id`** — the process restarted in place; two processes cannot listen on one address | Immediately when the new run's roster row is seen | **Included**: the new run nulls the old row's heartbeat at registration (§6.2); also removes singlebox's post-crash delay |
 | Release on panic / shutdown hook | Immediate | **Included**, best effort (no help for OOM kill or `kill -9`) |
-| Shorter thresholds | e.g. 1 s / 3 s → ~5 s RTO | Tunable; relative staleness (§6.3) makes it safe against storage hiccups |
+| Shorter thresholds | e.g. 1 s / 3 s → ~5 s RTO | Tunable; relative staleness plus the observer recovery grace (§6.3) make it safe against storage hiccups and longer outages |
 | Infrastructure signals (pod deletion events) | Fast | Later, as an optional plugin behind a port with a Noop default |
 
 A node that is alive but silently unreachable gives no evidence; for it,
@@ -832,7 +832,12 @@ All configurable; defaults chosen for RTO ≤ 30 s.
 Crash RTO ≈ claim threshold (15) + roster poll (≤ 5) + grace (0 for the
 preferred node, 3 otherwise) + rehydrate (1–3): typically ≈ 18–23 s when the
 preferred node claims; worst case ≈ 26 s (15 + 5 + 3 + 3) when a non-preferred
-node claims — inside the 30 s target, with ~4 s of headroom.
+node claims — inside the 30 s target, with ~4 s of headroom. This bound
+assumes every surviving observer has been healthy for at least one claim
+threshold (§6.3). If a peer dies while the survivors are still inside their
+recovery grace (they restarted, or storage just recovered), the earliest
+claim moves out by up to the remaining grace, so the bound does not hold for
+that sequence.
 
 ---
 
