@@ -1252,17 +1252,47 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
-  test('Bot 列表和好友申请使用真实 Service，画像仍保留原有链路', async () => {
+  test('画像详情拉取失败不判定目标失效：卡片保留、画像置空、不弹失效提示', async () => {
+    // 画像走 bot-catalog profile 真实端点；目录外的 bot_uuid 会 404 → target_invalid。
+    // 申请弹窗必须保持打开（无已公开能力版式），不能删卡片。
+    const bot = resultBot('20260413_uhup5rb8:246864');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest
+      .spyOn(collaborationSquareBotService, 'getBotProfile')
+      .mockRejectedValue(new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问'));
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await result.current.openBotProfile(bot);
+    });
+
+    expect(useCollaborationSquareStore.getState().bots).toEqual([bot]);
+    expect(useCollaborationSquareStore.getState().botProfile).toBeNull();
+    expect(useCollaborationSquareStore.getState().detailLoading).toBe(false);
+    // 选中位保留（申请弹窗据此归口画像数据）；关闭路径由面板 closeProfile 收口。
+    expect(useCollaborationSquareStore.getState().selectedBotId).toBe(bot.id);
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('Bot 列表、画像与好友申请均使用真实 Service（mock 链路退出）', async () => {
     const bot = resultBot('legacy-actions');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
-    const realProfile = jest.spyOn(collaborationSquareBotService, 'getBotProfile');
-    const legacyProfile = jest.spyOn(collaborationSquareService, 'getBotProfile').mockResolvedValue({
-      id: bot.id,
-      name: bot.name,
-      ownerName: bot.ownerName,
-      description: bot.description,
-      capabilities: [],
-    });
+    const realProfile = jest
+      .spyOn(collaborationSquareBotService, 'getBotProfile')
+      .mockResolvedValue({
+        id: bot.id,
+        name: bot.name,
+        ownerName: bot.ownerName,
+        description: bot.description,
+        capabilities: [],
+      });
+    const legacyProfile = jest.spyOn(collaborationSquareService, 'getBotProfile');
     const realFriendship = jest
       .spyOn(collaborationSquareBotService, 'requestBotFriendship')
       .mockResolvedValue({ status: 'applying' });
@@ -1280,8 +1310,8 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(legacyProfile).toHaveBeenCalledWith(bot.id);
-    expect(realProfile).not.toHaveBeenCalled();
+    expect(realProfile).toHaveBeenCalledWith(bot.id);
+    expect(legacyProfile).not.toHaveBeenCalled();
     expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext, undefined, { type: 'human', id: '900003' });
     expect(legacyFriendship).not.toHaveBeenCalled();
     expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('applying');

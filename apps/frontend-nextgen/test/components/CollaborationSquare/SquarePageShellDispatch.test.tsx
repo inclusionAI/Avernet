@@ -19,6 +19,18 @@ jest.mock('@/hooks/useCollaborationSquare', () => ({ useCollaborationSquare: jes
 jest.mock('@/components/CollaborationSquare/PublicBotCatalogPanel', () => ({
   PublicBotCatalogPanel: () => <div>bot panel</div>,
 }));
+// dmore：bot Tab 的搜索栏 + 身份选择器上移页头；固定 mock 避免真实 hooks 触发请求。
+jest.mock('@/components/CollaborationSquare/SquareSearchBar', () => ({
+  __esModule: true,
+  default: () => <div data-testid="square-search" />,
+}));
+jest.mock('@/components/CollaborationSquare/SquareIdentityPicker', () => ({
+  SquareIdentityPicker: () => <div data-testid="square-identity-picker" />,
+}));
+// dmore artboard-004 Frame 2：群 Tab 页头工具组（固定登录身份展示）；mock 避免真实用户信息请求。
+jest.mock('@/components/CollaborationSquare/PublicGroupSquareSection/GroupIdentityDisplay', () => ({
+  GroupIdentityDisplay: () => <div data-testid="square-group-identity" />,
+}));
 jest.mock('@/components/CollaborationSquare/PublicGroupSquareSection', () => ({
   PublicGroupSquareSection: () => <div>group section</div>,
 }));
@@ -92,6 +104,42 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
   });
 
+  test('resource=bot 头部注入搜索栏与身份选择器（dmore Frame 2 右端工具组）', () => {
+    render(<SquarePageShell resource="bot" />);
+    const navigation = screen.getByRole('navigation');
+    const search = screen.getByTestId('square-search');
+    const picker = screen.getByTestId('square-identity-picker');
+    expect(navigation).toContainElement(search);
+    expect(navigation).toContainElement(picker);
+    // dmore artboard-002：下拉弹层 338px —— 触发器容器与其保持等宽（用户实测 222 偏短）。
+    expect(picker.parentElement).toHaveClass('md:w-[338px]');
+    // 搜索在前、身份选择器在后的顺序。
+    expect(search.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // 内容区不再重复出现身份选择器。
+    const resourceRegion = screen.getByRole('region', { name: '公开 Bot内容' });
+    expect(resourceRegion).not.toContainElement(picker);
+  });
+
+  test('resource=group 页头注入搜索栏与固定身份展示（dmore artboard-004 Frame 2 群视图工具组）', () => {
+    render(<SquarePageShell resource="group" />);
+    const navigation = screen.getByRole('navigation');
+    const search = screen.getByTestId('square-search');
+    const groupIdentity = screen.getByTestId('square-group-identity');
+    expect(navigation).toContainElement(search);
+    expect(navigation).toContainElement(groupIdentity);
+    // 搜索在前、身份展示在后的顺序。
+    expect(search.compareDocumentPosition(groupIdentity) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // 内容区不再重复出现工具栏。
+    const resourceRegion = screen.getByRole('region', { name: '公开协作群内容' });
+    expect(resourceRegion).not.toContainElement(search);
+    expect(resourceRegion).not.toContainElement(groupIdentity);
+    expect(screen.getByText('group section')).toBeInTheDocument();
+  });
+
   test('resource=bot 保留导航和面板，不再渲染内容区标题及说明', () => {
     render(<SquarePageShell resource="bot" />);
     expect(screen.getByText('bot panel')).toBeInTheDocument();
@@ -101,8 +149,10 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(resourceRegion).toContainElement(screen.getByText('bot panel'));
     const botNav = screen.getByRole('link', { name: '公开Bot' });
     expect(botNav).toHaveClass('bg-primary/10', 'text-primary');
-    expect(resourceRegion).toHaveClass('space-y-5');
-    expect(resourceRegion.parentElement).toHaveClass('pt-3', 'lg:px-8');
+    expect(resourceRegion).toHaveClass('space-y-4');
+    // dmore：页头下 16px 起内容，左右 20px 边距，内容列宽 1200。
+    expect(resourceRegion.parentElement).toHaveClass('pt-4', 'px-5');
+    expect(resourceRegion.parentElement).not.toHaveClass('max-w-[1200px]');
     expect(botNav).toHaveAttribute('aria-current', 'page');
   });
 

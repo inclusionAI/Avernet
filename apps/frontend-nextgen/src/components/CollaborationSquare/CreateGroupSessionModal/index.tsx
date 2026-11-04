@@ -59,7 +59,14 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
-      <ModalContent size="sm" aria-describedby={undefined} className="p-4">
+      <ModalContent
+        size="sm"
+        aria-describedby={undefined}
+        className="p-4"
+        // 同分享弹窗：关闭弹窗不把焦点还给卡上的「创建新会话」图标钮，
+        // 阻断归还 focus 引发的 tooltip 未 hover 凭空展开。保留关闭按钮等正常行为。
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
         <ModalHeader className="flex-row items-center gap-2.5 space-y-0">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <MessagesSquare aria-hidden className="size-5" />
