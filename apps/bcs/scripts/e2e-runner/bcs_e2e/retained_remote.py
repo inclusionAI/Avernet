@@ -34,22 +34,50 @@ SUITE = 'preprod-retained-v1'
 CONTRACT = 'supervised-retained-control-v1'
 
 
+GATEWAY_HUMAN_VIEW_GENERATION = 'gateway-human-view'
+BCS_DIRECT_DUAL_HEADER_GENERATION = 'bcs-direct-dual-header'
+RETAINED_GENERATIONS = (GATEWAY_HUMAN_VIEW_GENERATION, BCS_DIRECT_DUAL_HEADER_GENERATION)
+
+
+def execution_generation(profile: dict) -> str:
+    """Pure admission-generation judgment for one resolved remote Profile.
+
+    Generation G is the historical composition: gateway entrypoint with the
+    reviewed authorized Human-view identity binding and exactly the Cookie
+    header reference. Generation D is the separately reviewed dual-header
+    composition: bcs-direct entrypoint WITHOUT any explicit identity binding
+    (implicit native identity discovery, and the legacy business adapters that
+    bind their own reviewed principals; an explicit NATIVE binding stays blocked
+    by the pilot blocker) with both the driver Bot Authorization and Human
+    Cookie references. No other composition, including singlebox/mock, gateway
+    with a Bot token or bcs-direct with only Cookie, is admitted. The judgment
+    is pure: no network, no journal rebasing and no new authority.
+    """
+    kind = profile['entrypoint']['kind']
+    headers = set(profile['auth'].get('header_env', {}))
+    if (kind == 'gateway' and profile.get('identity_binding') == HUMAN_VIEW
+            and headers == {'Cookie'}):
+        return GATEWAY_HUMAN_VIEW_GENERATION
+    if (kind == 'bcs-direct' and 'identity_binding' not in profile
+            and {'Authorization', 'Cookie'} <= headers):
+        return BCS_DIRECT_DUAL_HEADER_GENERATION
+    raise ConfigError('retained remote execution requires the reviewed gateway Human-view Cookie composition or the reviewed bcs-direct dual-header (driver token plus Human Cookie) composition')
+
+
 def require_remote_profile(profile: dict) -> None:
     validate(copy.deepcopy(profile))
     require_resolved(profile)
     if (profile['environment']['tier'] != 'preprod'
-            or profile['entrypoint']['kind'] != 'gateway'
-            or profile.get('identity_binding') != HUMAN_VIEW
             or profile['observer']['kind'] != 'alisddbquery'
             or profile['policy']['exclusive_use_confirmed'] is not True
-            or set(profile['auth'].get('header_env', {})) != {'Cookie'}):
-        raise ConfigError('retained remote execution requires reviewed gateway Human-view identity, Cookie and exclusive preprod fixtures')
+            or execution_generation(profile) not in RETAINED_GENERATIONS):
+        raise ConfigError('retained remote execution requires reviewed preprod exclusive fixtures and an admitted identity generation')
 
 
 def validate_review(value: dict, profile: dict, run_id: str, case_id: str) -> dict:
     require_remote_profile(profile)
-    optional = {k for k in ('execution_observation', 'downstream_observation', 'execution_observation_budget')
-                if isinstance(value, dict) and k in value}
+    optional = {k for k in ('execution_observation', 'downstream_observation', 'execution_observation_budget',
+                'execution_generation') if isinstance(value, dict) and k in value}
     object_keys(value, {'schema_version', 'contract', 'profile_digest', 'run_id', 'case_id',
                         'reviewed_at', 'expires_at', 'supervisor', 'effect_review', 'retention_quota'} | optional, 'retained review')
     if (type(value['schema_version']) is not int or value['schema_version'] != 1
@@ -60,6 +88,10 @@ def validate_review(value: dict, profile: dict, run_id: str, case_id: str) -> di
     identifier(run_id, 'retained Run ID')
     if value['supervisor'] != profile['human']['user_id']:
         raise ConfigError('retained review requires the bound Human as the available incident supervisor')
+    if 'execution_generation' in value:
+        if (not isinstance(value['execution_generation'], str)
+                or value['execution_generation'] != execution_generation(profile)):
+            raise ConfigError('retained review execution generation must equal the reviewed Profile admission generation')
     start, end = value['reviewed_at'], value['expires_at']
     if (type(start) is not int or type(end) is not int or not 0 < end-start <= 3600
             or not start <= int(time.time()) < end):
@@ -108,24 +140,28 @@ def validate_observation_permission(value: dict, profile: dict) -> None:
             raise ConfigError('downstream test Bot bindings must be distinct')
 
 
-def review_summary(value: dict) -> dict:
+def review_summary(value: dict, profile: dict | None = None) -> dict:
+    declared = value.get('execution_generation')
+    generation = declared if declared is not None else (
+        execution_generation(profile) if profile is not None else None)
     return {'contract': value['contract'], 'receipt_digest': fingerprint(value),
-            'reviewed_at': value['reviewed_at'], 'expires_at': value['expires_at'],
-            'verification_mode': 'OPERATOR_ATTESTED', 'live_deployment_verification': 'NOT_PERFORMED',
-            'declared_deployment_commit': value['effect_review']['deployment_commit'],
-            'execution_termination': 'NOT_CONFIRMED', 'automatic_delete': False}
+        'reviewed_at': value['reviewed_at'], 'expires_at': value['expires_at'],
+        'verification_mode': 'OPERATOR_ATTESTED', 'live_deployment_verification': 'NOT_PERFORMED',
+        'declared_deployment_commit': value['effect_review']['deployment_commit'],
+        'execution_termination': 'NOT_CONFIRMED', 'automatic_delete': False,
+        'execution_generation': generation}
 
 
 class RetainedReview:
     def __init__(self, profile: dict, run_id: str, case_id: str, path: Path):
         self.profile = copy.deepcopy(profile)
         self.run_id, self.case_id, self.path = run_id, case_id, path
-        self.summary = review_summary(validate_review(read(path), self.profile, run_id, case_id))
+        self.summary = review_summary(validate_review(read(path), self.profile, run_id, case_id), self.profile)
         self.state_dir: Path | None = None  # Preflight runs before a Run exists.
 
     def validate(self) -> dict:
         value = validate_review(read(self.path), self.profile, self.run_id, self.case_id)
-        if review_summary(value) != self.summary:
+        if review_summary(value, self.profile) != self.summary:
             raise ConfigError('retained review changed after admission; no automatic renewal')
         if self.state_dir is not None:
             state = read(self.state_dir / 'run.json')

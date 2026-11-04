@@ -145,7 +145,7 @@ def _execute(profile, state_dir, run_id, definition, state, ledger, execution, l
     progress_type, steps = CASES[case_id]
     summary = state.get('retained_review')
     if (isinstance(remote_review, FileRetainedReview) and case_id == 'RETAIN-FILE-01'
-            and profile['entrypoint']['kind'] == 'gateway'
+            and profile['entrypoint']['kind'] in {'gateway', 'bcs-direct'}
             and isinstance(summary, dict) and summary.get('contract') == FILE_REVIEW_CONTRACT):
         steps = _remote_file_control_steps
     progress = progress_type()

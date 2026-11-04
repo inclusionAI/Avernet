@@ -48,6 +48,10 @@ class RetainedRemoteTests(unittest.TestCase):
         self.adapter=RemoteShapedAdapter(self.profile)
         self.http=[];self.visibility='protected'
 
+    def test_review_summary_reports_the_admitted_generation(self):
+        from bcs_e2e.retained_remote import review_summary
+        self.assertEqual(review_summary(self.review, self.profile)['execution_generation'], 'gateway-human-view')
+
     def args(self):
         return ['retained-run','--profile',str(self.profile_path),'--state-dir',str(self.state),
                 '--run-id',self.run_id,'--case',self.review['case_id'],'--allow-write','--confirm-run-id',self.run_id,
@@ -381,3 +385,91 @@ class RetainedRemoteTests(unittest.TestCase):
             self.assertFalse(any(k=='write' for k,_ in self.http))
         finally:
             for guard in held:guard.close()
+
+
+def dual_header_profile(profile: dict) -> dict:
+    """Convert a gateway fixture Profile into the reviewed dual-header generation shape."""
+    value = copy.deepcopy(profile)
+    value['entrypoint']['kind'] = 'bcs-direct'
+    value['entrypoint']['origin'] = 'https://bcs-pre.alipay.com'
+    value.pop('identity_binding', None)
+    value['auth']['header_env'] = {'Authorization': 'BCS_E2E_DRIVER_TOKEN', 'Cookie': 'BCS_E2E_HUMAN_COOKIE'}
+    return value
+
+
+class RetainedDualHeaderGenerationTests(RetainedRemoteTests):
+    """Generation D: bcs-direct without explicit identity_binding; driver token plus Human Cookie."""
+
+    def setUp(self):
+        super().setUp()
+        self.profile = dual_header_profile(self.profile)
+        write(self.profile_path, self.profile)
+        self.receipt['profile_digest'] = fingerprint(self.profile)
+        self.receipt['target']['api_origin'] = self.profile['entrypoint']['origin']
+        write(self.receipt_path, self.receipt)
+        self.review['profile_digest'] = fingerprint(self.profile)
+        write(self.review_path, self.review)
+        self._token_env = patch.dict(os.environ, {'BCS_E2E_DRIVER_TOKEN': 'synthetic-driver-token'})
+        self._token_env.start()
+        self.addCleanup(self._token_env.stop)
+
+    def test_review_summary_reports_the_admitted_generation(self):
+        from bcs_e2e.retained_remote import review_summary
+        self.assertEqual(review_summary(self.review, self.profile)['execution_generation'], 'bcs-direct-dual-header')
+
+    def test_dual_header_generation_runs_group_slice_with_real_composition_and_no_delete(self):
+        with self.boundaries():
+            rc, result = self.command(self.args())
+        self.assertEqual(rc, 2, result)
+        self.assertEqual(result['functional'], 'PASS', result)
+        self.assertEqual(result['execution_status'], 'UNCONFIRMED')
+        self.assertEqual(result['cleanup'], 'RETAINED')
+        self.assertEqual(result['evidence_status'], 'PASS')
+        self.assertEqual(result['retained_review']['execution_generation'], 'bcs-direct-dual-header')
+        self.assertTrue(Path(read(self.state / 'run.json')['lock_path']).exists())
+        self.assertEqual(len(self.adapter.groups), 1)
+        self.assertEqual(len(self.adapter.sessions), 1)
+        self.assertFalse(self.adapter.deleted)
+        self.assertFalse(any('delete' in op for _, op in self.http))
+        self.assertEqual(len(read(self.state / 'retention.json')['resources']), 2)
+
+    def test_dual_header_generation_review_declaration_is_bound_and_reported(self):
+        from bcs_e2e import retained_remote
+        undeclared = copy.deepcopy(self.review)
+        self.assertEqual(retained_remote.execution_generation(self.profile), 'bcs-direct-dual-header')
+        retained_remote.validate_review(undeclared, self.profile, self.run_id, self.review['case_id'])
+        declared = {**undeclared, 'execution_generation': 'bcs-direct-dual-header'}
+        retained_remote.validate_review(declared, self.profile, self.run_id, self.review['case_id'])
+        forged = {**undeclared, 'execution_generation': 'gateway-human-view'}
+        with self.assertRaises(ConfigError):
+            retained_remote.validate_review(forged, self.profile, self.run_id, self.review['case_id'])
+
+    def test_only_the_two_reviewed_generations_are_admitted(self):
+        from bcs_e2e import retained_remote
+        gateway = dual_header_profile(self.profile)
+        gateway['entrypoint']['kind'] = 'gateway'
+        gateway['identity_binding'] = dict(HUMAN_VIEW)
+        gateway['auth']['header_env'] = {'Cookie': 'BCS_E2E_HUMAN_COOKIE'}
+        self.assertEqual(retained_remote.execution_generation(gateway), 'gateway-human-view')
+        vetoes = []
+        gateway_dual = copy.deepcopy(gateway)
+        gateway_dual['auth']['header_env'] = {'Authorization': 'BCS_E2E_DRIVER_TOKEN', 'Cookie': 'BCS_E2E_HUMAN_COOKIE'}
+        vetoes.append(('gateway-with-bot-token', gateway_dual))
+        gateway_no_binding = copy.deepcopy(gateway)
+        gateway_no_binding.pop('identity_binding')
+        vetoes.append(('gateway-without-identity-binding', gateway_no_binding))
+        native = copy.deepcopy(self.profile)
+        native['identity_binding'] = dict(NATIVE)
+        vetoes.append(('bcs-direct-explicit-native', native))
+        human_view = copy.deepcopy(native)
+        human_view['identity_binding'] = dict(HUMAN_VIEW)
+        vetoes.append(('bcs-direct-explicit-human-view', human_view))
+        cookie_only = copy.deepcopy(self.profile)
+        cookie_only['auth']['header_env'] = {'Cookie': 'BCS_E2E_HUMAN_COOKIE'}
+        vetoes.append(('bcs-direct-cookie-only', cookie_only))
+        for name, profile in vetoes:
+            with self.subTest(veto=name):
+                with self.assertRaises(ConfigError):
+                    retained_remote.execution_generation(profile)
+                with self.assertRaises(ConfigError):
+                    retained_remote.require_remote_profile(profile)

@@ -16,8 +16,8 @@ from .adapters import RemotePilotAdapter
 from .file_transport import RemoteFileClient, FileTransportError
 from .profile import ConfigError, fingerprint, identifier, object_keys
 from .retained_remote import (FILENAME, ProtectedReadClient, RetainedMcpClient,
-                              preflight as common_preflight, require_remote_profile,
-                              review_summary)
+                              execution_generation, preflight as common_preflight,
+                              require_remote_profile, review_summary)
 from .retention_quota import validate_quota
 from .run_state import read, require_profile_binding, write
 
@@ -34,9 +34,10 @@ def _sha256(value: object, where: str) -> str:
 
 def validate_file_review(value: dict, profile: dict, run_id: str, case_id: str) -> dict:
     require_remote_profile(profile)
+    optional = {'execution_generation'} if isinstance(value, dict) and 'execution_generation' in value else set()
     object_keys(value, {'schema_version', 'contract', 'profile_digest', 'run_id', 'case_id',
         'reviewed_at', 'expires_at', 'supervisor', 'effect_review', 'file_effect_review',
-        'retention_quota'}, 'retained File review')
+        'retention_quota'} | optional, 'retained File review')
     if (type(value['schema_version']) is not int or value['schema_version'] != 1
             or value['contract'] != CONTRACT or value['profile_digest'] != fingerprint(profile)
             or value['run_id'] != run_id or value['case_id'] != case_id
@@ -45,6 +46,10 @@ def validate_file_review(value: dict, profile: dict, run_id: str, case_id: str) 
     identifier(run_id, 'retained File Run ID')
     if value['supervisor'] != profile['human']['user_id']:
         raise ConfigError('retained File review requires the bound Human supervisor')
+    if 'execution_generation' in value:
+        if (not isinstance(value['execution_generation'], str)
+                or value['execution_generation'] != execution_generation(profile)):
+            raise ConfigError('retained File review execution generation must equal the reviewed Profile admission generation')
 
     # Reuse the exact common effect declaration without allowing an old control
     # receipt to admit File operations.
@@ -112,8 +117,8 @@ def validate_file_review(value: dict, profile: dict, run_id: str, case_id: str) 
     return copy.deepcopy(value)
 
 
-def file_review_summary(value: dict) -> dict:
-    summary = review_summary(value)
+def file_review_summary(value: dict, profile: dict | None = None) -> dict:
+    summary = review_summary(value, profile)
     file_review = value['file_effect_review']
     summary['file_effects'] = {
         'storage_backend': file_review['storage_backend'],
@@ -136,12 +141,12 @@ class FileRetainedReview:
     def __init__(self, profile: dict, run_id: str, case_id: str, path: Path):
         self.profile = copy.deepcopy(profile)
         self.run_id, self.case_id, self.path = run_id, case_id, path
-        self.summary = file_review_summary(validate_file_review(read(path), self.profile, run_id, case_id))
+        self.summary = file_review_summary(validate_file_review(read(path), self.profile, run_id, case_id), self.profile)
         self.state_dir: Path | None = None
 
     def validate(self) -> dict:
         value = validate_file_review(read(self.path), self.profile, self.run_id, self.case_id)
-        if file_review_summary(value) != self.summary:
+        if file_review_summary(value, self.profile) != self.summary:
             raise ConfigError('retained File review changed after admission; no automatic renewal')
         if self.state_dir is not None:
             state = read(self.state_dir / 'run.json')

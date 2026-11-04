@@ -394,5 +394,69 @@ class RetainedFileRemoteTests(unittest.TestCase):
             self.assertNotIn(header, request.headers)
 
 
+class RetainedFileDualHeaderGenerationTests(RetainedFileRemoteTests):
+    """Generation D execution of the retained File slice through the remote BaaS steps."""
+
+    def setUp(self):
+        super().setUp()
+        self.profile = fixtures.dual_header_profile(self.profile)
+        write(self.profile_path, self.profile)
+        self.receipt['profile_digest'] = fingerprint(self.profile)
+        self.receipt['target']['api_origin'] = self.profile['entrypoint']['origin']
+        write(self.receipt_path, self.receipt)
+        self.review['profile_digest'] = fingerprint(self.profile)
+        write(self.review_path, self.review)
+        self._token_env = patch.dict(os.environ, {'BCS_E2E_DRIVER_TOKEN': 'synthetic-driver-token'})
+        self._token_env.start()
+        self.addCleanup(self._token_env.stop)
+
+    def test_file_review_admits_the_dual_header_generation_only_when_consistent(self):
+        validate_file_review(self.review, self.profile, self.run_id, self.review['case_id'])
+        declared = {**self.review, 'execution_generation': 'bcs-direct-dual-header'}
+        validate_file_review(declared, self.profile, self.run_id, self.review['case_id'])
+        forged = {**self.review, 'execution_generation': 'gateway-human-view'}
+        with self.assertRaises(ConfigError):
+            validate_file_review(forged, self.profile, self.run_id, self.review['case_id'])
+
+    def test_dual_header_file_slice_executes_remote_baas_steps(self):
+        with self.boundaries():
+            rc, result = self.command(self.args())
+        self.assertEqual(rc, 0, result)
+        self.assertEqual((result['functional'], result['status']), ('PASS', 'PASS'))
+        self.assertEqual(result['execution_status'], 'UNCONFIRMED')
+        self.assertEqual(result['cleanup'], 'RETAINED')
+        self.assertEqual(result['full_release_status'], 'NOT_QUALIFIED')
+        self.assertEqual(result['retained_review']['contract'], CONTRACT)
+        self.assertEqual(result['retained_review']['execution_generation'], 'bcs-direct-dual-header')
+        effects = result['retained_review']['file_effects']
+        self.assertEqual(effects['completion_implicit_share']['outcome'], 'NOT_VERIFIED')
+        self.assertEqual(effects['completion_notifications']['delivery'], 'NOT_VERIFIED')
+        self.assertEqual(result['retention_quota']['cost'], COSTS['RETAIN-FILE-01'])
+        self.assertTrue({'file.prepare', 'file.upload', 'file.complete'} <= set(self.file_calls))
+
+    # The station-gateway fixture test mocks the plain internal-V1 reply shape.
+    # Generation D answers through the public-V1 envelope (station legacy face),
+    # so the same transport proof re-declares the mocked reply shape.
+    def test_encoded_direct_oss_path_and_transport_never_forward_browser_credentials(self):
+        opener = Mock()
+        filename = f'e2e-{self.run_id}.txt'
+        signed = self.signed_target('owned:session', filename)
+        target = {'file_id': 'f-1', 'mode': 'single', 'method': 'PUT', 'upload_url': signed}
+        envelope = {'code': 20100, 'message': 'prepared', 'request_id': 'file-prepare-1', 'data': target}
+        opener.open.side_effect = [Reply(envelope, 201), Reply(b'', 204)]
+        profile = copy.deepcopy(self.profile)
+        profile['auth'] = {'header_env': {'Cookie': 'TEST_COOKIE', 'Authorization': 'TEST_AUTH'}}
+        with patch.dict(os.environ, {'TEST_COOKIE': 'cookie-secret', 'TEST_AUTH': 'auth-secret'}, clear=True), \
+             patch('bcs_e2e.file_transport.build_opener', return_value=opener):
+            client = RemoteFileClient(profile)
+            client.prepare('owned:session', {'file_name': filename, 'size': 7, 'mime_type': 'text/plain'})
+            client.upload('owned:session', 'f-1', b'payload')
+        request = opener.open.call_args_list[1].args[0]
+        self.assertEqual(request.full_url, signed)
+        self.assertNotIn('/', request.full_url.split('storage.example.test/', 1)[1].split('?', 1)[0])
+        for header in ('Cookie', 'Authorization', 'Origin', 'Referer', 'X-request-id'):
+            self.assertNotIn(header, request.headers)
+
+
 if __name__ == '__main__':
     unittest.main()
