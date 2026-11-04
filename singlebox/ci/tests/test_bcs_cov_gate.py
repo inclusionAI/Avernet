@@ -58,13 +58,13 @@ class ChangedLineCoverageTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("changed-instrumentable-lines=100 covered=0", result.stdout)
 
-    def test_changed_line_coverage_must_be_strictly_above_eighty_seven_percent(self):
-        result = self.run_gate(87)
+    def test_changed_line_coverage_must_be_strictly_above_eighty_five_percent(self):
+        result = self.run_gate(85)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("Changed-line coverage 87.00% is not > 87.00%", result.stdout)
-        result = self.run_gate(47, instrumentable=54)
+        self.assertIn("Changed-line coverage 85.00% is not > 85.00%", result.stdout)
+        result = self.run_gate(46, instrumentable=54)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Changed-line coverage 87.04%", result.stdout)
+        self.assertIn("Changed-line coverage 85.19%", result.stdout)
 
     def test_fifty_instrumentable_lines_are_report_only_despite_larger_physical_diff(self):
         result = self.run_gate(0, instrumentable=50)

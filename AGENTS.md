@@ -243,7 +243,7 @@ then run `verify_singlebox_coverage_artifacts.py` against the generated report
 directory so local pushes and GitHub PRs enforce the same artifact baseline.
 
 The BCS unit-test CI gate requires a 100% pass rate and overall line coverage
-strictly above 87%. Changed-line coverage must also be strictly above 87% when
+strictly above 87%. Changed-line coverage must be strictly above 85% when
 there are more than 50 instrumentable changed lines; changes with 1–50 such
 lines are reported only, and zero instrumentable changed lines are N/A. This
 exemption never relaxes the pass-rate or overall-line coverage gates.

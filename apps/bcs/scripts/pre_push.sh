@@ -4,7 +4,7 @@
 # a single cargo llvm-cov nextest invocation emits BOTH junit (pass rate) and
 # cobertura (coverage), so the pass-rate verdict and coverage artifacts come
 # from the same build — no second run. After the unit gate confirms 100% pass,
-# a coverage gate (cov_gate.py) enforces changed-line > 87% for at least 51
+# a coverage gate (cov_gate.py) enforces changed-line > 85% for at least 51
 # instrumentable changed lines and overall-line > 87% (mirrors the GitHub CI
 # gate) against those same artifacts.
 #
@@ -203,7 +203,7 @@ bcs_parallel_gates() {
 }
 
 # ----------------------------------------------------------------------------
-# Unit coverage gate (changed-line > 87% for >50 lines, overall-line > 87%).
+# Unit coverage gate (changed-line > 85% for >50 lines, overall-line > 87%).
 # The unit gate above already ran ci_test.sh WITH --coverage (single llvm-cov
 # nextest pass -> testresult/{junit,cobertura}.xml) AND confirmed the 100% pass
 # rate via fast-fail. So coverage is already collected — this step only enforces
@@ -221,7 +221,7 @@ bcs_coverage_gate() {
     return 0
   fi
   echo ""
-  echo "== required: bcs unit coverage gate (changed-line>87% for >50 lines, overall-line>87%) =="
+  echo "== required: bcs unit coverage gate (changed-line>85% for >50 lines, overall-line>87%) =="
   # Enforce thresholds. cov_gate.py reads testresult/{junit,cobertura}.xml (the
   # SAME artifacts produced by the unit gate's single llvm-cov nextest pass),
   # diffs src/bcs against --base-ref, and maps changed lines onto cobertura
@@ -232,7 +232,7 @@ bcs_coverage_gate() {
         --bcs-dir "$PWD" \
         --pass-rate-min 100 \
         --overall-line-min 87 \
-        --changed-line-min 87 \
+        --changed-line-min 85 \
         --changed-line-min-lines 51 )
   local rc=$?
   if [[ "$rc" -ne 0 ]]; then

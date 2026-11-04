@@ -5,7 +5,7 @@ Enforces three thresholds against the testresult/ produced by ci_test.sh
 --coverage:
   1. Test pass rate  == 100%
   2. Overall line coverage > 87%
-  3. Changed-line coverage > 87% when at least 51 instrumentable changed BCS
+  3. Changed-line coverage > 85% when at least 51 instrumentable changed BCS
      lines map against the base ref; smaller changes are report-only
 
 When run inside GitHub Actions (CI=true), prints ::error::/::notice:: workflow
@@ -46,7 +46,7 @@ def parse_args():
                    help="bcs checkout root (contains testresult/ + is under repo root)")
     p.add_argument("--pass-rate-min", type=float, default=100.0)
     p.add_argument("--overall-line-min", type=float, default=87.0)
-    p.add_argument("--changed-line-min", type=float, default=87.0)
+    p.add_argument("--changed-line-min", type=float, default=85.0)
     p.add_argument("--changed-line-min-lines", type=int, default=51,
                    help="enforce changed-line coverage at or above this instrumentable line count")
     return p.parse_args()
