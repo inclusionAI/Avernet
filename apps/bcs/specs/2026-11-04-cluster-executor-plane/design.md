@@ -342,9 +342,12 @@ SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_
 -- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
 -- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
--- RELEASE (no successor; next claimer bumps the token)
+-- RELEASE (no successor; next claimer bumps the token). Conditional on no pending
+-- work, so it serializes with fallback writes on the lease-row lock (§9.4);
+-- 0 rows → keep or TRANSFER instead.
 UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
  WHERE env = :env AND session_id = :s AND node_id = :me AND fencing_token = :mine
+   AND has_pending_work = FALSE
 
 -- TRANSFER (handoff to a chosen successor; only the live holder can do this)
 UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
@@ -499,9 +502,13 @@ win. This depends on the PA reusing `messageId` on retry ([cross-item notes](cro
 
 ### 9.4 Durable fallback
 
-If the owner is unreachable, the entry node records the round durably as
-unprocessed input (unfenced — it is input to the session, not owner
-progress) and acks. The round is picked up by the owner's pending-input
+If the owner is unreachable, the entry node runs one transaction on S's lease
+row: if the lease is claimable it **claims S itself** and serves (placement is
+only a preference); otherwise it records the round as unprocessed input
+(unfenced — input to the session, not owner progress), sets
+`has_pending_work = TRUE` on the lease row, and acks. Because the marker is set
+under the lease-row lock and release requires it to be false (§8.3), a
+concurrent idle release cannot strand the input. The round is picked up by the owner's pending-input
 query or, if the owner is dead, by the dead-node query, which repeats every
 roster poll (§10.1). Time to first token then equals
 takeover time; nothing can do better, because no other node may drive S
@@ -868,9 +875,9 @@ index on `(env, advertise_addr)` is needed.
 `bcs_task_leases` — pinned: `session_id` (key), `node_id`, `fencing_token`
 (monotonic BIGINT), `expires_at`. Changed meaning: `expires_at` is NULL while
 held and set on release/handoff (D5). Added: `env`, `write_seq` (fence step
-and handoff delta detection). The "has pending work" signal (§10.1) is
-either a column here or derived from run/queue tables — decided in the plan,
-weighing lock contention with the fence step.
+and handoff delta detection), `has_pending_work` (set by the owner while it
+has work and by fallback writes; cleared by the owner, fenced; guards
+release, §8.3 and §9.4; indexed with `(env, node_id)` for §10.1).
 
 New numbered migrations for MySQL, SQLite and OceanBase (with partition
 clause and table group); committed migrations are never edited.
@@ -932,8 +939,7 @@ idempotency across transports, exactly-once wording) are collected in
 | 4 | Deploy platform: default stop timeout; can it run a pre-stop hook per group? | Needed for drain sizing and double-move avoidance |
 | 5 | Does production run 2 BCS replicas on one database today? | If yes, pin to 1 until item 1 lands, or confirm CAS guards |
 | 6 | Where the bot `max_running` cap is enforced once several nodes schedule | In the DB (conditional insert / count under CAS), in item 1 |
-| 7 | Shape of the "has pending work" signal | Decide in the plan |
-| 8 | Timer durability audit | In the plan; any in-memory-only timer is a gap |
+| 7 | Timer durability audit | In the plan; any in-memory-only timer is a gap |
 
 ---
 

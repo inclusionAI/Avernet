@@ -307,9 +307,12 @@ SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_
 -- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
 -- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
--- RELEASE (no successor; next claimer bumps the token)
+-- RELEASE (no successor; next claimer bumps the token). Conditional on no pending
+-- work, so it serializes with fallback writes on the lease-row lock (§9.4);
+-- 0 rows → keep or TRANSFER instead.
 UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
  WHERE env = :env AND session_id = :s AND node_id = :me AND fencing_token = :mine
+   AND has_pending_work = FALSE
 
 -- TRANSFER (handoff to a chosen successor; only the live holder can do this)
 UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
@@ -446,8 +449,10 @@ PA 在重试时复用 `messageId`([跨项备注](cross-item-notes.zh-CN.md))。
 
 ### 9.4 持久回退
 
-若所有者不可达,入口节点把该轮作为未处理的输入持久记录(不加围栏 —— 它是会话的
-输入,不是所有者的推进)并确认。该轮会被所有者的待处理输入查询拾取;若所有者已死,则由每次花名册轮询都会重复的
+若所有者不可达,入口节点在 S 的租约行上执行一个事务:若租约可认领,它**自己认领 S**
+并服务(放置只是一种偏好);否则把该轮作为未处理的输入持久记录(不加围栏 —— 它是会话
+的输入,不是所有者的推进),在租约行上置 `has_pending_work = TRUE`,然后确认。由于该标记
+是在租约行锁下设置的,而释放要求它为假(§8.3),并发的空闲释放不会让这条输入落空。该轮会被所有者的待处理输入查询拾取;若所有者已死,则由每次花名册轮询都会重复的
 死亡节点查询拾取(§10.1)。
 此时首 token 时延等于接管时间;没有办法做得更好,因为在 S 的租约仍有效时,其他
 节点不得驱动 S。
@@ -762,9 +767,10 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 
 `bcs_task_leases` —— 约定列:`session_id`(键)、`node_id`、`fencing_token`
 (单调递增的 BIGINT)、`expires_at`。含义变化:`expires_at` 持有期间为 NULL,在
-释放/交接时设置(D5)。新增:`env`、`write_seq`(围栏步骤与交接时的增量检测)。
-"有待处理工作"信号([§10.1](#101-触发-1--花名册检测到死亡随后一次定向查询))要么是这里的一列,要么从运行表/队列表推导
-—— 在计划阶段权衡它与围栏步骤之间的锁竞争后决定。
+释放/交接时设置(D5)。新增:`env`、`write_seq`(围栏步骤与交接时的增量检测)、
+`has_pending_work`(所有者有工作时由其设置,回退写入时也会设置;由所有者在围栏下清除;
+约束释放,见 §8.3 与 §9.4;与 `(env, node_id)` 一起建索引,供
+[§10.1](#101-触发-1--花名册检测到死亡随后一次定向查询) 使用)。
 
 为 MySQL、SQLite 和 OceanBase(带分区子句和表组)新增编号迁移;已提交的迁移
 绝不修改。这里**不**创建 `bcs_dispatch_records`(第 3 项)。
@@ -822,8 +828,7 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 | 4 | 发布平台:默认停止超时是多少;能否按组运行停止前钩子? | 用于确定排空时长并避免二次移动 |
 | 5 | 生产环境今天是否在一个数据库上运行 2 个 BCS 副本? | 若是,在第 1 项落地前固定为 1 个,或确认 CAS 保护足够 |
 | 6 | 多个节点参与调度后,Bot 的 `max_running` 上限在哪里强制 | 在数据库中(条件插入 / CAS 下计数),放在第 1 项 |
-| 7 | "有待处理工作"信号的形态 | 在计划阶段决定 |
-| 8 | 定时器持久性审计 | 在计划阶段;任何仅在内存中的定时器都是缺口 |
+| 7 | 定时器持久性审计 | 在计划阶段;任何仅在内存中的定时器都是缺口 |
 
 ---
 
