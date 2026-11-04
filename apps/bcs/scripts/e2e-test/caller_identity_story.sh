@@ -40,15 +40,18 @@ if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_owner_mode_master_relay")
 fi
 
-story_caller_delegation_chain() {
-    info "Story: leased Owner Manager delegates to a Caller Worker over the protected wire"
-    local result=0
+run_caller_delegation_chain() {
+    local mode="$1" result=0
+    info "Story: leased Owner Manager delegates to a Caller Worker (context=$mode)"
     python3 "$SCRIPT_DIR/caller_delegation_chain_story.py" \
         --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
-        --human "$BCS_MOCK_USER_ID" || result=$?
-    assert_eq "Owner lineage reached the Caller Worker; protected dispatch and result delivery verified" "$result" "0"
+        --human "$BCS_MOCK_USER_ID" --context-delivery "$mode" || result=$?
+    assert_eq "Owner lineage and protected Worker delivery with $mode initialization" "$result" "0"
 }
 
+story_caller_delegation_chain_send() { run_caller_delegation_chain send; }
+story_caller_delegation_chain_inject() { run_caller_delegation_chain inject; }
+
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
-    E2E_TESTS_STORIES+=("story_caller_delegation_chain")
+    E2E_TESTS_STORIES+=("story_caller_delegation_chain_send" "story_caller_delegation_chain_inject")
 fi

@@ -7,6 +7,10 @@ that live run assigns work through the supported inline v1 contract. The
 Worker must receive a new protected dispatch and return its result through
 the existing callback and delivery-status APIs. No fabricated v2 stored-intent
 receipt, internal store mutation or test-only production entrypoint is used.
+
+Run separately with --context-delivery send and inject. Send completes an
+initialization turn; Inject must stay pending without a run and be consumed
+by the first human turn. Both modes exercise the full protected delegation.
 """
 from __future__ import annotations
 
@@ -30,6 +34,8 @@ class DelegationChainStory:
         self.worker = None
         self.group_id = None
         self.session_id = None
+        self.context_marker = "delegation-context-" + uuid.uuid4().hex
+        self.context_message_id = None
         self._delivery_policy_restore = None
 
     # ---------------------------------------------------------------- http
@@ -66,7 +72,7 @@ class DelegationChainStory:
         # Capability discovery is part of real container preparation, not
         # supplied by a test-only composition root.
         self.provider = self.post("/providers", {
-            "name": "Delegation chain provider",
+            "name": "Delegation chain provider " + uuid.uuid4().hex,
             "webhook_url": self.args.mock_url + "/provider/webhook",
             "auth": {"mode": "static_bearer"},
             "protocol_version": "2.0",
@@ -115,6 +121,7 @@ class DelegationChainStory:
         enforced["flow_enabled"]["task"] = True
         enforced["defaults"]["mode"] = "enforce"
         enforced["defaults"]["max_running"] = 8
+        enforced["pause_dispatch"] = False
         body = {"expected_version": current["version"], "policy": enforced}
         updated = self.request("/admin/message-delivery/policy", body, method="PUT")
         assert updated["version"] == current["version"] + 1, updated
@@ -154,6 +161,45 @@ class DelegationChainStory:
             "bcs_session_id": self.session_id, "message": {"text": text},
         }, headers)
 
+    def is_manager_send(self, item):
+        body = item["body"]
+        return (body.get("method") == "chat.send"
+                and (body.get("to_bot") or {}).get("provider_bot_ref")
+                == self.manager["provider_bot_ref"])
+
+    def context_deliveries(self):
+        return self.request("/openapi/v1/collaboration/messages/"
+                            + segment(self.context_message_id) + "/deliveries?session_id="
+                            + segment(self.session_id))
+
+    def initialize_context(self, headers):
+        history = self.wait("persisted manager context",
+            lambda: self.request(f"/sessions/{segment(self.session_id)}/messages"),
+            lambda rows: any(self.context_marker in row.get("content", "") for row in rows))
+        self.context_message_id = next(row["id"] for row in history
+                                       if self.context_marker in row.get("content", ""))
+        if self.args.context_delivery == "inject":
+            rows = self.wait("manager pending context", self.context_deliveries,
+                lambda rows: any(row["target_bot_id"] == self.manager["bot_uuid"]
+                                 and row["status"] == "pending_context" for row in rows))
+            manager = next(row for row in rows if row["target_bot_id"] == self.manager["bot_uuid"])
+            assert manager["kind"] == "inject" and manager["run_id"] is None, manager
+            captured = self.request("/control/provider/requests", mock=True)["requests"]
+            assert not any(self.is_manager_send(item) for item in captured), \
+                "Inject must remain silent before the first user message"
+            print("  Inject persisted without a run; waiting for the first user message", flush=True)
+            return
+        captured = self.wait("manager initialization Send",
+            lambda: self.request("/control/provider/requests", mock=True)["requests"],
+            lambda items: any(self.is_manager_send(item) for item in items))
+        initial = next(item for item in captured if self.is_manager_send(item))
+        assert self.context_marker in json.dumps(initial["body"]["message"])
+        self.reply_chat_final(initial["body"]["id"], "manager ready", headers)
+        self.wait("manager initialization completed", self.context_deliveries,
+                  lambda rows: any(row["target_bot_id"] == self.manager["bot_uuid"]
+                                   and row["status"] == "completed" for row in rows))
+        print("  Send started and completed a separate initialization run", flush=True)
+
     def run(self) -> None:
         socket_client = None
         try:
@@ -171,7 +217,8 @@ class DelegationChainStory:
             })
             self.group_id = group["id"]
             session = self.post(f"/groups/{segment(self.group_id)}/sessions",
-                                {"group_context_delivery": "inject"})
+                                {"group_context_delivery": self.args.context_delivery,
+                                 "input": self.context_marker})
             self.session_id = session["id"]
             assert self.session_id, session
             socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
@@ -179,22 +226,13 @@ class DelegationChainStory:
             connect = socket_client.receive(socket_client.connect_id)
             assert connect.get("ok") is True, connect
 
-            # Finish the system-context run first: a Bot/Session lane is
-            # serialized even when the Bot's global max_running exceeds one.
+            # Send starts an initialization run; Inject remains pending until
+            # the first human message carries it into the Manager turn.
             provider_headers = {
                 "X-BCN-Provider-Id": self.provider["provider_id"],
                 "Authorization": "Bearer " + self.manager["bot_runtime_token"],
             }
-            initial = self.wait("manager session initialization",
-                lambda: self.request("/control/provider/requests", mock=True)["requests"],
-                lambda items: any(item["body"].get("method") == "chat.send"
-                    and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
-                    == self.manager["provider_bot_ref"] for item in items))
-            initial_ride = next(item for item in initial
-                if item["body"].get("method") == "chat.send"
-                and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
-                == self.manager["provider_bot_ref"])
-            self.reply_chat_final(initial_ride["body"]["id"], "manager ready", provider_headers)
+            self.initialize_context(provider_headers)
 
             # Lease admission parks the identity for the ordinary Manager.
             socket_client.send({"type": "req", "id": "dc-lease", "method": "lease.acquire",
@@ -226,6 +264,12 @@ class DelegationChainStory:
                              and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
                              == self.manager["provider_bot_ref"]
                              and "delegate this onward" in json.dumps(item["body"]))
+            if self.args.context_delivery == "inject":
+                message = json.dumps(root_ride["body"]["message"], ensure_ascii=False)
+                assert self.context_marker in message, "First user turn lost injected context"
+                assert "bcs_assign_task" in message, "Manager instructions were lost"
+                assert len([item for item in rides if self.is_manager_send(item)]) == 1, \
+                    "Inject must not start an extra initialization turn"
             parent_run_id = root_ride["body"]["id"]
             assert not (root_ride["body"].get("extensions") or {}).get("caller_execution_token")
             print("  ordinary Manager ride reached the provider; no Caller token exposed", flush=True)
@@ -312,6 +356,10 @@ class DelegationChainStory:
                       lambda rows: any(row["target_bot_id"] == self.worker["bot_uuid"]
                                        and row["status"] == "completed" for row in rows))
             self.reply_chat_final(parent_run_id, "manager delegated the work", provider_headers)
+            if self.args.context_delivery == "inject":
+                self.wait("injected initialization consumed", self.context_deliveries,
+                          lambda rows: any(row["target_bot_id"] == self.manager["bot_uuid"]
+                                           and row["status"] == "consumed" for row in rows))
             def is_result_ride(item):
                 body = item["body"]
                 return (body.get("method") == "chat.send"
@@ -355,6 +403,7 @@ def main() -> int:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--mock-url", required=True)
     parser.add_argument("--human", required=True)
+    parser.add_argument("--context-delivery", choices=("send", "inject"), required=True)
     args = parser.parse_args()
     DelegationChainStory(args).run()
     return 0
