@@ -14,12 +14,14 @@
 // 数据平铺：镜像引擎 BusinessComponentMount/CDNMount——把 `params.data` 业务字段平铺到组件
 // 顶层 props（剔除保留键），并透传 tab/params/payload/onAction/onInteraction/eventEmitter。
 import { Skeleton } from '@/components/ui';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
 import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent/registry';
 import { Component, type ComponentType, useEffect, useState } from 'react';
 import { resolveBcsStateMachineApiBaseUrl } from './bcsPanelBaseUrl';
 import { RESERVED_DATA_KEYS, resolveExportName } from './resolveUmdExport';
+import { resolveUndercoverViewerActorId } from './resolveUndercoverViewerActorId';
 import { resolveUmdComponent } from './resolveUmdModule';
 
 /**
@@ -73,10 +75,12 @@ interface UmdState {
  */
 export function UmdPanel(props: PanelContentProps): React.ReactElement {
   const { tab, onAction, onInteraction, eventEmitter } = props;
+  const { identity } = useHumanIdentity();
   const tabData = (tab?.params ?? tab?.payload ?? {}) as Record<string, unknown>;
 
   const cdn = tabData.cdn as string | undefined;
   const exportName = resolveExportName(tabData);
+  const viewerActorId = resolveUndercoverViewerActorId(exportName, identity?.userId);
   const data = (tabData.data as Record<string, unknown> | undefined) ?? {};
 
   const [state, setState] = useState<UmdState>({ Component: null, error: null });
@@ -143,6 +147,7 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
     flattened.baseUrl,
   );
   if (injectedApiBaseUrl) flattened.apiBaseUrl = injectedApiBaseUrl;
+  if (viewerActorId) flattened.viewerActorId = viewerActorId;
 
   const propsData = { ...tabData, eventEmitter };
   return (

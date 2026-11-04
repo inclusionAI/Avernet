@@ -226,6 +226,51 @@ class PeekerIsolationTest(unittest.TestCase):
         self.assertIn("speak_1:", speak)
         self.assertIn("collect:", speak)
 
+    def test_three_humans_continue_to_next_vote_after_last_bot_is_eliminated(self) -> None:
+        state = build_multi_human_state()
+        state["seats"] = state["seats"][:4]
+        state["seats"][2] = {
+            "seat": 3, "kind": "human", "display": "你", "bot_name": "你", "bot_uuid": None,
+            "binding": None, "actor_id": "human-C", "word": "隐词乙", "role": "undercover",
+            "alive": True, "eliminated_round": None,
+        }
+        state["seats"][3]["role"] = "civilian"
+        state["seats"][3]["word"] = "隐词甲"
+        state["human_actor_ids"] = ["human-A", "human-B", "human-C"]
+        state["config"]["players"] = 4
+        state["rounds"][0]["order"] = [1, 2, 3, 4]
+        state["phase"] = "VOTE_RUNNING"
+        undercover.save_state(state)
+
+        votes = {"1": "我投4号", "2": "我投4号", "3": "我投4号", "4": "我投1号"}
+        with patch.object(undercover, "emit") as emit:
+            undercover.cmd_votes_set(argparse.Namespace(
+                session=state["session_id"], json=json.dumps(votes),
+            ))
+        result = emit.call_args.args[0]
+        self.assertEqual(result["verdict"], "continue")
+        self.assertEqual(result["eliminated"]["seat"], 4)
+        self.assertEqual([item["seat"] for item in result["alive"]], [1, 2, 3])
+
+        speak = undercover.prepare_speak_run(state["session_id"], retry=False)
+        self.assertEqual(speak["round"], 2)
+        self.assertEqual(speak["bindings"], ["referee=referee-1"])
+        speeches = {str(seat): "它常用于日常生活" for seat in (1, 2, 3)}
+        with patch.object(undercover, "emit"):
+            undercover.cmd_speeches_set(argparse.Namespace(
+                session=state["session_id"], json=json.dumps(speeches), flag=[],
+            ))
+        vote = undercover.prepare_vote_run(state["session_id"], retry=False)
+        self.assertEqual(vote["round"], 2)
+        self.assertEqual(vote["bindings"], ["referee=referee-1"])
+        vote_yaml = Path(vote["yaml_path"]).read_text(encoding="utf-8")
+        start = self._node_block(vote_yaml, "vote_start")
+        self.assertIn("binding: referee", start)
+        self.assertIn("targets: [vote_1]", start)
+        for seat in (1, 2, 3):
+            self.assertIn(f"      vote_{seat}:\n", vote_yaml)
+        self.assertNotIn("      vote_4:\n", vote_yaml)
+
     # ---- 旧存档：只有顶层 human_actor_id 也要保住 word reminder ----
 
     def test_legacy_single_human_state_keeps_word_reminder(self) -> None:
@@ -284,6 +329,20 @@ class PeekerIsolationTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as raised:
                     undercover.cmd_my_word(argparse.Namespace(
                         session=self.state["session_id"], human=actor_id, seat=None,
+                    ))
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(json.loads(out.getvalue())["error"], "HUMAN_NOT_FOUND")
+                emit.assert_not_called()
+
+    def test_my_word_explicit_seat_selector_is_strict(self) -> None:
+        undercover.save_state(self.state)
+        for seat in (0, 3, 99):
+            out = io.StringIO()
+            with (self.subTest(seat=seat), patch.object(undercover, "emit") as emit,
+                  contextlib.redirect_stdout(out)):
+                with self.assertRaises(SystemExit) as raised:
+                    undercover.cmd_my_word(argparse.Namespace(
+                        session=self.state["session_id"], human=None, seat=seat,
                     ))
                 self.assertEqual(raised.exception.code, 2)
                 self.assertEqual(json.loads(out.getvalue())["error"], "HUMAN_NOT_FOUND")

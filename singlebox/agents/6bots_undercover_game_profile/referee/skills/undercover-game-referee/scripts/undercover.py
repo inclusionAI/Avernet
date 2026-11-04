@@ -2034,6 +2034,8 @@ def cmd_my_word(args: argparse.Namespace) -> None:
         die("HUMAN_NOT_FOUND", f"本局没有 actor_id 为「{requested}」的人类玩家。请核对 --human 参数。")
     if target is None and requested_seat is not None:
         target = next((s for s in humans if s["seat"] == requested_seat), None)
+        if target is None:
+            die("HUMAN_NOT_FOUND", f"本局没有 {requested_seat} 号人类玩家。请核对 --seat 参数。")
     human = target or humans[0]
     emit(
         {
