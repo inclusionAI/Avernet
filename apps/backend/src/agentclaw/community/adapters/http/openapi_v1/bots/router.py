@@ -114,7 +114,7 @@ from .schemas import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-from .projections import _require_service_capable_engine, _to_bot
+from .converter_bot import _require_service_capable_engine, _to_bot
 from .router_listings import router as listings_router
 from .router_listings import list_bots as list_bots, query_bot_metadata as query_bot_metadata
 from .router_runtime import router as runtime_router

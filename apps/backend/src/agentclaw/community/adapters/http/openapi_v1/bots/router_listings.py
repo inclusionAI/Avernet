@@ -76,7 +76,7 @@ from .schemas import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-from .projections import _to_bot, _resolve_row_spaces, _to_bot_metadata
+from .converter_bot import _to_bot, _resolve_row_spaces, _to_bot_metadata
 
 logger = get_logger()
 

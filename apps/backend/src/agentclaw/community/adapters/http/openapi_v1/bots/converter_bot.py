@@ -1,15 +1,7 @@
-"""Bots group — ``/openapi/v1/bots`` endpoints.
+"""Bot records to display-safe OpenAPI response models.
 
-Public handlers that delegate to the existing internal bot services and wrap the
-result in the standard :class:`Envelope` / :class:`Page` contracts. Identity is
-the end user the request names in ``?user_id=`` (validated to the verified
-caller via ``UserIdDep``); the bot owner a read or write addresses comes from
-``OwnerIdDep`` — the caller by default, a shared bot's owner when the request
-names one. ``check-name`` asks a tenant-wide question and takes neither. The
-request tenant is bound by ``AvernetTenantMiddleware``
-before the handler runs, so every service read/write is already tenant-scoped by
-the Track A guard. Services are obtained with ``Injected`` exactly as the
-internal router does.
+Router-local converters project explicit response fields and resolve space
+summaries through the declared core port; they do not define HTTP endpoints.
 """
 
 from __future__ import annotations

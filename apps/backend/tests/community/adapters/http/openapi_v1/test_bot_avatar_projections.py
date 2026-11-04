@@ -5,7 +5,7 @@ import json
 import pytest
 
 from agentclaw.community.adapters.http.openapi_v1.bot_public.router import _public_bot
-from agentclaw.community.adapters.http.openapi_v1.bots.projections import _to_bot, _to_bot_metadata
+from agentclaw.community.adapters.http.openapi_v1.bots.converter_bot import _to_bot, _to_bot_metadata
 from agentclaw.community.adapters.http.openapi_v1.collaborating_bots.router import _to_item
 from agentclaw.community.core.bot_management.avatar import bot_avatar_url
 from tests.community.adapters.http.openapi_v1.test_collaborating_bots import _relation
