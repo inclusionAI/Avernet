@@ -177,6 +177,49 @@ class QdrantRetrievalIndex:
                 counts[f"{name}_mismatched_points"] = mismatched
         return counts
 
+    def read_source_points(self, source_id: str) -> dict[str, list[VectorPoint]]:
+        """Inspect actual content without trusting the local applied checkpoint."""
+        result = {}
+        with self._lock.read(self.read_timeout_seconds):
+            for name, store, id_field in (
+                ("vector", self._dense, "_external_id"),
+                ("keyword", self._keyword, "_keyword_external_id"),
+            ):
+                points, offset = [], None
+                condition = models.Filter(
+                    should=[
+                        models.FieldCondition(
+                            key="source_id", match=models.MatchValue(value=source_id)
+                        ),
+                        models.FieldCondition(
+                            key=id_field, match=models.MatchValue(value=source_id)
+                        ),
+                    ]
+                )
+                while True:
+                    records, offset = store._client.scroll(
+                        store.collection_name,
+                        scroll_filter=condition,
+                        offset=offset,
+                        limit=100,
+                        with_payload=True,
+                        with_vectors=name == "vector",
+                        **self._query_options,
+                    )
+                    for record in records:
+                        payload = record.payload or {}
+                        points.append(
+                            VectorPoint(
+                                id=payload.get(id_field, str(record.id)),
+                                payload=payload,
+                                vector=record.vector if name == "vector" else [],
+                            )
+                        )
+                    if offset is None:
+                        break
+                result[name] = sorted(points, key=lambda point: point.id)
+        return result
+
     def get_vector_ids(self):
         """Snapshot IDs for recovery cleanup; never queried by online retrieval."""
         with self._lock.read(self.read_timeout_seconds):

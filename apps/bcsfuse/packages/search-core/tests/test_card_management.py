@@ -179,3 +179,69 @@ with tempfile.TemporaryDirectory() as path:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_http_versions_use_caller_names_and_keep_card_fields_opaque(setup):
+    _, client = setup
+    business = {"saved_revision": 42, "prepared": True, "name": "demo"}
+    assert client.put(PATH, json={"card": business}).json() == {
+        "saved": True,
+        "card_version": 1,
+    }
+    assert client.get(PATH).json() == {
+        "card": business,
+        "resource_type": "agent",
+        "card_version": 1,
+    }
+    status = client.get(PATH + "/index-status").json()
+    assert status == {
+        "agent_id": "example:one",
+        "card_version": 1,
+        "deleted": False,
+        "doc_ready": False,
+        "doc_error": "",
+        "instance_id": "test",
+        "environment": "local",
+        "index_key": "test",
+        "indexed_card_version": 0,
+        "index_error": "",
+    }
+    schema = client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schema["CardStatus"]["properties"]) == set(status)
+    assert set(schema["Saved"]["properties"]) == {"saved", "card_version"}
+
+
+def test_catalog_http_versions_distinguish_card_and_doc():
+    from search_core.adapters.http.catalog_cards import CardRebuildResult, CardStatus
+
+    status = CardStatus.model_validate(
+        {
+            "agent_id": "demo",
+            "saved_revision": 2,
+            "deleted": False,
+            "prepared": True,
+            "preparation_error": "",
+            "instance_id": "node",
+            "environment": "test",
+            "index_key": "default",
+            "local_applied_revision": 1,
+            "local_error": "INDEX_APPLY_FAILED",
+            "document_version": 4,
+            "local_applied_document_version": 3,
+        }
+    ).model_dump()
+    assert status["card_version"] == 2
+    assert status["indexed_card_version"] == 1
+    assert status["doc_version"] == 4
+    assert status["indexed_doc_version"] == 3
+    assert status["index_error"] == "INDEX_APPLY_FAILED"
+    assert set(CardStatus.model_json_schema(mode="serialization")["properties"]) == set(
+        status
+    )
+    assert CardRebuildResult.model_validate(
+        {
+            "published": True,
+            "index_key": "default",
+            "saved_revision": 2,
+        }
+    ).model_dump() == {"published": True, "index_key": "default", "card_version": 2}

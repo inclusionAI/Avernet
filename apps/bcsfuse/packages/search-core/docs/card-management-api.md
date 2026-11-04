@@ -63,10 +63,10 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 成功返回 **202**：
 
 ```json
-{"saved": true, "saved_revision": 1}
+{"saved": true, "card_version": 1}
 ```
 
-`saved_revision` 由服务端生成，仅供排查，不需要在后续请求里传回来。重复提交当前相同内容可直接成功，不会因重试而重新增加版本。这里只确认持久化成功，不返回固定的 pending 状态。
+`card_version` 由服务端生成，仅供排查，不需要在后续请求里传回来。重复提交当前相同内容可直接成功，不会因重试而重新增加版本。这里只确认持久化成功，不返回固定的 pending 状态。
 
 同一 ID 的并发更新由服务端处理，未提供的字段仍保留；同时修改同一字段时，以数据库最终提交顺序为准。服务能阻止内部旧加工任务覆盖新数据，但无法自行识别上游网络迟到的旧业务请求。
 
@@ -114,11 +114,11 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 {
   "resource_type": "agent",
   "card": {"name": "账单助手", "description": "查询消费账单"},
-  "saved_revision": 1
+  "card_version": 1
 }
 ```
 
-读取 Card 只查询 Card 表；即使索引产物表暂时不可用，仍能读到已保存的业务资料。card 返回保存后的完整业务对象，包括未被此次更新修改的字段。resource_type 和 saved_revision 位于 Card 外，不是业务字段，也不需要整体复制回更新请求。不存在或已删除返回 **404**。
+读取 Card 只查询 Card 表；即使索引产物表暂时不可用，仍能读到已保存的业务资料。card 返回保存后的完整业务对象，包括未被此次更新修改的字段。resource_type 和 card_version 位于 Card 外，不是业务字段，也不需要整体复制回更新请求。不存在或已删除返回 **404**。
 
 ## 4. 查看索引加工状态
 
@@ -129,17 +129,55 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 | 字段 | 说明 |
 | --- | --- |
 | agent_id | 路径中的对象 ID，Group 也沿用此字段名 |
-| saved_revision | 已保存到数据库的版本，由系统生成 |
+| card_version | 已保存到数据库的版本，由系统生成 |
 | deleted | 是否由 DELETE 删除，与 card.deleted 业务字段无关 |
-| prepared | 当前保存版本的索引产物是否已生成 |
-| preparation_error | 本 index_key 最近记录的加工错误；其他版本的构建失败不显示在这里，错误归属不符时为空。完整版本任务错误查询 index-builds |
-| local_applied_revision | 本实例已经应用的版本；等于 saved_revision 表示本实例已跟上 |
-| local_error | 本实例应用索引时的错误码 |
+| doc_ready | 当前保存版本的索引产物是否已生成 |
+| doc_error | 本 index_key 最近记录的加工错误；其他版本的构建失败不显示在这里，错误归属不符时为空。完整版本任务错误查询 index-builds |
+| indexed_card_version | 本实例最近成功同步的 Card 版本；是内存同步记录，不是实时 Qdrant 核验 |
+| index_error | 本实例最近一次索引同步的错误码；与本次 Qdrant 读取错误分开 |
 | instance_id | 响应请求的实例 |
-| environment / index_key | 环境及本实例索引版本；接入版本管理的宿主直接使用版本名作为 index_key |
-| document_version / local_applied_document_version | 中心主 Doc 版本与本实例已应用版本；修复后结合 local_error 核对是否已同步 |
+| environment / index_key | 环境及本实例启动时选定的索引版本；不是从 Qdrant 查询的值 |
+| doc_version / indexed_doc_version | 数据库主 Doc 版本 / 本实例最近成功同步的主 Doc 版本；Card 不变而重建 Doc 时，Doc 版本仍会增加 |
 
 经负载均衡查询可能落到不同实例，不能用一次响应证明所有实例已完成。资料尚未创建过返回 404。
+
+该接口直接返回两份内容，帮助核对“生成了什么”和“实际检索什么”：
+
+- `documents`：数据库当前 index_key 下该 Card 的所有 Doc，包括主 Doc、扩展问题 Doc 和删除记录。每条包含 `id`、`doc_version`、`deleted`、完整 `search_text`、`filters` 和向量摘要 `vector`。
+- `qdrant.vector_documents`：本实例实际向量集合中的点，包含实际 `index_key`、`search_text`、`filters` 和 `vector`。
+- `qdrant.keyword_documents`：本实例实际关键词集合中的点，包含实际 `index_key`、`search_text` 和 `filters`。不返回稀疏向量。
+- `vector` 只包含 `dimension`（实际向量长度）和 `preview`（前 8 个数值）。Qdrant 可能归一化向量，预览数值不同不一定表示出错；预览也不能证明语义质量。
+- `filters` 展示本索引声明的前置标签和 Doc 中记录的标签；不把业务 Card 的所有字段都当作过滤条件。
+- `qdrant.status=ok` 表示这次读取成功，列表为空才表示没有找到点。`unavailable` 表示读取失败，`error=QDRANT_READ_FAILED`；`unsupported` 表示宿主索引不支持此诊断。失败时列表不代表实际数量，数据库内容仍可查看。
+- 顶层 `index_key` 是本实例选定的版本；`qdrant` 每个点的 `index_key` 来自实际 payload，缺失时为 null，不会拿配置值填充。即使 `indexed_*` 与当前版本一致，这里仍可能发现外部删除或错误写入。
+
+本次查询不重新构建 Doc、不调用 embedding 模型，也不修复数据。数据库与两个 Qdrant 集合分别读取，不保证并发更新期间是同一时刻的快照。
+
+内容片段示例：
+
+```json
+{
+  "documents": [{
+    "id": "test:billing", "doc_version": 1, "deleted": false,
+    "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]},
+    "vector": {"dimension": 1024, "preview": [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]}
+  }],
+  "qdrant": {
+    "status": "ok", "error": "",
+    "vector_documents": [{
+      "id": "test:billing", "index_key": "default",
+      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]},
+      "vector": {"dimension": 1024, "preview": [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08]}
+    }],
+    "keyword_documents": [{
+      "id": "test:billing", "index_key": "default",
+      "search_text": "账单助手\n查询消费账单", "filters": {"resource_type": ["agent"]}
+    }]
+  }
+}
+```
+
+对外统一使用 `card_version`、`indexed_card_version`、`doc_version`、`indexed_doc_version`、`doc_ready`、`doc_error`、`index_error`；旧响应字段名不再输出。请求体和数据库结构不变，调用方若读取旧响应字段需同步更新。
 
 构建、切换和向量复用见 [索引版本管理](index-rebuild.md)。Qdrant 的向量和关键词
 point payload 都保存所属 `index_key`，由系统在写入和恢复时补充，不属于业务 Card，
@@ -149,7 +187,7 @@ point payload 都保存所属 `index_key`，由系统在写入和恢复时补充
 
 `POST /api/v1/agent-cards/test:billing/rebuild`，请求体 `{"index_key":"default"}`。
 先从本实例状态取得 index_key；接口只修复响应实例当前加载的版本，不能用它选择或切换版本。
-成功返回 200：`{"published":true,"index_key":"default","saved_revision":1}`。
+成功返回 200：`{"published":true,"index_key":"default","card_version":1}`。
 这表示中心产物已提交，Qdrant 随后台同步生效；原始业务 Card 不改写。
 目标版本与响应实例不符返回 409，说明为 `requested index_key is not loaded on this instance`；
 并发加工或资料变化也返回 409；模型或存储失败返回 503，原有完整产物保留。

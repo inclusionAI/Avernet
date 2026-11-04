@@ -55,7 +55,7 @@ provides `claim_preparation`, `renew_preparation`, `release_preparation` and
 `publish_documents`: publication must check source revision and unexpired ownership
 in the same transaction as writing the whole document group. The core never holds
 a database transaction open while conversion/model work runs. Successful repair
-returns `published`, `index_key`, and `saved_revision`; publication does not mean
+returns `published`, `index_key`, and `card_version`; publication does not mean
 every serving replica has applied it.
 
 ## Persistence and activation

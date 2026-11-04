@@ -78,6 +78,40 @@ def test_retrieval_filters_updates_and_deletes(index):
     assert index.keyword_search("weather", 2, {}, None) == []
 
 
+def test_inspection_reads_actual_source_points_and_excludes_other_cards(index):
+    index.upsert(
+        [
+            VectorPoint(
+                id="a",
+                vector=[1.0, 0.0],
+                payload={
+                    "source_id": "a",
+                    "index_key": "old",
+                    "search_text": "invoice",
+                },
+            ),
+            VectorPoint(
+                id="a-extra",
+                vector=[0.0, 1.0],
+                payload={"source_id": "a", "search_text": "bill"},
+            ),
+            VectorPoint(
+                id="b",
+                vector=[1.0, 0.0],
+                payload={"source_id": "b", "index_key": "new"},
+            ),
+        ]
+    )
+    result = index.read_source_points("a")
+    for kind in ("vector", "keyword"):
+        assert [point.id for point in result[kind]] == ["a", "a-extra"]
+        assert result[kind][0].payload["index_key"] == "old"
+        assert "index_key" not in result[kind][1].payload
+    assert result["vector"][0].vector == [1.0, 0.0]
+    index.delete(["a", "a-extra"])
+    assert index.read_source_points("a") == {"vector": [], "keyword": []}
+
+
 def test_server_queries_do_not_serialize(index, monkeypatch):
     if index.connection.mode != "server":
         pytest.skip("Local intentionally serializes access")
