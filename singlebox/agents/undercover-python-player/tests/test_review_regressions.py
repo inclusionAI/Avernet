@@ -193,6 +193,24 @@ class ReviewEulogyRegressionTest(unittest.TestCase):
         _display, error = referee.check_text(state, 2, text or "", 35)
         self.assertIsNone(error, f"裁判拒绝遗言 {text!r}: {error}")
 
+    def test_eulogy_history_keywords_do_not_change_task_phase(self):
+        state = _referee_state(
+            [1, 3, 4],
+            speeches={1: "发言之前会用上", 3: "投票之前会用上"},
+        )
+        content = (
+            "你在第 2 轮被投出局了。按规矩你可以留一句遗言，主持人会念给全场听。\n\n"
+            f"到目前为止全场说过的话：\n{referee.history_block(state)}\n\n"
+            "请说一句遗言，不超过 35 个字：挑一个你最怀疑的座位号，"
+            "说清是他哪句话让你在意，并点出关键几个字。"
+        )
+        task = parse_node_task(content)
+        self.assertEqual(task.phase, NodePhase.WILL)
+        self.assertFalse(task.is_vote)
+        text = asyncio.run(UndercoverPlayer().decide(None, task))
+        self.assertIn("3号", text or "")
+        self.assertIn("投票之前会用上", text or "")
+
 
 class _EarlyRequestWs(HandshakeWs):
     """connect 响应之前先投递一条服务端请求。"""
@@ -241,6 +259,43 @@ class ReviewHandshakeRegressionTest(unittest.TestCase):
         self.assertEqual(
             finals[0]["payload"]["runId"], acks[0]["payload"]["run_id"]
         )
+
+
+class ReviewReconnectRegressionTest(unittest.TestCase):
+    def test_offline_terminal_results_are_sent_after_reconnect(self):
+        async def on_task(_ctx, task):
+            if task.seat == 1:
+                return "离线期间完成的发言"
+            raise RuntimeError("offline decision failure")
+
+        engine = PeterPlayerEngine(ws_url="ws://unused", on_task=on_task)
+        final_task = parse_node_task(build_speak_prompt(1, "台灯", 1))
+        error_task = parse_node_task(build_speak_prompt(3, "台灯", 1))
+
+        async def drive():
+            await engine._process_node("run-offline-final", SESSION, final_task)
+            await engine._process_node("run-offline-error", SESSION, error_task)
+            self.assertIn("run-offline-final", engine._finished_runs)
+            self.assertIn("run-offline-error", engine._finished_runs)
+
+            stub = HandshakeWs()
+            await engine._handshake(stub)
+            events = [
+                frame for frame in stub.sent
+                if frame["type"] == "event" and frame["event"] == "chat"
+            ]
+            self.assertEqual(
+                [frame["payload"]["state"] for frame in events],
+                ["final", "error"],
+            )
+            self.assertEqual(events[0]["payload"]["runId"], "run-offline-final")
+            self.assertEqual(events[0]["payload"]["content"], "离线期间完成的发言")
+            self.assertEqual(events[1]["payload"]["runId"], "run-offline-error")
+            self.assertIn(
+                "offline decision failure", events[1]["payload"]["errorMessage"]
+            )
+
+        run_until(drive())
 
 
 if __name__ == "__main__":

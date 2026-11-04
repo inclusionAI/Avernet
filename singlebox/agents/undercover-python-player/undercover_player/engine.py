@@ -89,6 +89,9 @@ class PeterPlayerEngine:
         self._connect_fut: Optional[asyncio.Future] = None
         # connect 响应之前到达的服务端请求；握手成功后按原顺序派发。
         self._pre_handshake_requests: list[dict] = []
+        # 断线期间完成的终态事件：按 run_id 保留到重连后补发。
+        self._pending_terminal_events: dict[str, dict] = {}
+        self._terminal_flush_lock = asyncio.Lock()
         self._closed = asyncio.Event()
         self._stop = False
 
@@ -214,6 +217,9 @@ class PeterPlayerEngine:
 
         # _open_ws 返回前 self._ws 尚未赋值；ACK 需要在这里先绑定当前连接。
         self._ws = ws
+        await self._flush_terminal_events()
+        if self._pending_terminal_events:
+            raise ConnectionError("failed to flush terminal events after reconnect")
         buffered, self._pre_handshake_requests = self._pre_handshake_requests, []
         for frame in buffered:
             await self._handle_frame(frame)
@@ -382,10 +388,26 @@ class PeterPlayerEngine:
             self._active_runs.pop(run_id, None)
             self._finished_runs.add(run_id)
 
+    async def _send_terminal_event(self, run_id: str, event: dict) -> None:
+        self._pending_terminal_events[run_id] = event
+        await self._flush_terminal_events()
+
+    async def _flush_terminal_events(self) -> None:
+        """补发终态；发送失败时保留队列，等待下一次重连。"""
+        async with self._terminal_flush_lock:
+            ws = self._ws
+            if ws is None:
+                return
+            for run_id, event in list(self._pending_terminal_events.items()):
+                try:
+                    await ws.send(json.dumps(event, ensure_ascii=False))
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("defer terminal event for run %s: %s", run_id, exc)
+                    return
+                self._pending_terminal_events.pop(run_id, None)
+
     async def _emit_chat_final(self, run_id: str, session_key: str, text: str) -> None:
-        """发送 canonical chat state=final 事件。"""
-        if self._ws is None:
-            return
+        """发送 canonical chat state=final 事件；离线时保留到重连。"""
         seq = self.next_seq()
         payload = {
             "runId": run_id,
@@ -402,13 +424,11 @@ class PeterPlayerEngine:
             "payload": payload,
             "seq": seq,
         }
-        await self._ws.send(json.dumps(event, ensure_ascii=False))
+        await self._send_terminal_event(run_id, event)
 
     async def _emit_chat_error(self, run_id: str, session_key: str,
                                exc: Exception) -> None:
         """发送 canonical chat state=error 终态事件（见 bot-integration §6.2）。"""
-        if self._ws is None:
-            return
         seq = self.next_seq()
         message = str(exc).strip() or type(exc).__name__
         payload = {
@@ -426,7 +446,7 @@ class PeterPlayerEngine:
             "payload": payload,
             "seq": seq,
         }
-        await self._ws.send(json.dumps(event, ensure_ascii=False))
+        await self._send_terminal_event(run_id, event)
 
     # ------------------------------------------------------------------ #
     # chat.abort：精确取消

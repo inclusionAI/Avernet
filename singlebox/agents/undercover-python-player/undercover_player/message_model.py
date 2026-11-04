@@ -58,23 +58,36 @@ class NodeTask:
 
     @property
     def is_vote(self) -> bool:
-        return self.phase == NodePhase.VOTE or "投票" in self.instruction
+        return self.phase == NodePhase.VOTE or (
+            self.phase != NodePhase.WILL and "投票" in self.instruction
+        )
 
     @property
     def is_speech(self) -> bool:
         return self.phase == NodePhase.SPEECH
 
 
+def _outer_task_instruction(instruction: str) -> str:
+    """去掉 cmd_render_ping 嵌在遗言任务里的公开发言历史。"""
+    before, marker, rest = instruction.partition("到目前为止全场说过的话：\n")
+    if not marker:
+        return instruction
+    _history, separator, after = rest.partition("\n\n")
+    return before + after if separator else before
+
+
 def classify_phase(node_id: str, instruction: str, display_name: str) -> str:
+    # 历史发言是引用材料，不是当前任务指令，不能参与 SPEECH/VOTE 关键词分类。
+    outer_instruction = _outer_task_instruction(instruction)
     if "vote_start" in node_id or "投票预备" in display_name:
         return NodePhase.VOTE_START
-    if is_vote_keyword(node_id, instruction):
+    if is_vote_keyword(node_id, outer_instruction):
         return NodePhase.VOTE
-    if is_speech_keyword(node_id, instruction):
+    if is_speech_keyword(node_id, outer_instruction):
         return NodePhase.SPEECH
-    if "遗言" in instruction or "遗言" in display_name:
+    if "遗言" in outer_instruction or "遗言" in display_name:
         return NodePhase.WILL
-    if "预备" in instruction or "预备" in display_name:
+    if "预备" in outer_instruction or "预备" in display_name:
         return NodePhase.PREP
     return NodePhase.UNKNOWN
 
