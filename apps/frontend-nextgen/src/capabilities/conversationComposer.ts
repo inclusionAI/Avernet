@@ -17,6 +17,11 @@ export interface ConversationComposerValue {
   header?: ReactNode;
   /** 平台侧覆盖输入框默认提示文案（capability 覆盖式注入；Open Core 不持有平台命令文案）。 */
   placeholder?: string;
+  /** 平台侧注入「＋」菜单的额外菜单行（渲染函数收 close：点击后可收起外层菜单；
+   * capability 自渲染；Open Core 不持有平台能力入口）。 */
+  extraMenuRows?: (close: () => void) => ReactNode;
+  /** 触发输入框命令（往草稿插入命令 token 并聚焦，唤起命令面板）；由舞台层提供实现。 */
+  onInvokeCommand?: (command: string) => void;
   onSend: (content: string, context?: SubmitContext) => void;
 }
 export interface ConversationComposerProps extends ConversationComposerValue {

@@ -145,8 +145,9 @@ describe('ConversationBotItem 操作区', () => {
       el.className.includes('truncate'),
     ) as HTMLElement;
     // 收起指示器是展开状态的行级指示(同日修正:hover 别处不消失),静态让位单按钮 36px。
-    expect(title?.parentElement).toHaveClass('pr-9');
-    expect(title?.parentElement.className).toContain('group-hover:pr-[112px]');
+    const column = title?.parentElement as HTMLElement;
+    expect(column).toHaveClass('pr-9');
+    expect(column.className).toContain('group-hover:pr-[112px]');
     expect(screen.getByRole('button', { name: '收起会话列表' }).className).not.toContain('opacity-0');
   });
 
@@ -159,7 +160,7 @@ describe('ConversationBotItem 操作区', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement.className).toContain('group-hover:pr-[138px]');
+    expect((title?.parentElement as HTMLElement).className).toContain('group-hover:pr-[138px]');
     // 非钉住态(收起且无筛选/检索)走临时让位变体,菜单打开期间(data-state=open)同样让位,
     // 鼠标移出行、菜单仍开时不塌缩。
     const { container: collapsed } = renderBotItem({

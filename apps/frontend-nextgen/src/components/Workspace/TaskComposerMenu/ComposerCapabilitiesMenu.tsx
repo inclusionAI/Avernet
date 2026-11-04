@@ -34,6 +34,7 @@ import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
 import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
 /** 功能开关。clawweb 内部环境 /api/workflows 已实测可用（restore-design-chat-page-b2-b3 design.md D4 回填），开闸。 */
@@ -58,6 +59,7 @@ function MenuBody({
   workflowsLoading,
   onWorkflowHover,
   showTaskEntries = true,
+  extraMenuRows,
 }: {
   onUpload?: () => void;
   /** 添加图片回调（打开文件选择器）。单聊设计稿未含此项；群域传入时仍保留「添加图片」行。 */
@@ -74,6 +76,8 @@ function MenuBody({
   workflowsLoading: boolean;
   onWorkflowHover?: () => void;
   showTaskEntries?: boolean;
+  /** 平台注入的额外菜单行（capability 覆盖式）：渲染在任务/工作流行之后，行样式由注入方负责。 */
+  extraMenuRows?: ReactNode;
 }) {
   const [wfOpen, setWfOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,6 +166,9 @@ function MenuBody({
           </Popover>
         </>
       ) : null}
+      {/* 平台注入的额外菜单行（capability 覆盖式，2026-11-04）：渲染在任务/工作流之后，
+          行样式与视觉一致性由注入方负责（复用 MenuRow）。 */}
+      {extraMenuRows}
     </div>
   );
 }
@@ -179,6 +186,7 @@ export function ComposerCapabilitiesMenu({
   onRemoveSelection,
   capabilitySets,
   showTaskEntries = true,
+  extraMenuRows,
   className,
   onOpened,
 }: ComposerCapabilitiesMenuProps) {
@@ -238,6 +246,7 @@ export function ComposerCapabilitiesMenu({
               workflowsLoading={execution?.workflowsLoading ?? false}
               onWorkflowHover={execution ? () => void execution.loadWorkflows() : undefined}
               showTaskEntries={showTaskEntries}
+              extraMenuRows={extraMenuRows?.(close)}
             />
             {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
           </PopoverContent>
