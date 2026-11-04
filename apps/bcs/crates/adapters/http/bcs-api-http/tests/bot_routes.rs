@@ -14,3 +14,5 @@ mod fixtures;
 mod read;
 #[path = "bot_routes/write.rs"]
 mod write;
+#[path = "bot_routes/avatars.rs"]
+mod avatars;

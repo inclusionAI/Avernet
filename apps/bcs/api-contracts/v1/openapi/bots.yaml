@@ -546,6 +546,9 @@ MyBotsPath:
       Both physical Bot and Human rows can be returned. Omitting kind means all
       kinds; reachability only matches physical Bots, so combining kind=human
       with reachability produces an empty page.
+      Each returned row includes avatar_url: the current Bot display URL, or
+      null for Bots without an avatar and for Human rows. Avatar read failures
+      fail the request rather than returning misleading null values.
     x-avernet-security:
       user: required
       app: required

@@ -12,6 +12,11 @@
   control-plane Service API.
 - Human-Principal authorization, Bot/Human projections, candidate visibility,
   reachability computation, and owner-scoped updates.
+- Shared Bot responses (including `/bots/mine`) expose the current `avatar_url`.
+  Projection reads only returned physical Bot IDs through one batched registry
+  Core call after authorization/filtering/pagination. Empty and Human-only pages
+  issue no avatar read. Missing avatars and Humans serialize null; read failures
+  propagate. The mine flow retains its existing runtime sampling and drift retry.
 
 ## Consumes
 
