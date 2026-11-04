@@ -172,7 +172,7 @@ every owner write carries its token, and the database refuses a stale one.
 
 `bcs_task_leases` has one row per session: `node_id` (owner, or `''` when
 released), `fencing_token` (only ever increases), `expires_at` (NULL while
-held), `assigned_at` (when `node_id` last changed), `bucket` (§4),
+held), `adopted` (has the owner started driving it?), `bucket` (§4),
 `write_seq`, and `has_pending_work` + `pending_seq` (§5.4).
 
 **A lease is claimable** when it is released, or its owner's heartbeat is
@@ -416,14 +416,16 @@ can mark a whole group draining at once, double moves disappear entirely.
 
 The gap for S is one database write plus one network round trip. If anything
 fails midway, existing rules cover it: B dies → ordinary takeover; the COMMIT
-is lost → B finds S anyway, because every node reads, each heartbeat, the
-leases newly assigned to it (`WHERE node_id = :me AND assigned_at > :last −
-margin`, usually empty); A writes after the transfer → fenced out. The same
-read covers transfers made without a PREPARE (drain deadline, watchdog).
-`:last` is the highest `assigned_at` value actually read back — never a node
-clock — and `margin` exceeds the longest transaction, so a transfer that
-commits after its timestamp was taken is still seen. Sessions the node
-already drives are skipped, so the overlap is harmless.
+is lost → B finds S anyway; A writes after the transfer → fenced out.
+
+How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
+sets it `TRUE` in the same transaction; a new owner sets it `TRUE` (fenced)
+when it starts driving. Every node reads, each heartbeat, its leases that
+are not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed,
+usually empty). There is no timestamp or cursor, so a transfer that commits
+late can't be skipped: an unadopted row stays visible until it is adopted.
+The same read covers transfers made without a PREPARE (drain deadline,
+watchdog).
 
 ### 9.3 When is it safe to move a run mid-flight?
 
@@ -517,9 +519,9 @@ All configurable; defaults sized for a ≤ 30 s takeover.
 - `bcs_node_roster`: `node_id`, `member_name`, `state`, `started_at`,
   `last_heartbeat_at`, `advertise_addr`, `build_version`.
 - `bcs_task_leases`: `session_id`, `bucket`, `node_id`, `fencing_token`,
-  `expires_at`, `assigned_at`, `write_seq`, `has_pending_work`, `pending_seq`.
+  `expires_at`, `adopted`, `write_seq`, `has_pending_work`, `pending_seq`.
   Indexes: `(node_id, has_pending_work, bucket)` for failure discovery,
-  `(node_id, assigned_at)` for newly assigned leases.
+  `(node_id, adopted)` for leases transferred but not yet adopted.
 
 **Interfaces** (protocol-neutral, each with a database implementation, a
 single-node implementation and a no-op one):

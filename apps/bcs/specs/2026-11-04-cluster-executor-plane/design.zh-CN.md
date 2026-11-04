@@ -150,7 +150,7 @@ preferred(S) = the active node with the highest score
 ### 5.2 租约行
 
 `bcs_task_leases` 每个会话一行:`node_id`(所有者;释放后为 `''`)、`fencing_token`
-(只增不减)、`expires_at`(持有期间为 NULL)、`assigned_at`(`node_id` 最近一次变化的时间)、`bucket`(§4)、`write_seq`,以及
+(只增不减)、`expires_at`(持有期间为 NULL)、`adopted`(所有者是否已开始驱动它)、`bucket`(§4)、`write_seq`,以及
 `has_pending_work` + `pending_seq`(§5.4)。
 
 **租约可认领**的条件是:它已被释放,或其所有者的心跳陈旧(并满足上面的恢复宽限期),
@@ -352,11 +352,13 @@ TARGET NODE
 5. A 转发它暂存的一切;之后到达的请求得到 `NOT_OWNER(B)`。
 
 S 的空窗是一次数据库写加一次网络往返。中途任何一步失败,都有现成规则兜底:B 死了 →
-普通接管;COMMIT 丢了 → B 仍会发现 S,因为每个节点每次心跳都会读取新分配给它的租约
-(`WHERE node_id = :me AND assigned_at > :last − margin`,通常为空);同一次读取也覆盖了
-没有 PREPARE 的转移(排空截止时间、看门狗);A 在转移之后写入 → 被围栏挡掉。`:last` 是实际
-读回的最大 `assigned_at` 值 —— 绝不使用节点时钟 —— 而 `margin` 大于最长的事务,因此时间戳
-取得之后才提交的转移仍会被看到。节点已经在驱动的会话会被跳过,所以这段重叠是无害的。
+普通接管;COMMIT 丢了 → B 仍会发现 S;A 在转移之后写入 → 被围栏挡掉。
+
+B 如何发现:转移会在租约行上置 `adopted = FALSE`;认领在同一事务里把它置为 `TRUE`;新所有者
+开始驱动时(在围栏下)把它置为 `TRUE`。每个节点每次心跳都会读取自己尚未采纳的租约
+(`WHERE node_id = :me AND adopted = FALSE`,有索引,通常为空)。这里没有时间戳或游标,所以
+晚提交的转移不会被跳过:未采纳的行会一直可见,直到被采纳。同一次读取也覆盖了没有 PREPARE
+的转移(排空截止时间、看门狗)。
 
 ### 9.3 什么时候可以在运行中途移动它?
 
@@ -436,8 +438,8 @@ S 的空窗是一次数据库写加一次网络往返。中途任何一步失败
 - `bcs_node_roster`:`node_id`、`member_name`、`state`、`started_at`、
   `last_heartbeat_at`、`advertise_addr`、`build_version`。
 - `bcs_task_leases`:`session_id`、`bucket`、`node_id`、`fencing_token`、`expires_at`、
-  `assigned_at`、`write_seq`、`has_pending_work`、`pending_seq`。索引:
-  `(node_id, has_pending_work, bucket)` 用于故障发现,`(node_id, assigned_at)` 用于新分配的租约。
+  `adopted`、`write_seq`、`has_pending_work`、`pending_seq`。索引:
+  `(node_id, has_pending_work, bucket)` 用于故障发现,`(node_id, adopted)` 用于已转移但尚未采纳的租约。
 
 **接口**(与协议无关,每个都有数据库实现、单节点实现和 no-op 实现):
 
