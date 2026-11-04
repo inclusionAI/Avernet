@@ -24,6 +24,7 @@ from agentclaw.community.di.config import (
     HttpClientPoolConfig,
     McpRuntimeCredentialsConfig,
     TaskQueueConfig,
+    TaskQueueWorkerConfig,
 )
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
@@ -321,6 +322,9 @@ def build_injector(
 
     _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    # Invalid isolation must fail boot rather than silently drop the worker
+    # during lifecycle discovery.
+    _app_injector.get(TaskQueueWorkerConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)

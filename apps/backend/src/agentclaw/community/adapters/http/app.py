@@ -171,7 +171,7 @@ from agentclaw.community.adapters.http.skill_center import skills, skillsets, sk
 # =============================================================================
 # Lifespan — generic Lifecycle dispatch over DI-discovered participants
 # =============================================================================
-from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants  # noqa: E402
+from agentclaw.community.kernel.lifecycle import discover_lifecycle_participants, shutdown_lifecycle_participants  # noqa: E402
 from agentclaw.community.log import get_logger  # noqa: E402
 
 logger = get_logger()
@@ -180,15 +180,16 @@ logger = get_logger()
 async def _app_lifespan(app: FastAPI):
     """Application lifespan — runs every Lifecycle participant's hooks.
 
-    Four phases, two each direction:
+    Two setup phases and two ordinary teardown phases:
 
       Startup:   bootstrap()  ->  startup()
-      Shutdown:  shutdown()   ->  teardown()
+      Shutdown:  optional drain_before_shutdown() -> shutdown() -> teardown()
 
     Within a phase, all participants run concurrently via
     ``asyncio.gather``. The next phase only begins after the previous
     phase's coroutines have all resolved. Setup direction is
-    fail-fast; teardown direction is log-and-continue.
+    fail-fast; ordinary teardown is log-and-continue. A pre-shutdown drain
+    propagates failure rather than allowing dependent services to stop early.
 
     Participants come from the injector *this process* finalized, not from a
     handle captured at import: under ``preload`` the module-level import happened
@@ -225,29 +226,7 @@ async def _app_lifespan(app: FastAPI):
     # Reference: https://fastapi.tiangolo.com/advanced/events/
     yield
 
-    # ── Teardown phase 1: shutdown (stop services)
-    shutdown_results = await asyncio.gather(
-        *(p.shutdown() for p in participants),
-        return_exceptions=True,
-    )
-    for p, r in zip(participants, shutdown_results):
-        if isinstance(r, Exception):
-            logger.error(
-                "[lifecycle] shutdown failed for %r: %s",
-                type(p).__name__, r, exc_info=r,
-            )
-
-    # ── Teardown phase 2: teardown (release infra)
-    teardown_results = await asyncio.gather(
-        *(p.teardown() for p in participants),
-        return_exceptions=True,
-    )
-    for p, r in zip(participants, teardown_results):
-        if isinstance(r, Exception):
-            logger.error(
-                "[lifecycle] teardown failed for %r: %s",
-                type(p).__name__, r, exc_info=r,
-            )
+    await shutdown_lifecycle_participants(participants, logger)
 
 app = FastAPI(lifespan=_app_lifespan)
 

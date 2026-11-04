@@ -46,11 +46,12 @@ wakes fall back to the configured poll interval plus jitter in isolation mode.
 Types must be registered and consistent across every worker consuming the same
 app/environment. Pool sizes must be positive and fit the configured batch.
 
-Stopping an isolated worker stops issuing new claim queries and waits up to 30
-seconds for handlers and any already-started claim to drain. If that expires,
-it reports the in-flight work and keeps the
-drain running while its event loop remains alive; it cannot cancel synchronous
-handler threads or promise they survive process shutdown. After a lease is
+Before normal shutdown, the application stops issuing new claim queries and
+waits for isolated handlers, hooks, lease renewals and already-started claims
+to drain. Claims returned after draining begins are returned with a guarded
+reschedule before their handlers start. There is no bounded graceful-drain
+guarantee: a blocked handler or DB call may delay shutdown, and an external
+forced termination can still interrupt the process. After a lease is
 reclaimed the queue is still at-least-once: the old holder's outcome CAS cannot
 overwrite the new holder, but external side effects need their own safeguards.
 Do not enable longer-running handlers until every consumer has the isolation

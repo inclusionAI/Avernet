@@ -12,7 +12,7 @@ Two phases, each direction
 ::
 
     Startup:   bootstrap()   →   startup()
-    Shutdown:  shutdown()    →   teardown()
+    Shutdown:  optional drain_before_shutdown() → shutdown() → teardown()
 
 Within a phase, every participant's hook runs concurrently
 (``asyncio.gather``). The next phase only begins after every coroutine
@@ -30,6 +30,8 @@ Failure semantics
   — every component's hook is awaited via
   ``gather(..., return_exceptions=True)``; exceptions are logged per
   component, but they do not stop other shutdowns.
+* Optional pre-shutdown drains propagate failures and cancellation: an
+  incomplete drain must not be presented as a safe ordinary teardown.
 
 Ordering
 --------
@@ -52,9 +54,39 @@ bindings (e.g. via a router) runs its hooks exactly once.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Protocol, runtime_checkable
 
 from injector import Injector
+
+
+@runtime_checkable
+class PreShutdownDrain(Protocol):
+    """Optionally drain in-flight work before other services stop.
+
+    A failed or cancelled drain must propagate rather than claiming teardown
+    is safe. Implementations that do not enable draining should return at once.
+    """
+
+    async def drain_before_shutdown(self) -> None:
+        ...
+
+
+async def shutdown_lifecycle_participants(participants, logger) -> None:
+    """Drain optional work before the ordinary two teardown phases."""
+    drains = await asyncio.gather(*(
+        p.drain_before_shutdown() for p in participants if isinstance(p, PreShutdownDrain)
+    ), return_exceptions=True)
+    for result in drains:
+        if isinstance(result, BaseException):
+            raise result
+    for phase in ('shutdown', 'teardown'):
+        results = await asyncio.gather(*(getattr(p, phase)() for p in participants),
+                                       return_exceptions=True)
+        for participant, result in zip(participants, results):
+            if isinstance(result, Exception):
+                logger.error('[lifecycle] %s failed for %r: %s', phase,
+                             type(participant).__name__, result, exc_info=result)
 
 
 @runtime_checkable

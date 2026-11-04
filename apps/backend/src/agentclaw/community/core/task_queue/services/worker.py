@@ -51,6 +51,7 @@ from agentclaw.community.core.task_queue.services.registry import GivesUp, Handl
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import (
     Complete,
+    ClaimOutcome,
     Fail,
     Reschedule,
     Retry,
@@ -64,7 +65,6 @@ from agentclaw.community.plugin_api.tracer import TracerPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
-ISOLATED_SHUTDOWN_SECONDS = 30
 
 
 def _make_worker_id() -> str:
@@ -153,24 +153,32 @@ class TaskWorker(LifecycleBase):
         )
 
     async def shutdown(self) -> None:
+        if self._isolated_types:
+            await self.drain_before_shutdown()
+            logger.info("[TaskWorker] stopped worker_id=%s", self._worker_id)
+            return
         self._running = False
         # Unbind first: handler threads can outlive teardown, and a signal
         # arriving after this point should be a no-op rather than a callback
         # scheduled onto a loop that is going away.
         self._wakeup.unbind()
         if self._task and not self._task.done():
-            if self._isolated_types:
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._task), timeout=ISOLATED_SHUTDOWN_SECONDS)
-                except asyncio.TimeoutError:
-                    logger.warning('[TaskWorker] shutdown timed out; handlers and leases are still draining')
-            else:
-                self._task.cancel()
-                try:
-                    await self._task
-                except asyncio.CancelledError:
-                    pass
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         logger.info("[TaskWorker] stopped worker_id=%s", self._worker_id)
+
+    async def drain_before_shutdown(self) -> None:
+        if not self._isolated_types:
+            return
+        self._running = False
+        self._wakeup.unbind()
+        if self._task:
+            # A synchronous handler cannot be cancelled safely. Lifespan
+            # must retain its dependencies and lease until the drain ends.
+            await asyncio.shield(self._task)
 
     # ── loop ────────────────────────────────────────────────────────────
     async def _loop(self) -> None:
@@ -193,10 +201,14 @@ class TaskWorker(LifecycleBase):
     async def _run_isolated(self, normal: int, isolated: int) -> None:
         db_worker = asyncio.create_task(self._drain_db_requests())
         try:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 self._pool_loop(normal, exclude=True),
                 self._pool_loop(isolated, exclude=False),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
         finally:
             await self._db_requests.put((2, next(self._sequence), None))
             await db_worker
@@ -216,6 +228,8 @@ class TaskWorker(LifecycleBase):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                if not self._running:
+                    raise
                 logger.exception('[TaskWorker] isolated poll tick failed')
                 claimed = 0
             if self._running and claimed < capacity:
@@ -228,9 +242,14 @@ class TaskWorker(LifecycleBase):
             limit=capacity, lease_seconds=self._config.lease_seconds,
             task_types=self._isolated_types, exclude_task_types=exclude,
         )
-        for task in retired:
-            await self._give_up(task)
-        await asyncio.gather(*(self._run_guarded(task) for task in claimed))
+        results = await asyncio.gather(
+            *(self._give_up(task) for task in retired),
+            *(self._run_guarded(task) for task in claimed),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
         return len(claimed)
 
     async def _drain_db_requests(self) -> None:
@@ -240,6 +259,9 @@ class TaskWorker(LifecycleBase):
                 return
             future, fn, kwargs, context = request
             if future.cancelled():
+                continue
+            if getattr(fn, '__name__', '') == 'claim_batch_reporting_retired' and not self._running:
+                future.set_result(ClaimOutcome([], []))
                 continue
             try:
                 result = await asyncio.get_running_loop().run_in_executor(
@@ -367,6 +389,13 @@ class TaskWorker(LifecycleBase):
 
     async def _run_guarded(self, task: TaskRecord) -> None:
         async with self._sem:
+            if self._isolated_types and not self._running:
+                # Claim may have been in flight when drain started. The
+                # handler has not begun, so return ownership through the same
+                # guarded reschedule/retirement path as an ordinary retry.
+                with self._restored_trace(task):
+                    await self._apply(task, Reschedule(0))
+                return
             # Re-establish the trace of the request that enqueued this task, for
             # the whole of its execution — so the handler's own logging, the
             # lease-lost warning, and the defensive catch below all land under
@@ -388,6 +417,8 @@ class TaskWorker(LifecycleBase):
                 except asyncio.CancelledError:
                     raise
                 except Exception:
+                    if self._isolated_types and not self._running:
+                        raise
                     # Defensive: _run_one already maps handler errors to Retry;
                     # this only catches a failure in the mapping/DB write itself.
                     # Leave the row RUNNING — its lease will expire and another

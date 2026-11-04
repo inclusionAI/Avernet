@@ -85,7 +85,7 @@ default + ``ON UPDATE CURRENT_TIMESTAMP``); this body never sets them.
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from injector import inject
 from sqlalchemy import and_, func, literal, or_, select, text, union_all
@@ -759,7 +759,7 @@ class TaskQueueRepository(
         app: str,
         limit: int,
         lease_seconds: int,
-        task_types: Optional[tuple[str, ...]] = None,
+        task_types: Optional[Sequence[str]] = None,
         exclude_task_types: bool = False,
     ) -> ClaimOutcome:
         if limit <= 0:
