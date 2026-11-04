@@ -1,0 +1,21 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_89ee1c722ef961::t_3c628e5b8706ca 9-11
+apps/bcsfuse/tests/ci/test_zbcsfuse_pipeline.py
+  s_89ee1c722ef961::t_8dd849f2efaeda 22-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e794a5441e6bd1449fc13cbf5e7cd9932da8f1e7",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
