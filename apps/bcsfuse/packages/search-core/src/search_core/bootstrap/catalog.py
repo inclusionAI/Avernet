@@ -177,9 +177,12 @@ def create_catalog_search_app(
                 calls["card_metadata"],
             )
         online_embedding = query_embedding if query_embedding is not None else embedding
-        if embedding_cache.enabled:
+        if embedding_cache.enabled or policy.embedding_singleflight_enabled:
             online_embedding = CachedEmbedding(
-                online_embedding, embedding_cache, embedding_key
+                online_embedding,
+                embedding_cache,
+                embedding_key,
+                singleflight_enabled=policy.embedding_singleflight_enabled,
             )
         execution = dict(calls)
         for name, timeout in (
