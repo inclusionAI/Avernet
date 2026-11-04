@@ -765,7 +765,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
-    EngineRuntimeError: (502, "Engine service error"),
+    EngineRuntimeError: (500, "Internal error"),
     # Cron upstream fallback; mapped_error_response preserves the relay's
     # explicit business statuses. The timeout subclass keeps its own mapping.
     CronApiTimeoutError: (504, "Cron relay timed out"),
