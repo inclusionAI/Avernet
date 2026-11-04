@@ -279,6 +279,14 @@ that wraps retrieval owns complete cache keys, trusted scope separation, data
 revision invalidation, successful-result admission and final eligibility checks.
 Hosts must keep authentication and overload protection outside cache shortcuts.
 
+With query-embedding caching enabled, `CachedEmbedding` also shares overlapping
+calls for the same model configuration, dimension and exact query within one
+instance/event loop. The first call starts immediately; there is no batch window.
+Each caller keeps its own deadline and receives a separate result list. Cancelling
+one caller does not cancel peers; the last departing caller cancels and drains
+unfinished async work. Failed or invalid vectors are not cached. Running
+synchronous provider calls still require their own finite network timeouts.
+
 ## Multiple retrieval documents per source (opt-in)
 
 A retrieval point may carry `source_id`, `search_text`, `rerank_text` and explicit
