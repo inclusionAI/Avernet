@@ -404,7 +404,9 @@ ENTRY NODE, on a round for S:
     target = hint_cache.get(S) or HRW(S, live roster)          # µs, no DB
     if target == me: handle(S) else: forward(target, round)
     on NOT_OWNER(X): hint_cache.put(S, X); forward(X, round)    # hop limit = 2
-    on forward failure (refused / timeout): durable fallback (§9.4)
+    on forward failure (refused / timeout): drop that node from my roster view and
+        forward to the next-ranked node, which claims S if it is claimable;
+        only if nobody can serve or claim S yet: durable fallback (§9.4)
 
 TARGET NODE, handle(S):
     if I hold S's lease (in-memory set)        → serve: persist round (fenced), drive, stream back
@@ -442,7 +444,8 @@ PA 在重试时复用 `messageId`([跨项备注](cross-item-notes.zh-CN.md))。
 ### 9.4 持久回退
 
 若所有者不可达,入口节点把该轮作为未处理的输入持久记录(不加围栏 —— 它是会话的
-输入,不是所有者的推进)并确认。该轮会被所有者的待处理输入查询,或随后的接管拾取。
+输入,不是所有者的推进)并确认。该轮会被所有者的待处理输入查询拾取;若所有者已死,则由每次花名册轮询都会重复的
+死亡节点查询拾取(§10.1)。
 此时首 token 时延等于接管时间;没有办法做得更好,因为在 S 的租约仍有效时,其他
 节点不得驱动 S。
 
@@ -476,7 +479,8 @@ PA 在重试时复用 `messageId`([跨项备注](cross-item-notes.zh-CN.md))。
 
 ```
 roster poll (already happening every heartbeat):  D is stale beyond the claim threshold
-  → each survivor, once:  SELECT session_id, fencing_token FROM bcs_task_leases
+  → each survivor, at every roster poll while D stays dead:
+                          SELECT session_id, fencing_token FROM bcs_task_leases
                           WHERE env = ? AND node_id = :D AND has_pending_work   -- indexed, paginated
   → for each row: if HRW(S, live nodes minus D) == me → claim now
                   else → claim after the grace period (in case the preferred node is also down)
@@ -484,7 +488,9 @@ roster poll (already happening every heartbeat):  D is stale beyond the claim th
 ```
 
 每个幸存者算出同样的排名,所以各自只认领自己那份,接管负载均匀分摊;任何竞争都由
-CAS 裁决。
+CAS 裁决。只要 D 仍是死的,该查询**在每次花名册轮询时重复执行**(通常是一次返回为空的
+索引探测),所以在首次扫描之后才变为待处理的工作 —— 例如走了持久回退的一轮请求 ——
+会在一次轮询内被发现。
 
 **待处理工作**(pending work)把查询限制在此刻需要驱动者的会话上:未终结的运行、
 排队中的投递、持久定时器,或未处理的入站输入(包括故障期间走了持久回退的轮次)。
@@ -494,7 +500,7 @@ CAS 裁决。
 
 空闲会话由它的下一轮请求发现:入口节点转发失败,或花名册显示所有者已死;首选
 幸存者在可认领时认领并服务 —— 就是一次普通的冷启动。若尚不可认领,该轮走持久回退,
-由触发 1 拾取。
+由触发 1 的重复查询在租约变为可认领后的一次花名册轮询内拾取。
 
 ### 10.3 触发 3 —— 兜底扫描
 

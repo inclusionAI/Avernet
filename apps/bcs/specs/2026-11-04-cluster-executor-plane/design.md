@@ -452,7 +452,9 @@ ENTRY NODE, on a round for S:
     target = hint_cache.get(S) or HRW(S, live roster)          # µs, no DB
     if target == me: handle(S) else: forward(target, round)
     on NOT_OWNER(X): hint_cache.put(S, X); forward(X, round)    # hop limit = 2
-    on forward failure (refused / timeout): durable fallback (§9.4)
+    on forward failure (refused / timeout): drop that node from my roster view and
+        forward to the next-ranked node, which claims S if it is claimable;
+        only if nobody can serve or claim S yet: durable fallback (§9.4)
 
 TARGET NODE, handle(S):
     if I hold S's lease (in-memory set)        → serve: persist round (fenced), drive, stream back
@@ -495,7 +497,8 @@ win. This depends on the PA reusing `messageId` on retry ([cross-item notes](cro
 If the owner is unreachable, the entry node records the round durably as
 unprocessed input (unfenced — it is input to the session, not owner
 progress) and acks. The round is picked up by the owner's pending-input
-query or by the takeover that follows. Time to first token then equals
+query or, if the owner is dead, by the dead-node query, which repeats every
+roster poll (§10.1). Time to first token then equals
 takeover time; nothing can do better, because no other node may drive S
 while its lease is live.
 
@@ -533,7 +536,8 @@ dead node's sessions need a new owner, and split them without coordinating.
 
 ```
 roster poll (already happening every heartbeat):  D is stale beyond the claim threshold
-  → each survivor, once:  SELECT session_id, fencing_token FROM bcs_task_leases
+  → each survivor, at every roster poll while D stays dead:
+                          SELECT session_id, fencing_token FROM bcs_task_leases
                           WHERE env = ? AND node_id = :D AND has_pending_work   -- indexed, paginated
   → for each row: if HRW(S, live nodes minus D) == me → claim now
                   else → claim after the grace period (in case the preferred node is also down)
@@ -541,7 +545,10 @@ roster poll (already happening every heartbeat):  D is stale beyond the claim th
 ```
 
 Every survivor computes the same ranking, so each claims only its share and
-takeover load spreads evenly; the CAS settles any race.
+takeover load spreads evenly; the CAS settles any race. The query **repeats
+at every roster poll** while D stays dead (usually an empty, indexed probe),
+so work that becomes pending after the first scan — e.g. a round that took
+the durable fallback — is found within one poll.
 
 **Pending work** limits the query to sessions that need a driver now: a
 non-terminal run, queued deliveries, a durable timer, or unprocessed inbound
@@ -553,7 +560,8 @@ Idle sessions are left alone.
 An idle session is discovered by its next round: the entry node's forward
 fails or the roster says the owner is dead; the preferred survivor claims
 (if claimable) and serves — a normal cold start. If not yet claimable, the
-round takes the durable fallback and Trigger 1 picks it up.
+round takes the durable fallback, and Trigger 1's repeating query picks it
+up within one roster poll of the lease becoming claimable.
 
 ### 10.3 Trigger 3 — safety-net sweep
 

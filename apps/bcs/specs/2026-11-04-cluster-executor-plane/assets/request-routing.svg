@@ -65,9 +65,9 @@
   <text x="60" y="312" font-size="11" fill="#1c2420">second and last hop; X must serve or claim</text>
 
   <rect x="44" y="346" width="390" height="74" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
-  <text x="60" y="368" font-size="12" font-weight="bold" fill="#b3402e">④ forward refused / timed out → durable fallback</text>
-  <text x="60" y="388" font-size="11" fill="#1c2420">record the round as unprocessed input (unfenced), ack;</text>
-  <text x="60" y="405" font-size="11" fill="#1c2420">owner's pending-input query or the takeover picks it up</text>
+  <text x="60" y="368" font-size="12" font-weight="bold" fill="#b3402e">④ refused / timed out → next-ranked node, else fallback</text>
+  <text x="60" y="388" font-size="11" fill="#1c2420">it claims S if claimable; only if nobody can: record the round</text>
+  <text x="60" y="405" font-size="11" fill="#1c2420">as input (unfenced) and ack; the repeating dead-node query finds it</text>
 
   <!-- bottom: cases -->
   <rect x="24" y="464" width="912" height="176" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
@@ -75,7 +75,7 @@
   <text x="44" y="512" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Stable cluster</tspan> — guess is the owner: one hop, zero extra DB reads. ~2–7 ms added to TTFT (vs ~500 ms average with polling).</text>
   <text x="44" y="534" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">After scale-up</tspan> — HRW says D, lease says A: one extra hop, once; the hint cache sends later rounds straight to A.</text>
   <text x="44" y="556" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Cold session</tspan> — the preferred node claims (1 statement) and serves.</text>
-  <text x="44" y="578" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Owner crashed</tspan> — forward fails → durable fallback; TTFT = takeover time (no one may drive S while its lease is live).</text>
+  <text x="44" y="578" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Owner crashed</tspan> — forward fails → next-ranked node claims if claimable, else durable fallback; TTFT ≤ takeover time.</text>
   <text x="44" y="600" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Timeout, but the owner did process it</tspan> — two copies of one round: dedup on (principal, session_id, messageId) is required.</text>
   <text x="44" y="624" font-size="11" fill="#5c6a62">No load-balancer dependency: unique node_id, shared DB, direct peer reachability, same hash on every node.</text>
 </svg>

@@ -28,7 +28,7 @@
 
   <!-- trigger 1 -->
   <rect x="24" y="160" width="440" height="200" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
-  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">Trigger 1 · roster detects death → one targeted query</text>
+  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">Trigger 1 · roster detects death → targeted query, every poll</text>
   <text x="44" y="208" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT session_id, fencing_token</text>
   <text x="44" y="224" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">  FROM bcs_task_leases</text>
   <text x="44" y="240" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE node_id = :D AND has_pending_work</text>
