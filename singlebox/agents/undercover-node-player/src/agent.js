@@ -180,6 +180,27 @@ export function publicSpeeches(task, { includeUpstream = true } = {}) {
 export class UndercoverNodeAgent {
   constructor({ persona = DEFAULT_PERSONA } = {}) {
     this.persona = persona;
+    this.privateContexts = new Map();
+  }
+
+  retainPrivateContext(task, sessionKey) {
+    if (typeof sessionKey !== "string" || !sessionKey) return task;
+    const previous = this.privateContexts.get(sessionKey);
+    if (task.phase === "will") {
+      // Restore seat/word from canonical session for last-word tasks when the
+      // instruction lacks "你是 N 号" and private words.
+      if (task.seat === null && previous) task.seat = previous.seat;
+      if (!task.word && previous) task.word = previous.word;
+      return task;
+    }
+    if (task.phase !== "speech" && task.phase !== "vote") return task;
+
+    const context = {
+      seat: task.seat ?? previous?.seat ?? null,
+      word: task.word || previous?.word || "",
+    };
+    if (context.seat !== null || context.word) this.privateContexts.set(sessionKey, context);
+    return task;
   }
 
   makeSpeech(task) {
@@ -260,9 +281,9 @@ export class UndercoverNodeAgent {
     throw new Error("没有不泄词的遗言可回传");
   }
 
-  async decide({ content, signal }) {
+  async decide({ content, signal, sessionKey }) {
     throwIfAborted(signal);
-    const task = parseNodeTask(content);
+    const task = this.retainPrivateContext(parseNodeTask(content), sessionKey);
     let output;
     if (task.phase === "vote_start") output = VOTE_OPENING;
     else if (task.phase === "vote") output = this.makeVote(task);

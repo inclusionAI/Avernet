@@ -26,8 +26,10 @@
 - 遗言和投票预备也经 `chat.send` 下发。
 - `chat.inject` 只 ACK，不产出回答；本样例不把 inject 拼成“全网可见历史”。
 
-因此 `src/agent.js` 没有全局群聊记录，也不读取其他 Bot 的私聊。每次只解析本次任务
-显式携带的公开输入与直接上游。不能假设 worker 能收到主持人和人类的完整广播时间线。
+因此 `src/agent.js` 没有全局群聊记录，也不读取其他 Bot 的私聊。公开历史只解析本次任务
+显式携带的输入与直接上游；座位和私人词按 canonical session 从此前 speech/vote 任务保留，
+供不重复携带这两项私有信息的真实遗言任务复用，不跨 session 共享。不能假设 worker 能收到
+主持人和人类的完整广播时间线。
 
 ## 3. 协议保证 vs 引擎自实现
 
@@ -61,8 +63,8 @@ BCN 标准 Request 并不保证总有 `seq`。本样例仅在下行 `chat.send` 
 
 1. **握手版本和 capabilities 都要检查。** 只看 `ok:true` 会把 V2 响应当成 V3；
    在校验完成前也不能提前保存 token/uuid。
-2. **ACK 后仍不能丢弃终态责任。** 决策异常会回传 `state:"error"`；但 abort 是取消，
-   不应再补 error/final。
+2. **ACK 后仍不能丢弃终态责任。** 决策异常会回传 `state:"error"`，包括 `onTask` 自己抛出的
+   `AbortError`；只有真实 `chat.abort` 已把 run 标成非活跃时才抑制终态，不再补 error/final。
 3. **仅在回调入口检查 signal 不够。** 回调可能在 abort 后才 resolve；发送终态前必须再次
    检查 run 状态。本样例不发送 delta，从设计上避免半截文本。
 4. **过期任务不能“只不回复”。** 若先注册 run 再判断 seq，仍会污染 abort/history 状态；
@@ -83,9 +85,10 @@ cd singlebox/agents/undercover-node-player
 node --test test/
 ```
 
-本机 Node `v24.21.0`：20 项通过、0 失败，未安装 `ws` 也能执行全部测试。
+本机 Node `v24.21.0`：22 项通过、0 失败，未安装 `ws` 也能执行全部测试。
 覆盖握手成功/版本拒绝、心跳、canonical final、24/25/26 字边界、严格票面与垃圾输入、
-abort 中取消及迟到 final 屏蔽、过期 seq、公开 history 和 PK 禁弃权。
+abort 中取消及迟到 final 屏蔽、回调主动 `AbortError` 的 error 终态、过期 seq、公开 history、
+PK 禁弃权，以及真实 `cmd_render_ping()` 遗言提示下的 session 私有上下文复用与隔离。
 
 未在本环境启动完整 BCS + 主持人 + 多 Bot 真桌，未做真实 WebSocket 联调或三局统计。
 自动重连、token 持久化和 LLM 决策也不在这个增量样例内；进程重启后需要重新接入/复用

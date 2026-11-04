@@ -143,6 +143,26 @@ test("chat.abort 中止正在生成的 run，迟到内容不作为半截 final �
   protocol.stop();
 });
 
+test("onTask 自行抛出 AbortError 时仍回传 error 终态", async () => {
+  const { protocol, socket } = makeProtocol({
+    onTask: async () => {
+      throw new DOMException("timeout", "AbortError");
+    },
+  });
+
+  const accepted = await protocol.handleFrame(chatSend());
+  await protocol.idle();
+
+  const terminal = socket.sent.find((frame) => frame.type === "event");
+  assert.equal(terminal.event, "chat");
+  assert.equal(terminal.payload.runId, accepted.runId);
+  assert.equal(terminal.payload.state, "error");
+  assert.equal(terminal.payload.errorCode, "DECISION_ERROR");
+  assert.equal(terminal.payload.errorMessage, "timeout");
+  assert.equal(protocol.runs.get(accepted.runId).status, "finished");
+  protocol.stop();
+});
+
 test("迟到任务 seq 被丢弃，不新增 run、不推进状态、不回传产物", async () => {
   let decisions = 0;
   const { protocol, socket } = makeProtocol({

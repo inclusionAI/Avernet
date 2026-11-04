@@ -1,12 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { UndercoverNodeAgent, parseNodeTask, publicSpeeches } from "../src/agent.js";
 import { descriptionForRound, parseVote, validateSpeech } from "../src/rules.js";
 
-function speechPrompt(roundNumber) {
-  return `[State Machine Task]\nnode_id: speak_3\ndisplay_name: 3号发言\n\n` +
+// Captured from the referee's real cmd_render_ping(); it intentionally omits seat and word.
+const refereeLastWord = JSON.parse(readFileSync(
+  new URL("./fixtures/referee-last-word.json", import.meta.url),
+  "utf8",
+));
+
+function speechPrompt(roundNumber, { seat = 3, word = "台灯" } = {}) {
+  return `[State Machine Task]\nnode_id: speak_${seat}\ndisplay_name: ${seat}号发言\n\n` +
     `[Input]\n{}\n\n[Upstream Outputs]\n(none)\n\n[Instruction]\n` +
-    `你是 3 号，你的词是【台灯】。第 ${roundNumber} 轮发言。\n` +
+    `你是 ${seat} 号，你的词是【${word}】。第 ${roundNumber} 轮发言。\n` +
     `输出一句话，不超过 25 字。本轮钝度 ${roundNumber === 1 ? 4 : 3}。`;
 }
 
@@ -73,4 +80,31 @@ test("投票预备原样播报", async () => {
     `[Input]\n{}\n\n[Upstream Outputs]\n(none)\n\n[Instruction]\n请原样播报投票开场。`;
   const output = await new UndercoverNodeAgent().decide({ content });
   assert.equal(output, "投票开始，请大家投出一票，等待主持人公布结果。");
+});
+
+test("真实 referee 遗言复用本 session 的座位和词，不引用自己或泄词", async () => {
+  const agent = new UndercoverNodeAgent();
+  const sessionKey = "grp-node-player:session-6";
+  const otherSessionKey = "grp-node-player:session-5";
+  await agent.decide({
+    content: speechPrompt(1, { seat: 6, word: "早餐" }),
+    sessionKey,
+  });
+  await agent.decide({
+    content: speechPrompt(1, { seat: 5, word: "牛奶" }),
+    sessionKey: otherSessionKey,
+  });
+
+  assert.equal(refereeLastWord.kind, "eulogy");
+  assert.doesNotMatch(refereeLastWord.message, /你是\s*6\s*号|【早餐】/);
+  const output = await agent.decide({ content: refereeLastWord.message, sessionKey });
+  assert.equal(output, "我没有更多补充，请大家继续核对公开发言。");
+  assert.equal(validateSpeech(output, { maxChars: 35, word: "早餐" }).valid, true);
+  assert.doesNotMatch(output, /早上先吃一餐|每天都吃早餐/);
+
+  const otherOutput = await agent.decide({
+    content: refereeLastWord.message,
+    sessionKey: otherSessionKey,
+  });
+  assert.equal(otherOutput, "我比较在意6号那句「早上先吃一餐」。");
 });

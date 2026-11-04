@@ -305,9 +305,9 @@ export class BcnProtocol {
         stopReason: "complete",
       });
     } catch (error) {
-      // Abort wins over every later completion, including a callback that ignores
-      // AbortSignal. This sample sends no deltas, so no partial answer can leak.
-      if (run.status !== "active" || error?.name === "AbortError") return;
+      // A real chat.abort marks the run non-active before aborting its signal. An
+      // AbortError thrown by onTask itself is still an active-run decision failure.
+      if (run.status !== "active") return;
       const message = (error instanceof Error ? error.message : String(error)) || "decision failed";
       this.emitChat(run, {
         state: "error",
