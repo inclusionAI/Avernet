@@ -23,6 +23,7 @@ from agentclaw.community.core.devices.services.device_context import DeviceConte
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.arca_error_classifier import ArcaErrorClassifier
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -277,8 +278,18 @@ class DeviceFilesystemDispatcher:
         The vendor baas / arca / teclaw / local construction (and the BaaS-binding
         lookup the local branch needs) lives in the resolver impl
         (``plugins.prod`` for corp/test; no-op for community).
+
+        For the ``arca`` provider, the result is wrapped with
+        :class:`ArcaErrorClassifier` so that transient sandbox-unreachable
+        errors (connection refused → proxy 502) are raised as
+        :class:`DeviceConnectionUnavailableError` rather than a generic
+        exception.
         """
-        return self._resolve(ctx, path_mapper)
+        fs = self._resolve(ctx, path_mapper)
+        if ctx.provider == "arca":
+            sandbox_id = ctx.conn_info.get("sandbox_id", "unknown")
+            fs = ArcaErrorClassifier(fs, sandbox_id=sandbox_id)
+        return fs
 
     def for_bot(self, bot_id: str, user_id: str) -> DeviceFileSystem:
         """⚠️ DEPRECATED — 走兼容层,后续删。
