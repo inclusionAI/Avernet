@@ -176,6 +176,14 @@ const statusColor = (status: string, c: FlavorPalette): string => {
   if (s === 'retry_scheduled') return c.warn;
   return c.pending;
 };
+const statusSoft = (status: string, c: FlavorPalette): string => {
+  const s = (status ?? '').toLowerCase();
+  if (s === 'running' || s === 'ready') return c.runningSoft;
+  if (s === 'completed' || s === 'done') return c.doneSoft;
+  if (s === 'failed' || s === 'aborted') return c.badSoft;
+  if (s === 'retry_scheduled') return c.warnSoft;
+  return c.pendingSoft;
+};
 const statusLabel = (status: string): string => {
   const s = (status ?? '').toLowerCase();
   if (s === 'running') return '运行中';
@@ -249,7 +257,7 @@ function WorkflowGraph({ layout, palette, compact }: { layout: RunnerGraphLayout
                   position: 'absolute', left, top,
                   width: cellW, height: cellH,
                   border: `1px solid ${color}`, borderRadius: 4,
-                  background: `${color}${compact ? '10' : '16'}`,
+                  background: statusSoft(node.status, palette),
                   color: palette.text,
                   fontSize: compact ? 9.5 : 10.5,
                   padding: '3px 5px',
@@ -318,7 +326,7 @@ function Roster({ model, palette, currentViewer }: { model: UndercoverGameViewMo
               style={{
                 border: `1px solid ${isSelf ? palette.human : palette.border}`,
                 borderLeft: `3px solid ${elim ? palette.bad : st === 'action_required' ? palette.human : st === 'active_speech' ? palette.running : st === 'voted' || st === 'completed_speech' ? palette.done : palette.pending}`,
-                background: elim ? '#261417' : isSelf ? palette.accentSoft : 'transparent',
+                background: elim ? palette.badSoft : isSelf ? palette.accentSoft : 'transparent',
                 padding: '5px 8px', borderRadius: 4,
               }}
             >
@@ -372,6 +380,34 @@ function VoteTally({ model, palette }: { model: UndercoverGameViewModel; palette
 }
 
 /* ------------------------------------------------------------------ *
+ *  Host public broadcasts
+ * ------------------------------------------------------------------ */
+function HostBroadcast({ model, palette }: { model: UndercoverGameViewModel; palette: FlavorPalette }) {
+  if (model.params.display?.showHostOutput === false) return null;
+  const host = model.actors.find((actor) => actor.kind === 'host');
+  const history = (host?.outputHistory ?? []).filter((event) => Boolean(event.text?.trim()) && !event.pending);
+  if (!history.length) return null;
+  const latest = history[history.length - 1];
+  const earlier = history.slice(0, -1).reverse();
+  return (
+    <Panel $left="accent" data-region="ops-host-broadcast">
+      <PanelTitle>主持人播报</PanelTitle>
+      <div style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, lineHeight: 1.7, color: palette.text }}>{latest.text}</div>
+      {earlier.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ cursor: 'pointer', color: palette.muted, fontSize: 10.5 }}>更早播报（{earlier.length}）</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+            {earlier.map((event) => (
+              <div key={event.identity} style={{ whiteSpace: 'pre-wrap', fontSize: 10.5, lineHeight: 1.6, color: palette.muted }}>{event.text}</div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  *  Main panel
  * ------------------------------------------------------------------ */
 const fallbackApi = '/bcnproxy';
@@ -389,7 +425,7 @@ function errorText(e: unknown): string { return e instanceof Error ? e.message :
 function InvalidParams({ message, className, style }: { message: string; className?: string; style?: CSSProperties }) {
   return (
     <RootShell $palette={OPS_PALETTE.obsidian} className={className} style={style} data-ops-panel="true">
-      <Scene><Notice $left="bad" style={{ borderLeftColor: '#ff6b6b' }}><b>面板参数无效</b><br />{message}</Notice></Scene>
+      <Scene><Notice $left="bad"><b>面板参数无效</b><br />{message}</Notice></Scene>
     </RootShell>
   );
 }
@@ -692,6 +728,7 @@ function OpsPanel({
 
         <Roster model={shown} palette={palette} currentViewer={params.currentViewerActorId} />
         <VoteTally model={shown} palette={palette} />
+        <HostBroadcast model={shown} palette={palette} />
 
         {pendingHumanNode && (
           <Panel $left={actionKind === 'vote' ? 'good' : 'accent'}>
@@ -746,13 +783,13 @@ function OpsPanel({
                           data-ops-vote-choice="true"
                           data-pk-candidate={isPk ? 'true' : undefined}
                           $selected={vote === c.actorId}
-                          onClick={() => { setVote(c.actorId); setActionError(null); }}
+                          onClick={() => { setVote(c.actorId); setConfirmed(false); setActionError(null); }}
                         >
                           {c.seatNumber}号 {c.displayName}
                         </Candidate>
                       ))}
                       {allowAbstain && (
-                        <Candidate type="button" role="radio" aria-checked={vote === '__abstain__'} data-ops-vote-choice="true" $selected={vote === '__abstain__'} onClick={() => { setVote('__abstain__'); setActionError(null); }}>
+                        <Candidate type="button" role="radio" aria-checked={vote === '__abstain__'} data-ops-vote-choice="true" $selected={vote === '__abstain__'} onClick={() => { setVote('__abstain__'); setConfirmed(false); setActionError(null); }}>
                           弃权
                         </Candidate>
                       )}
@@ -783,6 +820,9 @@ function OpsPanel({
           <Panel $left="accent">
             <PanelTitle>终局</PanelTitle>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 11.5, lineHeight: 1.7 }}>{result.title}</div>
+            {result.summary && (
+              <div data-region="ops-finale-summary" style={{ marginTop: 6, whiteSpace: 'pre-wrap', fontSize: 11, lineHeight: 1.7, color: palette.muted }}>{result.summary}</div>
+            )}
             <div style={{ marginTop: 8 }}>
               <MonoBtn data-primary type="button" onClick={() => onInteraction?.({ type: 'refresh', runId: params.runId })}>【重复】查看终局</MonoBtn>
             </div>

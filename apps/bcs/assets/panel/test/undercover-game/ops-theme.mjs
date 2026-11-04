@@ -29,7 +29,22 @@ const React = ReactModule.default;
 const { act } = ReactModule;
 const { createRoot } = await import('react-dom/client');
 const require = createRequire(import.meta.url);
-const { UndercoverGameOpsPanel, buildRunnerGraph } = require('../../dist/index.umd.js');
+const { UndercoverGameOpsPanel, buildRunnerGraph, OPS_PALETTE } = require('../../dist/index.umd.js');
+
+// --- design tokens -----------------------------------------------------------
+// The ops theme must not ship an independent literal palette: every surface,
+// accent and status colour derives from the shared shadcn semantic tokens.
+{
+  const palette = OPS_PALETTE.obsidian;
+  for (const [name, value] of Object.entries(palette)) {
+    assert.match(value, /^hsl\(var\(--[a-z-]+/, `${name} must derive from a shared semantic token, got ${value}`);
+  }
+  assert.equal(palette.accent, 'hsl(var(--primary, 221.7 100% 62%))', 'accent follows --primary');
+  assert.equal(palette.bg, 'hsl(var(--background, 240 10% 3.9%))', 'surface follows --background');
+  assert.equal(palette.text, 'hsl(var(--foreground, 0 0% 98%))', 'text follows --foreground');
+  assert.equal(palette.done, 'hsl(var(--success, 142 71% 45%))', 'status follows --success');
+  assert.equal(palette.bad, 'hsl(var(--destructive, 0 72.2% 50.6%))', 'error follows --destructive');
+}
 
 const PLAYERS = [
   { actorId: 'a', displayName: '小甲', seatNumber: 1 },
@@ -208,6 +223,10 @@ try {
   // select + confirm + submit
   const check = v.container.querySelector('input[type="checkbox"]');
   await act(async () => { check.click(); await settle(); });
+  // switching the target must clear the confirmation so it cannot carry over
+  await act(async () => { [...v.container.querySelectorAll('[data-ops-vote-choice]')][1].click(); await settle(); });
+  assert.equal(v.container.querySelector('input[type="checkbox"]').checked, false, 'confirmation resets when the vote target changes');
+  await act(async () => { v.container.querySelector('input[type="checkbox"]').click(); await settle(); });
   await act(async () => { v.container.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); await settle(8); });
   assert.equal(votePosts.length, 1);
   assert.match(votePosts[0].content, /^\{"kind":"vote"/);
@@ -235,6 +254,22 @@ try {
   assert.match(text(e), /出局/);
   await act(async () => e.unmount());
 
+  // 4b) Host public broadcasts survive in the Ops view and honour showHostOutput.
+  const hostBroadcast = '主持人播报：本轮计票完成，请把票投给最可疑的人。';
+  const hostParams = { ...base, phase: 'voting', nodeActorMap: { ...base.nodeActorMap, 'tally-note': 'host' } };
+  const hostSnapshot = () => snapshot({ run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'tally-note', status: 'completed' }] }, [], { 'tally-note': hostBroadcast });
+  globalThis.fetch = fetchFor([hostSnapshot()], []);
+  let hb;
+  await act(async () => { hb = mount(hostParams); await settle(8); });
+  assert.match(hb.container.querySelector('[data-region="ops-host-broadcast"]')?.textContent ?? '', /主持人播报：本轮计票完成/, 'host broadcast rendered');
+  await act(async () => hb.unmount());
+  globalThis.fetch = fetchFor([hostSnapshot()], []);
+  let hh;
+  await act(async () => { hh = mount({ ...hostParams, display: { showHostOutput: false } }); await settle(8); });
+  assert.equal(hh.container.querySelector('[data-region="ops-host-broadcast"]'), null, 'host broadcast hidden by showHostOutput=false');
+  assert.doesNotMatch(text(hh), /本轮计票完成/, 'host text not rendered when hidden');
+  await act(async () => hh.unmount());
+
   // 5) Finale: structured host verdict opens a result card, no raw private.
   const resultFile = 'undercover-result-v1-r1-a1.json';
   const result = { kind: 'undercover.game-result', version: 1, status: 'finished', gameSessionId: 'game', hostActorId: 'host', round: 1, attempt: 1, winner: 'civilian', reason: '卧底全部出局', summary: '平民胜利！公开词对：平民 苹果 · 卧底 梨。' };
@@ -251,6 +286,8 @@ try {
   let f;
   await act(async () => { f = mount({ ...base, phase: 'voting', resultFile }); await settle(10); });
   assert.match(text(f), /终局|平民|卧底/, 'finale rendered');
+  assert.ok(f.container.querySelector('[data-region="ops-finale-summary"]'), 'public finale summary rendered next to the verdict');
+  assert.match(text(f), /公开词对：平民 苹果 · 卧底 梨/, 'public word pair and recap visible');
   assert.doesNotMatch(text(f), /target_actor_id|UNDERCOVER_UI_CONTEXT/, 'raw private payload not leaked');
   await act(async () => f.unmount());
   assert.ok(lists >= 1, 'result file polled');

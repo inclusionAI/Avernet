@@ -14,9 +14,14 @@ export interface FlavorPalette {
   good: string;
   goodSoft: string;
   bad: string;
+  badSoft: string;
   warn: string;
+  warnSoft: string;
   running: string;
+  runningSoft: string;
   pending: string;
+  pendingSoft: string;
   done: string;
+  doneSoft: string;
   human: string;
 }
