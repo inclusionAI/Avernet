@@ -29,13 +29,12 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, status
 
+from app.adapters.http.fusion_fallback import _create_minimal_perspective
 from app.adapters.http.schemas.fusion_schemas import (
     FusionRequest,
     FusionResult,
-    FusionPerspective,
     ConflictPoint,
     AlignmentPoint,
     RiskAssessment,
@@ -57,13 +56,9 @@ async def _run_fuse(service, request, group_id: str):
     return await run_in_threadpool(service.fuse, request, group_id=group_id)
 
 
-# Router for R5 fusion routes - mounted at /api/v1
 router = APIRouter()
 
 
-# =============================================================================
-# Dependency Injection Helpers
-# =============================================================================
 
 def _get_worker_registry_store(request: Request):
     """Get worker registry store from provider registry."""
@@ -77,101 +72,10 @@ def _get_profile_content_store(request: Request):
 
 def _require_auth(request: Request) -> None:
     """Require authentication for protected endpoints."""
-    from app.bootstrap.oss_business_routes import require_oss_auth
+    from app.tc.auth import require_oss_auth
     require_oss_auth(request)
 
 
-# =============================================================================
-# Minimal Fusion Implementation
-# =============================================================================
-
-def _extract_profile_summary(profile_content: Optional[dict]) -> str:
-    """
-    Extract a simple summary from profile content.
-
-    This is a minimal deterministic extraction without NLP/ML.
-
-    Args:
-        profile_content: Profile content dict or None
-
-    Returns:
-        Profile summary string
-    """
-    if not profile_content:
-        return "No profile content available."
-
-    parts = []
-
-    # Extract skills
-    if 'skills' in profile_content:
-        skills = profile_content['skills']
-        if isinstance(skills, list):
-            parts.append(f"Skills: {', '.join(str(s) for s in skills[:5])}")
-        else:
-            parts.append(f"Skills: {str(skills)}")
-
-    # Extract tags
-    if 'tags' in profile_content:
-        tags = profile_content['tags']
-        if isinstance(tags, dict):
-            tag_values = [str(v) for v in tags.values()][:5]
-            parts.append(f"Tags: {', '.join(tag_values)}")
-        elif isinstance(tags, list):
-            parts.append(f"Tags: {', '.join(str(t) for t in tags[:5])}")
-
-    # Extract responsibilities
-    if 'responsibilities' in profile_content:
-        responsibilities = profile_content['responsibilities']
-        if isinstance(responsibilities, list):
-            parts.append(f"Responsibilities: {', '.join(str(r) for r in responsibilities[:3])}")
-        else:
-            parts.append(f"Responsibilities: {str(responsibilities)}")
-
-    if not parts:
-        return "Profile content available but no structured data."
-
-    return " | ".join(parts)
-
-
-def _create_minimal_perspective(
-    participant_id: str,
-    profile_content: Optional[dict],
-    question: str,
-) -> FusionPerspective:
-    """
-    Create a minimal deterministic perspective from profile content.
-
-    This is a minimal implementation without LLM analysis.
-    The perspective is simply based on the profile summary.
-
-    Args:
-        participant_id: Participant identifier
-        profile_content: Profile content dict or None
-        question: The fusion question
-
-    Returns:
-        FusionPerspective with deterministic content
-    """
-    profile_summary = _extract_profile_summary(profile_content)
-
-    # Create a simple deterministic perspective
-    # This is NOT a real LLM-generated perspective
-    perspective_content = (
-        f"Based on profile data, this participant has the following background: {profile_summary}. "
-        f"The profile contains relevant information related to the question: '{question[:100]}...'"
-    )
-
-    return FusionPerspective(
-        participant_id=participant_id,
-        profile_key=participant_id,  # Use participant_id as profile_key
-        perspective=perspective_content,
-        confidence=0.5,  # Fixed confidence for minimal implementation
-    )
-
-
-# =============================================================================
-# P0 Critical Routes - Fusion (1 route)
-# =============================================================================
 
 @router.post(
     "/groups/{group_id}/fuse",
@@ -220,9 +124,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
     """
     _require_auth(request)
 
-    # =========================================================================
-    # Runtime-Aware Routing: Check if real LLM fusion is enabled
-    # =========================================================================
     canonical_enabled = os.environ.get("ENABLE_REAL_LLM", "").lower() == "true"
     legacy_enabled = os.environ.get("LLM_ENABLED", "").lower() == "true"
     llm_enabled = canonical_enabled or legacy_enabled
@@ -234,31 +135,23 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
         f"llm_enabled={llm_enabled}, source={llm_flag_source}"
     )
 
-    # =========================================================================
-    # Try Real LLM Fusion if enabled
-    # =========================================================================
     if llm_enabled:
         try:
             logger.info("[Fusion][R5] Attempting to delegate to real LLM fusion service...")
 
-            # Import real fusion service
             from app.adapters.http.fusion_routes import get_service as get_real_fusion_service
             from app.adapters.http.fusion_routes import FusionRequest as RealFusionRequest
             from app.infra.context import set_current_cookie
 
-            # Set cookie context for BCN API calls
             cookie = request.headers.get("cookie", "")
             if cookie:
                 set_current_cookie(cookie)
                 logger.info(f"[Fusion][R5] Cookie set for BCN API calls (len={len(cookie)})")
 
-            # Get real fusion service
             try:
                 service = get_real_fusion_service()
                 logger.info(f"[Fusion][R5] Real fusion service obtained: {type(service).__name__}")
 
-                # P1 Fix: Inject OSS-safe availability checker from request context
-                # This ensures Fusion uses the SAME store instances as Worker CRUD
                 from app.adapters.http.dependencies.fusion_dependencies import get_availability_checker_from_request
                 try:
                     oss_safe_checker = get_availability_checker_from_request(request)
@@ -274,17 +167,13 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     )
                     raise RuntimeError(f"Failed to create OSS-safe availability_checker: {ac_err}") from ac_err
 
-                # Phase B4 Fix: Inject OSS-safe perspective provider from request context
-                # This ensures Fusion profile lookup uses the SAME profile_content_store as Profile CRUD
                 from app.adapters.http.dependencies.fusion_dependencies import (
                     get_profile_source_from_request,
                     _get_llm_gateway_service
                 )
                 try:
-                    # Get profile source with request-context stores
                     oss_safe_profile_source = get_profile_source_from_request(request)
 
-                    # Get LLM gateway
                     oss_safe_gateway = _get_llm_gateway_service()
 
                     if oss_safe_gateway is None:
@@ -294,14 +183,12 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             "Cannot create LLMPerspectiveProvider."
                         )
 
-                    # Create perspective provider with request-context profile source
                     from app.infra.providers.llm_perspective_provider import LLMPerspectiveProvider
                     oss_safe_perspective_provider = LLMPerspectiveProvider(
                         gateway=oss_safe_gateway,
                         profile_source=oss_safe_profile_source,
                     )
 
-                    # Inject into service
                     service.set_perspective_provider(oss_safe_perspective_provider)
 
                     logger.info(
@@ -322,10 +209,7 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 logger.error(f"[Fusion][R5] Failed to get real fusion service: {e}", exc_info=True)
                 raise RuntimeError(f"Failed to initialize real fusion service: {e}")
 
-            # Convert FusionRequest to domain model format
-            # Use model_dump() to get dict and reconstruct domain model
             try:
-                # PHASE E4: Trace fusion_mode through request lifecycle
                 logger.info(f"[Fusion][R5] API request fusion_mode: {req.fusion_mode}")
                 logger.info(f"[Fusion][R5] API request participants: {req.participants[:3] if req.participants else []}")
 
@@ -333,9 +217,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 logger.info(f"[Fusion][R5] req_dict fusion_mode: {req_dict.get('fusion_mode')}")
                 logger.info(f"[Fusion][R5] req_dict options: {req_dict.get('options', {})}")
 
-                # Q1: tolerate caller-supplied session_id (not used by Avernet G9,
-                # which scopes context by group_id). Strip before domain conversion
-                # so the domain FusionRequest (extra=forbid) does not reject it.
                 req_dict.pop("session_id", None)
 
                 real_request = RealFusionRequest(**req_dict)
@@ -345,7 +226,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 logger.error(f"[Fusion][R5] Failed to convert FusionRequest: {e}", exc_info=True)
                 raise RuntimeError(f"Failed to convert request to domain model: {e}")
 
-            # Call real fusion service
             logger.info(f"[Fusion][R5] Calling real LLM fusion: group_id={group_id}, participants={len(req.participants)}")
             start_time = datetime.now()
 
@@ -354,20 +234,12 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             logger.info(f"[Fusion][R5] Real LLM fusion completed in {latency_ms}ms")
 
-            # Real fusion returns domain model FusionResult
-            # Convert to API schema FusionResult with proper type handling
             from app.domain.models.fusion_result import FusionResult as DomainFusionResult
 
             if isinstance(result, DomainFusionResult):
-                # Convert domain model to API schema
                 result_dict = result.model_dump()
 
-                # Recommendation is already an object in both the domain model
-                # and the API schema; no conversion needed.
 
-                # Handle G2 conflicts field type conversion
-                # Domain FusionConflict -> API ConflictPoint
-                # Mapping: parties -> participants, issue -> topic, positions -> description, severity -> severity
                 if result_dict.get("conflicts"):
                     converted_conflicts = []
                     for i, conflict in enumerate(result_dict["conflicts"]):
@@ -375,8 +247,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             if not isinstance(conflict, dict):
                                 conflict = conflict.model_dump() if hasattr(conflict, "model_dump") else dict(conflict)
 
-                            # Map domain fields to API fields
-                            # Fix G2-DESCRIPTION-PRECEDENCE: Explicit handling to avoid ternary/or precedence ambiguity
                             positions = conflict.get("positions") or []
                             if isinstance(positions, list):
                                 positions_text = "\n".join(str(p) for p in positions if p)
@@ -406,16 +276,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                 f"conflict={conflict}",
                                 exc_info=True
                             )
-                            # Skip malformed conflict
                             continue
 
                     result_dict["conflicts"] = converted_conflicts
                     logger.info(f"[G2-SCHEMA-MAPPING] Converted {len(converted_conflicts)} conflicts")
 
-                # Handle G2 alignment_points field type conversion
-                # Domain FusionAlignmentPoint -> API AlignmentPoint
-                # Mapping: summary -> topic, participants -> participants, rationale -> description, significance -> strength
-                # Field name: alignment_points -> alignments
                 if result_dict.get("alignment_points"):
                     converted_alignments = []
                     for i, alignment in enumerate(result_dict["alignment_points"]):
@@ -423,7 +288,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             if not isinstance(alignment, dict):
                                 alignment = alignment.model_dump() if hasattr(alignment, "model_dump") else dict(alignment)
 
-                            # Map domain fields to API fields
                             converted_alignment = {
                                 "topic": alignment.get("summary") or alignment.get("topic") or "Alignment",
                                 "participants": alignment.get("participants") or [],
@@ -444,34 +308,24 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                 f"alignment={alignment}",
                                 exc_info=True
                             )
-                            # Skip malformed alignment
                             continue
 
-                    # Map to API field name "alignments"
                     result_dict["alignments"] = converted_alignments
-                    # Remove domain field name to avoid Pydantic validation errors
                     result_dict.pop("alignment_points", None)
                     logger.info(f"[G2-SCHEMA-MAPPING] Converted {len(converted_alignments)} alignments (alignment_points -> alignments)")
 
-                # Map G2 conclusion field if present (domain has "conclusion", API needs to add it)
                 if result_dict.get("conclusion"):
-                    # Keep conclusion in metadata since API schema doesn't have this field yet
                     if "metadata" not in result_dict:
                         result_dict["metadata"] = {}
                     result_dict["metadata"]["g2_conclusion"] = result_dict.pop("conclusion")
                     logger.info(f"[G2-SCHEMA-MAPPING] Mapped conclusion to metadata.g2_conclusion")
 
-                # Handle G5 structured output fields
-                # Domain risk_assessment/critical_issues/recommendations/go_live_conditions/summary
-                # API schema currently only has 'risks' field, map risk_assessment to risks
                 if result_dict.get("risk_assessment"):
                     try:
                         risk_assessment = result_dict["risk_assessment"]
                         if not isinstance(risk_assessment, dict):
                             risk_assessment = risk_assessment.model_dump() if hasattr(risk_assessment, "model_dump") else dict(risk_assessment)
 
-                        # Convert risk_assessment to risks array
-                        # If risk_assessment is an object with overall/categories, create risk items
                         risks = []
                         if isinstance(risk_assessment, dict):
                             if risk_assessment.get("overall"):
@@ -504,8 +358,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             exc_info=True
                         )
 
-                # Map G5 critical_issues/recommendations/go_live_conditions/summary to metadata
-                # (API schema doesn't have these fields yet, store in metadata)
                 g5_metadata = {}
                 if result_dict.get("critical_issues"):
                     g5_metadata["critical_issues"] = result_dict["critical_issues"]
@@ -525,9 +377,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                         result_dict["metadata"] = {}
                     result_dict["metadata"]["g5_structured_output"] = g5_metadata
 
-                # Handle perspectives field type conversion
-                # Domain Perspective -> API FusionPerspective
-                # Phase B: Explicit domain-to-API adapter with comprehensive logging
                 if result_dict.get("perspectives"):
                     converted_perspectives = []
                     conversion_errors = []
@@ -543,7 +392,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                     f"Domain result.model_dump() should produce dict perspectives."
                                 )
 
-                            # Log original perspective for debugging
                             logger.info(
                                 f"[Fusion][R5] Converting perspective {i}: "
                                 f"keys={list(perspective.keys())}, "
@@ -552,13 +400,9 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                 f"status={perspective.get('status', 'MISSING')}"
                             )
 
-                            # Domain perspective fields (from fusion_result.Perspective)
-                            # Required API fields: participant_id, profile_key, perspective
-                            # Domain fields: participant_id, summary, confidence, role, status, etc.
 
                             converted_p = {}
 
-                            # participant_id - same in both (required)
                             participant_id = perspective.get("participant_id")
                             if not participant_id:
                                 raise ValueError(
@@ -567,9 +411,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                 )
                             converted_p["participant_id"] = participant_id
 
-                            # profile_key - Domain doesn't have this field
-                            # Mapping strategy: Use participant_id as profile_key
-                            # In G1 mode, participant_id IS the worker_id (or "worker_id:profile_id" for multi-profile workers)
                             profile_key = perspective.get("profile_key") or participant_id
                             if not profile_key:
                                 raise ValueError(
@@ -578,8 +419,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                 )
                             converted_p["profile_key"] = profile_key
 
-                            # perspective - API expects "perspective", Domain has "summary"
-                            # Try multiple fallbacks in order of preference
                             perspective_text = (
                                 perspective.get("perspective") or  # Direct field (unlikely)
                                 perspective.get("summary") or      # Domain field (most common)
@@ -587,7 +426,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             )
 
                             if not perspective_text:
-                                # Last resort: construct from role and status
                                 role = perspective.get("role", "unknown")
                                 perspective_status = perspective.get("status", "unknown")
                                 perspective_text = f"[{role}] Worker perspective (status: {perspective_status})"
@@ -598,43 +436,34 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
 
                             converted_p["perspective"] = perspective_text
 
-                            # confidence - optional in both
                             confidence = perspective.get("confidence")
                             if confidence is not None:
                                 converted_p["confidence"] = float(confidence)
 
-                            # Phase 2.7: Add status and other fields (OpenAPI contract requirement)
-                            # perspective_status - critical for offline/skipped participant detection
                             perspective_status = perspective.get("status")
                             if perspective_status is not None:
                                 converted_p["status"] = perspective_status
 
-                            # participant_type - optional
                             participant_type = perspective.get("participant_type")
                             if participant_type is not None:
                                 converted_p["participant_type"] = participant_type
 
-                            # role - optional
                             role = perspective.get("role")
                             if role is not None:
                                 converted_p["role"] = role
 
-                            # evidence - optional list
                             evidence = perspective.get("evidence")
                             if evidence is not None:
                                 converted_p["evidence"] = evidence
 
-                            # key_points - optional list (G2)
                             key_points = perspective.get("key_points")
                             if key_points is not None:
                                 converted_p["key_points"] = key_points
 
-                            # concerns - optional list (G2)
                             concerns = perspective.get("concerns")
                             if concerns is not None:
                                 converted_p["concerns"] = concerns
 
-                            # Validate required fields are present and non-empty
                             missing_fields = []
                             if not converted_p.get("participant_id"):
                                 missing_fields.append("participant_id")
@@ -650,7 +479,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                                     f"Converted: {converted_p}"
                                 )
 
-                            # Log successful conversion
                             logger.info(
                                 f"[Fusion][R5] Perspective {i} conversion successful: "
                                 f"participant_id={converted_p['participant_id']}, "
@@ -673,8 +501,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             logger.error(error_msg, exc_info=True)
                             conversion_errors.append((i, str(p_err), perspective))
 
-                    # If any conversions failed, do NOT silently continue
-                    # Instead, raise a clear error with diagnostic info
                     if conversion_errors:
                         error_summary = "\n".join([
                             f"  Perspective {i}: {err}"
@@ -701,20 +527,17 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
 
                 api_result = FusionResult(**result_dict)
 
-                # Add runtime routing metadata
                 api_result.metadata["route_impl"] = "real_llm_fusion"
                 api_result.metadata["llm_enabled"] = True
                 api_result.metadata["llm_flag_source"] = llm_flag_source
                 api_result.metadata["llm_used"] = True
                 api_result.metadata["latency_ms"] = latency_ms
 
-                # P1 Diagnostics: Add registry store diagnostics
                 try:
                     registry = request.app.state.context.registry
                     worker_registry_store = registry.get('worker_registry_store')
                     worker_runtime_state_store = registry.get('worker_runtime_state_store')
 
-                    # Get availability_checker instance_id from the service
                     if hasattr(service, '_availability_checker') and service._availability_checker:
                         checker_registry_store_id = id(service._availability_checker._registry_store) if hasattr(service._availability_checker, '_registry_store') else 0
                         checker_profile_binding_store_id = id(service._availability_checker._profile_binding_store) if hasattr(service._availability_checker, '_profile_binding_store') else 0
@@ -728,7 +551,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     api_result.metadata["worker_crud_registry_store_instance_id"] = id(worker_registry_store) if worker_registry_store else 0
                     api_result.metadata["same_registry_store_instance"] = (id(worker_registry_store) == checker_registry_store_id) if worker_registry_store and checker_registry_store_id else False
 
-                    # Phase B4 Diagnostics: Add profile store diagnostics
                     worker_profile_content_store = registry.get('worker_profile_content_store')
                     worker_profile_binding_store = registry.get('worker_profile_binding_store')
 
@@ -740,13 +562,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     api_result.metadata["fusion_profile_binding_store_instance_id"] = checker_profile_binding_store_id
                     api_result.metadata["same_profile_binding_store_instance"] = (id(worker_profile_binding_store) == checker_profile_binding_store_id) if worker_profile_binding_store and checker_profile_binding_store_id else False
 
-                    # Try to get perspective provider's profile source instance (if available)
                     fusion_profile_content_store_id = 0
                     if hasattr(service, '_provider') and service._provider:
                         provider = service._provider
                         if hasattr(provider, '_profile_source') and provider._profile_source:
                             profile_source = provider._profile_source
-                            # Try to get content_store from APIProfileSource
                             if hasattr(profile_source, '_api_source') and profile_source._api_source:
                                 api_source = profile_source._api_source
                                 if hasattr(api_source, '_content_store') and api_source._content_store:
@@ -755,17 +575,14 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     api_result.metadata["fusion_profile_content_store_instance_id"] = fusion_profile_content_store_id
                     api_result.metadata["same_profile_content_store_instance"] = (id(worker_profile_content_store) == fusion_profile_content_store_id) if worker_profile_content_store and fusion_profile_content_store_id else False
 
-                    # Add participant resolution diagnostics
                     api_result.metadata["participants_requested_count"] = len(req.participants)
                     api_result.metadata["participants_resolved_count"] = len([p for p in result_dict.get("perspectives", []) if p])
                     api_result.metadata["online_workers_count"] = result_dict.get("metadata", {}).get("online_workers_count", 0)
                     api_result.metadata["active_profiles_loaded_count"] = result_dict.get("metadata", {}).get("active_profiles_loaded_count", 0)
 
-                    # Phase D2: Add fallback_taken from result_dict (false when real LLM fusion succeeds)
                     result_profile_diagnostics = result_dict.get("metadata", {}).get("profile_diagnostics", {})
                     api_result.metadata["fallback_taken"] = result_profile_diagnostics.get("fallback_perspective_used", False)
 
-                    # Profile content diagnostics from perspective provider
                     profile_diagnostics = result_dict.get("metadata", {}).get("profile_diagnostics", {})
                     api_result.metadata["profile_content_loaded_count"] = profile_diagnostics.get("profile_content_loaded_count", 0)
                     api_result.metadata["profile_content_non_empty_count"] = profile_diagnostics.get("profile_content_non_empty_count", 0)
@@ -774,7 +591,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     api_result.metadata["fallback_perspective_used"] = profile_diagnostics.get("fallback_perspective_used", False)
                     api_result.metadata["profile_loading_skip_reason"] = profile_diagnostics.get("profile_loading_skip_reason", "")
 
-                    # Phase E3: Extract vector_supplement_diagnostics from G5 metadata
                     vector_supplement_diagnostics = result_dict.get("metadata", {}).get("vector_supplement_diagnostics", {})
                     if vector_supplement_diagnostics:
                         api_result.metadata["vector_supplement_enabled"] = vector_supplement_diagnostics.get("vector_supplement_enabled", False)
@@ -799,7 +615,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                             f"reason={api_result.metadata.get('supplement_skip_reason')}"
                         )
 
-                    # Extract unavailable participants info from result metadata
                     result_meta = result_dict.get("metadata", {})
                     if "unavailable_participants" in result_meta:
                         api_result.metadata["unavailable_participants"] = result_meta["unavailable_participants"]
@@ -825,10 +640,8 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     logger.warning(f"[Fusion][R5] Failed to add diagnostics: {diag_err}")
                     api_result.metadata["diagnostics_error"] = str(diag_err)
 
-                # Extract model name from result metadata if available
                 result_metadata = result_dict.get("metadata", {})
                 if "model_name" not in api_result.metadata:
-                    # Try multiple possible metadata keys for model name
                     model_name = (
                         result_metadata.get("llm_model") or
                         result_metadata.get("model_name") or
@@ -846,7 +659,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                     f"model_name={api_result.metadata.get('model_name', 'N/A')}"
                 )
 
-                # ========== Phase R7-1-F: Trace API Result Mapping ==========
                 logger.info("[G5-TRACE] ========== TRACE-F: API Result Mapping ==========")
                 logger.info("[G5-TRACE] domain_result_perspectives_count: %d", len(result_dict.get("perspectives", [])))
                 logger.info("[G5-TRACE] api_result_perspectives_count: %d", len(api_result.perspectives))
@@ -874,20 +686,17 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
 
                 return api_result
             else:
-                # Unexpected result type
                 logger.error(f"[Fusion][R5] Unexpected result type: {type(result)}")
                 logger.error(f"[Fusion][R5] Expected: {DomainFusionResult}")
                 raise RuntimeError(f"Unexpected result type from real fusion service: {type(result)}")
 
         except Exception as e:
-            # Real LLM fusion failed, capture detailed diagnostics
             import traceback
             error_type = type(e).__name__
             error_message_preview = str(e)[:500]
             traceback_lines = traceback.format_exc().split('\n')
             top_stack_functions = [line.strip() for line in traceback_lines if line.strip().startswith('File "')][:5]
 
-            # Determine failing stage
             failing_stage = "unknown"
             if "get_real_fusion_service" in str(traceback.format_exc()):
                 failing_stage = "get_real_fusion_service"
@@ -912,7 +721,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 exc_info=True
             )
 
-            # Store error info for fallback reason
             fusion_error_info = {
                 "error_type": error_type,
                 "error_message_preview": error_message_preview,
@@ -921,16 +729,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 "fallback_taken": True
             }
 
-            # Continue to fallback implementation below
 
-    # =========================================================================
-    # Fallback: Deterministic Profile Merge (or LLM not enabled)
-    # =========================================================================
     fallback_reason = None
     if not llm_enabled:
         fallback_reason = f"LLM not enabled (ENABLE_REAL_LLM={canonical_enabled}, LLM_ENABLED={legacy_enabled})"
     else:
-        # Use detailed error info from exception handler
         if 'fusion_error_info' in locals():
             error_info = fusion_error_info
             fallback_reason = (
@@ -943,12 +746,8 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
 
     logger.info(f"[Fusion][R5] Using deterministic fallback: {fallback_reason}")
 
-    # Phase C: Runtime mode fail-fast policy
-    # If runtime mode + real LLM enabled + conversion failed, do NOT silently fallback
     provider_mode = os.environ.get("BCSFUSE_PROVIDER_MODE", "dev")
     if provider_mode == "runtime" and llm_enabled and 'fusion_error_info' in locals():
-        # Runtime mode should NOT silently pass with fallback
-        # Return 500 with explicit error info
         logger.error(
             f"[Fusion][R5] RUNTIME MODE FAIL-FAST: "
             f"Real LLM fusion failed in runtime mode. "
@@ -957,7 +756,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             f"Refusing to fallback to deterministic_parity_fallback."
         )
 
-        # Return 500 with error details
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -972,21 +770,12 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             }
         )
 
-    # Get stores
     registry_store = _get_worker_registry_store(request)
     profile_store = _get_profile_content_store(request)
 
-    # Generate fusion_id
     fusion_id = f"fusion-{uuid.uuid4().hex[:12]}"
 
-    logger.info(
-        f"[Fusion][R5] group_id={group_id}, fusion_id={fusion_id}, "
-        f"question='{req.question[:50]}...', "
-        f"participants={len(req.participants)}, "
-        f"mode={req.fusion_mode}"
-    )
 
-    # Check stores availability
     if registry_store is None and profile_store is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -997,33 +786,21 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             }
         )
 
-    # Collect perspectives from participants
     perspectives = []
     missing_participants = []
 
     for participant_id in req.participants:
         profile_content = None
 
-        # Try to get profile from profile store
-        if profile_store:
+        source = request.app.state.context.registry.get("worker_profile_source")
+        if source is not None:
             try:
-                # Try to get profile using participant_id as worker_id
-                # profile_store.get(worker_id, profile_id)
-                profile_content = profile_store.get(participant_id, participant_id)
-            except Exception as e:
-                logger.debug(f"[Fusion][R5] Failed to get profile for {participant_id}: {e}")
+                profile = source.get_by_participant(participant_id)
+                if profile is not None:
+                    profile_content = {"description": profile.searchable_text}
+            except Exception as error:  # noqa: BLE001 -- fallback reports missing content without exposing database details
+                logger.warning("[Fusion] Current content unavailable: error_type=%s", type(error).__name__)
 
-        # If no profile content found, try to get worker metadata
-        if not profile_content and registry_store:
-            try:
-                worker = registry_store.get(participant_id)
-                if worker:
-                    worker_dict = worker.model_dump() if hasattr(worker, 'model_dump') else worker.dict() if hasattr(worker, 'dict') else dict(worker)
-                    profile_content = worker_dict
-            except Exception as e:
-                logger.debug(f"[Fusion][R5] Failed to get worker for {participant_id}: {e}")
-
-        # Create perspective
         if profile_content or not req.options.fail_fast:
             perspective = _create_minimal_perspective(
                 participant_id=participant_id,
@@ -1035,12 +812,10 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             if not profile_content:
                 missing_participants.append(participant_id)
         else:
-            # fail_fast is True and no profile found
             missing_participants.append(participant_id)
             if req.options.fail_fast:
                 break
 
-    # Build metadata with runtime routing info
     metadata = {
         "route_impl": "deterministic_parity_fallback",
         "llm_enabled": llm_enabled,
@@ -1063,13 +838,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
         "missing_participant_count": len(missing_participants),
     }
 
-    # Add trace_id if available
     if req.metadata and req.metadata.trace_id:
         metadata["trace_id"] = req.metadata.trace_id
     else:
         metadata["trace_id"] = fusion_id
 
-    # Log result with runtime routing info
     logger.info(
         f"[Fusion][R5] result | "
         f"fusion_id={fusion_id}, "
@@ -1081,26 +854,18 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
         f"fallback_reason={fallback_reason}"
     )
 
-    # Calculate timing
     finished_at = datetime.now()
-    # Estimate started_at as 10ms before finished_at for fallback
     started_at = datetime.fromtimestamp(finished_at.timestamp() - 0.01)
     duration_ms = 10  # Fallback is fast
 
-    # Build warnings and errors
     warnings = []
     if missing_participants:
         warnings.append(f"Missing profile content for {len(missing_participants)} participant(s): {', '.join(missing_participants)}")
 
     errors = []
 
-    # Determine partial_success
-    # Partial success if we generated perspectives but had some missing participants
     partial_success = len(perspectives) > 0 and len(missing_participants) > 0
 
-    # Build response
-    # Note: conflicts, alignments, risks are empty (not evaluated)
-    # Note: recommendation is None (not generated without LLM)
     result = FusionResult(
         group_id=group_id,
         fusion_id=fusion_id,
@@ -1126,9 +891,6 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
     return result
 
 
-# =============================================================================
-# Route Mounting Helper
-# =============================================================================
 
 def include_r5_routes(app) -> None:
     """

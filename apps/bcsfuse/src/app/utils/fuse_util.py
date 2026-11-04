@@ -12,6 +12,7 @@ Fuse Utility Functions - 融合相关工具函数
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from typing import TYPE_CHECKING, Union
 
@@ -46,7 +47,7 @@ def generate_fusion_id(
         ...     group_id="group_123",
         ...     driver_bot_id="bot_001",
         ...     participant_ids=["wrk_arch:default", "wrk_dba:default"],
-        ...     profiles_dict=[{"soul_md": "...", "skills": [...]}],
+        ...     profiles_dict=[{"description": "...", "skills": [...]}],
         ... )
         >>> fusion_id = generate_fusion_id("bot_profile_fuse", ctx=ctx)
         >>> len(fusion_id)
@@ -83,50 +84,13 @@ def generate_fusion_id(
 
 
 def calculate_profile_content_hash(profile: dict) -> str:
-    """
-    计算单个 Profile 的内容哈希。
-
-    基于 Profile 的核心内容字段计算 MD5 哈希，用于：
-    - G9 模式的 fusion_id 生成
-    - 判断 Profile 内容是否变化
-
-    使用字段（按优先级）：
-    - soul_md 或 soul：核心身份定位
-    - identity_md 或 identity：身份信息
-    - memory_md 或 memory：经验知识
-    - skills：技能列表
-
-    Args:
-        profile: Profile 字典，包含 soul/soul_md, identity/identity_md,
-                 memory/memory_md, skills 等字段
-
-    Returns:
-        8位 hex 哈希字符串
-
-    Examples:
-        >>> profile = {
-        ...     "soul_md": "我是一名系统架构师",
-        ...     "identity_md": "10年分布式系统经验",
-        ...     "memory_md": "曾主导过多个高可用系统设计",
-        ...     "skills": ["code_review", "deployment"]
-        ... }
-        >>> calculate_profile_content_hash(profile)
-        'a1b2c3d4'
-    """
-    # 提取关键字段，优先使用 _md 版本
-    soul = profile.get("soul_md", "") or profile.get("soul", "") or ""
-    identity = profile.get("identity_md", "") or profile.get("identity", "") or ""
-    memory = profile.get("memory_md", "") or profile.get("memory", "") or ""
-
-    # skills 需要排序确保顺序无关
-    skills_data = profile.get("skills", [])
-    if isinstance(skills_data, list):
-        skills = ",".join(sorted(str(s) for s in skills_data))
-    else:
-        skills = ""
-
-    # 组合内容并计算哈希
-    content = f"{soul}|{identity}|{memory}|{skills}"
+    """Hash the current TC fusion input, excluding archived Markdown content."""
+    content = json.dumps(
+        {key: profile.get(key, [] if key == "skills" else "") for key in (
+            "worker_id", "display_name", "description", "profile", "skills",
+        )},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 
@@ -236,23 +200,21 @@ def get_current_timestamp() -> str:
 
 
 def worker_profile_to_dict(profile) -> dict:
-    """
-    将 WorkerProfileContent 转换为字典格式（用于存储和 fusion_id 计算）
+    """Project current TC data for the model, deduplication, and cache identity.
 
-    Args:
-        profile: WorkerProfileContent 对象
-
-    Returns:
-        包含关键字段的字典
+    The TC read adapter exposes only valid new generated text at ``profile``.
+    Legacy MD and skill implementation content remain outside fusion input.
     """
+    generated_profile = profile.contents.get("profile", "")
     return {
         "worker_id": profile.worker_id,
-        "soul_md": profile.soul_md or "",
-        "identity_md": profile.contents.get("identity.md", "") if profile.contents else "",
-        "memory_md": profile.contents.get("memory.md", "") if profile.contents else "",
-        "skills": [s.name for s in profile.skill_sets] if profile.skill_sets else [],
-        "display_name": profile.display_name or "",
+        "display_name": profile.display_name or profile.worker_id,
         "description": profile.description or "",
+        "profile": generated_profile if isinstance(generated_profile, str) else "",
+        "skills": sorted(
+            ({"name": skill.name, "description": skill.description or ""} for skill in profile.skill_sets),
+            key=lambda skill: (skill["name"], skill["description"]),
+        ),
     }
 
 

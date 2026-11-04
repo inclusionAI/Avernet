@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-def test_oss_worker_lifecycle_routes_do_not_load_legacy_api_app() -> None:
+def test_tc_routes_do_not_load_an_application_or_legacy_worker_router() -> None:
     bcsfuse_root = Path(__file__).resolve().parents[2]
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
@@ -14,7 +14,7 @@ def test_oss_worker_lifecycle_routes_do_not_load_legacy_api_app() -> None:
     )
     script = """
 import sys
-import app.bootstrap.oss_worker_lifecycle_routes
+import app.tc.routes
 
 assert "app.adapters.http.app" not in sys.modules
 assert "app.adapters.http.worker_routes" not in sys.modules
