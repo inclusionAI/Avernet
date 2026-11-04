@@ -1,0 +1,24 @@
+apps/bcs-internal/Cargo.lock
+  h_fa66fe7c023b4b 556,756-765,992,994,2490,2502
+apps/bcs-internal/crates/external-clients/bcs-layotto/tests/support/zdas_mysql.rs
+  h_fa66fe7c023b4b 17,140-143,227-230,236-240,245-248,252
+apps/bcs-internal/crates/plugins/bcs-db-zdas/CONTEXT.md
+  h_fa66fe7c023b4b 37-43,75-77
+apps/bcs-internal/crates/plugins/bcs-db-zdas/src/lib.rs
+  h_fa66fe7c023b4b 30-31,363-368,421-422,426-427,432-463
+apps/bcs-internal/crates/plugins/bcs-db-zdas/tests/transaction_stop.rs
+  h_fa66fe7c023b4b 184-221
+submodules/avernet
+  h_fa66fe7c023b4b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66a8f972ef1b951016321ae618927cf132dc1f73",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
