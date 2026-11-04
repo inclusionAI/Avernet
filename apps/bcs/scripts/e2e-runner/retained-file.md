@@ -56,7 +56,8 @@ section below. Steps 3–4 are not enabled by passing step 2.
   narrowly scoped transition which compares the old frozen profile with the new
   one under the same guard, permits only the approved storage-origin addition,
   and checks all new dependencies before transferring scheduling authority.
-  Identity, actors, gateway, database and pool may not change under that receipt.
+  Identity, actors, gateway, database, pool and admission generation may not
+  change under that receipt.
 ### PRE share-content redirect characterization and probe alignment — 2026-11-01
 
 Live PRE characterization (fresh share mint on the retained r20 fixture,
@@ -266,8 +267,13 @@ no real file has been uploaded by this milestone.
 
 Remote execution uses a distinct `supervised-retained-file-v2` review. A control-v1
 Group/Session review cannot admit File operations. The File review binds the same
-Human, dedicated protected Bots, gateway identity, complete Profile and fresh
-Run, plus quota-v2 and explicit process-serial preflight. It declares:
+Human, dedicated protected Bots, admitted remote identity (gateway Human-view
+Cookie generation or bcs-direct dual-header generation), complete Profile and
+fresh Run, plus quota-v2 and explicit process-serial preflight; it may declare the
+same optional `execution_generation` as the control review. Remote File execution
+engages for both entrypoint kinds; on the bcs-direct station legacy face the
+transport answers through the public-V1 envelope, and the internal-v1 manifest
+route requirement below is unchanged. It declares:
 
 - BaaS backend and the exact nonempty configured storage-origin list;
 - reviewed storage key prefix, original small payload and a 4096-byte ceiling;

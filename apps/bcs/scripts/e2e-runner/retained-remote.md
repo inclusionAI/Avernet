@@ -5,6 +5,12 @@ It shares their existing business steps and never enables the original PRE suite
 or the native identity adapter by implication. **Implementation/contract tests are
 not a live preproduction PASS.**
 
+Two Profile compositions are admitted (the execution generation): the historical
+gateway Human-view Cookie generation and the separately reviewed bcs-direct
+dual-header generation (driver Bot token plus Human Cookie references, no explicit
+identity binding). Both demand the same operator-attested effect review, exclusive
+preprod fixtures, observer binding and finite budgets.
+
 ## Current scheduling policy
 
 The accepted preproduction policy is serial triggering plus fresh per-run
@@ -18,9 +24,19 @@ behavior. Never remove its lock manually or modify an old report to enable reuse
 
 ## Inputs
 
-- A resolved preproduction **gateway** Profile with the reviewed
-  `authorized-human-view` identity binding, legitimate Cookie reference, one Human,
-  two owned dedicated protected Bots, and an exclusive single-runner pool.
+- A resolved preproduction remote Profile of one admitted generation. Generation
+  `gateway-human-view`: gateway entrypoint with the reviewed
+  `authorized-human-view` identity binding and exactly the Cookie reference.
+  Generation `bcs-direct-dual-header`: bcs-direct entrypoint WITHOUT any explicit
+  identity binding (implicit native identity discovery; the legacy business
+  adapters bind their own reviewed principals; an explicit NATIVE binding stays
+  blocked) with both the driver Bot `Authorization` and Human `Cookie` references.
+  Either way: one Human, two owned dedicated protected Bots, and an exclusive
+  single-runner pool.
+- The review may declare an optional `execution_generation`
+  (`gateway-human-view` or `bcs-direct-dual-header`); a declared value must equal
+  the Profile's judged generation, and an undeclared review stays valid with the
+  generation derived from the Profile and reported in the frozen summary.
 - An available Human supervisor and a current source/effect review: test runtimes
   must be isolated, have no operational channels, and permit implicit Bot bootstrap.
   The Run's finite actions do not bound an arbitrary autonomous Bot's effects.
@@ -101,6 +117,9 @@ Supply secrets through the Profile's environment references, not command-line
 Cookie values. Use the existing approved CA configuration where needed; never
 disable TLS verification. The command supports the gateway Human-view contract,
 not a guessed `/openapi/v1/auth/user` endpoint or fallback to native `/auth/user`.
+The dual-header bcs-direct generation likewise fixes both routes through the
+resolved Profile: implicit native discovery for identity and the reviewed
+legacy public-V1 business adapters; no guessed endpoints either.
 
 ## Admission and limits
 
@@ -665,7 +684,9 @@ never authorizes SQL, business execution, cleanup or fixture release.
 The gateway adapter passes the same resolved Cookie and explicitly configured
 browser Origin/Referer to its fixed-origin WebSocket Upgrade. The Session token
 still binds the Group/Session connection; it is not a substitute for gateway
-login context. Only these three header names are accepted, values are bounded
+login context. Under the dual-header bcs-direct generation the Upgrade carries
+no Cookie; the legacy-face Session token still binds the Group/Session
+connection. Only these three header names are accepted, values are bounded
 and control characters are rejected. They are never copied to an alternate host,
 redirect or storage URL, and their values never enter request evidence. The
 standalone token-only WS probe remains a separate diagnostic interface.

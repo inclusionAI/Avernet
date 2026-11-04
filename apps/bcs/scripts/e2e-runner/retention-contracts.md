@@ -18,6 +18,32 @@ under the API/ownership contract. It does not certify that all dependent rows,
 history, object-store replicas, backups or audit records have been erased.
 The runner must never turn this gap into a database/table/bucket-wide delete.
 
+## Retained admission generations
+
+Retained remote execution admits exactly two Profile compositions
+(`bcs_e2e.retained_remote.execution_generation`):
+
+- `gateway-human-view` (G): gateway entrypoint, reviewed `authorized-human-view`
+  identity binding, exactly the Cookie header reference - the historical shape,
+  byte-compatible with every previously frozen review and Run.
+- `bcs-direct-dual-header` (D): bcs-direct entrypoint with NO explicit identity
+  binding (implicit native identity discovery; the legacy business adapters bind
+  their own reviewed principals - an explicit NATIVE binding remains pilot-blocked)
+  and both the driver-Bot `Authorization` and Human `Cookie` references.
+
+The retained and retained-File review contracts accept an optional
+`execution_generation` declaration; a declared value must equal the Profile's
+judged generation, and undeclared reviews stay valid with the generation derived
+from the Profile and reported in the frozen summary. Vetoed compositions include
+gateway with a Bot token, gateway without the Human-view binding, bcs-direct with
+only Cookie, bcs-direct with an explicit NATIVE or Human-view binding, and
+singlebox/mock.
+
+Changing generation changes nothing about quotas, journal targets or pool
+bindings: retained-resource accounting, the raise-group-limit amendment and the
+journal target binding apply identically per generation. Admitting generation D
+also does not by itself close the journal-target rebinding or quota-headroom gaps.
+
 ## Audited resource matrix
 
 Only normal Group, Session and File cleanup handlers are currently admitted.
