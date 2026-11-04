@@ -142,3 +142,11 @@ display data only, never authorization input. OAuth bootstrap copies it from
 the existing strict-session snapshot, and `/openapi/v1/auth/user` forwards it
 without another credential-chain run or database query. Sources constructed
 with `pin` keep a null avatar unless they explicitly supply one.
+
+## Compatibility current-user selection
+
+Bootstrap may inject `ApiState.auth_user_verifier` for the legacy-configured
+OAuth facade when `[api.auth]` is absent. Only `GET /openapi/v1/auth/user`
+uses it; protected V1 routes retain `principal_verifier`. The adapter selects
+one verifier before authentication, never retries another source on failure.
+Explicit chains do not install this override.

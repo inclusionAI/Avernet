@@ -152,16 +152,18 @@ def compatibility(env):
     with env.server(config, root, base):
         a = env.browser()
         first = a.login(base)
-        user(a, base, expected=401)
-        identity = user(a, base, family=LEGACY)
+        identity = user(a, base)
+        assert user(a, base, family=LEGACY)['user_id'] == identity['user_id']
+        # Restoring current-user lookup must not open ordinary protected APIs.
+        a.request('GET', base + '/openapi/v1/collaboration/groups', 401)
         assert identity['provider']
         a.request('POST', base + V1 + '/refresh', headers={'Origin': base})
         user(env.browser(), base, first, 401, family=LEGACY)
         user(a, base, family=LEGACY)
         a.request('POST', base + V1 + '/logout', headers={'Origin': base})
         user(a, base, expected=401, family=LEGACY)
-        # Versioned current-user still accepts a signed gateway user.
-        assert user(a, base, extra={'x-avernet-principal': env.gateway()})['provider'] == 'gateway'
+        # Compatibility current-user uses the legacy chain, not Gateway.
+        user(a, base, extra={'x-avernet-principal': env.gateway()}, expected=401)
     # Gateway-only explicitly closes the V1 login family but leaves /user usable.
     config, root, base = env.config('gateway')
     with env.server(config, root, base):
@@ -181,7 +183,7 @@ def compatibility(env):
     with env.server(config, root, base):
         a = env.browser()
         a.login(base, 'github', family=LEGACY)
-        user(a, base, expected=403)
+        user(a, base, expected=401)  # All sources are NotApplicable.
         before = a.cookie()
         body, headers, _ = a.request('POST', base + V1 + '/refresh', 403, {'Origin': base})
         assert body['data']['error_code'] == 'session_forbidden'

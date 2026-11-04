@@ -288,6 +288,9 @@ impl BcsServer {
         {
             openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
             if self.state.config.api.auth.is_none() {
+                openapi_v1.auth_user_verifier = Some(Arc::new(
+                    crate::compat_auth_principal::CompatAuthPrincipalVerifier(self.state.auth_chain.clone()),
+                ));
                 // The compat V1 facade uses the same exact CORS trust as
                 // legacy OAuth. Explicit chains retain their own origins.
                 let origins = Self::exact_cors_origins(&self.config);

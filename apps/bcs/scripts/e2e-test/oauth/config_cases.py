@@ -41,6 +41,9 @@ def invalid_configs(env):
         assert headers['Location'] == '/', 'omitted success redirect must default to root'
 
     baseline, root, _ = env.config()
+    mismatched = copy.deepcopy(baseline)
+    mismatched['auth']['oauth']['jwt_secret'] = env.key + '-different'
+    reject(env, mismatched, root, 'session_signing_key_mismatch')
     cases = []
 
     def field(name, value, expected=None):

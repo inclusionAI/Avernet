@@ -32,6 +32,10 @@ pub struct ApiState {
     pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,
+    /// Optional compatibility selection for GET /auth/user only. None uses
+    /// the ordinary V1 verifier. This is selected before verification,
+    /// never retried after a credential fails.
+    pub auth_user_verifier: Option<Arc<dyn PrincipalVerifier>>,
     pub bot_service: Option<Arc<dyn BotService>>,
     pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
     pub group_service: Arc<dyn GroupService>,
@@ -81,6 +85,7 @@ impl ApiState {
             worker_task_service: None,
             bot_self_service: None,
             auth_service: None,
+            auth_user_verifier: None,
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
             event_subscription_service: None,

@@ -342,7 +342,9 @@ chain = ["gateway", "alipay", "github"]
 # enabled; rejected when none is.
 public_base_url = "https://bcs.example.com/openapi/v1/auth"
 # Required while any OAuth source is enabled; resolved and verified at
-# startup through the [secret] backend.
+# startup through the [secret] backend. If legacy OAuth is also configured,
+# its resolved value MUST equal auth.oauth.jwt_secret above: both entries
+# share bcs_session and startup rejects different keys.
 session_signing_key_secret = "bcs-api-session-signing-key"
 # OAuth session idle timeout in minutes; positive, expanded once to seconds
 # at validation time. Defaults to 30 when omitted.

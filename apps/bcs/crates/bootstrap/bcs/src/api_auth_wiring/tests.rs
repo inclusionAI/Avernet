@@ -227,24 +227,30 @@ client_secret_secret = "wechat-secret"
     }
 
     #[tokio::test]
-    async fn disabled_provider_session_is_forbidden() {
-        let (identities, access, _calls) = fixtures();
-        let built = assemble_v1_api_auth(
-            &section(&oauth_body("\"google\", \"github\"")),
-            &production_registrations(),
-            Arc::clone(&identities) as Arc<dyn AuthSessionIdentityPort>,
-            TEST_ENV.to_string(),
-            access,
-        )
-        .await
-        .expect("oauth chain assembles");
-        let (headers, _user_id) =
-            session_cookie_headers(&identities, "wechat", TEST_ENV, None).await;
-        match built.verifier.verify(&headers).await {
-            Err(PrincipalVerificationError::Forbidden(reason)) => {
-                assert!(!reason.is_empty());
+    async fn disabled_provider_session_is_missing_and_does_not_block_gateway() {
+        for chain in ["\"google\", \"github\"", "\"google\", \"github\", \"gateway\""] {
+            let (identities, access, calls) = fixtures();
+            let built = assemble_v1_api_auth(
+                &section(&oauth_body(chain)),
+                &production_registrations(),
+                identities.clone(),
+                TEST_ENV.to_string(),
+                access,
+            ).await.expect("chain assembles");
+            let (mut headers, _) = session_cookie_headers(&identities, "wechat", TEST_ENV, None).await;
+            assert!(matches!(built.verifier.verify(&headers).await,
+                Err(PrincipalVerificationError::Missing)));
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "cache Missing across OAuth positions");
+            if chain.contains("gateway") {
+                calls.store(0, Ordering::SeqCst);
+                headers.insert("x-avernet-principal", craft_gateway_token().parse().unwrap());
+                let identity = built.verifier.verify(&headers).await.expect("gateway remains usable");
+                assert_eq!(identity.authentication_context.source, "gateway");
+                assert_eq!(calls.load(Ordering::SeqCst), 1);
+                headers.insert("cookie", "bcs_session=invalid".parse().unwrap());
+                assert!(matches!(built.verifier.verify(&headers).await,
+                    Err(PrincipalVerificationError::Invalid(_))), "invalid is still final");
             }
-            other => panic!("valid session of a disabled provider must be Forbidden, got {other:?}"),
         }
     }
 

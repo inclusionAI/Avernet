@@ -423,13 +423,10 @@ async fn openapi_auth_callback_rejects_not_enabled_provider_before_consuming() {
     handle.abort();
 }
 
-/// The V1 `/user` route resolves Human callers through the composed V1
-/// verifier chain only: a browser cookie does not feed it raw headers
-/// anymore (Task 12 composes the OAuth cookie source), while the LEGACY
-/// `/auth/user` keeps resolving the same strict session through the auth
-/// chain.
+/// Without [api.auth], both current-user facades retain the existing
+/// strict legacy OAuth chain and its display projection.
 #[tokio::test]
-async fn openapi_auth_user_comes_from_the_v1_chain_and_legacy_auth_user_from_the_cookie() {
+async fn compat_current_user_facades_share_the_verified_cookie_identity() {
     let tmp = tempfile::TempDir::new().expect("temp dir");
     let config = config_with_auth(&tmp.path().to_path_buf(), full_oauth_config());
     let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
@@ -439,8 +436,7 @@ async fn openapi_auth_user_comes_from_the_v1_chain_and_legacy_auth_user_from_the
     let (user_id, token) =
         seed_strict_session(&state, "Alice OAuth", "https://example.com/a.png").await;
 
-    // V1 /user: no gateway-style verifiable credential in the current
-    // composite -> unauthenticated (Never raw-header forwarding).
+    // V1 current-user has its own preselected compatibility verifier.
     let resp = reqwest::Client::new()
         .get(format!("http://{addr}/openapi/v1/auth/user"))
         .header("cookie", format!("bcs_session={token}"))
@@ -448,7 +444,10 @@ async fn openapi_auth_user_comes_from_the_v1_chain_and_legacy_auth_user_from_the
         .send()
         .await
         .expect("request /openapi/v1/auth/user");
-    assert_eq!(resp.status(), 401, "the V1 chain has no cookie source composed yet");
+    assert_eq!(resp.status(), 200, "compat current-user retains the legacy OAuth chain");
+    let body: Value = resp.json().await.expect("V1 user JSON");
+    assert_eq!(body["data"]["user_id"], user_id);
+    assert_eq!(body["data"]["avatar"], "https://example.com/a.png");
 
     // Legacy /auth/user: the retained identity reader resolves the same
     // strict session through the chain (name/avatar from the trusted row).

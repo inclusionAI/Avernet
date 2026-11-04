@@ -273,7 +273,11 @@ AuthUserPath:
       "200":
         description: >-
           The current user identity resolved through the configured
-          authentication source chain. The response is never cached and
+          authentication source chain. Without api.auth, a mounted legacy OAuth
+          facade retains its legacy current-user auth chain (including strict
+          OAuth Cookies); ordinary protected V1 APIs stay Gateway-only. The
+          selection is made before verification, never as fallback on failure.
+          The response is never cached and
           carries no Set-Cookie header — this entrypoint only reads the
           session.
         headers:
@@ -295,10 +299,10 @@ AuthUserPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          The presented session was verified by its issuer but rejected by
-          policy — for example a session from a provider that the
-          configured chain does not accept. The rejection is final; the
-          chain is never re-entered to try another source.
+          An enabled authentication source verified the principal but
+          rejected it by policy. The rejection is final; the chain is never
+          re-entered. A strictly verified Cookie from an unlisted provider
+          is instead not applicable and does not block later sources.
         x-error-codes: [forbidden]
         content:
           application/json:

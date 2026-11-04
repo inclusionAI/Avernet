@@ -25,7 +25,8 @@ pub enum CredentialKind {
     SsoCookie,
     /// An explicit per-request token (bearer / connection token).
     ExplicitToken,
-    /// The legacy native Human browser router only. It keeps its existing
+    /// The legacy native Human browser router and compat current-user GET.
+    /// The browser router keeps its existing
     /// `browser_boundary` write protection and is never registered in the
     /// new ordered chain: an ordinary V1/connection-token chain that
     /// nonetheless observes it rejects with `Internal` (interfaces §Delivery).

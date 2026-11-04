@@ -175,3 +175,35 @@ async fn compat_origin_configuration_is_validated_before_routes_are_published() 
         .await;
     assert!(matches!(result, Err(BcsError::InvalidConfig(_))));
 }
+
+#[tokio::test]
+async fn compat_current_user_accepts_oauth_without_changing_protected_api_trust() {
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let config = config_with_auth(&tmp.path().to_path_buf(), full_oauth_config());
+    let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
+        .run_on_random_port_with_state().await.expect("start server");
+    let (user_id, token) = seed_strict_session(&state, "Alice", "/avatar.png").await;
+    let client = reqwest::Client::new();
+    for family in ["/auth", "/openapi/v1/auth"] {
+        let response = client.get(format!("http://{addr}{family}/user"))
+            .header("cookie", format!("bcs_session={token}"))
+            .send().await.expect("current user");
+        assert_eq!(response.status(), 200, "{family}");
+        let body: Value = response.json().await.expect("JSON");
+        let user = body.get("data").unwrap_or(&body);
+        assert_eq!(user["user_id"], user_id);
+        assert_eq!(user["provider"], "google");
+        assert_eq!(user["name"], "Alice");
+        assert_eq!(user["avatar"], "/avatar.png");
+    }
+    let response = client.get(format!("http://{addr}/openapi/v1/collaboration/groups"))
+        .header("cookie", format!("bcs_session={token}"))
+        .send().await.expect("protected route");
+    assert_eq!(response.status(), 401, "compat must not accept cookies on protected APIs");
+    strict_engine_for(&state).await.revoke(&token).await.expect("revoke");
+    let response = client.get(format!("http://{addr}/openapi/v1/auth/user"))
+        .header("cookie", format!("bcs_session={token}"))
+        .send().await.expect("revoked current user");
+    assert_eq!(response.status(), 401);
+    handle.abort();
+}

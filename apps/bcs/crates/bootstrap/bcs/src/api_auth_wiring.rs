@@ -281,21 +281,13 @@ impl PrincipalVerifier for OAuthSessionSourceVerifier {
                 return Err(error);
             }
         };
-        // Allowlist gate over the VERIFIED provider (never the claims'
-        // word alone): a valid session issued for a provider the chain did
-        // not enable is a policy Forbidden (403-side), final for the chain.
+        // A strictly verified credential for an unlisted source does not
+        // participate in this chain. Cache Missing as well: later OAuth
+        // positions must neither repeat the SELECT nor block a Gateway.
         let provider = snapshot.scope.provider.clone();
-        if !self
-            .context
-            .allowed_providers
-            .iter()
-            .any(|allowed| allowed == &provider)
-        {
-            let error = PrincipalVerificationError::Forbidden(
-                "OAuth provider is not enabled in the configured chain".into(),
-            );
-            attempt.store_oauth_session(Err(error.clone()));
-            return Err(error);
+        if !self.context.allowed_providers.iter().any(|allowed| allowed == &provider) {
+            attempt.store_oauth_session(Err(PrincipalVerificationError::Missing));
+            return Err(PrincipalVerificationError::Missing);
         }
         // Pin the CURRENT verified provider in the request-local cache: a
         // LATER position must see exactly this provenance and may only
@@ -403,9 +395,9 @@ fn unix_now() -> u64 {
 /// and the registration inventory. This runs the whole initialization
 /// order; every failure is a startup-fatal, field-path-only error.
 ///
-/// The same function serves production (via
-/// [`select_v1_authentication`], with `production_registrations`) and the
-/// assembly tests (with injected fake descriptors). It never invents a
+/// This source-only entry and production [`select_v1_authentication`] share
+/// the same assembly; production also checks any legacy session signing key.
+/// Assembly tests may inject fake descriptors. It never invents a
 /// source that is not in BOTH the chain and the registrations, and it
 /// resolves a secret only after the merged-schema validation accepted the
 /// configuration.
@@ -415,6 +407,20 @@ pub async fn assemble_v1_api_auth(
     identities: Arc<dyn AuthSessionIdentityPort>,
     env: String,
     secret_access: Arc<dyn SecretAccessPort>,
+) -> Result<BuiltApiAuth, String> {
+    assemble_with_legacy_session_key(config, registrations, identities, env, secret_access, None).await
+}
+
+/// The production path additionally checks the shared-cookie signing key
+/// against any configured legacy session reader/writer. The resolved key is
+/// read once and never returned or included in diagnostics.
+async fn assemble_with_legacy_session_key(
+    config: &ApiAuthConfig,
+    registrations: &[ApiAuthSourceRegistration],
+    identities: Arc<dyn AuthSessionIdentityPort>,
+    env: String,
+    secret_access: Arc<dyn SecretAccessPort>,
+    legacy_session_key: Option<&str>,
 ) -> Result<BuiltApiAuth, String> {
     // Discover + merged-schema validation (Task 6's contract, unchanged).
     let validated = validate_api_auth(config, registrations)?;
@@ -438,6 +444,9 @@ pub async fn assemble_v1_api_auth(
                 &secret_access,
             )
             .await?;
+            if legacy_session_key.is_some_and(|legacy| legacy != signing_key) {
+                return Err("api.auth.session_signing_key_secret: must resolve to the same key as auth.oauth.jwt_secret while legacy OAuth sessions are enabled (category: session_signing_key_mismatch)".into());
+            }
             let engine = Arc::new(OAuthSessionEngine::new(
                 bcs_jwt::OAuthSessionJwt::new(&signing_key),
                 Arc::clone(&identities),
@@ -565,12 +574,20 @@ pub async fn select_v1_authentication(
     };
     // Match the legacy OAuth identity namespace, including the local fallback.
     let env = crate::config_loader::Environment::resolve().as_str().to_string();
-    let built = assemble_v1_api_auth(
+    use secrecy::ExposeSecret;
+    let legacy_session_key = config.auth.oauth.as_ref().and_then(|oauth| {
+        let key = oauth.jwt_secret.as_ref()?.expose_secret().as_str();
+        let reader_enabled = config.auth.chain.iter().any(|name| name == "oauth_session");
+        let writer_enabled = !oauth.providers.is_empty() && !key.is_empty();
+        (reader_enabled || writer_enabled).then_some(key)
+    });
+    let built = assemble_with_legacy_session_key(
         auth,
         &production_registrations(),
         identities,
         env,
         secret_access,
+        legacy_session_key,
     )
     .await
     .map_err(crate::BcsError::InvalidConfig)?;

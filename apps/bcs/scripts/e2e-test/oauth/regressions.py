@@ -42,7 +42,8 @@ def rollback_modes(env):
         identity = user(browser, base)['user_id']
     config.pop('api')
     with env.server(config, root, base):
-        user(browser, base, expected=401)  # Protected V1 trust is Gateway-only.
+        assert user(browser, base)['user_id'] == identity
+        browser.request('GET', base + '/openapi/v1/collaboration/groups', 401)
         assert user(browser, base, family=LEGACY)['user_id'] == identity
         # Removing api.auth restores the legacy-configured V1 OAuth facade.
         browser.urls(base)
@@ -67,3 +68,16 @@ def rollback_modes(env):
                                  ('POST', '/refresh'), ('POST', '/logout')]:
                 browser.request(method, base + family + path, 404)
         assert user(browser, base, extra={'x-avernet-principal': env.gateway()})['provider'] == 'gateway'
+
+
+def unlisted_provider_does_not_block_gateway(env):
+    config, root, base = env.config(chain=['google', 'gateway'])
+    with env.server(config, root, base):
+        browser = env.browser()
+        browser.login(base, provider='github', family=LEGACY)
+        user(browser, base, expected=401)
+        assert user(browser, base, extra={'x-avernet-principal': env.gateway()})['provider'] == 'gateway'
+        # This is not permission to rotate a disabled provider through V1.
+        body, _, _ = browser.request('POST', base + V1 + '/refresh', 403, {'Origin': base})
+        assert body['data']['error_code'] == 'session_forbidden'
+        user(env.browser(), base, 'invalid', 401, extra={'x-avernet-principal': env.gateway()})

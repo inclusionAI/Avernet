@@ -194,6 +194,13 @@ avatar keep returning null.
   Compatibility never restores unconditional identity/session writes; the schema (sid/revision
   columns) and the session JWT contract persist. Pre-upgrade sid-less
   sessions are invalidated in either direction — re-login is the recovery.
+- When explicit V1 OAuth and a legacy OAuth session reader or login writer
+  are both configured, `api.auth.session_signing_key_secret` MUST resolve to
+  exactly the same signing key as `auth.oauth.jwt_secret`. A mismatch is
+  startup-fatal (`session_signing_key_mismatch`), without printing either key.
+  They share the `bcs_session` Cookie and session store; independent keys
+  cannot define independent sessions. V1-only and gateway-only deployments
+  do not impose this cross-entry key requirement.
 - The identity model stays: `ensure_identity` per
   `(provider, external_user_id, env)`; deleting a session never deletes the
   identity row or user assets.
@@ -202,7 +209,11 @@ avatar keep returning null.
 
 `[api.auth]` is the V1 chain. Absent `[api.auth]` = compatibility assembly
 (current Gateway-protected surface; legacy login entry choices unchanged —
-but on the SAME hardened lifecycles). In this compatibility mode, V1 OAuth
+but on the SAME hardened lifecycles). When the legacy OAuth facade is mounted,
+`GET /openapi/v1/auth/user` retains the legacy auth-chain selection, including
+strict OAuth Cookie verification and its provider/avatar projection. This is a
+separate composition-time choice for current-user lookup only: protected V1
+APIs remain Gateway-only, and failed authentication never triggers a fallback. In this compatibility mode, V1 OAuth
 refresh/logout use the finite exact `cors.allowed_origins` subset, just like
 the legacy entry: wildcard/null entries grant no trust, and no exact origins
 means cookie writes are denied. Malformed exact origins fail validation before
@@ -250,7 +261,9 @@ gateway-only shape in `configs/bcs-config-local.toml`.
 
 The composite verifier covers the V1 protected collaboration routes (public
 OpenAPI and internal API), the Bot Authority router, the connection-token
-route, and `/auth/user`. Manifest, public registration, invitation claim, and
+route, and `/auth/user` in explicit `[api.auth]` mode. The legacy-configured
+compatibility facade selects its existing auth chain for `/auth/user` only.
+Manifest, public registration, invitation claim, and
 public draft reads keep their existing dedicated trusts. The legacy browser
 Human chain (`/collaboration/user/**`) stays on its own verifier and is NOT
 switched to this chain. With no OAuth source configured, the login family

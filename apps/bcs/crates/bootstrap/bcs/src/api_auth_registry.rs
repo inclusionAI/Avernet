@@ -92,8 +92,8 @@ pub struct OAuthSourceContext {
     /// AS-IS (default/minutes conversion happened once in Task 6).
     pub engine: Arc<OAuthSessionEngine>,
     /// Provider instance names enabled in the chain (chain order). A
-    /// verified session whose provider is outside this list is Forbidden,
-    /// even if the signature and store checks passed (spec §7.2).
+    /// verified session whose provider is outside this list is Missing:
+    /// an unlisted source does not participate in the configured chain.
     pub allowed_providers: Vec<String>,
 }
 

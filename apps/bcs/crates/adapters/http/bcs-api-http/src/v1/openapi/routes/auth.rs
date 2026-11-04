@@ -201,12 +201,11 @@ async fn current_user(
 ) -> Result<impl IntoResponse, ErrorResponse> {
     let request_id = RequestId::from_headers(&headers);
 
-    // V1 `/user` resolves the caller through the composed verifier chain
-    // (plan §8.2: the new chain returns the Human identity) and projects
-    // with the ONE shared Human projection. No second chain runs behind
-    // this query and cookie parsing never happens here.
-    let verified = match state
-        .principal_verifier
+    // Bootstrap selects the compat current-user chain or the explicit V1
+    // chain before this call. Exactly one verifier runs, with no fallback
+    // on failure; protected APIs always retain their own verifier.
+    let verifier = state.auth_user_verifier.as_ref().unwrap_or(&state.principal_verifier);
+    let verified = match verifier
         .verify(&headers)
         .await
     {
