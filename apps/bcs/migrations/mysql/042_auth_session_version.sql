@@ -1,5 +1,5 @@
 -- 042_auth_session_version: strict versioned login sessions for the V1 API
--- auth plugin chain. Semantically identical to the SQLite 041 migration
+-- auth plugin chain. Semantically identical to the SQLite 042 migration
 -- modulo dialect: nullable `session_id`, non-null `session_revision`
 -- (default 0), and the `session_expires_at` BIGINT Unix-seconds column.
 -- Session scope stays (`user_id`, `auth_source`, `env`) on the existing

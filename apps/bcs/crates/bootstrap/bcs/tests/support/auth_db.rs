@@ -408,7 +408,7 @@ pub struct DbHarness {
 impl DbHarness {
     /// In-memory SQLite with the REAL full migration chain applied
     /// through `bcs::migrations::run_sqlite_migrations` (the published
-    /// baseline + every versioned migration, incl. 040).
+    /// baseline + every versioned migration, incl. 042).
     pub async fn migrated() -> Self {
         let raw: Arc<dyn DbPlugin> =
             Arc::new(LocalSqliteDbPlugin::new().expect("test sqlite db"));

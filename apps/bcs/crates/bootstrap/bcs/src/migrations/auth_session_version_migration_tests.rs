@@ -70,6 +70,13 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
     ))
     .await?;
 
+    let history_sql = "SELECT version, name, dialect, checksum, applied_at FROM bcs_schema_migrations WHERE version <= 41 ORDER BY version";
+    let existing_history = db.query(DbStatement::new(history_sql)).await?;
+    assert_eq!(existing_history.len(), 41);
+    assert_eq!(
+        db_get_column::<String>(existing_history.last().expect("version 41 recorded"), "name")?,
+        "group_agent_cards",
+    );
     let pending_before = check_sqlite_migrations(&db).await?.pending_versions;
     assert_eq!(
         pending_before
@@ -133,6 +140,8 @@ async fn auth_session_version_upgrade_clears_legacy_tokens_once() -> DbResult<()
         "a recorded migration never clears sessions again"
     );
     assert_eq!(expires, Some(1_900_000_000));
+    assert_eq!(db.query(DbStatement::new(history_sql)).await?, existing_history,
+        "OAuth upgrade must preserve every upstream migration record and checksum");
     let record = applied_sqlite_migration(&db, 42).await?.expect("version 42 recorded");
     assert_eq!(record.name, "auth_session_version");
     assert_eq!(record.dialect, "sqlite");

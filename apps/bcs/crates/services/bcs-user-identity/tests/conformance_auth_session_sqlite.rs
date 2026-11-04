@@ -159,7 +159,7 @@ async fn sqlite_store_passes_auth_session_contract() {
 /// the three versioned-session columns present with their pinned defaults
 /// (spec §8.5/§9: old browser sessions do not survive the strict chain).
 #[tokio::test]
-async fn migration_041_invalidates_legacy_tokens_and_adds_session_columns() {
+async fn migration_042_invalidates_legacy_tokens_and_adds_session_columns() {
     let db = migrated_identity_db().await;
 
     // New columns exist on every row of the upgraded table.

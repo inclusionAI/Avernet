@@ -587,7 +587,14 @@ There is no backfill and no default: existing Bot rows keep NULL, and the
 column is written only when an avatar is stored. Apply remote DDL before
 rolling out binaries that read the column; SQLite bootstrap applies the
 migration automatically on startup. A downgrade may retain the column.
-## Versioned login sessions (MySQL/SQLite 041)
+
+## Versioned login sessions (MySQL/SQLite 042)
+
+Version 041 remains owned by the upstream `group_agent_cards` migration; its
+DDL and history must not be changed. This unmerged OAuth migration follows it
+as version 042 in both dialects. Disposable databases created from the earlier
+feature-branch 041 OAuth migration must be rebuilt; retained databases require
+a separately reviewed upgrade plan, not edited migration history/checksums.
 
 `042_auth_session_version.sql` adds the strict versioned login-session columns
 to `bcs_user_identities`: nullable `session_id`, non-null `session_revision`

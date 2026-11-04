@@ -1,7 +1,7 @@
 //! SQL-backed strict atomic auth sessions (V1 API auth plugin chain).
 //!
 //! `bcs_user_identities` is the single shared identity + session row. After
-//! migration 041 the row doubles as a compare-and-swap cell under one
+//! migration 042 the row doubles as a compare-and-swap cell under one
 //! `(user_id, auth_source, env)` scope: `token` holds the current session
 //! token hash, `session_id` / `session_revision` name the current version, and
 //! the `session_expires_at` Unix-seconds column keeps expiry comparisons
