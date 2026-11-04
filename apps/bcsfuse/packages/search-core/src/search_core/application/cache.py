@@ -172,12 +172,13 @@ class CachedRetrieval:
 
 
 class CachedEmbedding:
-    """Cache only successful, finite vectors from one immutable model configuration."""
+    """Cache valid vectors and share overlapping calls within this instance."""
 
     def __init__(self, provider, cache, embedding_key):
         self.provider, self.cache = provider, cache
         self.dimension = provider.dimension
         self.embedding_key = embedding_key
+        self._pending, self._waiters = {}, {}
 
     async def embed(self, text):
         with stage_timing("embedding_cache_read") as stage:
@@ -187,6 +188,28 @@ class CachedEmbedding:
                 stage["cache"] = "hit"
                 return list(hit)
             stage["cache"] = "miss"
+        task = self._pending.get(key)
+        if task is None or task.done():
+            task = asyncio.create_task(self._embed(text, key))
+            self._pending[key] = task
+            self._waiters[task] = 0
+        # No await between lookup and registration: callers share one event loop.
+        self._waiters[task] += 1
+        try:
+            return list(await asyncio.shield(task))
+        finally:
+            self._waiters[task] -= 1
+            if not self._waiters[task]:
+                del self._waiters[task]
+                if self._pending.get(key) is task:
+                    del self._pending[key]
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                elif not task.cancelled():
+                    task.exception()  # Consume failures even if the last waiter cancelled.
+
+    async def _embed(self, text, key):
         if inspect.iscoroutinefunction(self.provider.embed):
             values = await self.provider.embed(text)
         else:
@@ -196,4 +219,4 @@ class CachedEmbedding:
         values = tuple(values)
         with stage_timing("embedding_cache_write"):
             self.cache.put(key, values)
-        return list(values)
+        return values
