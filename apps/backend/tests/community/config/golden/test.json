@@ -261,6 +261,8 @@
     "task_queue_worker": {
       "batch_size": 10,
       "enabled": true,
+      "isolated_concurrency": 0,
+      "isolated_task_types": [],
       "lease_seconds": 60,
       "max_concurrency": 10,
       "poll_interval_seconds": 2.0,
