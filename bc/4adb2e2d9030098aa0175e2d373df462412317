@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc4adb2e2d9030098aa0175e2d373df462412317",
+  "prompts": {},
+  "sessions": {
+    "s_fba55b011da7a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19b47-faea-72d3-a864-2bcaf0b9e963",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
