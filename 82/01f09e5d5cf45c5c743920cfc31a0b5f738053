@@ -1,0 +1,73 @@
+apps/bcsfuse/tests/alipay/test_minimal_http_contract.py
+  s_89ee1c722ef961::t_1abebf3095a045 17,57-63,68-79,214,218
+apps/bcsfuse/docs/architecture/alipay-card-contract.md
+  s_89ee1c722ef961::t_384af4894f664e 3-7
+apps/bcsfuse/docs/api/zbcsfuse-apitester.json
+  s_89ee1c722ef961::t_94ff71241e2652 37,69,95,172,199,232,264
+apps/bcsfuse/docs/architecture/alipay-index-rebuild-minimal.md
+  s_89ee1c722ef961::t_b297ed9999630c 33,36,61,67
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/operations_preview.py
+  s_89ee1c722ef961::t_d01ee447af4796 29
+apps/bcsfuse/scripts/ci/verify_zbcsfuse.py
+  s_89ee1c722ef961::t_2542a5bb10da69 14
+apps/bcsfuse/scripts/verify_alipay_card_lifecycle.py
+  s_89ee1c722ef961::t_35def9f257e63e 187,335
+apps/bcsfuse/scripts/verify_alipay_replica_recovery.py
+  s_89ee1c722ef961::t_1eab5ba5f8d9b6 288,311,323
+apps/bcsfuse/tests/alipay/test_card_management_boundary.py
+  s_89ee1c722ef961::t_473e8833452805 31
+apps/bcsfuse/tests/alipay/test_card_rebuild.py
+  s_89ee1c722ef961::t_d37f8e33794ba2 207
+apps/bcsfuse/tests/alipay/test_catalog_http.py
+  s_89ee1c722ef961::t_501c31493cee46 64,143
+apps/bcsfuse/tests/alipay/test_catalog_retrieval.py
+  s_89ee1c722ef961::t_e440c3fb3fa193 175,224
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_89ee1c722ef961::t_ff82fb5b5de701 337,341
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_89ee1c722ef961::t_7e6467a6d43473 75
+apps/bcsfuse/tests/alipay/test_document_search.py
+  s_89ee1c722ef961::t_e1322fa937bcf5 178,184
+apps/bcsfuse/tests/alipay/test_emergency.py
+  s_89ee1c722ef961::t_7b026feedbd6d6 179,191
+apps/bcsfuse/tests/alipay/test_index_build_http.py
+  s_89ee1c722ef961::t_125b69bd986161 62,127,141
+apps/bcsfuse/tests/alipay/test_local_app.py
+  s_89ee1c722ef961::t_a7e7d84c82c14e 24,31,42,49,60
+apps/bcsfuse/tests/alipay/test_operations_http.py
+  s_89ee1c722ef961::t_2abb2583b0cbfe 60,66,69,115,163
+apps/bcsfuse/tests/alipay/test_resource_cards.py
+  s_89ee1c722ef961::t_01e34bb84da22e 163
+apps/bcsfuse/tests/alipay/test_resource_types.py
+  s_89ee1c722ef961::t_55f9e5a2325784 124,133,204,213
+apps/bcsfuse/tests/alipay/test_search_cache.py
+  s_89ee1c722ef961::t_def16be074aa2d 93,96,109
+apps/bcsfuse/tests/alipay/test_search_response.py
+  s_89ee1c722ef961::t_cdceae92a47347 163
+apps/bcsfuse/tests/alipay/test_shared_card_management.py
+  s_89ee1c722ef961::t_a7c8f21d2f3fb5 35-36,42
+apps/bcsfuse/tests/alipay/test_simple_card_api.py
+  s_89ee1c722ef961::t_1c065ffc88c0a3 60,141,154-155,192
+apps/bcsfuse/tests/deployment/test_zbcsfuse_runtime.py
+  s_89ee1c722ef961::t_572be3da3ad445 286
+apps/bcsfuse/tests/deployment/test_zbcsfuse_smoke.py
+  s_89ee1c722ef961::t_33ac3eb5c41b7f 29
+apps/bcsfuse/tests/fixtures/alipay_cards/README.md
+  s_89ee1c722ef961::t_d7af2f6cdf7cea 29,32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8201f09e5d5cf45c5c743920cfc31a0b5f738053",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
