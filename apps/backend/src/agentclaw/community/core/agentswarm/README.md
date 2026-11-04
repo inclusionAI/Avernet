@@ -350,6 +350,10 @@ state independent, and auto-issued creations (passport issued inline, no
 consent page) never enter the gate (the decision keys off the application
 status being pending, never off the presence of consent URLs).
 
+A creation apply whose report is `RUNNING` remains `PROVISIONING`, even
+when the container is already active. Only a succeeded creation apply can
+make an active bot `READY`; an unfinished apply is not `APPLY_FAILED`.
+
 **Run detail** — an agent with a passport application actually PENDING
 inside its window carries an additive `authorization` descriptor. Presence
 keys off the authorization source — the passport facade's live

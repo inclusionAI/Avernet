@@ -59,7 +59,6 @@ from agentclaw.community.plugins.local.agentswarm.factory import (
 from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
     DecisionParser,
 )
-from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
@@ -216,7 +215,7 @@ def _config() -> AgentSwarmConfig:
     )
 
 
-def _build_swarm(db, script, platform):
+def _build_swarm(db, platform):
     cfg = _config()
     repos = {
         "run": RunRepository(db), "agent": AgentRepository(db),
@@ -224,7 +223,7 @@ def _build_swarm(db, script, platform):
         "round": RoundRepository(db), "guard": GuardEventRepository(db),
         "dispatch": RunDispatchRepository(db),
     }
-    llm = StubLLMProvider(script=script)
+    llm = _BotRoundLLM()
     orchestrator = Orchestrator(
         llm=llm,
         parser=DecisionParser(),
@@ -273,6 +272,23 @@ def _wait_decision(*refs: str) -> str:
 
 def _finish_decision(answer: str) -> str:
     return json.dumps({"kind": "finish", "answer": answer})
+
+
+class _BotRoundLLM:
+    """Wait for the durable result, including after a provisioning slice ends."""
+
+    async def complete(self, request):
+        state = request.user_prompt.splitlines()
+        if "agents_spawned=0" in state:
+            text = _spawn_decision(("surveyor", "survey the incident"))
+        elif "routed_results=0" in state:
+            text = _wait_decision("surveyor")
+        else:
+            text = _finish_decision("e2e-bot-done")
+        return dm.CompletionResponse(
+            text=text, model=dm.ModelId("bot-round"),
+            token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
+        )
 
 
 class _ScriptedEngineWs:
@@ -476,8 +492,12 @@ class _TaskQueuePump(threading.Thread):
 class TestBotKindEndToEnd:
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("defer_creation", [
+        pytest.param(False, id="same-slice"),
+        pytest.param(True, id="creation-after-slice"),
+    ])
     async def test_bot_agent_runs_a_real_swarm_round(
-            self, world, swarm_db, tmp_path, monkeypatch):
+            self, world, swarm_db, tmp_path, monkeypatch, defer_creation):
         from agentclaw.community.core.config.provider import load_config
         load_config().user_config["aidesktop_root"] = str(tmp_path)
 
@@ -504,12 +524,7 @@ class TestBotKindEndToEnd:
         )
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
-        script = [
-            _spawn_decision(("surveyor", "survey the incident")),
-            _wait_decision("surveyor"),
-            _finish_decision("e2e-bot-done"),
-        ]
-        service, worker, repos = _build_swarm(swarm_db, script, platform)
+        service, worker, repos = _build_swarm(swarm_db, platform)
         req = SubmitRunRequest(
             tenant=TENANT,
             goal="e2e: a bot-kind agent answers through the platform",
@@ -528,6 +543,15 @@ class TestBotKindEndToEnd:
         # slices run on the loop; the subagent's 1s READY poll yields in
         # between, and a later poll sees READY.
         pump = _TaskQueuePump(world)
+        if defer_creation:
+            # A loaded runner can outlive the first slice before provisioning
+            # settles. Force that ordering without timing-sensitive sleeps:
+            # leave the task queue unpumped until the first slice returns.
+            await worker.run_once()
+            unfinished = repos["run"].get(dm.RunId(run_id), TENANT)
+            assert unfinished is not None
+            assert unfinished.status is dm.RunStatus.RUNNING
+            assert repos["result"].list_by_run(dm.RunId(run_id), TENANT) == []
         pump.start()
 
         async def _drive():
@@ -552,7 +576,7 @@ class TestBotKindEndToEnd:
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
         assert [a.name.split("_", 1)[0] for a in agents] == ["surveyor"]
-        assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
+        assert all(a.status is dm.AgentStatus.COMPLETED for a in agents), agents
 
         results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
         assert len(results) == 1
@@ -585,7 +609,7 @@ class TestBotKindEndToEnd:
         )
         assert report is not None
         assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
-        assert report.status is ApplyStatus.SUCCEEDED
+        assert report.status is ApplyStatus.SUCCEEDED, report
 
         # The chat leg: one round per leg — the reset of the engine-served
         # session first, then the message the orchestrator spawned, on the
