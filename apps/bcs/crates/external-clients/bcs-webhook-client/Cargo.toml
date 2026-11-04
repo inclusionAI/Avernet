@@ -11,7 +11,6 @@ version.workspace = true
 workspace = true
 
 [dependencies]
-bcs-network-tracing.workspace = true
 bcs-observability = { workspace = true }
 async-trait = { workspace = true }
 bcs-route-security = { workspace = true }

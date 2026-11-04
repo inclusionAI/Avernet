@@ -1,5 +1,4 @@
 //! Guarded, bounded public AgentCard fetch; no automatic discovery or redirects.
-use bcs_network_tracing::RequestBuilderExt;
 use std::time::Duration;
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
@@ -66,7 +65,7 @@ impl A2aCardPort for HttpA2aCardFetcher {
         // Covers DNS resolution, response headers and the complete bounded body.
         tokio::time::timeout(Duration::from_secs(10), async {
             let client = guarded_client(&self.guard, url).await?;
-            let mut response = client.get(url).header("Accept", "application/json").send_traced().await
+            let mut response = client.get(url).header("Accept", "application/json").send().await
                 .map_err(|_| rejected("fetch failed"))?;
             if response.status()!=reqwest::StatusCode::OK { return Err(rejected("HTTP response rejected")); }
             let media_type = response.headers().get(CONTENT_TYPE).and_then(|v|v.to_str().ok())

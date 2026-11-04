@@ -374,7 +374,7 @@ impl StoragePlugin for BaasStoragePlugin {
         } else {
             format!("{}{}", self.cfg.endpoint.trim_end_matches('/'), self.cfg.health_probe_path)
         };
-        let resp = self.auth(self.http.get(&url)).send_traced().await;
+        let resp = self.auth(self.http.get(&url)).send().await;
         match resp {
             Ok(r) => {
                 let s = r.status().as_u16();

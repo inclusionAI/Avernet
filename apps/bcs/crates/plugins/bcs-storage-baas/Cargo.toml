@@ -22,5 +22,6 @@ chrono           = { workspace = true }
 percent-encoding = "2"
 
 [dev-dependencies]
+bcs-tracing-api = { workspace = true }
 tokio    = { workspace = true }
 wiremock = "0.6"

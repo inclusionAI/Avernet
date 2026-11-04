@@ -1,4 +1,3 @@
-use bcs_network_tracing::RequestBuilderExt;
 use std::{net::IpAddr, sync::Arc};
 
 use bcs_protocol::BCN_PROVIDER_ID_HEADER;
@@ -57,7 +56,7 @@ impl AdminInvocationTerminalObserver {
         let provider_id = run.provider_id;
         let run_id = run_id.to_string();
         let outbound_url_guard = self.outbound_url_guard.clone();
-        tokio::spawn(bcs_network_tracing::in_current_context(bcs_observability::in_current_context(async move {
+        tokio::spawn(bcs_observability::in_current_context(async move {
             let callback_url = callback_url_for_log(&callback.url);
             let guarded_url = match outbound_url_guard
                 .resolve_request_http_url(&callback.url)
@@ -103,7 +102,7 @@ impl AdminInvocationTerminalObserver {
                 .header(BCN_PROVIDER_ID_HEADER, provider_id)
                 .bearer_auth(callback.bearer_token)
                 .json(&body)
-                .send_traced()).await;
+                .send()).await;
             match response {
                 Ok(response) if response.status().is_success() => {
                     info!(run_id = %run_id, "organization admin terminal callback acknowledged")
@@ -115,7 +114,7 @@ impl AdminInvocationTerminalObserver {
                     warn!(request_id = %bcs_observability::CurrentRequestId, run_id = %run_id, error = %error, "organization admin terminal callback failed")
                 }
             }
-        })));
+        }));
     }
 }
 

@@ -1,12 +1,39 @@
 //! Network adapters for the optional tracing hook; existing clients own policy.
 use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo, with_context};
+use axum::extract::{MatchedPath, State};
 
 pub use bcs_tracing_api::in_current_context;
 pub use bcs_tracing_api::in_current_context_blocking;
 
+/// Composition supplies exact Axum route patterns, including configured probes.
+/// Unknown routes and CORS preflights never create a business trace.
+#[derive(Clone, Default)]
+pub struct HttpServerFilter {
+    excluded_routes: Vec<String>,
+}
+
+impl HttpServerFilter {
+    pub fn new(excluded_routes: impl IntoIterator<Item = String>) -> Self {
+        Self { excluded_routes: excluded_routes.into_iter().collect() }
+    }
+
+    fn includes(&self, request: &axum::extract::Request) -> bool {
+        let Some(route) = request.extensions().get::<MatchedPath>() else { return false; };
+        let preflight = request.method() == axum::http::Method::OPTIONS
+            && request.headers().contains_key("origin")
+            && request.headers().contains_key("access-control-request-method");
+        !preflight && !self.excluded_routes.iter().any(|path| path == route.as_str())
+    }
+}
+
 /// End at response headers. Do not buffer/consume streaming response bodies.
-pub async fn http_server(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+pub async fn http_server(State(filter): State<HttpServerFilter>, request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
     if !bcs_tracing_api::is_enabled() { return next.run(request).await; }
+    if !filter.includes(&request) {
+        // A probe may call a traced client internally. Suppress the entire
+        // excluded request so it cannot create standalone outbound records.
+        return bcs_tracing_api::with_provider(None, with_context(None, next.run(request))).await;
+    }
     let incoming = request.headers().iter().filter_map(|(name, value)| {
         value.to_str().ok().map(|value| (name.to_string(), value.to_owned()))
     }).collect();

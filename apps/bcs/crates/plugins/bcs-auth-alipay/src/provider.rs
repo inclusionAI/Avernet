@@ -1,6 +1,5 @@
 //! Alipay OAuth provider implementation.
 
-use bcs_network_tracing::RequestBuilderExt;
 use async_trait::async_trait;
 use bcs_auth_api::{OAuthError, OAuthProvider, OAuthToken, ProviderUserInfo};
 use std::collections::BTreeMap;
@@ -259,7 +258,7 @@ impl OAuthProvider for AlipayOAuthProvider {
             .http
             .post(Self::gateway_url())
             .form(&params)
-            .send_traced()
+            .send()
             .await
             .map_err(|e| OAuthError::TokenExchangeFailed(e.to_string()))?;
         let status = resp.status();
@@ -351,7 +350,7 @@ impl OAuthProvider for AlipayOAuthProvider {
             .http
             .post(Self::gateway_url())
             .form(&params)
-            .send_traced()
+            .send()
             .await
             .map_err(|e| OAuthError::UserInfoFailed(e.to_string()))?;
         let status = resp.status();

@@ -1,6 +1,5 @@
 //! Secure single-attempt Webhook delivery for public BCS Events.
 
-use bcs_network_tracing::RequestBuilderExt;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -154,7 +153,7 @@ impl WebhookClient {
             .post(guarded_url.as_str())
             .header(CONTENT_TYPE, "application/json; charset=utf-8")
             .body(request.body)
-            .send_traced()
+            .send()
             .await
         {
             Ok(response) => response,
