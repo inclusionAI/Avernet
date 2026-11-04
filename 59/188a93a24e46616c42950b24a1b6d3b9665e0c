@@ -1,0 +1,20 @@
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
+  s_37d6bf63656bc1::t_6ef14f0789d1de 188-194,197-198,202,205
+  s_37d6bf63656bc1::t_f8fee4c575fc7d 195-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "59188a93a24e46616c42950b24a1b6d3b9665e0c",
+  "prompts": {},
+  "sessions": {
+    "s_37d6bf63656bc1": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "aaf090ad-8871-4232-b4f2-85b2e25d1fb6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

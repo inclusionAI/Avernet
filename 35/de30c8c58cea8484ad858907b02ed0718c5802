@@ -1,0 +1,19 @@
+apps/bcs/crates/bootstrap/bcs/src/message_delivery_wiring.rs
+  s_875e3f9d4d0db3::t_33587bbef69218 262-266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35de30c8c58cea8484ad858907b02ed0718c5802",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
