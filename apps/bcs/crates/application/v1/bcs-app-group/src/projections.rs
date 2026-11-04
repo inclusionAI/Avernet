@@ -9,11 +9,18 @@ impl GroupServiceImpl {
         state_machine_override: Option<StateMachineConfiguration>,
     ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
-        let participants = group
+        let mut participants = group
             .participants
             .iter()
             .map(project_participant)
             .collect::<Vec<_>>();
+        // Detail keeps every control field and gains the avatar column from
+        // one batched display-profile read for this Group (design §5.3);
+        // read failures surface as service errors.
+        let avatars = self
+            .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
+            .await?;
+        avatar::apply_participant_avatars(&mut participants, &avatars);
         let common = DetailCommon {
             group_id: group.id.clone(),
             version: group.version,
@@ -178,11 +185,27 @@ impl GroupServiceImpl {
         target_bot_uuid: &str,
         membership: Membership,
     ) -> Result<GroupSummary, ApplicationError> {
+        // Design §5.2/§5.3: the lightweight rows' names are the stored
+        // membership snapshots (null allowed), so they must be extracted
+        // BEFORE the driver/peer name backfill mutates the member copies.
+        // The avatar column stays null here; the page orchestration fills it
+        // from one batched display-profile read.
+        let participants = avatar::participant_summaries(&group);
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let status = project_status(group.status);
         let visibility = project_visibility(&group.visibility)?;
         let originator_actor_id = group.originator().to_string();
         if group.group_kind == GroupKind::Dm {
+            // Mirror the detail projection's invariant (they share the
+            // exactly-2 DM membership contract): corrupted store rows must
+            // fail the read loudly instead of serializing a
+            // contract-violating summary page (bot-avatar plan Task 8).
+            if group.participants.len() != 2 {
+                return Err(ApplicationError::internal(format!(
+                    "DM Group '{}' does not contain exactly two participants",
+                    group.id
+                )));
+            }
             let peer_actor = group
                 .participants
                 .iter()
@@ -196,6 +219,7 @@ impl GroupServiceImpl {
                             actor_id: participant.bot_uuid.clone(),
                             actor_kind: participant.actor_kind,
                             name: participant.bot_name.clone(),
+                            avatar_url: None,
                         })
                 })
                 .flatten();
@@ -210,6 +234,7 @@ impl GroupServiceImpl {
                 originator_actor_id,
                 participant_count: group.participants.len(),
                 peer_actor,
+                participants,
                 human_mention_notify_mode: group.human_mention_notify_mode,
                 created_at: group.created_at,
                 updated_at: group.updated_at,
@@ -236,6 +261,7 @@ impl GroupServiceImpl {
             driver_bot_uuid: group.driver_bot,
             driver_bot_name,
             strategy: project_strategy(group.group_strategy),
+            participants,
             human_mention_notify_mode: group.human_mention_notify_mode,
             created_at: group.created_at,
             updated_at: group.updated_at,

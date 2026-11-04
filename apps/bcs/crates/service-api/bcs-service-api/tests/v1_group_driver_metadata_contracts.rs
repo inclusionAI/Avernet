@@ -6,7 +6,7 @@ fn legacy_summary() -> Value {
         "kind": "normal", "group_id": "group", "version": 1,
         "status": "active", "visibility": "public", "membership": "none",
         "originator_actor_id": "human_reader", "participant_count": 1,
-        "driver_bot_uuid": "driver", "strategy": "chat",
+        "driver_bot_uuid": "driver", "strategy": "chat", "participants": [],
         "human_mention_notify_mode": "all", "created_at": 1, "updated_at": 2
     })
 }

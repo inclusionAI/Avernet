@@ -17,6 +17,22 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
+- Admin onboard (`BotOnboarding`) applies an optional `AvatarChange`
+  together with the merged capabilities through the single existing-only
+  profile write (bot-avatar plan Task 5). BotCore applies the existing Provider
+  identity protection before that composite write: an omitted `agent_code`
+  retains the persisted parent, and an explicit reparent is rejected before
+  either capabilities or avatar can change. If identity validation rejects an
+  unavailable Bot, a strict repository read confirms absence before classifying
+  it as `Missing`; read failures propagate. A missing or soft-deleted target
+  — including one that slips away between the precheck and the write —
+  returns the legacy `onboarded=false` shape and persists no row. Independently
+  of that application-layer guard, the store implementations treat the runtime
+  AgentPass identity (`agent_code`/`agent_token`) as registry-owned: the
+  profile write covers profile fields only and preserves the live identity in
+  both the durable record and the in-memory publication (PR-3488 review — the
+  merged profile snapshot carries no credentials, and publishing it wholesale
+  would silently disable the Bot's outbound interceptor chain).
 
 ## Consumes
 

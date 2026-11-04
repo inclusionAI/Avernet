@@ -94,6 +94,7 @@ fn group_detail() -> GroupDetail {
             actor_id: "driver-bot".into(),
             actor_kind: ActorKind::Bot,
             name: Some("Driver".into()),
+            avatar_url: None,
             role: ParticipantRole::Driver,
             mode: ParticipantMode::Auto,
             tags: Vec::new(),

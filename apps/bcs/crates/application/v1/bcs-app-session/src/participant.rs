@@ -260,19 +260,11 @@ impl SessionServiceImpl {
                 }
             }
         }
-        match self
-            .backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
+        // The projection surfaces a missing-target 404 at the source and lets
+        // registry avatar read failures propagate as Internal errors, so no
+        // error remapping is needed here: a failure after the committed
+        // update must never masquerade as `participant_not_found`.
+        self.backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
             .await
-        {
-            Ok(participant) => Ok(participant),
-            Err(ApplicationError::Internal(_)) => Err(ApplicationError::not_found(
-                "participant_not_found",
-                format!(
-                    "Participant '{}' not found in Session '{}'",
-                    command.bot_uuid, command.session_id
-                ),
-            )),
-            Err(other) => Err(other),
-        }
     }
 }

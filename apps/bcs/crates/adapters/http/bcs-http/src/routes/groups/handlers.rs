@@ -114,7 +114,10 @@ pub async fn patch_group(
         })
         .await
     {
-        Ok(group) => Json(group).into_response(),
+        // Legacy PATCH responses keep the pre-avatar wire shape: the shared
+        // V1 GroupDetail exits through the legacy projection (bot-avatar
+        // plan design §5.1).
+        Ok(group) => Json(v1_group_detail_to_legacy_update_json(group)).into_response(),
         Err(error) => group_application_error_response(error),
     }
 }

@@ -43,3 +43,7 @@ bcs-organization-store = { workspace = true }
 bcs-domain = { workspace = true }
 tokio-test = "0.4"
 tempfile = { workspace = true }
+# The bot_profile integration test mounts the committed SQLite migration
+# chain (bootstrap_migrations), whose version checksums need these helpers.
+hex = { workspace = true }
+sha2 = { workspace = true }

@@ -12,6 +12,8 @@ use crate::{ServiceResult, TaskModeMatch};
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
 use super::v1::UserVisibility;
 
+use crate::types::bot_profile::AvatarChange;
+
 /// Default lifetime for an HTTP Provider `chat.send` callback correlation.
 pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
 
@@ -104,6 +106,12 @@ pub struct RegisterProviderBotCommand {
     pub bot_uuid: Option<String>,
     pub reject_existing_bot_uuid: bool,
     pub connection_mode: ProviderBotConnectionMode,
+    /// Avatar transition for the record's dedicated avatar field
+    /// (bot-avatar plan Task 5). The registration applies it through the
+    /// existing-only avatar write after the Bot and ownership init
+    /// succeed; `Keep` (the wire field omitted) adds no write. It is not
+    /// part of the internal registration protocol.
+    pub avatar: AvatarChange,
 }
 
 #[derive(Debug, Clone)]

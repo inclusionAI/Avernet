@@ -33,3 +33,4 @@ bcs-test-support = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
 secrecy = { workspace = true }
+tempfile = { workspace = true }

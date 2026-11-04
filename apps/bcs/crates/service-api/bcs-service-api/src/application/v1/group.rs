@@ -92,6 +92,10 @@ pub struct Actor {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when unavailable. Human actors always
+    /// resolve null (bot-avatar plan design §5.1).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,11 +104,31 @@ pub struct Participant {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when the participant has none. Human
+    /// participants resolve null and retained members of soft-deleted Bots
+    /// keep their stored face (design §5.2/§5.3).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: ParticipantRole,
     pub mode: ParticipantMode,
     pub message_view_scope: MessageViewScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Lightweight participant row for the V1 list summaries (bot-avatar plan
+/// design §5.2): identity plus the two nullable display fields. `name` is the
+/// Group-membership snapshot verbatim (may be null) and is never backfilled
+/// from the registry; the detail-only control fields (role, mode,
+/// message_view_scope, tags) are intentionally absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantSummary {
+    pub actor_id: String,
+    pub actor_kind: ActorKind,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +157,10 @@ pub struct NormalGroupSummary {
     #[serde(default)]
     pub driver_bot_name: Option<String>,
     pub strategy: GroupStrategy,
+    /// Lightweight summaries of every stored member in stored order, with the
+    /// membership name snapshot and the current Bot avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
@@ -153,6 +181,10 @@ pub struct DirectMessageGroupSummary {
     pub participant_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_actor: Option<Actor>,
+    /// Lightweight summaries of every stored member in stored order, with the
+    /// membership name snapshot and the current Bot avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,

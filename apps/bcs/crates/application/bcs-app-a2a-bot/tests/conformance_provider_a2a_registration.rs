@@ -10,6 +10,7 @@ use bcs_service_api::{ProviderCredential, ProviderCredentialRepoPort, ProviderCo
 use bcs_service_api::application::a2a_bot::A2aBotManagementService;
 use bcs_service_api::port::{a2a_card::{A2aCardPort, ValidatedA2aCard}, repo::a2a_bot::*};
 use bcs_service_api::types::a2a_bot::A2aRegistrationCard;
+use bcs_service_api::types::bot_profile::AvatarChange;
 use bcs_service_api::port::repo::BotAuthorityRepoPort;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_test_support::contract::bot_registration_chain::{registration_chain, RegistrationChain,
@@ -44,11 +45,15 @@ fn command() -> RegisterProviderBotCommand {
     RegisterProviderBotCommand {provider_id:"provider-a".into(),provider_admin_token:"test-admin".into(),
         name:"A2A Provider Bot".into(),provider_bot_ref:"remote".into(),owners:vec!["delegated-owner".into()],
         webhook_url:None,summary:None,domains:vec![],skills:vec![],scopes:vec![],bot_uuid:None,
-        reject_existing_bot_uuid:false,connection_mode:ProviderBotConnectionMode::Gateway}
+        reject_existing_bot_uuid:false,connection_mode:ProviderBotConnectionMode::Gateway,
+        avatar:AvatarChange::Keep}
 }
 async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aProviderRegistrationCore>) {
     let chain=registration_chain().await;
     for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
+        chain.db.execute(DbStatement::new(sql)).await.unwrap();
+    }
+    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/040_bot_avatar.sql")) {
         chain.db.execute(DbStatement::new(sql)).await.unwrap();
     }
     chain.db.execute(DbStatement::with_params("UPDATE bcs_providers SET config=? WHERE provider_id='provider-a'",
@@ -64,7 +69,8 @@ async fn fixture() -> (RegistrationChain,A2aBotManagement,Arc<Fetcher>,Arc<A2aPr
     let registration=Arc::new(A2aProviderRegistrationCore::new(providers.clone(),chain.provider_repo.clone()));
     let fetcher=Arc::new(Fetcher {calls:AtomicUsize::new(0),fail:AtomicBool::new(false),providers:providers.clone(),revoke:AtomicBool::new(false),
         parallel:AtomicBool::new(false),barrier:tokio::sync::Barrier::new(2)});
-    (chain,A2aBotManagement::new(providers,core,fetcher.clone()).with_registration(registration.clone()),fetcher,registration)
+    let service=A2aBotManagement::new(providers,core,fetcher.clone()).with_registration(registration.clone(),chain.registry_core.clone());
+    (chain,service,fetcher,registration)
 }
 async fn assert_empty(chain:&RegistrationChain) {
     for table in ["bcs_bots","bcs_provider_bot_bindings","edge_grants","permission_profiles","bot_authority_changes"] {
@@ -218,5 +224,86 @@ async fn card_url_registration_can_also_default_name_and_preserves_explicit_alia
         assert_eq!(fetcher.calls.load(Ordering::SeqCst),1);
         let saved=DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()).get(&created.bot_uuid).await.unwrap().unwrap();
         assert_eq!(saved.agent_card["name"],"Remote");
+    }
+}
+
+fn card_sources() -> [A2aCardSource; 2] {
+    ["https://example.org/card.json".into(), A2aCardSource::Inline(validated().raw)]
+}
+
+async fn stored_avatar(chain: &RegistrationChain, bot: &str) -> Option<String> {
+    let rows=chain.db.query(DbStatement::with_params("SELECT avatar_url FROM bcs_bots WHERE bot_uuid=?",
+        vec![bot.into()])).await.unwrap();
+    assert_eq!(rows.len(),1);
+    rows[0].get_string("avatar_url").unwrap()
+}
+
+#[tokio::test]
+async fn registration_applies_avatar_set_for_url_and_inline_cards() {
+    for source in card_sources() {
+        let (chain,service,_,_)=fixture().await;
+        let mut command=command();command.avatar=AvatarChange::Set("https://example.org/avatar.png".into());
+        let created=service.register_provider_bot(command,source,1000).await.unwrap();
+        assert_eq!(stored_avatar(&chain,&created.bot_uuid).await.as_deref(),Some("https://example.org/avatar.png"));
+        assert_delegated_owner(&chain,&created.bot_uuid).await;
+    }
+}
+
+#[tokio::test]
+async fn registration_applies_avatar_clear_for_url_and_inline_cards() {
+    for source in card_sources() {
+        let (chain,service,_,_)=fixture().await;
+        chain.db.execute(DbStatement::new("CREATE TRIGGER seed_avatar AFTER INSERT ON bcs_bots BEGIN UPDATE bcs_bots SET avatar_url='https://example.org/seed.png' WHERE bot_uuid=NEW.bot_uuid AND env=NEW.env; END")).await.unwrap();
+        let mut command=command();command.avatar=AvatarChange::Clear;
+        let created=service.register_provider_bot(command,source,1000).await.unwrap();
+        assert_eq!(stored_avatar(&chain,&created.bot_uuid).await,None);
+        assert_delegated_owner(&chain,&created.bot_uuid).await;
+    }
+}
+
+#[tokio::test]
+async fn registration_avatar_keep_never_writes_for_url_and_inline_cards() {
+    for source in card_sources() {
+        let (chain,service,_,_)=fixture().await;
+        chain.db.execute(DbStatement::new("CREATE TRIGGER seed_avatar AFTER INSERT ON bcs_bots BEGIN UPDATE bcs_bots SET avatar_url='https://example.org/seed.png' WHERE bot_uuid=NEW.bot_uuid AND env=NEW.env; END")).await.unwrap();
+        // Seeding may write, but the application must not issue any avatar update.
+        chain.db.execute(DbStatement::new("CREATE TRIGGER reject_avatar_write BEFORE UPDATE OF avatar_url ON bcs_bots WHEN OLD.avatar_url IS NOT NULL BEGIN SELECT RAISE(ABORT, 'unexpected avatar write'); END")).await.unwrap();
+        let created=service.register_provider_bot(command(),source,1000).await.unwrap();
+        assert_eq!(stored_avatar(&chain,&created.bot_uuid).await.as_deref(),Some("https://example.org/seed.png"));
+    }
+}
+
+#[tokio::test]
+async fn registration_avatar_write_failure_propagates_after_card_and_owner_commit() {
+    for source in card_sources() {
+        let (chain,service,_,_)=fixture().await;
+        chain.db.execute(DbStatement::new("CREATE TRIGGER reject_avatar_write BEFORE UPDATE OF avatar_url ON bcs_bots BEGIN SELECT RAISE(ABORT, 'avatar write failure'); END")).await.unwrap();
+        let mut command=command();command.bot_uuid=Some("avatar-failure".into());
+        command.avatar=AvatarChange::Set("https://example.org/avatar.png".into());
+        assert!(service.register_provider_bot(command,source,1000).await.is_err(),"avatar failures must not report success");
+        assert_eq!(stored_avatar(&chain,"avatar-failure").await,None);
+        assert_delegated_owner(&chain,"avatar-failure").await;
+        assert!(committed_profile(&chain,"avatar-failure").await.is_some());
+        assert!(DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()).get("avatar-failure").await.unwrap().is_some());
+    }
+}
+
+#[tokio::test]
+async fn registration_missing_avatar_target_returns_bot_not_found_without_resurrection() {
+    for source in card_sources() {
+        let (chain,service,_,_)=fixture().await;
+        chain.db.execute(DbStatement::new("CREATE TRIGGER tombstone_after_card AFTER UPDATE OF agent_card ON bcs_bots BEGIN UPDATE bcs_bots SET is_deleted=1 WHERE bot_uuid=NEW.bot_uuid AND env=NEW.env; END")).await.unwrap();
+        let mut command=command();command.bot_uuid=Some("avatar-missing".into());command.avatar=AvatarChange::Clear;
+        assert!(matches!(service.register_provider_bot(command,source,1000).await,
+            Err(ServiceError::BotNotFound(bot)) if bot=="avatar-missing"));
+        let rows=chain.db.query(DbStatement::new("SELECT is_deleted FROM bcs_bots WHERE bot_uuid='avatar-missing'")).await.unwrap();
+        assert_eq!(rows.len(),1);assert_eq!(rows[0].get_i64("is_deleted").unwrap(),Some(1));
+        assert_eq!(stored_avatar(&chain,"avatar-missing").await,None);
+        // Authority reads hide tombstoned Bots; inspect retained transaction rows.
+        for sql in ["SELECT COUNT(*) AS n FROM edge_grants WHERE to_id='avatar-missing' AND from_id='human_delegated-owner' AND grant_kind='owner'",
+            "SELECT COUNT(*) AS n FROM permission_profiles WHERE bot_id='avatar-missing'"] {
+            let rows=chain.db.query(DbStatement::new(sql)).await.unwrap();
+            assert_eq!(rows[0].get_i64("n").unwrap(),Some(1));
+        }
     }
 }
