@@ -107,7 +107,9 @@ export function buildVersionColumns(viewDiff: (v: EvolutionVersion) => void): Da
       header: '操作',
       width: COLUMN_WIDTHS[8],
       align: 'end',
-      className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
+      // 恒定不透明底(bg-card)挡住横向滚动到其下方的内容;hover 蒙层走 before 叠加而非替换背景色。
+      className:
+        "sticky right-0 z-10 bg-card before:pointer-events-none before:absolute before:inset-0 before:content-[''] before:-z-10 group-hover:before:bg-muted/40",
       headerClassName: 'sticky right-0 z-10 bg-muted/50',
       cell: (v) => (
         <div onClick={(e) => e.stopPropagation()}>

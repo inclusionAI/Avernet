@@ -52,6 +52,7 @@ function buildVm(overrides: Partial<BotCatalogViewModel> = {}): BotCatalogViewMo
     closeProfile: jest.fn(),
     selectedBotId: null,
     botProfile: null,
+    botProfileError: null,
     detailLoading: false,
     copyBotId: jest.fn(),
     ...overrides,

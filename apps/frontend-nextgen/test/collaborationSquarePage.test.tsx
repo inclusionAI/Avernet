@@ -164,16 +164,17 @@ describe('collaboration square accessible UI', () => {
     expect((groupHtml.match(/h-8 w-8 rounded-lg/g) ?? [])).toHaveLength(2);
 
     const botHtml = renderToStaticMarkup(<SquareBotCardSkeleton />);
-    // 40px 圆角头像位 + 沿用真实卡面双层软阴影（避免加载完成时阴影 pop）。
+    // 40px 圆角头像位 + 与真实卡一致的描边静止态（无静态阴影，hover 才出）。
     expect(botHtml).toContain('h-10 w-10');
-    expect(botHtml).toContain('rgba(0,10,26,0.07)');
+    expect(botHtml).toContain('border-divider');
+    expect(botHtml).not.toContain('rgba(0,10,26,0.07)');
   });
 
   test('详情和成员弹层只渲染公开信息', () => {
     const botHtml = renderWithPortals(
       <BotProfileModal
         open
-        profile={{ ...bot, engine: 'OpenClaw', capabilities: [{ id: 'c1', name: '需求分析' }] }}
+        profile={{ ...bot, engine: 'OpenClaw', capabilities: [{ id: 'c1', name: '需求分析' }], skills: [] }}
         loading={false}
         onClose={jest.fn()}
         onCopyId={jest.fn()}
@@ -189,7 +190,7 @@ describe('collaboration square accessible UI', () => {
     const uuidProfileHtml = renderWithPortals(
       <BotProfileModal
         open
-        profile={{ ...botWithUuid, engine: 'OpenClaw', capabilities: [] }}
+        profile={{ ...botWithUuid, engine: 'OpenClaw', capabilities: [], skills: [] }}
         loading={false}
         onClose={jest.fn()}
         onCopyId={jest.fn()}

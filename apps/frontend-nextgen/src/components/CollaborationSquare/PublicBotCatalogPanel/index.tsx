@@ -71,6 +71,9 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
   const requestTarget = pendingBot && canRequest(pendingBot) ? pendingBot : null;
   // 申请弹窗详情（引擎 chip 与已公开能力）与画像弹窗共用 store 状态；按 selectedBotId 对齐后才可用。
   const requestProfile = requestTarget && vm.selectedBotId === requestTarget.id ? vm.botProfile : null;
+  // 画像拉取中（弹窗内 shimmer 占位）；失败原因改在弹窗内提示（不 toast），同口径按 selectedBotId 归口。
+  const requestProfileLoading = requestTarget && vm.selectedBotId === requestTarget.id ? vm.detailLoading : false;
+  const requestProfileError = requestTarget && vm.selectedBotId === requestTarget.id ? vm.botProfileError : null;
   const closeRequestDialog = () => {
     setPending(null);
     vm.closeProfile();
@@ -175,7 +178,8 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         <FriendRequestDialog
           bot={requestTarget}
           profile={requestProfile}
-          loading={vm.detailLoading}
+          profileLoading={requestProfileLoading}
+          profileError={requestProfileError}
           onClose={closeRequestDialog}
           onSendRequest={() => {
             closeRequestDialog();
@@ -187,6 +191,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         open={Boolean(vm.selectedBotId) && !requestTarget}
         profile={vm.botProfile}
         loading={vm.detailLoading}
+        error={vm.botProfileError}
         onClose={vm.closeProfile}
         onCopyId={(id) => vm.copyBotId(id)}
       />
