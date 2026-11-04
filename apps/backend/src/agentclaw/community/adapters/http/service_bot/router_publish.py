@@ -1212,7 +1212,7 @@ async def retry_publish(
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except PublishFlowServiceError as e:
-        logger.error(f"[retry_publish] Flow error: {e}")
+        logger.warning(f"[retry_publish] Flow error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except Exception as e:
@@ -1289,7 +1289,7 @@ async def retry_publish_for_others(
         return ApiResponse(success=False, message=str(e), error_code=404, data=None)
 
     except PublishFlowServiceError as e:
-        logger.error(f"[retry_publish_for_others] Flow error: {e}")
+        logger.warning(f"[retry_publish_for_others] Flow error: {e}")
         return ApiResponse(success=False, message=str(e), error_code=400, data=None)
 
     except Exception as e:
