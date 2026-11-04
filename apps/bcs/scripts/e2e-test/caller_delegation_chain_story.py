@@ -1,25 +1,12 @@
 #!/usr/bin/env python3
-"""Caller parent → caller worker delegation, end to end over live HTTP (P5.9).
+"""Human → Owner Manager → Caller Worker over the live Provider boundary.
 
-The P2 delegation pipe (`caller_dispatch_pipeline/delegate.rs`) previously
-had NO live e2e drive: the owner-mode relay story pins only the fail-closed
-boundary (an owner-mode parent never holds a root lineage). This story
-drives the ACCEPTED deep path — the stage liveness retrofit's delegate
-counterparts (spec 2026-11-03) executing on a real wire:
-
-- a HUMAN leases the caller group and speaks: queue admission claims the
-  one-shot handoff, the protected dispatch rides the root wire toward the
-  caller-enabled manager and registers the ROOT LINEAGE at Accepted;
-- the manager's run stays live (never answered final): while its managed
-  delivery is Running, the manager's chat.final carries the v2
-  `bcs_assign_task` coordination frame — the trusted parent echo minting
-  the delegated row toward the second caller-enabled worker;
-- the delegate dispatch rides the protected wire with the ROOT's delegated
-  identity: the Provider must see a second `chat.send` carrying
-  caller_context for the worker, produced by the delegate pipeline's
-  ensure/issue/commit/send stages (the exact lines e2e never reached);
-- the delegate's execution token is its own (parent-attempt bound), and
-  the worker's reply lands in session history from both rides.
+A leased human message gives the ordinary Manager run a delegation-only
+lineage, not a Caller execution token. A matched tool start/result pair on
+that live run assigns work through the supported inline v1 contract. The
+Worker must receive a new protected dispatch and return its result through
+the existing callback and delivery-status APIs. No fabricated v2 stored-intent
+receipt, internal store mutation or test-only production entrypoint is used.
 """
 from __future__ import annotations
 
@@ -63,7 +50,7 @@ class DelegationChainStory:
     def post(self, path, body=None, **kwargs):
         return self.request(path, body, method="POST", **kwargs)
 
-    def wait(self, description, read, predicate, attempts=240, delay=0.5):
+    def wait(self, description, read, predicate, attempts=150, delay=0.2):
         for _ in range(attempts):
             value = read()
             if predicate(value):
@@ -76,11 +63,8 @@ class DelegationChainStory:
     def setup(self) -> None:
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
-        # The provider MUST declare caller_capabilities with ensure routing:
-        # the singlebox assembly wires provider_core, and without the
-        # declaration the capability read inside CallerContainerPreparation
-        # converges IsolationMismatch — silently, which is exactly how the
-        # 2026-11-04 CI run lost every protected ride at preparation.
+        # Capability discovery is part of real container preparation, not
+        # supplied by a test-only composition root.
         self.provider = self.post("/providers", {
             "name": "Delegation chain provider",
             "webhook_url": self.args.mock_url + "/provider/webhook",
@@ -98,7 +82,7 @@ class DelegationChainStory:
         })
         headers = {"Authorization": "Bearer " + self.provider["provider_admin_token"]}
         self.manager = self.post(f"/providers/{segment(self.provider['provider_id'])}/bots", {
-            "name": "Delegating manager", "summary": "Caller-enabled delegating parent",
+            "name": "Delegating manager", "summary": "Owner-mode delegating parent",
             "owners": [self.args.human],
             "provider_bot_ref": "delegation-manager-" + uuid.uuid4().hex,
         }, headers=headers)
@@ -108,16 +92,14 @@ class DelegationChainStory:
             "provider_bot_ref": "delegation-worker-" + uuid.uuid4().hex,
             "domains": ["caller"], "skills": ["dispatch"], "scopes": ["local"],
         }, headers=headers)
-        # BOTH ends are caller-enabled: the manager rides the root protected
-        # dispatch (registering the root lineage at Accepted), and the worker
-        # is delegated onto with Execution purpose — its delegate dispatch
-        # ensures the worker's caller container (spec §8.3 per-target read).
-        for ref in (self.manager["provider_bot_ref"], self.worker["provider_bot_ref"]):
-            path = (f"/providers/{segment(self.provider['provider_id'])}"
-                    f"/bots/{segment(ref)}/caller")
-            applied = self.request(path, {"snapshot": {"source_revision": 1,
-                "caller_identity": {"enabled": True}}}, method="PATCH", headers=headers)
-            assert applied["sync_status"] == "applied", applied
+        # The Owner manager retains an ordinary callback-streaming run.
+        # Only the Worker opts into Caller; the human lease supplies the
+        # delegation-only lineage at the Manager's ordinary send-start.
+        path = (f"/providers/{segment(self.provider['provider_id'])}"
+                f"/bots/{segment(self.worker['provider_bot_ref'])}/caller")
+        applied = self.request(path, {"snapshot": {"source_revision": 1,
+            "caller_identity": {"enabled": True}}}, method="PATCH", headers=headers)
+        assert applied["sync_status"] == "applied", applied
         for bot in (self.manager, self.worker):
             self.request(f"/bots/{segment(bot['bot_uuid'])}/visibility",
                          {"visibility": "public"}, method="PUT")
@@ -130,6 +112,7 @@ class DelegationChainStory:
         enforced = json.loads(json.dumps(current["policy"]))
         enforced["flow_enabled"]["group"] = True
         enforced["flow_enabled"]["system"] = True
+        enforced["flow_enabled"]["task"] = True
         enforced["defaults"]["mode"] = "enforce"
         enforced["defaults"]["max_running"] = 8
         body = {"expected_version": current["version"], "policy": enforced}
@@ -149,38 +132,71 @@ class DelegationChainStory:
 
     # ----------------------------------------------------------------- run
 
-    def reply_chat_final(self, run_id: str, text: str, headers: dict) -> dict:
-        response = None
-        for _ in range(6):
-            response = self.post("/bot/events", {
-                "run_id": run_id, "state": "final", "group_id": self.group_id,
-                "bcs_session_id": self.session_id,
-                "message": {"text": text},
-            }, headers=headers)
+    def provider_event(self, body, headers):
+        # The mock records the request before BCS consumes the JSON ACK.
+        # Retry only the explicit negotiation conflict, never a missing run.
+        for _ in range(60):
+            try:
+                response = self.post("/bot/events", body, headers=headers)
+            except urllib.error.HTTPError as error:
+                response = json.loads(error.read())
+                if error.code != 409 or response.get("error") != "transport_conflict":
+                    raise AssertionError(f"Provider callback failed: {error.code} {response}") from error
             if response.get("error") != "transport_conflict":
+                assert not response.get("error"), response
                 return response
-            time.sleep(1)
-        return response
+            time.sleep(0.1)
+        raise AssertionError("Provider callback transport negotiation timed out")
+
+    def reply_chat_final(self, run_id: str, text: str, headers: dict) -> dict:
+        return self.provider_event({
+            "run_id": run_id, "state": "final", "group_id": self.group_id,
+            "bcs_session_id": self.session_id, "message": {"text": text},
+        }, headers)
 
     def run(self) -> None:
-        self.setup()
-        group = self.post("/groups", {
-            "label": "Caller delegation chain",
-            "driver_bot": self.manager["bot_uuid"],
-            "participants": [{"bot_uuid": actor}
-                             for actor in (self.manager["bot_uuid"],
-                                          self.worker["bot_uuid"],
-                                          "human_" + self.args.human)],
-        })
-        self.group_id, self.session_id = group["id"], group["session_id"]
-        assert self.session_id, group
-        socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
-                                        self.group_id, self.session_id)
+        socket_client = None
         try:
+            self.setup()
+            group = self.post("/groups", {
+                "label": "Caller delegation chain",
+                "driver_bot": self.manager["bot_uuid"],
+                "group_strategy": "manager_worker",
+                "create_initial_session": False,
+                "participants": [
+                    {"bot_uuid": self.manager["bot_uuid"], "role": "manager"},
+                    {"bot_uuid": self.worker["bot_uuid"], "role": "worker"},
+                    {"bot_uuid": "human_" + self.args.human, "role": "observer"},
+                ],
+            })
+            self.group_id = group["id"]
+            session = self.post(f"/groups/{segment(self.group_id)}/sessions",
+                                {"group_context_delivery": "inject"})
+            self.session_id = session["id"]
+            assert self.session_id, session
+            socket_client = WorkbenchSocket(self.args.base_url, self.args.human,
+                                            self.group_id, self.session_id)
             connect = socket_client.receive(socket_client.connect_id)
             assert connect.get("ok") is True, connect
 
-            # ---- Root protected ride: claim the handoff, ride the wire. ----
+            # Finish the system-context run first: a Bot/Session lane is
+            # serialized even when the Bot's global max_running exceeds one.
+            provider_headers = {
+                "X-BCN-Provider-Id": self.provider["provider_id"],
+                "Authorization": "Bearer " + self.manager["bot_runtime_token"],
+            }
+            initial = self.wait("manager session initialization",
+                lambda: self.request("/control/provider/requests", mock=True)["requests"],
+                lambda items: any(item["body"].get("method") == "chat.send"
+                    and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
+                    == self.manager["provider_bot_ref"] for item in items))
+            initial_ride = next(item for item in initial
+                if item["body"].get("method") == "chat.send"
+                and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
+                == self.manager["provider_bot_ref"])
+            self.reply_chat_final(initial_ride["body"]["id"], "manager ready", provider_headers)
+
+            # Lease admission parks the identity for the ordinary Manager.
             socket_client.send({"type": "req", "id": "dc-lease", "method": "lease.acquire",
                                 "params": {"groupId": self.group_id}})
             acquired = socket_client.receive("dc-lease")
@@ -197,51 +213,44 @@ class DelegationChainStory:
                                            "leaseEpoch": lease["epoch"]}})
             admitted = socket_client.receive("dc-speak")
             assert admitted.get("ok") is True, admitted
-            rides = self.wait("manager root protected ride",
+            rides = self.wait("manager ordinary ride",
                               lambda: self.request("/control/provider/requests", mock=True)["requests"],
                               lambda items: any(
                                   item["body"].get("method") == "chat.send"
-                                  and (item["body"].get("extensions") or {}).get("caller_context")
+                                  and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
+                                  == self.manager["provider_bot_ref"]
                                   and "delegate this onward" in json.dumps(item["body"])
                                   for item in items))
             root_ride = next(item for item in rides
                              if item["body"].get("method") == "chat.send"
-                             and (item["body"].get("extensions") or {}).get("caller_context")
+                             and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
+                             == self.manager["provider_bot_ref"]
                              and "delegate this onward" in json.dumps(item["body"]))
-            root_delivery_id = root_ride["body"]["id"]
-            print("  root protected ride reached the manager provider wire", flush=True)
+            parent_run_id = root_ride["body"]["id"]
+            assert not (root_ride["body"].get("extensions") or {}).get("caller_execution_token")
+            print("  ordinary Manager ride reached the provider; no Caller token exposed", flush=True)
 
-            # ---- Delegation: the LIVE parent run emits the tool-call echo. ----
-            # The mint channel is the agent tool-event pair (bot_event.rs
-            # `tool_event_phase`): a `stream:"tool"` phase=start caches the
-            # tool name, then phase=result carries the v2 bcs_assign_task frame
-            # in `result` — the run stays Running (tool events are
-            # non-terminal), so claim_and_dispatch's liveness window and
-            # prepare_assignment's validate_parent both pass: the registered
-            # root lineage plus the live BotRunContext mint the delegated row
-            # toward the caller-enabled worker.
-            intent_id = "bcs_intent_" + uuid.uuid4().hex
+            # A v1 inline receipt is the supported public contract when
+            # there is no external MCP intent store. Keep the result nameless:
+            # authorization must use the matching start's cached tool name.
             tool_call_id = "toolu_" + uuid.uuid4().hex
             frame = json.dumps({
-                "__bcs_coordination__": True, "v": 2, "tool": "bcs_assign_task",
-                "intent_id": intent_id, "status": "stored",
-                "message": "worker handles the delegated leg",
-                "timeout_s": 120,
+                "__bcs_coordination__": True, "v": 1, "tool": "bcs_assign_task",
+                "status": "received", "arguments": {
+                    "target_bot": self.worker["bot_uuid"],
+                    "message": "worker handles the delegated leg", "timeout_s": 120,
+                },
             })
-            provider_headers = {
-                "X-BCN-Provider-Id": self.provider["provider_id"],
-                "Authorization": "Bearer " + self.manager["bot_runtime_token"],
-            }
-            start = self.post("/bot/events", {
-                "run_id": root_delivery_id, "group_id": self.group_id,
+            start = self.provider_event({
+                "run_id": parent_run_id, "group_id": self.group_id,
                 "bcs_session_id": self.session_id, "event": "agent",
                 "payload": {"stream": "tool", "data": {
-                    "phase": "start", "toolCallId": tool_call_id, "name": "bcs_assign_task",
+                    "phase": "start", "toolCallId": tool_call_id, "name": "exec",
                 }},
             }, headers=provider_headers)
             assert not start.get("error"), start
-            result = self.post("/bot/events", {
-                "run_id": root_delivery_id, "group_id": self.group_id,
+            result = self.provider_event({
+                "run_id": parent_run_id, "group_id": self.group_id,
                 "bcs_session_id": self.session_id, "event": "agent",
                 "payload": {"stream": "tool", "data": {
                     "phase": "result", "toolCallId": tool_call_id,
@@ -250,7 +259,7 @@ class DelegationChainStory:
             }, headers=provider_headers)
             assert not result.get("error"), result
             # Keep the parent run alive until the delegated row settles; the
-            # final answer settles the root run (and frees the managed lease)
+            # final answer settles the root run (and frees the managed lane)
             # only after the worker's protected ride is observed below.
 
             # ---- The delegate dispatch rides the protected wire. ----
@@ -258,19 +267,37 @@ class DelegationChainStory:
                 body = item["body"]
                 to_ref = (body.get("to_bot") or {}).get("provider_bot_ref", "")
                 return (body.get("method") == "chat.send"
-                        and to_ref.startswith("delegation-worker")
+                        and to_ref == self.worker["provider_bot_ref"]
                         and (body.get("extensions") or {}).get("caller_context"))
             delegated = self.wait("delegated protected ride toward the worker",
                                   lambda: self.request("/control/provider/requests", mock=True)["requests"],
                                   lambda items: any(is_worker_ride(item) for item in items))
             ride = next(item for item in delegated if is_worker_ride(item))
             token = ride["body"]["extensions"]["caller_execution_token"]
-            assert token["format"] == "jwt" and token["token"], token
-            # The delegated proof is its OWN issuance (DelegationOnly/Execution
-            # bounded by the root lineage window) — never the parent's token.
+            assert token["format"] == "jwt" and token["token"], "Worker proof is missing"
+            body = ride["body"]
+            assert body["id"] != parent_run_id, "Child must have an independent run"
+            assert body["session_id"] == self.session_id
+            assert ride["authorization"] == "Bearer " + self.provider["bcs_to_provider_token"]
+            assert "worker handles the delegated leg" in json.dumps(body["message"])
+            assert token["token"] not in json.dumps(body["message"]), "Proof leaked into model input"
+            ensures = [item for item in delegated[:delegated.index(ride)]
+                       if item["body"].get("method") == "caller.container.ensure"
+                       and (item["body"].get("to_bot") or {}).get("provider_bot_ref")
+                       == self.worker["provider_bot_ref"]]
+            assert len(ensures) == 1, "Worker ensure must precede the protected send exactly once"
+            ensure = ensures[0]["body"]
+            assert ensure["session_id"] == self.session_id
+            binding = ensure["extensions"]["run"]
+            assert binding["run_id"] == body["id"]
+            assert binding["parent_run_id"] == parent_run_id
+            assert binding["root_run_id"] == parent_run_id
+            assert ensure["extensions"]["bot_id"] == self.worker["bot_uuid"]
+            assert ensure["extensions"]["caller_subject"] == body["extensions"]["caller_context"]["subject"]
             print("  delegated protected ride reached the worker provider wire", flush=True)
 
-            # Answer both legs so the session history carries the pair.
+            # Complete the Worker through its authenticated callback, then
+            # free the Manager's lane for the independent TaskResult delivery.
             self.post("/control/provider/clear", mock=True)
             answer_headers = {
                 "X-BCN-Provider-Id": self.provider["provider_id"],
@@ -278,15 +305,27 @@ class DelegationChainStory:
             }
             self.reply_chat_final(ride["body"]["id"], "worker finished the delegated leg",
                                   answer_headers)
-            history = self.wait("both rides in session history",
-                                lambda: self.request(f"/sessions/{segment(self.session_id)}/messages"),
-                                lambda messages: (
-                                    any("delegate this onward" in json.dumps(message)
-                                        for message in messages)
-                                    and any("worker finished the delegated leg"
-                                            in json.dumps(message)
-                                            for message in messages)))
-            assert history, history
+            deliveries_path = ("/openapi/v1/collaboration/messages/"
+                               + segment(binding["message_turn_id"]) + "/deliveries?session_id="
+                               + segment(self.session_id))
+            self.wait("completed Worker delivery", lambda: self.request(deliveries_path),
+                      lambda rows: any(row["target_bot_id"] == self.worker["bot_uuid"]
+                                       and row["status"] == "completed" for row in rows))
+            self.reply_chat_final(parent_run_id, "manager delegated the work", provider_headers)
+            def is_result_ride(item):
+                body = item["body"]
+                return (body.get("method") == "chat.send"
+                        and (body.get("to_bot") or {}).get("provider_bot_ref")
+                        == self.manager["provider_bot_ref"]
+                        and "worker finished the delegated leg" in json.dumps(body.get("message")))
+            results = self.wait("Worker result delivered to Manager",
+                                lambda: self.request("/control/provider/requests", mock=True)["requests"],
+                                lambda items: any(is_result_ride(item) for item in items))
+            result_ride = next(item for item in results if is_result_ride(item))
+            assert result_ride["body"]["session_id"] == self.session_id
+            assert not (result_ride["body"].get("extensions") or {}).get("caller_execution_token")
+            self.reply_chat_final(result_ride["body"]["id"], "manager finished delegated work",
+                                  provider_headers)
 
             socket_client.send({"type": "req", "id": "dc-release", "method": "lease.release",
                                 "params": {"groupId": self.group_id,
@@ -295,7 +334,11 @@ class DelegationChainStory:
             released = socket_client.receive("dc-release")
             assert released.get("ok") is True, released
         finally:
-            socket_client.close()
+            if socket_client:
+                try:
+                    socket_client.close()
+                except OSError:
+                    socket_client.conn.close()
             self.restore_delivery_policy()
             if self.group_id and self.manager:
                 try:
@@ -303,8 +346,8 @@ class DelegationChainStory:
                                  f"?bot_id={segment(self.manager['bot_uuid'])}", method="DELETE")
                 except Exception as error:  # noqa: BLE001 — cleanup is best-effort
                     print(f"  group cleanup skipped: {error}", flush=True)
-        print("  caller manager delegated to the caller worker over the protected wire; "
-              "root and delegated rides both reached the provider", flush=True)
+        print("  Owner Manager delegated to Caller Worker; protected dispatch, "
+              "parent binding, completion and result delivery verified", flush=True)
 
 
 def main() -> int:
