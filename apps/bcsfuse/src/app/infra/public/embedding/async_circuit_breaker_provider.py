@@ -41,6 +41,19 @@ class EmbeddingQuotaExhaustedError(RuntimeError):
         self.provider_reason_code = provider_reason_code
 
 
+def _caller_cancelled() -> bool:
+    """Return whether this task was cancelled by its caller.
+
+    Request-timeout cancellation raised inside a backend leaves the enclosing
+    task's cancellation count at zero. A caller cancellation is a host shutdown
+    or deadline and must not poison the upstream circuit.
+    """
+
+    task = asyncio.current_task()
+    cancelling = getattr(task, "cancelling", None)
+    return bool(task is not None and callable(cancelling) and cancelling() > 0)
+
+
 class AsyncCircuitBreakerEmbeddingProvider:
     """Model protection without putting native async I/O on a worker thread.
 
@@ -226,7 +239,7 @@ class AsyncCircuitBreakerEmbeddingProvider:
     async def _finish_success(self) -> None:
         await self._after_success()
 
-    async def _finish_failure(self, error: Exception) -> None:
+    async def _finish_failure(self, error: BaseException) -> None:
         await self._after_failure()
         status_code = getattr(error, "status_code", None)
         if not isinstance(status_code, int) or status_code != 429:
@@ -250,7 +263,9 @@ class AsyncCircuitBreakerEmbeddingProvider:
         await self._before_call()
         try:
             vector = await self.backend.embed(text)
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
+            if isinstance(error, asyncio.CancelledError) and _caller_cancelled():
+                raise
             await self._finish_failure(error)
         else:
             await self._finish_success()
@@ -264,7 +279,9 @@ class AsyncCircuitBreakerEmbeddingProvider:
         await self._before_call()
         try:
             vectors = await self.backend.embed_batch(texts)
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
+            if isinstance(error, asyncio.CancelledError) and _caller_cancelled():
+                raise
             await self._finish_failure(error)
         else:
             await self._finish_success()

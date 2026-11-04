@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -67,7 +68,9 @@ class AsyncEmbeddingTokenPoolProvider:
         for lane in self._ordered_lanes():
             try:
                 return await _invoke_batch(lane, texts)
-            except Exception as error:
+            except (Exception, asyncio.CancelledError) as error:
+                if isinstance(error, asyncio.CancelledError) and _caller_cancelled():
+                    raise
                 errors.append(error)
 
         _raise_pool_error(errors, "async")
@@ -78,6 +81,20 @@ class AsyncEmbeddingTokenPoolProvider:
             if close is not None:
                 await close()
 
+
+
+def _caller_cancelled() -> bool:
+    """Distinguish a backend cancellation from cancellation of this task.
+
+    Async transports expose request timeouts as ``CancelledError``. A timeout
+    raised by the lane should fail over. If the host task itself was cancelled,
+    the TokenPool must not swallow the cancellation and continue to call model
+    lanes.
+    """
+
+    task = asyncio.current_task()
+    cancelling = getattr(task, "cancelling", None)
+    return bool(task is not None and callable(cancelling) and cancelling() > 0)
 
 async def _invoke_batch(lane: Any, texts: list[str]) -> list[list[float]]:
     vectors = await lane.embed_batch(texts)

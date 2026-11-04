@@ -515,3 +515,69 @@ def test_async_cache_rejects_new_queries_after_shutdown() -> None:
         asyncio.run(provider.embed("second"))
 
     assert backend.calls == []
+
+
+def test_async_circuit_counts_backend_cancellation_and_fail_fast() -> None:
+    """A transport timeout cancellation must open the embedding circuit.
+
+    HTTP timeout implementations may surface as ``asyncio.CancelledError``
+    rather than a normal exception. Those are genuine upstream failures: after
+    the configured threshold, subsequent batches must skip the model and let
+    bounded retrieval continue through its degraded contract.
+    """
+
+    class CancelledBatchBackend(_FakeBackend):
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            self.calls.extend(texts)
+            raise asyncio.CancelledError
+
+    backend = CancelledBatchBackend()
+    provider = AsyncCircuitBreakerEmbeddingProvider(
+        backend,
+        failure_threshold=2,
+        recovery_timeout_seconds=30.0,
+    )
+
+    for _ in range(2):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(provider.embed_batch(["query"]))
+
+    with pytest.raises(RuntimeError, match="circuit is open"):
+        asyncio.run(provider.embed_batch(["query"]))
+
+    assert backend.calls == ["query", "query"]
+    assert provider.state == "open"
+
+
+def test_async_circuit_ignores_caller_cancellation_not_backend_failure() -> None:
+    """Caller cancellation must stop calls without poisoning the model circuit."""
+
+    class BlockingBackend(_FakeBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.arrived = asyncio.Event()
+
+        async def embed(self, text: str) -> list[float]:
+            self.calls.append(text)
+            self.arrived.set()
+            await asyncio.Event().wait()
+
+    backend = BlockingBackend()
+    provider = AsyncCircuitBreakerEmbeddingProvider(
+        backend, failure_threshold=1, recovery_timeout_seconds=30.0
+    )
+
+    async def scenario() -> None:
+        requested = asyncio.create_task(provider.embed("reader"))
+        await backend.arrived.wait()
+        requested.cancel()
+        await asyncio.sleep(0)
+
+        with pytest.raises(asyncio.CancelledError):
+            await requested
+
+    asyncio.run(scenario())
+
+    assert backend.calls == ["reader"]
+    assert provider.state == "closed"
+    assert provider._failed_attempts == 0

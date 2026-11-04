@@ -604,3 +604,62 @@ def test_dev_composition_uses_the_same_shared_token_pool(
     assert isinstance(pool, AsyncEmbeddingTokenPoolProvider)
     assert pool.lane_count == 3
     assert provider.dimension == 1024
+
+
+def test_async_pool_fails_over_to_another_token_after_timeout_cancellation() -> None:
+    """A transport-timeout cancellation is a lane failure, not a pool abort."""
+
+    from app.infra.public.embedding.async_embedding_token_pool_provider import (
+        AsyncEmbeddingTokenPoolProvider,
+    )
+
+    class CancelledAsyncLane(FakeAsyncLane):
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            self.calls.extend(texts)
+            raise asyncio.CancelledError
+
+    timed_out = CancelledAsyncLane("timed-out")
+    healthy = FakeAsyncLane("healthy")
+    provider = AsyncEmbeddingTokenPoolProvider([timed_out, healthy])
+
+    vector = asyncio.run(provider.embed("reader"))
+
+    assert vector == healthy.vector
+    assert timed_out.calls == ["reader"]
+    assert healthy.calls == ["reader"]
+
+
+def test_async_pool_preserves_caller_cancellation_without_failing_over() -> None:
+    """Cancellation of the pool's host task must stop all model calls immediately."""
+
+    from app.infra.public.embedding.async_embedding_token_pool_provider import (
+        AsyncEmbeddingTokenPoolProvider,
+    )
+
+    class BlockingFirstLane(FakeAsyncLane):
+        def __init__(self) -> None:
+            super().__init__("first")
+            self.arrived = asyncio.Event()
+
+        async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+            self.calls.extend(texts)
+            self.arrived.set()
+            await asyncio.Event().wait()
+
+    first = BlockingFirstLane()
+    second = FakeAsyncLane("second")
+    provider = AsyncEmbeddingTokenPoolProvider([first, second])
+
+    async def scenario() -> None:
+        requested = asyncio.create_task(provider.embed("reader"))
+        await first.arrived.wait()
+        requested.cancel()
+        await asyncio.sleep(0)
+
+        with pytest.raises(asyncio.CancelledError):
+            await requested
+
+    asyncio.run(scenario())
+
+    assert first.calls == ["reader"]
+    assert second.calls == []
