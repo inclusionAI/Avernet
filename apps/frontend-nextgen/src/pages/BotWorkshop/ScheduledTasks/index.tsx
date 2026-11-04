@@ -45,7 +45,7 @@ const ScheduledTasksPage = () => {
     Object.entries(values).forEach(([key, value]) => (value === undefined ? next.delete(key) : next.set(key, value)));
     history[replace ? 'replace' : 'push'](`/bot-workshop/scheduled-tasks${detail ? '/detail' : ''}?${next.toString()}`);
   }
-  async function operate(work: () => Promise<OperationResult>, _message: string) {
+  async function operate(work: () => Promise<OperationResult>) {
     try {
       const result = await work();
       notifyRoutineResult(result);
