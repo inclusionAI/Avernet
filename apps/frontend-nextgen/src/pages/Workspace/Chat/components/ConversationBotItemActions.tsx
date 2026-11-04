@@ -103,13 +103,15 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
         // 容器常渲染不整体隐藏(2026-11-04 显隐下沉 icon 级,激活 icon 常显需要父级透明)。
       )}
     >
-      {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。 */}
+      {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。
+          2026-11-04 显隐重构修正:收起指示器是展开状态的行级指示(icon 常显),
+          不随操作组 hover 规则收起——用户反馈 hover 别处时它消失,失去收起入口。 */}
       {expanded && !unavailable && (
         <IconButton
           label="收起会话列表"
           size="sm"
           icon={<ChevronDown className="h-3.5 w-3.5" />}
-          className={cn('h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground', iconVisibility)}
+          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={(event) => {
             event.stopPropagation();
             onCollapse();

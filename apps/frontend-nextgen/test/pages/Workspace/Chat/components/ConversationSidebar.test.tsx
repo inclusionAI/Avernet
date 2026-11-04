@@ -61,7 +61,7 @@ describe('ConversationSidebar', () => {
     expect(screen.queryByText('暂无好友 Bot')).not.toBeInTheDocument();
   });
 
-  it('renders three groups 我的 Bot / 团队 Bot / 好友 Bot when team Bots exist', () => {
+  it('renders three groups 我的 Bot / 团队空间 Bot / 好友 Bot when team Bots exist', () => {
     render(
       <ConversationSidebar
         {...sidebarProps({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) })}
@@ -96,7 +96,7 @@ describe('ConversationSidebar', () => {
     expect(within(filteredGroup).getByText('1')).toBeInTheDocument();
   });
 
-  it('keeps the empty 团队 Bot group visible with its empty state', () => {
+  it('keeps the empty 团队空间 Bot group visible with its empty state', () => {
     render(<ConversationSidebar {...modelWithManagedAndFriendBots} />);
     expect(screen.getByText('我的 Bot')).toBeInTheDocument();
     expect(screen.getByText('好友 Bot')).toBeInTheDocument();
@@ -711,7 +711,7 @@ describe('ConversationSidebar', () => {
       expect(aside).toHaveAttribute('data-collapsed', 'false');
     });
 
-    it('团队 Bot 分组接入收起(2026-10-22 需求变更):标题即开关,收起只留标题行+计数,记忆写入 Store', () => {
+    it('团队空间 Bot 分组接入收起(2026-10-22 需求变更):标题即开关,收起只留标题行+计数,记忆写入 Store', () => {
       const base = sidebarProps({
         teamBots: [teamBot],
         directory: directoryModel({ teamBots: [teamBot] }),
@@ -973,7 +973,7 @@ describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指�
     expect(screen.getAllByRole('status', { name: 'Bot 正在回复' })).toHaveLength(1);
   });
 
-  it('团队 Bot 分组标题携带来源提示 infoHint(#2990 还原),切换按钮可访问名保持纯标题', async () => {
+  it('团队空间 Bot 分组标题携带来源提示 infoHint(#2990 还原),切换按钮可访问名保持纯标题', async () => {
     render(
       <ConversationSidebar
         {...sidebarProps({
@@ -982,7 +982,7 @@ describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指�
         })}
       />,
     );
-    // 既有契约不回归:标题即开关、可访问名纯「团队 Bot」,计数徽标仍在。
+    // 既有契约不回归:标题即开关、可访问名纯「团队空间 Bot」,计数徽标仍在。
     expect(screen.getByRole('button', { name: '团队空间 Bot' })).toBeInTheDocument();
     const info = screen.getByLabelText('通过团队成员身份获取的 Bot');
     fireEvent.pointerMove(info, { pointerType: 'mouse' });

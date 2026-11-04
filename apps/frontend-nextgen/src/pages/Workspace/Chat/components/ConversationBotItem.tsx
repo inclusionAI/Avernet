@@ -149,11 +149,15 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     inputDisabled: instanceInputDisabled,
     marked: searchMarked,
   } = useConversationInstanceRow(bot, searchActive);
-  // 激活态标记(2026-11-04 显隐重构):检索/实例标记或归属/范围筛选激活——操作组仅
-  // hover 显示,激活的单个 icon 常显(Actions 内 icon 级控制);让位仅按激活 icon
-  // 数量预留(单 36px/双 60px),展开态不再整组钉住(用户拍板:展开后操作组也仅 hover 可见)。
-  const activeMarked = !unavailable && (searchMarked || filterActive);
-  const activeMarkPadding = filterActive && searchMarked ? 'pr-[60px]' : 'pr-9';
+  // 常显 icon 让位(2026-11-04 显隐重构与同日修正):收起指示器(展开态常显,
+  // 用户反馈 hover 别处时它消失是误伤——它是展开状态的行级指示)与激活标记
+  // (🔍 检索/实例、归属/范围筛选非默认项)共同按数量预留静态让位;操作组其余
+  // 按钮仅 hover 显示。检索标记仅在 🔍 渲染(scope=all)时计入。
+  const pinnedMarkCount =
+    (expanded ? 1 : 0) + (searchMarked && searchVisible ? 1 : 0) + (filterActive ? 1 : 0);
+  const pinnedMarked = !unavailable && pinnedMarkCount > 0;
+  const pinnedMarkPadding =
+    pinnedMarkCount >= 3 ? 'pr-[86px]' : pinnedMarkCount >= 2 ? 'pr-[60px]' : 'pr-9';
   const handleSearchToggle = () => {
     if (!expanded) onToggle();
     setSearchInputOpen((current) => !current);
@@ -210,8 +214,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             stripVisible
               ? unavailable
                 ? 'pr-9'
-                : activeMarked
-                  ? activeMarkPadding
+                : pinnedMarked
+                  ? // 常显指示器静态让位 + hover 全组让位叠加(hover 类特异性高,非 hover
+                    // 态落在常显宽度;漏叠会让展开态 hover 出现的整组按钮压名称——同日修正)。
+                    [pinnedMarkPadding, hoverActionsPadding]
                   : hoverActionsPadding
               : false,
           )}

@@ -139,12 +139,15 @@ describe('ConversationBotItem 操作区', () => {
     expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开态让位转 hover 响应式:4 按钮让位 112px(2026-11-04 显隐重构,操作组仅 hover 显示)', () => {
+  it('展开态收起指示器常显让位 pr-9,hover 全组让位 112px(2026-11-04 显隐重构)', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
+    // 收起指示器是展开状态的行级指示(同日修正:hover 别处不消失),静态让位单按钮 36px。
+    expect(title?.parentElement).toHaveClass('pr-9');
     expect(title?.parentElement.className).toContain('group-hover:pr-[112px]');
+    expect(screen.getByRole('button', { name: '收起会话列表' }).className).not.toContain('opacity-0');
   });
 
   it('展开且有「更多操作」入口时 hover 让位 5 按钮 138px（紧凑几何）', () => {
