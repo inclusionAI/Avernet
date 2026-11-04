@@ -1,0 +1,19 @@
+submodules/avernet
+  s_d62a97d32cdc0b::t_5ed35f1395b905 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a52a730da7c12663208ab86316c4289d94c36d52",
+  "prompts": {},
+  "sessions": {
+    "s_d62a97d32cdc0b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_d62a97d32cdc0b",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
