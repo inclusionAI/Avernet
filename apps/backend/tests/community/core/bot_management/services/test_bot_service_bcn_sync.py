@@ -174,14 +174,19 @@ class TestUpdateBotBcnSync:
     def test_update_bot_no_sync_when_no_name_or_desc_change(
         self, mock_repository, mock_device_service
     ):
-        """Test that BCN sync is not triggered when only other fields change."""
+        """Test that BCN sync is not triggered when only unrelated ext changes.
+
+        An ext key that is not ``avatar_url`` carries no avatar projection
+        change, so alone it must not trigger the sync. (Avatar-only edits now
+        DO trigger — covered in test_bot_avatar_sync.py.)
+        """
         service = _make_bot_service(repository=mock_repository, device_service=mock_device_service)
 
         with patch.object(service, "_sync_bot_to_bcn") as mock_sync:
             service.update_bot(
                 bot_id="test-bot-id",
                 user_id="85020",
-                ext={"avatar_url": "https://example.com/avatar.png"},
+                ext={"read_only_rules": []},
             )
 
             # Verify BCN sync was NOT called
@@ -245,6 +250,7 @@ class TestSyncBotToBcn:
             bot_id="20260421_gfdsz5vi:85020",
             name="New Bot Name",
             summary="New Description",
+            avatar_url="",
         )
 
     def test_sync_bot_to_bcn_uses_existing_values_when_none(
@@ -279,6 +285,7 @@ class TestSyncBotToBcn:
             bot_id="test-bot:85020",
             name="New Name",
             summary="Existing Description",  # Uses existing description
+            avatar_url="",
         )
 
     def test_sync_bot_to_bcn_forwards_request_headers(
@@ -317,6 +324,7 @@ class TestSyncBotToBcn:
             name="Existing Name",
             summary="Existing Description",
             request_headers=request_headers,
+            avatar_url="",
         )
 
     def test_sync_bot_to_bcn_handles_bcn_error(

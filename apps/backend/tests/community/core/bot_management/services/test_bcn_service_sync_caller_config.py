@@ -10,10 +10,13 @@ import httpx
 import pytest
 
 from agentclaw.community.core.bot_management.services.bcn_service import (
+    BcnBotMissingError,
+    BcnRequestError,
     BcnService,
     BcnServiceError,
 )
 from agentclaw.community.di.config import BcnConfig
+from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 _TEST_BCN_CONFIG = BcnConfig(
@@ -218,3 +221,121 @@ class TestSyncCallerConfigDevRegistrationEnabled:
         )
 
         assert result["sync_status"] == "applied"
+
+
+class TestSyncCallerConfigStableReference:
+    """显式 ``provider_bot_ref``(已解析稳定地址)优先;缺省保持既有 owner 拼接。
+
+    Ownership handoff 后当前 owner 不再适用于寻址 —— 显式引用原样进入 URL,
+    绝不重拼当前 owner,``source_revision`` 由调用方给定、本调用不改写。
+    """
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_explicit_reference_is_used_verbatim_in_path(self, _mock_env, service, http):
+        http.set_response("patch", _ok_response(200, {"sync_status": "applied"}))
+
+        result = service.sync_bot_caller_config(
+            teamclaw_bot_uuid="b",
+            owner_workno="new-owner",
+            enabled=True,
+            source_revision=5,
+            provider_bot_ref="b:stable",
+        )
+
+        record = http.calls_to("patch")[0]
+        assert record.args[0] == "/providers/prv_40354c8a/bots/b:stable/caller"
+        assert "new-owner" not in record.args[0]
+        assert record.kwargs["json"]["snapshot"]["source_revision"] == 5
+        assert result["skipped"] is False
+        assert result["sync_status"] == "applied"
+        assert result["provider_bot_ref"] == "b:stable"
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_omitted_reference_keeps_legacy_owner_derived_address(
+        self, _mock_env, service, http
+    ):
+        http.set_response("patch", _ok_response(200, {"sync_status": "unchanged"}))
+
+        result = service.sync_bot_caller_config(
+            teamclaw_bot_uuid="b",
+            owner_workno="new-owner",
+            enabled=True,
+            source_revision=5,
+        )
+
+        record = http.calls_to("patch")[0]
+        assert record.args[0] == "/providers/prv_40354c8a/bots/b:new-owner/caller"
+        assert result["provider_bot_ref"] == "b:new-owner"
+
+    @pytest.mark.parametrize("ref", ["", "another:ref"])
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_invalid_explicit_reference_never_reaches_http(
+        self, _mock_env, service, http, ref
+    ):
+        with pytest.raises(BcnServiceError, match="Invalid provider_bot_ref"):
+            service.sync_bot_caller_config(
+                teamclaw_bot_uuid="b",
+                owner_workno="new-owner",
+                enabled=True,
+                source_revision=5,
+                provider_bot_ref=ref,
+            )
+        assert http.calls_to("patch") == []
+
+
+class TestSyncCallerConfigTypedErrors:
+    """既有 httpx 捕获点的类型化结果(不解析错误字符串)。"""
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_http_404_raises_bot_missing_error(self, _mock_env, service, http):
+        http.set_response("patch", _ok_response(404, {"error": "provider bot not found"}))
+
+        with pytest.raises(BcnBotMissingError):
+            _sync(service)
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_timeout_raises_typed_request_error(self, _mock_env, service, http):
+        def _raise_timeout(*_args, **_kwargs):
+            raise httpx.TimeoutException("read timeout")
+
+        http.set_override("patch", _raise_timeout)
+
+        with pytest.raises(BcnRequestError) as excinfo:
+            _sync(service)
+
+        assert excinfo.value.kind == DeliveryFailure.UNKNOWN
+        assert excinfo.value.code == "timeout"
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="prod",
+    )
+    def test_stale_conflict_raises_typed_caller_conflict_error(
+        self, _mock_env, service, http
+    ):
+        """stale = CAS 冲突:按 REJECTED/caller_conflict 分类,不解析消息字符串。"""
+        http.set_response("patch", _ok_response(200, {"sync_status": "stale"}))
+
+        with pytest.raises(BcnRequestError) as excinfo:
+            _sync(service)
+
+        assert excinfo.value.kind == DeliveryFailure.REJECTED
+        assert excinfo.value.code == "caller_conflict"
+        # 既有消息文本保持不变(供人工排障/旧断言继续成立)。
+        assert "stale" in str(excinfo.value)
+        assert "BCS holds a higher source_revision" in str(excinfo.value)
