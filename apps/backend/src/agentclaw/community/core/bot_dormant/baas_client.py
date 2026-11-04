@@ -94,6 +94,7 @@ class AliveResult:
 
     result: str  # 'true' | 'false' | 'unknown'
     last_session_time: Optional[str]
+    error_type: Optional[str] = None  # exception class name when result='unknown' due to exhaustion
 
 
 def _max_session_time(devices: list[dict[str, Any]]) -> Optional[str]:
@@ -191,13 +192,15 @@ class BaasDormantClient:
                 if attempt < len(_RETRY_DELAYS):
                     await asyncio.sleep(delay)
 
-        logger.error(
+        error_type = type(last_exc).__name__ if last_exc else None
+        logger.warning(
             "[BaasDormantClient.check_alive] all retries exhausted for bot_id=%s "
-            "— returning unknown. last error: %s",
+            "error_type=%s — returning unknown. last error: %s",
             bot_id,
+            error_type,
             last_exc,
         )
-        return AliveResult(result="unknown", last_session_time=None)
+        return AliveResult(result="unknown", last_session_time=None, error_type=error_type)
 
     @staticmethod
     def _parse_envelope(envelope: Any, bot_id: str) -> AliveResult:
