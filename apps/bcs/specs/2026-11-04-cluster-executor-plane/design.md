@@ -417,9 +417,13 @@ can mark a whole group draining at once, double moves disappear entirely.
 The gap for S is one database write plus one network round trip. If anything
 fails midway, existing rules cover it: B dies → ordinary takeover; the COMMIT
 is lost → B finds S anyway, because every node reads, each heartbeat, the
-leases newly assigned to it (`WHERE node_id = :me AND assigned_at > :last`,
-indexed, usually empty); A writes after the transfer → fenced out. The same
+leases newly assigned to it (`WHERE node_id = :me AND assigned_at > :last −
+margin`, usually empty); A writes after the transfer → fenced out. The same
 read covers transfers made without a PREPARE (drain deadline, watchdog).
+`:last` is the highest `assigned_at` value actually read back — never a node
+clock — and `margin` exceeds the longest transaction, so a transfer that
+commits after its timestamp was taken is still seen. Sessions the node
+already drives are skipped, so the overlap is harmless.
 
 ### 9.3 When is it safe to move a run mid-flight?
 
@@ -514,6 +518,8 @@ All configurable; defaults sized for a ≤ 30 s takeover.
   `last_heartbeat_at`, `advertise_addr`, `build_version`.
 - `bcs_task_leases`: `session_id`, `bucket`, `node_id`, `fencing_token`,
   `expires_at`, `assigned_at`, `write_seq`, `has_pending_work`, `pending_seq`.
+  Indexes: `(node_id, has_pending_work, bucket)` for failure discovery,
+  `(node_id, assigned_at)` for newly assigned leases.
 
 **Interfaces** (protocol-neutral, each with a database implementation, a
 single-node implementation and a no-op one):

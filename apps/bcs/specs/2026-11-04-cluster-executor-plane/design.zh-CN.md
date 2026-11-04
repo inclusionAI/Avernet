@@ -353,8 +353,10 @@ TARGET NODE
 
 S 的空窗是一次数据库写加一次网络往返。中途任何一步失败,都有现成规则兜底:B 死了 →
 普通接管;COMMIT 丢了 → B 仍会发现 S,因为每个节点每次心跳都会读取新分配给它的租约
-(`WHERE node_id = :me AND assigned_at > :last`,有索引,通常为空);同一次读取也覆盖了
-没有 PREPARE 的转移(排空截止时间、看门狗);A 在转移之后写入 → 被围栏挡掉。
+(`WHERE node_id = :me AND assigned_at > :last − margin`,通常为空);同一次读取也覆盖了
+没有 PREPARE 的转移(排空截止时间、看门狗);A 在转移之后写入 → 被围栏挡掉。`:last` 是实际
+读回的最大 `assigned_at` 值 —— 绝不使用节点时钟 —— 而 `margin` 大于最长的事务,因此时间戳
+取得之后才提交的转移仍会被看到。节点已经在驱动的会话会被跳过,所以这段重叠是无害的。
 
 ### 9.3 什么时候可以在运行中途移动它?
 
@@ -434,7 +436,8 @@ S 的空窗是一次数据库写加一次网络往返。中途任何一步失败
 - `bcs_node_roster`:`node_id`、`member_name`、`state`、`started_at`、
   `last_heartbeat_at`、`advertise_addr`、`build_version`。
 - `bcs_task_leases`:`session_id`、`bucket`、`node_id`、`fencing_token`、`expires_at`、
-  `assigned_at`、`write_seq`、`has_pending_work`、`pending_seq`。
+  `assigned_at`、`write_seq`、`has_pending_work`、`pending_seq`。索引:
+  `(node_id, has_pending_work, bucket)` 用于故障发现,`(node_id, assigned_at)` 用于新分配的租约。
 
 **接口**(与协议无关,每个都有数据库实现、单节点实现和 no-op 实现):
 
