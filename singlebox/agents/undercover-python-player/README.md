@@ -98,8 +98,19 @@ python -m unittest discover -s tests -v
      python -m undercover_player --token <原玩家的持久化 token>
      ```
    - **新增 Python 玩家为 session 成员**：先启动本引擎拿到 `bot_uuid`
-     （握手日志 `bot connected: uuid=...`），再用这个 UUID 构造/加入牌局
-     session，然后开一局。
+     （握手日志 `bot connected: uuid=...`），再**先把这个身份入网**，最后用
+     这个 UUID 构造/加入牌局 session，然后开一局。
+     ```bash
+     # bot.connect 只分配 uuid/token；未入网的身份 capability.name 为空，
+     # 不在 list_bots 作用域里，前端/牌桌选不到它。
+     curl -X POST http://127.0.0.1:21000/admin/bots/onboard \
+       -H 'Content-Type: application/json' \
+       -d '{"bot_id":"<bot connected: uuid=...>","name":"玩家逻辑控林工"}'
+     ```
+     入网响应为 `{"bot_uuid":"...","onboarded":true,"name":"玩家逻辑控林工"}`；
+     之后用同一个 UUID 加入 session。引擎在 `is_new` 握手时会直接打出这条
+     `curl` 提示（`bot ... is not onboarded yet`），照抄即可。
+
 4. 完整的一局手动验证按 `docs/undercover-game-tutorial.zh-CN.md` 走。
 
 ## 与 OpenClaw 玩家的人格对齐

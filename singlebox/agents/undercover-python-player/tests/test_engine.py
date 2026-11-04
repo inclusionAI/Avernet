@@ -125,6 +125,32 @@ class TestHandshake(unittest.TestCase):
         self.assertEqual(engine.bot_uuid, "bot-undercover-01")
         self.assertEqual(engine._token, "tok-abc123")
 
+    def test_fresh_identity_is_marked_for_onboarding(self):
+        # 回归：is_new 的身份没 name，必须先 /admin/bots/onboard 才能被选中。
+        engine = PeterPlayerEngine(ws_url="ws://127.0.0.1:21000/ws/bot")
+
+        async def drive():
+            await engine._handshake(HandshakeWs())
+
+        with self.assertLogs("undercover_player.engine", level="WARNING") as logs:
+            run_until(drive())
+        self.assertTrue(engine.needs_onboarding)
+        joined = "\n".join(logs.output)
+        self.assertIn("not onboarded yet", joined)
+        self.assertIn("http://127.0.0.1:21000/admin/bots/onboard", joined)
+        self.assertIn('"bot_id":"bot-undercover-01"', joined)
+
+    def test_reconnect_identity_needs_no_onboarding(self):
+        reconnect = dict(CONNECT_PAYLOAD)
+        reconnect["is_new"] = False
+        engine = PeterPlayerEngine(ws_url="wss://bcs.example:443/ws/bot")
+
+        async def drive():
+            await engine._handshake(HandshakeWs(payload=reconnect))
+
+        run_until(drive())
+        self.assertFalse(engine.needs_onboarding)
+
     def test_handshake_rejects_missing_capability(self):
         bad = dict(CONNECT_PAYLOAD)
         bad["capabilities"] = {"unified_run_events": False,

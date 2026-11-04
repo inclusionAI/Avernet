@@ -71,6 +71,9 @@ class PeterPlayerEngine:
         self.on_task = on_task
         self.heartbeat_s = heartbeat_s
         self.bot_uuid: str | None = None
+        # 首次握手拿到的是未入网身份：必须先在 BCN 侧 onboard（带名字），
+        # 否则它不会出现在前端/牌桌的可选成员列表里。
+        self.needs_onboarding = False
 
         # 活跃 run：run_id -> asyncio.Task（正在跑/待决策）
         self._active_runs: dict[str, asyncio.Task] = {}
@@ -183,6 +186,7 @@ class PeterPlayerEngine:
         payload = resp["payload"]
         self._token = payload.get("token", self._token)
         self.bot_uuid = payload.get("bot_uuid", self.bot_uuid)
+        self.needs_onboarding = payload.get("is_new") is True
         cap = payload.get("capabilities", {})
         if cap.get("unified_run_events") is not True:
             raise RuntimeError("BCN 未启用 unified_run_events，拒绝非 V3 兼容连接")
@@ -193,6 +197,17 @@ class PeterPlayerEngine:
             import os
             os.environ[k] = str(v)
         log.info("bot connected: uuid=%s name=%s", self.bot_uuid, self.bot_name)
+        if self.needs_onboarding:
+            # bot.connect 只分配 uuid/token；BCS 会把这个身份留在「待入网」状态，
+            # 不在 list_bots 作用域内，因此前端选不到它。用同一个 uuid 补一次
+            # onboard（带显示名）即可，连接本身不需要重开。
+            log.warning(
+                "bot %s is not onboarded yet: run `curl -X POST %s/admin/bots/onboard "
+                "-H 'Content-Type: application/json' "
+                "-d '{\"bot_id\":\"%s\",\"name\":\"%s\"}'` before joining a table",
+                self.bot_uuid, _http_base(self.ws_url), self.bot_uuid, self.bot_name,
+            )
+
 
     async def _await_response(self, ws, req_id: str, timeout: float = 30) -> dict:
         """在启动读循环前，直接读取与 ``req_id`` 匹配的响应帧。"""
@@ -446,6 +461,20 @@ class PeterPlayerEngine:
         payload = {"session_key": session_key, "session_id": session_key,
                    "messages": []}  # 本引擎不持久化历史，返回空
         await self._ack(rid, payload)
+
+
+def _http_base(ws_url: str) -> str:
+    """把 ws(s)://host:port/ws/bot 映射到同一端口的 HTTP 基址（BCS 同端口）。"""
+    if ws_url.startswith("wss://"):
+        rest = ws_url[len("wss://"):]
+        scheme = "https"
+    elif ws_url.startswith("ws://"):
+        rest = ws_url[len("ws://"):]
+        scheme = "http"
+    else:
+        return ws_url
+    authority = rest.split("/", 1)[0]
+    return f"{scheme}://{authority}"
 
 
 def _extract_text(content) -> str:

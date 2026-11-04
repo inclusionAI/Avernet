@@ -164,10 +164,32 @@ active 但因 on_task 已返回」当成「还能 abort」，导致幂等测试�
 - **不要**只把显示名改成一致就期望接管座位——任务仍会派给旧 UUID。
 
 ### 4.9 决策回调失败要回传 `state:"error"`
+
 `chat.send` 已 ACK 之后，如果决策回调抛异常却不发终态，BCS 只能等节点超时。
 `engine.py::_process_node` 现在捕获普通异常并发送 canonical
 `{"state":"error","errorCode":"DECISION_ERROR","errorMessage":...}`；
 abort 的 `CancelledError` 仍只做取消、不发错误。
+
+### 4.10 新身份要先 onboard，才会出现在可选成员里
+
+`bot.connect` 只分配 `bot_uuid` / `token`（`bcs-bot` 侧对 `is_new` 的身份
+只 `register`，capabilities 里的 `name` 仍是空的，日志为
+`New bot connected, waiting for onboard`）。这样的身份不在
+`is_in_list_bots_scope()` 的已入网集合里，前端/牌桌都选不到，即使 WebSocket
+握手成功、任务能下发也一样。
+
+补一次入网即可，`bot_id` 直接用握手里的 `bot_uuid`：
+
+```bash
+curl -X POST http://127.0.0.1:21000/admin/bots/onboard \
+  -H 'Content-Type: application/json' \
+  -d '{"bot_id":"<bot_uuid>","name":"玩家逻辑控林工"}'
+```
+
+返回 `{"bot_uuid": "...", "onboarded": true, "name": "..."}` 后，这个 UUID 就能
+被 session 收录。`engine.py` 在 `is_new` 握手时会把这条命令打进 WARNING 日志
+（`bot ... is not onboarded yet`），不需要自己拼。
+
 
 ---
 
