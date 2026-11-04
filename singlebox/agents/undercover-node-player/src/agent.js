@@ -86,7 +86,8 @@ export function parseNodeTask(content) {
     : raw;
 
   const seatMatch = /你是\s*(\d+)\s*号/.exec(instruction);
-  const wordMatch = /词是【(.+?)】|【(.+?)】/.exec(instruction);
+  // Quoted speeches are public history, never the current player's private word.
+  const wordMatch = /词是【(.+?)】|【(.+?)】/.exec(outerInstruction(instruction));
   const roundMatch = /第\s*(\d+)\s*轮/.exec(instruction);
   const bluntnessMatch = /(?:钝度|钝到|至少)\s*(\d+)/.exec(instruction);
   const maxCharsMatch = /不超过\s*(\d+)\s*字/.exec(instruction);

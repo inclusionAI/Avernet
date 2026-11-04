@@ -20,6 +20,18 @@ export function extractText(content) {
     .join("\n");
 }
 
+export function chatSendContent(params) {
+  const prompt = params.session_context?.message;
+  if (typeof prompt === "string") return prompt;
+
+  const content = extractText(params.message?.content);
+  if (!/^\[BCS Group Context\][ \t]*\r?\n/.test(content)) return content;
+  const marker = /\r?\n\r?\n\[消息内容\]\r?\n/.exec(content);
+  if (!marker) return content;
+  const wrappedPrompt = content.slice(marker.index + marker[0].length);
+  return wrappedPrompt.replace(/^\[from:[^\]\r\n]*\]/, "");
+}
+
 export class BcnProtocol {
   constructor({
     onTask = async () => "",
@@ -282,7 +294,7 @@ export class BcnProtocol {
     if (frame.seq !== undefined) this.latestTaskSeq.set(sessionKey, frame.seq);
     this.ack(frame.id, { run_id: runId });
 
-    const content = extractText(params.message?.content);
+    const content = chatSendContent(params);
     run.processing = Promise.resolve().then(() => this.processRun(run, content, params));
     return { accepted: true, type: "chat.send", runId };
   }

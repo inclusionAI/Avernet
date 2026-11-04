@@ -112,7 +112,9 @@ def _extract_seat_word_round(instruction: str) -> tuple[int | None, str | None, 
     seat_m = re.search(r"你是\s*(\d+)\s*号", instruction)
     seat = int(seat_m.group(1)) if seat_m else None
 
-    word_m = re.search(r"词是【(.+?)】|【(.+?)】", instruction)
+    # 引用历史里的【…】是公开发言，不是当前玩家的私有词。
+    outer_instruction = _outer_task_instruction(instruction)
+    word_m = re.search(r"词是【(.+?)】|【(.+?)】", outer_instruction)
     word = (word_m.group(1) or word_m.group(2)) if word_m else None
 
     round_m = re.search(r"第\s*(\d+)\s*轮", instruction)

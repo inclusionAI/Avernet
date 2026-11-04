@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { UndercoverNodeAgent } from "../src/agent.js";
 import { BcnProtocol } from "../src/protocol.js";
 import {
   CONNECT_PAYLOAD,
@@ -104,6 +105,46 @@ test("chat.send 先 ACK，再回传 canonical final", async () => {
   assert.equal(final.seq, final.payload.seq);
   assert.equal(protocol.runs.get(accepted.runId).status, "finished");
   protocol.stop();
+});
+
+test("V3 装饰后的投票读取未包装 prompt，不退化成弃权", async () => {
+  const input = {
+    alive: ["1号 玩家1", "3号 玩家3", "4号 玩家4"],
+    history: [{
+      round: 1,
+      speeches: [
+        { seat: 1, player: "1号 玩家1", text: "要通电" },
+        { seat: 3, player: "3号 玩家3", text: "晚上才用" },
+      ],
+    }],
+  };
+  const prompt = `[State Machine Task]\nnode_id: vote_4\ndisplay_name: 4号投票\n\n` +
+    `[Input]\n${JSON.stringify(input, null, 2)}\n\n` +
+    "[Upstream Outputs]\n[vote_start]\n投票预备确认\n\n[Instruction]\n" +
+    "第 2 轮投票。只输出「我投N号」或「我弃权」。\n" +
+    "你是 4 号，词是【台灯】。可以投：1号、3号；不能投自己。";
+  const wrapped = "[BCS Group Context]\n" +
+    "- 参与者: 主持人, 玩家4\n" +
+    "- 你是: 玩家4\n" +
+    "- 当前投递: chat.send (需要响应)\n" +
+    "- 发起方(driver): 主持人\n" +
+    "- 消息来自: 主持人\n\n" +
+    `[消息内容]\n[from:主持人]${prompt}`;
+
+  for (const hasSessionContext of [true, false]) {
+    const agent = new UndercoverNodeAgent();
+    const { protocol, socket } = makeProtocol({
+      onTask: (task) => agent.decide(task),
+    });
+    const frame = chatSend({ text: wrapped });
+    if (hasSessionContext) frame.params.session_context = { message: prompt };
+    await protocol.handleFrame(frame);
+    await protocol.idle();
+    const final = socket.sent.find((item) => item.type === "event");
+    assert.equal(final.payload.state, "final");
+    assert.equal(final.payload.content, "我投1号");
+    protocol.stop();
+  }
 });
 
 test("chat.abort 中止正在生成的 run，迟到内容不作为半截 final 回传", async () => {

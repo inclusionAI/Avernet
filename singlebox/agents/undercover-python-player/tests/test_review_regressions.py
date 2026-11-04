@@ -109,6 +109,19 @@ def _plain_eulogy(state: dict) -> str:
     )
 
 
+def _v3_envelope(content: str) -> str:
+    """build_chat_send_frame() / build_message_payload() 的 V3 正文形状。"""
+    return (
+        "[BCS Group Context]\n"
+        "- 参与者: 主持人, 玩家4\n"
+        "- 你是: 玩家4\n"
+        "- 当前投递: chat.send (需要响应)\n"
+        "- 发起方(driver): 主持人\n"
+        "- 消息来自: 主持人\n\n"
+        f"[消息内容]\n[from:主持人]{content}"
+    )
+
+
 class ReviewVoteRegressionTest(unittest.TestCase):
     def _vote(self, task) -> str | None:
         return asyncio.run(UndercoverPlayer().make_vote(task))
@@ -179,6 +192,49 @@ class ReviewVoteRegressionTest(unittest.TestCase):
             [1, 3, 4], [1, 3], {1: "屋里得有光", 2: "3号：亮。"}
         )
         self._assert_accepted(state, 4, ballot, 1)
+
+
+class ReviewV3EnvelopeRegressionTest(unittest.TestCase):
+    def test_decorated_vote_parses_history_instead_of_abstaining(self):
+        prompt = build_vote_prompt_from_history(
+            4, "台灯", 2, alive=[1, 3, 4], others=[1, 3],
+            history=_history(_speech(1, "要通电"), _speech(3, "晚上才用")),
+        )
+        for has_session_context in (True, False):
+            with self.subTest(has_session_context=has_session_context):
+                frame = chat_send_frame(_v3_envelope(prompt), SESSION, "wrapped-vote")
+                if has_session_context:
+                    frame["params"]["session_context"] = {"message": prompt}
+                player = UndercoverPlayer()
+                parsed_tasks = []
+
+                async def on_task(ctx, task):
+                    parsed_tasks.append(task)
+                    return await player.decide(ctx, task)
+
+                engine = PeterPlayerEngine(ws_url="ws://unused", on_task=on_task)
+                engine._ws = HandshakeWs()
+
+                async def drive():
+                    await engine._handle_chat_send(frame["id"], frame["params"], frame)
+                    await asyncio.gather(*list(engine._active_runs.values()))
+
+                run_until(drive())
+                self.assertEqual(parsed_tasks[0].node_id, "vote_4")
+                self.assertEqual(parsed_tasks[0].seat, 4)
+                finals = [
+                    item for item in engine._ws.sent
+                    if item["type"] == "event" and item["payload"]["state"] == "final"
+                ]
+                self.assertEqual(len(finals), 1)
+                ballot = finals[0]["payload"]["content"]
+                self.assertNotEqual(ballot, "我弃权")
+                state = _referee_state(
+                    [1, 3, 4], speeches={1: "要通电", 3: "晚上才用"}
+                )
+                target, error = referee.parse_vote(state, 4, ballot)
+                self.assertIsNone(error, f"裁判拒绝票面 {ballot!r}: {error}")
+                self.assertEqual(target, 1)
 
 
 class ReviewEulogyRegressionTest(unittest.TestCase):
@@ -353,6 +409,32 @@ class ReviewEulogyIdentityRegressionTest(unittest.TestCase):
             text = await player.decide(ctx, eulogy)
             self.assertIn("1号", text or "")
             self.assertIn("要通电", text or "")
+            self.assertNotIn("保温", text or "")
+            _display, error = referee.check_text(state, 4, text or "", 35)
+            self.assertIsNone(error, f"裁判拒绝遗言 {text!r}: {error}")
+
+        run_until(drive())
+
+    def test_quoted_brackets_do_not_replace_retained_private_word(self):
+        state = _referee_state(
+            [1, 3, 4],
+            speeches={1: "【日常】", 3: "保温一会儿就够了", 4: "随手能用"},
+        )
+        state["words"] = {"civilian": "保温杯", "undercover": "热水壶"}
+        state["seats"][3]["word"] = "保温杯"
+        state["seats"][2]["word"] = "热水壶"
+        player = UndercoverPlayer()
+
+        async def drive():
+            speech = parse_node_task(build_speak_prompt(4, "保温杯", 1))
+            await player.decide(ChatRunContext("run-speech", SESSION, speech), speech)
+            eulogy = parse_node_task(_plain_eulogy(state))
+            self.assertIsNone(eulogy.word)
+            text = await player.decide(
+                ChatRunContext("run-will", SESSION, eulogy), eulogy
+            )
+            self.assertEqual(eulogy.word, "保温杯")
+            self.assertIn("日常", text or "")
             self.assertNotIn("保温", text or "")
             _display, error = referee.check_text(state, 4, text or "", 35)
             self.assertIsNone(error, f"裁判拒绝遗言 {text!r}: {error}")

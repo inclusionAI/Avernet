@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections import defaultdict
 from typing import Any, Awaitable, Callable, Optional
@@ -345,8 +346,7 @@ class PeterPlayerEngine:
     # ------------------------------------------------------------------ #
     async def _handle_chat_send(self, rid: str, params: dict, frame: dict) -> None:
         run_id = f"run-{rid}"  # 引擎自生成 run_id（也可用 frame id）
-        message = params.get("message") or {}
-        content = _extract_text(message.get("content"))
+        content = _chat_send_content(params)
         session_key = params.get("bcs_session_id") or params.get("session_key")
         if not session_key:
             await self._ack_err(rid, "invalid_request", "V3 chat.send 必须携带 bcs_session_id")
@@ -533,3 +533,22 @@ def _extract_text(content) -> str:
                 parts.append(block.get("text", ""))
         return "\n".join(parts)
     return ""
+
+
+def _chat_send_content(params: dict) -> str:
+    """读取未装饰的 V3 prompt；旧帧缺少 session_context 时解传输信封。"""
+    session_context = params.get("session_context")
+    if isinstance(session_context, dict):
+        prompt = session_context.get("message")
+        if isinstance(prompt, str):
+            return prompt
+
+    message = params.get("message") or {}
+    content = _extract_text(message.get("content"))
+    if re.match(r"\A\[BCS Group Context\][ \t]*\r?\n", content) is None:
+        return content
+    marker = re.search(r"\r?\n\r?\n\[消息内容\]\r?\n", content)
+    if marker is None:
+        return content
+    prompt = content[marker.end():]
+    return re.sub(r"\A\[from:[^\]\r\n]*\]", "", prompt, count=1)

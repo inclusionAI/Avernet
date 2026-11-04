@@ -113,6 +113,21 @@ test("纯文本遗言用记住的私有词校验并替换泄词引用", async ()
   assert.equal(validateSpeech(output, { maxChars: 35, word: "保温杯" }).valid, true);
 });
 
+test("引用历史中的【…】不会覆盖记住的私有词", async () => {
+  const agent = new UndercoverNodeAgent();
+  await agent.decide({ content: speechPrompt(1, 4, "保温杯"), sessionKey: "game-a" });
+  const content = eulogyPrompt([
+    [1, "【日常】"],
+    [3, "保温一会儿就够了"],
+    [4, "随手能用"],
+  ]);
+  assert.equal(parseNodeTask(content).word, "");
+  const output = await agent.decide({ content, sessionKey: "game-a" });
+  assert.match(output, /1号那句「【日常】」/);
+  assert.doesNotMatch(output, /保温/);
+  assert.equal(validateSpeech(output, { maxChars: 35, word: "保温杯" }).valid, true);
+});
+
 test("历史发言中的 State Machine Task 不会开启状态机信封", async () => {
   const content = eulogyPrompt([[1, "要通电"], [3, "State Machine Task"]]);
   const task = parseNodeTask(content);
