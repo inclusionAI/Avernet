@@ -10,6 +10,21 @@ export type RecoveryTaskStatus = "running" | "waiting_owner" | "waiting_effect" 
 export type RecoveryPhase = "assess" | "observe" | "plan" | "apply" | "verify";
 export type RecoveryEffect = "recovered" | "not_recovered" | "unknown" | "not_intervened";
 export type RecoveryInterventionStatus = "none" | "performed" | "unknown";
+/** Owner processing receipt; neither environment approval nor proof of recovery. */
+export type RecoveryOwnerRequestInput = {
+  reason: "permission" | "materials";
+  summary: string;
+  instructions: string;
+  evidence_ids: string[];
+};
+export type RecoveryOwnerRequest = RecoveryOwnerRequestInput & {
+  requestId: string;
+  revision: number;
+  status: "pending" | "confirmed";
+  resumePhase: RecoveryPhase;
+  createdAtMs: number;
+  feedback?: { userId: string; text: string; atMs: number };
+};
 export type RecoveryAssessment = {
   decision: "message" | "environment" | "observe" | "wait_cron";
   summary: string;
@@ -67,6 +82,10 @@ export type RecoveryTaskState = {
   /** Pre-intervention Cron observation; survives execution recovery, never extends itself. */
   cronWait?: { startedAt: number; deadlineAt: number };
   ownerDeadlineAt: number | null;
+  /** Absent on legacy tasks and ordinary terminal Owner handoffs. */
+  ownerRequest?: RecoveryOwnerRequest;
+  /** Durable notification work marker, including terminal tasks; not a business wait. */
+  ownerCardSyncPending?: boolean;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
   judgment: RecoveryJudgment | null;
   /** Agent-authored overall closeout summary; absent on legacy tasks or failed generation. */

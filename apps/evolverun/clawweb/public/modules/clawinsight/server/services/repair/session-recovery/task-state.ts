@@ -26,6 +26,7 @@ export function validateRecoveryEvidenceReferences(state: RecoveryTaskState, ids
 export function observeRecovery(state: RecoveryTaskState, judgment: RecoveryJudgment, now: number): RecoveryTaskState {
   active(state);
   if (!["observe", "verify"].includes(state.phase)) conflict("当前阶段不能提交效果判断");
+  if (state.ownerRequest?.status === "confirmed" && state.requiresFreshObservation) conflict("Owner 反馈后尚未读取最新现场，不能提交恢复结论");
   validateRecoveryEvidenceReferences(state, judgment.evidence_ids);
   if (judgment.effect !== "unknown" && !judgment.evidence_ids.length) invalid("确定效果结论必须有证据");
   if (state.level === "debug") conflict("Debug 应回报未实际干预，不能回报真实效果");
