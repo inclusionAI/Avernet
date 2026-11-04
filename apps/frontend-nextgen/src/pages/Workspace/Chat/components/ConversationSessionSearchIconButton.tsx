@@ -7,10 +7,13 @@ import { Search } from 'lucide-react';
 export function ConversationSessionSearchIconButton({
   marked,
   onToggle,
+  triggerClassName,
 }: {
   /** 已生效的检索标记：激活态钉住品牌蓝（Bot 收起时仍可见的 🔍 圆点）。 */
   marked: boolean;
   onToggle: () => void;
+  /** 外部显隐类注入（行级 hover 群发 + 激活常显，2026-11-04 操作组显隐重构）。 */
+  triggerClassName?: string;
 }) {
   return (
     <IconButton
@@ -27,6 +30,7 @@ export function ConversationSessionSearchIconButton({
       className={cn(
         'h-6 w-6 rounded-md hover:bg-muted',
         marked ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
+        triggerClassName,
       )}
       onClick={(event) => {
         event.stopPropagation();

@@ -1,5 +1,5 @@
-// 对话页二级侧栏:搜索 + 我的 Bot / 团队 Bot / 好友 Bot 三组目录(组名按 dmore index.html 侧栏实测);
-// 团队 Bot 数据走独立 collaborations 目录(section=team,独立加载/错误/重试,他人会话开发中暂禁)。
+// 对话页二级侧栏:搜索 + 我的 Bot / 团队空间 Bot / 好友 Bot 三组目录(组名按 dmore index.html 侧栏实测);
+// 团队空间 Bot 数据走独立 collaborations 目录(section=team,独立加载/错误/重试,他人会话开发中暂禁)。
 // 本体(ConversationSidebarContent)与外壳分离:桌面端用 ResizableWorkspaceSidebar,
 // <lg 由页面(任务 8)以 Drawer 包裹同一 Content,保证两端一致。
 // 组件只消费 Store 状态与同步 setter / Hook 模型回调,不触达 Service。
@@ -19,7 +19,7 @@ import { FriendItem, ManagedItem } from './ConversationSidebarItems';
 
 export interface ConversationSidebarProps {
   managedBots: ConversationBotView[];
-  /** 团队 Bot 第三分组(collaborations 目录,section=team;sprint spec 2026-10-10-conversation-team-bots)。 */
+  /** 团队空间 Bot 第三分组(collaborations 目录,section=team;sprint spec 2026-10-10-conversation-team-bots)。 */
   teamBots: ConversationBotView[];
   friendBots: ConversationBotView[];
   store: ConversationState;
@@ -65,9 +65,10 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
   const filteredManaged = filterBots(managedBots, keyword);
   const filteredTeam = filterBots(teamBots, keyword);
   const filteredFriend = filterBots(friendBots, keyword);
-  // 组名与分组顺序按 v2 设计稿对齐(dmore index.html 侧栏实测):我的 Bot / 团队 Bot / 好友 Bot。
+  // 组名与分组顺序按 v2 设计稿对齐(dmore index.html 侧栏实测):我的 Bot / 团队空间 Bot / 好友 Bot。
+  // (2026-11-04 验收微调:团队组更名「团队空间 Bot」——明确指通过团队空间获取的 Bot,减少理解成本。)
   const managedTitle = '我的 Bot';
-  const teamTitle = '团队 Bot';
+  const teamTitle = '团队空间 Bot';
   const friendTitle = '好友 Bot';
   // 空态提示(文案即入口):我的 Bot 均为用户创建并管理,引导去 Bot 管理创建
   // (2026-10-14 体验修复,不再误导去公开 Bot 添加);好友 Bot 引导去公开 Bot 发现添加。
@@ -133,7 +134,7 @@ export function ConversationSidebarContent(props: ConversationSidebarProps) {
               error={directory.teamError}
               onRetry={directory.retryTeam}
               items={filteredTeam}
-              emptyTitle="暂无运行中的团队 Bot"
+              emptyTitle="暂无运行中的团队空间 Bot"
               isSearching={isSearching}
               renderItem={(view) => <ManagedItem key={view.bot.botId} view={view} props={props} />}
               collapsible
@@ -172,7 +173,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
   // 整栏收起时保留全部三类目录；空目录提供展开入口，与完整侧栏保持一致。
   const railSections: ConversationCollapsedRailSection[] = [
     { id: 'managed', label: '我的 Bot', items: managedBots },
-    { id: 'team', label: '团队 Bot', items: teamBots },
+    { id: 'team', label: '团队空间 Bot', items: teamBots },
     { id: 'friend', label: '好友 Bot', items: friendBots },
   ];
   return (
