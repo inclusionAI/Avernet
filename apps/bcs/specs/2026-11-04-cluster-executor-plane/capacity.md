@@ -8,8 +8,7 @@
 | --- | --- | --- |
 | Heartbeat (renews all of a node's leases) | 1 write | per node per 5 s |
 | Roster read | 1 read | per node per 5 s |
-| Claim (cold) | 1 | per new episode |
-| Claim (mismatch) | 2 | rare, after membership change |
+| Claim (either outcome) | 2 in one transaction (conditional increment + read-back) | per new episode; rarely after membership change |
 | Fence step | +1 single-row PK update per fenced transaction | per owner write transaction |
 | Release / transfer | 1 | per drain or rebalance |
 | Inbound round persist | 1 | per round (required by write-before-ack) |

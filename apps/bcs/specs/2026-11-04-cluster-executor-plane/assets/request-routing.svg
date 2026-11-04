@@ -42,20 +42,20 @@
   <line x1="840" y1="176" x2="840" y2="214" stroke="#5c6a62" marker-end="url(#ar)"/>
   <text x="848" y="200" font-size="11" fill="#5c6a62">no</text>
   <rect x="730" y="218" width="186" height="72" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
-  <text x="746" y="240" font-size="12" font-weight="bold" fill="#1c2420">try CLAIM (CAS first)</text>
-  <text x="746" y="258" font-size="11" fill="#1c2420">1 statement</text>
-  <text x="746" y="275" font-size="11" fill="#5c6a62">(MySQL/OB: no RETURNING)</text>
+  <text x="746" y="240" font-size="12" font-weight="bold" fill="#1c2420">CLAIM transaction</text>
+  <text x="746" y="258" font-size="11" fill="#1c2420">UPDATE + read-back (2 stmts)</text>
+  <text x="746" y="275" font-size="11" fill="#5c6a62">no prior token needed</text>
 
   <line x1="760" y1="290" x2="660" y2="324" stroke="#157a55" marker-end="url(#ar)"/>
-  <text x="664" y="310" font-size="11" fill="#157a55">affected 1</text>
+  <text x="590" y="304" font-size="11" fill="#157a55">read-back = me</text>
   <rect x="526" y="328" width="190" height="56" rx="8" fill="#e3f0e9" stroke="#157a55"/>
   <text x="542" y="350" font-size="12" font-weight="bold" fill="#157a55">(b) cold session:</text>
   <text x="542" y="368" font-size="11" fill="#1c2420">owner now (n+1) → serve</text>
   <line x1="840" y1="290" x2="840" y2="324" stroke="#b3402e" marker-end="url(#ab)"/>
-  <text x="848" y="312" font-size="11" fill="#b3402e">affected 0</text>
+  <text x="848" y="312" font-size="11" fill="#b3402e">read-back = X</text>
   <rect x="730" y="328" width="186" height="56" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
-  <text x="746" y="350" font-size="12" font-weight="bold" fill="#9a6b0a">(c) read lease row</text>
-  <text x="746" y="368" font-size="10.5" fill="#1c2420">reply NOT_OWNER(X) · 2nd stmt</text>
+  <text x="746" y="350" font-size="12" font-weight="bold" fill="#9a6b0a">(c) owned by X</text>
+  <text x="746" y="368" font-size="10.5" fill="#1c2420">reply NOT_OWNER(X)</text>
 
   <!-- back to entry -->
   <polyline points="823,384 823,432 470,432 470,298 438,298" fill="none" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ar)"/>
@@ -74,7 +74,7 @@
   <text x="44" y="488" font-size="13" font-weight="bold" fill="#1c2420">Cases</text>
   <text x="44" y="512" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Stable cluster</tspan> — guess is the owner: one hop, zero extra DB reads. ~2–7 ms added to TTFT (vs ~500 ms average with polling).</text>
   <text x="44" y="534" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">After scale-up</tspan> — HRW says D, lease says A: one extra hop, once; the hint cache sends later rounds straight to A.</text>
-  <text x="44" y="556" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Cold session</tspan> — the preferred node claims (1 statement) and serves.</text>
+  <text x="44" y="556" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Cold session</tspan> — the preferred node claims (one transaction) and serves.</text>
   <text x="44" y="578" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Owner crashed</tspan> — forward fails → next-ranked node claims if claimable, else durable fallback; TTFT ≤ takeover time.</text>
   <text x="44" y="600" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Timeout, but the owner did process it</tspan> — two copies of one round: dedup on (principal, session_id, messageId) is required.</text>
   <text x="44" y="624" font-size="11" fill="#5c6a62">No load-balancer dependency: unique node_id, shared DB, direct peer reachability, same hash on every node.</text>

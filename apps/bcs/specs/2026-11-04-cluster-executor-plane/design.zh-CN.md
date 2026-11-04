@@ -293,17 +293,19 @@ ranked(S)      = all candidates sorted by score (fallback order)
 路径永远是单条 `UPDATE`。
 
 ```sql
--- CLAIM (CAS first; 1 statement in the common cold case)
+-- CLAIM: one scripted transaction; the claimant needs no prior knowledge of the token.
 -- Dialect-neutral sketch: SET columns are unqualified (SQLite rejects
 -- qualified SET targets); the SQL store renders the statement per flavor.
 UPDATE bcs_task_leases
-   SET fencing_token = :n + 1, node_id = :me, expires_at = NULL
- WHERE env = :env AND session_id = :s AND fencing_token = :n
+   SET fencing_token = 1 + fencing_token, node_id = :me, expires_at = NULL
+ WHERE env = :env AND session_id = :s
    AND ( node_id = ''
          OR NOT EXISTS (SELECT 1 FROM bcs_node_roster r
                          WHERE r.node_id = bcs_task_leases.node_id
-                           AND <r is fresh>) )
--- affected = 1 → owner with token n+1;  affected = 0 → read the row to learn who owns it
+                           AND <r is fresh>) );
+SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_id = :s;
+-- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
+-- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
 -- RELEASE (no successor; next claimer bumps the token)
 UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
@@ -320,8 +322,8 @@ UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
   不删行。否则重新创建的行会从 1 开始,旧僵尸的令牌又会匹配上(ABA 问题)。
 - **过期决定谁可以认领;令牌决定谁可以写。** 心跳迟到但租约尚未被认领的所有者
   仍可安全地写 —— 没有别人在写。
-- **恰好一个认领者胜出。** CAS 会取得行锁;竞争的认领者重新求值,发现令牌已被
-  递增,影响 0 行。
+- **恰好一个认领者胜出。** 条件递增会取得行锁;竞争的认领者重新求值,发现
+  `node_id` 已是胜出者(且新鲜),不再可认领,影响 0 行;它的回读会看到胜出者。
 - **有待处理工作的租约绝不释放,只能转移。** 释放(`node_id = ''`)只用于没有待处理
   工作的会话(冷、空闲)。已释放的租约在死亡节点查询(§10.1)中不可见,所以释放一个
   仍需驱动者的会话,会让它只能等兜底扫描。凡是节点必须在没有完整交接的情况下放弃
@@ -410,15 +412,16 @@ ENTRY NODE, on a round for S:
 
 TARGET NODE, handle(S):
     if I hold S's lease (in-memory set)        → serve: persist round (fenced), drive, stream back
-    else try CLAIM (CAS)                       → affected 1: serve
-                                               → affected 0: read lease row, reply NOT_OWNER(owner)
+    else CLAIM (one transaction: UPDATE + read-back)
+                                               → read-back node_id = me: serve
+                                               → otherwise: reply NOT_OWNER(read-back node_id)
 ```
 
 - 每个节点都在内存中知道**自己的**租约;常见路径除了持久化该轮本身,不需要任何
   数据库读。
-- 目标节点**先做 CAS**:冷会话(非所有者收到请求的常见情况)只需 1 条语句;不匹配
-  需要 2 条(失败的 CAS + 一次读)。MySQL 和 OceanBase 没有 `UPDATE … RETURNING`,
-  所以一条语句无法既认领又报告当前所有者。
+- 目标节点**先认领**:一个包含两条语句的事务(条件递增,随后回读 `node_id` 与
+  `fencing_token`)即可回答两种结果,目标节点无需事先知道当前令牌。MySQL 和 OceanBase
+  没有 `UPDATE … RETURNING`,因此需要回读。
 - **提示缓存**(hint cache)从 `NOT_OWNER` 回复中学习;扩容后第一次被误路由的轮次
   多付一跳,之后的轮次直达。
 - 来自排空中节点的 `NOT_OWNER` 回复还会附带"我在排空",入口节点据此立即更新自己的
@@ -430,8 +433,8 @@ TARGET NODE, handle(S):
 | 情况 | 发生什么 | 目标处的数据库语句数 | 额外跳数 |
 | --- | --- | --- | --- |
 | 集群稳定 | 入口 → HRW → 所有者服务 | 0(另加持久化该轮) | 0 |
-| 刚扩容(所有者 ≠ 首选) | 首选节点回复 `NOT_OWNER(A)`;入口缓存并转发给 A | 2 | 1,仅一次 |
-| 冷会话 | 首选节点认领并服务 | 1 | 0 |
+| 刚扩容(所有者 ≠ 首选) | 首选节点回复 `NOT_OWNER(A)`;入口缓存并转发给 A | 2(一个认领事务) | 1,仅一次 |
+| 冷会话 | 首选节点认领并服务 | 2(一个认领事务) | 0 |
 | 所有者崩溃,尚不可认领 | 转发失败 → 持久回退;接管时被拾取 | — | — |
 | 转发超时但所有者其实已处理 | 入口也走了回退 → 同一轮出现两份 | — | 需要去重([§9.3](#93-去重是必需的不是可选的)) |
 

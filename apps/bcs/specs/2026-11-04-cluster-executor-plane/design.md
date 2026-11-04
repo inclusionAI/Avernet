@@ -328,17 +328,19 @@ All comparisons use the DB clock. Rows are created **released** when the
 task session is created, so the claim path is always a single `UPDATE`.
 
 ```sql
--- CLAIM (CAS first; 1 statement in the common cold case)
+-- CLAIM: one scripted transaction; the claimant needs no prior knowledge of the token.
 -- Dialect-neutral sketch: SET columns are unqualified (SQLite rejects
 -- qualified SET targets); the SQL store renders the statement per flavor.
 UPDATE bcs_task_leases
-   SET fencing_token = :n + 1, node_id = :me, expires_at = NULL
- WHERE env = :env AND session_id = :s AND fencing_token = :n
+   SET fencing_token = 1 + fencing_token, node_id = :me, expires_at = NULL
+ WHERE env = :env AND session_id = :s
    AND ( node_id = ''
          OR NOT EXISTS (SELECT 1 FROM bcs_node_roster r
                          WHERE r.node_id = bcs_task_leases.node_id
-                           AND <r is fresh>) )
--- affected = 1 → owner with token n+1;  affected = 0 → read the row to learn who owns it
+                           AND <r is fresh>) );
+SELECT node_id, fencing_token FROM bcs_task_leases WHERE env = :env AND session_id = :s;
+-- node_id = me → I own S with the token just read;  otherwise → NOT_OWNER(node_id)
+-- (also covers a handoff whose COMMIT notice was lost: node_id is already me)
 
 -- RELEASE (no successor; next claimer bumps the token)
 UPDATE bcs_task_leases SET node_id = '', expires_at = NOW()
@@ -358,8 +360,9 @@ Rules:
 - **Expiry decides who may claim; the token decides who may write.** An owner
   whose heartbeat is late but whose lease has not been claimed can still
   write safely — nobody else is writing.
-- **Exactly one claimant wins.** The CAS takes the row lock; a racing claimant
-  re-evaluates, finds the token already bumped, and touches 0 rows.
+- **Exactly one claimant wins.** The conditional increment takes the row lock;
+  a racing claimant re-evaluates, finds `node_id` already set to the (fresh)
+  winner, touches 0 rows, and its read-back names the winner.
 - **A lease with pending work is never released, only transferred.** Release
   (`node_id = ''`) is for sessions with no pending work (cold, idle). A
   released lease is invisible to the dead-node query (§10.1), so releasing a
@@ -458,16 +461,18 @@ ENTRY NODE, on a round for S:
 
 TARGET NODE, handle(S):
     if I hold S's lease (in-memory set)        → serve: persist round (fenced), drive, stream back
-    else try CLAIM (CAS)                       → affected 1: serve
-                                               → affected 0: read lease row, reply NOT_OWNER(owner)
+    else CLAIM (one transaction: UPDATE + read-back)
+                                               → read-back node_id = me: serve
+                                               → otherwise: reply NOT_OWNER(read-back node_id)
 ```
 
 - Each node knows **its own** leases in memory; the common path needs no DB
   read beyond persisting the round itself.
-- **CAS first** at the target: cold sessions (the common non-owner case)
-  cost 1 statement; a mismatch costs 2 (failed CAS + read). MySQL and
-  OceanBase have no `UPDATE … RETURNING`, so one statement cannot both claim
-  and report the current owner.
+- **Claim first** at the target: one transaction of two statements (the
+  conditional increment, then a read-back of `node_id` and `fencing_token`)
+  answers both outcomes, without the target knowing the current token in
+  advance. MySQL and OceanBase have no `UPDATE … RETURNING`, hence the
+  read-back.
 - The **hint cache** learns from `NOT_OWNER` replies; after a scale-up the
   first mis-routed round pays one extra hop, later rounds go direct.
 - `NOT_OWNER` replies from a draining node also say "I'm draining", so the
@@ -480,8 +485,8 @@ TARGET NODE, handle(S):
 | Case | What happens | DB statements at target | Extra hops |
 | --- | --- | --- | --- |
 | Stable cluster | Entry → HRW → owner serves | 0 (plus persisting the round) | 0 |
-| Just after scale-up (owner ≠ preferred) | Preferred replies `NOT_OWNER(A)`; entry caches and forwards to A | 2 | 1, once |
-| Cold session | Preferred claims and serves | 1 | 0 |
+| Just after scale-up (owner ≠ preferred) | Preferred replies `NOT_OWNER(A)`; entry caches and forwards to A | 2 (one claim transaction) | 1, once |
+| Cold session | Preferred claims and serves | 2 (one claim transaction) | 0 |
 | Owner crashed, not yet claimable | Forward fails → durable fallback; picked up at takeover | — | — |
 | Forward timed out but owner did process | Entry also falls back → two copies of one round | — | dedup required (§9.3) |
 
