@@ -225,7 +225,7 @@ def test_shared_management_http_preserves_auth_status_and_conflicts(tmp_path):
 
     app = FastAPI()
     app.include_router(create_index_build_router(service, operator))
-    path = "/api/v1/index-builds/ordinary-documents"
+    path = "/api/v2/index-builds/ordinary-documents"
     body = {"embedding_model": "plain-model", "embedding_dimension": 64}
     headers = {"x-operator": "test"}
     with TestClient(app) as client:

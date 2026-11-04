@@ -18,7 +18,7 @@ def local_factory():
 def applied(client, revision, deleted=False):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        response = client.get("/api/v1/agent-cards/demo/index-status")
+        response = client.get("/api/v2/agent-cards/demo/index-status")
         if response.status_code == 200:
             status = response.json()
             if (
@@ -46,7 +46,7 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         base_url="http://127.0.0.1",
     ) as client:
         saved = client.put(
-            "/api/v1/agent-cards/demo",
+            "/api/v2/agent-cards/demo",
             json={"card": {"name": "Nutrition", "description": None}},
         )
         assert saved.status_code == 202, saved.text
@@ -70,7 +70,7 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
         assert search(client, "nutrition")["items"][0]["id"] == "demo"
         assert search(client, "nutrition")["items"][0]["summary"] == ""
         changed = client.put(
-            "/api/v1/agent-cards/demo",
+            "/api/v2/agent-cards/demo",
             json={
                 "card": {"name": "Travel", "description": "railway journey planning"}
             },
@@ -85,8 +85,8 @@ def test_public_write_search_update_delete_and_restart(tmp_path):
     ) as client:
         applied(client, changed.json()["card_version"])
         assert search(client, "railway")["items"][0]["id"] == "demo"
-        assert client.delete("/api/v1/agent-cards/demo").status_code == 202
-        state = client.get("/api/v1/agent-cards/demo/index-status").json()
+        assert client.delete("/api/v2/agent-cards/demo").status_code == 202
+        state = client.get("/api/v2/agent-cards/demo/index-status").json()
         applied(client, state["card_version"], deleted=True)
         assert search(client, "railway")["items"] == []
         assert client.get("/ready?include_counts=true").json()["index_counts"] == {
@@ -191,7 +191,7 @@ def test_readiness_does_not_depend_on_optional_counts(tmp_path, monkeypatch):
         base_url="http://127.0.0.1",
     ) as client:
         saved = client.put(
-            "/api/v1/agent-cards/demo", json={"card": {"name": "invoice"}}
+            "/api/v2/agent-cards/demo", json={"card": {"name": "invoice"}}
         )
         applied(client, saved.json()["card_version"])
         assert client.get("/ready").status_code == 200
@@ -211,7 +211,7 @@ def test_ready_counts_report_actual_mismatched_payloads_without_new_endpoint(tmp
         app, client=("127.0.0.1", 50000), base_url="http://127.0.0.1"
     ) as client:
         saved = client.put(
-            "/api/v1/agent-cards/demo", json={"card": {"name": "invoice"}}
+            "/api/v2/agent-cards/demo", json={"card": {"name": "invoice"}}
         )
         applied(client, saved.json()["card_version"])
         index = app.state.catalog_updates.index
