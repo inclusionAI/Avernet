@@ -1218,15 +1218,6 @@ impl UserIdentityPort for StaticHumanIdentity {
     ) -> Result<Option<UserIdentityInfo>, AuthError> {
         Ok(None)
     }
-
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 /// §3.3 Human self right (GPT-review batch C

@@ -158,6 +158,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 39, name: "bot_a2a" },
     SqliteMigration { version: 40, name: "bot_avatar" },
     SqliteMigration { version: 41, name: "group_agent_cards" },
+    SqliteMigration { version: 42, name: "auth_session_version" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -545,6 +546,10 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        // Versioned login sessions on the shared identity row (spec §8.5/§9):
+        // `session_id` / `session_revision` / `session_expires_at` columns plus
+        // the one-time historical token/expiry clear.
+        42 => add_sqlite_auth_session_version_schema(db).await,
         _ => Ok(()),
     }
 }
@@ -668,6 +673,10 @@ fn is_create_index(sql: &str) -> bool {
 #[cfg(test)]
 #[path = "migrations/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "migrations/auth_session_version_migration_tests.rs"]
+mod auth_session_version_migration_tests;
 
 #[cfg(test)]
 #[path = "migrations/collection_migration_tests.rs"]

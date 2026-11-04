@@ -1435,6 +1435,9 @@ fn session_application_error_response(
             (StatusCode::UNPROCESSABLE_ENTITY, code, message)
         }
         ApplicationError::BadGateway { code, message } => (StatusCode::BAD_GATEWAY, code, message),
+        ApplicationError::Unavailable { code, message } => {
+            (StatusCode::SERVICE_UNAVAILABLE, code, message)
+        }
         ApplicationError::Internal(message) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error".to_string(),

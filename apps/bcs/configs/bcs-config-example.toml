@@ -305,6 +305,108 @@ client_id = "replace-with-github-client-id"
 client_secret = "replace-with-github-client-secret"
 
 # =============================================================================
+# V1 API authentication chain: [api.auth]
+# (V1 API auth plugin chain — api-contracts/v1/authentication/contract.md)
+# =============================================================================
+# This chain is INDEPENDENT from the legacy [auth] section above: it selects
+# the sources that authenticate the OpenAPI V1 protected surface and the
+# /openapi/v1/auth/* login family.
+#
+#   * Omitting the whole [api.auth] section keeps the compatibility
+#     assembly: the current Gateway-protected surface and the legacy login
+#     provider choices, hardened to the same strict session lifecycle.
+#   * A PRESENT [api.auth] fully defines the chain. Nothing is appended
+#     implicitly: no implicit gateway fallback, no inheritance from [auth],
+#     and no local/mock source can join this chain implicitly (test
+#     identities are injected fakes, never a config-selected mock).
+#   * A source joins ONLY by being listed in `chain`, in order; sources run
+#     strictly in that order, the first success short-circuits the rest, and
+#     invalid credentials / policy rejection (403) / dependency outage (503
+#     auth_dependency_unavailable) are FINAL — no fallback to later sources.
+#   * A provider table that is present but NOT chained stays inert: it is
+#     structurally validated, its secrets are NOT read, and no client is
+#     initialized.
+#   * Secret fields are LOGICAL REFERENCES into the [secret] backend (key
+#     names), never literal material.
+#
+# The active block below is the MIXED shape (gateway first, then two OAuth
+# sources). Deployment constraints: OAuth login needs either single-instance
+# / sticky routing or an atomically shared pending-login state store;
+# MySQL deployments must run a strict SQL mode (the session token hash is a
+# 64-char SHA-256 hex in VARCHAR(64) — non-strict mode silently truncates).
+[api.auth]
+chain = ["gateway", "alipay", "github"]
+# External base URL of the V1 auth routes; callbacks are always joined as
+# {public_base_url}/callback/{provider} (never with an extra "/auth", never
+# inferred from Host/Forwarded headers). Required while any OAuth source is
+# enabled; rejected when none is.
+public_base_url = "https://bcs.example.com/openapi/v1/auth"
+# Required while any OAuth source is enabled; resolved and verified at
+# startup through the [secret] backend. If legacy OAuth is also configured,
+# its resolved value MUST equal auth.oauth.jwt_secret above: both entries
+# share bcs_session and startup rejects different keys.
+session_signing_key_secret = "bcs-api-session-signing-key"
+# OAuth session idle timeout in minutes; positive, expanded once to seconds
+# at validation time. Defaults to 30 when omitted.
+session_idle_timeout_minutes = 30
+# In-site relative redirect target after a successful login; open-redirect
+# shapes are rejected at startup. Defaults to "/".
+success_redirect_path = "/?login=success"
+# Exact-match browser origins (scheme://host[:port], no wildcards/paths/
+# userinfo) required for cookie-authenticated unsafe writes. Required while
+# any cookie-kind source is enabled; FORBIDDEN otherwise.
+trusted_browser_origins = ["https://workbench.example.com"]
+
+[api.auth.gateway]
+# Signed-principal source (X-Avernet-Principal). Defaults shown.
+issuers = ["gateway", "backend"]
+audience = "bcs"
+key_id = "bare"
+signing_key_secret = "bcs-api-principal-signing-key"
+
+[api.auth.alipay]
+client_id = "example-alipay-app-id"
+private_key_secret = "bcs-api-alipay-private-key"
+alipay_public_key_secret = "bcs-api-alipay-public-key"
+
+[api.auth.github]
+client_id = "example-github-client-id"
+client_secret_secret = "bcs-api-github-client-secret"
+
+# --- Alternative shape 1: gateway-only ---------------------------------------
+# No OAuth source is enabled, so the OAuth-only public fields above become
+# ILLEGAL (startup fails): public_base_url / session_signing_key_secret must
+# be removed, and with no cookie-kind source trusted_browser_origins must
+# NOT be configured.
+#
+# [api.auth]
+# chain = ["gateway"]
+#
+# [api.auth.gateway]
+# issuers = ["gateway", "backend"]
+# audience = "bcs"
+# key_id = "bare"
+# signing_key_secret = "bcs-api-principal-signing-key"
+
+# --- Alternative shape 2: OAuth-only -----------------------------------------
+# No gateway source: the gateway table is absent and no Gateway signing key
+# is read. friend-auth-sync (if separately enabled) still resolves its own
+# Gateway resigner secret under its own contract; group-session WebSocket
+# signing stays independent either way.
+#
+# [api.auth]
+# chain = ["github"]
+# public_base_url = "https://bcs.example.com/openapi/v1/auth"
+# session_signing_key_secret = "bcs-api-session-signing-key"
+# session_idle_timeout_minutes = 30
+# success_redirect_path = "/"
+# trusted_browser_origins = ["https://workbench.example.com"]
+#
+# [api.auth.github]
+# client_id = "example-github-client-id"
+# client_secret_secret = "bcs-api-github-client-secret"
+
+# =============================================================================
 # Speaking Lease (spec §10.13.9)
 # Workbench speaking-lease idle window, granted at acquire/preempt and
 # required at message submission alike. Absent section = frozen 60s
@@ -406,6 +508,9 @@ allow_loopback = false
 token_secret = "replace-with-invite-token-secret"
 public_claim_enabled = false
 public_claim_max_count = 1000
+# Explicitly authorize manual issuance; empty denies /api/v1/.../invite-codes/init.
+# Use user_id from /openapi/v1/auth/user, never provider IDs, usernames or human_ IDs.
+issuer_user_ids = []
 default_ttl_seconds = 86400
 base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"

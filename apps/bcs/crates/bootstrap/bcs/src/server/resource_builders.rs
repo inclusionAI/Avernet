@@ -401,7 +401,8 @@ pub(super) fn build_invite_code_service(
         )
         // 与 invite-code gate 中间件同源接线：开关关闭时 /me 合成“已绑定”，
         // 客户端提示行为完全由该后端开关控制。
-        .with_gate_enabled(config.invite.invite_code_gate_enabled),
+        .with_gate_enabled(config.invite.invite_code_gate_enabled)
+        .with_issuer_user_ids(config.invite.issuer_user_ids.clone()),
     )
 }
 

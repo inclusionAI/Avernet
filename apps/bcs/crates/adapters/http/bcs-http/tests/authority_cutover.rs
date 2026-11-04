@@ -250,9 +250,6 @@ impl UserIdentityPort for StaticHumanIdentity {
         Ok(None)
     }
 
-    async fn update_token(&self, _user_id: &str, _token: &str, _expire_at: u64) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 struct SessionFixture {
@@ -551,9 +548,6 @@ impl UserIdentityPort for StaticFriendIdentity {
         Ok(None)
     }
 
-    async fn update_token(&self, _user_id: &str, _token: &str, _expire_at: u64) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 fn friend_app(
@@ -682,9 +676,6 @@ impl UserIdentityPort for StaticMembersIdentity {
         Ok(None)
     }
 
-    async fn update_token(&self, _user_id: &str, _token: &str, _expire_at: u64) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 async fn members_app(

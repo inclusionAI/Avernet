@@ -16,8 +16,13 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-config-api  = { workspace = true }
 bcs-db-local = { workspace = true }
+bcs-db-mysql    = { workspace = true }
 bcs-test-support = { workspace = true }
+mysql_async     = { workspace = true }
+sha2            = { workspace = true }
+tokio-test      = "0.4"
 
 [lints]
 workspace = true

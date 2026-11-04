@@ -702,3 +702,59 @@ within a trusted scope. Repository CAS returns the committed projection and
 fences both run and shared Task revisions. Pending input is Task-owned; budgets
 and local states remain run-owned. Run-scoped cancellation rejects a shared Task
 with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+## Strict atomic auth session repository
+
+`AuthSessionRepoPort` is the strict, environment-scoped login-session
+persistence contract for the V1 API auth plugin chain. `AuthSessionScope`
+includes `env`, and scope values come from trusted configuration plus an
+already-verified identity, never from unverified JWT claims. Session versions
+CAS on a revision that advances by `checked_add(1)` within SQL signed BIGINT
+bounds. Install and rotate are compare-and-swap writes returning
+`Applied`/`Conflict`; a conflict is a lost race, never a persistence error,
+and callers restart the login batch or fail authentication instead of writing
+unconditionally. Revoking bumps the revision and clears the token hash, so a
+revoked or rotated-out hash no longer resolves; repeating a revoke reports
+`NotCurrent`. Reads separate absence (`None` for a missing session), the
+current revision, and persistence failure through the closed two-category
+`AuthSessionStoreError` whose display text never carries SQL, endpoint, or
+credential material. The port is independent of `UserIdentityRepoPort`: an
+implementation may implement both, but the strict trait has no default
+methods delegating to the legacy Option-returning lookups, and a session
+write never auto-creates a missing identity row. Snapshot display fields are
+joined from the identity row. Concrete implementations prove conformance
+against the shared `bcs-test-support` harness
+(`auth_session_repo_port_contract_tests`), which takes any
+`AuthSessionRepoPort` trait object and a scope.
+
+## V1 auth application ports and AuthService
+
+`port::oauth` is the ONLY surface the auth application layer consumes for
+login, transport-neutral by construction: `OAuthProviderPort` (chain-ordered
+provider names, authorize-URL build with the exact per-provider callback,
+one-time code exchange whose third-party errors are lowered to stable
+`ApplicationError` categories, never raw provider text), `OAuthSessionPort`
+(atomic install for a completed browser-bound login, rotation, and
+idempotent session-instance revoke), and `PendingOAuthLoginPort` (the
+issue/consume mirror of plugin-api's `PendingOAuthLoginStore`, with the
+byte-identical `{callback_base}/{provider}` join on both sides). `application::v1::AuthService`
+orchestrates them for the OpenAPI V1 facade (`login_urls`, `complete_login`,
+`current_user`, `refresh_session`, `logout`): its `AuthFlowReply` carries
+transport-neutral cookie instructions — one `SetLoginChallenge` on URL
+discovery, session-install plus challenge-clear on callback success — plus
+the failure classes the API chain pins (lost login race → 409, lost rotation
+race → 401, dependency outage → 503 `auth_dependency_unavailable`, and
+logout never reports success after a failed revoke). No delivery type crosses
+into this contract; the HTTP adapter encodes `BrowserCookieChange` into
+separate `Set-Cookie` headers and the rest of BCS keeps consuming
+`AuthenticatedCaller` unchanged. Wire contract:
+`api-contracts/v1/authentication/contract.md`.
+
+## Invite-code issuance caller
+
+`InitInviteCodes` requires the verified `AuthenticatedCaller`; application
+implementations must authorize issuance before repository access. The bootstrap
+allowlist uses exact user IDs and defaults to denying all callers. Gateway or
+OAuth authentication, a binding and non-user identities do not implicitly grant
+issuance. HTTP request bodies remain count-only; Rust callers must provide the
+caller when rebuilding. No persistence schema changes are required.

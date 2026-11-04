@@ -146,6 +146,9 @@ mkdir -p "$cov_dir"
 cat > "$cov_dir/summary.json" <<'JSON'
 {"data":[{"totals":{"lines":{"covered":45,"count":100},"functions":{"covered":40,"count":100},"regions":{"covered":30,"count":100},"branches":{"covered":0,"count":0}}}]}
 JSON
+cat > "$cov_dir/oauth_e2e.json" <<'JSON'
+{"status":"passed","scenarios":["mixed-sqlite","mixed-memory","compatibility-and-chain-selection","pending-capacity","startup-validation"],"checks":[{"path":"/auth/url","status":200}],"provider_calls":{"authorize":1,"exchange":1,"userinfo":1}}
+JSON
 printf '%s\n' '<coverage line-rate="0.45"></coverage>' > "$cov_dir/cobertura.xml"
 printf '%s\n' 'TOTAL 100 55 45.00%' > "$cov_dir/coverage.txt"
 printf '%s\n' '<endpointCoverage><overall covered="12" total="12" uncovered="0" percent="100.0"/></endpointCoverage>' > "$cov_dir/endpoint_coverage.xml"
@@ -264,7 +267,7 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
-  for artifact in e2e.log cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
+  for artifact in e2e.log oauth_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
     [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
       fail "BCS artifact missing: ${artifact}"
   done

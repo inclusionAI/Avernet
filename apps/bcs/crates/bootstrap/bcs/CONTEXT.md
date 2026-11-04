@@ -243,3 +243,24 @@ independent human-wait/total caps; typed config validation enforces positive
 wait <= total <= one day. Execution continues to use its existing timeout.
 Test-only server constructors retain the legacy mux unless explicitly configured;
 the production infrastructure path enables the supported Structured Input profile.
+
+## OAuth entry compatibility
+
+When `[api.auth]` is absent and the legacy OAuth facade is mounted, bootstrap
+injects `CompatAuthPrincipalVerifier` only for V1 current-user lookup. Protected
+V1 APIs retain Gateway-only trust; explicit auth chains never use this override.
+The compat projection preserves the verified provider and avatar from one legacy
+chain pass, and propagates dependency failures rather than retrying another chain.
+
+Explicit OAuth selection resolves its signing secret once and rejects a mismatch
+with a configured legacy OAuth session reader/writer's `auth.oauth.jwt_secret`.
+Both entries share one Cookie and session scope; independent signing keys are
+not independent namespaces. Errors identify the configuration fields, not keys.
+
+## Invite-code issuer policy
+
+Bootstrap injects `[invite].issuer_user_ids` (default empty) into the invite-code
+application facade. Only exact verified user IDs are authorized for manual
+issuance, regardless of authentication source or the binding-gate switch.
+Configuration changes require restart; policy enforcement and creator audit
+metadata stay in application, not the router or authentication verifier.

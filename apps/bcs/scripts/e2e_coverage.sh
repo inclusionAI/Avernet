@@ -243,6 +243,8 @@ bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 # Exercise channel plugins through a separate real server without enabling a
 # test ingress on the shared production-composition Singlebox instance.
 bash "$bcs_dir/scripts/caller_e2e_coverage.sh" || e2e_status=$?
+# Real OAuth login/session journeys against isolated local HTTPS provider stubs.
+bash "$bcs_dir/scripts/oauth_e2e_coverage.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
 fi
@@ -392,7 +394,6 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-session-file-store/src/memory.rs
     bcs-session-store/src/memory.rs
     bcs-session-store/src/memory_operations/
-    bcs-user-identity/src/memory.rs
   )
   # Caller delegate stages are exercised by caller_delegation_chain_story.py;
   # only structurally unreachable memory repositories belong in this list.

@@ -6,6 +6,12 @@ pub mod a2a_delivery;
 pub mod bot_terminal_observer;
 pub mod human_notify;
 pub mod metrics;
+pub mod oauth;
+
+pub use oauth::{
+    o_auth_provider_port_contract_tests, o_auth_session_port_contract_tests,
+    pending_o_auth_login_port_contract_tests,
+};
 
 use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::port::{

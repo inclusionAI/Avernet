@@ -388,15 +388,6 @@ impl UserIdentityPort for NoUserIdentity {
     ) -> Result<Option<UserIdentityInfo>, AuthError> {
         Ok(None)
     }
-
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 struct HeaderUserIdentity;
@@ -436,15 +427,6 @@ impl UserIdentityPort for HeaderUserIdentity {
         _user_id: &str,
     ) -> Result<Option<UserIdentityInfo>, AuthError> {
         Ok(None)
-    }
-
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
     }
 }
 
