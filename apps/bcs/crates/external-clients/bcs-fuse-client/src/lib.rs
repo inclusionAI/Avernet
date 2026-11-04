@@ -4,9 +4,11 @@
 //! service traits live in `services/bcs-fusion`.
 
 pub mod client;
+pub mod cards;
 pub mod types;
 
-pub use bcs_config_api::BcsFuseConfig;
+pub use bcs_config_api::{BcsFuseApiVersion, BcsFuseConfig};
+pub use cards::*;
 pub use client::FuseClient;
 pub use types::*;
 

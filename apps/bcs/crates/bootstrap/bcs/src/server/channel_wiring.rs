@@ -115,7 +115,10 @@ impl BotCatalogCleanupPort for FuseBotCatalogCleanupPort {
     }
 }
 
-pub(super) fn build_bot_catalog_cleanup(config: &BcsConfig) -> Arc<dyn BotCatalogCleanupPort> {
+pub(super) fn build_bot_catalog_cleanup(
+    config: &BcsConfig, card_changes: Option<&Arc<bcs_fusion::CardChangeQueue>>,
+) -> Arc<dyn BotCatalogCleanupPort> {
+    if let Some(queue) = card_changes { return queue.clone(); }
     if !config.bcsfuse.enabled {
         return Arc::new(NoopBotCatalogCleanupPort);
     }

@@ -250,6 +250,8 @@ tenant = "teamclaw"
 actions = ["managers:sync", "ownership:sync"]
 
 [bcsfuse]
+# Switch registration and discovery together: v1 workers / v2 Cards.
+api_version = "v1"
 enabled = true
 url = "http://127.0.0.1:8765"
 fusion_timeout_ms = 120000

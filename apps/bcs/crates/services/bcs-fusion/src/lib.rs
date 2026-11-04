@@ -10,3 +10,6 @@ pub use core::{
     load_bot_context, normalize_worker_id, sync_worker_availability_with_retry,
     sync_worker_with_retry, AvailabilitySyncOutcome,
 };
+
+pub use core::card_sync::{CardChangeQueue, FuseCardSyncLifecycle};
+pub use core::card_worker_profiles::FuseCardWorkerProfileService;

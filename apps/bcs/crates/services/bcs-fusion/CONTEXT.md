@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Fuse v2 Card search adaptation and master-bound Agent/Group catalog publication, with a coalesced identity queue and startup backfill.
+
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.
 - BCSFuse-backed `FusionCoreService` implementation using the transport-only external client.
 - BCSFuse-backed `WorkerProfileCoreService` implementation and worker sync helpers.

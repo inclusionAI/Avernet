@@ -454,6 +454,8 @@ pub(super) fn build_candidate_search_bindings(
     fuse_client: Option<Arc<FuseClient>>,
 ) -> CandidateSearchBindings {
     let worker_profiles: Arc<dyn WorkerProfileCoreService> = match fuse_client {
+        Some(client) if config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2 =>
+            Arc::new(bcs_fusion::FuseCardWorkerProfileService::new(client, config.bcsfuse.profile_id.clone())),
         Some(client) => Arc::new(FuseWorkerProfileService::new(client)),
         None => Arc::new(EmptyWorkerProfileCoreService),
     };
@@ -475,6 +477,7 @@ pub(super) fn build_candidate_search_bindings(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_openapi_v1_state(
     config: &BcsConfig,
+    card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
     invite_token_secret: Vec<u8>,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
@@ -545,7 +548,7 @@ pub(super) fn build_openapi_v1_state(
         control_plane_repo,
         provider_repos.provider_repo.clone(),
         provider_repos.provider_bindings.clone(),
-    ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+    ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
     let bot_service = Arc::new(
         BotServiceImpl::new(
             control_plane.clone(),

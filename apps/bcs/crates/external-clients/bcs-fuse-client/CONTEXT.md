@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Transport-only Fuse v2 Card PUT/DELETE and search contracts.
+
 - Pure HTTP wrapper for the remote BCSFuse service.
 - Request/response DTOs for worker sync, worker recommendation, batch lookup, and fusion APIs.
 - `FuseClientError` for transport and response parsing failures.
