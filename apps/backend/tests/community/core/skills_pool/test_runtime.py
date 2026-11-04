@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_context import DeviceContext, DeviceOfflineError
 from agentclaw.community.core.skills_pool.models import (
     MappingProjectionStatus,
     MappingResultReason,
@@ -626,6 +626,122 @@ async def test_legacy_mapping_contract_unavailable_is_not_retryable(
     assert result.status is MappingProjectionStatus.DEGRADED
     assert result.reason is MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED
     assert result.evidence == {"reason": "engine_skill_mapping_unsupported"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish_mappings", "verify_mappings"])
+@pytest.mark.parametrize("status_code", [500, 502, 503], ids=["500", "502", "503"])
+async def test_unknown_mapping_5xx_remains_observable_and_pending(
+    caplog,
+    operation: str,
+    status_code: int,
+) -> None:
+    transport = FakeTransport()
+
+    async def reject(*_args, **_kwargs):
+        raise DeviceAdapterHTTPStatusError(status_code, "private-response-sentinel")
+
+    transport.invoke = reject
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+    caplog.set_level(logging.INFO)
+
+    result = await getattr(runtime, operation)(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+    )
+
+    expected_evidence = {
+        "publish_mappings": "runtime_mapping_publish_unavailable",
+        "verify_mappings": "runtime_mapping_verify_unavailable",
+    }[operation]
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence == {"reason": expected_evidence}
+    transient_records = [
+        record
+        for record in caplog.records
+        if "[skills_pool.runtime] mapping" in record.getMessage()
+    ]
+    assert transient_records[-1].levelno == logging.ERROR
+    assert transient_records[-1].exc_info is None
+    assert "private-response-sentinel" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish_mappings", "verify_mappings"])
+async def test_trusted_resolver_offline_is_not_flattened(operation: str) -> None:
+    class OfflineResolver:
+        def resolve_for_bot(self, bot_id, user_id):
+            raise DeviceOfflineError("confirmed offline")
+
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=OfflineResolver(), adapter_transport=FakeTransport(), probe_service=FakeProbe(),
+    )
+
+    result = await getattr(runtime, operation)(bot_id="bot-1", user_id="owner-1", mappings=[])
+    assert not result
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.reason is MappingResultReason.DEVICE_OFFLINE
+
+
+@pytest.mark.asyncio
+async def test_center_cutover_keeps_transient_result_when_resolver_is_offline() -> None:
+    class OfflineResolver:
+        def resolve_for_bot(self, bot_id, user_id):
+            raise DeviceOfflineError("confirmed offline")
+
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=OfflineResolver(), adapter_transport=FakeTransport(), probe_service=FakeProbe(),
+    )
+    result = await runtime.cutover(
+        bot_id="bot-1", user_id="owner-1", migration_generation="generation",
+        preparation_id="prepare", registered_local_names=[],
+        mappings=[PoolSkillMapping("center", None, "weather", "skill-id", "1")],
+        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
+    )
+    assert result.committed is False
+    assert result.status is PoolCutoverStatus.TRANSIENT_ERROR
+
+
+@pytest.mark.asyncio
+async def test_logical_apply_preserves_confirmed_offline_evidence() -> None:
+    transport = FakeTransport()
+
+    async def offline(*args, **kwargs):
+        raise DeviceOfflineError("confirmed offline")
+
+    transport.invoke = offline
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(), adapter_transport=transport, probe_service=FakeProbe(),
+    )
+    result = await runtime.apply_mappings(context=_context(), engine="openclaw", mappings=[])
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.reason is MappingResultReason.DEVICE_OFFLINE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["CONVERGED", "PENDING", "DEGRADED"])
+async def test_engine_evidence_cannot_claim_trusted_device_offline(status: str) -> None:
+    transport = FakeTransport()
+
+    async def response(*args, **kwargs):
+        return {"success": True, "data": {
+            "status": status, "items": [], "issues": [],
+            "evidence": {"reason": "DEVICE_OFFLINE"},
+            "reason": "DEVICE_OFFLINE",
+        }}
+
+    transport.invoke = response
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(), adapter_transport=transport, probe_service=FakeProbe(),
+    )
+    result = await runtime.apply_mappings(context=_context(), engine="openclaw", mappings=[])
+    assert result.reason is None
+    assert result.status.value == status
 
 
 @pytest.mark.asyncio

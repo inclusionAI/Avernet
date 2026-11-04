@@ -98,7 +98,6 @@ class DesktopRecoveryDisposition(StrEnum):
 class RecoveryContinuation(StrEnum):
     """What the current durable recovery task should do next."""
 
-    COMPLETE_WAITING_FOR_EVENT = "COMPLETE_WAITING_FOR_EVENT"
     RETRY_WITH_BACKOFF = "RETRY_WITH_BACKOFF"
     RESCHEDULE_FOR_PROGRESS = "RESCHEDULE_FOR_PROGRESS"
     COMPLETE_PERMANENT = "COMPLETE_PERMANENT"
@@ -466,7 +465,11 @@ class DesktopSkillRecoveryTaskHandler:
             return Fail(ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE)
         retryable = tuple(issue for issue in projection.issues if issue.retryable)
         if any(issue.code == _DEVICE_OFFLINE_CODE for issue in retryable):
-            continuation = RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT
+            # This attempt started with an ACTIVE/PENDING Bot. Keep a bounded
+            # retry until a fresh read observes OFFLINE, or the device recovers.
+            # The next attempt stops and waits for reconnect once OFFLINE is
+            # persisted. Event delivery and task completion are not atomic.
+            return Retry("Desktop device offline while Bot state remains runnable")
         elif any(issue.code == _POOL_TRANSITION_CODE for issue in retryable):
             continuation = RecoveryContinuation.RESCHEDULE_FOR_PROGRESS
         else:
@@ -497,8 +500,6 @@ class DesktopSkillRecoveryTaskHandler:
                         unknown_retryable,
                     )
 
-        if continuation is RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT:
-            return Complete()
         if continuation is RecoveryContinuation.RESCHEDULE_FOR_PROGRESS:
             return Reschedule(DESKTOP_SKILL_RECOVERY_DELAY_SECONDS)
         if continuation is RecoveryContinuation.RETRY_WITH_BACKOFF:
