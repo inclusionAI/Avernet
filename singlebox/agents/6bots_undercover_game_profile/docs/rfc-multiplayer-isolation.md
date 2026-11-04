@@ -2,8 +2,9 @@
 
 - **状态**：Draft（竞标并行贡献，`wt-2609-multiplayer`）。待维护者评审定稿。
 - **实施状态（随本 PR 已落地）**：profile 侧（`undercover.py`）已完成 2～4 Human 配置、
-  私有发词、§6 多人类**投票 Human 链**（Bot 并行 + Human 串行）；panel 侧已做多人类高亮防御纵深
-  （`viewModel.ts` 仅激活 `currentViewerActorId` 匹配的待办）。BCS 服务端 P1（assignee 支持）未实现，
+  私有发词、§6 多人类**投票 Human 链**（Bot 并行 + Human 串行，中间插裁判中立过场，
+  票面不跨人转发）；panel 侧已做多人类 viewer 解析（共享参数不带 primary，客户端用
+  `viewerActorId` 传自己的已认证身份）与待办防御纵深。BCS 服务端 P1（assignee 支持）未实现，
   单独提 PR，见第 6/8 节。
 - **范围**：2～4 位 Present 人类 + M 个玩家 Bot，总人数 4～8，主持人另计，卧底数可配。
 - **修改面**：profile（`undercover.py` 编排 + 指令）+ panel（多人类高亮 + 隔离护栏）。
@@ -33,7 +34,11 @@
 - 词只出现在**对应 Human 座位自己的 `human_input` instruction**（既有 `UNDERCOVER_UI_CONTEXT_V1` 私有块 + 节点正文）。
 - 面板 **公开参数不含任何词**：`seatOrder`/`turnOrder`/`players`/`publicHistory`/`voteCandidates` 全为公共面；
   `currentViewerActorId`、`currentAction` 只表达「动作归属/高亮」，明确在文档标注**非认证证据**。
-- `my-word` 命令改为接受 `--seat`（或缺省=调用者对应座位）：人类忘了词就再跑，只回答该座的词。
+- `my-word` 只回答座位、不再打印词：工具结果是**共享信道**，多人类下它不是任何人的私聊窗口；
+  命令返回 `human_seat`/`actor_id` 与「去副屏看」的提醒（`word_in_tool_result: false`），
+  词始终只留在该座位的私有 HumanInput 指令里。`--human <actor_id>` 或 `--seat N` 指定座位。
+- 共享面板参数**不再写死某一位人类**：单人局可写 `currentViewerActorId`（无歧义），多人类局
+  完全不写，改由每个客户端用自己的已认证身份（panel `viewerActorId`）解析；未知/伪座位直接丢弃。
 - 群聊开场**不发词、不念词**；主持人只在沉默场景（cache 恢复）补一句「你的词在右边副屏的输入框上方，忘了点开详情」。
 
 > 若当前 `my-word` 的入口是「群聊机器人对会话的唯一人类」——多人类后该假设失效。必须绑定座位：
@@ -91,11 +96,16 @@ RFC 主张（**若获维护者批准，单独 PR**）：
 nodes:
   vote_start(bot starter) → targets: [vote_b1, vote_b2, ..., vote_h1]
   vote_bX (each bot)      → targets: [tally]
-  vote_h1 (human A)       → targets: [vote_h2, tally]
+  vote_h1 (human A)       → targets: [vote_scrub_1, tally]   # 不直接指向 vote_h2
+  vote_scrub_1 (referee)  → targets: [vote_h2]               # 只输出中立过场
   vote_h2 (human B)       → targets: [tally]
   tally (referee)         → final_output
 ```
+- `vote_scrub_N` 是裁判的中立过场节点：上游票面只进裁判自己的上下文（计票本来就要收），
+  下游人类只拿到「请下一位玩家投票」，**Human→Human 之间不存在数据边**。
 - 若仅 1 个 Human，`vote_h1.targets=[tally]`（与现状完全一致，回退零变化）。
+- 若最后一批 Bot 已出局（只剩人类，含人类卧底），`vote_start` 改由主持人担任，入口指向
+  第一位人类，投票继续进行，不再因找不到 Bot 而崩溃。
 - Bot 并行 + Human 链都汇聚到 tally，BCS join 等待全部上游完成。
 
 **不引入「等待信号」伪节点**：当 Human 数量≥2，链的好处是 A 提交后立刻激活 B 的节点，
@@ -106,9 +116,9 @@ nodes:
 - `players[].isHuman` 已存在；多人类时 B 的节点应以 `Hx（你）` 标记，A 的节点不显示「你」。
 - 高亮：`currentViewerActorId` 命中该视图的 `isHuman` 座位才加「当前玩家」框；无命中（观战/他人面板）不框。
 - 投票阶段：human 座位显示“已投票/等待”，**绝不在 dock 列出他人投票目标**——现状已是如此（只列表本人待办），保持。
-- 公开参数 v1 主题：多人类时 `voteCandidates` 不含任何人类座位（人类不能投人类？——规则：可投却不可投真人？需与规则一致：
-  卧底版通常可投任何人）。**决策：与单人一致，投票对象是「所有存活玩家」，含其他人类**；即 `voteCandidates` 列出其他
-  存活人类。这条会在面板可见性矩阵里标 `✅`（公开面）。
+- 公开参数 v1 主题：`voteCandidates` 是**完整公开候选**，必须列出**每一位存活人类**（以及其他存活玩家）；
+  「不能投自己」由客户端用自己解析出的 `viewerActorId` 过滤，不能在共享参数里剪掉某一位人类。
+  `voteCandidates` 会出现在面板可见性矩阵里标 `✅`（公开面）。
 
 ## 8. 隔离测试（自动化「偷看者」）
 
@@ -116,8 +126,9 @@ nodes:
 
 1. **公开参数**：对含 2 个 Human 的 state 渲染 speak/vote，`panel` 全量序列化后逐字扫描，不含任一 `word` 或 `role`。
 2. **upstream 传递**：渲染多个 Human + Bot 的 vote YAML，断言没有任何一个 Human/Bot 节点的 instruction 里出现
-   **其他玩家**的词（`speak_N.word` 只存在于自己节点；投票不出现任何词）。
-3. **群聊 / my-word**：`my-word --seat A` 只含 A 词；`status/render-*` 输出不含词（沿用既有纪律）。
+   **其他玩家**的词（`speak_N.word` 只存在于自己节点；投票不出现任何词），且 **Human 节点不直接连 Human**——
+   相邻人类之间只有裁判 `vote_scrub_N`，下游人类拿不到上游票面。
+3. **群聊 / my-word**：`my-word` 输出**不含任何词**，只给座位与「去副屏看」的提醒；`status/render-*` 同样不含词。
 4. **node 隔离（标 ⚠️，需 P1）**：断言 `pending`/`node-detail` 在**无服务端 assignee 支持**时返回给任一 Present Human——
    **故意让隔离测试“抓住”这个格**，作为已知待修；若服务端放行则标记为需 P1。
 5. **人为注入泄露抓得住**（issue 验收 2）：在测试里写一个 helper 把 A 的词临时塞进 panel `players[].publicFields.word`，

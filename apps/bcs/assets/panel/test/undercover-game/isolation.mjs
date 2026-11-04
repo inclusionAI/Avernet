@@ -66,4 +66,44 @@ const graphB = { run: { run_id: 'run-multi', status: 'running' }, nodes: [{ node
 const modelB = normalizeUndercoverGameViewModel(params2Human('human-B'), graphB, [{ node_id: 'speak_2', attempt: 1 }]);
 assert.equal(modelB.pendingHumanActorId, 'human-B');
 
+// 4) 共享面板参数（多人类）不带任何 viewer：不能把某一位人类烧成 primary。
+function sharedParams() {
+  const base = params2Human(undefined);
+  const { currentViewerActorId, currentAction, ...rest } = base;
+  return normalizePanelParams(rest);
+}
+const shared = sharedParams();
+assert.equal(shared.currentViewerActorId, undefined);
+// 待办同时属于 A 和 B、又没有 client viewer 时，一个都不激活（不让 A 替 B 提交）。
+const ambiguity = normalizeUndercoverGameViewModel(shared, { run: { run_id: 'run-multi', status: 'running' }, nodes: [] },
+  [{ node_id: 'speak_1', attempt: 1 }, { node_id: 'speak_2', attempt: 1 }]);
+assert.equal(ambiguity.pendingHumanActorId, undefined);
+
+// 5) viewer 由每个客户端自己的已认证身份解析：client prop viewerActorId 优先。
+const clientA = normalizePanelParams({ ...shared, viewerActorId: 'human-A' });
+assert.equal(clientA.currentViewerActorId, 'human-A');
+const modelClientB = normalizeUndercoverGameViewModel(
+  normalizePanelParams({ ...shared, viewerActorId: 'human-B' }),
+  { run: { run_id: 'run-multi', status: 'running' }, nodes: [] },
+  [{ node_id: 'speak_1', attempt: 1 }, { node_id: 'speak_2', attempt: 1 }],
+);
+assert.equal(modelClientB.pendingHumanActorId, 'human-B');
+// 未知/伪座位直接丢弃，不会误激活别人的节点。
+assert.equal(normalizePanelParams({ ...shared, viewerActorId: 'bot-not-a-seat' }).currentViewerActorId, undefined);
+
+// 6) 共享候选列表必须含每个存活人类；投自己由客户端按 viewer 过滤。
+const voting = normalizePanelParams({
+  ...shared,
+  phase: 'voting',
+  nodeActorMap: { ...shared.nodeActorMap, vote_1: 'human-A', vote_2: 'human-B', tally: 'host' },
+  voteCandidates: [
+    { actorId: 'human-A', displayName: '你', seatNumber: 1, eligible: true },
+    { actorId: 'human-B', displayName: '你', seatNumber: 2, eligible: true },
+    { actorId: 'bot-wukong', displayName: '悟空', seatNumber: 3, eligible: true },
+  ],
+});
+assert.deepEqual(voting.voteCandidates.map((c) => c.actorId), ['human-A', 'human-B', 'bot-wukong']);
+assert.ok(voting.voteCandidates.some((c) => c.actorId === 'human-A'));
+assert.ok(voting.voteCandidates.some((c) => c.actorId === 'human-B'));
+
 console.log('Multi-human peeker isolation tests passed (panel data layer).');

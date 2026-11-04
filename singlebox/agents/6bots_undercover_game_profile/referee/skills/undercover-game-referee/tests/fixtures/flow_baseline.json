@@ -204,16 +204,16 @@
           "forbidOwnWord": true,
           "bluntness": 4
         },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
         "currentViewerActorId": "human-1",
         "currentAction": {
           "actorId": "human-1",
           "type": "speech",
           "nodeId": "speak_2"
-        },
-        "display": {
-          "showVoteResults": false,
-          "showHostOutput": true,
-          "showTimer": true
         }
       },
       "tab": {
@@ -326,22 +326,28 @@
           "forbidOwnWord": false,
           "bluntness": 4
         },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
         "currentViewerActorId": "human-1",
         "currentAction": {
           "actorId": "human-1",
           "type": "vote",
           "nodeId": "vote_2"
         },
-        "display": {
-          "showVoteResults": false,
-          "showHostOutput": true,
-          "showTimer": true
-        },
         "voteCandidates": [
           {
             "actorId": "bot-1",
             "displayName": "玩家1",
             "seatNumber": 1,
+            "eligible": true
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
             "eligible": true
           },
           {
@@ -369,8 +375,8 @@
             "eligible": true
           }
         ],
-        "openingAnnouncement": "第 1 轮投票开始，请在副屏投票，全部提交后统一计票。",
-        "resultFile": "undercover-result-v1-r1-a1.json"
+        "resultFile": "undercover-result-v1-r1-a1.json",
+        "openingAnnouncement": "第 1 轮投票开始，请在副屏投票，全部提交后统一计票。"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -580,16 +586,16 @@
           "forbidOwnWord": true,
           "bluntness": 3
         },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
         "currentViewerActorId": "human-1",
         "currentAction": {
           "actorId": "human-1",
           "type": "speech",
           "nodeId": "speak_2"
-        },
-        "display": {
-          "showVoteResults": false,
-          "showHostOutput": true,
-          "showTimer": true
         }
       },
       "tab": {
@@ -699,18 +705,24 @@
           "forbidOwnWord": false,
           "bluntness": 3
         },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
         "currentViewerActorId": "human-1",
         "currentAction": {
           "actorId": "human-1",
           "type": "vote",
           "nodeId": "vote_2"
         },
-        "display": {
-          "showVoteResults": false,
-          "showHostOutput": true,
-          "showTimer": true
-        },
         "voteCandidates": [
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "eligible": true
+          },
           {
             "actorId": "bot-3",
             "displayName": "玩家3",
@@ -736,8 +748,8 @@
             "eligible": true
           }
         ],
-        "openingAnnouncement": "第 2 轮投票开始，请在副屏投票，全部提交后统一计票。",
-        "resultFile": "undercover-result-v1-r2-a1.json"
+        "resultFile": "undercover-result-v1-r2-a1.json",
+        "openingAnnouncement": "第 2 轮投票开始，请在副屏投票，全部提交后统一计票。"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -944,13 +956,13 @@
           "forbidOwnWord": true,
           "bluntness": 2
         },
-        "currentViewerActorId": "human-1",
-        "currentAction": null,
         "display": {
           "showVoteResults": false,
           "showHostOutput": true,
           "showTimer": true
-        }
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": null
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -1057,15 +1069,41 @@
           "forbidOwnWord": false,
           "bluntness": 2
         },
-        "currentViewerActorId": "human-1",
-        "currentAction": null,
         "display": {
           "showVoteResults": false,
           "showHostOutput": true,
           "showTimer": true
         },
-        "openingAnnouncement": "第 3 轮投票开始，请在副屏投票，全部提交后统一计票。",
-        "resultFile": "undercover-result-v1-r3-a1.json"
+        "currentViewerActorId": "human-1",
+        "currentAction": null,
+        "voteCandidates": [
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "eligible": true
+          }
+        ],
+        "resultFile": "undercover-result-v1-r3-a1.json",
+        "openingAnnouncement": "第 3 轮投票开始，请在副屏投票，全部提交后统一计票。"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",

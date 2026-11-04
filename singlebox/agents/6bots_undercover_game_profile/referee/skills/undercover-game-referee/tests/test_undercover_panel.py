@@ -68,7 +68,10 @@ class UndercoverPanelParamsTest(unittest.TestCase):
              for actor_id in speech["turnOrder"]],
             [("human-1", 1, "你"), ("bot-a", 2, "甲")],
         )
-        self.assertEqual([(c["actorId"], c["seatNumber"]) for c in vote["voteCandidates"]], [("bot-a", 2)])
+        # 候选是公开面：列出每一位存活玩家，含人类自己；「不能投自己」由客户端用
+        # 自己解析出的 viewerActorId 过滤，不能在共享参数里烧死某一位 primary。
+        self.assertEqual([(c["actorId"], c["seatNumber"]) for c in vote["voteCandidates"]],
+                         [("human-1", 1), ("bot-a", 2)])
         self.assertEqual(speech["publicHistory"][0]["speeches"][0]["text"], "公开甲")
         self.assertEqual(speech["rules"]["speechMaxChars"], undercover.SPEECH_MAX_CHARS)
         for forbidden in ("role", "word", "secret-civilian-word", "secret-undercover-word", "private raw", "raw vote", '"target"'):
