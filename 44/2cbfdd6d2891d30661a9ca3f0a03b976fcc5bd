@@ -1,0 +1,28 @@
+apps/bcsfuse/tests/integration/test_worker_runtime_vector_sync.py
+  h_5686002b4ce7b9 73
+apps/bcsfuse/tests/opensource/test_bootstrap_safe_imports.py
+  h_5686002b4ce7b9 13-20,46-53
+apps/bcsfuse/tests/opensource/test_package_layout.py
+  h_5686002b4ce7b9 82-86,88-89
+apps/bcsfuse/tests/opensource/test_provider_registry.py
+  h_5686002b4ce7b9 8-9,14-22,26-27,130,132-133,346
+apps/bcsfuse/tests/smoke/basic_lifecycle_regression.py
+  h_5686002b4ce7b9 126,142,163,180,196,217,234,255,272-273,311,404,424,479
+apps/bcsfuse/tests/unit/bootstrap/test_trust_gateway_auth.py
+  h_5686002b4ce7b9 42,48,109
+apps/bcsfuse/tests/verification/test_candidate_recommendation_strict_mode.py
+  h_5686002b4ce7b9 72,113,153,192,229
+apps/bcsfuse/tests/verification/test_strict_participants_e2e.py
+  h_5686002b4ce7b9 330,375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "442cbfdd6d2891d30661a9ca3f0a03b976fcc5bd",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

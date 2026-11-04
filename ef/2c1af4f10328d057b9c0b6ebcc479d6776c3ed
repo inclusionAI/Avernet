@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/agentswarm/test_production_gates.py
+  s_bc81d244cfc235::t_b0cf647fe558cd 100-127,228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ef2c1af4f10328d057b9c0b6ebcc479d6776c3ed",
+  "prompts": {},
+  "sessions": {
+    "s_bc81d244cfc235": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19d74-f5f4-7df3-a5ae-38ca575d031b",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
