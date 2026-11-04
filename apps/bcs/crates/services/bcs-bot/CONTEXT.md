@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Optional post-commit catalog change notifications for Bot registration, descriptors, visibility and deletion.
+
 ProviderCore validates optional slugs and returns a credential-free
 ProviderBasicInfo projection for public discovery, including disabled Providers.
 ProviderManagement consumes this through its core contract. Additive slug-aware
