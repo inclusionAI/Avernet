@@ -4,6 +4,7 @@ from typing import Callable
 
 from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
     ForumNotificationPublisher,
+    _decode_aggregate,
 )
 from agentclaw.community.core.work_orders.models import WorkOrderEventType
 
@@ -28,7 +29,6 @@ class FakeWorkOrderRepository:
     ) -> int:
         assert recipient_user_id == "900003"
         assert biz_type == "BBS"
-        assert biz_id == "topic-1"
         self.calls += 1
         self.groups.add(group_id)
         self.content = content_factory(self.content)
@@ -36,8 +36,11 @@ class FakeWorkOrderRepository:
 
 
 class FakeBotRepository:
+    def __init__(self) -> None:
+        self.id_to_bot: dict[str, dict] = {}
+
     def get_by_id(self, bot_id: str):
-        raise AssertionError("human notification must not query Bot repository")
+        return self.id_to_bot.get(bot_id)
 
 
 def _notify(
@@ -167,3 +170,159 @@ def test_baseline_aggregates_follow_like_and_favorite_separately() -> None:
 
     assert repository.calls == 6
     assert repository.content is not None
+
+
+def test_bot_recipient_uses_owner_and_skips_owner_self_action() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-b": {"owner_id": "900003"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="BOT",
+        recipient_id="bot-b",
+        actor_type="HUMAN",
+        actor_id="900003",
+        actor_display_name="自己",
+        target_type="TOPIC",
+        target_id="topic-1",
+        text="赞了你的内容",
+        topic_id="topic-1",
+        post_id=None,
+    )
+
+    assert repository.calls == 0
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_LIKED,
+        recipient_type="BOT",
+        recipient_id="bot-b",
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name="张三",
+        target_type="POST",
+        target_id="post-1",
+        text="赞了你的内容",
+        topic_id=None,
+        post_id="post-1",
+    )
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "张三赞了你的内容"
+
+
+def test_notice_group_falls_back_to_target_identity_without_topic_or_post() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_FOLLOWED,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name="张三",
+        target_type="HUMAN",
+        target_id="user-owner",
+        text="关注了你",
+        topic_id=None,
+        post_id=None,
+    )
+
+    assert repository.calls == 1
+    assert len(repository.groups) == 1
+
+
+def test_content_factory_merges_legacy_and_malformed_actor_payloads() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+
+    factory = publisher._content_factory(
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name="张三",
+        original_text="回复了你的回复",
+        target_type="POST",
+        target_id="post-1",
+        topic_id="topic-1",
+        topic_title=None,
+        post_id="post-2",
+    )
+    result = factory(
+        {
+            "event_count": 1,
+            "actors": [{"type": "HUMAN", "id": "900001", "displayName": None}, "bad"],
+            "post_ids": ["post-1", 1],
+            "topic_title": "旧标题",
+            "actor_id": "900002",
+            "actor_type": "HUMAN",
+            "actor_display_name": 123,
+        }
+    )
+
+    assert result["event_count"] == 2
+    assert result["actor_count"] == 1
+    assert result["post_ids"] == ["post-1", "post-2"]
+    assert result["topic_title"] == "旧标题"
+    assert result["text"] == "张三回复了你的回复《旧标题》（2 条）"
+
+
+def test_content_factory_ignores_invalid_actors_and_requires_valid_aggregate() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+    factory = publisher._content_factory(
+        event_type=WorkOrderEventType.BBS_FOLLOWED,
+        actor_type="HUMAN",
+        actor_id="900001",
+        actor_display_name=None,
+        original_text="关注了你",
+        target_type="TOPIC",
+        target_id="topic-1",
+        topic_id="topic-1",
+        topic_title="聚合通知测试",
+        post_id=None,
+    )
+
+    assert _decode_aggregate(None) == _decode_aggregate({})
+    assert _decode_aggregate(
+        {"event_count": -1, "actors": ["bad"], "post_ids": ["post-1"]}
+    ).actors == ()
+
+    result = factory({"event_count": 1, "actors": ["bad", {"type": 1, "id": 2}]})
+
+    assert result["event_count"] == 2
+    assert result["actor_count"] == 1
+
+
+def test_two_actor_notice_text_names_both_actors() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+
+    _notify(publisher, actor_id="900001", actor_name="张三")
+    _notify(publisher, actor_id="900002", actor_name="李四")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "张三、李四回复了你的帖子《聚合通知测试》（2 条）"
+
+
+def test_default_bot_actor_falls_back_to_display_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+    factory = publisher._content_factory(
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        actor_type="BOT",
+        actor_id="default",
+        actor_display_name=None,
+        original_text="回复了你的帖子",
+        target_type="TOPIC",
+        target_id="topic-1",
+        topic_id="topic-1",
+        topic_title="聚合通知测试",
+        post_id=None,
+    )
+
+    scoped = factory(None)
+    assert scoped["actors"] == [{"type": "BOT", "id": "default", "displayName": "Bot"}]
