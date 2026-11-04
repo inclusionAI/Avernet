@@ -8,7 +8,7 @@ vi.mock("../../common/logging.js", async importOriginal => ({
 
 function setup() {
   const task = { taskId: "SR-notification", version: 7, status: "running", phase: "assess", level: "approval", controlPlaneEnvironment: "pre",
-    request: { diagnosis: "读取失败，需要核对实际调用", target: { bot_id: "bot", entity_id: "owner" } },
+    request: { diagnosis: "读取失败，需要核对实际调用", target: { bot_id: "bot", entity_id: "owner", env: "prod" } },
     judgment: null, timeline: [{ event_id: "call-1", kind: "operation", at_ms: 1, actor: "agent", summary: "纠正调用方式",
       payload: { status: "succeeded", request: { message: "请使用已配置的工具继续原任务" } } }] } as RecoveryStoredTask;
   const events: RecoveryTimelineEvent[] = [];
@@ -80,6 +80,48 @@ it.each(["message", "plan", "execution", "result"] as const)("routes %s to the e
   expect(sender.send.mock.calls[0][0].text).toContain("**Bot**：default\n\n**Entity ID**：001234");
   expect(JSON.stringify(events)).not.toMatch(/https:\/\/(test|business|another)\.invalid/);
 });
+it.each(["pre", "prod"] as const)("routes the same Bot and Owner by target environment %s", async env => {
+  const { notifier, config, sender, task, events } = setup();
+  task.request.target.env = env;
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", env: "prod", webhook: "https://prod.invalid/send" },
+      { bot_id: "bot", entity_id: "owner", env: "pre", webhook: "https://pre.invalid/send" }] }) });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe(`https://${env}.invalid/send`);
+});
+it.each(["pre", "prod"] as const)("defaults a legacy route to prod for target environment %s", async env => {
+  const { notifier, config, sender, task, events } = setup();
+  task.request.target.env = env;
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", webhook: "https://prod.invalid/send" }] }) });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe(`https://${env === "prod" ? "prod" : "business"}.invalid/send`);
+});
+it.each(["pre", "prod"] as const)("allows a legacy prod route alongside a pre route for target environment %s", async env => {
+  const { notifier, config, sender, task, events } = setup();
+  task.request.target.env = env;
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", webhook: "https://prod.invalid/send" },
+      { bot_id: "bot", entity_id: "owner", env: "pre", webhook: "https://pre.invalid/send" }] }) });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe(`https://${env}.invalid/send`);
+});
+it.each(["pre", "prod"] as const)("retains the default group when only another target environment matches %s", async env => {
+  const { notifier, config, sender, task, events } = setup();
+  task.request.target.env = env;
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", env: env === "prod" ? "pre" : "prod", webhook: "https://another.invalid/send" }] }) });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  expect(sender.send.mock.calls[0][0].webhook).toBe("https://business.invalid/send");
+});
 it.each([["bot", "another-owner"], ["another-bot", "owner"]])("retains the default group for unmatched target %s/%s", async (bot_id, entity_id) => {
   const { notifier, config, sender, events } = setup();
   config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
@@ -94,6 +136,15 @@ it.each([
   [{ bot_id: "bot", entity_id: "owner", webhook: "http://test.invalid/send" }],
   [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" },
     { bot_id: "bot", entity_id: "owner", webhook: "https://another.invalid/send" }],
+  [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" },
+    { bot_id: "bot", entity_id: "owner", env: "prod", webhook: "https://another.invalid/send" }],
+  ...["pre", "prod"].map(env => [
+    { bot_id: "bot", entity_id: "owner", env, webhook: "https://test.invalid/send" },
+    { bot_id: "bot", entity_id: "owner", env, webhook: "https://another.invalid/send" },
+  ]),
+  ...["", "PROD", "dev", null, true, 1].map(env => [
+    { bot_id: "bot", entity_id: "owner", env, webhook: "https://test.invalid/send" },
+  ]),
 ])("isolates invalid or ambiguous Bot routes without sending to the default group", async (...routes) => {
   const { notifier, config, sender, tasks, task } = setup();
   config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10, bot_webhooks: routes }) });
