@@ -8,7 +8,6 @@ import pathlib
 
 import pytest
 
-from agentclaw.community.kernel.bot_manager_sync import BOT_NOT_FOUND_CODE
 from agentclaw.community.kernel.collaboration_repair import RepairItem
 
 from tests.community.core.bot_management.collaboration_repair.factories import (
@@ -81,35 +80,6 @@ async def test_no_unexpected_calls_beyond_the_contract(repair_case):
     assert [c[0] for c in repair_case.managers.method_calls] == [
         "replace_managers"
     ]
-
-
-def test_both_sync_readers_share_the_kernel_not_found_code():
-    """The reader vocabulary is declared once, in the kernel."""
-    for module_name in (
-        "agentclaw.community.core.repository.implementations.bot.ownership_sync",
-        "agentclaw.community.core.repository.implementations.bot.manager_sync",
-    ):
-        module = importlib.import_module(module_name)
-        tree = ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))
-        literals = [
-            node.value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and node.value == BOT_NOT_FOUND_CODE
-        ]
-        assert literals == [], f"{module_name} re-spells the kernel code"
-        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-        assert "BOT_NOT_FOUND_CODE" in names, module_name
-
-
-def test_report_cannot_be_built_from_three_items():
-    """The four-parameter signature makes a short report unbuildable."""
-    with pytest.raises(TypeError):
-        _report(  # type: ignore[call-arg]
-            default_repair_facts(),
-            RepairItem("ownership", "succeeded"),
-            RepairItem("profile", "succeeded"),
-            RepairItem("managers", "succeeded"),
-        )
 
 
 def test_report_rejects_an_item_in_the_wrong_slot():

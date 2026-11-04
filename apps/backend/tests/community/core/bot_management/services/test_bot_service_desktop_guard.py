@@ -209,7 +209,7 @@ class TestCreateBotDesktopGuard:
             "agentclaw.community.core.bot_management.services.bot_service.DeviceService"
         ):
             with patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.creation.generate_bot_id",
+                "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
                 return_value="desktop_new",
             ):
                 result = svc.create_bot(
@@ -233,7 +233,7 @@ class TestCreateBotDesktopGuard:
         )
 
         with patch(
-            "agentclaw.community.core.bot_management.services.bot_service_parts.creation.generate_bot_id",
+            "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
             return_value="desktop_new",
         ):
             svc.create_bot(
@@ -282,7 +282,7 @@ class TestCreateBotDesktopGuard:
             "agentclaw.community.core.bot_management.services.bot_service.DeviceService"
         ):
             with patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.creation.generate_bot_id",
+                "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
                 return_value="personal_new",
             ):
                 svc.create_bot(

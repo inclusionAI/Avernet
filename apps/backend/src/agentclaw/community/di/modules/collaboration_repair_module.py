@@ -1,36 +1,9 @@
-"""Compose the one-shot collaboration repair behind a per-request factory.
+"""Request-scoped collaboration repair composition.
 
-The repair Service API is request-scoped by construction: one bounded pass,
-no queue, no retry, no persisted delivery state. This module is the only
-place that knows which concrete plugins deliver that pass, and it hands
-them out through :class:`CollaborationRepairFactory` — a **composition
-object**, not a Core dependency. An HTTP adapter therefore submits only the
-filtered authentication headers and a command; it never selects an
-implementation or builds a transport.
-
-Loop ownership. The background manager/ownership sync owns
-``ManagerSyncStack`` instances born on the worker loop. This factory never
-borrows them: every ``open`` constructs **new** ``HttpBcsOwnershipPlugin`` /
-``HttpBcsManagersPlugin`` instances, so their pooled ``httpx`` clients are
-born on the caller's loop and are released on that same loop in ``finally``.
-Sharing an async client across loops is the failure this shape prevents.
-
-Budget. One repair gets exactly one budget — the ``timeout`` passed to
-``BcnService`` (stored as ``_timeout``, 30s today). There is no
-repair-specific knob, no retry policy and no persisted configuration: the
-composition root reads the transport's configured timeout and the service
-spends it across the whole request. A non-positive timeout is an explicit
-unavailable deployment (``invalid-budget``), never a zero-length request.
-
-Unavailable is explicit. A deployment with the feature off, ownership
-delivery off, no principal signing key, or no provider credentials/scope for
-the current environment refuses in ``open`` with
-``collaboration_sync_unavailable`` **before** any plugin is constructed or
-any write is attempted. Repair always writes ownership, so
-``ownership_enabled=False`` is a managers-only deployment and cannot run it.
-Nothing falls back to a recording implementation or "just the parts that
-work": a half-enabled repair is exactly the silent divergence this feature
-exists to correct.
+Each request owns fresh delivery plugins on its event loop and closes them
+in finally; background clients must not be borrowed across loops. Deployment
+prerequisites and the single BCN timeout budget are documented in the Core
+module README. Unavailable deployments refuse before creating plugins.
 """
 from __future__ import annotations
 
@@ -93,13 +66,9 @@ Clock = Callable[[], float]
 async def _close_quietly(
     plugin: BcsCollaborationMetadataPlugin | BcsOwnershipPlugin | BcsManagersPlugin,
 ) -> None:
-    """Close one request-owned plugin; a failure never strands the rest.
+    """Close one request-owned plugin without stranding the remaining clients.
 
-    ``aclose`` releases a socket pool, so a raising close is a real defect —
-    but this runs after the repair already produced its report, and the
-    remaining plugins still own clients that must not follow the request
-    into another loop. The failure is therefore logged (type only, never the
-    headers or any client detail) and the loop continues.
+    Log only types: credentials and transport details must not escape cleanup.
     """
     try:
         await plugin.aclose()

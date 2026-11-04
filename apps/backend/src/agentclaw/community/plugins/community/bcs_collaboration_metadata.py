@@ -14,7 +14,7 @@ transport classification; the composition root injects its borrowed
 Exactly ONE bounded transport send happens per Plugin method call: no
 retry, no new URL or endpoint, no ``register_provider_bot`` (the up-link
 ``onboard`` is the only profile write, mirroring the daily metadata path
-in ``bot_service_parts/collaboration.py``), and the ``source_revision``
+in ``services/bot_service.py``), and the ``source_revision``
 is forwarded verbatim, never bumped.
 
 Threading. Because each Plugin method issues exactly one send, the

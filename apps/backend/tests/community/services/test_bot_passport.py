@@ -141,11 +141,11 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
 
         with (
             patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.get_current_env",
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
             patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.ThreadPoolExecutor",
+                "agentclaw.community.core.bot_management.services.bot_service.ThreadPoolExecutor",
                 side_effect=executor_factory,
             ),
         ):
@@ -198,7 +198,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
 
         with (
             patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.get_current_env",
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
             pytest.raises(BotServiceError, match="draft unavailable"),
@@ -235,7 +235,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
 
         with (
             patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.get_current_env",
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
             pytest.raises(BotServiceError, match="caller a unavailable"),
@@ -264,7 +264,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
 
         with (
             patch(
-                "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.get_current_env",
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
                 return_value="prod",
             ),
             pytest.raises(BotServiceError, match="没有 ACTIVE 物理设备"),
@@ -284,7 +284,7 @@ class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
         )
 
         with patch(
-            "agentclaw.community.core.bot_management.services.bot_service_parts.credentials.get_current_env",
+            "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
             return_value="prod",
         ):
             result = bot_service._hot_update_service_bot_passport_token(
@@ -382,7 +382,7 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         bot_service._skills_pool_native_creation_policy.select.reset_mock()
 
         with patch(
-            "agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types",
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
             return_value=["moltis"],
         ):
             bot_service.create_bot(
@@ -425,8 +425,8 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         bot_service._device_service_provider = lambda: mock_device_service
-        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'):
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
                 user_id="123456",
@@ -807,8 +807,8 @@ class TestCreateServiceBotPublish:
         mock_publish_service.create_publish.return_value = mock_publish_record
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'):
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
                 user_id="123456",
@@ -869,8 +869,8 @@ class TestCreateServiceBotPublish:
         mock_publish_service = MagicMock()
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'):
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
                 user_id="123456",
@@ -927,8 +927,8 @@ class TestCreateServiceBotPublish:
         mock_publish_service.create_publish.side_effect = Exception("Database error")
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service_parts.creation.DEFAULT_ENGINE_TYPE', 'moltis'), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
+             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'), \
              pytest.raises(BotServiceError, match="publish record"):
 
             bot_service.create_bot(

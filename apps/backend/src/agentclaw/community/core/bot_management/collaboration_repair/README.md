@@ -40,9 +40,8 @@ The kernel DTOs, error codes and `report_status` rule live in
 `agentclaw.community.kernel.collaboration_repair`; renaming a field there
 ripples through every layer of this feature — the Service API Protocol,
 the read repository contract and implementation, the metadata Plugin API
-and all of their tests. The Service API is additive: nothing consumes it
-until the repair service (a later task of this plan) implements the
-Protocol against the same kernel vocabulary.
+and all of their tests. The additive Service API and its HTTP adapter use this same kernel
+vocabulary.
 
 ## Composition root (`di/`)
 

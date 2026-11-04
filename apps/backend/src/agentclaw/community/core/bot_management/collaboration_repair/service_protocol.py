@@ -1,12 +1,6 @@
-"""Collaboration repair Service API v1 — the Core-owned contract.
+"""Core-owned collaboration repair Service API v1.
 
-The Protocol lives in its owning Core module so the concrete repair
-service (a later task of this plan) can inherit it without a
-Core→api import edge; ``api/collaboration_repair_service.py`` only
-re-exports it for adapters. Like the repair itself, ``repair``
-performs bounded work and returns an explicit report; it never mutates
-Backend business state and never confirms anything about BCS collaboration
-metadata beyond what the returned items state.
+The api package re-exports this Protocol; Core never imports api.
 """
 
 from __future__ import annotations

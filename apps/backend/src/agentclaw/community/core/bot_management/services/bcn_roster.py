@@ -1,12 +1,7 @@
-"""Task-mode roster cache and list transport for :class:`BcnService`.
+"""Task-mode roster cache and list transport for BcnService.
 
-Mechanically split from ``bcn_service.py``: the roster cache/list members were
-moved here with only their httpx error-capture clauses re-typed to the shared
-``bcn_transport_types`` taxonomy; the split keeps the facade inside the CI
-1,000-line file-size cap, exactly like the ``bot_service_parts`` split of
-``bot_service.py``. The facade composes this mixin onto ``BcnService``; this
-module must not import the facade — shared transport definitions live in
-``bcn_transport_types``.
+Extracted to keep the facade within the file-size cap. Shared transport
+errors live in bcn_transport_types so this mixin never imports the facade.
 """
 
 import time

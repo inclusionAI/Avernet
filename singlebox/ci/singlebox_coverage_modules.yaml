@@ -260,7 +260,7 @@ modules:
             symbol: BcnCollaborationMetadataAdapter.aclose
     thresholds:
       # Measured by `singlebox_coverage.sh --module collaboration_repair`
-      # (see docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-validation.md):
+      # Baseline evidence is recorded in PR #3569.
       # router 1/1 live route hit by the repair stories. Since the shared
       # coverage stack provisions an ephemeral BCN provider, the stories
       # drive the route past the capability gate. The fresh focused run

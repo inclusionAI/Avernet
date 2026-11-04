@@ -86,7 +86,7 @@ def _run_create_instances(svc: BotService, **kwargs) -> MagicMock:
         "agentclaw.community.core.workspace.path_factory.get_bot_dir",
         return_value=mock_bot_dir,
     ), patch(
-        "agentclaw.community.core.bot_management.services.bot_service_parts.publication._copy_tree_fast",
+        "agentclaw.community.core.bot_management.services.bot_service._copy_tree_fast",
     ), patch(
         "agentclaw.community.core.bot_management.services.bot_service.BotService._is_new_bot_use_nas",
         return_value=False,

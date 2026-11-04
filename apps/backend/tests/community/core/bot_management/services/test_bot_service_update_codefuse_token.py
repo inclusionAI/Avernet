@@ -93,7 +93,7 @@ class TestUpdateBotCodefuseTokenDispatch:
         # Finding 2：env 由 _maybe_refresh 在请求边界解析（get_current_env），
         # 这里固定为 "dev" 使 dispatch 断言的 env 确定化。
         monkeypatch.setattr(
-            "agentclaw.community.core.bot_management.services.bot_service_parts.metadata.get_current_env",
+            "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
             lambda: "dev",
         )
         yield
