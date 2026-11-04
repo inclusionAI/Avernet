@@ -14,7 +14,7 @@
 | Inbound round persist | 1 | per round (required by write-before-ack) |
 | Owner pickup of fallback input | 1 indexed query **per node per tick**, never per session | per node per tick |
 | Failure discovery | 1 indexed query per survivor per dead node per poll, reading only that survivor's buckets, at most one batch (2,000 rows) | while a node is dead |
-| Transferred, not-yet-adopted leases | 1 indexed query per node per tick (`adopted = FALSE`; usually empty) | per node per tick |
+| Transferred, not-yet-adopted leases | 1 indexed query per node per tick (`adopted = FALSE`, at most one 2,000-row batch; usually empty) | per node per tick |
 
 The rule behind every row: costs scale with **nodes**, never with
 **sessions**, except for work a session actually does. These counts should be

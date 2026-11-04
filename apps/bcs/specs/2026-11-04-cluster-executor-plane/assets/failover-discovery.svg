@@ -56,7 +56,7 @@
   <text x="44" y="404" font-size="13" font-weight="bold" fill="#9a6b0a">Taking over earlier on evidence (fencing makes a wrong guess safe; it only costs a rehydration)</text>
   <text x="44" y="430" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Same advertise_addr, new node_id</tspan> — the process restarted in place; two processes can't listen on one address → old run's leases</text>
   <text x="44" y="448" font-size="11.5" fill="#1c2420">claimable as soon as the new roster row is seen. RTO ≈ restart time + ≤ 5 s.</text>
-  <text x="44" y="474" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Release on panic / shutdown hook</tspan> — best effort; nothing runs on OOM kill or kill -9.</text>
+  <text x="44" y="474" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Mark own roster row dead on panic</tspan> — leases kept, so survivors find them at once; best effort (not on OOM kill / kill -9).</text>
   <text x="44" y="500" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Relative staleness</tspan> — stale(D) = max(heartbeats) − heartbeat(D), plus a recovery grace: nobody claims until its own heartbeats are healthy for 15 s.</text>
   <text x="44" y="524" font-size="11.5" fill="#5c6a62">A node that is alive but silently unreachable gives no evidence: wait the claim threshold.</text>
 </svg>

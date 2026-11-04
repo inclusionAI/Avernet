@@ -351,8 +351,10 @@ blindly resend), and resume.
 
 **Taking over earlier on evidence.** Because fencing makes a wrong guess
 safe, evidence can replace waiting: a restart at the same address frees the
-old run's leases at once; a process that panics releases its leases on the
-way out. A node that is alive but silently unreachable gives no evidence —
+old run's leases at once; a process that panics marks its own roster row
+dead on the way out (heartbeat set to NULL) and keeps its leases, so
+survivors find them through the normal dead-node query (§8, step 1) at once —
+pending work is never released. A node that is alive but silently unreachable gives no evidence —
 for it, wait the claim threshold.
 
 | Situation | Sessions resume after |
@@ -422,7 +424,10 @@ How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
 sets it `TRUE` in the same transaction; a new owner sets it `TRUE` (fenced)
 when it starts driving. Every node reads, each heartbeat, its leases that
 are not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed,
-usually empty). There is no timestamp or cursor, so a transfer that commits
+usually empty), at most one batch per tick (the same 2,000-row bound and
+backoff as failure discovery; state is reloaded lazily, so adopting is
+cheap). Adopted rows leave the result set, so paging needs no cursor
+either. There is no timestamp or cursor, so a transfer that commits
 late can't be skipped: an unadopted row stays visible until it is adopted.
 The same read covers transfers made without a PREPARE (drain deadline,
 watchdog).
