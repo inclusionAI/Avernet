@@ -43,7 +43,7 @@ const params = {
   currentViewerActorId: 'human',
   rules: { speechMaxChars: 25, forbidOwnWord: true, bluntness: mode === 'eliminated' ? 5 : undefined },
   publicHistory: [],
-  voteCandidates: (mode === 'vote' || mode === 'finale')
+  voteCandidates: voting
     ? players.filter((p) => p.actorId !== 'human').map((p) => ({ ...p, eligible: true })) : undefined,
   autoRefresh: false,
   style: { height: '100%' },

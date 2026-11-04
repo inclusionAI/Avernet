@@ -270,6 +270,26 @@ try {
   assert.doesNotMatch(text(hh), /本轮计票完成/, 'host text not rendered when hidden');
   await act(async () => hh.unmount());
 
+  // 4c) Accumulated public speech history stays reachable in the Ops view.
+  const historyParams = {
+    ...voteParams,
+    publicHistory: [
+      { round: 1, stage: 'regular', speeches: [{ actorId: 'a', seatNumber: 1, displayName: '小甲', text: '第一轮线索：会在忙碌的一天用到。' }] },
+      { round: 2, stage: 'pk', speeches: [{ actorId: 'c', seatNumber: 3, displayName: '小丙', text: '第二轮线索：和水果有关。' }] },
+    ],
+  };
+  globalThis.fetch = fetchFor([
+    snapshot({ run: { run_id: 'ops-run', status: 'running' }, nodes: [{ node_id: 'vote_a', status: 'completed' }] }, [], { 'vote_a': '已投票' }),
+  ], []);
+  let hp;
+  await act(async () => { hp = mount(historyParams); await settle(8); });
+  const historyRegion = hp.container.querySelector('[data-region="ops-public-history"]');
+  assert.ok(historyRegion, 'public history panel rendered');
+  assert.match(historyRegion.textContent, /第 1 轮 · 常规发言/, 'rounds grouped by round/stage');
+  assert.match(historyRegion.textContent, /第一轮线索：会在忙碌的一天用到。/, 'earlier round speech stays readable');
+  assert.match(historyRegion.textContent, /第二轮线索：和水果有关。/, 'pk round speech stays readable');
+  await act(async () => hp.unmount());
+
   // 5) Finale: structured host verdict opens a result card, no raw private.
   const resultFile = 'undercover-result-v1-r1-a1.json';
   const result = { kind: 'undercover.game-result', version: 1, status: 'finished', gameSessionId: 'game', hostActorId: 'host', round: 1, attempt: 1, winner: 'civilian', reason: '卧底全部出局', summary: '平民胜利！公开词对：平民 苹果 · 卧底 梨。' };

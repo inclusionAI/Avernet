@@ -408,6 +408,35 @@ function HostBroadcast({ model, palette }: { model: UndercoverGameViewModel; pal
 }
 
 /* ------------------------------------------------------------------ *
+ *  Accumulated public speech history
+ * ------------------------------------------------------------------ */
+function PublicHistory({ model, palette }: { model: UndercoverGameViewModel; palette: FlavorPalette }) {
+  const rounds = model.params.publicHistory.filter((round) => round.speeches.length > 0);
+  if (!rounds.length) return null;
+  return (
+    <Panel data-region="ops-public-history">
+      <PanelTitle>历轮公开发言</PanelTitle>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rounds.map((round, index) => (
+          <details key={`${round.round}-${round.stage ?? 'regular'}`} open={index === rounds.length - 1}>
+            <summary style={{ cursor: 'pointer', color: palette.muted, fontSize: 10.5 }}>
+              第 {round.round} 轮{round.stage === 'pk' ? ' · PK 发言' : ' · 常规发言'}（{round.speeches.length} 条）
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 6, fontSize: 10.5, lineHeight: 1.7 }}>
+              {round.speeches.map((speech, speechIndex) => (
+                <div key={`${speech.actorId}-${speechIndex}`} style={{ color: palette.muted }}>
+                  <b style={{ color: palette.text }}>{speech.seatNumber}号 {speech.displayName}</b>：{speech.text}
+                </div>
+              ))}
+            </div>
+          </details>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ *
  *  Main panel
  * ------------------------------------------------------------------ */
 const fallbackApi = '/bcnproxy';
@@ -729,6 +758,7 @@ function OpsPanel({
         <Roster model={shown} palette={palette} currentViewer={params.currentViewerActorId} />
         <VoteTally model={shown} palette={palette} />
         <HostBroadcast model={shown} palette={palette} />
+        <PublicHistory model={shown} palette={palette} />
 
         {pendingHumanNode && (
           <Panel $left={actionKind === 'vote' ? 'good' : 'accent'}>

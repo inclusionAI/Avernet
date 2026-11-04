@@ -275,6 +275,7 @@ Preview PK with `?width=560&height=800&mode=pk-vote` or
 - 左边是**本轮实际运行的 workflow 图**：发言 run 呈现为按回合顺序连号的串行传递闭包链（后手可读齐前序原话）；投票 run 呈现为「入口 → 各玩家并行 `vote_N`（彼此无边）→ 主持人 `tally`」的末节点计票结构。
 - 全部通过 CSS 自定义属性（`var(--bg/--panel/--accent/--run/--done/--bad/…)`）驱动，这些属性只是上面共享语义 token 的别名，因此调色跟随工作台主题；`prefers-reduced-motion` 关闭动画。
 - `showHostOutput` 开启时保留**主持人公开播报**区（最新一条直接展示，更早的折叠收纳），计票、出局/PK 公告与阶段交接不会在 Ops 视图中消失。
+- 独立保留**历轮公开发言**区，按轮次/PK 阶段分组折叠展示 `publicHistory`；某玩家投完票后行卡只剩“已投票”时，此前描述仍可从历史区回读。
 
 ### 覆盖的 5 个状态
 
