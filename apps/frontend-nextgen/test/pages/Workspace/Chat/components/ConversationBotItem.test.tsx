@@ -566,13 +566,13 @@ describe('ConversationBotItem 行徽标', () => {
     expect(label.parentElement).not.toHaveClass('flex-col');
   });
 
-  it('展开态徽章保留显示:操作组仅 hover 让位(2026-11-04 显隐重构,展开不再整组钉住)', () => {
+  it('展开态徽章让位于常显收起指示器(2026-11-04 收起常显修正):整徽章隐藏', () => {
     const { container } = renderBotItem({ expanded: true, bot: { engine: 'openclaw' } });
     const badge = Array.from(container.querySelectorAll('span')).find((el) =>
       el.textContent === 'OpenClaw',
     ) as HTMLElement;
-    expect(badge).not.toHaveClass('hidden');
-    expect(badge.className).toContain('group-hover:hidden');
+    // 收起指示器常显在操作组首位(距右 18px),静态让位 36px 下 badge 与其重叠,恒让位。
+    expect(badge).toHaveClass('hidden');
   });
 
   it('收起态徽章静默常显:仅悬停/聚焦/菜单开/触屏类让位,不强制 hidden', () => {

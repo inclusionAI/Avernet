@@ -238,9 +238,11 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             className={cn(
               stripVisible &&
                 'group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden [@media(hover:none)]:hidden',
-              // 不可用 Bot「更多操作」常驻(让位 pr-9)时 badge 恒让位;激活 icon 仅让
-              // 36px,名称+badge 空间足够,badge 保持显示(2026-11-04 显隐重构)。
-              stripVisible && unavailable && 'hidden',
+              // 收起指示器常显(展开态,同日修正)与不可用「更多」常驻时 badge 恒让位——
+              // 收起按钮在操作组首位(距右 18px),静态让位 36px 下 badge 尾部会与其重叠
+              // (用户反馈 2026-11-04 实测);激活 icon 仅让 36px 且位于透明按钮之后,
+              // badge 保持显示不重叠。
+              stripVisible && (expanded || unavailable) && 'hidden',
             )}
           />
         </div>
