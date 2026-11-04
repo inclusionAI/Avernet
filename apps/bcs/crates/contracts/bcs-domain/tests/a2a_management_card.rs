@@ -181,3 +181,36 @@ fn raw_card_parser_preserves_extension_values_and_rejects_ambiguous_json() {
         assert!(parse_card_json(raw).is_err());
     }
 }
+
+#[test]
+fn card_byte_limit_counts_preserved_extension_data_at_the_boundary() {
+    use bcs_domain::a2a_management::MAX_CARD_BYTES;
+    let mut raw = card();
+    raw["futureData"] = json!("");
+    let padding = MAX_CARD_BYTES - serde_json::to_vec(&raw).unwrap().len();
+    raw["futureData"] = json!("a".repeat(padding));
+    assert_eq!(serde_json::to_vec(&raw).unwrap().len(), MAX_CARD_BYTES);
+    validate_management_card(&raw).unwrap();
+    // Two UTF-8 bytes replacing one ASCII byte exceed the limit by one byte.
+    raw["futureData"] = json!(format!("{}é", "a".repeat(padding - 1)));
+    assert_eq!(serde_json::to_vec(&raw).unwrap().len(), MAX_CARD_BYTES + 1);
+    let error = validate_management_card(&raw).unwrap_err();
+    assert_eq!(error.code, Code::CardTooLarge);
+    assert_eq!(error.field, "agent_card");
+    assert_eq!(error.reason, "SIZE_LIMIT_EXCEEDED");
+}
+
+#[test]
+fn card_root_must_be_an_object_and_interface_tenant_is_preserved() {
+    for raw in [json!(null), json!([]), json!("agent"), json!(42)] {
+        let error = validate_management_card(&raw).unwrap_err();
+        assert_eq!(error.code, Code::InvalidCard);
+        assert_eq!(error.field, "agent_card");
+        assert_eq!(error.reason, "OBJECT_REQUIRED");
+    }
+    let mut raw = card();
+    raw["supportedInterfaces"][0]["tenant"] = json!("tenant-one");
+    let original = raw.clone();
+    validate_management_card(&raw).unwrap();
+    assert_eq!(raw, original);
+}
