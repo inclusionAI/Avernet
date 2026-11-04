@@ -58,9 +58,8 @@ const GROUP_CHAT_NEW_SESSION_CONFIG: &str = "group_chat_new_session_per_message"
 const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
 /// Well-known binding config key that overrides the initial `<GroupContext>`
 /// delivery for the session lead: `"send"` (default) or `"inject"` (lead
-/// observes the bootstrap context silently via chat.inject). Only Chat groups
-/// honor the override; ManagerWorker groups keep delivering to the manager
-/// via chat.send.
+/// observes the bootstrap context silently via chat.inject). Both Chat and
+/// ManagerWorker groups honor the override for their lead Bot.
 const GROUP_CONTEXT_DELIVERY_CONFIG: &str = "group_context_delivery";
 
 /// Provider-local streaming state is scoped to one card-producing run.

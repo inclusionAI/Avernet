@@ -1,3 +1,4 @@
+import { GroupContextDeliveryField } from '@/components/GroupContextDeliveryField';
 import {
   Badge,
   Button,
@@ -35,6 +36,7 @@ export interface DingTalkConfigPanelProps {
 }
 
 const EMPTY_CONFIG: GroupDingTalkConfig = {
+  groupContextDelivery: 'send',
   robotCode: '',
   appKey: '',
   appSecret: '',
@@ -160,6 +162,15 @@ export function DingTalkConfigPanel({
           />
         </label>
       )}
+      <div>
+        <GroupContextDeliveryField
+          value={form.groupContextDelivery}
+          onChange={(value) => update('groupContextDelivery', value)}
+        />
+        <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+          仅对该绑定后续新建的会话生效；已有会话不重新投递群上下文。
+        </p>
+      </div>
       <ConfigSelect
         label="会话模式"
         value={form.groupChatScope}

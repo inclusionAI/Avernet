@@ -22,6 +22,9 @@ export type SessionStatus = 'running' | 'completed';
 export type SenderKind = 'human' | 'bot' | 'system';
 export type ParticipantRole = 'owner' | 'driver' | 'manager' | 'worker' | 'member';
 export type ParticipantMode = 'auto' | 'muted' | 'present' | 'absent';
+/** 新建会话时群上下文的投递方式。 */
+export type GroupContextDelivery = 'send' | 'inject';
+
 /** 消息可见域：full=完整视角；participant=参与者视角（仅公共/与自己相关/自己的消息）。 */
 export type MessageViewScope = 'full' | 'participant';
 export type DeliveryPolicy = 'send_to_driver' | 'inject_observers';
