@@ -38,7 +38,6 @@ export function BindingSlot({ visible, binding, botNameResolver, summaryAction }
     yamlValidation,
     participantBindings,
     activeParticipantKey,
-    boundCount,
     setActiveParticipantKey,
     handleUnbind,
   } = binding;
@@ -72,9 +71,6 @@ export function BindingSlot({ visible, binding, botNameResolver, summaryAction }
             </div>
             {summaryAction && <div className="min-w-0">{summaryAction}</div>}
           </div>
-          <span className="text-xs text-muted-foreground">
-            已绑定 {boundCount} / {yamlValidation.participantDefinitions.length} 个角色
-          </span>
         </>
       )}
       {validated && yamlValidation.participantDefinitions.length > 0 && (

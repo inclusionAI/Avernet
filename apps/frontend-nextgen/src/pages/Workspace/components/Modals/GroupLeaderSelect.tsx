@@ -1,4 +1,4 @@
-import { Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import { Avatar, Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { Check, ChevronDown } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -8,6 +8,7 @@ export interface GroupLeaderOption {
   name: string;
   current?: boolean;
   description?: string;
+  avatarUrl?: string;
 }
 
 export interface GroupLeaderSelectProps {
@@ -48,6 +49,7 @@ export function GroupLeaderSelect({
             <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-muted-foreground')}>
               {selected ? (
                 <>
+                  {selected.avatarUrl && <Avatar name={selected.name} src={selected.avatarUrl} size={20} />}
                   <span className="max-w-44 truncate text-xs text-foreground">{selected.name}</span>
                   {selected.current && (
                     <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
@@ -86,6 +88,7 @@ export function GroupLeaderSelect({
                       setOpen(false);
                     }}
                   >
+                    {option.avatarUrl && <Avatar name={option.name} src={option.avatarUrl} size={24} />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs">{option.name}</span>
                       {option.description ? (

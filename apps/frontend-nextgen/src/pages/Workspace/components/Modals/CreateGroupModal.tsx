@@ -213,7 +213,7 @@ export function CreateGroupModal({
         closeLabel="关闭发起协作弹窗"
         className={cn(
           'h-[min(860px,calc(100vh-2rem))] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0',
-          showFlowAside && 'xl:left-[calc(50%-208px)] xl:overflow-visible',
+          showFlowAside && 'xl:left-[calc(50%-248px)] xl:overflow-visible 2xl:left-[calc(50%-288px)]',
         )}
       >
         <CreateGroupHeader />

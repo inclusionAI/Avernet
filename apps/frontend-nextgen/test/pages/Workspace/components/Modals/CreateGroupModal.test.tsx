@@ -389,15 +389,16 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
     expect(screen.getByRole('complementary', { name: '协作流程侧栏', hidden: true })).toBeInTheDocument();
   });
   expect(screen.getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
-  expect(screen.getByRole('dialog')).toHaveClass('max-w-2xl', 'xl:left-[calc(50%-208px)]', 'xl:overflow-visible');
+  expect(screen.getByRole('dialog')).toHaveClass('max-w-2xl', 'xl:left-[calc(50%-248px)]', 'xl:overflow-visible');
   expect(screen.getByRole('complementary', { name: '协作流程侧栏', hidden: true })).toHaveClass(
     'absolute',
     'left-[calc(100%+1rem)]',
     'flex-col',
-    'w-[400px]',
+    'w-[480px]',
     'xl:flex',
   );
-  expect(screen.getByTestId('collaboration-flow-content')).toHaveClass('flex-1', 'items-center');
+  expect(screen.getByTestId('collaboration-flow-content')).toHaveClass('flex-1', 'min-h-0');
+  expect(screen.getByTestId('collaboration-flow-content')).not.toHaveClass('items-center');
   expect(screen.getByTestId('create-group-modal-body')).toHaveClass('lg:overflow-y-auto');
   expect(screen.getByTestId('group-participant-list')).toHaveClass('max-h-[420px]', 'pb-2');
   expect(screen.getByText('协同剧本')).toHaveClass('text-xs', 'font-semibold');
@@ -409,6 +410,11 @@ it('shows the collaboration flow preview aside after YAML validation', async () 
   expect(scriptFrame?.parentElement).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
   expect(scriptFrame?.nextElementSibling).toContainElement(notifyField);
   expect(screen.getByRole('button', { name: '重新编辑' })).toHaveClass('text-xs');
+  fireEvent.click(screen.getByRole('button', { name: '流程预览' }));
+  const expanded = screen.getByRole('dialog', { name: '协作流程预览' });
+  expect(within(expanded).getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
+  fireEvent.click(within(expanded).getByRole('button', { name: '关闭展开预览' }));
+  expect(screen.queryByRole('dialog', { name: '协作流程预览' })).not.toBeInTheDocument();
 });
 
 it('previews a validation-only Loop but blocks creation until the server permits execution', async () => {

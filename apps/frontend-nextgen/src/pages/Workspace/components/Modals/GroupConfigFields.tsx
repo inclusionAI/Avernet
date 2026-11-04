@@ -19,6 +19,7 @@ const STRATEGY_OPTIONS: Array<{ value: GroupStrategyKind; label: string; descrip
 ];
 
 export interface GroupConfigFieldsProps {
+  fixedKind?: boolean;
   kind: GroupStrategyKind;
   name: string;
   context: string;
@@ -123,7 +124,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
         </div>
       </div>
 
-      <div>
+      {!props.fixedKind && <div>
         <span className="mb-1.5 block text-xs font-semibold text-foreground" id="strategy-group-label">
           协作群类型
         </span>
@@ -178,9 +179,9 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             })(),
           )}
         </div>
-      </div>
+      </div>}
 
-      {kind === 'task_dag' && (
+      {kind === 'task_dag' && !props.fixedKind && (
         <div className="flex items-center gap-2">
           <Checkbox
             id="create-group-via-execute"

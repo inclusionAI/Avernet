@@ -2,6 +2,7 @@ import { Badge, Button } from '@/components/ui';
 import type { ParticipantDefinition } from '@/services/workspace/collaborationDefinitionService';
 import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 export interface ParticipantBindingPanelProps {
   definitions: ParticipantDefinition[];
@@ -22,6 +23,8 @@ export function ParticipantBindingPanel({
   activeKey,
   onActiveKeyChange,
 }: ParticipantBindingPanelProps) {
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [activeKey]);
   const boundCount = definitions.filter((definition) => Boolean(bindings[definition.key])).length;
   const botCount = new Set(Object.values(bindings).filter(Boolean)).size;
   const currentIndex = Math.max(
@@ -35,7 +38,7 @@ export function ParticipantBindingPanel({
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
+    <div data-role-binding-panel className="overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center justify-between gap-3 border-b border-divider px-3 py-2.5">
         <span className="text-xs font-semibold text-foreground">角色绑定</span>
         <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
@@ -61,6 +64,7 @@ export function ParticipantBindingPanel({
             return (
               <Button
                 key={definition.key}
+                ref={active ? activeRef : undefined}
                 variant="ghost"
                 size="sm"
                 aria-label={`选择角色 ${label}`}
