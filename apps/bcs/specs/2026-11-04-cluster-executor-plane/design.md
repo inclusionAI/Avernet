@@ -334,6 +334,15 @@ Rules:
   write safely — nobody else is writing.
 - **Exactly one claimant wins.** The CAS takes the row lock; a racing claimant
   re-evaluates, finds the token already bumped, and touches 0 rows.
+- **A lease with pending work is never released, only transferred.** Release
+  (`node_id = ''`) is for sessions with no pending work (cold, idle). A
+  released lease is invisible to the dead-node query (§10.1), so releasing a
+  session that still needs a driver would leave it waiting for the safety-net
+  sweep. Whenever a node must give up such a session without a full handoff
+  (drain deadline, stuck-session watchdog), it **transfers** the lease to the
+  session's HRW successor and sends a best-effort `COMMIT` notice; if the
+  notice is lost, the successor finds the session in its owned set at its next
+  heartbeat read-back (≤ 5 s).
 
 **Self-fencing** (a liveness courtesy, not the safety mechanism): a node that
 cannot complete a heartbeat by `send_time + claim_threshold − margin` on its
@@ -524,7 +533,8 @@ round takes the durable fallback and Trigger 1 picks it up.
 
 Every 30–60 s, each node runs one indexed, paginated query for released or
 dead-owned leases with pending work. It catches failed claims and nodes that
-were restarting when another died.
+were restarting when another died. Because pending work is transferred, never
+released (§8.3), a planned shutdown does not depend on this sweep.
 
 ### 10.4 Taking over earlier on evidence
 
@@ -594,7 +604,8 @@ STOP SIGNAL
  3. Bot sockets on A: no new sends; "please reconnect" to idle bots; wait for busy
     bots' in-flight runs; close. Their deliveries stay queued with each session's owner.
  4. Keep relaying open PA streams; keep answering NOT_OWNER redirects (peer port stays open).
- 5. Drain deadline: release the rest (read-only steps: cancel and redo; side-effecting: reconcile).
+ 5. Drain deadline: TRANSFER the rest to their HRW successors + COMMIT notice (no PREPARE);
+    successor rehydrates (read-only steps: cancel and redo; side-effecting: reconcile).
  6. Delete roster row, exit.
 RESTART
  7. Same address, new node_id → leftovers claimable at once;
@@ -693,8 +704,10 @@ owned by any node. That job is independent of session ownership.
 ### 11.7 Deadline, platform requirements, rollout
 
 **Deadline.** `drain_timeout` (default 25 s) must fit inside the platform's
-stop timeout. At the deadline: read-only steps are cancelled and redone;
-side-effecting steps are released for reconciliation. A Kubernetes example:
+stop timeout. At the deadline, every remaining session with pending work is
+**transferred** (not released) to its HRW successor with a `COMMIT` notice
+(§8.3): read-only steps are cancelled and redone there; side-effecting steps
+are reconciled there. A Kubernetes example:
 `preStop` sleep 5 s (covers the race between SIGTERM and LB endpoint
 removal) + drain 25 s + margin → `terminationGracePeriodSeconds: 40`.
 
@@ -746,8 +759,9 @@ rehydration bumps; no 5xx at the LB.
   releases the lease; the preferred node claims it on the next round. Moving
   a cold session costs nothing, so rebalancing never costs TTFT.
 - A **stuck-session watchdog** (default ~5 min without progress, per run
-  type) releases a session whose driver is wedged on a live node — the case
-  per-row lease renewal would have caught.
+  type) transfers a session whose driver is wedged on a live node to its
+  next-ranked node (a transfer, not a release — §8.3) — the case per-row
+  lease renewal would have caught.
 
 ---
 

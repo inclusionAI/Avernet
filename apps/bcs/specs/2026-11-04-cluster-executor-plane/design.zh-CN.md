@@ -304,6 +304,12 @@ UPDATE bcs_task_leases SET node_id = :successor, fencing_token = :mine + 1
   仍可安全地写 —— 没有别人在写。
 - **恰好一个认领者胜出。** CAS 会取得行锁;竞争的认领者重新求值,发现令牌已被
   递增,影响 0 行。
+- **有待处理工作的租约绝不释放,只能转移。** 释放(`node_id = ''`)只用于没有待处理
+  工作的会话(冷、空闲)。已释放的租约在死亡节点查询(§10.1)中不可见,所以释放一个
+  仍需驱动者的会话,会让它只能等兜底扫描。凡是节点必须在没有完整交接的情况下放弃
+  这类会话(排空截止时间、卡住会话看门狗),都把租约**转移**(TRANSFER)给该会话的
+  HRW 后继节点,并发送尽力而为的 `COMMIT` 通知;若通知丢失,后继节点会在下一次心跳
+  回读自己持有的会话集合时(≤ 5 s)发现它。
 
 **自我围栏**(self-fencing,是一种存活性上的礼让,不是安全机制):节点若无法按本地
 单调时钟在 `send_time + claim_threshold − margin` 之前完成一次心跳,就停止驱动所有
@@ -475,7 +481,8 @@ CAS 裁决。
 ### 10.3 触发 3 —— 兜底扫描
 
 每 30–60 s,每个节点执行一次带索引、分页的查询,查找已释放或所有者已死、且有待处理
-工作的租约。它兜住失败的认领,以及另一节点死亡时恰好正在重启的节点。
+工作的租约。它兜住失败的认领,以及另一节点死亡时恰好正在重启的节点。由于待处理
+工作只转移、从不释放(§8.3),计划内停机不依赖这次扫描。
 
 ### 10.4 凭证据提前接管
 
@@ -538,7 +545,8 @@ STOP SIGNAL
  3. Bot sockets on A: no new sends; "please reconnect" to idle bots; wait for busy
     bots' in-flight runs; close. Their deliveries stay queued with each session's owner.
  4. Keep relaying open PA streams; keep answering NOT_OWNER redirects (peer port stays open).
- 5. Drain deadline: release the rest (read-only steps: cancel and redo; side-effecting: reconcile).
+ 5. Drain deadline: TRANSFER the rest to their HRW successors + COMMIT notice (no PREPARE);
+    successor rehydrates (read-only steps: cancel and redo; side-effecting: reconcile).
  6. Delete roster row, exit.
 RESTART
  7. Same address, new node_id → leftovers claimable at once;
@@ -627,7 +635,8 @@ S 的空档是第 3–6 步:一次数据库写加一次对等往返。失败情�
 ### 11.7 截止时间、平台要求与滚动发布
 
 **截止时间。** `drain_timeout`(默认 25 s)必须小于平台的停止超时。到达截止时间时:
-只读步骤取消后重做;有副作用的步骤释放以待对账。Kubernetes 示例:`preStop` 休眠
+所有仍有待处理工作的会话都**转移**(而非释放)给各自的 HRW 后继节点并附 `COMMIT`
+通知(§8.3):只读步骤在后继节点上取消后重做;有副作用的步骤在后继节点上对账。Kubernetes 示例:`preStop` 休眠
 5 s(覆盖 SIGTERM 与负载均衡器摘除 endpoint 之间的竞态)+ 排空 25 s + 余量 →
 `terminationGracePeriodSeconds: 40`。
 
@@ -667,8 +676,9 @@ MySQL/OceanBase);花名册行已写入且首次心跳已提交;后台循环已�
 - **协作式再平衡只动冷会话。** 当所有者对某个活跃期已被逐出的空闲会话不再是 HRW
   首选时,它释放租约;首选节点在下一轮请求时认领。移动冷会话没有成本,所以再平衡
   永远不会增加 TTFT。
-- **卡住会话看门狗**(默认约 5 分钟无进展,按运行类型设置)会释放驱动者在存活节点
-  上卡死的会话 —— 这正是逐行续期本可以捕获的情况。
+- **卡住会话看门狗**(默认约 5 分钟无进展,按运行类型设置)会把驱动者在存活节点
+  上卡死的会话转移给排名下一位的节点(是转移而非释放 —— 见 §8.3)—— 这正是逐行
+  续期本可以捕获的情况。
 
 ---
 
