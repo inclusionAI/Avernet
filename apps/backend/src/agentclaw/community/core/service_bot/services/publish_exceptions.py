@@ -15,6 +15,14 @@ class BotPublishServiceError(Exception):
     """Bot publish service error."""
 
 
+class EvalBindingNotFoundError(BotPublishServiceError):
+    """指定的 bot owner/stage 下没有找到评测环境绑定。
+
+    This is a missing-resource condition, not an infrastructure failure, so the
+    HTTP adapter maps it to NOT_FOUND for eval binding callers.
+    """
+
+
 class BotNotFoundError(BotPublishServiceError):
     """Bot 不存在错误。"""
 
