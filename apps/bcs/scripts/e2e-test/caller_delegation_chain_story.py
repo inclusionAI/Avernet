@@ -76,6 +76,11 @@ class DelegationChainStory:
     def setup(self) -> None:
         self.post("/control/reset", mock=True)
         self.post("/me/ensure-human")
+        # The provider MUST declare caller_capabilities with ensure routing:
+        # the singlebox assembly wires provider_core, and without the
+        # declaration the capability read inside CallerContainerPreparation
+        # converges IsolationMismatch — silently, which is exactly how the
+        # 2026-11-04 CI run lost every protected ride at preparation.
         self.provider = self.post("/providers", {
             "name": "Delegation chain provider",
             "webhook_url": self.args.mock_url + "/provider/webhook",
@@ -83,6 +88,13 @@ class DelegationChainStory:
             "protocol_version": "2.0",
             "coordination": {"mode": "mcporter_mcp", "mcp_server": "bcs",
                              "mcporter_command": "mcporter"},
+            "caller_capabilities": {
+                "container_routing": "ensure",
+                "supports_caller": True,
+                "supports_isolation_binding": True,
+                "supports_observe_inject": True,
+                "token_visibility": "runtime_only",
+            },
         })
         headers = {"Authorization": "Bearer " + self.provider["provider_admin_token"]}
         self.manager = self.post(f"/providers/{segment(self.provider['provider_id'])}/bots", {
@@ -199,13 +211,20 @@ class DelegationChainStory:
             root_delivery_id = root_ride["body"]["id"]
             print("  root protected ride reached the manager provider wire", flush=True)
 
-            # ---- Delegation: the still-live parent final carries the frame. ----
-            # The root run stays Running (no answer yet): its registered lineage
-            # plus the live BotRunContext satisfy validate_parent, and the v2
-            # bcs_assign_task echo mints the delegated row toward the worker.
+            # ---- Delegation: the LIVE parent run emits the tool-call echo. ----
+            # The mint channel is the agent tool-event pair (bot_event.rs
+            # `tool_event_phase`): a `stream:"tool"` phase=start caches the
+            # tool name, then phase=result carries the v2 bcs_assign_task frame
+            # in `result` — the run stays Running (tool events are
+            # non-terminal), so claim_and_dispatch's liveness window and
+            # prepare_assignment's validate_parent both pass: the registered
+            # root lineage plus the live BotRunContext mint the delegated row
+            # toward the caller-enabled worker.
+            intent_id = "bcs_intent_" + uuid.uuid4().hex
+            tool_call_id = "toolu_" + uuid.uuid4().hex
             frame = json.dumps({
                 "__bcs_coordination__": True, "v": 2, "tool": "bcs_assign_task",
-                "intent_id": "bcs_intent_" + uuid.uuid4().hex, "status": "stored",
+                "intent_id": intent_id, "status": "stored",
                 "message": "worker handles the delegated leg",
                 "timeout_s": 120,
             })
@@ -213,11 +232,26 @@ class DelegationChainStory:
                 "X-BCN-Provider-Id": self.provider["provider_id"],
                 "Authorization": "Bearer " + self.manager["bot_runtime_token"],
             }
-            settled = self.wait("parent final settlement",
-                                lambda: self.reply_chat_final(root_delivery_id, frame,
-                                                              provider_headers),
-                                lambda body: body.get("error") != "transport_conflict")
-            assert not settled.get("error"), settled
+            start = self.post("/bot/events", {
+                "run_id": root_delivery_id, "group_id": self.group_id,
+                "bcs_session_id": self.session_id, "event": "agent",
+                "payload": {"stream": "tool", "data": {
+                    "phase": "start", "toolCallId": tool_call_id, "name": "bcs_assign_task",
+                }},
+            }, headers=provider_headers)
+            assert not start.get("error"), start
+            result = self.post("/bot/events", {
+                "run_id": root_delivery_id, "group_id": self.group_id,
+                "bcs_session_id": self.session_id, "event": "agent",
+                "payload": {"stream": "tool", "data": {
+                    "phase": "result", "toolCallId": tool_call_id,
+                    "isError": False, "result": frame,
+                }},
+            }, headers=provider_headers)
+            assert not result.get("error"), result
+            # Keep the parent run alive until the delegated row settles; the
+            # final answer settles the root run (and frees the managed lease)
+            # only after the worker's protected ride is observed below.
 
             # ---- The delegate dispatch rides the protected wire. ----
             def is_worker_ride(item):
