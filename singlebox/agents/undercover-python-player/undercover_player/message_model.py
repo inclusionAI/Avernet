@@ -109,11 +109,11 @@ def _extract_seat_word_round(instruction: str) -> tuple[int | None, str | None, 
     is_pk = "PK" in instruction
     allow_abstain = "禁止弃权" not in instruction and "不能弃权" not in instruction
 
-    seat_m = re.search(r"你是\s*(\d+)\s*号", instruction)
+    # 座位和私有词只能来自外层指令，不能从遗言引用的历史发言提取。
+    outer_instruction = _outer_task_instruction(instruction)
+    seat_m = re.search(r"你是\s*(\d+)\s*号", outer_instruction)
     seat = int(seat_m.group(1)) if seat_m else None
 
-    # 引用历史里的【…】是公开发言，不是当前玩家的私有词。
-    outer_instruction = _outer_task_instruction(instruction)
     word_m = re.search(r"词是【(.+?)】|【(.+?)】", outer_instruction)
     word = (word_m.group(1) or word_m.group(2)) if word_m else None
 

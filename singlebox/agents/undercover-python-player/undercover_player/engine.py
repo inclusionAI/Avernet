@@ -381,8 +381,19 @@ class PeterPlayerEngine:
                 return
             await self._emit_chat_final(run_id, session_key, text)
         except asyncio.CancelledError:
-            # abort 取消
-            log.info("run %s cancelled by abort", run_id)
+            if run_id in self._finished_runs or self._stop:
+                # 显式 abort / shutdown 已有终态语义，不补发事件。
+                log.info("run %s cancelled by abort/shutdown", run_id)
+            else:
+                # 回调等待的子任务可能被独立取消；这并非协议 abort，必须终止 run。
+                log.warning("run %s decision callback cancelled independently", run_id)
+                try:
+                    await self._emit_chat_error(
+                        run_id, session_key,
+                        RuntimeError("decision callback cancelled independently"),
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("run %s failed to emit terminal error", run_id)
         except Exception as exc:  # noqa: BLE001
             # 决策回调失败必须回传终态，否则 BCS 会一直等到节点超时。
             log.exception("run %s decision callback failed", run_id)

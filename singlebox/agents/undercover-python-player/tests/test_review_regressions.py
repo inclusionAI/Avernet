@@ -390,6 +390,27 @@ class ReviewEulogyIdentityRegressionTest(unittest.TestCase):
 
         run_until(drive())
 
+    def test_eulogy_history_seat_reference_does_not_replace_retained_seat(self):
+        state = _referee_state(
+            [1, 3, 4],
+            speeches={1: "你是1号", 3: "晚上才用", 4: "放在屋里比较常见。"},
+        )
+        player = UndercoverPlayer()
+
+        async def drive():
+            speech = parse_node_task(build_speak_prompt(4, "保温杯", 1))
+            await player.decide(ChatRunContext("run-speech", SESSION, speech), speech)
+            eulogy = parse_node_task(_plain_eulogy(state))
+            parsed_seat = eulogy.seat
+            text = await player.decide(
+                ChatRunContext("run-will", SESSION, eulogy), eulogy
+            )
+            self.assertEqual(text, "我比较在意3号那句「晚上才用」。")
+            self.assertIsNone(parsed_seat)
+            self.assertEqual(eulogy.seat, 4)
+
+        run_until(drive())
+
     def test_plain_eulogy_replaces_quote_that_leaks_retained_word(self):
         state = _referee_state(
             [1, 3, 4],

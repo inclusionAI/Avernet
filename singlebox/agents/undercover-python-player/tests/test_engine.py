@@ -276,6 +276,40 @@ class TestDecisionError(unittest.TestCase):
 
         run_until(drive())
 
+    def test_independently_cancelled_await_emits_terminal_error(self):
+        async def on_task(ctx: ChatRunContext, task):
+            child = asyncio.create_task(asyncio.sleep(30))
+            child.cancel()
+            await child
+
+        engine = make_engine(on_task=on_task)
+        frame = chat_send_frame(build_speak_prompt(3, "台灯", 1), SESSION,
+                                "smnode-1-speak_3-cancelled")
+
+        async def drive():
+            await engine._handle_frame(frame)
+            run_id = next(iter(engine._active_runs))
+            processor = engine._active_runs[run_id]
+            await processor
+
+            acks = [f for f in engine._ws.sent
+                    if f["type"] == "res" and f["id"] == frame["id"]]
+            self.assertEqual(len(acks), 1)
+            self.assertTrue(acks[0]["ok"])
+            errors = [f for f in engine._ws.sent
+                      if f["type"] == "event" and f["event"] == "chat"
+                      and f["payload"]["state"] == "error"]
+            self.assertEqual(len(errors), 1)
+            payload = errors[0]["payload"]
+            self.assertEqual(payload["runId"], run_id)
+            self.assertEqual(payload["sessionId"], SESSION)
+            self.assertEqual(payload["errorCode"], "DECISION_ERROR")
+            self.assertIn("cancelled independently", payload["errorMessage"])
+            self.assertNotIn(run_id, engine._active_runs)
+            self.assertIn(run_id, engine._finished_runs)
+
+        run_until(drive())
+
 
 class TestChatInject(unittest.TestCase):
     def test_ack_only(self):
