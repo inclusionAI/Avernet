@@ -67,6 +67,7 @@ export interface CollaborationBotTransport {
 }
 
 export interface PublicBotCatalogTransport {
+  avatar_url?: string | null;
   bot_id?: string;
   bot_uuid?: string;
   entity_id?: string;
@@ -174,6 +175,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
+    ...(value.avatar_url?.trim() ? { avatarUrl: value.avatar_url.trim() } : {}),
     ownerName: value.owner_name?.trim() || '未公开',
     description: value.description?.trim() ?? '',
     capabilities: [],

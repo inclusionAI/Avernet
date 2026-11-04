@@ -39,6 +39,8 @@ class BotMetadataQueries(BaseModel):
 class BotMetadata(BaseModel):
     """Display-safe Bot metadata, without ownership or runtime internals."""
 
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
+
     bot_id: str = Field(description="Unique Bot identifier.")
     owner_id: str = Field(description="Current personnel Owner; not the stable BCN address.")
     bcn_bot_id: str = Field(

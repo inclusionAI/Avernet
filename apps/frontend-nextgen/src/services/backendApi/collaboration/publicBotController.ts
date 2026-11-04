@@ -4,6 +4,7 @@ import { isEnvelopeFailure } from '../types';
 
 /** TeamClaw Gateway bot-catalog 的公开 Bot 普通搜索 DTO。 */
 export interface PublicBotCatalogDto {
+  avatar_url?: string | null;
   bot_id: string;
   bot_uuid?: string;
   bot_type: string;

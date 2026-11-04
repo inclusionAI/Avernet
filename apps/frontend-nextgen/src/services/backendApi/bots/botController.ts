@@ -17,6 +17,7 @@ export type MutateBotRequest = BackendUnknownRecord;
 export interface OwnedBotDto {
   entity_id?: string;
   bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   bot_name: string;
   bot_desc?: string;
@@ -53,6 +54,7 @@ export interface BotMetadataQueryBody {
 /** POST /openapi/v1/bots/metadata/queries 单条返回结构。 */
 export interface BotMetadataDto {
   bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   owner_id: string;
   bot_name: string;

@@ -13,7 +13,7 @@ interface AvatarTileProps {
 
 /** Bot/群列表头像:图片 > emoji > 名称首字 > 占位图标，使用轻量 32px 方形底板。 */
 export function AvatarTile({ src, label, className, fallbackContent }: AvatarTileProps) {
-  const isImage = !!src && /^(https?:)?\/\//.test(src);
+  const isImage = !!src && /^(?:(?:https?:)?\/\/|data:image\/|\/)/.test(src);
   if (isImage) {
     return <img src={src} alt={label} className={cn('h-8 w-8 shrink-0 rounded-md object-cover', className)} />;
   }

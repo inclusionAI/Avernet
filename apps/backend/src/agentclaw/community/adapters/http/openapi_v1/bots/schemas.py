@@ -83,6 +83,7 @@ class Bot(BaseModel):
     bcn_bot_id: str = Field(
         default="", description="Established BCN address; stable across Owner handoff."
     )
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
 
     model_config = ConfigDict(
         json_schema_extra={
