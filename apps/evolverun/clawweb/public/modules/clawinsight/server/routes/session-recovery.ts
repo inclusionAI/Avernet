@@ -81,6 +81,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm", json({ limit: "16kb", inflate: false }), async (req, res, next) => {
+    try {
+      await tasks().confirmOwner(String(req.params.taskId), String(req.params.requestId), await actor(req), req.body?.feedback ?? "");
+      res.set("Cache-Control", "no-store").json({ ok: true });
+    } catch (error) { next(error); }
+  });
   router.post("/monitoring/session-recoveries/:taskId/annotations", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try { await tasks().annotate(String(req.params.taskId), await actor(req), req.body); res.json({ ok: true }); }
     catch (error) { next(error); }

@@ -274,7 +274,7 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
-### 按手册转交 Owner 自行处理
+### 按手册纯通知转交 Owner 自行处理（省略 owner_request）
 
 Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
 `{"kind":"owner_handoff","phase":"当前阶段","delivery":"confirmed|unconfirmed","response":"acted|replied|none|unknown","effect":"recovered|not_recovered|unknown","summary":"原任务实际进展、剩余阻塞或优化建议、手册处理依据、具体对象及 Owner 指引（Markdown）","evidence_ids":["受控现场读取返回的完整证据 ID"]}`。
@@ -285,11 +285,45 @@ Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化�
 `completion_reason=owner_handoff`；恢复效果独立于转交决定，使用本次 `effect` 更新 `judgment.effect`，干预情况仍由实际审计计算，通知不算干预。`delivery`／`response` 成对提交并保存，复用普通效果回报的校验：`confirmed` 必须有受控读取核实当前投递标识的证据，`acted`／`replied` 必须先确认本次触达；未发指引用 `unconfirmed`／`none`，关联证据不足用 `unknown`，不因转交自动推断触达或行动。旧包同时省略这两个字段时保留已有判断，无判断则为 `unconfirmed`／`unknown`；单字段、无效值或无触达证据的确认返回 422，不结束任务或发送通知。新包明确回报三种效果之一；旧包省略 `effect` 时沿用已有判断，无判断则记为 `unknown`，不自动推断未恢复。`not_intervened` 不适用于真实转交，其他无效效果值返回 422 且不结束任务或通知。
 通知失败或禁用时同样结束，但页面不得显示“已通知”；已恢复时展示后续建议及实际通知状态，仍需人工处理时展示 Owner 处理指引。通知回执与任务结束均保存在原时间线，无新增数据库字段或配置。
 
-原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。其他不满足转交条件、确需 Owner 配合恢复的事项仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
+原故障已解除、原任务实际继续或完成，仅剩手册规定的有依据的 Skill 优化建议时，转交仍保留 `effect=recovered`，通知明确建议不阻塞本次恢复；不等待修改，也不为验证优化重跑原业务。独立权限申请或必要补料按下节等待反馈；环境修复所需动作及方案内配合仍进入完整方案；普通消息干预后的 `observe.effect=not_recovered` 仍推进 `plan`，不自动转交 Owner。
 
 兼容与发布顺序：通用转交依赖支持 `owner_handoff` 的结果发送／接收后端和页面。旧包的 `blocked.reason=mcp_permission_required` 在 Agent 回报入口转换为通用转交并明确 `effect=not_recovered`，之后生成 `completion_reason=owner_handoff`；历史任务与待发送结果中的旧原因仍可读取、展示及回传，不迁移既有记录。新 Skill／Wrapper 不再输出或依赖 MCP 专属原因。
 
 本次新通用 Skill 手册需先随自愈包上传，再部署包含 `TC.SKILL` 新候选路径的后端，避免新任务引用旧包中不存在的手册；效果回报与通知行为在配套后端部署后生效。恢复执行继续使用任务创建时保存的手册引用，不给旧任务补入新候选。后端保持兼容旧包省略效果的输入；若回滚到不含新手册的旧包，应先停止后端产生该新候选引用，避免缺失手册导致执行失败。
+
+### 权限／必要补料：Owner 反馈后续接同一任务
+
+保持 `kind=owner_handoff`，增加可选 `owner_request` 对象：
+
+```json
+{
+  "kind": "owner_handoff",
+  "phase": "assess",
+  "summary": "评审缺权益规则正文和图1，无法继续核对权益条件",
+  "evidence_ids": ["已留存的受控现场读取证据ID"],
+  "owner_request": { "reason": "materials", "instructions": "请在原业务会话补权益规则正文和图1原图；处理后点击已处理，继续核验。" }
+}
+```
+
+`reason` 仅接受 `permission | materials`。`summary` 与 `instructions` 均为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
+
+新增 Task 可选 `ownerRequest`：后台生成 `requestId`、递增 `revision`、`status=pending|confirmed`，保存 `reason/summary/instructions/evidence_ids/resumePhase/createdAtMs` 和可选 `feedback={userId,text,atMs}`。复用 waiting_owner，无新业务状态、表、上游结果字段或空环境Plan。当前身份和状态留在Task配置；完整内容及反馈走已有详情对象。初始待办不会向上游发最终结果，不声明恢复，也不要求先干预Bot。
+
+登录态 `POST /monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm` 接受 `{ "feedback": "可省略，最多4,000字符，不含凭据" }`，返回 `{"ok":true}`。Owner或管理员沿现有资源权限确认，服务核对当前待办和CW控制面，先持久化再异步启动。重复确认幂等；旧卡、终止任务和其他环境不可重新激活。此接口不调用方案decide、不授予环境操作、不提交业务确认。
+
+反馈后重新assess，但保留历史计划、动作和原阶段。必须先成功读取最新原会话／轨迹，NAS说明不代替这一读取；否则不允许续接消息、阶段判断或恢复结论。原任务已被用户接手时沿原协议让路。需要续接时每个requestId只有一条固定身份消息；重复请求和新execution复用该身份，原初始delivery保持原样。原阶段为verify时，新评估后的观察回到verify，不开启第二套Plan。缺项未齐时刷新现场后提交剩余事项，递增requestId/revision并更新同一张卡。
+
+等待期间由现有wrapper轮询；临近Base期限仅释放execution并保存上下文。反馈可在活执行继续，也可启动新的execution恢复同一Task。原执行票据、CAS启动互斥和未知写入核实保持有效。CW重启后maintenance恢复已保存、尚未启动的确认任务。
+
+Owner卡配置扩展既有 `session_recovery_owner_notifications`：
+
+```json
+{ "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } }, "bot_overrides": [] }
+```
+
+保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，原markdown方案审批／纯转交通知不变。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试，首次创建后只更新固定outTrackId，不重建未知卡。未知创建之后的成功更新不独立证明Owner已收到卡片。
+
+内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。标准卡片按钮为“已处理，继续核验”；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 
 ## 任务整体摘要
 
