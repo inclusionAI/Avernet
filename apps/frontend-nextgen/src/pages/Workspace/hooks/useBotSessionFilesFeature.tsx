@@ -100,7 +100,11 @@ export function useBotSessionFilesFeature(
   }, [upload.removeTask, upload.tasks]);
 
   const handleSelectSkill = useCallback((skillName: string) => {
-    senderRef.current?.insert(`/${skillName} `, 'end');
+    // 选中后的文本插入由命令面板默认替换完成（subConfig.format 定制 `/${name}`，触发
+    // token 被整段替换为 `/task-loop `）。此处不再 insert('end')：它基于受控回流前的
+    // 旧 DOM 追加，会覆盖面板的替换结果，造成 '/s/task-loop' 残留（2026-11-04 实测
+    // 反馈修复）；签名保留供 buildBotSessionCommandItems 的 subConfig.onSelect 调用。
+    void skillName;
     senderRef.current?.focus?.();
   }, []);
 
