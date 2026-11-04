@@ -2821,3 +2821,234 @@ class TestGetCronDetailBotContext:
             "publish_id",
             "publish_status",
         }.isdisjoint(result["data"])
+
+
+# ── Retry on adapter 5xx ────────────────────────────────────────────
+
+class TestRetryableAdapterError:
+    """_is_retryable_adapter_error 判定逻辑。"""
+
+    def test_500_is_retryable(self):
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+        exc = DeviceAdapterHTTPStatusError(500, "internal error")
+        assert cron_runtime_targets.CronRuntimeTargetMixin._is_retryable_adapter_error(exc) is True
+
+    def test_502_is_retryable(self):
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+        exc = DeviceAdapterHTTPStatusError(502, "bad gateway")
+        assert cron_runtime_targets.CronRuntimeTargetMixin._is_retryable_adapter_error(exc) is True
+
+    def test_404_is_not_retryable(self):
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+        exc = DeviceAdapterHTTPStatusError(404, "not found")
+        assert cron_runtime_targets.CronRuntimeTargetMixin._is_retryable_adapter_error(exc) is False
+
+    def test_value_error_is_not_retryable(self):
+        exc = ValueError("connection refused")
+        assert cron_runtime_targets.CronRuntimeTargetMixin._is_retryable_adapter_error(exc) is False
+
+
+class TestFetchRuntimeTargetCronsRetry:
+    """_fetch_runtime_target_crons 重试行为。"""
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt(self):
+        """第一次 500、第二次 200 → 返回成功数据。"""
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(binding_id=10, bot_id="bot-1")
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                DeviceAdapterHTTPStatusError(500, "failed to create system job"),
+                {"success": True, "data": [{"id": "cron-1"}]},
+            ]
+        )
+
+        svc = _make_service(device_provider=device_provider, resolver=resolver, transport=transport)
+
+        result = await svc._fetch_runtime_target_crons(
+            CronRuntimeTarget(
+                bot_id="bot-1",
+                bot_name="Test Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=10,
+            ),
+            "owner-1",
+        )
+
+        assert result["success"] is True
+        assert result["data"] == [{"id": "cron-1"}]
+        assert transport.invoke.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_returns_failure(self):
+        """全部 3 次调用均 500 → 返回 cron_api_failed，总调用 3 次。"""
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(binding_id=10, bot_id="bot-1")
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                DeviceAdapterHTTPStatusError(500, "error 1"),
+                DeviceAdapterHTTPStatusError(500, "error 2"),
+                DeviceAdapterHTTPStatusError(500, "error 3"),
+            ]
+        )
+
+        svc = _make_service(device_provider=device_provider, resolver=resolver, transport=transport)
+
+        result = await svc._fetch_runtime_target_crons(
+            CronRuntimeTarget(
+                bot_id="bot-1",
+                bot_name="Test Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=10,
+            ),
+            "owner-1",
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "cron_api_failed"
+        assert transport.invoke.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_non_retryable_error_no_retry(self):
+        """404 不重试，总调用 1 次。"""
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(binding_id=10, bot_id="bot-1")
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=DeviceAdapterHTTPStatusError(404, "not found")
+        )
+
+        svc = _make_service(device_provider=device_provider, resolver=resolver, transport=transport)
+
+        result = await svc._fetch_runtime_target_crons(
+            CronRuntimeTarget(
+                bot_id="bot-1",
+                bot_name="Test Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=10,
+            ),
+            "owner-1",
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "cron_api_failed"
+        assert transport.invoke.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_no_retry(self):
+        """CronApiTimeoutError 不重试（现有行为保留）。"""
+        from agentclaw.community.core.cron.errors import CronApiTimeoutError
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(binding_id=10, bot_id="bot-1")
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=CronApiTimeoutError("/api/cron", 10.0)
+        )
+
+        svc = _make_service(device_provider=device_provider, resolver=resolver, transport=transport)
+
+        result = await svc._fetch_runtime_target_crons(
+            CronRuntimeTarget(
+                bot_id="bot-1",
+                bot_name="Test Bot",
+                owner_id="owner-1",
+                bot_type="personal",
+                runtime_stage="draft",
+                binding_id=10,
+            ),
+            "owner-1",
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "cron_api_timeout"
+        assert transport.invoke.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_list_all_crons_with_retry_success(self):
+        """list_all_crons 端到端：1 个 bot 先 500 后成功，聚合正确。"""
+        from agentclaw.community.plugin_api.device_adapter_transport import (
+            DeviceAdapterHTTPStatusError,
+        )
+
+        bot_provider = MagicMock()
+        bot_provider.list_bots_by_owner_or_collaborator.return_value = {
+            "items": [
+                {
+                    "bot_id": "bot-1",
+                    "owner_id": "owner-1",
+                    "binding_id": 10,
+                    "bot_name": "Test Bot",
+                }
+            ]
+        }
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(binding_id=10, bot_id="bot-1")
+
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=[
+                DeviceAdapterHTTPStatusError(500, "transient error"),
+                {"success": True, "data": [{"id": "cron-1", "task_id": "t1"}]},
+            ]
+        )
+
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+
+        result = await svc.list_all_crons(user_id="owner-1", nick_name="Owner")
+
+        assert result["success"] is True
+        assert len(result["data"]) == 1
+        assert result["data"][0]["id"] == "cron-1"
+        assert result["failed_targets"] == []

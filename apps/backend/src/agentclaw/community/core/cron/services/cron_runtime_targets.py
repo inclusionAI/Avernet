@@ -11,6 +11,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from agentclaw.community.core.cron.errors import CronApiTimeoutError
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterHTTPStatusError,
+)
 from agentclaw.community.core.cron.protocols import DeviceBindingStatus
 from agentclaw.community.log import get_logger
 
@@ -30,6 +33,8 @@ SINGLE_INSTANCE_DEVICE_PROVIDERS = {"arca", "local"}
 
 # Cron 查询只等待有限时间；并发数用于限制同步设备请求占用的线程数。
 CRON_READ_TIMEOUT_SECONDS = 10.0
+# Adapter 5xx 重试：最多 3 次总调用（1 初始 + 最多 2 次重试）。
+CRON_RETRY_MAX_ATTEMPTS = 3
 RUNTIME_DEVICE_QUERY_TIMEOUT_SECONDS = 10.0
 RUNTIME_DEVICE_QUERY_CONCURRENCY = 8
 RUNTIME_QUERY_PREPARE_CONCURRENCY = 8
@@ -313,6 +318,15 @@ class CronRuntimeTargetMixin:
         async with self._runtime_query_prepare_semaphore:
             return await asyncio.to_thread(self._prepare_runtime_query, target)
 
+
+    @staticmethod
+    def _is_retryable_adapter_error(exc: BaseException) -> bool:
+        """Return True when the adapter error is a retryable HTTP 5xx."""
+        return (
+            isinstance(exc, DeviceAdapterHTTPStatusError)
+            and exc.status_code >= 500
+        )
+
     async def _fetch_runtime_target_crons(
         self,
         target: CronRuntimeTarget,
@@ -325,42 +339,74 @@ class CronRuntimeTargetMixin:
             return failure
         assert ctx is not None
 
-        # 下游异常统一转换成可聚合的失败原因。
-        try:
-            result = await self._invoke_transport(
-                ctx.conn_info,
-                method="GET",
-                path=path,
-                body=None,
-                params=None,
-            )
-        except CronApiTimeoutError as e:
-            logger.warning(
-                "[_fetch_runtime_target_crons] Adapter request timed out for "
-                "bot=%s stage=%s: %s",
-                target.bot_id,
-                target.runtime_stage,
-                e,
-            )
-            return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
-        except Exception as e:
-            logger.error(
-                "[_fetch_runtime_target_crons] Adapter request failed for "
-                "bot=%s stage=%s: %s",
-                target.bot_id,
-                target.runtime_stage,
-                e,
-            )
-            return {"success": False, "reason": "cron_api_failed", "error": str(e)}
+        binding_id = target.binding_id
+        last_error: BaseException | None = None
 
-        if not result.get("success", True):
-            return {
-                "success": False,
-                "reason": "cron_api_failed",
-                "error": result.get("message") or result.get("error") or "cron api failed",
-            }
+        for attempt in range(1, CRON_RETRY_MAX_ATTEMPTS + 1):
+            try:
+                result = await self._invoke_transport(
+                    ctx.conn_info,
+                    method="GET",
+                    path=path,
+                    body=None,
+                    params=None,
+                )
+            except CronApiTimeoutError as e:
+                logger.warning(
+                    "[_fetch_runtime_target_crons] Adapter request timed out for "
+                    "bot=%s stage=%s binding=%s: %s",
+                    target.bot_id,
+                    target.runtime_stage,
+                    binding_id,
+                    e,
+                )
+                return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
+            except Exception as e:
+                last_error = e
+                if self._is_retryable_adapter_error(e) and attempt < CRON_RETRY_MAX_ATTEMPTS:
+                    delay = 2 ** (attempt - 1)  # 1s, 2s
+                    logger.warning(
+                        "[_fetch_runtime_target_crons] Retryable adapter error, "
+                        "retrying in %.1fs (attempt %d/%d) "
+                        "bot=%s stage=%s binding=%s: %s",
+                        delay,
+                        attempt,
+                        CRON_RETRY_MAX_ATTEMPTS,
+                        target.bot_id,
+                        target.runtime_stage,
+                        binding_id,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(
+                    "[_fetch_runtime_target_crons] Adapter request failed for "
+                    "bot=%s stage=%s binding=%s (attempt %d/%d): %s",
+                    target.bot_id,
+                    target.runtime_stage,
+                    binding_id,
+                    attempt,
+                    CRON_RETRY_MAX_ATTEMPTS,
+                    e,
+                )
+                return {"success": False, "reason": "cron_api_failed", "error": str(e)}
 
-        return result
+            if not result.get("success", True):
+                return {
+                    "success": False,
+                    "reason": "cron_api_failed",
+                    "error": result.get("message") or result.get("error") or "cron api failed",
+                }
+
+            return result
+
+        # All retries exhausted — should not normally reach here,
+        # but guard against the loop completing without a return.
+        return {
+            "success": False,
+            "reason": "cron_api_failed",
+            "error": str(last_error) if last_error else "cron api failed after retries",
+        }
 
     def _failed_target(
         self,
