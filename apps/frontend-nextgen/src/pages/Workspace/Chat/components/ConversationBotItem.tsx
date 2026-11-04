@@ -103,8 +103,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
   const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
   const searchActive = sessionKey !== '';
-  // 不可用 Bot 操作区不渲染,展开/筛选/检索激活态的让位与钉住一并抑制。
-  const actionsPinned = !unavailable && (expanded || filterActive || searchActive);
   // 搜索入口仅在有效范围 all 下展示:favorite 清空并隐藏(切回 all 不恢复),others 强制 all 保留。
   const searchVisible = scope === 'all';
   const showFilter = isManaged || canFavorite;
@@ -122,12 +120,15 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     (searchVisible ? 1 : 0) +
     (showFilter ? 1 : 0) +
     (showMenu ? 1 : 0);
-  const pinnedActionsPadding =
-    actionButtonCount >= 5 ? 'pr-[138px]' : actionButtonCount >= 4 ? 'pr-[112px]' : 'pr-[86px]';
+  // hover 让位(2026-11-04 显隐重构):操作组仅 hover/键盘/菜单打开/触屏显示(触屏常显
+  // → 让位同步常显),展开态不再整组钉住;激活 icon 让位见 activeMarkPadding。
+  // 展开+菜单达 5 按钮时 hover 让位需 138px(原 pinned 独有档位下沉到 hover 变体)。
   const hoverActionsPadding =
-    actionButtonCount >= 4
-      ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px]'
-      : 'group-hover:pr-[86px] group-focus-within:pr-[86px]';
+    actionButtonCount >= 5
+      ? 'group-hover:pr-[138px] group-focus-within:pr-[138px] group-has-[[data-state=open]]:pr-[138px] [@media(hover:none)]:pr-[138px]'
+      : actionButtonCount >= 4
+        ? 'group-hover:pr-[112px] group-focus-within:pr-[112px] group-has-[[data-state=open]]:pr-[112px] [@media(hover:none)]:pr-[112px]'
+        : 'group-hover:pr-[86px] group-focus-within:pr-[86px] [@media(hover:none)]:pr-[86px]';
   // 🔍 开关式输入框:显隐为组件本地态;过滤词已生效时强制可见,激活的入口不因开关丢失。
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
@@ -148,6 +149,11 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     inputDisabled: instanceInputDisabled,
     marked: searchMarked,
   } = useConversationInstanceRow(bot, searchActive);
+  // 激活态标记(2026-11-04 显隐重构):检索/实例标记或归属/范围筛选激活——操作组仅
+  // hover 显示,激活的单个 icon 常显(Actions 内 icon 级控制);让位仅按激活 icon
+  // 数量预留(单 36px/双 60px),展开态不再整组钉住(用户拍板:展开后操作组也仅 hover 可见)。
+  const activeMarked = !unavailable && (searchMarked || filterActive);
+  const activeMarkPadding = filterActive && searchMarked ? 'pr-[60px]' : 'pr-9';
   const handleSearchToggle = () => {
     if (!expanded) onToggle();
     setSearchInputOpen((current) => !current);
@@ -204,8 +210,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             stripVisible
               ? unavailable
                 ? 'pr-9'
-                : actionsPinned
-                  ? pinnedActionsPadding
+                : activeMarked
+                  ? activeMarkPadding
                   : hoverActionsPadding
               : false,
           )}
@@ -226,7 +232,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             className={cn(
               stripVisible &&
                 'group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden [@media(hover:none)]:hidden',
-              stripVisible && (actionsPinned || unavailable) && 'hidden',
+              // 不可用 Bot「更多操作」常驻(让位 pr-9)时 badge 恒让位;激活 icon 仅让
+              // 36px,名称+badge 空间足够,badge 保持显示(2026-11-04 显隐重构)。
+              stripVisible && unavailable && 'hidden',
             )}
           />
         </div>
@@ -237,7 +245,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           expanded={expanded}
           isOthers={isOthers}
           unavailable={unavailable}
-          actionsPinned={actionsPinned}
+          filterActive={filterActive}
           searchVisible={searchVisible}
           searchMarked={searchMarked}
           showFilter={showFilter}

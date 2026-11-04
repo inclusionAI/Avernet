@@ -21,6 +21,8 @@ export interface ConversationOriginFilterProps {
   supportsFavorites?: boolean;
   /** 团队 Bot 他人会话后端尚未就绪；保留选项提示但不可操作。 */
   othersDisabled?: boolean;
+  /** 外部显隐类注入（行级 hover 群发 + 激活常显，2026-11-04 操作组显隐重构）。 */
+  triggerClassName?: string;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
 }
@@ -43,6 +45,7 @@ export function ConversationOriginFilter({
   supportsOrigin = true,
   supportsFavorites = true,
   othersDisabled = false,
+  triggerClassName,
   onOriginChange,
   onScopeChange,
 }: ConversationOriginFilterProps) {
@@ -87,6 +90,7 @@ export function ConversationOriginFilter({
             // hover 与同排「新建会话」按钮统一走 muted 灰系，激活态 hover 保持蓝色不被覆盖。
             'h-6 w-6 rounded-md hover:bg-muted',
             filterActive ? 'text-primary hover:text-primary' : 'text-muted-foreground hover:text-foreground',
+            triggerClassName,
           )}
         />
       </PopoverTrigger>
