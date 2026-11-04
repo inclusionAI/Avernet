@@ -9,9 +9,9 @@ from typing import Any, Protocol, runtime_checkable
 class ServicePublicationFacadeProtocol(Protocol):
     """Resolve, authorize and orchestrate service-Bot publication operations.
 
-    Restart acknowledgements may carry an operation_id. Lifecycle cards may
-    carry a separate restart projection without changing their product status.
-    Missing engine-owned progress preserves the original response shape.
+    Engine strategies may add namespaced response extensions to restart
+    acknowledgements and lifecycle cards without changing product status.
+    Missing engine-owned extensions preserve the original response shape.
     """
 
     def list_publications(

@@ -184,7 +184,9 @@ class AicodingDurableRestartMixin:
         result = dict(bot)
         result["restart_in_progress"] = journal(bot).get("phase") in IN_PROGRESS
         result["restart_operation_id"] = journal(bot).get("operation_id")
-        result["restart"] = self.get_restart_status(ext=bot.get("ext") or {})
+        result["ext"] = self.project_status_ext(
+            ext=bot.get("ext") or {}, response_ext=bot.get("ext") or {},
+        )
         return result
 
 

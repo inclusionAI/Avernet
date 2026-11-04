@@ -1,7 +1,6 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
-import uuid
 from functools import partial
 
 from agentclaw.community.core.bot_management.engines.registry import (
@@ -134,10 +133,7 @@ class RestartMixin:
 
         # Resolve + validate the restart target (record → stage → binding → bot →
         # artifact). On any failure ``error`` is the response dict to return.
-        restart_operation_id = uuid.uuid4().hex
-        error, stage, bot_uuid = self._resolve_restart_request(
-            publish_id, operation_id=restart_operation_id,
-        )
+        error, stage, bot_uuid, admission = self._resolve_restart_request(publish_id)
         if error is not None:
             return error
 
@@ -153,7 +149,7 @@ class RestartMixin:
             publish_id=publish_id,
             stage=stage.value,
             operator=operator,
-            in_place=in_place, operation_id=restart_operation_id,
+            in_place=in_place, operation_id=admission.operation_id,
         )
 
         logger.info(
@@ -162,18 +158,20 @@ class RestartMixin:
             f"operator={operator}"
         )
 
-        return {
+        result = {
             "success": True,
             "message": f"Restart task submitted, stage: {stage.value}",
             "stage": stage.value,
             "bot_uuid": bot_uuid,
-            "operation_id": restart_operation_id,
         }
+        if admission.ext:
+            result["ext"] = admission.ext
+        return result
 
-    def _resolve_restart_request(self, publish_id: int, *, operation_id=None):
+    def _resolve_restart_request(self, publish_id: int):
         """Validate/resolve a restart and optionally admit its engine-owned operation.
 
-        Returns ``(error, stage, bot_uuid)``: on failure ``error`` is the response
+        Returns ``(error, stage, bot_uuid, admission)``: on failure ``error`` is the response
         dict (``success=False`` + message) and stage/bot_uuid are None; on success
         ``error`` is None and stage/bot_uuid are populated. The build-artifact
         presence is also checked here so the durable handler always has one."""
@@ -185,10 +183,10 @@ class RestartMixin:
             return {
                 "success": False,
                 "message": f"Publish record not found: publish_id={publish_id}",
-            }, None, None
+            }, None, None, None
 
         if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
-            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}, None, None
+            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}, None, None, None
 
         current_status = PublishStatus(publish_record.status)
         stage = self._determine_restart_stage(current_status)
@@ -201,7 +199,7 @@ class RestartMixin:
                 "success": False,
                 "message": f"Current status {current_status} does not support restart operation",
                 "status": current_status,
-            }, None, None
+            }, None, None, None
 
         # (#197) The previous ext.restart marker is NO LONGER cleared here.
         # Clearing it before the new workflow id was recorded was a crash hazard
@@ -220,7 +218,7 @@ class RestartMixin:
                 "success": False,
                 "message": f"No binding info found for stage {stage.value}",
                 "stage": stage.value,
-            }, None, None
+            }, None, None, None
 
         binding = self._publish_service.get_device_binding_by_id(binding_id)
         if not binding:
@@ -230,7 +228,7 @@ class RestartMixin:
             return {
                 "success": False,
                 "message": f"Device binding record not found: binding_id={binding_id}",
-            }, None, None
+            }, None, None, None
 
         bot_uuid = binding.device_id
         if not bot_uuid:
@@ -240,7 +238,7 @@ class RestartMixin:
             return {
                 "success": False,
                 "message": f"Device binding record has no device_id: binding_id={binding_id}",
-            }, None, None
+            }, None, None, None
 
         bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id, user_id=publish_record.owner_id,
@@ -253,7 +251,7 @@ class RestartMixin:
             return {
                 "success": False,
                 "message": f"Bot not found: {publish_record.source_bot_id}",
-            }, None, None
+            }, None, None, None
 
         if not ext.get("migration_path") and not ext.get("config_artifact"):
             logger.warning(
@@ -262,17 +260,16 @@ class RestartMixin:
             return {
                 "success": False,
                 "message": f"Publish record is missing build artifact: publish_id={publish_id}",
-            }, None, None
+            }, None, None, None
 
-        if operation_id is not None:
-            ctx, strategy = resolve_restart_strategy(bot)
-            strategy.accept_published_restart(
-                ctx, services=PublishedRestartServices(
-                    get_record=self._publish_service.get_publish_by_id,
-                    mutate_ext=self._mutate_and_update_ext, update_status=self._update_publish_status,
-                ), publish_id=publish_id, stage=stage.value, operation_id=operation_id,
-            )
-        return None, stage, bot_uuid
+        ctx, strategy = resolve_restart_strategy(bot)
+        admission = strategy.accept_published_restart(
+            ctx, services=PublishedRestartServices(
+                get_record=self._publish_service.get_publish_by_id,
+                mutate_ext=self._mutate_and_update_ext, update_status=self._update_publish_status,
+            ), publish_id=publish_id, stage=stage.value,
+        )
+        return None, stage, bot_uuid, admission
 
     async def execute_restart(
         self,

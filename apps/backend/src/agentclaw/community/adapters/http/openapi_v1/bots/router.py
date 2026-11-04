@@ -68,6 +68,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
@@ -803,12 +804,11 @@ async def get_bot_status(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""
-    from agentclaw.community.core.bot_management.engines.registry import resolve_restart_status
     bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
     return envelope(
         BotStatus(
-            restart=resolve_restart_status(bot),
+            ext=resolve_status_ext(bot, response_ext={}),
             status=bot.get("status") or "",
             # Shared policy: an application bot is not ready until its repo
             # checkout reports SUCCEEDED, so ACTIVE alone is not enough.

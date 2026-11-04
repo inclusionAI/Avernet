@@ -21,7 +21,7 @@ async def test_admission_keeps_old_runtime_active(setup):
     accepted = await submit(s)
     assert accepted['status'] == 'ACTIVE'
     assert accepted['binding_id'] == 7
-    assert accepted['restart']['status'] == 'RUNNING'
+    assert accepted['ext']['aicoding']['restart']['status'] == 'RUNNING'
     assert s.repo.bot['ext']['start_status'] == 'SUCCEEDED'
     assert s.repo.bot['ext']['unrelated'] == {'keep': True}
     s.service.restart_bot.assert_not_called()
@@ -70,8 +70,8 @@ async def test_published_veto_preserves_success_and_binding(published):
     assert record.ext['restart']['status'] == 'FAILED'
     progress = svc.sync_restart_progress(1)
     assert progress.status == 'success'
-    assert progress.restart['status'] == 'FAILED'
-    assert '快盘' in progress.restart['message']
+    assert progress.ext['aicoding']['restart']['status'] == 'FAILED'
+    assert '快盘' in progress.ext['aicoding']['restart']['message']
     build.upgrade_async.assert_not_called()
 
 
@@ -96,19 +96,22 @@ async def test_openapi_and_internal_status_agree_after_veto(setup):
     )
     assert internal_result.data['bot_status'] == public_result.data.status == 'ACTIVE'
     assert internal_result.data['is_ready'] is public_result.data.is_ready is True
-    assert internal_result.data['restart'] == public_result.data.restart.model_dump()
+    assert internal_result.data['ext']['aicoding']['restart'] == public_result.data.ext['aicoding']['restart']
     assert internal_result.data['error_message'] is None
+    assert 'restart' not in internal_result.data
+    assert 'restart' not in public_result.data.model_dump()
+    assert 'coding_restart' not in public_result.data.ext
 
 
 @pytest.mark.asyncio
 async def test_explicit_new_published_attempt_does_not_reuse_failed_receipt(published):
     from unittest.mock import AsyncMock
-    from agentclaw.community.core.bot_management.engines.registry import resolve_published_restart_status
+    from agentclaw.community.core.bot_management.engines.registry import resolve_published_status_ext
     from tests.community.core.bot_management.aicoding.test_restart_backup import partial_response
 
     svc, _, baas, build, record = published
     record.ext.setdefault('restart', {})['custom'] = {'keep': [1, 2]}
-    first = svc.restart_bot(1, 'operator')['operation_id']
+    first = svc.restart_bot(1, 'operator')['ext']['aicoding']['restart']['operation_id']
     assert record.ext['unrelated'] == {'keep': True}
     assert record.ext['restart']['custom'] == {'keep': [1, 2]}
     execute = executor([response('failed', operation_id=first)])
@@ -118,12 +121,12 @@ async def test_explicit_new_published_attempt_does_not_reuse_failed_receipt(publ
     count = baas.post_bots_api.call_count
     assert not (await svc.execute_restart(1, 'online', 'operator', operation_id=first))['success']
     assert baas.post_bots_api.call_count == count
-    second = svc.restart_bot(1, 'operator')['operation_id']
+    second = svc.restart_bot(1, 'operator')['ext']['aicoding']['restart']['operation_id']
     assert second != first
     assert record.ext['restart']['phase'] == 'QUEUED'
     assert record.ext['unrelated'] == {'keep': True}
     assert record.ext['restart']['custom'] == {'keep': [1, 2]}
-    assert svc.sync_restart_progress(1).restart['status'] == 'RUNNING'
+    assert svc.sync_restart_progress(1).ext['aicoding']['restart']['status'] == 'RUNNING'
     execute = executor([partial_response(operation_id=second)] * 3)
     baas.post_bots_api.side_effect = lambda **kw: execute(kw['payload']['cmd'])
     build.upgrade_async = AsyncMock(return_value={'success': True, 'publish_id': 902})
@@ -131,16 +134,16 @@ async def test_explicit_new_published_attempt_does_not_reuse_failed_receipt(publ
     assert record.status == 'success'
     assert record.ext['unrelated'] == {'keep': True}
     assert record.ext['restart']['custom'] == {'keep': [1, 2]}
-    assert resolve_published_restart_status(record, progress={'status': 'SUCCESS'})['status'] == 'SUCCEEDED'
+    assert resolve_published_status_ext(record, progress={'status': 'SUCCESS'})['aicoding']['restart']['status'] == 'SUCCEEDED'
 
 
 @pytest.mark.parametrize('engine', ['openclaw', 'hermes', 'moltis', 'teclaw', None])
 def test_default_engines_and_legacy_status_json_are_unchanged(engine):
-    from agentclaw.community.core.bot_management.engines.registry import resolve_restart_status
+    from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
     from agentclaw.community.adapters.http.openapi_v1.bots.schemas import BotStatus
-    assert resolve_restart_status({'active_engine': engine, 'ext': {
+    assert resolve_status_ext({'active_engine': engine, 'ext': {
         'coding_restart': {'operation_id': 'foreign', 'phase': 'FAILED'},
-    }}) is None
+    }}, response_ext={}) == {}
     assert BotStatus(status='ACTIVE', is_ready=True, device_id='old').model_dump() == {
         'status': 'ACTIVE', 'is_ready': True, 'device_id': 'old',
     }
@@ -153,7 +156,7 @@ async def test_published_workflow_terminal_keeps_original_lifecycle_and_operatio
     from tests.community.core.bot_management.aicoding.test_restart_backup import partial_response
 
     svc, _, baas, build, record = published
-    operation = svc.restart_bot(1, 'operator')['operation_id']
+    operation = svc.restart_bot(1, 'operator')['ext']['aicoding']['restart']['operation_id']
     execute = executor([partial_response(operation_id=operation)] * 3)
     baas.post_bots_api = Mock(side_effect=lambda **kw: execute(kw['payload']['cmd']))
     build.upgrade_async = AsyncMock(return_value={'success': True, 'publish_id': 902})
@@ -165,12 +168,12 @@ async def test_published_workflow_terminal_keeps_original_lifecycle_and_operatio
     # Repository reads return detached snapshots, not the mutable test store.
     svc.get_publish_record = Mock(side_effect=lambda _: record.model_copy(deep=True))
     result = svc.sync_restart_progress(1)
-    assert result.restart['operation_id'] == operation
-    assert result.restart['status'] == ('SUCCEEDED' if provider_status == 'SUCCESS' else 'FAILED')
+    assert result.ext['aicoding']['restart']['operation_id'] == operation
+    assert result.ext['aicoding']['restart']['status'] == ('SUCCEEDED' if provider_status == 'SUCCESS' else 'FAILED')
     assert record.status == ('success' if provider_status == 'SUCCESS' else 'failed')
-    assert record.ext['restart']['status'] == result.restart['status']
+    assert record.ext['restart']['status'] == result.ext['aicoding']['restart']['status']
     if provider_status == 'FAILED':
-        assert svc.sync_restart_progress(1).restart['status'] == 'FAILED'
+        assert svc.sync_restart_progress(1).ext['aicoding']['restart']['status'] == 'FAILED'
     else:
         svc._activate_binding.assert_called_once()
 
@@ -207,6 +210,26 @@ async def test_openapi_restart_acceptance_exposes_the_operation_id(setup):
         request=Request({'type': 'http', 'method': 'POST', 'path': '/', 'headers': []}),
     )
     assert response.data.status == 'ACTIVE'
-    assert response.data.restart.status == 'RUNNING'
-    assert response.data.restart.operation_id == task(s).payload['operation_id']
-    assert response.model_dump()['data']['restart']['status'] == 'RUNNING'
+    assert response.data.ext['aicoding']['restart']['status'] == 'RUNNING'
+    assert response.data.ext['aicoding']['restart']['operation_id'] == task(s).payload['operation_id']
+    assert response.model_dump()['data']['ext']['aicoding']['restart']['status'] == 'RUNNING'
+
+
+@pytest.mark.asyncio
+async def test_status_projection_merges_without_changing_persisted_ext(setup):
+    import inspect
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from agentclaw.community.adapters.http.bot_management.router import get_bot_status
+
+    s = setup
+    s.repo.bot['ext'].update(aicoding={'other': {'keep': True}}, other_engine={'keep': 1})
+    await submit(s)
+    before = deepcopy(s.repo.bot['ext'])
+    result = await inspect.unwrap(get_bot_status)(
+        bot_id='b', owner_id='o', ctx=SimpleNamespace(user_id='o'), bot_service=s.service,
+    )
+    assert result.data['ext']['aicoding']['other'] == {'keep': True}
+    assert result.data['ext']['aicoding']['restart']['status'] == 'RUNNING'
+    assert result.data['ext']['other_engine'] == {'keep': 1}
+    assert s.repo.bot['ext'] == before

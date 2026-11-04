@@ -1145,8 +1145,7 @@ async def restart_status(
         )
 
         return ApiResponse(
-            success=(result.restart.get('status') != 'FAILED' if result.restart
-                     else result.status != PublishStatus.FAILED),
+            success=result.success and result.status != PublishStatus.FAILED,
             data=result.model_dump() if hasattr(result, 'model_dump') else result.dict(),
             message=result.message,
         )

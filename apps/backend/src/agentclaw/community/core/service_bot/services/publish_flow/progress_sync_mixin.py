@@ -14,7 +14,7 @@ import copy
 from typing import Dict, Literal
 
 from agentclaw.community.core.bot_management.engines.registry import (
-    resolve_published_restart_status, observe_published_restart_status,
+    resolve_published_status_ext, resolve_published_restart_result, observe_published_restart_status,
 )
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -566,13 +566,9 @@ class ProgressSyncMixin:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         current_status = PublishStatus(publish_record.status)
-        restart = resolve_published_restart_status(publish_record, precondition_only=True)
-        if restart is not None:
-            return PublishFlowResult(
-                publish_id=publish_id, status=current_status,
-                message=restart['message'] or '重启前置检查进行中',
-                action='sync_restart', restart=restart,
-            )
+        engine_result = resolve_published_restart_result(publish_record)
+        if engine_result is not None:
+            return engine_result
 
         # Step 2: Determine the restart stage based on the status
         stage = self._determine_restart_stage(current_status)
@@ -585,7 +581,7 @@ class ProgressSyncMixin:
                 publish_id=publish_id,
                 status=current_status,
                 message=f"Current status {current_status} does not support querying restart progress",
-                restart=resolve_published_restart_status(publish_record),
+                ext=resolve_published_status_ext(publish_record),
             )
 
         # Step 3: Get the BaaS-layer restart publish record ID.
@@ -654,7 +650,7 @@ class ProgressSyncMixin:
                 observe_published_restart_status(
                     publish_record, progress=progress, mutate_ext=self._mutate_and_update_ext,
                 )
-                result.restart = resolve_published_restart_status(publish_record, progress=progress)
+                result.ext = resolve_published_status_ext(publish_record, progress=progress)
                 return result
 
             # A restart that RECREATED the target minted a NEW binding as PENDING
@@ -712,7 +708,7 @@ class ProgressSyncMixin:
                 message=f"Restart publish status: {baas_status}",
                 action="sync_restart",
                 data=progress,
-                restart=resolve_published_restart_status(publish_record, progress=progress),
+                ext=resolve_published_status_ext(publish_record, progress=progress),
             )
 
         if baas_status == "SUCCESS":
@@ -747,5 +743,5 @@ class ProgressSyncMixin:
         observe_published_restart_status(
             publish_record, progress=progress, mutate_ext=self._mutate_and_update_ext,
         )
-        result.restart = resolve_published_restart_status(publish_record, progress=progress)
+        result.ext = resolve_published_status_ext(publish_record, progress=progress)
         return result

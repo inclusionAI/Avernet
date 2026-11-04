@@ -45,7 +45,7 @@ def journal(bot: dict) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def restart_status(ext: dict, *, published=False, progress=None):
+def restart_status(ext: dict, *, published=False, progress=None, public=False):
     record = ext.get('restart' if published else KEY)
     if not isinstance(record, dict) or not isinstance(record.get('operation_id'), str):
         return None
@@ -57,13 +57,47 @@ def restart_status(ext: dict, *, published=False, progress=None):
         return None
     if published and status == 'RUNNING' and phase == 'WAITING_READY' and progress:
         status = {'SUCCESS': 'SUCCEEDED', 'FAILED': 'FAILED'}.get(progress.get('status'), 'RUNNING')
-    return {
+    result = {
         'operation_id': record['operation_id'], 'status': status,
         'phase': record.get('failure_phase', phase),
         'message': record.get('error_message') or record.get('message') or (
             '容器重启失败，请检查部署日志' if status == 'FAILED' else None
         ),
     }
+    if public:
+        result['message'] = None
+        if status == 'FAILED':
+            result['message'] = (
+                '快盘备份失败，本次重启已终止，旧容器未销毁；请查看 Bot 日志。'
+                if result['phase'] == 'BACKING_UP'
+                else '本次重启失败，请查看 Bot 日志。'
+            )
+    return result
+
+
+def project_status_ext(ext, *, response_ext, published=False, progress=None, public=False):
+    """Merge the response namespace without mutating persisted JSON or exposing it."""
+    result = deepcopy(response_ext)
+    restart = restart_status(ext, published=published, progress=progress, public=public)
+    if restart is not None:
+        namespace = result.setdefault('aicoding', {})
+        namespace['restart'] = restart
+    return result
+
+
+def published_restart_result(record):
+    """Backup/precondition outcomes must not read an older BaaS workflow."""
+    from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+
+    restart = restart_status(record.ext or {}, published=True)
+    if restart is None or restart['phase'] not in {'QUEUED', 'BACKING_UP'}:
+        return None
+    return PublishFlowResult(
+        publish_id=record.id, status=record.status, action='sync_restart',
+        success=restart['status'] != 'FAILED',
+        message=restart['message'] or '重启前置检查进行中',
+        ext=project_status_ext(record.ext or {}, response_ext={}, published=True),
+    )
 
 
 class RestartSuperseded(RuntimeError):

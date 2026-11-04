@@ -42,7 +42,7 @@ async def test_restart_receipt_preserves_operation_identity_without_provider_det
     row = record(1, PublishStatus.SUCCESS)
     deps.publish_repo.list_by_source_bot.return_value = [row]
     deps.flow_service.restart_bot.return_value = {
-        "success": True, "operation_id": OPERATION,
+        "success": True, "ext": {"aicoding": {"restart": {"operation_id": OPERATION, "status": "RUNNING", "phase": "QUEUED", "message": None}}},
         "bot_uuid": "provider-private-id", "message": "provider-private-message",
     }
 
@@ -52,7 +52,7 @@ async def test_restart_receipt_preserves_operation_identity_without_provider_det
 
     payload = response.model_dump()["data"]
     assert response.code == 202000
-    assert payload["operation_id"] == OPERATION
+    assert payload["ext"]["aicoding"]["restart"]["operation_id"] == OPERATION
     assert payload["accepted"] is True
     assert "provider-private" not in str(payload)
     assert row.status == PublishStatus.SUCCESS.value
@@ -90,7 +90,7 @@ async def test_lifecycle_reports_backup_veto_without_changing_serving_state(
     assert payload["status"] == public_status
     assert payload["internal_status"] == serving_status.value
     assert payload["deployment"] is None
-    assert payload["restart"] == {
+    assert payload["ext"]["aicoding"]["restart"] == {
         "operation_id": OPERATION, "status": "FAILED", "phase": "BACKING_UP",
         "message": "快盘备份失败，本次重启已终止，旧容器未销毁；请查看 Bot 日志。",
     }
@@ -122,7 +122,7 @@ async def test_lifecycle_projects_task_progress_without_reading_an_old_workflow(
 
     payload = response.model_dump()["data"]["items"][0]
     assert payload["status"] == "running"
-    assert payload["restart"] == {
+    assert payload["ext"]["aicoding"]["restart"] == {
         "operation_id": OPERATION, "status": status, "phase": phase,
         "message": "本次重启失败，请查看 Bot 日志。" if status == "FAILED" else None,
     }
@@ -151,6 +151,7 @@ async def test_other_engines_do_not_get_a_restart_view(deps, monkeypatch, engine
     assert payload["status"] == "running"
     assert payload["deployment"] is None
     assert "restart" not in payload
+    assert "ext" not in payload
     assert not deps.flow_service.mock_calls
     assert not deps.device_service.mock_calls
 
@@ -173,8 +174,9 @@ async def test_each_version_card_keeps_its_own_restart_result(deps, monkeypatch)
     cards = response.model_dump()["data"]["items"]
     assert [card["publication_id"] for card in cards] == [2, 1]
     assert "restart" not in cards[0]
+    assert "ext" not in cards[0]
     assert cards[1]["status"] == "running"
-    assert cards[1]["restart"]["operation_id"] == OPERATION
+    assert cards[1]["ext"]["aicoding"]["restart"]["operation_id"] == OPERATION
     assert "restart_publish" in cards[1]["available_actions"]
 
 
@@ -203,10 +205,10 @@ async def test_real_backup_veto_is_visible_through_the_public_lifecycle(deps, pu
     accepted = await restart_lifecycle(
         "bot-1", LifecycleRestartRequest(stage="online"), request(), "owner", "owner", deps.facade,
     )
-    operation_id = accepted.data.operation_id
+    operation_id = accepted.data.ext["aicoding"]["restart"]["operation_id"]
     before = await get_lifecycle("bot-1", request(), "owner", "owner", deps.facade)
-    assert before.data.items[0].restart.operation_id == operation_id
-    assert before.data.items[0].restart.status == "RUNNING"
+    assert before.data.items[0].ext["aicoding"]["restart"]["operation_id"] == operation_id
+    assert before.data.items[0].ext["aicoding"]["restart"]["status"] == "RUNNING"
     execute = executor([response("failed", operation_id=operation_id)])
     baas.post_bots_api = Mock(side_effect=lambda **kw: execute(kw["payload"]["cmd"]))
 
@@ -218,10 +220,10 @@ async def test_real_backup_veto_is_visible_through_the_public_lifecycle(deps, pu
     assert card.status == "running"
     assert card.internal_status == "success"
     assert card.deployment is None
-    assert card.restart.operation_id == operation_id
-    assert card.restart.status == "FAILED"
-    assert card.restart.phase == "BACKING_UP"
-    assert "快盘备份失败" in card.restart.message
+    assert card.ext["aicoding"]["restart"]["operation_id"] == operation_id
+    assert card.ext["aicoding"]["restart"]["status"] == "FAILED"
+    assert card.ext["aicoding"]["restart"]["phase"] == "BACKING_UP"
+    assert "快盘备份失败" in card.ext["aicoding"]["restart"]["message"]
     assert row.ext["unrelated"] == {"keep": True}
     build.upgrade_async.assert_not_called()
     build.retire_superseded_bot.assert_not_called()
@@ -247,7 +249,7 @@ async def test_post_submission_failure_keeps_the_existing_failed_publication_vie
     assert card["internal_status"] == "failed"
     assert card["deployment"]["action"] == "restart_publish"
     assert card["deployment"]["status"] == "failed"
-    assert card["restart"]["status"] == "FAILED"
-    assert card["restart"]["phase"] == "WAITING_READY"
-    assert "旧容器未销毁" not in card["restart"]["message"]
+    assert card["ext"]["aicoding"]["restart"]["status"] == "FAILED"
+    assert card["ext"]["aicoding"]["restart"]["phase"] == "WAITING_READY"
+    assert "旧容器未销毁" not in card["ext"]["aicoding"]["restart"]["message"]
     assert "provider-private-diagnostic" not in str(card)

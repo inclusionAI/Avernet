@@ -510,7 +510,7 @@ async def test_status_http_response_keeps_existing_failure_fields(setup):
     assert response.success
     assert response.data["bot_status"] == "ACTIVE"
     assert response.data["is_ready"] is True
-    assert "备份超时" in response.data["restart"]["message"]
+    assert "备份超时" in response.data["ext"]["aicoding"]["restart"]["message"]
 
 
 @pytest.mark.asyncio

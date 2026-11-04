@@ -42,7 +42,6 @@ re-runs a failed stage on its own.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from typing import TYPE_CHECKING, Callable, Optional
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
@@ -212,7 +211,8 @@ def enqueue_restart(
     payload = build_restart_payload(
         publish_id=publish_id, stage=stage, operator=operator, in_place=in_place,
     )
-    payload['operation_id'] = operation_id or uuid.uuid4().hex
+    if operation_id is not None:
+        payload['operation_id'] = operation_id
     task_queue_service.enqueue(
         RESTART_TASK,
         payload,

@@ -184,7 +184,7 @@ requests. `engines/aicoding/restart_task.py` owns the queue handler and admissio
 pre-mutation failure preserve the current runtime status, binding and startup
 markers; failure belongs to the restart journal. Only the mutation owner enters
 PENDING. Actual post-mutation failures retain the existing status/startup-error
-contract. Both status routes project optional `data.restart` through the engine
+contract. Both status routes project optional `data.ext.aicoding.restart` through the engine
 strategy; runtime fields and callbacks remain authoritative. Published backup
 vetoes likewise preserve the release record and expose operation-only failure.
 See `engines/aicoding/restart-backup.md` for the public field contract.
@@ -257,7 +257,12 @@ are supplied as `PublishedRestartServices`; only the strategy interprets its
 restart metadata. Default strategies add no probing, metadata or status writes.
 The operation runner accepts an acquisition callback, preserves the exact operation
 identity and workflow adoption, and knows nothing about coding or backup failures.
-The existing HTTP status surfaces add optional operation progress; frontend restart consumers must handle it. No database schema or container-script change is required.
+The existing HTTP status surfaces add engine-namespaced operation progress through
+`EngineProvisioningStrategy.project_status_ext`; shared schemas and handlers know
+only the generic `ext` envelope. AICoding creates its own admission identity and
+backup-only result, while default engines add no task/response fields. Frontend
+restart consumers must handle the extension. No database schema or container-script
+change is required.
 The internal `published_restart_scope` hook replaces the callback-based
 `execute_published_restart` hook; deploy the common flow, base strategy and coding
 strategy together. Third-party overrides of the former hook must implement the

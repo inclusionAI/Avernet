@@ -429,11 +429,11 @@ def _seed_restart_progress(world):
     make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER, active_engine="aicoding")
 
     def restart(_self, bot_id, _stage, **_kwargs):
-        return {**_operation(bot_id, "restart_publish"), "operation_id": _RESTART_OPERATION_ID}
+        return {**_operation(bot_id, "restart_publish"), "ext": {"aicoding": {"restart": {**_RESTART_VIEW, "status": "RUNNING", "phase": "QUEUED", "message": None}}}}
 
     def list_publications(_self, bot_id, **_kwargs):
         card = {**_publication(bot_id), "status": "running", "internal_status": "success",
-                "restart": _RESTART_VIEW}
+                "ext": {"aicoding": {"restart": _RESTART_VIEW}}}
         return {"bot_id": bot_id, "items": [card]}
 
     bind_overrides(world, ServicePublicationFacadeProtocol, {
@@ -445,7 +445,7 @@ endpoint_test(
     method="POST", path=f"{_LIFECYCLE}/restart", scenario="restart_operation_identity",
     input=_case(json_body=_RESTART_BODY), seed=_seed_restart_progress,
     expect=ExpectSuccess(status=202, json_contains={
-        "code": 202000, "data": {"accepted": True, "operation_id": _RESTART_OPERATION_ID},
+        "code": 202000, "data": {"accepted": True, "ext": {"aicoding": {"restart": {"operation_id": _RESTART_OPERATION_ID, "status": "RUNNING", "phase": "QUEUED", "message": None}}}},
     }),
 )(lambda: None)
 
@@ -454,7 +454,7 @@ endpoint_test(
     input=_case(), seed=_seed_restart_progress,
     expect=ExpectSuccess(status=200, json_contains={
         "code": 200000, "data": {"items": [{
-            "status": "running", "internal_status": "success", "restart": _RESTART_VIEW,
+            "status": "running", "internal_status": "success", "ext": {"aicoding": {"restart": _RESTART_VIEW}},
         }]},
     }),
 )(lambda: None)

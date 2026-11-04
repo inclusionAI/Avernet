@@ -46,11 +46,12 @@ class PublishFlowResult(BaseModel):
     @model_serializer(mode='wrap')
     def _serialize(self, handler):
         data = handler(self)
-        if self.restart is None:
-            data.pop('restart', None)
+        if not self.ext:
+            data.pop('ext', None)
         return data
 
-    restart: dict[str, Any] | None = None
+    ext: Dict[str, Any] = Field(default_factory=dict, description="Engine-owned response extensions")
+    success: bool = Field(default=True, exclude=True, description="Whether the operation is successful")
     approval: Optional[Dict[str, Any]] = Field(
         default=None,
         description="审批信息，包含 puid、action、operator_id、status、owner_id、approval_url、created_at、processed_at"

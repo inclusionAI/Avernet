@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import model_serializer, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 from .schemas_metadata import (
     BotMetadata as BotMetadata,
     BotMetadataId as BotMetadataId,
@@ -19,7 +19,7 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
-from agentclaw.community.adapters.http.openapi_v1.contracts import RestartStatus as RestartStatus
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
 from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
@@ -77,7 +77,7 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
 
     entity_id: str = Field(default="", description="Immutable Bot resource locator.")
@@ -85,16 +85,6 @@ class Bot(BaseModel):
         default="", description="Established BCN address; stable across Owner handoff."
     )
     avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
-    @model_serializer(mode='wrap')
-    def _serialize(self, handler):
-        data = handler(self)
-        if self.restart is None:
-            data.pop('restart', None)
-        return data
-
-    restart: RestartStatus | None = Field(
-        default=None, description="Latest restart result, independent of runtime readiness."
-    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -452,7 +442,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
@@ -465,16 +455,6 @@ class BotStatus(BaseModel):
         }
     )
 
-    @model_serializer(mode='wrap')
-    def _serialize(self, handler):
-        data = handler(self)
-        if self.restart is None:
-            data.pop('restart', None)
-        return data
-
-    restart: RestartStatus | None = Field(
-        default=None, description="Latest restart result, independent of runtime readiness."
-    )
     status: str = Field(description=_BOT_STATUS_DESC)
     is_ready: bool = Field(
         description="True once the bot can actually take work. Stricter than "

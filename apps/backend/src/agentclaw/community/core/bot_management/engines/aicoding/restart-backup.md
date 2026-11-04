@@ -20,7 +20,7 @@ The operation runner still owns adoption and never reissues an accepted workflow
 
 The OpenAPI restart acceptance response also retains the operation view/ID so
 clients can correlate their subsequent status polls. Both `GET /api/bots/{bot_id}/status` and
-`GET /openapi/v1/bots/{bot_id}/status` project an optional `data.restart`:
+`GET /openapi/v1/bots/{bot_id}/status` project an optional `data.ext.aicoding.restart`:
 `{operation_id, status: RUNNING|SUCCEEDED|FAILED, phase, message}`. Original
 bot_status/status, binding status, is_ready and runtime error_message keep their
 meaning. The published `POST /api/service-bot/publish/{publish_id}/restart_status`
@@ -30,11 +30,30 @@ before querying any old workflow. Legacy/default strategies contribute nothing;
 the old JSON shape is retained when there is no restart view. No database schema
 or configuration change is required.
 
+The response envelope is extensible: shared schemas declare only a generic `ext`
+object. `EngineProvisioningStrategy.project_status_ext` supplies its content;
+AICoding alone owns the `aicoding.restart` namespace, the projection of persisted
+journals, and the backup-precondition result. Other engines may contribute their
+own namespace without changing HTTP handlers or common orchestration. Existing
+response extension keys are preserved, and projection never writes the stored
+JSON. The existing persistence locations (`Bot.ext.coding_restart` and
+`BotPublishRecord.ext.restart`) are not migrated or exposed as the public journal.
+
+The published `restart_status` envelope retains `success=false` for a backup
+veto, while `data.status` remains the original publication status. That outcome
+is supplied by the strategy through the neutral result `success` flag; it is
+not serialized inside `data`. Consumers must read `data.ext.aicoding.restart`
+before interpreting the outer `success` flag. `RUNNING` means continue polling,
+`FAILED` means stop and display its message without disconnecting the preserved
+runtime, and `SUCCEEDED` means the restart workflow completed. Without this
+extension, consumers retain their existing nested BaaS-progress logic.
+
 The published OpenAPI surface uses `POST /openapi/v1/bots/{bot_id}/lifecycle/restart`
 with `stage=online` or `prestable` (and the existing `staging` alias). Its
-202 acknowledgement retains `data.operation_id` from the accepted restart.
+202 acknowledgement retains the accepted operation in `data.ext.aicoding.restart`,
+including its `operation_id`.
 `GET /openapi/v1/bots/{bot_id}/lifecycle` exposes the same four-field restart
-view on the matching `data.items[].restart`, independently of that card's
+view on the matching `data.items[].ext.aicoding.restart`, independently of that card's
 `status`/`internal_status`/`deployment`. A veto keeps a running card running;
 it is not a new publication failure. Different version cards never share the
 restart result. The GET is a read-only projection; the existing background
@@ -43,9 +62,8 @@ restart poll persists provider terminal results, so GET adds no workflow I/O.
 The lifecycle facade calls the strategy dispatcher without interpreting coding
 metadata. Its public projection asks the coding policy for stable, actionable
 failure guidance; raw helper/provider diagnostics, credentials and physical
-container identifiers are not exposed. Legacy/non-coding cards omit `restart`,
-and acknowledgements without an operation ID omit that optional field rather
-than adding a null key. No existing required request field or HTTP status changes.
+container identifiers are not exposed. Legacy/non-coding cards and acknowledgements omit empty `ext`;
+no top-level `restart` or new top-level `operation_id` field is added. No existing required request field or HTTP status changes.
 
 Frontend restart polling must correlate operation_id. ACTIVE while a restart is
 RUNNING is not operation success, and restart FAILED must not disconnect the

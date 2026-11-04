@@ -14,6 +14,7 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
 )
 from agentclaw.community.core.bot_management.avatar import bot_avatar_url
 from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_reference
+from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
 from agentclaw.community.core.bot_management.expert_origin import expert_name_from_ext
 
 from agentclaw.community.core.bot_inventory.errors import (
@@ -78,7 +79,7 @@ def _to_bot(
     return Bot(
         entity_id=d.get("entity_id") or "",
         bcn_bot_id=bcn_bot_reference(d),
-        restart=d.get("restart"),
+        ext=resolve_status_ext(d, response_ext={}),
         avatar_url=bot_avatar_url(d),
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",

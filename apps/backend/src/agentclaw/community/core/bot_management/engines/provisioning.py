@@ -22,7 +22,7 @@ from agentclaw.community.core.bot_management.errors import BotTemplateInvalidErr
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
-from .restart_contract import PublishedRestartServices
+from .restart_contract import PublishedRestartServices, RestartAdmission
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -280,15 +280,27 @@ class EngineProvisioningStrategy(ABC):
         """
         yield {}
 
-    def get_restart_status(self, *, ext: dict, published: bool = False, progress=None, precondition_only=False, public=False):
-        """Optional projection; public views omit raw diagnostics. Default has no I/O."""
+    def project_status_ext(
+        self, *, ext: dict, response_ext: dict, published: bool = False,
+        progress=None, public: bool = False,
+    ) -> dict:
+        """Project safe engine-owned fields into a response extension envelope.
+
+        The caller supplies existing response fields; implementations preserve
+        them and own their namespace. The default adds no fields or I/O.
+        """
+        return dict(response_ext)
+
+    def published_restart_result(self, *, record):
+        """Optionally answer progress before a provider workflow can be queried."""
         return None
 
     def observe_published_restart(self, *, record, progress, mutate_ext):
         """Persist engine-owned operation progress; default has no I/O."""
 
-    def accept_published_restart(self, ctx, *, services, publish_id, stage, operation_id):
-        """Record engine-owned admission before enqueue; default is a no-op."""
+    def accept_published_restart(self, ctx, *, services, publish_id, stage) -> RestartAdmission:
+        """Admit an engine-owned operation; the default changes nothing."""
+        return RestartAdmission()
 
     async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
         """Keep the runner's exact operation identity and crash/adoption contract."""

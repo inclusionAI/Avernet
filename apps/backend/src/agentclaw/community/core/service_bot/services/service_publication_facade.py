@@ -28,7 +28,7 @@ from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.engines.registry import resolve_published_restart_status
+from agentclaw.community.core.bot_management.engines.registry import resolve_published_status_ext
 from agentclaw.community.core.devices.errors import (
     DeviceServiceError,
     InvalidDeviceStatusError,
@@ -338,9 +338,9 @@ class ServicePublicationFacade:
             "updated_at": record.gmt_modified,
         }
 
-        restart = resolve_published_restart_status(record, public=True)
-        if restart is not None:
-            result["restart"] = restart
+        ext = resolve_published_status_ext(record, public=True)
+        if ext:
+            result["ext"] = ext
         return result
 
     @staticmethod
@@ -742,8 +742,8 @@ class ServicePublicationFacade:
         if not result.get("success"):
             raise ServicePublicationConflictError("restart is unavailable")
         acknowledgement = self._operation(record, action="restart_publish", result=result)
-        if result.get("operation_id"):
-            acknowledgement["operation_id"] = result["operation_id"]
+        if result.get("ext"):
+            acknowledgement["ext"] = result["ext"]
         return acknowledgement
 
     async def cancel_staging(
