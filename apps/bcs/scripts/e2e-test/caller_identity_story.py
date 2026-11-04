@@ -438,6 +438,7 @@ class CallerStory:
                                 lambda messages: any("route this caller turn" in json.dumps(message)
                                                      for message in messages))
             assert history, history
+            self.caller_sse_reply(socket_client, plain_group_id, plain_session_id, lease)
             socket_client.send({"type": "req", "id": "lease-plain-release", "method": "lease.release",
                                 "params": {"groupId": plain_group_id,
                                            "leaseId": lease["leaseId"],
@@ -451,6 +452,45 @@ class CallerStory:
             socket_client.close()
             self.restore_delivery_policy()
         print("  plain caller group: lease fence, admission and the protected ride verified", flush=True)
+
+    def caller_sse_reply(self, socket_client, group_id, session_id, lease) -> None:
+        """Verify protected results arrive from the HTTP stream, not callbacks."""
+        reply = "protected SSE reply " + uuid.uuid4().hex
+        self.post("/control/provider/sse", {
+            "provider_bot_ref": self.bot["provider_bot_ref"], "text": reply,
+        }, mock=True)
+        self.post("/control/provider/clear", mock=True)
+        socket_client.send({"type": "req", "id": "caller-sse-send", "method": "chat.send",
+                            "params": {"group_id": group_id, "session_id": session_id,
+                                       "bot_id": "human_" + self.args.human,
+                                       "message": "receive this caller result over SSE",
+                                       "mentions": [self.bot["bot_uuid"]],
+                                       "leaseId": lease["leaseId"], "leaseEpoch": lease["epoch"]}})
+        admitted = socket_client.receive("caller-sse-send")
+        assert admitted.get("ok") is True, admitted
+        rides = self.wait("protected SSE request",
+                          lambda: self.request("/control/provider/requests", mock=True)["requests"],
+                          lambda rows: any(row["body"].get("method") == "chat.send"
+                                           and row["body"].get("to_bot", {}).get("provider_bot_ref")
+                                           == self.bot["provider_bot_ref"] for row in rows))
+        ride = next(row["body"] for row in rides if row["body"].get("method") == "chat.send"
+                    and row["body"].get("to_bot", {}).get("provider_bot_ref") == self.bot["provider_bot_ref"])
+        assert ride["extensions"]["caller_context"]
+        assert ride["extensions"]["caller_execution_token"]["token"]
+        assert ride["session_id"] == session_id
+        # No answer_dispatch()/POST /bot/events here: only the mock's actual
+        # SSE response can persist this unique assistant reply.
+        self.wait("SSE assistant reply in the originating session",
+                  lambda: self.request(f"/sessions/{segment(session_id)}/messages"),
+                  lambda rows: any(reply in json.dumps(row, ensure_ascii=False) for row in rows))
+        message_id = admitted["payload"]["queue_admission"]["message_id"]
+        deliveries_path = ("/openapi/v1/collaboration/messages/" + segment(message_id)
+                           + "/deliveries?session_id=" + segment(session_id))
+        self.wait("SSE delivery completed instead of remaining Unknown",
+                  lambda: self.request(deliveries_path),
+                  lambda rows: any(row["target_bot_id"] == self.bot["bot_uuid"]
+                                   and row["status"] == "completed" for row in rows))
+        print("  protected SSE response reached session history and completed without a callback", flush=True)
 
     def enable_group_queue_policy(self) -> None:
         """Queue admission (and the caller seam mounted on it) only runs for

@@ -13,18 +13,21 @@ use tracing::{info, warn};
 
 use super::{HttpProviderTransport, provider_request_from_frame};
 
+mod reception;
+
 // ---------------------------------------------------------------------------
 // Protected root-H2A chat.send v1 (spec §10.9; wire doc "受保护 root-H2A
 // chat.send v1"). Independent outbound CallerExecutionSendPort over the
 // Provider webhook envelope: caller material rides runtime-only extension
 // zones, never the ordinary request-body logger, DBs, queues or model input.
-// The ACK requires explicit ok=true; local in-flight context owns correlation;
+// JSON requires explicit ok=true; negotiated SSE headers also mean accepted.
+// Local in-flight context owns correlation;
 // transport errors after the request started are OutcomeUnknown, never
 // fabricated rejections.
 // ---------------------------------------------------------------------------
 
 /// Response cap for the protected send ACK (wire contract: 64 KiB), applied
-/// after the transport; a larger body maps to GatewayFailed.
+/// after the transport; a larger successful body maps to OutcomeUnknown.
 const CALLER_EXECUTION_ACK_MAX_BYTES: usize = 64 * 1024;
 
 #[async_trait]
@@ -176,14 +179,16 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         // DNS-rebinding guard: post through the pinning client bound to the
         // validated addresses — never the shared client that would re-resolve
         // the hostname at connect time.
+        let wants_sse = matches!(protocol_version.as_str(), "2" | "2.0");
         let request_client = match super::request_client_for_guarded_url(
-            &self.client,
+            if wants_sse { &self.sse_client } else { &self.client },
             &guarded_url,
-            super::ProviderClientPolicy::for_request(false),
+            super::ProviderClientPolicy::for_request(wants_sse),
         ) {
             Ok(client) => client,
             Err(_) => return Err(Error::NotSent),
         };
+        let reception = reception::CallerReception::prepare(self, target, &command).await?;
         let started = Instant::now();
         // Align transport negotiation with the ordinary downlink path
         // (lib.rs): protocol 2.0 with SSE-eligible provider sends
@@ -215,7 +220,10 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             Ok(Ok(response)) => response,
             // Build errors mean nothing left the wire; send errors after
             // start stay ambiguous.
-            Ok(Err(_)) if started.elapsed().is_zero() => return Err(Error::NotSent),
+            Ok(Err(error)) if error.is_builder() => {
+                reception.clear().await;
+                return Err(Error::NotSent);
+            }
             Ok(Err(_)) | Err(_) => {
                 warn!(
                     provider_id = %provider_id,
@@ -256,8 +264,27 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
                 body = %preview,
                 "protected caller send: non-ack status"
             );
+            if !status.is_server_error() { reception.clear().await; }
             return Err(Error::GatewayFailed { retryable: status.is_server_error() });
         }
+        // SSE acceptance is the successful negotiated response, NOT EOF. The
+        // existing reader owns asynchronous deltas, terminals, idle/deadline
+        // bounds and interactions, independently of the send-stage ACK budget.
+        let is_sse = response.headers().get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
+        if wants_sse && is_sse {
+            reception.accept_sse(self, target, response, bot_id).await?;
+            return Ok(CallerDispatchAck::Accepted {
+                control_revision: command.control_revision,
+                request_digest: command.request_digest,
+            });
+        }
+        // The Provider selected the finite ACK/callback channel. Bind before
+        // reading the ACK so a lost/unknown JSON ACK can still converge through
+        // authenticated late callbacks; the binding is not an acceptance fact.
+        reception.bind(bcs_service_api::ProviderRunTransport::Callback).await?;
         // A 2xx means the request reached the Provider: any ACK-shape failure
         // from here on (body timeout, oversized body, unparsable JSON) cannot
         // falsify acceptance, so it stays OutcomeUnknown — never a fabricated
@@ -270,7 +297,10 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
         .await
         {
             Ok(Ok(bytes)) => bytes,
-            _ => return Err(Error::OutcomeUnknown),
+            _ => {
+                warn!(run_id = %command.association.run_id, "protected caller send: JSON ack body unavailable");
+                return Err(Error::OutcomeUnknown);
+            }
         };
         if bytes.len() > CALLER_EXECUTION_ACK_MAX_BYTES {
             warn!(
@@ -296,6 +326,7 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
                 .and_then(Value::as_str)
                 .unwrap_or("UNKNOWN")
                 .to_string();
+            reception.clear().await;
             return Ok(CallerDispatchAck::Rejected { error_code, retryable });
         }
         // The synchronous HTTP response belongs to this in-flight request.
