@@ -17,6 +17,7 @@ from search_core.api.models import (
 from search_core.api.services import RetrievalService
 from search_core.application.emergency import EmergencyControl
 from search_core.core.observation import events, request_budget
+from search_core.core.timing import request_timing, stage_timing
 
 
 @dataclass(frozen=True)
@@ -43,72 +44,90 @@ class CatalogSearchApplication:
     async def execute(
         self, command: SearchCommand, identity: VerifiedIdentity
     ) -> SearchResult:
-        started = time.monotonic()
-        snapshot = self._emergency.snapshot() if self._emergency is not None else None
-        if isinstance(command, CatalogSearchCommand) and command.retrieval:
-            if self._emergency is None:
-                raise UnsupportedSearchOption("request retrieval switches unavailable")
-            snapshot = self._emergency.for_request(command.retrieval)
-        maximum = snapshot.policy.max_results if snapshot is not None else 20
-        if command.limit > maximum:
-            events.record(
-                "search_request",
-                "validation",
-                "limit_clamped",
-                requested_limit=command.limit,
-                effective_limit=maximum,
-            )
-            command = replace(command, limit=maximum)
-        binding = (
-            self._emergency.bind(snapshot)
-            if self._emergency is not None
-            else nullcontext()
-        )
-        with request_budget(self._budget), binding:
-            try:
-                result = await self._validated_execute(command, identity)
-            except Exception as error:
-                events.record(
-                    "search_request",
-                    "request",
-                    type(error).__name__,
-                    elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+        with request_budget(self._budget), request_timing() as timing:
+            started = time.monotonic()
+            with stage_timing("configuration"):
+                snapshot = (
+                    self._emergency.snapshot() if self._emergency is not None else None
                 )
-                raise
-            if result.status == "degraded":
-                for reason in result.reasons:
+                if isinstance(command, CatalogSearchCommand) and command.retrieval:
+                    if self._emergency is None:
+                        raise UnsupportedSearchOption(
+                            "request retrieval switches unavailable"
+                        )
+                    snapshot = self._emergency.for_request(command.retrieval)
+                maximum = snapshot.policy.max_results if snapshot is not None else 20
+                if command.limit > maximum:
                     events.record(
-                        "search_degraded",
-                        "request",
-                        reason,
-                        elapsed_ms=round((time.monotonic() - started) * 1000, 2),
-                        result_count=len(result.items),
+                        "search_request",
+                        "validation",
+                        "limit_clamped",
+                        requested_limit=command.limit,
+                        effective_limit=maximum,
                     )
-            # Attach after retrieval/cache lookup, using this request's snapshot.
-            # Enabled switches describe policy, not model execution or success.
-            return replace(
-                result,
-                effective=EffectiveSearch(
-                    limit=command.limit,
-                    retrieval=(
-                        EffectiveRetrieval(**snapshot.policy.retrieval.model_dump())
-                        if snapshot is not None
-                        else None
-                    ),
-                ),
+                    command = replace(command, limit=maximum)
+                if snapshot is not None:
+                    timing.update(
+                        config_version=snapshot.version,
+                        retrieval=snapshot.policy.retrieval.model_dump(),
+                    )
+            binding = (
+                self._emergency.bind(snapshot)
+                if self._emergency is not None
+                else nullcontext()
             )
+            with binding:
+                try:
+                    result = await self._validated_execute(command, identity)
+                except Exception as error:
+                    events.record(
+                        "search_request",
+                        "request",
+                        type(error).__name__,
+                        elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+                    )
+                    raise
+                if result.status == "degraded":
+                    for reason in result.reasons:
+                        events.record(
+                            "search_degraded",
+                            "request",
+                            reason,
+                            elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+                            result_count=len(result.items),
+                        )
+                timing.update(
+                    outcome=result.status,
+                    result_count=len(result.items),
+                    reasons=result.reasons,
+                    effective_limit=command.limit,
+                )
+                # Attach after retrieval/cache lookup, using this request's snapshot.
+                # Enabled switches describe policy, not model execution or success.
+                return replace(
+                    result,
+                    effective=EffectiveSearch(
+                        limit=command.limit,
+                        retrieval=(
+                            EffectiveRetrieval(**snapshot.policy.retrieval.model_dump())
+                            if snapshot is not None
+                            else None
+                        ),
+                    ),
+                )
 
     async def _validated_execute(self, command, identity):
-        if command.scene != "default" or command.extensions:
-            raise UnsupportedSearchOption(
-                "only the default catalog policy is configured"
-            )
-        if command.filters.keys() - self._filter_fields:
-            raise UnsupportedSearchOption("unsupported catalog filter")
-        if identity.allowed_ids == frozenset() or any(
-            not values for values in command.filters.values()
-        ):
-            return SearchResult()
+        with stage_timing("validation"):
+            if command.scene != "default" or command.extensions:
+                raise UnsupportedSearchOption(
+                    "only the default catalog policy is configured"
+                )
+            if command.filters.keys() - self._filter_fields:
+                raise UnsupportedSearchOption("unsupported catalog filter")
+            if identity.allowed_ids == frozenset() or any(
+                not values for values in command.filters.values()
+            ):
+                return SearchResult()
         return await self._execute(command, identity)
 
     async def _execute(self, command, identity):
@@ -122,9 +141,13 @@ class CatalogSearchApplication:
         )
         # Defense in depth for provider bugs. Providers still MUST prefilter;
         # filtering after top-k alone would under-fill valid results.
-        items = tuple(
-            item
-            for item in result.items
-            if identity.allowed_ids is None or item.item_id in identity.allowed_ids
-        )
-        return replace(result, items=items[: command.limit])
+        with stage_timing("authorization") as stage:
+            items = tuple(
+                item
+                for item in result.items
+                if identity.allowed_ids is None or item.item_id in identity.allowed_ids
+            )
+            stage.update(
+                input_count=len(result.items), result_count=len(items[: command.limit])
+            )
+            return replace(result, items=items[: command.limit])

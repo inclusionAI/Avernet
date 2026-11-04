@@ -64,7 +64,8 @@ class EventSummaries:
     """Every event is counted; emit first sample, then periodic count summaries.
 
     Keys must be bounded internal stage/reason names, never user input. Logging
-    uses only whitelisted scalar metadata; exception messages are excluded.
+    uses only bounded internal metadata; exception messages are excluded.
+    Timing windows keep the slowest request's stages plus total mean/max latency.
     """
 
     def __init__(self, interval=5.0):
@@ -89,7 +90,14 @@ class EventSummaries:
                 },
             )
             bucket["count"] += 1
-            bucket["sample"] = {"request_id": _request_id.get(), **fields}
+            if event == "search_timing":
+                elapsed = fields["elapsed_ms"]
+                if elapsed >= bucket.get("max_ms", 0):
+                    bucket["sample"] = {"request_id": _request_id.get(), **fields}
+                bucket["total_ms"] = bucket.get("total_ms", 0) + elapsed
+                bucket["max_ms"] = max(bucket.get("max_ms", 0), elapsed)
+            else:
+                bucket["sample"] = {"request_id": _request_id.get(), **fields}
             if now - bucket["last"] >= self.interval:
                 self._emit(bucket, now)
 
@@ -102,9 +110,17 @@ class EventSummaries:
             timestamp=time.time(),
             sample=bucket["sample"],
         )
+        if record["event"] == "search_timing":
+            record.update(
+                avg_ms=round(bucket["total_ms"] / bucket["count"], 2),
+                max_ms=bucket["max_ms"],
+            )
         level = (
             logging.INFO
-            if record["event"] == "search_index_sync" and record["reason"] == "applied"
+            if record["event"] == "search_timing"
+            or (
+                record["event"] == "search_index_sync" and record["reason"] == "applied"
+            )
             else logging.WARNING
         )
         try:
@@ -114,7 +130,7 @@ class EventSummaries:
         except Full:
             # Retain all counts for the next flush if the sink is stalled.
             return
-        bucket.update(count=0, start=now, last=now)
+        bucket.update(count=0, start=now, last=now, total_ms=0, max_ms=0)
 
     def flush(self, *, force=False):
         now = time.monotonic()
