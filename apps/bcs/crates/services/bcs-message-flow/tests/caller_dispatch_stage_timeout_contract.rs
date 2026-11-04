@@ -439,3 +439,156 @@ async fn fast_collaborators_inside_the_hairtrigger_stay_accepted() {
     let second = dispatch(&pipeline).await.unwrap_err();
     assert_eq!(second, CallerDispatchError::IdentityUnavailable);
 }
+
+// ---------------------------------------------------------------------------
+// Delegate (worker) branch (spec §3.3 delegate counterparts): identity is
+// the ROOT's registered runtime lineage, so the fixture mirrors
+// delegate.rs's inline tests — a live RootLineageIndex entry — and pins the
+// same stage-convergence table for dispatch_delegate_once. Fixes the
+// e2e-side unreachable deep path: these are the bot-to-bot handoff lines
+// the SQLite e2e stack never produces (e2e_coverage.sh P2 list).
+// ---------------------------------------------------------------------------
+
+use bcs_message_flow::caller_dispatch_pipeline::DelegateDispatchError;
+use bcs_message_flow::caller_lineage::{RootLineage, RootLineageIndex};
+
+fn delegate_facts() -> bcs_message_flow::caller_dispatch_pipeline::DelegateDispatchFacts {
+    bcs_message_flow::caller_dispatch_pipeline::DelegateDispatchFacts {
+        environment: "test".into(),
+        target_bot_id: "bot-worker".into(),
+        provider_id: "provider-a".into(),
+        provider_bot_ref: "runtime-w".into(),
+        session_id: "session-1".into(),
+        group_id: Some("group-1".into()),
+        message_turn_id: "turn-1".into(),
+        run_id: "task-run-1".into(),
+        parent_run_id: "run-parent".into(),
+        parent_attempt: 1,
+        parent_bot_id: "bot-manager".into(),
+        attempt: 1,
+        dispatch_id: "dispatch-1".into(),
+        request_digest: DIGEST.into(),
+        not_after_ms: now_clock() + 280_000,
+        caller_task: "delegated task text".into(),
+        channel_actor_id: "human_alice".into(),
+        channel_actor_name: "Alice".into(),
+        control_revision: 0,
+        delivery_commit: None,
+        history: None,
+        history_cutoff_seq: 0,
+        shared_content_kind: None,
+        // Execution purpose: the worker is caller-enabled, so the hop ENSURES
+        // a caller container (spec §8.3). The ensure-timeout test depends on
+        // this; DelegationOnly hops never ensure (spec §6.8).
+        purpose: bcs_service_api::application::caller_identity::CallerExecutionPurpose::Execution,
+    }
+}
+
+fn live_lineage() -> Arc<RootLineageIndex> {
+    let index = Arc::new(RootLineageIndex::new(8));
+    assert!(index.register(
+        "run-parent",
+        RootLineage {
+            root_run_id: "root-run".into(),
+            environment: "test".into(),
+            delegation_depth: 0,
+            attempt: 1,
+            message_turn_id: "turn-1".into(),
+            group_id: "group-1".into(),
+            session_id: "session-1".into(),
+            history_cutoff_seq: 0,
+            expires_at_ms: now_clock() + 120_000,
+            identity_subject: "root-pseudonym".into(),
+            identity_subject_type: CallerSubjectRefType::BcsEphemeral,
+            delegate_subject: "root-pseudonym".into(),
+            parent_execution: false,
+        },
+        now_clock(),
+    ));
+    index
+}
+
+fn delegate_pipeline(
+    gateway: Arc<dyn CallerContainerGatewayPort>,
+    identity: Arc<dyn CallerIdentityPlugin>,
+    sender: Arc<dyn CallerExecutionSendPort>,
+) -> CallerDispatchPipeline {
+    CallerDispatchPipeline::new(
+        Arc::new(HumanCallerDeliveryHandoff::new(8)) as Arc<dyn HumanCallerDeliveryHandoffService>,
+        Arc::new(CallerContainerPreparation::new(gateway)),
+        identity,
+        sender,
+        3_600_000,
+    )
+    .with_root_lineage(live_lineage())
+    .with_stage_timeout(HAIRTRIGGER)
+}
+
+#[tokio::test]
+async fn a_hanging_delegate_ensure_converges_stage_timeout() {
+    let pipeline = delegate_pipeline(
+        Arc::new(HangingGateway),
+        Arc::new(FastIdentity),
+        Arc::new(FastSender { calls: AtomicUsize::new(0) }) as Arc<dyn CallerExecutionSendPort>,
+    );
+    let error = pipeline
+        .dispatch_delegate_once(&delivery_target(), &RedactedToken::new("svc"), delegate_facts(), now_clock())
+        .await
+        .unwrap_err();
+    assert_eq!(error, DelegateDispatchError::StageTimeout { stage: "container_ensure" });
+}
+
+#[tokio::test]
+async fn a_hanging_delegate_issuance_converges_stage_timeout() {
+    let pipeline = delegate_pipeline(
+        Arc::new(FastGateway),
+        Arc::new(HangingIdentity { hang_establish: false, hang_issue: true }),
+        Arc::new(FastSender { calls: AtomicUsize::new(0) }) as Arc<dyn CallerExecutionSendPort>,
+    );
+    let error = pipeline
+        .dispatch_delegate_once(&delivery_target(), &RedactedToken::new("svc"), delegate_facts(), now_clock())
+        .await
+        .unwrap_err();
+    assert_eq!(error, DelegateDispatchError::StageTimeout { stage: "issue_execution" });
+}
+
+#[tokio::test]
+async fn a_hanging_delegate_send_converges_outcome_unknown() {
+    // Same evidence rule as the root branch: an in-flight delegated send is
+    // Unknown, the row keeps its lane — the delegation identity is consumed
+    // either way.
+    let pipeline = delegate_pipeline(
+        Arc::new(FastGateway),
+        Arc::new(FastIdentity),
+        Arc::new(HangingSender) as Arc<dyn CallerExecutionSendPort>,
+    );
+    let outcome = pipeline
+        .dispatch_delegate_once(&delivery_target(), &RedactedToken::new("svc"), delegate_facts(), now_clock())
+        .await
+        .unwrap();
+    assert!(matches!(outcome, CallerDispatchOutcome::OutcomeUnknown));
+}
+
+#[tokio::test]
+async fn a_fast_delegate_dispatch_stays_accepted() {
+    // The wraps must not mis-fire a healthy Execution delegation: every
+    // stage inside the budget, exactly one container ensure (spec §6.8
+    // review-VII P1 counting rule) and Accepted.
+    let sender = Arc::new(FastSender { calls: AtomicUsize::new(0) });
+    let pipeline = CallerDispatchPipeline::new(
+        Arc::new(HumanCallerDeliveryHandoff::new(8)) as Arc<dyn HumanCallerDeliveryHandoffService>,
+        Arc::new(CallerContainerPreparation::new(Arc::new(FastGateway))),
+        Arc::new(FastIdentity),
+        sender.clone() as Arc<dyn CallerExecutionSendPort>,
+        3_600_000,
+    )
+    .with_root_lineage(live_lineage())
+    .with_stage_timeout(Duration::from_secs(30));
+    let outcome = pipeline
+        .dispatch_delegate_once(&delivery_target(), &RedactedToken::new("svc"), delegate_facts(), now_clock())
+        .await
+        .unwrap();
+    assert!(matches!(outcome, CallerDispatchOutcome::Accepted));
+    assert_eq!(sender.calls.load(Ordering::SeqCst), 1);
+}
+
