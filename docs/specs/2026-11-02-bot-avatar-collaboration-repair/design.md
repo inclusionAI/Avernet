@@ -247,6 +247,7 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 修复不调用只返回入队结果的 `request_bot()`，也不直接复用默认会重试的 `sync_once()`。复用已有纯 projector 与单次发送 Plugin；必要时抽取有限的一次投递能力，不复制角色映射或实现通用任务框架。
 
 - 每分项最多一次下游写入，沿用经 DI 注入的超时；整体请求有明确截止时间，时间不足的项不再启动。
+- 事实读取的 await 同样受剩余预算约束；超时后丢弃线程返回值，不等待它完成后才返回，也不启动后续写入。读取超时发生在 exists 前时返回 504；执行分项读取超时时，该项为 failed/delivery_timeout。
 - 不进行内部自动重试，不把失败重新塞回后台队列。已有后台同步完全保留。
 - 不跨网络调用持有数据库事务或锁。
 - Owner/managers 的生产 Plugin 当前由后台 loop 管理；不能把同一个 AsyncClient 借给 HTTP 请求所在的不同 loop。composition root 为请求侧配置同契约、独立且正确关闭的 client/Plugin，或采用已有安全的同 loop 调用机制；不得新增修复 worker/队列来掩盖生命周期问题。
@@ -260,6 +261,8 @@ Caller 修复必须复用现有领域映射，不能简单调用会修改 call t
 **前置拒绝**使用现有 `ErrorEnvelope`，`data: null`：未认证 401、无权限 403（资源隐藏按既有策略）、Backend/BCS Bot 不存在 404、地址歧义或无效事实 409、同步能力未配置/禁用 503。上游存在性检查失败或超时分别映射 502/504，不能伪装 404。
 
 **已经进入修复执行的请求**返回 HTTP 200 的 `Envelope<CollaborationRepairReport>`。HTTP 200 只代表成功取得执行报告，不代表修复全部成功；前端必须依据 `data.status`，不能只按 HTTP 状态弹出“修复成功”。这样保留全局错误 envelope 的 `data: null` 约束，同时提供部分失败明细，不修改所有接口的错误结构。
+
+ownership/profile 执行后，重新读取或投影 managers 的已分类事实错误必须保留此前结果：managers 为 failed，携带既有 RepairFactsErrorCode，caller 为 skipped_dependency（无适用配置时仍为 not_applicable）。禁止将此时的失败转换为 data:null 的前置错误。未分类程序异常及请求取消仍向上传播。
 
 报告的整体状态为 `succeeded | partial_failed | failed`。只有所有适用项确认后才是 `succeeded`；存在 unknown/失败/依赖跳过时不得成功。分项状态为 `succeeded | failed | unknown | skipped_dependency | not_applicable`；字段为 `component`、`status`、nullable `error_code`。unknown 表示结果未确认，不表示远端没有修改。
 

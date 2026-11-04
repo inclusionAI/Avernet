@@ -31,6 +31,9 @@ class CollaborationRepairServiceProtocol(Protocol):
 
         Preconditions fail with the kernel's ``RepairPreconditionError``
         codes; component outcomes are reported per item and never
-        rewritten into pretend success.
+        rewritten into pretend success. Classified managers facts failures
+        preserve prior writes in the report and stop remaining delivery.
+        Facts reads and sends share one deadline; expired read results are
+        discarded even if the synchronous database thread is still running.
         """
         ...

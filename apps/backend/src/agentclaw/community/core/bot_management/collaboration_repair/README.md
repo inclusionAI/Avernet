@@ -141,7 +141,7 @@ facts error rather than parsing into a default payload.
 
 ## Failure semantics
 
-- Facts failures propagate. A missing/deleted/out-of-scope Bot, an
+- Initial facts failures propagate. A missing/deleted/out-of-scope Bot, an
   unresolvable stable identity (missing, blank or padded `bot_id` /
   `entity_id`), an unreadable saved avatar projection (illegal avatar
   field type or corrupt `ext` JSON), an unknown saved `call_type`, or
@@ -173,10 +173,11 @@ by the composition root): initial facts read → owner precondition →
 `update_profile` → fresh managers read + one `replace_managers` → `<=1`
 `sync_caller` for an established config (disabled included). All three
 reader calls run in `asyncio.to_thread`, so no network I/O observes an
-open session; each send receives its current remaining budget, and the
-outer `await` shares that same budget as a backstop.
+open session; each read await and each send uses the current remaining
+budget. A timed-out reader may finish on its worker thread later, but its
+result is discarded and cannot initiate another write.
 
-Interpretation and stop rules (the service docstring is the authority):
+Interpretation and stop rules (implementing design §7.3–7.5):
 
 - `OwnershipChange.owner_user_id is None` is the missing-Bot no-op —
   the item fails `collaboration_bot_not_found`, never success, and the
@@ -184,13 +185,19 @@ Interpretation and stop rules (the service docstring is the authority):
   `unknown`/`collaboration_response_malformed`; an owner that differs
   from the written snapshot is `failed`/`owner_drift`.
 - `ManagerSetChange` has no missing marker (a missing Bot surfaces as a
-  classified `BcsManagersError`); a returned change IS the
+  classified `BcsManagersError(REJECTED, BOT_NOT_FOUND_CODE)`); a returned change IS the
   confirmation. Roster re-verification is the background sync's drift
   diagnosis, not this contract.
 - Any ownership anomaly stops profile/managers/caller
   (`skipped_dependency`). A profile failure continues except the
   vanished-target not-found code or an exhausted deadline; a managers
-  failure does not stop the caller (an independent facet). Owner drift
+  delivery failure continues only while the target exists and budget remains.
+  Classified managers facts failures produce `failed` with their existing
+  `RepairFactsErrorCode`, preserve completed ownership/profile outcomes,
+  and skip caller delivery because the target/owner could not be revalidated.
+  Initial facts and ownership validation failures before any write remain
+  error envelopes. Unclassified exceptions and cancellation still propagate.
+  Owner drift
   between the ownership write and the managers re-read never writes the
   stale roster: managers is `skipped_dependency`/`owner_drift` and an
   applicable caller follows as a plain `skipped_dependency`. An absent
@@ -217,18 +224,18 @@ design: `CollaborationRepairFactory.open` refuses with
 `RepairPreconditionError(collaboration_sync_unavailable)` → HTTP **503**
 before a plugin is constructed or any write attempted.
 
-The live acceptance stories
-(`tests/community/acceptance/collaboration_repair/`) therefore drive the real
-owner-scoped route and prove, from the live stores: the refusal and its
-logged `provider-scope-unavailable` reason, zero BCS row creation for a
-missing target, no partial writes to a drifted existing target, no enqueued
-background work, the masked owner-scoped 404 for a non-owner, and — through
-the same shared stack — the end-to-end avatar chain (Backend owner edit →
-BCS profile write → V1 Group/Session list+get readback, including the
-explicit `""` clear). The success-path report (four items, ownership /
-profile / managers / `caller_config`), the metadata adapter and the
-per-target `404 collaboration_bot_not_found` mapping are pinned by the
-unit, contract-conformance and route suites; green repair execution requires
-a deployment whose transport has provider scope (corp pre/prod-class
-overlays), which is the deployment boundary recorded in the plan's
-validation document.
+The coverage runner explicitly provisions a temporary Provider through BCS
+HTTP, allowlists its ID in disposable runtime configuration, and installs an
+acceptance-only production plugin source. Ordinary startup and the shared daily
+BCN configuration remain credentialless. Credentials stay in a private runtime
+file, outside the report artifacts and source tree.
+
+The live acceptance stories (`tests/community/acceptance/collaboration_repair/`)
+call the real owner-scoped HTTP route and verify profile restoration, manager
+convergence, ownership confirmation, the four-item success report, missing-target
+404 with zero creation, invalid-avatar refusal, and non-owner masking. The same
+stack exercises avatar edits and explicit clears with V1 Group/Session readback.
+Readers, projectors and delivery plugins remain production implementations;
+there are no test-only calls into Core. Credentialless 503, classified failures,
+deadline handling and caller-config delivery remain covered by unit/contract
+suites. See the acceptance README for fixture provisioning and isolation.

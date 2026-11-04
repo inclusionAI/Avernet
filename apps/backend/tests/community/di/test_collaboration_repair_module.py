@@ -39,7 +39,7 @@ from agentclaw.community.core.repository.protocols.bot.ownership_sync import (
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
-from agentclaw.community.di.bcs_collaboration_metadata_adapter import (
+from agentclaw.community.plugins.community.bcs_collaboration_metadata import (
     BcnCollaborationMetadataAdapter,
 )
 from agentclaw.community.di.config import SecretNamesConfig

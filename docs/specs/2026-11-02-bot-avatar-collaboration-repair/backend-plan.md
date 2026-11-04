@@ -60,7 +60,7 @@ pt tests/community/core/bot_management/services \
 | `src/agentclaw/community/core/repository/implementations/bot/collaboration_repair.py` | 明确 tenant/env/PK 的事实读取 |
 | `src/agentclaw/community/core/bot_management/collaboration_repair/profile.py` | 头像来源、显式清空和资料投影 |
 | `src/agentclaw/community/core/bot_management/collaboration_repair/service.py` | 一次修复编排，不持有后台线程/队列 |
-| `src/agentclaw/community/di/bcs_collaboration_metadata_adapter.py` | 组合既有 BcnService transport 与新出站协议，保留类型化结果 |
+| `src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py` | 组合既有 BcnService transport 与新出站协议，保留类型化结果 |
 | `src/agentclaw/community/di/modules/collaboration_repair_module.py` | request-scoped 装配与资源关闭 |
 | `src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py` | recording local 实现 |
 | `src/agentclaw/community/adapters/http/openapi_v1/bots/collaboration_repair.py` | 新 HTTP 路由 |
@@ -315,19 +315,19 @@ def test_unknown_is_not_success():
 ## Task 5: 单次 metadata 适配与 recording 实现
 
 **Files:**
-- Create: `apps/backend/src/agentclaw/community/di/bcs_collaboration_metadata_adapter.py`
+- Create: `apps/backend/src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py`
 - Create: `apps/backend/src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py`
-- Create: `apps/backend/tests/community/di/test_bcs_collaboration_metadata_adapter.py`
+- Create: `apps/backend/tests/community/plugins/community/test_bcs_collaboration_metadata.py`
 - Modify: Task 2 transport 方法，仅为保留 typed missing/unavailable/unknown 信息
 
-**Interfaces:** `BcnCollaborationMetadataAdapter(bcn_service, profile_headers: Mapping[str,str])` 实现 Task 4 Plugin，位于 composition glue；Core 不导入 BcnService。`RecordingBcsCollaborationMetadataPlugin` 记录 `calls: list[tuple[str, object]]`、`existing: set[str]`、可注入 `failures: dict[str, Exception]`；不存在返回 False，不自动创建。
+**Interfaces:** `BcnCollaborationMetadataAdapter(bcn_service, profile_headers: Mapping[str,str])` 实现 Task 4 Plugin，位于 production community plugin；Core 不导入 BcnService。`RecordingBcsCollaborationMetadataPlugin` 记录 `calls: list[tuple[str, object]]`、`existing: set[str]`、可注入 `failures: dict[str, Exception]`；不存在返回 False，不自动创建。
 
 - [ ] **RED：** 用 `Mock(spec=BcnService)` 配合真实 adapter 断言：
 
 ```python
 import pytest
 from unittest.mock import Mock
-from agentclaw.community.di.bcs_collaboration_metadata_adapter import BcnCollaborationMetadataAdapter
+from agentclaw.community.plugins.community.bcs_collaboration_metadata import BcnCollaborationMetadataAdapter
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.kernel.collaboration_repair import ProfileSnapshot
 
@@ -342,7 +342,7 @@ async def test_profile_uses_existing_onboard_only():
     bcn.register_provider_bot.assert_not_called()
 ```
 
-- [ ] 运行 `pt tests/community/di/test_bcs_collaboration_metadata_adapter.py -q`，预期缺 adapter。
+- [ ] 运行 `pt tests/community/plugins/community/test_bcs_collaboration_metadata.py -q`，预期缺 adapter。
 - [ ] adapter 通过 `asyncio.to_thread` 调用原同步 HttpClient 链路，并向每个 transport 传入 remaining timeout。profile 转调 onboard，exists 转调 provider-scoped get_attributes，caller 转调 sync_bot_caller_config 并传稳定 reference；不创建新 URL 或新重试。
 - [ ] typed mapping：真实 404→exists False；其他异常不能变 False。skipped→`RepairPreconditionError("collaboration_sync_unavailable")`；onboarded=false→`MetadataDeliveryError(REJECTED,"collaboration_bot_not_found")`；malformed/ID mismatch→UNKNOWN；caller stale/conflict→明确 failed，不加 revision。
 - [ ] 同步 thread 取消不能强停底层 HTTP：transport 自身必须设置 remaining timeout；取消后不启动其他项，不在未结束发送上关闭共享 client。BcnService/HttpClient 使用已有生命周期，adapter.aclose 不关闭借来的 singleton。
@@ -394,8 +394,8 @@ def remaining(deadline: float, clock) -> float:
     return seconds
 ```
 
-进入执行后 deadline 错误映射对应项 failed/unknown 和后续 skipped_dependency；未发送的项不标 unknown。每次调用都传当前 remaining，外层 await 也使用该预算。
-- [ ] Owner 异常或不匹配就停止其他写入；owner missing-no-op→collaboration_bot_not_found。profile 失败可继续 managers/caller，除非目标已消失或截止时间耗尽。manager facts read 错误必须抛明确事实错误，不能发送空名单。
+进入执行后 deadline 错误映射对应项 failed/unknown 和后续 skipped_dependency；未发送的项不标 unknown。每次调用都传当前 remaining，外层 await 也使用该预算，包括三个 to_thread 事实读取。超时后丢弃线程结果，不等待线程完成；读取自身的未分类 TimeoutError 不等同于请求截止时间耗尽。
+- [ ] Owner 异常或不匹配就停止其他写入；owner missing-no-op→collaboration_bot_not_found。profile 失败可继续 managers/caller，除非目标已消失或截止时间耗尽。manager facts read 已分类错误由编排层纳入 failed 分项，保留已执行结果并跳过 caller，不能发送空名单；managers missing 同样停止 caller。
 - [ ] 将已知 DeliveryFailure.NOT_SENT/REJECTED 映射 failed，UNKNOWN 映射 unknown；消息使用有限 code。不要捕获 BaseException；未分类异常和 Backend DB 错误仍抛出，不假装成功报告。
 - [ ] 增加测试：Owner first、fresh managers、owner exclusion/Space 规则、unknown、skipped、partial_failed、caller not_applicable/disabled、timeout、取消、每项一次、无队列调用、无凭证/运行时写入。`AsyncMock.attach_mock` 或事件列表断言实际顺序，不只断言最终状态。
 - [ ] **GREEN：** `pt tests/community/core/bot_management/collaboration_repair -q`；既有 owner/managers suite 再跑，确认重试和后台 behavior 未改。

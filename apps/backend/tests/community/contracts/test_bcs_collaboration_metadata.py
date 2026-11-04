@@ -40,7 +40,7 @@ from agentclaw.community.core.repository.protocols.bot.manager_sync import (
 from agentclaw.community.core.repository.protocols.bot.ownership_sync import (
     OwnershipSyncReadRepository,
 )
-from agentclaw.community.kernel.bot_manager_sync import SyncKey
+from agentclaw.community.kernel.bot_manager_sync import SnapshotUnavailable, SyncKey
 from agentclaw.community.kernel.collaboration_repair import (
     RepairCommand,
     RepairPreconditionError,
@@ -178,3 +178,24 @@ async def test_success_records_the_ownership_and_manager_writes(world, repair_wo
     assert [call.bcs_bot_id for call in ownership.calls] == [_STABLE]
     assert [call.bcs_bot_id for call in managers.calls] == [_STABLE]
     assert managers.calls[0].manager_user_ids == ("member",)
+
+
+@pytest.mark.asyncio
+async def test_manager_facts_failure_keeps_confirmed_plugin_outcomes(
+    world, repair_world, monkeypatch
+):
+    command, service, metadata = repair_world
+
+    def unavailable(key):
+        raise SnapshotUnavailable("read_error")
+
+    monkeypatch.setattr(world.get(ManagerSyncReadRepository), "read_facts", unavailable)
+    report = await service.repair(command)
+    assert report.status == "partial_failed"
+    assert [item.status for item in report.items] == [
+        "succeeded", "succeeded", "failed", "not_applicable"
+    ]
+    assert report.items[2].error_code == "collaboration_facts_read_error"
+    assert [name for name, value in metadata.calls] == ["exists", "profile"]
+    assert len(world.get(BcsOwnershipPlugin).calls) == 1
+    assert world.get(BcsManagersPlugin).calls == []

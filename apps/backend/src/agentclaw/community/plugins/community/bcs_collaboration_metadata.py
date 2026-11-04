@@ -1,4 +1,4 @@
-"""BcnService → collaboration-metadata Plugin composition adapter (prod glue).
+"""Production BCN collaboration-metadata plugin for one-shot repair.
 
 The one-shot collaboration repair sends a Bot's committed metadata
 snapshots through the Plugin Protocol declared in
@@ -6,9 +6,10 @@ snapshots through the Plugin Protocol declared in
 is the *synchronous* ``BcnService`` over the bcn-qualified ``HttpClient``
 up-link. This adapter is the only place that joins them: Core never
 imports ``BcnService`` (the repair service consumes the Protocol), and
-``BcnService`` never learns about repair snapshots. Living in ``di/``
-means only composition code (the Task 7 factory binds it) may import
-this module — the boundary runs through here, not through Core.
+``BcnService`` never learns about repair snapshots. Like the ownership
+and managers community plugins, this plugin owns only delivery and
+transport classification; the composition root injects its borrowed
+``BcnService`` and request-scoped headers.
 
 Exactly ONE bounded transport send happens per Plugin method call: no
 retry, no new URL or endpoint, no ``register_provider_bot`` (the up-link
@@ -21,9 +22,8 @@ caller's ``timeout_seconds`` IS the remaining budget for that send and
 is forwarded to the transport, which enforces it on the HTTP client
 itself (``timeout_seconds`` plumbing from Task 2). The synchronous
 chain runs via ``asyncio.to_thread`` so the delivery loop never blocks
-on httpx. This is the first ``to_thread`` adapter under ``di/`` — it
-mirrors the established Core pattern (``bot_collaborator`` probes and
-``manager_sync`` read facts the same way). A cancelled ``await`` cannot
+on httpx. It mirrors the established Core pattern (``bot_collaborator``
+probes and ``manager_sync`` read facts the same way). A cancelled ``await`` cannot
 interrupt the in-flight synchronous send (thread cancellation is not
 possible), which is why the transport keeps the remaining timeout
 instead of relying on argument-level cancellation; after a cancelled
@@ -102,6 +102,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bcs_collaboration_metadata import (
     BcsCollaborationMetadataPlugin,
 )
+from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 
 logger = get_logger()
 
@@ -130,6 +131,7 @@ _PRECONDITION_UNAVAILABLE = (
 )
 
 
+@plugin_impl(mode=Mode.PROD, rationale="BCN up-link collaboration metadata delivery")
 class BcnCollaborationMetadataAdapter(BcsCollaborationMetadataPlugin):
     """Adapt the existing synchronous BCN up-link onto the Plugin Protocol."""
 

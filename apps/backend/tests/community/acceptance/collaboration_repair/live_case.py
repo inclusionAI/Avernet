@@ -9,18 +9,19 @@ initialize`` maintenance command). The Backend-side flows this module drives
 routes; nothing here calls the ownership suite's enqueue-based
 ``repair_driver`` or any in-memory queue.
 
-Public-local singlebox deliberately ships no BCN provider credentials (see
-``configs/application-singlebox.yaml``: "No provider creds: singlebox never
-registers"), so the one-shot repair interface refuses at its capability gate
-with ``503 collaboration repair is unavailable`` before constructing a plugin
-or sending anything. The repair stories assert that documented boundary and
-prove — from the live BCS store — that a refused repair creates nothing and
-leaves existing rows byte-identical.
+Ordinary public-local singlebox remains credentialless. The coverage runner
+explicitly installs a test-only production plugin source backed by a provider
+registered over real BCS HTTP and allowlisted in disposable runtime config.
+The stories therefore exercise actual repair HTTP delivery without changing
+public defaults, recording fake success, or calling domain logic directly.
 """
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import time
+from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -47,11 +48,6 @@ from tests.community.acceptance.bot_collaborator.test_member_management_live imp
 PREFIX = "colabrepacc"
 
 _BCS_DEPENDENCIES_ROOT = (_REPO_ROOT / "singlebox/.dependencies").resolve()
-
-#: The refusal reason `CollaborationRepairModule` logs for a deployment whose
-#: transport has no provider scope — the documented credential-less boundary.
-_PROVIDER_SCOPE_UNAVAILABLE = "reason=provider-scope-unavailable"
-
 
 def _backend_principal_headers(user_id: str) -> dict[str, str]:
     """Gateway-signed principal for the public API — what the backend verifies.
@@ -118,13 +114,22 @@ class RepairCase:
         result = _execute_local_sql(self.backend, [{"sql": sql, "params": params}])
         return result["results"][0].get("rows") or []
 
-    def seed(self, *, register_bcs: bool = True, register_avatar_url: str | None = None):
+    def seed(
+        self,
+        *,
+        register_bcs: bool = True,
+        register_avatar_url: str | None = None,
+        provider_binding: bool = False,
+    ):
         self._register_backend_user(self.owner)
         self._register_backend_user(self.other_user)
         _ensure_human(self.bcs, self.owner)
         if register_bcs:
+            if provider_binding:
+                self._ensure_provider_binding()
             _ensure_projection_target(self.bcs, bcs_bot_id=self.target, owner_id=self.owner)
-            _initialize_fixture_ownership(self.target)
+            if not provider_binding:
+                _initialize_fixture_ownership(self.target)
             if register_avatar_url is not None:
                 self.admin_onboard(
                     name=f"Story bot {self.bot_id}",
@@ -143,6 +148,40 @@ class RepairCase:
         files = self.sql("SELECT file FROM pragma_database_list WHERE name='main'")
         assert len(files) == 1
 
+    def save_profile(self, *, name: str, summary: str, avatar_url: str) -> None:
+        """Fixture-only saved state; repair itself must deliver it over HTTP."""
+        self.sql(
+            "UPDATE ac_bots SET bot_name=:name, bot_desc=:summary, ext=:ext WHERE id=:pk",
+            name=name, summary=summary, ext=json.dumps({"avatar_url": avatar_url}),
+            pk=self.bot_pk,
+        )
+
+    def save_unreadable_avatar(self) -> None:
+        """An invalid saved value must refuse repair, never become a clear."""
+        self.sql(
+            "UPDATE ac_bots SET ext=:ext WHERE id=:pk",
+            ext=json.dumps({"avatar_url": 42}), pk=self.bot_pk,
+        )
+
+    def save_manager(self, user_id: str) -> None:
+        """Seed one saved collaborator without running background sync."""
+        _ensure_human(self.bcs, user_id)
+        self.sql(
+            "INSERT INTO ac_bot_collaborator "
+            "(bot_pk, bot_id, owner_id, user_id, role, operator_id, env, gmt_create, gmt_modified) "
+            "VALUES (:pk, :bot, :owner, :user, 'member', :owner, 'dev', "
+            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            pk=self.bot_pk, bot=self.bot_id, owner=self.owner, user=user_id,
+        )
+
+    def save_caller(self, *, enabled: bool = True, revision: int = 1) -> None:
+        """Seed an established caller-config fact without bumping its revision."""
+        call_type = "caller" if enabled else "owner"
+        self.sql(
+            "UPDATE ac_bots SET call_type=:call_type, caller_config_revision=:revision WHERE id=:pk",
+            call_type=call_type, revision=revision, pk=self.bot_pk,
+        )
+
     def _register_backend_user(self, user_id: str) -> None:
         response = self.backend.post(
             "/api/v1/user",
@@ -150,6 +189,34 @@ class RepairCase:
         )
         _assert_status(response, 200, "Backend fixture user registration")
         assert response.json()["success"]
+
+    def _ensure_provider_binding(self) -> None:
+        """Create the caller sub-resource's required provider binding.
+
+        The repair story still repairs only committed Backend facts; this BCS
+        provider binding is part of the pre-existing remote state for a Bot
+        that has an established caller configuration. Gateway mode (not the
+        no-binding plugin mode) uses BCS's official provider registration
+        channel and its returned provider-admin credential stays unlogged.
+        Registration initializes ownership in the same BCS transaction.
+        """
+        fixture = Path(os.environ["SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE"])
+        payload = json.loads(fixture.read_text(encoding="utf-8"))
+        provider_id = payload["provider_id"]
+        token = payload["provider_admin_token"]
+        response = self.bcs.post(
+            f"/providers/{provider_id}/bots",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "provider_bot_ref": self.target,
+                "name": f"Story bot {self.bot_id}",
+                "owners": [self.owner],
+            },
+        )
+        _assert_status(response, 200, "BCS provider binding registration")
+        body = response.json()
+        assert body.get("bot_uuid") == self.target, body
+        assert body.get("provider_bot_ref") == self.target, body
 
     # ------------------------------------------------------------------
     # BCS official admin/profile channel (registration carry + drift facility)
@@ -345,23 +412,7 @@ class RepairCase:
             stream.seek(self._log_offset)
             return stream.read().decode(errors="replace").splitlines()
 
-    def assert_repair_refused_at_capability_gate(self, response: httpx.Response) -> None:
-        """The documented boundary of a credential-less public-local stack."""
-        assert response.status_code == 503, (
-            f"repair returned HTTP {response.status_code}; expected the "
-            "capability-gate 503 of a stack without BCN provider scope"
-        )
-        body = response.json()
-        assert body["data"] is None
-        assert body["message"] == "Collaboration repair is unavailable"
-        assert any(
-            "[COLLABORATION-REPAIR] unavailable:" in line
-            and _PROVIDER_SCOPE_UNAVAILABLE in line
-            for line in self.log_lines()
-        ), "the refusal reason must be logged once, before any plugin is built"
-        assert not any(
-            "[COLLABORATION-REPAIR] bot_id=" in line for line in self.log_lines()
-        ), "a refused repair must not report per-item outcomes"
+    def assert_no_repair_queue(self) -> None:
         rows = self.sql(
             "SELECT COUNT(*) FROM ac_task_queue WHERE task_type='collaboration_repair'"
         )

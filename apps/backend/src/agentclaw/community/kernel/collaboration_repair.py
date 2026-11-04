@@ -179,8 +179,9 @@ class RepairItem:
     succeeded, not_applicable, or a skipped/dependency case with nothing
     to attribute; failed/unknown items carry one of the finite kernel
     code families: a ``RepairItemErrorCode`` value for item-level
-    conditions, or a ``MetadataDeliveryErrorCode`` value forwarded from
-    the delivery that could not be confirmed.
+    conditions, a ``RepairFactsErrorCode`` for facts unavailable after
+    execution began, or a delivery failure code. Managers missing-target
+    delivery is normalized to ``collaboration_bot_not_found``.
     """
 
     component: Component

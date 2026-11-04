@@ -20,7 +20,7 @@ Return-value interpretation (the delivery classes checked during design):
   owner that differs from the just-written snapshot is an owner drift
   (``failed`` / ``owner_drift``).
 - ``ManagerSetChange`` has no missing marker: the managers PUT signals a
-  missing Bot through ``BcsManagersError`` (classified REJECTED), so a
+  missing Bot through ``BcsManagersError(REJECTED, BOT_NOT_FOUND_CODE)``, so a
   returned change IS BCS's confirmation. Roster-vs-``total`` semantic
   re-verification is the background sync's drift diagnosis, not this
   single-shot contract, and is deliberately not re-implemented here.
@@ -34,9 +34,10 @@ choices made explicit):
   to a target the request cannot confirm.
 - A profile failure does NOT stop managers/caller — the plan's continue
   rule — except the target-vanished code ``collaboration_bot_not_found``
-  or an exhausted deadline, which freeze the tail. A managers failure
-  does not stop the caller either: the caller config is an independent
-  facet, exactly as profile is.
+  or an exhausted deadline, which freeze the tail. A managers delivery
+  failure follows the same rule. A managers facts failure stops caller
+  delivery because the target/owner could not be revalidated; it preserves
+  the completed ownership/profile items in the report.
 - Owner drift between the ownership write and the managers re-read is
   discovered at the managers step: the stale roster is never written;
   managers reports ``skipped_dependency`` carrying ``owner_drift``, and
@@ -67,13 +68,17 @@ execution; one budget per step is shared by the plugin call and the outer
 
 Classified delivery errors map by ``DeliveryFailure`` kind —
 NOT_SENT/REJECTED become ``failed``, UNKNOWN becomes ``unknown`` — and
-the delivered finite code flows onto ``RepairItem.error_code`` verbatim.
+the delivered finite code flows onto ``RepairItem.error_code``. The shared
+managers missing-target code maps to ``collaboration_bot_not_found``.
 
 Facts discipline: all three reader calls run inside ``asyncio.to_thread``
 so the tenant-scoped sessions open and close on worker threads and no
 network I/O ever observes an open session. A synchronous read cannot be
 interrupted by cancellation — the discarded result is simply never sent,
 because cancellation exits the flow before the next send is constructed.
+Each read await is bounded by the remaining deadline, even if its thread
+cannot yet exit. Initial facts failures are preconditions; classified
+manager facts failures after writes become failed items in the report.
 Only targeted exception classes are classified: facts errors
 (``SnapshotUnavailable``/projection refusals mapped onto the kernel's
 ``RepairFactsError`` vocabulary), the delivery families and the deadline
@@ -213,7 +218,9 @@ def _facts_error(error: SnapshotUnavailable) -> RepairFactsError:
     return RepairFactsError(RepairFactsErrorCode.COLLABORATION_FACTS_READ_ERROR)
 
 
-async def _read_mapped(reader: Callable[[SyncKey], T], key: SyncKey) -> T:
+async def _read_mapped(
+    reader: Callable[[SyncKey], T], key: SyncKey, deadline: float, clock: Clock
+) -> T:
     """Read one facts set on a worker thread, mapping typed refusals.
 
     The synchronous, tenant-scoped reader session opens and closes on the
@@ -225,13 +232,22 @@ async def _read_mapped(reader: Callable[[SyncKey], T], key: SyncKey) -> T:
     Anything else (raw driver errors included) propagates untouched: a
     failed read is never a default payload.
 
-    A reader that overruns the budget cannot be interrupted either; the
-    late result is absorbed here and the NEXT send reports
-    ``failed``/``delivery_timeout``, so a run's total latency can exceed
-    the nominal deadline.
+    The await uses the remaining request budget. Cancellation cannot kill
+    the worker thread, but its eventual result is discarded and cannot
+    trigger any delivery after the request has returned.
     """
+    budget = remaining(deadline, clock)
+    read_timeout = asyncio.timeout(budget)
     try:
-        return await asyncio.to_thread(reader, key)
+        async with read_timeout:
+            return await asyncio.to_thread(reader, key)
+    except TimeoutError as exc:
+        if not read_timeout.expired():
+            # A reader's unclassified timeout is not our deadline expiring.
+            raise
+        raise RepairPreconditionError(
+            RepairPreconditionErrorCode.REPAIR_DEADLINE_EXCEEDED
+        ) from exc
     except SnapshotUnavailable as exc:
         raise _facts_error(exc) from exc
     except SnapshotTooLarge:
@@ -279,7 +295,9 @@ class CollaborationRepairService(
         deadline = self._clock() + self._timeout_seconds
         remaining(deadline, self._clock)
 
-        facts = await _read_mapped(self._reader.read_facts, command.key)
+        facts = await _read_mapped(
+            self._reader.read_facts, command.key, deadline, self._clock
+        )
         self._require_scope(facts.key, command.key)
         stable = facts.profile.bcs_bot_id
         # The unified-owner authorization result as a fact-drift check:
@@ -312,9 +330,23 @@ class CollaborationRepairService(
                 self._stopped_caller(facts),
             )
 
-        managers_item = await self._repair_managers(
-            command.key, stable, snapshot.owner_user_id, deadline
-        )
+        try:
+            managers_item = await self._repair_managers(
+                command.key, stable, snapshot.owner_user_id, deadline
+            )
+        except (RepairFactsError, RepairPreconditionError) as exc:
+            # Ownership/profile already ran. Preserve their outcomes when
+            # fresh facts are unreadable; do not return a precondition envelope
+            # that hides completed writes or continue with an unverified owner.
+            code = (
+                RepairItemErrorCode.DELIVERY_TIMEOUT
+                if exc.code == RepairPreconditionErrorCode.REPAIR_DEADLINE_EXCEEDED
+                else exc.code
+            )
+            return self._report(
+                facts, ownership_item, profile_item,
+                RepairItem("managers", "failed", code), self._stopped_caller(facts),
+            )
         if managers_item.status == "skipped_dependency" and (
             managers_item.error_code == RepairItemErrorCode.OWNER_DRIFT
         ):
@@ -326,11 +358,8 @@ class CollaborationRepairService(
                 self._stopped_caller(facts),
             )
         caller_item: RepairItem
-        if self._deadline_dead(managers_item):
-            # The request's budget is exhausted (this item never sent, or
-            # its send lost the race with the deadline): later applicable
-            # items are skipped dependencies, never a fresh send against
-            # a dead budget.
+        if self._target_gone(managers_item) or self._deadline_dead(managers_item):
+            # A missing target or exhausted budget forbids another write.
             caller_item = self._stopped_caller(facts)
         else:
             caller_item = await self._repair_caller(facts.caller, deadline)
@@ -388,7 +417,15 @@ class CollaborationRepairService(
         is no longer the owner, so adopting the fresh owner here is
         carrying out the authorized repair, not re-authorizing it.
         """
-        facts = await _read_mapped(self._ownership_reader.read_facts, key)
+        try:
+            facts = await _read_mapped(
+                self._ownership_reader.read_facts, key, deadline, self._clock
+            )
+        except RepairPreconditionError:
+            # No ownership send started: a facts-read timeout is definitive.
+            return RepairItem(
+                "ownership", "failed", RepairItemErrorCode.DELIVERY_TIMEOUT
+            ), None
         self._require_scope(facts.key, key)
         try:
             # The background ownership projector's contract (identity parts
@@ -459,7 +496,9 @@ class CollaborationRepairService(
         Owner drift found here freezes the managers item (and its caller
         dependency) instead of writing a stale roster.
         """
-        facts = await _read_mapped(self._managers_reader.read_facts, key)
+        facts = await _read_mapped(
+            self._managers_reader.read_facts, key, deadline, self._clock
+        )
         self._require_scope(facts.key, key)
         try:
             snapshot = build_manager_snapshot(facts)
@@ -561,6 +600,11 @@ class CollaborationRepairService(
             )
         except (BcsOwnershipError, BcsManagersError, MetadataDeliveryError) as exc:
             kind: DeliveryFailure = exc.kind
+            if isinstance(exc, BcsManagersError) and exc.code == BOT_NOT_FOUND_CODE:
+                return RepairItem(
+                    component, _status_for_kind(kind),
+                    MetadataDeliveryErrorCode.COLLABORATION_BOT_NOT_FOUND,
+                ), None
             return RepairItem(component, _status_for_kind(kind), exc.code), None
         return RepairItem(component, "succeeded"), result
 
@@ -600,7 +644,7 @@ class CollaborationRepairService(
 
     @staticmethod
     def _target_gone(item: RepairItem) -> bool:
-        """A definitive vanished-target profile failure freezes the tail."""
+        """A definitive vanished-target failure freezes the tail."""
         return item.status == "failed" and item.error_code == (
             MetadataDeliveryErrorCode.COLLABORATION_BOT_NOT_FOUND
         )

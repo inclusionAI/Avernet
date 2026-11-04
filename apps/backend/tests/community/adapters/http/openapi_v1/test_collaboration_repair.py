@@ -59,6 +59,36 @@ _ENV = "dev"
 _BOT_PK = 11
 
 
+def test_manager_read_failure_returns_partial_report_after_real_writes():
+    from dataclasses import replace
+
+    from agentclaw.community.kernel.bot_manager_sync import SnapshotUnavailable
+    from tests.community.core.bot_management.collaboration_repair.factories import (
+        default_repair_facts,
+        make_repair_case,
+    )
+
+    facts = default_repair_facts(
+        key=SyncKey(_TENANT, _ENV, _BOT_PK), owner_user_id="u1", caller=None
+    )
+    facts = replace(facts, profile=replace(facts.profile, bot_id="b-1", bcs_bot_id="b-1:e"))
+    case = make_repair_case(facts=facts)
+    case.managers_reader.read_facts.side_effect = SnapshotUnavailable("read_error")
+    client, factory, _, _ = _build()
+    factory.service = case.service
+    response = client.post(_PATH)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "partial_failed"
+    assert [item["status"] for item in data["items"]] == [
+        "succeeded", "succeeded", "failed", "not_applicable"
+    ]
+    assert data["items"][2]["error_code"] == "collaboration_facts_read_error"
+    case.ownership.replace_ownership.assert_awaited_once()
+    case.metadata.update_profile.assert_awaited_once()
+    case.managers.replace_managers.assert_not_awaited()
+
+
 def _report() -> RepairReport:
     """Task 4's report shape: only managers is unknown, everything else passed."""
     return RepairReport(

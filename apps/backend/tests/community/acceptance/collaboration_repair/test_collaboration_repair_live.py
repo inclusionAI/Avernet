@@ -1,32 +1,10 @@
-"""Live singlebox coverage for the Bot avatar sync and manual repair interface.
+"""Live avatar sync and genuine HTTP repair on the shared coverage stack.
 
-The stories below are what this stack can honestly prove about the two
-deliveries of the spec:
-
-1. The daily avatar chain, end to end against the live BCS: the fixture Bot is
-   registered on BCS with an explicit avatar through the official admin
-   profile channel, Backend's real owner-scoped avatar route edits and clears
-   it, and BCS V1 Group *and* Session views (list and get, four readbacks per
-   snapshot) serve the current avatar — a set after an edit, ``null`` after
-   the explicit clear.
-
-2. The new one-shot manual repair route: on this credential-less public-local
-   stack the composition root's capability gate is the real boundary — the
-   owner call arrives, is admitted, and is refused with the documented
-   ``503 Collaboration repair is unavailable`` before a plugin is built or a
-   write attempted. The stories prove from the live stores that the refusal
-   writes nothing: BCS Bot rows do not grow (missing-target zero-creation),
-   the drifted profile of an existing Bot stays exactly as drifted (no
-   partial writes, no silent compensation), no background queue rows appear,
-   and a non-owner never gets past the owner-scoped admission.
-
-The repair success path (HTTP 200 four-item report, ownership/profile/
-managers read-backs) is exercised where the transport has provider scope —
-the Service API, adapter and report contracts are pinned by the module's
-unit, contract-conformance and route suites (see
-``tests/community/di/test_collaboration_repair_module.py``,
-``tests/community/contracts/test_bcs_collaboration_metadata.py`` and
-``tests/community/adapters/http/openapi_v1/test_collaboration_repair.py``).
+Coverage-only DI supplies real ephemeral provider credentials; the runner
+allowlists that provider in disposable BCS configuration. All repair reads,
+projectors, ownership/managers delivery and metadata delivery remain production
+implementations. Ordinary public-local startup remains credentialless and its
+503 capability refusal stays covered by the composition/adapter unit suites.
 """
 import pytest
 
@@ -82,28 +60,39 @@ def test_avatar_registration_daily_sync_and_v1_readback(repair_case):
     assert (rows_after, target_after) == (rows_before, target_before)
 
 
-def test_repair_refuses_at_capability_gate_and_writes_nothing(repair_case):
-    """A drifted, existing BCS target survives an owner repair byte-identically."""
-    case = repair_case()
+def test_repair_restores_saved_profile_and_confirms_authority(repair_case):
+    """An owner repairs drift through HTTP and reads actual BCS state back."""
+    case = repair_case(provider_binding=True)
+    name = f"Saved {case.suffix}"
+    case.save_manager(case.other_user)
+    case.save_caller(enabled=True, revision=1)
+    assert case.read_bcs_managers() == set()
+    case.save_profile(name=name, summary="saved repair summary", avatar_url=_SET_URL)
     case.admin_onboard(
         name=_DRIFTED_NAME,
         summary="fixture-drifted summary",
         avatar_url=_DRIFTED_AVATAR,
     )
-    owner_before = case.read_bcs_owner()
-    managers_before = case.read_bcs_managers()
-    rows_before, target_before = case.bcs_bot_count()
+    rows_before = case.bcs_bot_count()
 
     response = case.repair()
 
-    case.assert_repair_refused_at_capability_gate(response)
-    # No partial writes, no silent compensation: the drift the fixture made
-    # through the official channel is exactly what the delivery side still
-    # holds after the refused repair.
-    assert case.read_bcs_owner() == owner_before
-    assert case.read_bcs_managers() == managers_before
-    assert case.registry_row() == {"name": _DRIFTED_NAME, "avatar_url": _DRIFTED_AVATAR}
-    assert (case.bcs_bot_count()) == (rows_before, target_before)
+    assert response.status_code == 200
+    report = response.json()["data"]
+    assert report["bot_id"] == case.bot_id
+    assert report["status"] == "succeeded"
+    assert [(item["component"], item["status"], item["error_code"])
+            for item in report["items"]] == [
+        ("ownership", "succeeded", None),
+        ("profile", "succeeded", None),
+        ("managers", "succeeded", None),
+        ("caller_config", "succeeded", None),
+    ]
+    assert case.read_bcs_owner() == case.owner
+    assert case.read_bcs_managers() == {case.other_user}
+    assert case.registry_row() == {"name": name, "avatar_url": _SET_URL}
+    assert case.bcs_bot_count() == rows_before
+    case.assert_no_repair_queue()
 
 
 def test_repair_missing_bcs_target_never_creates(repair_case):
@@ -115,11 +104,33 @@ def test_repair_missing_bcs_target_never_creates(repair_case):
 
     response = case.repair()
 
-    case.assert_repair_refused_at_capability_gate(response)
-    # Zero-creation, proven from the live store: the refusal at the capability
-    # gate ran no registration/ensure path on the delivery side.
+    assert response.status_code == 404
+    assert response.json()["data"] is None
+    # A real existence probe finds absence; repair never registers a Bot.
     assert case.bcs_bot_count() == (rows_before, 0)
     case.assert_bcs_bot_absent()
+    case.assert_no_repair_queue()
+
+
+def test_repair_unreadable_saved_avatar_refuses_without_clearing(repair_case):
+    """Invalid persisted facts cannot clear BCS's confirmed profile avatar."""
+    case = repair_case(register_avatar_url=_REGISTRATION_URL)
+    before = case.registry_row()
+    owner_before = case.read_bcs_owner()
+    managers_before = case.read_bcs_managers()
+    rows_before = case.bcs_bot_count()
+    case.save_unreadable_avatar()
+
+    response = case.repair()
+
+    assert response.status_code == 409
+    assert response.json()["data"] is None
+    assert response.json()["message"] == "Bot profile facts could not be read"
+    assert case.registry_row() == before
+    assert case.read_bcs_owner() == owner_before
+    assert case.read_bcs_managers() == managers_before
+    assert case.bcs_bot_count() == rows_before
+    case.assert_no_repair_queue()
 
 
 def test_repair_non_owner_never_reaches_the_interface(repair_case):

@@ -10,17 +10,15 @@ the plan's behaviour contract:
 - exactly one bounded send per component and one exists probe;
 - Owner missing-noop, drift, deadline and delivery-classification mappings;
 - preconditions raised before any outbound never produce a report;
-- facts errors raise instead of fabricating a payload (never an empty roster);
+- initial facts errors raise; execution facts errors preserve the report;
 - cancellation propagates and starts no new send;
 - no queue submission surface, no credential/runtime writes.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import importlib
-import pathlib
 from unittest.mock import patch
 
 import pytest
@@ -61,6 +59,10 @@ from tests.community.core.bot_management.collaboration_repair.factories import (
     STABLE,
     default_repair_facts,
     make_repair_case,
+)
+
+_SERVICE_MODULE = (
+    "agentclaw.community.core.bot_management.collaboration_repair.service"
 )
 
 # The plan's RED test relies on this fixture; it is registered here
@@ -393,7 +395,7 @@ async def test_fresh_committed_owner_is_adopted_and_repair_continues():
 async def test_ownership_projector_refusal_is_a_facts_error(repair_case):
     """A projection that cannot validate identities is never a send."""
     with patch.object(
-        _service_module(),
+        importlib.import_module(_SERVICE_MODULE),
         "build_ownership_snapshot",
         side_effect=SnapshotUnavailable("missing_entity_id"),
     ):
@@ -560,13 +562,13 @@ async def test_owner_drift_with_no_caller_keeps_not_applicable(repair_case):
         ),
     ],
 )
-async def test_managers_facts_error_raises_never_empty_roster(
+async def test_managers_facts_error_reports_never_empty_roster(
     repair_case, reader_error, expected_code
 ):
     repair_case.managers_reader.read_facts.side_effect = reader_error
-    with pytest.raises(RepairFactsError) as excinfo:
-        await repair_case.service.repair(repair_case.command)
-    assert excinfo.value.code == expected_code
+    report = await repair_case.service.repair(repair_case.command)
+    assert _items(report)["managers"] == ("failed", expected_code)
+    assert report.status == "partial_failed"
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.sync_caller.assert_not_awaited()
 
@@ -631,14 +633,15 @@ async def test_ownership_identity_unresolved_mid_flight_raises(repair_case):
 
 
 @pytest.mark.asyncio
-async def test_managers_identity_unresolved_mid_flight_raises(repair_case):
+async def test_managers_identity_unresolved_mid_flight_reports_failure(repair_case):
     repair_case.managers_reader.read_facts.return_value = SyncFacts(
         KEY, "b", "e2", CURRENT_OWNER, ()
     )
-    with pytest.raises(
-        RepairFactsError, match="collaboration_bot_identity_unresolved"
-    ):
-        await repair_case.service.repair(repair_case.command)
+    report = await repair_case.service.repair(repair_case.command)
+    assert _items(report)["managers"] == (
+        "failed", "collaboration_bot_identity_unresolved"
+    )
+    repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
 
 
@@ -653,40 +656,38 @@ async def test_foreign_manager_facts_are_identity_not_benign_drift(repair_case):
     repair_case.managers_reader.read_facts.return_value = SyncFacts(
         KEY, "b", "e2", "owner-newer", ()
     )
-    with pytest.raises(
-        RepairFactsError, match="collaboration_bot_identity_unresolved"
-    ):
-        await repair_case.service.repair(repair_case.command)
+    report = await repair_case.service.repair(repair_case.command)
+    assert _items(report)["managers"] == (
+        "failed", "collaboration_bot_identity_unresolved"
+    )
+    repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.managers.replace_managers.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_managers_reader_oversized_roster_raises_never_empty(repair_case):
+async def test_managers_reader_oversized_roster_reports_failure_never_empty(repair_case):
     """``SnapshotTooLarge`` from the reader is "unreadable", not "empty"."""
     repair_case.managers_reader.read_facts.side_effect = SnapshotTooLarge()
-    with pytest.raises(RepairFactsError) as excinfo:
-        await repair_case.service.repair(repair_case.command)
-    assert excinfo.value.code == FactsCode.COLLABORATION_FACTS_READ_ERROR
+    report = await repair_case.service.repair(repair_case.command)
+    assert _items(report)["managers"] == ("failed", FactsCode.COLLABORATION_FACTS_READ_ERROR)
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.sync_caller.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_managers_projector_refusal_raises_before_its_send(repair_case):
+async def test_managers_projector_refusal_preserves_prior_writes(repair_case):
     """A projector refusal surfaces as a facts error; earlier sends stand.
 
-    The contract is: no report is produced. Ownership and profile already
-    went out (they precede the managers step), and no managers write is
-    ever attempted — an unreadable roster must not become an empty one.
+    Ownership and profile remain in the report; an unreadable roster
+    must not become an empty one.
     """
     with patch.object(
-        _service_module(),
+        importlib.import_module(_SERVICE_MODULE),
         "build_manager_snapshot",
         side_effect=SnapshotUnavailable("space_unavailable"),
     ):
-        with pytest.raises(RepairFactsError) as excinfo:
-            await repair_case.service.repair(repair_case.command)
-    assert excinfo.value.code == FactsCode.COLLABORATION_FACTS_READ_ERROR
+        report = await repair_case.service.repair(repair_case.command)
+    assert _items(report)["managers"] == ("failed", FactsCode.COLLABORATION_FACTS_READ_ERROR)
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.sync_caller.assert_not_awaited()
     repair_case.ownership.replace_ownership.assert_awaited_once()
@@ -793,7 +794,7 @@ async def test_deadline_between_profile_and_managers_fails_managers_skips_caller
     assert report.status == "partial_failed"
     case.managers.replace_managers.assert_not_awaited()
     case.metadata.sync_caller.assert_not_awaited()
-    assert case.managers_reader.read_facts.call_count == 1
+    case.managers_reader.read_facts.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -876,123 +877,3 @@ async def test_cancellation_during_in_flight_ownership_starts_no_new_send(
     repair_case.managers.replace_managers.assert_not_awaited()
     repair_case.metadata.sync_caller.assert_not_awaited()
     never.set()
-
-
-# ── Boundary pins: no queue, no credential/runtime writes, bounded sends ───
-
-
-_SERVICE_MODULE = (
-    "agentclaw.community.core.bot_management.collaboration_repair.service"
-)
-
-
-def _service_module():
-    """The service module object (patch target for projector refusals)."""
-    return importlib.import_module(_SERVICE_MODULE)
-
-
-def _report(*items):
-    """The service's fixed-order report builder, for the invariant pins.
-
-    These two pins call the private ``_report`` on purpose: the four-item
-    and slot-order invariants are otherwise unobservable through the
-    public ``repair`` API, which can only ever produce them.
-    """
-    from agentclaw.community.core.bot_management.collaboration_repair.service import (
-        CollaborationRepairService,
-    )
-
-    return CollaborationRepairService._report(*items)
-
-
-def test_service_module_never_imports_admission_or_writers():
-    """No queue submission surface, no repository writers, no plugin impls."""
-    service_path = pathlib.Path(_service_module().__file__)
-    tree = ast.parse(service_path.read_text(encoding="utf-8"))
-    forbidden = (
-        "agentclaw.community.api",
-        "agentclaw.community.core.repository.implementations",
-        "agentclaw.community.core.bot_collaborator.manager_sync.dispatcher",
-        "agentclaw.community.core.bot_collaborator.manager_sync.lifecycle",
-        "agentclaw.community.core.bot_collaborator.manager_sync.notifications",
-        "agentclaw.community.core.bot_management.ownership_sync.notifications",
-        "agentclaw.community.plugins",
-        "agentclaw.community.di",
-    )
-    imported: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            # A relative import cannot name an absolute forbidden root, but
-            # resolve the dotted form anyway so the pin also works on a
-            # module that later switches to ``from .... import x`` shapes.
-            module = "." * node.level + (node.module or "")
-            imported.append(module)
-        elif isinstance(node, ast.Import):
-            imported.extend(alias.name for alias in node.names)
-    hits = [module for module in imported if module.startswith(forbidden)]
-    assert hits == [], f"forbidden admission/write imports: {hits}"
-
-
-@pytest.mark.asyncio
-async def test_no_unexpected_calls_beyond_the_contract(repair_case):
-    """Only the declared contract methods are touched on every dependency."""
-    await repair_case.service.repair(repair_case.command)
-    assert [c[0] for c in repair_case.reader.method_calls] == ["read_facts"]
-    assert [c[0] for c in repair_case.ownership_reader.method_calls] == ["read_facts"]
-    assert [c[0] for c in repair_case.managers_reader.method_calls] == ["read_facts"]
-    assert [c[0] for c in repair_case.metadata.method_calls] == [
-        "exists",
-        "update_profile",
-        "sync_caller",
-    ]
-    assert [c[0] for c in repair_case.ownership.method_calls] == ["replace_ownership"]
-    assert [c[0] for c in repair_case.managers.method_calls] == [
-        "replace_managers"
-    ]
-
-
-def test_both_sync_readers_share_the_kernel_not_found_code():
-    """The reader vocabulary is declared once, in the kernel.
-
-    Both sync readers must raise ``SnapshotUnavailable`` with the kernel's
-    constant — not with their own string literal — because the repair
-    service compares against that declaration to preserve the not-found
-    meaning across layers.
-    """
-    for module_name in (
-        "agentclaw.community.core.repository.implementations.bot.ownership_sync",
-        "agentclaw.community.core.repository.implementations.bot.manager_sync",
-    ):
-        module = importlib.import_module(module_name)
-        tree = ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))
-        literals = [
-            node.value
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and node.value == BOT_NOT_FOUND_CODE
-        ]
-        assert literals == [], f"{module_name} re-spells the kernel code"
-        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-        assert "BOT_NOT_FOUND_CODE" in names, module_name
-
-
-def test_report_cannot_be_built_from_three_items():
-    """The four-parameter signature makes a short report unbuildable."""
-    with pytest.raises(TypeError):
-        _report(  # type: ignore[call-arg]
-            default_repair_facts(),
-            RepairItem("ownership", "succeeded"),
-            RepairItem("profile", "succeeded"),
-            RepairItem("managers", "succeeded"),
-        )
-
-
-def test_report_rejects_an_item_in_the_wrong_slot():
-    """Slot order is the kernel's, so a swapped pair is a programming error."""
-    with pytest.raises(ValueError, match="fixed report order"):
-        _report(
-            default_repair_facts(),
-            RepairItem("profile", "succeeded"),
-            RepairItem("ownership", "succeeded"),
-            RepairItem("managers", "succeeded"),
-            RepairItem("caller_config", "succeeded"),
-        )

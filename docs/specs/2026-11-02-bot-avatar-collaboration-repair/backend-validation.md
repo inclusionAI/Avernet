@@ -1,5 +1,29 @@
 # Backend Bot 头像同步与手动修复验证与交付记录（Task 9）
 
+## PR #3569 复审修复（2026-11-04）
+
+当前分支为 `feat/bot-avatar-backend-squashed`，复审基线 `8cc26f9`。
+本节更新后文历史记录；实现与验证计划见 [backend-review-fixes.md](backend-review-fixes.md)。
+
+- 修复三个边界：事实读取受整体 deadline 约束；managers 已分类读取/投影失败
+  保留 ownership/profile 的执行结果；managers 确认目标缺失后停止 caller 写入。
+- 新增回归先红后绿；真实 managers HTTP Plugin 的 404、实际 Service 到 HTTP
+  200 部分报告、取消后的迟到数据库结果均有断言。读取自身抛出的未分类
+  TimeoutError 保持传播，不误报请求截止时间耗尽。
+- Backend 全量门禁最终工作树实测：`BACKEND_CI_SKIP_INSTALL=1
+  BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`：**29,295 passed /
+  40 skipped / 6 subtests passed**，行覆盖率 **90.95%**，变更行覆盖
+  **86.66%（2580/2977，≥80）**。最终提交后 pre-push/远端 CI 会以提交内容为
+  边界重跑同一门禁。
+- 原失败 CI 的两个测试有独立调度故障复现：逐实例解析延迟 0/50/100ms
+  重现文件计数最大并发 1；LLM 额外延迟 600ms 重现 fencing 场景 reschedule。
+  修复使用事件协调并发、为 fencing 完成流程提供独立 slice 预算，保留所有
+  行为断言。延迟复现 **2 passed**，相关扩展套件 **89 passed**。
+- 首次 focused Singlebox 的四个现有场景通过，但模块 Core 32.44% 未达
+  36% 门槛；BCS 旧目录残留前一天未结算队列，正确触发 queue_draining，
+  导致两个后续端点未执行。保留该失败记录；后续使用新的运行目录和真实
+  Provider 验收装配，不调整覆盖率阈值。
+
 - 日期：2026-11-03 至 2026-11-04（实测运行跨日）。
 - 分支：`feat/bot-avatar-backend`（未推送、无远端跟踪）。Task 9 开始时基线 =
   `feat(backend): expose owner-scoped collaboration repair endpoint`（原 SHA
@@ -31,10 +55,10 @@
 | 命令 | 退出码 | 关键数字 |
 | --- | --- | --- |
 | `pt tests/community/core/bot_management/services tests/community/core/bot_management/collaboration_repair tests/community/core/bot_collaborator/manager_sync tests/community/contracts/test_bcs_collaboration_metadata.py tests/community/contracts/test_bcs_ownership.py tests/community/contracts/test_bcs_managers.py tests/community/architecture -q`（`pt` 即 `(cd apps/backend && DEPLOY_PROFILE=test SERVER_ENV=dev uv run --frozen pytest ...)`，最终代码状态复跑两次） | 0 | **1780 passed / 0 failed**（61.40s） |
-| `bash apps/backend/scripts/ci_test.sh --base e930d2fbc82a8a18144be0a574606099e2757e3b --head HEAD` | 0 | **backend CI gate passed**；**29080 passed、40 skipped（29126 用例 100.00%）**；行覆盖率 **90.91%**（≥75）；变更行覆盖率 **87.16%（2695/3092，≥80）** |
-| `bash singlebox/ci/singlebox_coverage.sh --module collaboration_repair`（focused 阈值确认跑） | 0 | **singlebox coverage gate passed**；acceptance **4 passed**；`collaboration_repair coverage: core=36.36% router=100.00% plugin=0.00%`；BCS E2E line **52.67%**（≥41）、method **46.90%**（≥36）、endpoint **173/173=100%**、bcs-cli **66/66=100%**、changed-line **61.12%（4930/8066，>60%）**（runner 默认 `origin/dev` 基线，含 target-only 污染仍达标） |
-| `bash singlebox/ci/singlebox_coverage.sh`（默认全部模块，全新 `.dependencies` 状态） | 0 | **`singlebox coverage gate passed`**；Backend acceptance **69 passed / 0 failed**（456.19s，含本模块 4 story）；**14 个模块**非回归全部达标（数字见 §3.3）；BCS E2E line **53.16%**（≥41）、method **47.12%**（≥36）、endpoint **173/173**、bcs-cli **66/66**、changed-line **61.27%（4942/8066，>60%）**（runner 默认 `origin/dev` 基线，含 target-only 污染仍达标） |
-| `python singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/singlebox/reports` | 0 | **`singlebox coverage artifacts verified`**；backend 49.51%（≥38）、BaaS 45.94%（≥45）、BCS runtime line/method/router/cli 53.16%/47.12%/100.00%/100.00%、backend router 命中 1082/plugin 证据 9、BaaS router 命中 294 |
+| `BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=6 bash apps/backend/scripts/ci_test.sh`（最终复审修复树） | 0 | **backend CI gate passed**；**29,295 passed、40 skipped、6 subtests passed**；行覆盖率 **90.95%**（≥75）；变更行覆盖率 **86.66%（2580/2977，≥80）** |
+| `bash singlebox/ci/singlebox_coverage.sh --module collaboration_repair --coverage-root singlebox/.dependencies/coverage/pr3569-focused-v3`（final focused） | 0 | **singlebox coverage gate passed**；acceptance **5 passed**；`collaboration_repair coverage: core=71.11% router=100.00% plugin=100.00%`；BCS E2E coverage gate passed、endpoint **173/173=100%**、bcs-cli **66/66=100%**；临时 Provider 凭据已清理 |
+| `bash singlebox/ci/singlebox_coverage.sh --coverage-root singlebox/.dependencies/coverage/pr3569-final-v3`（最终默认全部模块） | 0 | **`singlebox coverage gate passed`**；Backend acceptance **70 passed / 0 failed**（456.65s，含本模块 5 story）；**14 个模块**非回归全部达标（数字见 §3.3）；BCS E2E coverage gate passed、endpoint **173/173**、bcs-cli **66/66** |
+| `python singlebox/ci/verify_singlebox_coverage_artifacts.py --reports-dir singlebox/.dependencies/coverage/pr3569-final-v3/reports` | 0 | **`singlebox coverage artifacts verified`**；backend **49.73%**（≥38）、BaaS **45.94%**（≥45）、BCS runtime line/method/router/cli **54.12%/48.00%/100.00%/100.00%**、backend router 命中 **1093**/plugin 证据 **13**、BaaS router 命中 **296** |
 
 ### 1.1 首次全量回归发现并修复的既有缺陷
 
@@ -190,38 +214,37 @@ unavailable 工厂测试一致；本栈 live 层证明零创建与能力门前�
 - Plugin 分母：`BcsCollaborationMetadataPlugin` 的
   `exists/update_profile/sync_caller/aclose`；
   manifest 证据门要求证据位于 `src/agentclaw/community/plugins` 之下，故指向
-  该 Plugin 的插件树实现
-  `plugins/local/bcs_collaboration_metadata.py::RecordingBcsCollaborationMetadataPlugin`
-  （计划文件地图内的 recording local 实现）；请求侧生产装配（组合根）实现位于
-  `di/bcs_collaboration_metadata_adapter.py`（组合 glue，保持 ownership_sync
-  条目模型——生产 Owner/managers Http Plugin 的分母不变、旧阈值不动）。
+  该 Plugin 的生产插件树实现
+  `plugins/community/bcs_collaboration_metadata.py::BcnCollaborationMetadataAdapter`
+  ；请求侧生产装配复用同一实现，保持 ownership_sync
+  条目模型——生产 Owner/managers Http Plugin 的分母不变、旧阈值不动。
 
 ### 3.2 focused 实测与阈值
 
-三次 focused `--module collaboration_repair` 运行的测量历史（每次全部记录，未挑选数字）：
+阈值确认以修复后的最新 focused `--module collaboration_repair` 运行为准：
+`bash singlebox/ci/singlebox_coverage.sh --module collaboration_repair --coverage-root singlebox/.dependencies/coverage/pr3569-focused-v3`
+使用全新覆盖运行目录。**exit 0：`singlebox coverage gate passed`**；acceptance
+**5 passed**（含 provider-bound caller 成功修复 story）；模块实测：
 
-| 运行 | 运行前提 | 结果 |
-| --- | --- | --- |
-| 第 1 跑（测分母） | 既有 `.dependencies` 运行态（本 worktree 首跑） | acceptance **2 failed, 2 passed**：`test_avatar_registration_daily_sync_and_v1_readback` 因 V1 Group list 未选 view-actor 失败；`test_repair_non_owner_never_reaches_the_interface` 因本测试自身的元组比较笔误失败。两个 repair 边界 story 全绿。**core=34.93% router=100.00% plugin=0.00%**，BCS E2E 全绿（endpoint 173/173） |
-| 第 2 跑 | 修复两个 story 后，共享 `.dependencies` 运行态 | acceptance **4 passed**；`collaboration_repair coverage: core=36.36% router=100.00% plugin=0.00%`；BCS E2E 失败于 **[bcs-validation.md](bcs-validation.md) §7 已登记的时间性 flake**（`story_user_operates_group_workspace` 在 persistent group message 步骤 400 `queue_draining` 早退 → endpoint 171/173；T8 记录同一二进制第二跑全绿）。据此按该文档结论清理 `.dependencies` 一次性运行态后重跑 |
-| 第 3 跑（阈值确认） | **清空 `singlebox/.dependencies`（git-ignored 一次性运行态，CI 等价条件）后的全新栈** | **exit 0：`singlebox coverage gate passed`**；acceptance **4 passed**；`collaboration_repair coverage: **core=36.36%** router=100.00% plugin=0.00%`；BCS E2E line 52.67%、method 46.90%、endpoint **173/173**、cli **66/66**、changed-line **61.12%（4930/8066）**；`summary.json` 模块 core 计数 **76/209** |
-
-据此设置的阈值（全部取自本模块实测，低于各绿跑实测值以留出运行方差；未复制任何其他模块数字，
-未触碰既有模块阈值）：
-
-| 指标 | 实测（阈值确认跑） | 设定阈值 |
+| 指标 | 实测 | 设定阈值 |
 | --- | --- | --- |
 | Router API（`POST /openapi/v1/bots/{bot_id}/collaboration/repair`） | 100.00%（1/1） | 100.0 |
-| Core Line（整个 `core/bot_management/collaboration_repair/`，209 语句） | 36.36%（76/209） | 36.0 |
-| Plugin API（4 项 metadata 方法） | 0.00%（0/4） | 0.0 |
+| Core Line（整个 `core/bot_management/collaboration_repair/`，225 语句） | 71.11%（160/225） | 70.0（留一行运行方差） |
+| Plugin API（4 项 metadata 方法） | 100.00%（4/4） | 100.0 |
 
-- Router：两个 repair story（owner 503 调用 + missing-target 调用）+ 非 owner 掩蔽
-  404 调用真实击中该唯一路由，middleware 记录 1/1。
-- Core：`profile.py`（头像素投影）在真实每日编辑/注册链路执行；
-  `service.py` 的四项编排、facts reader 与 adapter 的方法体在能力门拒绝下**不会执行**
-  ——实测数字如实记录（72/209 未覆盖由前置 503 决定，非省略函数抬高）。
-- Plugin：无凭据栈不绑定该插件树实现（recording 实现仅在 TEST 列装配），实测 0/4、
-  阈值 0.0（不是覆盖造高点，是单盒栈能力边界；见 §2.1 与 §7 追踪项）。
+BCS E2E 同跑：coverage gate passed，endpoint **173/173=100%**，bcs-cli
+**66/66=100%**；`collaboration-repair-provider.json` 凭据由 runner 的
+EXIT trap 删除，未进入 reports/。caller 成功 story 的远端状态
+通过 BCS 官方 Gateway provider 注册建立（provider binding 是 `/caller`
+子资源的既有关系），修复本身仍只读取/改写 committed Backend facts。
+
+保留早期的分母探索历史（不用于阈值）：无 provider 凭据的 public-local 栈曾
+测得 `core=36.36% router=100.00% plugin=0.00%`（能力门 503 前置）；引入
+coverage-only 临时凭据后，首次补 caller story 曾暴露两个真实边界——
+`plugin` connection-mode 注册是 no-binding（`/caller` 404），provider
+注册又已同事务初始化 ownership。最终 story 以 Gateway provider
+binding + 已建立 caller revision 作为 fixture 前置，才断言整单
+`ownership/profile/managers/caller_config` 全部 `succeeded`。
 
 ### 3.3 默认全部模块运行
 
@@ -240,23 +263,23 @@ unavailable 工厂测试一致；本栈 live 层证明零创建与能力门前�
 | bot_collaborator | 65.04%（≥53.88） |
 | manager_sync | 70.03%（≥54.03） |
 | ownership_sync | 65.91%（≥65.90；plugin 100%） |
-| **collaboration_repair（新增）** | **36.36%（≥36.0；router 100%；plugin 0（≥0））** |
+| **collaboration_repair（新增）** | **71.11%（≥70.0；router 100%；plugin 100%）** |
 | cron | 44.91%（≥41.84） |
 | expert_chat | 62.14%（≥61.18） |
 | files | 69.39%（≥63.52） |
 | harness | 50.75%（≥40.86） |
 
-既有模块阈值未改动、未弱化；BCS E2E 汇总：line 53.16%（≥41）、method 47.12%
-（≥36）、endpoint **173/173=100%**、bcs-cli **66/66=100%**、changed-line
-**61.27%（4942/8066，>60%）**。随后对同一 reports 目录执行
-`verify_singlebox_coverage_artifacts.py`：**exit 0**，
-`singlebox coverage artifacts verified`（backend 49.51% ≥38、BaaS 45.94% ≥45、
-BCS router/cli 100%/100%、backend router 命中 1082/plugin 证据 9）。
+既有模块阈值未改动、未弱化；BCS E2E 汇总：line **54.12%**（≥41）、method
+**48.00%**（≥36）、endpoint **173/173=100%**、bcs-cli **66/66=100%**。
+随后对 `pr3569-final-v3/reports` 执行 `verify_singlebox_coverage_artifacts.py`：
+**exit 0**，`singlebox coverage artifacts verified`（backend **49.73%** ≥38、
+BaaS **45.94%** ≥45、BCS router/cli 100%/100%、backend router 命中
+**1093**/plugin 证据 **13**、BaaS router 命中 **296**）。临时 Provider 凭据文件
+已由 runner 清理，确认不存在后再结束。
 
 多模块共享栈下的相互干扰检查（AGENTS.md 要求）：默认全部模块的同一栈上，本模块
 story 与 owner/managers/dormant/expert_chat 等全部 story 并存运行，
-collaboration_repair 双重复测（focused 36.36% / 全量 36.36%）一致，
-无共享栈干扰回退。
+collaboration_repair 复测（focused 71.11% / 全量 71.11%）一致，无共享栈干扰回退。
 
 ## 4. 单次执行语义与已知局限（评审交接快照）
 
@@ -296,14 +319,14 @@ collaboration_repair 双重复测（focused 36.36% / 全量 36.36%）一致，
 | 文件 | 行数 |
 | --- | --- |
 | `apps/backend/tests/community/acceptance/collaboration_repair/conftest.py` | 26 |
-| `apps/backend/tests/community/acceptance/collaboration_repair/live_case.py` | 374 |
-| `apps/backend/tests/community/acceptance/collaboration_repair/test_collaboration_repair_live.py` | 137 |
+| `apps/backend/tests/community/acceptance/collaboration_repair/live_case.py` | 425 |
+| `apps/backend/tests/community/acceptance/collaboration_repair/test_collaboration_repair_live.py` | 148 |
 | `apps/backend/tests/community/endpoints/test_collaboration_repair_endpoint.py` | 181 |
-| `docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-validation.md` | 350 |
-| `apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/README.md` | 234 |
+| `docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-validation.md` | 373 |
+| `apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/README.md` | 241 |
 | `apps/backend/docs/bot-ownership-sync-operations.md` | 264 |
-| `singlebox/ci/singlebox_coverage_modules.yaml`（新增模块段） | 431 |
-| `apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py`（re-export 修复） | 981 |
+| `singlebox/ci/singlebox_coverage_modules.yaml`（新增模块段） | 427 |
+| `apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py`（re-export 修复） | 983 |
 
 全部 ≤1,000 行；`git diff --check` 通过；新增/修改行无密钥、无数据库迁移、
 无 runtime state、无私有 endpoint、无新增依赖（pyproject 未提交变更）。
@@ -312,39 +335,24 @@ collaboration_repair 双重复测（focused 36.36% / 全量 36.36%）一致，
 
 1. （§4.3）为 `BcnService` 暴露公开 timeout 访问器并移除组合根的 `_timeout` 读取。
 2. （Task 7 评审遗留）将 `CollaborationRepairPlugins` port 拆分至独立 di 模块。
-3. （单盒联调覆盖）在共享栈配置 provider scope（BCS 本地
-   `allowed_switch_provider_ids` + 栈级 provider 注册 + backend 侧
-   provider 凭据注入，或以 DEPLOY_PROFILE=corp overlay 联调）后，把
-   `collaboration_repair` 模块（core/plugin 阈值）按 §3.2 的说明重测并上调。
+3. ~~（单盒联调覆盖）共享栈 provider scope 已由 coverage-only 临时
+   Provider 实现并实测上调（§3.2/§3.3，plugin 100%）。~~
 
-## 8. 未执行项与原因（不以 mock/编造数字替代）
+## 8. 此前未执行项的最终状态
 
 1. **Live 双侧的 200 修复报告与四项分项读回（ownership/profile/managers/caller_config）**：
-   单盒公开本地栈无 BCN provider 凭据（§2.1），修复请求在 `factory.open` 的
-   能力门处即按设计 503，探测与四项写入在 live 栈不可能执行；其接口契约、
-   语义检查与 HTTP 200/报告 schema 由下述已绿门禁钉住而非跳过：
-   `tests/community/adapters/http/openapi_v1/test_collaboration_repair.py`
-   （四项顺序、partial_failed/unknown 分项、404/409/502/504 前置映射、
-   `GET /bcs/repair` 旧路径 404）、
-   `tests/community/di/test_collaboration_repair_module.py`
-   （请求 loop 分离、aclose、unavailable 工厂）、
-   `tests/community/contracts/test_bcs_collaboration_metadata.py`（真实 SQL
-   facts + `CollaborationRepairService` + recording Plugin 的消费端到端，含
-   `succeeded` 四项报告与 missing 零调用）、以及 §3.2/§3.3 全量单后端门禁。
-   上线后第一次在带 provider scope 的环境（corp pre）执行时应回补 live 双侧
-   四项读回记录。
-2. **Backend 创建路径的 provider 注册携带头像（create_bot →
+   已关闭。coverage-only 临时 Provider 仅在 Singlebox coverage runner 内
+   注册并被 BCS 一次性配置 allowlist；最终 focused/all-module live story 均
+   以真实 HTTP 修复到 `succeeded`，并读回 owner、manager roster、profile
+   和 caller applied 结果（§2.1/§3.2/§3.3）。普通 public-local 栈仍保持
+   credentialless，503 能力门语义不变。
+2. **caller_config 的 live CAS（stale/unchanged/applied）**：修复成功路径已
+   覆盖 live `applied`。`stale/unchanged` 仍由 BCS `caller_identity_story`
+   与 Backend transport/adapter 单测作为边界证据；本模块 story 不伪造双写
+   分叉。
+3. **剩余未执行项：Backend 创建路径的 provider 注册携带头像（create_bot →
    `_register_bot_to_bcn_as_provider(avatar_url=…)`）的 live 证据**：
-   单盒 dev 无凭据按设计 skip（`_get_provider_config` 见 §2.1）。该路径的
-   payload/激活行为由单测钉住：
+   普通单盒 dev 无凭据按设计 skip（§2.1）。该路径的 payload/激活行为由
    `tests/community/core/bot_management/services/test_bot_service_create_bcn_register.py`
-   与 `test_bcn_service_register_provider.py`（省略/设置/清空字段的 wire 语义）；
-   BCS 侧的消费由 [bcs-validation.md](bcs-validation.md) §2 实测（真实 MySQL 链路
-   完整绿）。本 Task 的 live 注册段使用 BCS 官方 admin onboard 通道复放认证
-   （T8 §5.4 步骤 3），头像写入语义同一实现。
-3. **caller_config 的 live CAS（stale/unchanged/applied）**：同因 §2.1（calls
-   `sync_bot_caller_config` 需 provider 凭据）；BCS 侧交互由
-   [bcs-validation.md](bcs-validation.md) 所引 e2e `caller_identity_story` 实测，
-   Backend 侧由 `test_bcn_service_sync_caller_config.py` 与适配器单测钉住。
-   本 live 故事集里 caller_config 一律 `not_applicable`（无可建立的 caller 配置，
-   未在 fixture 中伪造）。
+   与 `test_bcn_service_register_provider.py` 钉住；BCS 侧消费由
+   [bcs-validation.md](bcs-validation.md) §2 实测。

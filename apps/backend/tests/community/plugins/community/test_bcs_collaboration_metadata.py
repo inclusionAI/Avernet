@@ -1,6 +1,6 @@
-"""Single-pass metadata adapter mapping + recording fake, unit level.
+"""Single-pass metadata plugin mapping + recording fake, unit level.
 
-Covers the composition adapter that adapts the existing synchronous
+Covers the production adapter that adapts the existing synchronous
 ``BcnService`` up-link onto the ``BcsCollaborationMetadataPlugin``
 Protocol method semantics with ``Mock(spec=BcnService)`` only (no HTTP,
 no network), plus the test-only recording fake's behavior. Every method
@@ -42,7 +42,7 @@ from agentclaw.community.plugins.local.bcs_collaboration_metadata import (
     RecordingBcsCollaborationMetadataPlugin,
 )
 
-from agentclaw.community.di.bcs_collaboration_metadata_adapter import (
+from agentclaw.community.plugins.community.bcs_collaboration_metadata import (
     BcnCollaborationMetadataAdapter,
 )
 

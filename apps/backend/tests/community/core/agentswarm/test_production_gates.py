@@ -146,7 +146,9 @@ class TestChaosFencing:
         db = _gate_db()
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
-            config=_gate_config(),
+            # Expiry is forced below; this gate tests fencing, not the slice
+            # budget. Allow the production turn cadence and threaded DB work.
+            config=_gate_config(slice_seconds=30.0),
             llm=_StoryLLM([
                 _spawn_decision("a1", "work"),
                 _wait_decision("a1"),

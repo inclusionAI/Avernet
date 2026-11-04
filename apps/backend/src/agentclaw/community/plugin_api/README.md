@@ -147,6 +147,11 @@ translation, including enterprise host addresses and Teclaw namespaces.
 `BcsManagersPlugin` is the outbound transport boundary for manager projection.
 `replace_managers` sends one full `ManagerSnapshot` under an explicit deadline;
 failures expose `BcsManagersError(kind, code)` without raw response bodies.
+Missing targets use `REJECTED` with the kernel's `BOT_NOT_FOUND_CODE` instead
+of an HTTP-shaped code. Background sync still treats this as a permanent
+rejection; request-scoped repair stops remaining writes and reports
+`collaboration_bot_not_found`. The HTTP plugin and consumer conformance suites
+pin this mapping.
 NOT_SENT and UNKNOWN are eligible for the consumer's bounded best-effort retry;
 REJECTED ends the round. UNKNOWN does not prove whether BCS applied the write.
 There is no coordination plugin or persistent block. Consumer conformance lives

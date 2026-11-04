@@ -64,7 +64,7 @@ from agentclaw.community.core.repository.protocols.bot.manager_sync import (
 from agentclaw.community.core.repository.protocols.bot.ownership_sync import (
     OwnershipSyncReadRepository,
 )
-from agentclaw.community.di.bcs_collaboration_metadata_adapter import (
+from agentclaw.community.plugins.community.bcs_collaboration_metadata import (
     BcnCollaborationMetadataAdapter,
 )
 from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
