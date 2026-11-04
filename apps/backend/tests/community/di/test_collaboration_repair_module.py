@@ -77,7 +77,7 @@ from tests.community.core.bot_management.collaboration_repair.factories import (
     default_repair_facts,
 )
 
-_SECRET = "collaboration-repair-fixture-signing-key-0123456789abcdef"
+_SECRET = "test-token"
 _BCS_BASE_URL = "http://127.0.0.1:9999"
 _HEADERS = {"Authorization": "Bearer caller-token", "Cookie": "session=1"}
 _COMMAND = RepairCommand(KEY, CURRENT_OWNER)
@@ -424,7 +424,7 @@ async def test_unavailable_deployment_refuses_before_constructing_plugins(
 
 @pytest.mark.asyncio
 async def test_test_profile_repairs_through_recording_delivery_only():
-    """A local profile delivers the repair without credentials or private BCN."""
+    """A local profile delivers the repair without credentials or test-token BCN."""
     injector = build_injector(
         profile=DeployProfile.TEST,
         extra_modules=[

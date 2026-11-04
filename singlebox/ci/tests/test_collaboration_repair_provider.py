@@ -34,8 +34,8 @@ def test_provision_writes_private_minimal_credentials(tmp_path, monkeypatch, cap
     def handle(request):
         calls.append(request)
         return httpx.Response(200, json={
-            "provider_id": "prv_coverage", "provider_admin_token": "fixture-private-value",
-            "bcs_to_provider_token": "unused-private-value",
+            "provider_id": "prv_coverage", "provider_admin_token": "test-token",
+            "bcs_to_provider_token": "test-token",
         })
 
     client_class = httpx.Client
@@ -44,7 +44,7 @@ def test_provision_writes_private_minimal_credentials(tmp_path, monkeypatch, cap
     target = tmp_path / "provider.json"
     provider.provision("http://127.0.0.1:21000", "http://127.0.0.1:1234", target)
     assert json.loads(target.read_text()) == {
-        "provider_id": "prv_coverage", "provider_admin_token": "fixture-private-value"}
+        "provider_id": "prv_coverage", "provider_admin_token": "test-token"}
     assert target.stat().st_mode & 0o777 == 0o600
     assert len(calls) == 1
     assert calls[0].url.path == "/providers"
@@ -59,7 +59,7 @@ def test_provision_writes_private_minimal_credentials(tmp_path, monkeypatch, cap
     assert capsys.readouterr() == ("", "")
 
 
-@pytest.mark.parametrize("data", [{}, {"provider_id": "bad id", "provider_admin_token": "private"},
+@pytest.mark.parametrize("data", [{}, {"provider_id": "bad id", "provider_admin_token": "test-token"},
                                   {"provider_id": "prv_good", "provider_admin_token": ""}])
 def test_invalid_provider_response_never_writes_fixture(tmp_path, monkeypatch, data):
     monkeypatch.setenv("SINGLEBOX_COVERAGE", "1")
@@ -74,7 +74,7 @@ def test_invalid_provider_response_never_writes_fixture(tmp_path, monkeypatch, d
 def test_authorize_uses_structured_toml_and_preserves_other_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("SINGLEBOX_COVERAGE", "1")
     fixture = tmp_path / "provider.json"
-    fixture.write_text(json.dumps({"provider_id": "prv_coverage", "provider_admin_token": "private"}))
+    fixture.write_text(json.dumps({"provider_id": "prv_coverage", "provider_admin_token": "test-token"}))
     config = tmp_path / "bcs.toml"
     config.write_text('allowed_switch_provider_ids = [\n "prv_existing", # keep\n]\nport = 21000\n[llm]\ntype = "none"\n')
     provider.authorize(fixture, config)
@@ -82,7 +82,7 @@ def test_authorize_uses_structured_toml_and_preserves_other_settings(tmp_path, m
     assert tomlkit.parse(config.read_text()).unwrap() == {
         "allowed_switch_provider_ids": ["prv_existing", "prv_coverage"],
         "port": 21000, "llm": {"type": "none"}}
-    assert "private" not in config.read_text()
+    assert "provider_admin_token" not in config.read_text()
     assert "# keep" in config.read_text()
 
 
@@ -95,7 +95,7 @@ def test_authorize_requires_coverage(tmp_path, monkeypatch):
 def test_authorize_rejects_invalid_configuration_without_mutation(tmp_path, monkeypatch):
     monkeypatch.setenv("SINGLEBOX_COVERAGE", "1")
     fixture = tmp_path / "provider.json"
-    fixture.write_text(json.dumps({"provider_id": "prv_coverage", "provider_admin_token": "private"}))
+    fixture.write_text(json.dumps({"provider_id": "prv_coverage", "provider_admin_token": "test-token"}))
     config = tmp_path / "bcs.toml"
     original = 'allowed_switch_provider_ids = "not-an-array"\n'
     config.write_text(original)

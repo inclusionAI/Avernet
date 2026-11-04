@@ -92,6 +92,15 @@ SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
 # msgType=tcApp2a; it is not a certified token. Keep this exact, not prefix-wide.
 PUBLIC_PROTOCOL_LABELS = frozenset({"OPEN_API:app:agentswarm"})
 PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
+PYTHON_FIELD_NAME_RE = re.compile(
+    r"(?ix)^(?:[a-z0-9]+[._-])*"
+    r"(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
+    r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
+    r"password|passwd|credential|token)$"
+)
+PYTHON_INCOMPLETE_CALL_RE = re.compile(
+    r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\($"
+)
 
 
 def _entropy(value: str) -> float:
@@ -225,7 +234,14 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
                 )
     if assignment.group("quoted") is not None:
         return False
-    expression = content[assignment.start("bare"):].strip().rstrip(",")
+    previous = content[:assignment.start()].rstrip()
+    if previous.endswith("(") or previous.endswith(","):
+        # Keyword argument: the rest of the call belongs to outer parameters.
+        expression = assignment.group("bare").strip().rstrip(",")
+    else:
+        expression = content[assignment.start("bare"):].strip().rstrip(",")
+    if PYTHON_INCOMPLETE_CALL_RE.fullmatch(expression):
+        return True
     try:
         node = ast.parse(expression, mode="eval").body
     except (SyntaxError, ValueError):
@@ -237,6 +253,10 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if isinstance(value, ast.Attribute):
             return safe(value.value)
         if isinstance(value, ast.Subscript):
+            # Unknown numeric indexes are deliberately conservative; named
+            # indexes and credential-field-name strings are references.
+            if isinstance(value.slice, ast.Constant) and not isinstance(value.slice.value, str):
+                return False
             return safe(value.value) and safe(value.slice)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
@@ -252,6 +272,8 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if isinstance(value, (ast.List, ast.Tuple)):
             return all(safe(item) for item in value.elts)
         if isinstance(value, ast.Constant):
+            if isinstance(value.value, str) and PYTHON_FIELD_NAME_RE.fullmatch(value.value):
+                return True
             return not isinstance(value.value, (str, bytes)) or not (
                 _looks_like_plaintext_value(
                     value.value.decode("utf-8", errors="replace")

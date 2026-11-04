@@ -82,7 +82,7 @@ assert os.environ["SINGLEBOX_COVERAGE"] == "1"
 assert args.action == "provision"
 assert args.bcs_url == "http://127.0.0.1:21000"
 assert args.mock_url == "http://127.0.0.1:39090"
-args.fixture.write_text(json.dumps({"provider_id": "prv_fixture", "provider_admin_token": "fixture-only"}))
+args.fixture.write_text(json.dumps({"provider_id": "prv_fixture", "provider_admin_token": "test-token"}))
 args.fixture.chmod(0o600)
 PYTEST
   cat > "${tmp}/apps/bcs/scripts/e2e-test/mock_services.sh" <<'SH'

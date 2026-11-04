@@ -18,7 +18,7 @@ def test_credentials_are_loaded_lazily_without_changing_default_config(tmp_path)
     assert not source.available
     path.write_text(json.dumps({
         "provider_id": "fixture-provider",
-        "provider_admin_token": "ephemeral-fixture-token",
+        "provider_admin_token": "test-token",
     }))
     assert source.available
     resolved = source._resolve()
