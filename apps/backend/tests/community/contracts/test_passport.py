@@ -172,3 +172,9 @@ def test_handoff_consumer_refuses_local_capability_before_freezing(world, monkey
         consumer.create(bot_pk=1, actor_id="A", new_owner_id="B", request_key="request")
     assert called == [{"bot_id": "service", "owner_workno": "A", "entity_id": "A"}]
     repository.begin.assert_not_called()
+
+
+@pytest.mark.parametrize("fixture", ["world", "community_world"])
+def test_passport_without_history_does_not_invent_handoff_snapshot(request, fixture):
+    plugin = request.getfixturevalue(fixture).get(PassportPlugin)
+    assert plugin.query_handoff_passport(bot_id="bot", owner_workno="owner", entity_id="entity") is None

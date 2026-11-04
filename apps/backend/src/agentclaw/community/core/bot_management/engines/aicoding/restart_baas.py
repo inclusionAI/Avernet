@@ -256,14 +256,14 @@ class AicodingBaasRestart:
                     RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: prepared.image_policy_on_success,
                 },
             )
+            # Keep both serving states intact until the FINAL receipt/target check.
+            # The coding mutation fence changes Bot.PENDING only after it passes.
+            self._check_current_binding(execution)
+            strategy.before_restart_submission(ctx)
             service._device_binding_repo.update_status(
                 binding_id=binding_id,
                 status=DeviceBindingStatus.PENDING,
             )
-            # Admission already wrote Bot.PENDING; never repeat that write here.
-            # The receipt and physical target are checked at this exact boundary.
-            self._check_current_binding(execution)
-            strategy.before_restart_submission(ctx)
             result = service._baas_service_provider().post_bots_api(
                 path=f"/api/v1/bots/{prepared.bot_uuid}/update",
                 payload=prepared.request_payload,

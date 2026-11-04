@@ -19,6 +19,7 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
 from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
@@ -76,7 +77,7 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
 
     entity_id: str = Field(default="", description="Immutable Bot resource locator.")
@@ -441,7 +442,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
