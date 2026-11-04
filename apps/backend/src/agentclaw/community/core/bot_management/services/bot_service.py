@@ -34,6 +34,9 @@ from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaUnavailableError,
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
+from agentclaw.community.core.bot_management.services.restart_binding_scope import (
+    service_restart_binding_scope,
+)
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.bot_management.codefuse_write import (
     CodefuseWriteResult,
@@ -4533,6 +4536,7 @@ class BotService(BotServiceProtocol):
         self,
         *,
         bot_id: str,
+        bot_type: str,
         entity_id: str,
         entity_type: str,
         env: str,
@@ -4552,6 +4556,22 @@ class BotService(BotServiceProtocol):
             for binding in bindings:
                 if (binding.device_props or {}).get("bolt_id") != bot_id:
                     continue
+                if bot_type == "service":
+                    scope = service_restart_binding_scope(
+                        binding, bot_id=bot_id, entity_id=entity_id,
+                        entity_type=entity_type, env=env,
+                    )
+                    if scope != "draft":
+                        logger.info(
+                            "[bot_service.restart_bot] historical service binding scope: "
+                            "bot_id=%s entity_id=%s entity_type=%s env=%s "
+                            "binding_id=%s scope=%s binding_status=%s",
+                            bot_id, entity_id, entity_type, env,
+                            binding.id, scope, binding.status,
+                        )
+                        if scope == "unknown":
+                            return None
+                        continue
 
                 status = str(binding.status or "").upper()
                 if status not in {
@@ -4909,6 +4929,7 @@ class BotService(BotServiceProtocol):
         elif bot_status == "FAILED":
             current_device_provider = self._resolve_historical_unbound_restart_provider(
                 bot_id=bot_id,
+                bot_type=bot.get("bot_type") or "personal",
                 entity_id=str(entity_id),
                 entity_type=bot.get("entity_type", "staff"),
                 env=env,
