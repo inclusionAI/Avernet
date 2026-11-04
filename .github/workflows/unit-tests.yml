@@ -292,8 +292,9 @@ jobs:
             --base-ref "$BCS_BASE_REF" \
             --bcs-dir "$PWD" \
             --pass-rate-min 100 \
-            --overall-line-min 84 \
-            --changed-line-min 80
+            --overall-line-min 87 \
+            --changed-line-min 87 \
+            --changed-line-min-lines 51
 
       - name: Upload BCS test results
         if: always() && steps.changes.outputs.skip-bcs != 'true'

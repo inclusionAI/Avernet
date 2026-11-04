@@ -179,7 +179,8 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
         for inventory in ['edge-authority scenarios=63', 'provider-lifecycle scenarios=30',
                           'group-authorization scenarios=9', 'session-authorization scenarios=6']:
             self.assertEqual(bcs_job.count(inventory), 1)
-        for gate in ['--pass-rate-min 100', '--overall-line-min 84', '--changed-line-min 80']:
+        for gate in ['--pass-rate-min 100', '--overall-line-min 87', '--changed-line-min 87',
+                     '--changed-line-min-lines 51']:
             self.assertIn(gate, bcs_job)
 
 

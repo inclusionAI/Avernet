@@ -302,6 +302,21 @@ class GateIsReportOnlyTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("fewer than 20 lines in scope — reported only", proc.stdout)
 
+    def test_ci_changed_line_threshold_and_minimum_size(self):
+        source = self.bcs / "crates/a/src/lib.rs"
+        source.write_text("fn a() {}\n" + "".join(f"fn f{i}() {{}}\n" for i in range(20)))
+        self.git("commit", "-q", "-am", "twenty changed lines")
+        report = self.root / "cobertura.xml"
+        for total, covered, expected in [(19, 0, 0), (20, 13, 1), (20, 14, 0)]:
+            with self.subTest(total=total, covered=covered):
+                report.write_text(cobertura(str(self.bcs), [("crates/a/src/lib.rs",
+                    [(line, int(line < covered + 2)) for line in range(2, total + 2)],
+                )]))
+                proc = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~2",
+                                     "--ignore-filename-regex", IGNORE,
+                                     "--changed-line-min", "65")
+                self.assertEqual(proc.returncode, expected, proc.stdout + proc.stderr)
+
     def test_changed_line_gate_passes_when_not_applicable(self):
         proc = self.gate_with([(1, 1)])  # changed lines 2-3 not instrumentable
         self.assertEqual(proc.returncode, 0, proc.stdout)

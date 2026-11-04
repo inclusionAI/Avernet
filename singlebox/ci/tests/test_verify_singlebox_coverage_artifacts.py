@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -82,3 +83,25 @@ def test_malformed_llvm_metric_is_reported_without_crashing(tmp_path: Path):
     assert metrics[:2] == (0.0, 0.0)
     assert "BCS lines metric must be an object" in errors
     assert "BCS functions metric must be an object" in errors
+
+
+def test_default_bcs_thresholds_are_inclusive(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("sys.argv", [str(SCRIPT)])
+    args = VERIFIER.parse_args()
+    assert (args.bcs_line_min, args.bcs_method_min) == (54.0, 48.0)
+    assert (args.bcs_router_min, args.bcs_cli_min) == (100.0, 100.0)
+    _write_bcs_reports(
+        tmp_path,
+        '<overall covered="4" total="4" uncovered="0" percent="100.0"/>',
+    )
+    for lines, methods, expected_errors in [(5400, 4800, []), (5399, 4799, [
+        "BCS line coverage 53.99% < 54.00%",
+        "BCS method coverage 47.99% < 48.00%",
+    ])]:
+        (tmp_path / "bcs/summary.json").write_text(json.dumps({"data": [{"totals": {
+            "lines": {"covered": lines, "count": 10000},
+            "functions": {"covered": methods, "count": 10000},
+        }}]}), encoding="utf-8")
+        errors: list[str] = []
+        VERIFIER.validate_bcs_artifacts(tmp_path, args, errors)
+        assert errors == expected_errors
