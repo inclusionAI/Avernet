@@ -1,14 +1,31 @@
 import { Button } from '@/components/ui';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/Dialog';
 import type { SessionView } from '@/domain/collaboration';
 import { isTerminalTask, taskIdentity } from '@/domain/groupTasks/projection';
 import { useManagerWorkerTasks } from '@/pages/Workspace/hooks/useManagerWorkerTasks';
-import * as Dialog from '@radix-ui/react-dialog';
 import type { ChatMessage } from '@tc-chat/core';
 import { Check, ChevronRight, ChevronUp, CircleHelp, Clock3, LoaderCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { GroupTaskRow } from './GroupTaskRow';
 
-export function ManagerWorkerTasks({ session, messages, connected = true }: { session: SessionView; messages: ChatMessage[]; connected?: boolean }) {
+export function ManagerWorkerTasks({
+  session,
+  messages,
+  connected = true,
+}: {
+  session: SessionView;
+  messages: ChatMessage[];
+  connected?: boolean;
+}) {
   const model = useManagerWorkerTasks(session.sessionId, messages, session.participants, connected);
   const [open, setOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -55,19 +72,21 @@ export function ManagerWorkerTasks({ session, messages, connected = true }: { se
   ];
   const viewSource = (messageId: string) => {
     const conversation = trigger.current?.closest('[data-workspace-conversation]') ?? document;
-    const target = [...conversation.querySelectorAll<HTMLElement>('[data-message-id]')].find((element) => element.dataset.messageId === messageId);
+    const target = [...conversation.querySelectorAll<HTMLElement>('[data-message-id]')].find(
+      (element) => element.dataset.messageId === messageId,
+    );
     setOpen(false);
     requestAnimationFrame(() => target?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   };
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
       onOpenChange={(value) => {
         setContainer(trigger.current?.closest<HTMLElement>('[data-workspace-conversation]') ?? undefined);
         setOpen(value);
       }}
     >
-      <Dialog.Trigger asChild>
+      <DialogTrigger asChild>
         <Button
           variant="ghost"
           ref={trigger}
@@ -94,30 +113,30 @@ export function ManagerWorkerTasks({ session, messages, connected = true }: { se
             查看任务 <ChevronUp className="size-3" aria-hidden />
           </span>
         </Button>
-      </Dialog.Trigger>
-      <Dialog.Portal container={container}>
-        <Dialog.Overlay className="absolute inset-0 z-40 bg-foreground/10" />
+      </DialogTrigger>
+      <DialogPortal container={container}>
+        <DialogOverlay className="absolute inset-0 z-40 bg-foreground/10" />
         {/* 480px task rail on desktop; one bottom sheet on narrow screens. */}
-        <Dialog.Content
+        <DialogContent
           className="absolute inset-x-0 bottom-0 z-50 flex max-h-[85%] flex-col rounded-t-xl border border-border bg-background text-foreground outline-none sm:inset-x-auto sm:inset-y-0 sm:right-0 sm:max-h-full sm:w-[480px] sm:max-w-full sm:rounded-none"
           aria-describedby="group-task-description"
         >
           <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
             <div>
-              <Dialog.Title className="text-base font-semibold">任务</Dialog.Title>
-              <Dialog.Description id="group-task-description" className="mt-1 text-xs text-muted-foreground">
+              <DialogTitle className="text-base font-semibold">任务</DialogTitle>
+              <DialogDescription id="group-task-description" className="mt-1 text-xs text-muted-foreground">
                 {running.length || queued.length || unknown.length || recent.length
                   ? summary
                   : currentReceipts.length
                   ? `${currentReceipts.length} 条本次派发待确认`
                   : '当前没有执行中的任务'}
-              </Dialog.Description>
+              </DialogDescription>
             </div>
-            <Dialog.Close asChild>
+            <DialogClose asChild>
               <Button variant="ghost" size="icon" aria-label="关闭任务面板">
                 <X className="size-4" />
               </Button>
-            </Dialog.Close>
+            </DialogClose>
           </div>
           <div className="min-h-0 overflow-y-auto px-4 py-4">
             {model.error ? (
@@ -188,8 +207,8 @@ export function ManagerWorkerTasks({ session, messages, connected = true }: { se
               </section>
             ) : null}
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   );
 }
