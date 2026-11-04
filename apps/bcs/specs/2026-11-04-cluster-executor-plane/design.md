@@ -224,10 +224,21 @@ stale(D) = max(last_heartbeat_at over all roster rows) − last_heartbeat_at(D)
 ```
 
 Reason: after a cluster-wide storage hiccup, every node missed heartbeats at
-the same time. Wall-clock staleness would make every node look dead to every
-other node and trigger a cluster-wide takeover storm. Relative staleness sees
-everyone equally behind, so nobody is dead. (Chubby gives clients a grace
-period after its own master fails over for the same reason.)
+the same time; wall-clock staleness would make everyone look dead to everyone
+and trigger a takeover storm. Relative staleness sees everyone equally behind.
+
+That alone is not enough after an outage **longer** than the claim threshold:
+the first node to heartbeat again advances the maximum while healthy peers
+still carry pre-outage timestamps. So the observer must be healthy too
+(**recovery grace**, the idea behind Chubby's grace period after its own master
+fails over). Each node tracks `healthy_since`, the time of its first
+successful heartbeat after its last failed one, or after start. It treats
+`stale(D) > threshold` as death, for claiming, only when
+`now − healthy_since ≥ claim threshold`. After an outage every node's
+`healthy_since` resets, so nobody claims a peer's leases for one claim
+threshold; meanwhile every healthy peer heartbeats several times and only
+truly dead nodes stay stale. Positive evidence (§10.4) and claims of released
+leases need no grace.
 
 ### 6.4 Two thresholds on one heartbeat
 
@@ -793,47 +804,10 @@ commit outcomes) are in **[storage.md](storage.md)**.
 
 ## 14. Capacity and cost model
 
-### 14.1 Statements per operation
-
-| Operation | Statements | Frequency |
-| --- | --- | --- |
-| Heartbeat (renews all of a node's leases) | 1 write | per node per 5 s |
-| Roster read | 1 read | per node per 5 s |
-| Claim (cold) | 1 | per new episode |
-| Claim (mismatch) | 2 | rare, after membership change |
-| Fence step | +1 single-row PK update per fenced transaction | per owner write transaction |
-| Release / transfer | 1 | per drain or rebalance |
-| Inbound round persist | 1 | per round (required by write-before-ack) |
-| Owner pickup of fallback input | 1 indexed query **per node per tick**, never per session | per node per tick |
-| Failure discovery | 1 paginated query per survivor per dead node | per death |
-
-These counts become `RecordingDb` regression tests, so a later change cannot
-silently turn a per-node query into a per-session one.
-
-### 14.2 Two scenarios
-
-Little's law: in-flight sessions = arrival rate × average run duration.
-
-| | 10 k API QPS, mostly reads | 100 k new rounds/s |
-| --- | --- | --- |
-| In-flight sessions (60 s runs) | small | ~6 M (6 M lease rows) |
-| DB statements/s | ~10–30 k | ~1–5 M, mostly writes |
-| New data | small | ~1–10 GB/s (~85–850 TB/day; assumes 10–100 KB per round) |
-| Binding constraint | none | storage write throughput and volume |
-
-At the 100 k scale: OceanBase with co-partitioning; fewer statements per
-round (the repeated full reads flagged in
-`specs/2026-09-21-nested-fixed-loops/capacity.md`); micro-batching inbound
-writes; persist chunks or final output, not every token; L3 retention and
-compaction become mandatory; size the tenant by load test. These figures
-are estimates, not measurements.
-
-### 14.3 How to replace estimates with measurements
-
-1. Count statements per operation with `RecordingDb`.
-2. Load-test one node against real storage (release build) to find its knee.
-3. Load-test the storage tenant at the measured statement mix.
-4. Kill a node at load to measure the rehydration spike.
+Statements per lease/routing operation (renewal is one write per node per
+tick; owner pickup is one indexed query per node per tick, never per
+session), the 10 k-QPS and 100 k-rounds/s scenarios, and how to replace the
+estimates with measurements are in **[capacity.md](capacity.md)**.
 
 ---
 
@@ -845,6 +819,7 @@ All configurable; defaults chosen for RTO ≤ 30 s.
 | --- | --- | --- |
 | Heartbeat interval | 5 s | Also renews leases (node-level liveness) |
 | Placement-stale threshold | 10 s | Relative staleness |
+| Observer recovery grace | = claim threshold (15 s) | No peer is declared dead until the observer's own heartbeats have been healthy this long (§6.3) |
 | Claim threshold | 15 s | Effective lease TTL |
 | Self-fence margin | 2 s | Deadline measured from heartbeat send time |
 | Non-preferred claim grace | 3 s | |

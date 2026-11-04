@@ -24,7 +24,7 @@
   <rect x="620" y="100" width="150" height="20" fill="#e3f0e9" stroke="#157a55"/>
   <text x="695" y="114" font-size="11" text-anchor="middle" fill="#157a55">claim · rehydrate · reconcile</text>
   <circle cx="790" cy="110" r="6" fill="#157a55"/>
-  <text x="790" y="134" font-size="11" text-anchor="middle" fill="#157a55">~18–23 s · resumed</text>
+  <text x="790" y="134" font-size="11" text-anchor="middle" fill="#157a55">~18–26 s · resumed</text>
 
   <!-- trigger 1 -->
   <rect x="24" y="160" width="440" height="200" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
@@ -57,6 +57,6 @@
   <text x="44" y="430" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Same advertise_addr, new node_id</tspan> — the process restarted in place; two processes can't listen on one address → old run's leases</text>
   <text x="44" y="448" font-size="11.5" fill="#1c2420">claimable as soon as the new roster row is seen. RTO ≈ restart time + ≤ 5 s. (Also removes singlebox's post-crash wait.)</text>
   <text x="44" y="474" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Release on panic / shutdown hook</tspan> — best effort; nothing runs on OOM kill or kill -9.</text>
-  <text x="44" y="500" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Relative staleness</tspan> — stale(D) = max(heartbeats) − heartbeat(D), so a cluster-wide storage hiccup declares nobody dead.</text>
+  <text x="44" y="500" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Relative staleness</tspan> — stale(D) = max(heartbeats) − heartbeat(D), plus a recovery grace: nobody claims until its own heartbeats are healthy for 15 s.</text>
   <text x="44" y="524" font-size="11.5" fill="#5c6a62">A node that is alive but silently unreachable gives no evidence: wait the claim threshold.</text>
 </svg>
