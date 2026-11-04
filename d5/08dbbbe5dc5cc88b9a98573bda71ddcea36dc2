@@ -1,0 +1,32 @@
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_9e428ec8192673::t_cf3a6148d4b83a 66-74
+  s_9e428ec8192673::t_e9886d0c2d7548 75-88
+apps/bcsfuse/packages/search-core/tests/test_index_documents.py
+  s_9e428ec8192673::t_6e2eef76954039 99-101,103-105,115,117-118,120-122,124-130,132-134
+  s_9e428ec8192673::t_c16b8c651ab968 4,95-98,102,106-114,119,123,131
+  s_9e428ec8192673::t_960894c204e995 116
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_documents.py
+  s_9e428ec8192673::t_94e87efc25fc19 11,67-79,108,124,135,164,185,198,209-214,251,274,320,325-327,333-334
+  s_9e428ec8192673::t_4959246a15774a 21,26,236,242,360-361
+  s_9e428ec8192673::t_6e2eef76954039 99-101,225-227
+  s_9e428ec8192673::t_6ae5be4fac9f9b 215-219
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/index_documents.py
+  s_9e428ec8192673::t_4959246a15774a 3,41-51,55-59
+  s_9e428ec8192673::t_6e2eef76954039 52-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d508dbbbe5dc5cc88b9a98573bda71ddcea36dc2",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

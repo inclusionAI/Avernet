@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-11-03-caller-dispatch-stage-timeouts-design.md
+  s_ec329e2b8ae9bc::t_8b3f5bb1deee9a 80-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e7d984b23fdc5860e2177552191bb27e3e2e6bc",
+  "prompts": {},
+  "sessions": {
+    "s_ec329e2b8ae9bc": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "134f343e-3d10-4322-a5b5-6382cbcc9062",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

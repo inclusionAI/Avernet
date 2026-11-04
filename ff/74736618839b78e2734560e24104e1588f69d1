@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 209,211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff74736618839b78e2734560e24104e1588f69d1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

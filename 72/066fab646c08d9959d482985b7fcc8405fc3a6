@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  h_43af82e14600e4 231-239,241-251,253,255-256,258-259,261-264,271,273-277,279-280,284-287,289-292,294-296,298-299,301-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72066fab646c08d9959d482985b7fcc8405fc3a6",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
