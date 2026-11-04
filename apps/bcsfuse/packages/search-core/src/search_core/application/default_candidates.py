@@ -5,6 +5,7 @@ import asyncio
 from search_core.api.errors import SearchUnavailable
 from search_core.api.models import SearchItem, SearchResult
 from search_core.application.cache import _key
+from search_core.core.timing import stage_timing
 
 
 class DefaultCandidates:
@@ -63,30 +64,36 @@ class DefaultCandidates:
             hit = None
         return revision, key, hit
 
-    async def _ids(self, request):
+    async def _ids(self, request, stage):
         if not self.cache.enabled:
+            stage["cache"] = "disabled"
             return await self._load_ids(request)
         _, _, hit = self._cached(request)
         if hit is not None:
+            stage["cache"] = "hit"
             return hit
         # Hot hits never wait for an unrelated cold refresh. Waiters recheck
         # after the loader completes; the outer request deadline bounds waiting.
         async with self._refresh:
             revision, key, hit = self._cached(request)
             if hit is not None:
+                stage["cache"] = "hit_after_wait"
                 return hit
+            stage["cache"] = "miss"
             ids = await self._load_ids(request)
             if revision is not None:
                 self.state.put_result(self.cache, revision, key, ids)
             return ids
 
     async def retrieve(self, request):
-        if request.allowed_ids == frozenset() or any(
-            not v for v in request.filters.values()
-        ):
-            ids = ()
-        else:
-            ids = await self._ids(request)
+        with stage_timing("default_candidates") as stage:
+            if request.allowed_ids == frozenset() or any(
+                not v for v in request.filters.values()
+            ):
+                ids = ()
+            else:
+                ids = await self._ids(request, stage)
+            stage["result_count"] = len(ids)
         return SearchResult(
             items=tuple(SearchItem(key, "", "", 0.0, "default") for key in ids),
             status="degraded",
