@@ -39,3 +39,16 @@ story_owner_mode_master_relay() {
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_owner_mode_master_relay")
 fi
+
+story_caller_delegation_chain() {
+    info "Story: caller parent delegates to a caller worker over the protected wire"
+    local result=0
+    python3 "$SCRIPT_DIR/caller_delegation_chain_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Caller parent delegated to the caller worker; both rides reached the provider" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_caller_delegation_chain")
+fi
