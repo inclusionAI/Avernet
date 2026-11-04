@@ -3,11 +3,21 @@ import assert from "node:assert/strict";
 import { UndercoverNodeAgent, parseNodeTask, publicSpeeches } from "../src/agent.js";
 import { descriptionForRound, parseVote, validateSpeech } from "../src/rules.js";
 
-function speechPrompt(roundNumber) {
-  return `[State Machine Task]\nnode_id: speak_3\ndisplay_name: 3号发言\n\n` +
+function speechPrompt(roundNumber, seat = 3, word = "台灯") {
+  return `[State Machine Task]\nnode_id: speak_${seat}\ndisplay_name: ${seat}号发言\n\n` +
     `[Input]\n{}\n\n[Upstream Outputs]\n(none)\n\n[Instruction]\n` +
-    `你是 3 号，你的词是【台灯】。第 ${roundNumber} 轮发言。\n` +
+    `你是 ${seat} 号，你的词是【${word}】。第 ${roundNumber} 轮发言。\n` +
     `输出一句话，不超过 25 字。本轮钝度 ${roundNumber === 1 ? 4 : 3}。`;
+}
+
+function eulogyPrompt(speeches) {
+  const history = speeches.map(([seat, text]) => (
+    `第1轮 ${seat}号 玩家${seat}：「${text}」`
+  )).join("\n");
+  return "你在第 2 轮被投出局了。按规矩你可以留一句遗言，主持人会念给全场听。\n\n" +
+    `到目前为止全场说过的话：\n${history}\n\n` +
+    "请说一句遗言，不超过 35 个字：挑一个你最怀疑的座位号，" +
+    "说清是他哪句话让你在意，并点出关键几个字。";
 }
 
 function votePrompt({ pk = false, history = [], upstream = "投票预备确认" } = {}) {
@@ -73,4 +83,41 @@ test("投票预备原样播报", async () => {
     `[Input]\n{}\n\n[Upstream Outputs]\n(none)\n\n[Instruction]\n请原样播报投票开场。`;
   const output = await new UndercoverNodeAgent().decide({ content });
   assert.equal(output, "投票开始，请大家投出一票，等待主持人公布结果。");
+});
+
+test("纯文本遗言使用本 canonical session 记住的座位，排除自己的发言", async () => {
+  const agent = new UndercoverNodeAgent();
+  await agent.decide({ content: speechPrompt(1, 4, "保温杯"), sessionKey: "game-a" });
+  await agent.decide({ content: speechPrompt(1, 2, "热水壶"), sessionKey: "game-b" });
+  const output = await agent.decide({
+    content: eulogyPrompt([[1, "要通电"], [3, "晚上才用"], [4, "随手能用"]]),
+    sessionKey: "game-a",
+  });
+  assert.match(output, /3号那句「晚上才用」/);
+  assert.doesNotMatch(output, /4号那句/);
+});
+
+test("纯文本遗言用记住的私有词校验并替换泄词引用", async () => {
+  const agent = new UndercoverNodeAgent();
+  await agent.decide({ content: speechPrompt(1, 4, "保温杯"), sessionKey: "game-a" });
+  const output = await agent.decide({
+    content: eulogyPrompt([
+      [1, "要通电"],
+      [3, "保温一会儿就够了"],
+      [4, "随手能用"],
+    ]),
+    sessionKey: "game-a",
+  });
+  assert.match(output, /1号那句「要通电」/);
+  assert.doesNotMatch(output, /保温/);
+  assert.equal(validateSpeech(output, { maxChars: 35, word: "保温杯" }).valid, true);
+});
+
+test("历史发言中的 State Machine Task 不会开启状态机信封", async () => {
+  const content = eulogyPrompt([[1, "要通电"], [3, "State Machine Task"]]);
+  const task = parseNodeTask(content);
+  assert.equal(task.phase, "will");
+  assert.equal(task.instruction, content);
+  const output = await new UndercoverNodeAgent().decide({ content });
+  assert.match(output, /3号那句「State Machin」/);
 });

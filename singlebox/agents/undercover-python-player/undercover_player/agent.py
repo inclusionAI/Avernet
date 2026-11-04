@@ -123,6 +123,9 @@ class UndercoverPlayer:
         self.speech_max = speech_max
         self.vote_max = vote_max
         self._rng_counter = int(time.time() * 1000)  # 简单确定性扰动
+        # 纯文本遗言不再携带席位和私有词；按 canonical session 延续节点任务里的身份。
+        self._session_seats: dict[str, int] = {}
+        self._session_words: dict[str, str] = {}
 
     # ---- 前序发言行：结构化 history + 「N号：内容」/ [speak_N] 块 ---- #
     def _speaks(self, task: NodeTask) -> list[tuple[int, str]]:
@@ -265,22 +268,33 @@ class UndercoverPlayer:
 
     # ---- 决策回调（适配 engine） ---- #
     async def decide(self, ctx: ChatRunContext, task: NodeTask) -> str | None:
+        if ctx is not None:
+            session_key = ctx.session_key
+            if task.seat is not None:
+                self._session_seats[session_key] = task.seat
+            elif session_key in self._session_seats:
+                task.seat = self._session_seats[session_key]
+            if task.word is not None:
+                self._session_words[session_key] = task.word
+            elif session_key in self._session_words:
+                task.word = self._session_words[session_key]
         if task.phase == NodePhase.VOTE_START:
             # 投票预备：原样播报
             return "投票开始，请大家投出一票，等待主持人公布结果。"
         if task.phase == NodePhase.VOTE or task.is_vote:
             return await self.make_vote(task)
         if task.phase == NodePhase.WILL:
-            # 遗言：一句表达怀疑，引用一处原话，不编造，不泄词
-            speaks = self._speaks(task)
-            target = None
-            for entry in reversed(speaks):
-                if task.seat is None or entry[0] != task.seat:
-                    target = entry
-                    break
-            if target:
-                return f"我比较在意{target[0]}号那句「{target[1][:12]}」。"
-            return "我还没想好，先投一票看看。"
+            # 遗言：排除自己，并逐条回退到不泄私有词的真实引用。
+            for entry in reversed(self._speaks(task)):
+                if task.seat is not None and entry[0] == task.seat:
+                    continue
+                text = f"我比较在意{entry[0]}号那句「{entry[1][:12]}」。"
+                ok, _reason = validate_speech(task.word, text, task.max_chars)
+                if ok:
+                    return text
+            fallback = "我还没想好，先投一票看看。"
+            ok, _reason = validate_speech(task.word, fallback, task.max_chars)
+            return fallback if ok else None
         # SPEECH / PREP / 默认
         return self.make_speech(task)
 

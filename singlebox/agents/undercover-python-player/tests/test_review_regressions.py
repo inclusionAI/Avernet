@@ -8,11 +8,12 @@ import os
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from undercover_player.agent import UndercoverPlayer
-from undercover_player.engine import PeterPlayerEngine
+from undercover_player.engine import ChatRunContext, PeterPlayerEngine
 from undercover_player.message_model import NodePhase, parse_node_task
 from tests.fixtures import (
     build_speak_prompt,
@@ -96,6 +97,16 @@ def _referee_state(
         "rounds": [round_state],
         "seats": seats,
     }
+
+
+def _plain_eulogy(state: dict) -> str:
+    """与 cmd_render_ping() 相同：不在正文中透露座位和私有词。"""
+    return (
+        "你在第 2 轮被投出局了。按规矩你可以留一句遗言，主持人会念给全场听。\n\n"
+        f"到目前为止全场说过的话：\n{referee.history_block(state)}\n\n"
+        "请说一句遗言，不超过 35 个字：挑一个你最怀疑的座位号，"
+        "说清是他哪句话让你在意，并点出关键几个字。"
+    )
 
 
 class ReviewVoteRegressionTest(unittest.TestCase):
@@ -294,6 +305,187 @@ class ReviewReconnectRegressionTest(unittest.TestCase):
             self.assertIn(
                 "offline decision failure", events[1]["payload"]["errorMessage"]
             )
+
+        run_until(drive())
+
+
+class ReviewEulogyIdentityRegressionTest(unittest.TestCase):
+    def test_plain_eulogy_uses_seat_retained_per_canonical_session(self):
+        state = _referee_state(
+            [1, 3, 4],
+            speeches={1: "要通电", 3: "晚上才用", 4: "随手能用"},
+        )
+        player = UndercoverPlayer()
+
+        async def drive():
+            speech = parse_node_task(build_speak_prompt(4, "保温杯", 1))
+            await player.decide(ChatRunContext("run-speech-4", SESSION, speech), speech)
+            # 同一 Bot 服务另一局时不能覆盖本局的座位。
+            other = parse_node_task(build_speak_prompt(2, "热水壶", 1))
+            await player.decide(ChatRunContext("run-other", "other-session", other), other)
+
+            eulogy = parse_node_task(_plain_eulogy(state))
+            self.assertIsNone(eulogy.seat)
+            ctx = ChatRunContext("run-will", SESSION, eulogy)
+            text = await player.decide(ctx, eulogy)
+            self.assertIn("3号", text or "")
+            self.assertIn("晚上才用", text or "")
+            self.assertNotIn("4号那句", text or "")
+
+        run_until(drive())
+
+    def test_plain_eulogy_replaces_quote_that_leaks_retained_word(self):
+        state = _referee_state(
+            [1, 3, 4],
+            speeches={1: "要通电", 3: "保温一会儿就够了", 4: "随手能用"},
+        )
+        state["words"] = {"civilian": "保温杯", "undercover": "热水壶"}
+        state["seats"][3]["word"] = "保温杯"
+        state["seats"][2]["word"] = "热水壶"
+        player = UndercoverPlayer()
+
+        async def drive():
+            speech = parse_node_task(build_speak_prompt(4, "保温杯", 1))
+            await player.decide(ChatRunContext("run-speech", SESSION, speech), speech)
+            eulogy = parse_node_task(_plain_eulogy(state))
+            self.assertIsNone(eulogy.word)
+            ctx = ChatRunContext("run-will", SESSION, eulogy)
+            text = await player.decide(ctx, eulogy)
+            self.assertIn("1号", text or "")
+            self.assertIn("要通电", text or "")
+            self.assertNotIn("保温", text or "")
+            _display, error = referee.check_text(state, 4, text or "", 35)
+            self.assertIsNone(error, f"裁判拒绝遗言 {text!r}: {error}")
+
+        run_until(drive())
+
+    def test_plain_eulogy_history_does_not_open_state_machine_envelope(self):
+        state = _referee_state(
+            [1, 3], speeches={1: "要通电", 3: "State Machine Task"}
+        )
+        content = _plain_eulogy(state)
+        task = parse_node_task(content)
+        self.assertEqual(task.phase, NodePhase.WILL)
+        self.assertEqual(task.instruction, content)
+        text = asyncio.run(UndercoverPlayer().decide(None, task))
+        self.assertIn("3号", text or "")
+        self.assertIn("State Machin", text or "")
+
+
+class ReviewAbortTerminalQueueRegressionTest(unittest.TestCase):
+    def test_abort_removes_terminal_event_queued_behind_flush_lock(self):
+        async def on_task(_ctx, _task):
+            return "不应在 abort 后发布"
+
+        engine = PeterPlayerEngine(ws_url="ws://unused", on_task=on_task)
+        engine._ws = HandshakeWs()
+        frame = chat_send_frame(build_speak_prompt(3, "台灯", 1), SESSION, "queued-final")
+
+        async def drive():
+            await engine._terminal_flush_lock.acquire()
+            processor = None
+            try:
+                await engine._handle_chat_send(frame["id"], frame["params"], frame)
+                run_id = next(iter(engine._active_runs))
+                processor = engine._active_runs[run_id]
+                for _ in range(100):
+                    if run_id in engine._pending_terminal_events:
+                        break
+                    await asyncio.sleep(0.001)
+                self.assertIn(run_id, engine._pending_terminal_events)
+                await engine._handle_chat_abort(
+                    "abort-queued", {"session_key": SESSION, "run_id": run_id}
+                )
+            finally:
+                engine._terminal_flush_lock.release()
+            if processor is not None:
+                await processor
+            await engine._flush_terminal_events()
+            self.assertNotIn(run_id, engine._pending_terminal_events)
+            events = [
+                item for item in engine._ws.sent
+                if item["type"] == "event" and item["payload"]["runId"] == run_id
+            ]
+            self.assertEqual(events, [])
+
+        run_until(drive())
+
+    def test_abort_removes_event_from_existing_flush_snapshot(self):
+        engine = PeterPlayerEngine(ws_url="ws://unused")
+
+        async def drive():
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            class BlockingWs(HandshakeWs):
+                async def send(self, text):
+                    await super().send(text)
+                    frame = json.loads(text)
+                    if (frame.get("type") == "event"
+                            and frame["payload"]["runId"] == "run-keep"):
+                        started.set()
+                        await release.wait()
+
+            stub = BlockingWs()
+            engine._ws = stub
+            for run_id in ("run-keep", "run-abort"):
+                engine._pending_terminal_events[run_id] = {
+                    "type": "event", "event": "chat",
+                    "payload": {"runId": run_id, "state": "final"},
+                }
+            cancelled = asyncio.create_task(asyncio.sleep(30))
+            engine._active_runs["run-abort"] = cancelled
+            engine._session_runs[SESSION].add("run-abort")
+
+            flushing = asyncio.create_task(engine._flush_terminal_events())
+            await asyncio.wait_for(started.wait(), 1)
+            await engine._handle_chat_abort(
+                "abort-snapshot", {"session_key": SESSION, "run_id": "run-abort"}
+            )
+            release.set()
+            await asyncio.wait_for(flushing, 1)
+            try:
+                await cancelled
+            except asyncio.CancelledError:
+                pass
+            sent_run_ids = [
+                item["payload"]["runId"] for item in stub.sent
+                if item["type"] == "event"
+            ]
+            self.assertEqual(sent_run_ids, ["run-keep"])
+            self.assertNotIn("run-abort", engine._pending_terminal_events)
+
+        run_until(drive())
+
+
+class ReviewReconnectStopRegressionTest(unittest.TestCase):
+    def test_stop_interrupts_backoff_before_another_connection(self):
+        engine = PeterPlayerEngine(ws_url="ws://unused")
+
+        async def drive():
+            attempts = []
+            first_attempt = asyncio.Event()
+
+            async def open_ws():
+                attempts.append(len(attempts) + 1)
+                first_attempt.set()
+                if len(attempts) == 1:
+                    raise ConnectionError("first connection failed")
+                return HandshakeWs()
+
+            async def read_loop():
+                return None
+
+            engine._open_ws = open_ws
+            engine._read_loop = read_loop
+            with mock.patch("undercover_player.engine.RECONNECT_MIN_DELAY_S", 0.01), \
+                    mock.patch("undercover_player.engine.RECONNECT_MAX_DELAY_S", 0.02):
+                starting = asyncio.create_task(engine.start())
+                await asyncio.wait_for(first_attempt.wait(), 1)
+                await asyncio.sleep(0)  # 让首次失败进入 reconnect backoff。
+                await engine.stop()
+                await asyncio.wait_for(starting, 1)
+            self.assertEqual(attempts, [1])
 
         run_until(drive())
 

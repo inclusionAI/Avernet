@@ -191,8 +191,9 @@ def parse_node_task(content: str) -> NodeTask:
     content 为 chat.send.params.message.content 里 text 块拼接后的文本。
     若解析不出 [State Machine Task] 可回退：把纯 instruction 当 [Instruction]。
     """
-    if "State Machine Task" in content:
-        head, _, rest = content.partition("State Machine Task")
+    header = re.match(r"\[State Machine Task\][ \t]*\r?\n", content)
+    if header:
+        rest = content[header.end():]
         node_id_m = re.search(r"node_id:\s*(\S+)", rest)
         display_m = re.search(r"display_name:\s*(.+)", rest)
         node_id = node_id_m.group(1) if node_id_m else "unknown"

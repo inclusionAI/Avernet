@@ -133,10 +133,17 @@ class PeterPlayerEngine:
             try:
                 if not first:
                     log.info("reconnecting in %ss (backoff)", delay)
-                    await asyncio.sleep(delay)
+                    try:
+                        await asyncio.wait_for(self._closed.wait(), timeout=delay)
+                    except asyncio.TimeoutError:
+                        pass
                 else:
                     first = False
+                if self._stop or self._closed.is_set():
+                    break
                 self._ws = await self._open_ws()
+                if self._stop or self._closed.is_set():
+                    break
                 delay = RECONNECT_MIN_DELAY_S
                 # 事件处理循环会循环执行，直到断开
                 await self._read_loop()
@@ -399,6 +406,9 @@ class PeterPlayerEngine:
             if ws is None:
                 return
             for run_id, event in list(self._pending_terminal_events.items()):
+                # abort 可能在本快照生成后移除事件；发送前核对它仍在队列中。
+                if self._pending_terminal_events.get(run_id) is not event:
+                    continue
                 try:
                     await ws.send(json.dumps(event, ensure_ascii=False))
                 except Exception as exc:  # noqa: BLE001
@@ -481,7 +491,8 @@ class PeterPlayerEngine:
                                 f"run {run_id} 不属于 session {session_key}")
             return
 
-        # 取消该 run，并屏蔽其迟到事件
+        # 取消该 run，并屏蔽其迟到事件；已排队但未刷出的终态也一并移除。
+        self._pending_terminal_events.pop(run_id, None)
         run.cancel()
         self._finished_runs.add(run_id)
         aborted.append(run_id)

@@ -81,7 +81,7 @@ export function parseNodeTask(content) {
   const sections = splitSections(raw);
   const nodeId = /(?:^|\n)node_id:\s*(\S+)/.exec(raw)?.[1] || "unknown";
   const displayName = /(?:^|\n)display_name:\s*([^\r\n]+)/.exec(raw)?.[1]?.trim() || "";
-  const instruction = raw.includes("State Machine Task")
+  const instruction = /^\[State Machine Task\][ \t]*\r?\n/.test(raw)
     ? sections["[Instruction]"]
     : raw;
 
@@ -180,6 +180,7 @@ export function publicSpeeches(task, { includeUpstream = true } = {}) {
 export class UndercoverNodeAgent {
   constructor({ persona = DEFAULT_PERSONA } = {}) {
     this.persona = persona;
+    this.sessionIdentities = new Map();
   }
 
   makeSpeech(task) {
@@ -248,10 +249,9 @@ export class UndercoverNodeAgent {
         history.push({ seat: Number(match[1]), text: match[2].trim() });
       }
     }
-    const quoted = history.at(-1);
-    const candidates = quoted
-      ? [`我比较在意${quoted.seat}号那句「${Array.from(quoted.text).slice(0, 12).join("")}」。`]
-      : [];
+    const candidates = history.reverse().map((quoted) => (
+      `我比较在意${quoted.seat}号那句「${Array.from(quoted.text).slice(0, 12).join("")}」。`
+    ));
     candidates.push("我没有更多补充，请大家继续核对公开发言。");
     for (const candidate of candidates) {
       const checked = validateSpeech(candidate, { maxChars: 35, word: task.word });
@@ -260,9 +260,17 @@ export class UndercoverNodeAgent {
     throw new Error("没有不泄词的遗言可回传");
   }
 
-  async decide({ content, signal }) {
+  async decide({ content, signal, sessionKey }) {
     throwIfAborted(signal);
     const task = parseNodeTask(content);
+    if (typeof sessionKey === "string" && sessionKey) {
+      const identity = this.sessionIdentities.get(sessionKey) || { seat: null, word: "" };
+      if (task.seat === null) task.seat = identity.seat;
+      else identity.seat = task.seat;
+      if (!task.word) task.word = identity.word;
+      else identity.word = task.word;
+      this.sessionIdentities.set(sessionKey, identity);
+    }
     let output;
     if (task.phase === "vote_start") output = VOTE_OPENING;
     else if (task.phase === "vote") output = this.makeVote(task);
