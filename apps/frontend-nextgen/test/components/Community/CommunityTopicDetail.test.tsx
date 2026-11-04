@@ -73,6 +73,95 @@ describe('CommunityTopicDetail', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 
+  test('深链目标在第二页时持续高亮，点击后取消', () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = jest.fn();
+    jest.useFakeTimers();
+    try {
+      const onClearPendingPostLocation = jest.fn();
+      const initialProps = {
+        loading: true,
+        replyPage: 2,
+        pendingPostLocation: {
+          postId: 'reply-1',
+          rootPostId: 'reply-1',
+          page: 2,
+        },
+        onClearPendingPostLocation,
+      };
+      const view = renderDetail(initialProps);
+      expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+      view.rerender(<CommunityTopicDetail {...view.props} loading={false} />);
+      const target = screen.getByText('Bot 回复').closest('article');
+      expect(target).not.toBeNull();
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: 'center',
+        behavior: 'smooth',
+      });
+      expect(onClearPendingPostLocation).toHaveBeenCalledTimes(1);
+      act(() => {
+        jest.advanceTimersByTime(0);
+      });
+      fireEvent.click(document.body);
+      expect(target).not.toHaveClass('bg-primary/10');
+    } finally {
+      jest.useRealTimers();
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  test('深链目标在折叠楼中楼时先展开再定位目标回复', () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = jest.fn();
+    jest.useFakeTimers();
+    try {
+      const onClearPendingPostLocation = jest.fn();
+      const child = (index: number): CommunityReply => ({
+        ...replies[0],
+        id: `child-${index}`,
+        body: `目标楼中楼${index}`,
+        replyToPostId: 'floor-page-2',
+      });
+      const floor: CommunityReply = {
+        ...replies[0],
+        id: 'floor-page-2',
+        body: '第二页一级楼层',
+        childReplies: [child(1), child(2), child(3)],
+      };
+      const view = renderDetail({
+        loading: true,
+        replyPage: 2,
+        replies: [floor],
+        pendingPostLocation: {
+          postId: 'child-3',
+          rootPostId: 'floor-page-2',
+          page: 2,
+        },
+        onClearPendingPostLocation,
+      });
+
+      view.rerender(<CommunityTopicDetail {...view.props} loading={false} />);
+      const target = screen.getByText('目标楼中楼3').closest('article');
+      expect(target).not.toBeNull();
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: 'center',
+        behavior: 'smooth',
+      });
+      expect(onClearPendingPostLocation).toHaveBeenCalledTimes(1);
+      expect(target).toHaveClass('bg-primary/10');
+      act(() => {
+        jest.advanceTimersByTime(0);
+      });
+      expect(target).toHaveClass('bg-primary/10');
+      fireEvent.click(document.body);
+      expect(target).not.toHaveClass('bg-primary/10');
+    } finally {
+      jest.useRealTimers();
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   test('回复展示汇总互动量，并用红色图标表示当前用户状态', () => {
     const child: CommunityReply = {
       ...replies[0],
@@ -640,8 +729,10 @@ describe('CommunityTopicDetail', () => {
     });
     expect(floorArticle).toHaveClass('bg-primary/10');
     act(() => {
-      jest.advanceTimersByTime(1200);
+      jest.advanceTimersByTime(0);
     });
+    expect(floorArticle).toHaveClass('bg-primary/10');
+    fireEvent.click(document.body);
     expect(floorArticle).not.toHaveClass('bg-primary/10');
     jest.useRealTimers();
     window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;

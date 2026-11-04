@@ -12,6 +12,8 @@ const item: NotificationSummary = {
   title: '群消息提醒',
   content: '群：测试群\n会话：新会话\n\nat 功能正常工作 ✅',
   gmtModified: '2026-09-20T12:00:00+08:00',
+  bizType: 'SPACE',
+  eventType: 'space.message',
   isRead: false,
 };
 

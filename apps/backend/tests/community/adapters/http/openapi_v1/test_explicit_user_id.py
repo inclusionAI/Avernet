@@ -327,6 +327,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts/{{post_id}}/location",
+    ),
     # BBS Browse-Loop per-owner list: filtered by the explicit ``owner_id``
     # query, never by a ``user_id`` axis -- a backend read keyed on the
     # declared owner, so it sits in the no-user-dimension set.
@@ -631,9 +635,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # explicit-author account-level routes, both with no Bot dimension: 134 -> 136.
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
+# The non-user Bot overview adds one Bot-path operation with no user_id.
+# Bot copy adds one Bot-path operation and one retry operation with no Bot id.
+# BBS post-location adds one more tenant-wide no-Bot read.
 # The task_config match probe adds one operation without a path/query bot_id.
 # Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 142}
+_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 143}
 
 
 def _schema() -> dict:

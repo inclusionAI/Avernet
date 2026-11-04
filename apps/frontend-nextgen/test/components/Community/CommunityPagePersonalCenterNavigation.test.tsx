@@ -40,7 +40,10 @@ const mockCommunityState = {
   closeDetail: jest.fn(),
 };
 
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('@umijs/max', () => ({
+  history: { push: jest.fn() },
+  useSearchParams: () => [new URLSearchParams()],
+}));
 
 jest.mock('@/hooks/useCommunity', () => ({
   useCommunity: () => mockCommunityState,
@@ -53,7 +56,7 @@ jest.mock('@/components/Community/CommunityPersonalCenter', () => {
     onOpenTopic,
   }: {
     onBack: () => void;
-    onOpenTopic: (topicId: string) => void;
+    onOpenTopic: (target: { topicId: string; postId?: string }) => void;
   }) {
     const [view, setView] = useState('我的帖子');
     const [selectedAuthor, setSelectedAuthor] = useState(false);
@@ -72,7 +75,10 @@ jest.mock('@/components/Community/CommunityPersonalCenter', () => {
         >
           选择关注的张三
         </button>
-        <button type="button" onClick={() => onOpenTopic('topic-1')}>
+        <button
+          type="button"
+          onClick={() => onOpenTopic({ topicId: 'topic-1', postId: 'post-1' })}
+        >
           打开个人中心主题
         </button>
       </div>
@@ -103,7 +109,10 @@ describe('CommunityPage 个人中心导航', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '切换到我的回帖' }));
     fireEvent.click(screen.getByText('打开个人中心主题'));
-    expect(mockCommunityState.openTopicById).toHaveBeenCalledWith('topic-1');
+    expect(mockCommunityState.openTopicById).toHaveBeenCalledWith({
+      topicId: 'topic-1',
+      postId: 'post-1',
+    });
 
     // The real Zustand store re-renders when openTopicById selects the topic.
     mockCommunityState.selectedTopic = topic;
