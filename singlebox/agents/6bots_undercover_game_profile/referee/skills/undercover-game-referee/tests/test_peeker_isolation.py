@@ -16,6 +16,8 @@ fixtures 采用多人类(2 Human + 3 Bot)对局,直接构造 state,不依赖 bcs
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -265,6 +267,27 @@ class PeekerIsolationTest(unittest.TestCase):
             blob = json.dumps(payload, ensure_ascii=False)
             for word in BOTH_WORDS:
                 self.assertNotIn(word, blob)
+
+    def test_my_word_explicit_human_selector_is_strict(self) -> None:
+        undercover.save_state(self.state)
+        for actor_id, expected_seat in (("human-A", 1), ("human-B", 2), (None, 1)):
+            with self.subTest(actor_id=actor_id), patch.object(undercover, "emit") as emit:
+                undercover.cmd_my_word(argparse.Namespace(
+                    session=self.state["session_id"], human=actor_id, seat=None,
+                ))
+                self.assertEqual(emit.call_args.args[0]["human_seat"], expected_seat)
+
+        for actor_id in ("stale-human", ""):
+            out = io.StringIO()
+            with (self.subTest(actor_id=actor_id), patch.object(undercover, "emit") as emit,
+                  contextlib.redirect_stdout(out)):
+                with self.assertRaises(SystemExit) as raised:
+                    undercover.cmd_my_word(argparse.Namespace(
+                        session=self.state["session_id"], human=actor_id, seat=None,
+                    ))
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(json.loads(out.getvalue())["error"], "HUMAN_NOT_FOUND")
+                emit.assert_not_called()
 
     # ---- 辅助 ----
 

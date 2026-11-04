@@ -2029,7 +2029,9 @@ def cmd_my_word(args: argparse.Namespace) -> None:
         die("NO_HUMAN", "这一局没有人类玩家。")
     requested = getattr(args, "human", None)
     requested_seat = getattr(args, "seat", None)
-    target = next((s for s in humans if requested and actor_id_for(s, state) == requested), None)
+    target = next((s for s in humans if requested is not None and actor_id_for(s, state) == requested), None)
+    if requested is not None and target is None:
+        die("HUMAN_NOT_FOUND", f"本局没有 actor_id 为「{requested}」的人类玩家。请核对 --human 参数。")
     if target is None and requested_seat is not None:
         target = next((s for s in humans if s["seat"] == requested_seat), None)
     human = target or humans[0]
