@@ -43,6 +43,12 @@ export function DingTalkReadonlyList({ config }: DingTalkReadonlyListProps) {
           <p className="m-0 mt-1 font-medium text-foreground">{config ? scopeLabel(config.groupChatScope) : '—'}</p>
         </div>
         <div>
+          <p className="m-0 text-muted-foreground">Group context 投递方式</p>
+          <p className="m-0 mt-1 font-medium text-foreground">
+            {config ? (config.groupContextDelivery === 'inject' ? 'Inject' : 'Send') : '—'}
+          </p>
+        </div>
+        <div>
           <p className="m-0 text-muted-foreground">发送消息范围</p>
           <p className="m-0 mt-1 font-medium text-foreground">
             {config ? visibilityLabel(config.outboundVisibility) : '—'}
