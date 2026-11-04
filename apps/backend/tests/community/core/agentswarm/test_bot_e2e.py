@@ -30,9 +30,10 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -109,18 +110,58 @@ OWNER = "bot-e2e-owner"
 class _TestDB:
     def __init__(self, engine):
         self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        # StaticPool shares one connection across slice, lease and test threads.
+        # Serialize the entire transaction, matching the local SqliteDB plugin.
+        self._session_lock = threading.RLock()
 
     @contextmanager
     def orm_session(self):
-        db = self._factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with self._session_lock:
+            db = self._factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+
+def test_swarm_db_concurrent_commit_does_not_commit_a_rolled_back_session():
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    database = _TestDB(engine)
+    with database.orm_session() as session:
+        session.execute(text("CREATE TABLE transaction_probe (id INTEGER PRIMARY KEY)"))
+    attempted = threading.Event()
+
+    def commit_second():
+        attempted.set()
+        with database.orm_session() as session:
+            session.execute(text("INSERT INTO transaction_probe VALUES (2)"))
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with pytest.raises(ValueError, match="rollback first"):
+                with database.orm_session() as session:
+                    session.execute(text("INSERT INTO transaction_probe VALUES (1)"))
+                    future = pool.submit(commit_second)
+                    assert attempted.wait(2)
+                    try:
+                        future.result(timeout=0.2)
+                    except FutureTimeoutError:
+                        pass  # An isolated transaction waits for the first rollback.
+                    raise ValueError("rollback first")
+            future.result(timeout=2)
+        with database.orm_session() as session:
+            rows = session.execute(
+                text("SELECT id FROM transaction_probe ORDER BY id"),
+            ).scalars().all()
+        assert rows == [2]
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()
@@ -131,7 +172,10 @@ def swarm_db():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    yield _TestDB(engine)
+    try:
+        yield _TestDB(engine)
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()

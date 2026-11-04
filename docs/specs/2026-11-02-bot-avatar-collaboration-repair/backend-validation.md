@@ -1,5 +1,34 @@
 # Backend Bot 头像同步与手动修复验证与交付记录（Task 9）
 
+## PR #3569 Backend CI 稳定性修复（2026-11-04）
+
+基线 `56cd50efeb`。GitHub run `41783235206` 两次 Backend job 均在
+25 分钟上限取消。第二次收集 29,698 个用例，使用 4 个 worker；安装只耗时约
+6 秒，但 pytest 在输出最终失败详情和有效报告前被取消。日志已记录 reaper
+cadence 与 Bot E2E 两个失败，不能把这次运行判为纯粹的超时问题。
+
+- Reaper cadence 原来固定等待 300ms 后关闭 worker。增加 350ms 的真实 sweep
+  调度延迟可复现「dispatch 尚未写入就关闭」；修复改为等待实际 sweep 完成事件，
+  保留明确的 5 秒失败上限和 `finally` 关闭。保留原零延迟场景及 dispatch 断言。
+- Bot E2E 的独立 StaticPool 测试数据库缺少跨线程事务锁。新增回归在一个事务
+  待回滚时并发提交另一事务；修复前错误留下 `[1, 2]`，而非应有的 `[2]`。
+  修复将 session 创建、提交/回滚及关闭整体置于 RLock 下，与 local SqliteDB
+  一致，并在 fixture 结束时释放 engine。不修改生产业务逻辑。
+- CI 增加 `--maxfail=1`、`--durations=30` 和 `faulthandler_timeout=120`，
+  首次失败不再继续耗尽剩余时间；长测试可输出线程堆栈，最终摘要保留慢测试。
+  job 仍为 25 分钟；100% 用例通过率、75% 总行覆盖率及 80% 变更行覆盖率不变。
+- 两个回归均已先红后绿。两个完整受影响测试文件：**20 passed**。
+  CI diff/诊断回归：**3 passed**；覆盖率入口回归：**10 passed**。
+  三个修改的 Python 文件通过 Ruff 与 SAST blocking rules；shell 语法通过。
+- 完整 Backend 门禁：`BACKEND_CI_SKIP_INSTALL=1 BACKEND_CI_PYTEST_WORKERS=4
+  bash apps/backend/scripts/ci_test.sh`，**exit 0；29,660 passed、40 skipped、
+  6 subtests passed；428.96 秒**。用例通过率 100%，总行覆盖率 **91.01%**，
+  变更行覆盖率 **87.26%（2720/3117）**；所有原门禁通过。此为本地 macOS /
+  Python 3.12.11 实测，不代表 GitHub Ubuntu runner 的耗时。
+- 独立代码复审无阻塞发现。GitHub 的完整 traceback 已被原 job 超时截断，
+  上述定向复现证明修复的是实际测试缺陷，但仍需新远端运行确认原 CI 症状消失；
+  不能以本地定向通过替代 GitHub runner 的全量耗时验证。
+
 ## PR #3569 复审修复（2026-11-04）
 
 当前分支为 `feat/bot-avatar-backend-squashed`，复审基线 `8cc26f9`。
