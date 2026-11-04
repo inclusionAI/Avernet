@@ -1,0 +1,19 @@
+apps/bcs/crates/services/bcs-message-flow/tests/caller_dispatch_stage_timeout_contract.rs
+  s_8da14e79ec2145::t_235821d611de96 146,169,264,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d792d370cb86c35759799adaa7e8ddf26002f87b",
+  "prompts": {},
+  "sessions": {
+    "s_8da14e79ec2145": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "94ef1779-0264-4769-bab1-07f0c72659b9",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

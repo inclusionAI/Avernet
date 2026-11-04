@@ -1,0 +1,39 @@
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/index_builds.py
+  s_89ee1c722ef961::t_bd9e3cfc721ab8 25
+  s_89ee1c722ef961::t_cfcb9fc3709530 15-24
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  s_89ee1c722ef961::t_606cf9159021af 183-207
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_89ee1c722ef961::t_cfcb9fc3709530 414-415,418,453
+  s_89ee1c722ef961::t_93be29a4b6f064 247-251,297
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_89ee1c722ef961::t_b1d6b9b198fefa 161-168
+apps/bcsfuse/packages/search-core/tests/test_catalog_startup.py
+  s_89ee1c722ef961::t_606cf9159021af 1-38,45-74,78-107,118-119,133-134,138-139
+  s_89ee1c722ef961::t_bd9e3cfc721ab8 39-44,75-77,110-112
+  s_89ee1c722ef961::t_fe13ae7d55179c 140-159
+  s_89ee1c722ef961::t_bf837b321d5b9b 108-109,113-117,120-132,135-137
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_89ee1c722ef961::t_b1d6b9b198fefa 78-99,114
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  s_89ee1c722ef961::t_cfcb9fc3709530 75,77-78,82-91,93
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  s_89ee1c722ef961::t_cfcb9fc3709530 81,88-89,93-94,105,109
+  s_89ee1c722ef961::t_bd9e3cfc721ab8 90-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f35b296ff57e95c7b37d6b5ac0a9aec879e4334f",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
