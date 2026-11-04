@@ -1,0 +1,37 @@
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_89ee1c722ef961::t_1abebf3095a045 3-6
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_89ee1c722ef961::t_3a5e06e3b2763f 144-145
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_89ee1c722ef961::t_793fe543a71417 31,39,52,54
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/admission.py
+  s_89ee1c722ef961::t_b377c79a91145e 23
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_89ee1c722ef961::t_be00a3bfd0f1a9 73
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_89ee1c722ef961::t_d2172d39ec30e1 56
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_89ee1c722ef961::t_38dc5276180718 17
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  s_89ee1c722ef961::t_c41fd23052ac23 228
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  s_89ee1c722ef961::t_e7e1cb2a83e40f 15
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_89ee1c722ef961::t_583eb8484a62a9 21,49,73,88-89,194,214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "40be509dc5b8353b8c0e3b4456e1f215627c4d62",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
