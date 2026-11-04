@@ -131,6 +131,10 @@ cat > "${tmp}/apps/bcs/scripts/e2e_coverage.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 expected_bot_data_dir="${PWD}/singlebox/.dependencies/coverage/singlebox/standalone-openclaw/profiles"
+if [[ "${BCS_E2E_CHANGED_LINE_MIN:-}" != "65" ]]; then
+  echo "BCS E2E should enforce changed-line coverage above 65%" >&2
+  exit 17
+fi
 if [[ "${BCS_BOTS_DATA_DIR:-}" != "$expected_bot_data_dir" ]]; then
   echo "BCS E2E should read bot sessions from the coverage standalone profile root" >&2
   exit 15
@@ -250,7 +254,7 @@ test_default_mode_runs_real_singlebox() {
     fail "default coverage mode should run every manifest acceptance target"
   [ "$(grep -Fc -- '--standalone --with-bcs-coverage start all' "$log")" -eq 1 ] || \
     fail "all modules should share one singlebox startup"
-  grep -Fx -- "--skip-start --bcs-line-min 41 --bcs-method-min 36" "$bcs_log" >/dev/null || \
+  grep -Fx -- "--skip-start --bcs-line-min 54 --bcs-method-min 48" "$bcs_log" >/dev/null || \
     fail "default coverage mode should run BCS E2E against the shared stack"
   grep -F "run coverage combine" "$uv_log" >/dev/null || \
     fail "default coverage mode should combine coverage"

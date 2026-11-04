@@ -24,10 +24,10 @@ set -euo pipefail
 #   bash apps/bcs/scripts/e2e_coverage.sh              # full flow
 #   bash apps/bcs/scripts/e2e_coverage.sh --skip-start # instrumented bcs already running; run e2e + stop + aggregate only
 #   bash apps/bcs/scripts/e2e_coverage.sh --no-stop    # do not stop bcs after running (debug; no aggregation)
-#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 41 --bcs-method-min 36
-#                                                    # gate line >=41%, method >=36%
+#   bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 54 --bcs-method-min 48
+#                                                    # gate line >=54%, method >=48%
 #   bash apps/bcs/scripts/e2e_coverage.sh --force-rebuild # force-rebuild instrumented bcs (ignore cache)
-#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 60]
+#   bash apps/bcs/scripts/e2e_coverage.sh --changed-base-ref origin/dev [--changed-line-min 65]
 #                                                    # changed-line coverage (gated when min > 0)
 #
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
@@ -335,8 +335,8 @@ if [[ "$no_stop" -eq 0 ]]; then
   #     its exit code is combined with e2e's below — no more swallowed gate
   #     (the old `[[ e2e eq 0 ]] && exit` skipped coverage failure when e2e
   #     itself failed, so coverage thresholds appeared not to take effect).
-  # A threshold of 0 is report-only. Pre-push/CI gate line >=41% and method
-  # >=36%; --bcs-min remains available to set both to one value.
+  # A threshold of 0 is report-only. Pre-push/CI gate line >=54% and method
+  # >=48%; --bcs-min remains available to set both to one value.
   # With a base ref, also measure changed-line coverage from cobertura.xml.
   # It gates only when changed_line_min > 0 (e2e_cov_gate.py fails closed
   # then, including when no base ref was given).

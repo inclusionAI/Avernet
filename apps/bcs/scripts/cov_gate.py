@@ -4,8 +4,9 @@
 Enforces three thresholds against the testresult/ produced by ci_test.sh
 --coverage:
   1. Test pass rate  == 100%
-  2. Overall line coverage > 84%
-  3. Changed-line coverage >= 80%  (instrumentable changed BCS lines vs base ref)
+  2. Overall line coverage > 87%
+  3. Changed-line coverage > 85% when at least 51 instrumentable changed BCS
+     lines map against the base ref; smaller changes are report-only
 
 When run inside GitHub Actions (CI=true), prints ::error::/::notice:: workflow
 commands so failures annotate the job. Elsewhere, prints plain FAIL/OK lines
@@ -44,8 +45,10 @@ def parse_args():
     p.add_argument("--bcs-dir", required=True,
                    help="bcs checkout root (contains testresult/ + is under repo root)")
     p.add_argument("--pass-rate-min", type=float, default=100.0)
-    p.add_argument("--overall-line-min", type=float, default=84.0)
-    p.add_argument("--changed-line-min", type=float, default=80.0)
+    p.add_argument("--overall-line-min", type=float, default=87.0)
+    p.add_argument("--changed-line-min", type=float, default=85.0)
+    p.add_argument("--changed-line-min-lines", type=int, default=51,
+                   help="enforce changed-line coverage at or above this instrumentable line count")
     return p.parse_args()
 
 
@@ -190,12 +193,16 @@ def main():
            % (total_changed, total_changed_covered, chg_rate))
         for fname, n in per_file[:20]:
             gh("    %s: %d changed line(s)" % (fname, n))
-        if chg_rate < args.changed_line_min:
-            gh("::error::Changed-line coverage %.2f%% is below the required %.2f%%"
+        if total_changed < args.changed_line_min_lines:
+            gh("::notice::Changed-line coverage %.2f%% — reporting only: %d instrumentable "
+               "changed lines is below the gate minimum of %d"
+               % (chg_rate, total_changed, args.changed_line_min_lines))
+        elif chg_rate <= args.changed_line_min:
+            gh("::error::Changed-line coverage %.2f%% is not > %.2f%%"
                % (chg_rate, args.changed_line_min))
             fail = True
         else:
-            gh("::notice::Changed-line coverage %.2f%% (requirement: >=%.2f%%) — OK"
+            gh("::notice::Changed-line coverage %.2f%% (requirement: >%.2f%%) — OK"
                % (chg_rate, args.changed_line_min))
 
     sys.exit(1 if fail else 0)
