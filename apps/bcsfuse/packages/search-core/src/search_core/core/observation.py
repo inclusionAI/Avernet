@@ -102,9 +102,14 @@ class EventSummaries:
             timestamp=time.time(),
             sample=bucket["sample"],
         )
+        level = (
+            logging.INFO
+            if record["event"] == "search_index_sync" and record["reason"] == "applied"
+            else logging.WARNING
+        )
         try:
             self._pending.put_nowait(
-                json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                (level, json.dumps(record, ensure_ascii=False, separators=(",", ":")))
             )
         except Full:
             # Retain all counts for the next flush if the sink is stalled.
@@ -122,10 +127,10 @@ class EventSummaries:
         # holding the counter lock or from the request's record() path.
         for _ in range(128):
             try:
-                line = self._pending.get_nowait()
+                level, line = self._pending.get_nowait()
             except Empty:
                 break
-            logger.warning(line)
+            logger.log(level, line)
 
 
 events = EventSummaries()
