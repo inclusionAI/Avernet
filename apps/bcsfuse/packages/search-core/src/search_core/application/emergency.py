@@ -70,6 +70,7 @@ class EmergencyPolicy(BaseModel):
     max_results: int = Field(default=20, strict=True, ge=1, le=100)
     retrieval: RetrievalSwitches
     embedding_timeout_ms: float = Field(strict=True, gt=0, le=4000, allow_inf_nan=False)
+    embedding_singleflight_enabled: StrictBool = True
     reranker_timeout_ms: float = Field(strict=True, gt=0, le=4000, allow_inf_nan=False)
     cache: SearchCachePolicy = Field(default_factory=SearchCachePolicy)
 

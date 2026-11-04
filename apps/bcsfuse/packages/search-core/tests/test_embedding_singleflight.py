@@ -32,11 +32,12 @@ class Model:
         return list(self.vector)
 
 
-def cached(model):
+def cached(model, **options):
     return CachedEmbedding(
         model,
         MemoryCache(enabled=True, ttl_ms=10000, max_entries=16, max_bytes=4096),
         "model/2",
+        **options,
     )
 
 
@@ -54,6 +55,21 @@ def test_overlapping_identical_queries_call_model_once_and_copy_results():
         assert results[1] == [1.0, 0.0]
         assert await provider.embed("same") == [1.0, 0.0]
         assert model.calls == ["same"]
+
+    asyncio.run(asyncio.wait_for(run(), 2))
+
+
+def test_disabled_singleflight_retains_cache_without_sharing_pending_calls():
+    async def run():
+        model = Model()
+        provider = cached(model, singleflight_enabled=False)
+        tasks = [asyncio.create_task(provider.embed("same")) for _ in range(3)]
+        await model.started.wait()
+        model.release.set()
+        assert await asyncio.gather(*tasks) == [[1.0, 0.0]] * 3
+        assert model.calls == ["same"] * 3
+        assert await provider.embed("same") == [1.0, 0.0]
+        assert model.calls == ["same"] * 3
 
     asyncio.run(asyncio.wait_for(run(), 2))
 

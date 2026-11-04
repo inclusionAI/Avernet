@@ -174,10 +174,11 @@ class CachedRetrieval:
 class CachedEmbedding:
     """Cache valid vectors and share overlapping calls within this instance."""
 
-    def __init__(self, provider, cache, embedding_key):
+    def __init__(self, provider, cache, embedding_key, *, singleflight_enabled=True):
         self.provider, self.cache = provider, cache
         self.dimension = provider.dimension
         self.embedding_key = embedding_key
+        self._singleflight_enabled = singleflight_enabled
         self._pending, self._waiters = {}, {}
 
     async def embed(self, text):
@@ -188,6 +189,8 @@ class CachedEmbedding:
                 stage["cache"] = "hit"
                 return list(hit)
             stage["cache"] = "miss"
+        if not self._singleflight_enabled:
+            return list(await self._embed(text, key))
         task = self._pending.get(key)
         if task is None or task.done():
             task = asyncio.create_task(self._embed(text, key))
