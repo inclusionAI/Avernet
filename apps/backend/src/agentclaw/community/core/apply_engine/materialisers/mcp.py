@@ -25,6 +25,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
     ChecksSetSupply,
@@ -64,7 +65,10 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(Intent("gh", {"headers": {}}), "updated"),),
                        removals=("old",))
-        write   -> (EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.MCP, "gh", EntryOutcome.UPDATED),),
+            removals=("old",),
+        )
 
     ``plan`` compares both the installed set and persisted override, so it can
     answer ``created``, ``updated`` or ``unchanged``.
@@ -232,7 +236,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Apply Direct claims, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
         confirmed_write = False
@@ -301,7 +305,7 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
                 ) from None
             raise
 
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 __all__ = ["McpMaterialiser"]

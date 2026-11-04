@@ -99,7 +99,7 @@ provides:
   - Intent
   - ResolveResult
   - CategoryPlan
-  - CategoryWriteResult  # a writer may report removals confirmed from a fresh listing
+  - CategoryWriteResult  # every writer returns entry outcomes and confirmed removals
   - build_materialisers
   - ApplyOrchestrator
   - ApplyContext

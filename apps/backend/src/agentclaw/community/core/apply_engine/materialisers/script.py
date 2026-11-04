@@ -33,6 +33,7 @@ So the effect is **deferred, not lost**: a script written by a later manifest
 version executes at the next **device provisioning** — create, restart, or
 republish — and never re-executes inside a container that is already up.
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -48,6 +49,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -81,8 +83,11 @@ class ScriptMaterialiser(Materialiser):
                        identity="script", value="#!/bin/sh\necho prod\n"),))
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "created"),))
-        write   -> (EntryResult(Section.SCRIPT, "script",
-                                EntryOutcome.CREATED, note=DELIVERY_NOTE),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Section.SCRIPT, "script",
+                                EntryOutcome.CREATED, note=DELIVERY_NOTE),),
+            removals=(),
+        )
 
     A declared-empty section inverts that: ``resolve`` answers
     ``Intent("script", None)``, ``plan`` answers
@@ -99,7 +104,9 @@ class ScriptMaterialiser(Materialiser):
     def __init__(self, script_service: BotStartupScriptServiceProtocol) -> None:
         self._scripts = script_service
 
-    async def resolve(self, ctx: ApplyContext, entries: Sequence[DesiredScript]) -> ResolveResult:
+    async def resolve(
+        self, ctx: ApplyContext, entries: Sequence[DesiredScript]
+    ) -> ResolveResult:
         """Re-check that this bot accepts a script; the body is the compiler's, substituted.
 
         The capability is re-asked rather than trusted from the ``PUT`` that
@@ -109,7 +116,11 @@ class ScriptMaterialiser(Materialiser):
         """
         if not ctx.capabilities.supports(Section.SCRIPT):
             return ResolveResult(
-                failures=(ResolveFailure(_IDENTITY, ctx.capabilities.reason_for(Section.SCRIPT)),)
+                failures=(
+                    ResolveFailure(
+                        _IDENTITY, ctx.capabilities.reason_for(Section.SCRIPT)
+                    ),
+                )
             )
         if not entries:
             # ``script: null`` — declared, and declared to be nothing. The area
@@ -117,9 +128,7 @@ class ScriptMaterialiser(Materialiser):
             return ResolveResult(intents=(Intent(_IDENTITY, None),))
         return ResolveResult(intents=(Intent(_IDENTITY, entries[0].body),))
 
-    async def plan(
-        self, ctx: ApplyContext, intents: Sequence[Intent]
-    ) -> CategoryPlan:
+    async def plan(self, ctx: ApplyContext, intents: Sequence[Intent]) -> CategoryPlan:
         """Compare against the **substituted** body, never the document text.
 
         This comparison is the whole of the convergence criterion. Comparing the
@@ -127,9 +136,7 @@ class ScriptMaterialiser(Materialiser):
         using a placeholder, because the stored text and the written text differ
         by construction.
         """
-        current = self._scripts.get_body(
-            entity_id=ctx.entity_id, bot_id=ctx.bot_id
-        )
+        current = self._scripts.get_body(entity_id=ctx.entity_id, bot_id=ctx.bot_id)
         desired = intents[0].value if intents else None
 
         if desired is None:
@@ -147,9 +154,7 @@ class ScriptMaterialiser(Materialiser):
             outcome = EntryOutcome.UPDATED.value
         return CategoryPlan(entries=(PlannedEntry(intents[0], outcome),))
 
-    async def write(
-        self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    async def write(self, ctx: ApplyContext, plan: CategoryPlan) -> CategoryWriteResult:
         """Write the row, or remove it. Nothing else happens here.
 
         An ``unchanged`` plan performs **no write at all** — the service is not
@@ -158,20 +163,23 @@ class ScriptMaterialiser(Materialiser):
         """
         if plan.removals:
             self._scripts.delete(entity_id=ctx.entity_id, bot_id=ctx.bot_id)
-            return ()
+            return CategoryWriteResult((), plan.removals)
 
         if not plan.entries:
-            return ()
+            return CategoryWriteResult((), plan.removals)
 
         planned = plan.entries[0]
         if planned.outcome == EntryOutcome.UNCHANGED.value:
-            return (
-                EntryResult(
-                    self.construct,
-                    planned.intent.identity,
-                    EntryOutcome.UNCHANGED,
-                    note=DELIVERY_NOTE,
+            return CategoryWriteResult(
+                (
+                    EntryResult(
+                        self.construct,
+                        planned.intent.identity,
+                        EntryOutcome.UNCHANGED,
+                        note=DELIVERY_NOTE,
+                    ),
                 ),
+                plan.removals,
             )
 
         self._scripts.put(
@@ -183,13 +191,16 @@ class ScriptMaterialiser(Materialiser):
             # not do.
             modifier=ctx.actor_id,
         )
-        return (
-            EntryResult(
-                self.construct,
-                planned.intent.identity,
-                EntryOutcome(planned.outcome),
-                note=DELIVERY_NOTE,
+        return CategoryWriteResult(
+            (
+                EntryResult(
+                    self.construct,
+                    planned.intent.identity,
+                    EntryOutcome(planned.outcome),
+                    note=DELIVERY_NOTE,
+                ),
             ),
+            plan.removals,
         )
 
 
