@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import ApprovalWorkbench from '../ApprovalWorkbench'
 
-const items = [{cardId:1,flowId:'flow-1',nodeId:'review',workflowId:'expense',workflowTitle:'费用审批',message:'请确认',approverIds:['00123'],status:'pending',personalStatus:'pending',createdAt:'1970-01-01T00:01:40.000Z',approvalUrl:'/approval/1'}]
+const items = [{cardId:1,flowId:'flow-1',nodeId:'review',workflowId:'expense',workflowTitle:'费用审批',message:'请确认',approverIds:['00123'],status:'pending',personalStatus:'pending',actionability:'available',createdAt:'1970-01-01T00:01:40.000Z',approvalUrl:'/approval/1'}]
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()})
 it('loads current user pending without restricting workflow and can switch to handled',async()=>{
  const fetcher=vi.fn().mockResolvedValue({ok:true,json:async()=>({items,nextCursor:null,scope:'all'})});vi.stubGlobal('fetch',fetcher)
@@ -29,8 +29,8 @@ it('copies the row approval link as an absolute URL without page parameters',asy
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(page(items,null)))
  render(<ApprovalWorkbench isAdmin={false}/>)
  await screen.findByText('费用审批')
- const copyButton=screen.getByRole('button',{name:'复制审批链接'})
- expect(copyButton).toHaveAttribute('title','复制审批链接')
+ const copyButton=screen.getByRole('button',{name:'复制链接'})
+ expect(copyButton).toHaveAttribute('title','复制链接')
  await user.click(copyButton)
  expect(writeText).toHaveBeenCalledWith(new URL('/approval/1',window.location.origin).href)
  expect(screen.getByRole('status')).toHaveTextContent('已复制')
@@ -43,7 +43,7 @@ it('copies the server-configured absolute approval URL unchanged',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(page(absoluteItems as typeof items,null)))
  render(<ApprovalWorkbench isAdmin={false}/>)
  await screen.findByText('费用审批')
- await user.click(screen.getByRole('button',{name:'复制审批链接'}))
+ await user.click(screen.getByRole('button',{name:'复制链接'}))
  expect(writeText).toHaveBeenCalledWith('https://clawweb.example/approval/1')
 })
 
@@ -54,7 +54,7 @@ it('keeps copy feedback scoped to each row',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(page(twoItems as typeof items,null)))
  render(<ApprovalWorkbench isAdmin={false}/>)
  await screen.findAllByText('费用审批')
- const copyButtons=screen.getAllByRole('button',{name:'复制审批链接'})
+ const copyButtons=screen.getAllByRole('button',{name:'复制链接'})
  const rows=copyButtons.map(button => button.closest('tr'))
  await user.click(copyButtons[0])
  await user.click(copyButtons[1])
@@ -69,7 +69,7 @@ it('reports clipboard failure without claiming that the link was copied',async()
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(page(items,null)))
  render(<ApprovalWorkbench isAdmin={false}/>)
  await screen.findByText('费用审批')
- await user.click(screen.getByRole('button',{name:'复制审批链接'}))
+ await user.click(screen.getByRole('button',{name:'复制链接'}))
  expect(screen.getByRole('status')).toHaveTextContent('复制失败')
  expect(screen.queryByText('已复制')).not.toBeInTheDocument()
 })
@@ -81,15 +81,15 @@ it('approves an assigned task in the workbench and refreshes the list',async()=>
   if(url.includes('/workbench/')) return {ok:true,json:async()=>detail}
   return {ok:true,json:async()=>({items,nextCursor:null})}
  });vi.stubGlobal('fetch',fetcher)
- render(<ApprovalWorkbench isAdmin={false}/>);fireEvent.click(await screen.findByRole('button',{name:'查看详情'}))
+ render(<ApprovalWorkbench isAdmin={false}/>);fireEvent.click(await screen.findByRole('button',{name:'进行审批'}))
  const button=await screen.findByRole('button',{name:'通过'});fireEvent.click(button)
  await waitFor(()=>expect(fetcher.mock.calls.some(([url,options])=>String(url).includes('/workbench/1/resolve') && options?.method==='POST')).toBe(true))
  await waitFor(()=>expect(fetcher.mock.calls.filter(([url])=>String(url).includes('/search?')).length).toBeGreaterThan(1))
 })
 it('does not offer approval actions when the viewer is not an approver',async()=>{
  const detail={id:1,flowId:'flow-1',nodeId:'review',workflowId:'expense',workflowTitle:'费用审批',approvalType:null,message:'请确认',cardFields:[],approverIds:['00123'],approverNames:['审批人'],approvalPolicy:'any',approvedBy:[],rejectedBy:[],status:'pending',deliveryMode:'card-web',createdAt:100,resolvedAt:null,canAct:false}
- vi.stubGlobal('fetch',vi.fn(async (url:string)=>({ok:true,json:async()=>url.includes('/workbench/')?detail:{items,nextCursor:null}})))
- render(<ApprovalWorkbench isAdmin/>);fireEvent.click(await screen.findByRole('button',{name:'查看详情'}))
+ vi.stubGlobal('fetch',vi.fn(async (url:string)=>({ok:true,json:async()=>url.includes('/workbench/')?detail: url.includes('/search?')?{items,nextCursor:null,scope:'all'}:{items,nextCursor:null}})))
+ render(<ApprovalWorkbench isAdmin/>);fireEvent.click(await screen.findByRole('button',{name:'启用管理员'}));fireEvent.click(await screen.findByRole('button',{name:'查看详情'}))
  await screen.findByText('请确认',{selector:'h3'});expect(screen.queryByRole('button',{name:'通过'})).not.toBeInTheDocument()
 })
 
