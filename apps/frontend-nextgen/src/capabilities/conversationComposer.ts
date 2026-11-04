@@ -15,6 +15,8 @@ export interface ConversationComposerContext {
 export interface ConversationComposerValue {
   command?: CommandConfig;
   header?: ReactNode;
+  /** 平台侧覆盖输入框默认提示文案（capability 覆盖式注入；Open Core 不持有平台命令文案）。 */
+  placeholder?: string;
   onSend: (content: string, context?: SubmitContext) => void;
 }
 export interface ConversationComposerProps extends ConversationComposerValue {

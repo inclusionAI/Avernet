@@ -125,7 +125,7 @@ export function ConversationInteractiveStage(props: {
             }
             command={presentation.fileFeatures ? composer.command : undefined}
             fileToolbar={presentation.fileFeatures ? fileFeature.fileToolbar : undefined}
-            composerPlaceholder={presentation.composerPlaceholder}
+            composerPlaceholder={composer.placeholder ?? presentation.composerPlaceholder}
             senderRef={fileFeature.senderRef}
             mode="bot"
             interactive
