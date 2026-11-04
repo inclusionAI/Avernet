@@ -102,8 +102,9 @@ async def test_multi_instance_bounded_and_partial_results(world):
     world.get(DeviceAdapterTransport).set_override("invoke", invoke)
     result = await world.get(FileCountServiceProtocol).query(
         FileCountQuery("ignore-bot", "ignore_owner", "online", ".", "r"), "ignore_owner", is_admin=False)
-    # Scheduling may complete one instance before overlapping another; the
-    # service contract caps concurrency without guaranteeing a fixed overlap.
+    # At least one instance must execute, while scheduling is not required to
+    # overlap all calls. The service contract still caps concurrency at two.
+    assert maximum >= 1
     assert maximum <= 2
     assert result["success"] is False
     assert [r["file_count"] for r in result["results"]] == [0, None, 0]
