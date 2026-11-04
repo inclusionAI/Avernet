@@ -2960,6 +2960,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     modifier=operator,
                 )
                 if updated_rows == 0:
+                    logger.warning(
+                        f"Device configuration update affected no rows "
+                        f"(device_id={device_record.id}, publish_id={publish_record.id}, "
+                        f"tenant={tenant}, env={env})"
+                    )
                     raise RuntimeError("Device configuration update affected no rows")
                 image_config_ready = True
                 # Only expose PROCESSING to callback/timeout retries after
