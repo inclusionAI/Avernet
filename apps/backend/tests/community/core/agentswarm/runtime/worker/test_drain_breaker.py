@@ -569,7 +569,14 @@ class TestRealHandlerDrain:
         assert reclaim[0]["claim_epoch"] == state["claim_epoch"] + 1
 
     def test_within_grace_real_slice_completes(self, real_db):
-        gate = asyncio.Event()
+        entered = asyncio.Event()
+
+        class ReadyGate(asyncio.Event):
+            async def wait(self):
+                entered.set()
+                return await super().wait()
+
+        gate = ReadyGate()
         env = _build_env(
             real_db,
             [
@@ -588,29 +595,31 @@ class TestRealHandlerDrain:
             worker = AgentSwarmWorker(
                 config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
-            await worker.startup()
-
-            # A fixed 30ms sleep races slow CI workers that have not claimed
-            # the dispatch yet. Wait until the slice is genuinely in flight,
-            # then release it shortly after drain starts so the real handler
-            # completes inside its 3s grace window.
-            deadline = time.monotonic() + 3.0
-            while not worker._inflight_snapshot():
-                if time.monotonic() > deadline:
-                    await worker.shutdown()
-                    raise AssertionError("worker did not claim the run in time")
-                await asyncio.sleep(0.01)
-
-            async def release_slice():
-                await asyncio.sleep(0.1)
-                gate.set()
-
-            release = asyncio.create_task(release_slice())
+            release = None
+            drained = False
             try:
+                await worker.startup()
+                # In-flight is recorded before handler initialization and DB
+                # reads. Start the 3s drain only once the real subagent is
+                # blocked on this gate, not while slow CI is still setting up.
+                await asyncio.wait_for(entered.wait(), timeout=10.0)
+                assert worker._inflight_snapshot()
+
+                async def release_slice():
+                    assert worker._running is False
+                    gate.set()
+
+                release = asyncio.create_task(release_slice())
                 await worker.shutdown()
+                await release
+                drained = True
             finally:
-                release.cancel()
-                await asyncio.gather(release, return_exceptions=True)
+                gate.set()
+                if release is not None:
+                    release.cancel()
+                    await asyncio.gather(release, return_exceptions=True)
+                if not drained:
+                    await worker.shutdown()
 
         asyncio.run(main())
 

@@ -134,3 +134,9 @@ Use synthetic local fixtures and mocks; no production IDs, raw logs, credentials
 - Create an English PR with Problem / Solution / Validation and accurate checks. Address actual CI failures and reasonable review findings without weakening gates.
 - No OCB worktree/gitlink update, merge, deployment, production correction, or remote restart is authorized by this task.
 - Rollback: revert this focused source change; no data migration or historical binding mutation requires reversal.
+
+## CI repair addendum: deterministic drain-test synchronization
+
+The user also authorized fixing failures encountered during PR validation. The first remote Backend run failed only in the pre-existing `tests/community/core/agentswarm/runtime/worker/test_drain_breaker.py::TestRealHandlerDrain::test_within_grace_real_slice_completes`; feature tests passed. This test waits for inflight bookkeeping before the actual handler initialization completes, letting slow CI startup consume its 3-second drain grace.
+
+Allow a test-only repair in that file: wait for the real fake subagent to enter its blocking gate before starting drain, then release it after claiming stops. Keep the existing 3-second grace, final COMPLETED/final-answer/DONE/no-error assertions, and over-grace breaker tests. Bound preparation waits and clean up tasks on failure. Prove the old race and new behavior using the same injected 3.2-second real repository initialization delay; run the full drain test file plus the existing 109 feature/restart cases. Do not modify AgentSwarm runtime, product semantics, or CI thresholds.
