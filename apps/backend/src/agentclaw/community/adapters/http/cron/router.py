@@ -67,7 +67,34 @@ def _resolve_user_identity(
     Returns:
         (user_id, nick_name) 元组
     """
-    # bot_id="all" 或 owner_id 为空时，使用当前用户身份
+    # bot_id="all" 或显式 owner_id 之外，先解析当前用户的可达 Bot。
+    # 这里不会替代权限拦截器；拦截器已在上游完成授权检查。
+    if not owner_id and bot_id not in (None, "", "all", "default"):
+        try:
+            result = bot_service.search_bots(
+                owner_id=user.staffId,
+                collaborator_user_id=user.staffId,
+                bot_id=bot_id,
+                page=1,
+                page_size=1,
+            )
+            bot = next(
+                (
+                    item for item in (result or {}).get("items", [])
+                    if item.get("bot_id") == bot_id
+                ),
+                None,
+            )
+            resolved_owner_id = bot.get("owner_id") if bot else None
+            if resolved_owner_id:
+                if resolved_owner_id == user.staffId:
+                    return user.staffId, user.nickName or user.staffId
+                return resolved_owner_id, bot.get("owner_name") or resolved_owner_id
+        except Exception as e:
+            logger.warning(
+                "[_resolve_user_identity] Failed to resolve bot owner: %s", e
+            )
+
     if not owner_id or bot_id == "all":
         return user.staffId, user.nickName or user.staffId
 
