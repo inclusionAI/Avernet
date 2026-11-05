@@ -62,7 +62,34 @@ async fn dispatch(flow: &BcsMessageFlow, mut cmd: TaskDispatchCommand, native: b
     }
     let Some(target) = target else {
         emit_unknown_task_target_notice(flow, &group, &group_id, manager_session_id.as_deref(), &cmd.target_bot_id).await;
-        return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::BotNotFound(cmd.target_bot_id.clone())).await);
+        // The target bot is not found among group participants and cannot be
+        // resolved through the registry. Instead of failing the entire
+        // session_chat with BotNotFound (→ 500), skip this orphan
+        // participant, warn, and attempt best-effort cleanup from the session.
+        tracing::warn!(
+            target_bot_id = %cmd.target_bot_id,
+            group_id = %group_id,
+            "skipping orphan bot participant in task dispatch"
+        );
+        if let Some(sessions) = flow.session_management.as_ref() {
+            if let Some(sid) = manager_session_id.as_deref() {
+                if let Err(e) = sessions.remove_participant(sid, &cmd.target_bot_id).await {
+                    tracing::warn!(
+                        target_bot_id = %cmd.target_bot_id,
+                        session_id = %sid,
+                        error = %e,
+                        "failed to remove orphan participant from session"
+                    );
+                }
+            }
+        }
+        return Ok(TaskDispatchOutcome {
+            task_id: String::new(),
+            status: "skipped".to_string(),
+            real_run_id: None,
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
     };
     if group.group_strategy == GroupStrategy::ManagerWorker && target.role != ParticipantRole::Worker {
         return Err(crate::task_rejection::reject(flow, &cmd, ServiceError::InvalidOperation {

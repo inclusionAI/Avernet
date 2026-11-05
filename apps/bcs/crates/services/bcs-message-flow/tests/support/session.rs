@@ -99,7 +99,7 @@ impl SessionManagementService for StaticSessionManagement {
         _session_id: &str,
         _bot_uuid: &str,
     ) -> Result<Session, SessionUseCaseError> {
-        unimplemented!("not needed by this test")
+        Err(SessionUseCaseError::NotFound("test mock".into()))
     }
 
     async fn update_participant_mode(
