@@ -110,4 +110,28 @@ describe('InlineIdentityList（dmore artboard-002 选择当前身份）', () => 
     fireEvent.click(screen.getByRole('button', { name: /协作 Bot/ }));
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
+
+  it('身份超过弹层高度预算时列表区滚动而不是顶出页面，全部身份仍可滑出', () => {
+    const manyBots: Identity[] = Array.from({ length: 30 }, (_, index) => ({
+      id: `bot-${index}:900004`,
+      kind: 'bot',
+      name: `批量 Bot ${index}`,
+      avatar: '',
+      engine: 'OpenClaw',
+    }));
+    render(
+      <InlineIdentityList
+        userIdentities={identities.filter((identity) => identity.kind === 'user')}
+        botIdentities={manyBots}
+        activeId={null}
+        onSelect={jest.fn()}
+      />,
+    );
+
+    const listContainer = screen.getByTestId('inline-identity-scroll');
+    expect(listContainer).toHaveClass('max-h-[360px]', 'overflow-y-auto', 'app-scrollbar');
+    // 30 个 Bot 全部在 DOM 中（滚动展示，不是截断隐藏）。
+    expect(screen.getByText('批量 Bot 0')).toBeInTheDocument();
+    expect(screen.getByText('批量 Bot 29')).toBeInTheDocument();
+  });
 });

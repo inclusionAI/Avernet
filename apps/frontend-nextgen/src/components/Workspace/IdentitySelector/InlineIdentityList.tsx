@@ -119,43 +119,46 @@ export function InlineIdentityList({
           className="h-full min-w-0 flex-1 border-0 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
         />
       </div>
-      {users.length > 0 && (
-        <section aria-labelledby="inline-identity-section-user">
-          <SectionLabel title="用户" />
-          <div className="space-y-0.5">
-            {users.map((identity) => (
-              <InlineIdentityOption
-                key={identity.id}
-                identity={identity}
-                active={identity.id === activeId}
-                onSelect={onSelect}
-                userAvatarUrl={userAvatarUrl}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-      {bots.length > 0 && (
-        <section aria-labelledby="inline-identity-section-bot">
-          <SectionLabel title="Bot" />
-          <div className="space-y-0.5">
-            {bots.map((identity) => (
-              <InlineIdentityOption
-                key={identity.id}
-                identity={identity}
-                active={identity.id === activeId}
-                onSelect={onSelect}
-                userAvatarUrl={userAvatarUrl}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-      {users.length === 0 && bots.length === 0 && (
-        <p className="m-0 px-2 py-6 text-center text-xs text-muted-foreground">
-          没有匹配的身份，换个关键词试试。
-        </p>
-      )}
+      {/* 身份行高度 36px：列表区限高 10 行（360px），超出按协作群身份切换同款滚动展示，不再把弹层顶出页面。 */}
+      <div data-testid="inline-identity-scroll" className="app-scrollbar max-h-[360px] overflow-y-auto">
+        {users.length > 0 && (
+          <section aria-labelledby="inline-identity-section-user">
+            <SectionLabel title="用户" />
+            <div className="space-y-0.5">
+              {users.map((identity) => (
+                <InlineIdentityOption
+                  key={identity.id}
+                  identity={identity}
+                  active={identity.id === activeId}
+                  onSelect={onSelect}
+                  userAvatarUrl={userAvatarUrl}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+        {bots.length > 0 && (
+          <section aria-labelledby="inline-identity-section-bot">
+            <SectionLabel title="Bot" />
+            <div className="space-y-0.5">
+              {bots.map((identity) => (
+                <InlineIdentityOption
+                  key={identity.id}
+                  identity={identity}
+                  active={identity.id === activeId}
+                  onSelect={onSelect}
+                  userAvatarUrl={userAvatarUrl}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+        {users.length === 0 && bots.length === 0 && (
+          <p className="m-0 px-2 py-6 text-center text-xs text-muted-foreground">
+            没有匹配的身份，换个关键词试试。
+          </p>
+        )}
+      </div>
     </div>
   );
 }
