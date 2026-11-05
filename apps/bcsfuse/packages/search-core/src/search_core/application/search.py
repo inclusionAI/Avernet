@@ -2,6 +2,7 @@
 
 import math
 import time
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 
@@ -33,9 +34,11 @@ class CatalogSearchApplication:
         filter_fields: frozenset[str] = frozenset(),
         request_timeout: float = 4.0,
         emergency: EmergencyControl | None = None,
+        trace_id_provider: Callable[[], str] | None = None,
     ):
         if not math.isfinite(request_timeout) or request_timeout <= 0:
             raise ValueError("positive finite request timeout required")
+        self._trace_id_provider = trace_id_provider
         self._budget = request_timeout
         self._retrieval = retrieval
         self._filter_fields = filter_fields
@@ -45,6 +48,10 @@ class CatalogSearchApplication:
         self, command: SearchCommand, identity: VerifiedIdentity
     ) -> SearchResult:
         with request_budget(self._budget), request_timing() as timing:
+            if self._trace_id_provider is not None:
+                trace_id = self._trace_id_provider()
+                if trace_id:
+                    timing["trace_id"] = trace_id
             started = time.monotonic()
             with stage_timing("configuration"):
                 snapshot = (
