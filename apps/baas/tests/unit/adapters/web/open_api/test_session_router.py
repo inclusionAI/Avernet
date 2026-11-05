@@ -13,13 +13,16 @@ from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException, status
+from fastapi import FastAPI, HTTPException, status
+from fastapi.testclient import TestClient
 
 from secbaas.community.adapters.web.routers.open_api.session_router import (
     _check_app_type,
     get_session,
     get_session_messages,
     list_sessions,
+    query_session_messages,
+    router,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
@@ -933,6 +936,82 @@ class TestGetSessionMessages:
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
         assert "Internal server error" in exc.value.detail["message"]
+
+
+# ── query_session_messages ────────────────────────────────────
+
+
+class TestQuerySessionMessagesRouting:
+    """/sessions/messages/query 路由结构测试：不与现有路由重叠。"""
+
+    def test_route_registered_and_not_shadowed(self):
+        """只有新路由自身匹配 /openapi/v1/sessions/messages/query。"""
+        matching = [
+            route.path
+            for route in router.routes
+            if route.path_regex.match("/openapi/v1/sessions/messages/query")
+        ]
+        assert matching == ["/openapi/v1/sessions/messages/query"]
+
+    def test_route_reachable_with_slash_in_session_id(self):
+        """含 '/' 的 session_id 走 query 参数时路由可达（非 404），无鉴权头 → 401。"""
+        app = FastAPI()
+        app.include_router(router)
+        client = TestClient(app)
+        response = client.get(
+            "/openapi/v1/sessions/messages/query",
+            params={"session_id": "dingtalk:b_01:p:abc/def==:183839"},
+        )
+        assert response.status_code == 401
+
+
+class TestQuerySessionMessages:
+    """query_session_messages 端点核心逻辑测试。"""
+
+    @pytest.mark.asyncio
+    async def test_success_with_slash_in_session_id(self):
+        """session_id 含 '/' 时可正常查询（新接口存在的意义）。"""
+        session_with_slash = "dingtalk:b_01:p:abc/def==:183839"
+        api_key = _make_api_key_record(app_type="bot", app_id="bot-1:entity-1")
+        mock_runner = AsyncMock(spec=BotRunner)
+        mock_runner.get_session_messages = AsyncMock(
+            return_value=[_make_message_info(session_id=session_with_slash)]
+        )
+
+        with patch(RESOLVE_PATH, return_value=BOT_ID):
+            result = await query_session_messages(
+                session_id=session_with_slash,
+                limit=DEFAULT_LIMIT,
+                bot_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+
+        assert result.data.session_id == session_with_slash
+        assert result.data.total == 1
+        kwargs = mock_runner.get_session_messages.call_args[1]
+        assert kwargs["session_id"] == session_with_slash
+        assert kwargs["bot_id"] == BOT_ID
+
+    @pytest.mark.asyncio
+    async def test_missing_bot_id_system_type_returns_400(self):
+        """app_type='system' 不传 bot_id 返回 400。"""
+        api_key = _make_api_key_record(app_type="system")
+        mock_runner = AsyncMock(spec=BotRunner)
+
+        with pytest.raises(HTTPException) as exc:
+            await query_session_messages(
+                session_id=SESSION_ID,
+                limit=DEFAULT_LIMIT,
+                bot_id=None,
+                lifecycle_stage=DEFAULT_LIFECYCLE_STAGE,
+                api_key_record=api_key,
+                context=_make_context(),
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
 
 
 # ── list_sessions ─────────────────────────────────────────────
