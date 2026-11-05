@@ -80,7 +80,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
             leftIcon={<Settings2 className="size-3.5 shrink-0" aria-hidden />}
             onClick={() => setConfigBot(bot)}
           >
-            通用配置
+            公开设置
           </Button>
         ),
       },

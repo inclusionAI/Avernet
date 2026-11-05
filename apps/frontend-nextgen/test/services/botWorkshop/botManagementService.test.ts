@@ -112,12 +112,12 @@ test('授权候选仅查询 Bot 所属空间成员并保留姓名', async () => 
   expect(members).toHaveBeenCalledWith('145', { user_id: '149608', page_no: 1, page_size: 100 });
 });
 
-test('团队 Bot Owner 名称从空间成员补齐，缺失时由 UI 回退工号', async () => {
+test('团队空间 Bot Owner 名称从空间成员补齐，缺失时由 UI 回退工号', async () => {
   const members = listSpaceMembers as jest.Mock;
   members.mockResolvedValue({ code: 200000, data: { total: 1, items: [{ user_id: '1002', display_name: '小华' }] } });
   const bot = mapBotDto({
     bot_id: 'team-1',
-    bot_name: '团队 Bot',
+    bot_name: '团队空间 Bot',
     engine: 'openclaw',
     owner_entity_id: '1002',
     space: { space_id: '146', kind: 'team' },
