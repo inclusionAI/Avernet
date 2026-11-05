@@ -26,6 +26,8 @@ import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopHealthCheck } from './useBotWorkshopHealthCheck';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
+type BotWorkshopLoad = (options?: { silent?: boolean }) => Promise<void>;
+
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -37,6 +39,9 @@ export function useBotWorkshop() {
   const spaceError = useSpaceContext((space) => space.error);
   const spaceId = currentSpaceId === undefined ? '' : String(currentSpaceId);
   const loadSequence = useRef(0);
+  const loadRef = useRef<BotWorkshopLoad>();
+  const initialSettleTimer = useRef<ReturnType<typeof setTimeout>>();
+  const initialSettleScheduled = useRef(false);
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
   const navigation = useBotWorkshopNavigation();
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
@@ -44,6 +49,12 @@ export function useBotWorkshop() {
   const canCreateLocal = currentSpace?.spaceType === 'PERSONAL';
   const localCreateRestriction = '桌面 Bot 仅支持在个人空间创建和运维';
   const localCreateDisabledReason = canCreateLocal ? undefined : localCreateRestriction;
+  useEffect(
+    () => () => {
+      if (initialSettleTimer.current) clearTimeout(initialSettleTimer.current);
+    },
+    [],
+  );
   const load = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!requestIdentity.ready || !spaceInitialized || !spaceId) return;
@@ -71,6 +82,13 @@ export function useBotWorkshop() {
         });
         result.items = await botManagementService.fillOwnerNames(result.items, currentOpenApiUserId);
         if (sequence !== loadSequence.current) return;
+        if (!options?.silent && !initialSettleScheduled.current) {
+          initialSettleScheduled.current = true;
+          initialSettleTimer.current = setTimeout(() => {
+            initialSettleTimer.current = undefined;
+            void loadRef.current?.({ silent: true });
+          }, 3_000);
+        }
         state.setResult({
           items: result.items,
           total: result.total,
@@ -98,6 +116,7 @@ export function useBotWorkshop() {
       spaceInitialized,
     ],
   );
+  loadRef.current = load;
   useEffect(() => {
     void load();
   }, [load]);
