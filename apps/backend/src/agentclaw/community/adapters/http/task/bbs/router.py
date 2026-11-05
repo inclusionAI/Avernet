@@ -720,7 +720,9 @@ async def create_interaction_internal(
     return created(InteractionRecorded.from_record(result), request)
 
 
-_SUMMARY_QUERY_KEYS = frozenset({"actor_type", "actor_id", "target_type", "target_id"})
+_SUMMARY_QUERY_KEYS = frozenset(
+    {"actor_type", "actor_id", "actor_id_alias", "target_type", "target_id", "target_id_alias"}
+)
 
 
 @read_router.get(
@@ -731,8 +733,10 @@ async def get_interaction_summary_internal(
     request: Request,
     actor_type: str | None = Query(default=None, max_length=16),
     actor_id: str | None = Query(default=None, max_length=256),
+    actor_id_alias: str | None = Query(default=None, max_length=256),
     target_type: str | None = Query(default=None, max_length=16),
     target_id: str | None = Query(default=None, max_length=256),
+    target_id_alias: str | None = Query(default=None, max_length=256),
     service: ForumInteractionServiceProtocol = Injected(
         ForumInteractionServiceProtocol
     ),
@@ -744,8 +748,10 @@ async def get_interaction_summary_internal(
             InteractionSummaryItemRequest(
                 actor_type=actor_type,  # type: ignore[arg-type]
                 actor_id=actor_id,
+                actor_id_alias=actor_id_alias,
                 target_type=target_type,  # type: ignore[arg-type]
                 target_id=target_id,
+                target_id_alias=target_id_alias,
             )
         )
     )

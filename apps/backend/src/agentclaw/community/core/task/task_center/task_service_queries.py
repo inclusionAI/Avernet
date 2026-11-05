@@ -19,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 from agentclaw.community.core.task.task_center.task_service_support import (
     parse_status_filter,
@@ -83,6 +84,31 @@ def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> 
         owner_user_id = graph_props.get("owner_user_id")
         if owner_user_id:
             root.run_info.extend_props["assignee_owner_id"] = str(owner_user_id)
+
+
+def get_task_node_by_session(
+    self, session_id: str
+) -> TaskNodeSessionRef | None:
+    """Resolve a chat session to its task node while preserving task scoping.
+
+    The run-info lookup is deliberately not tenant scoped. After it yields a
+    task handle, the env-scoped task repository must resolve the owner. A task
+    outside the current scope therefore behaves as no match and cannot expose
+    the run-info owner.
+    """
+    if not session_id or self._run_info_repo is None or self._task_info_repo is None:
+        return None
+    run = self._run_info_repo.get_by_session_id(session_id)
+    if run is None:
+        return None
+    task = self._task_info_repo.get(run.task_id)
+    if task is None:
+        return None
+    return TaskNodeSessionRef(
+        task_id=run.task_id,
+        node_id=run.node_id,
+        owner_user_id=task.owner_user_id,
+    )
 
 
 def get_task_context(self, task_id: str) -> TaskContext:

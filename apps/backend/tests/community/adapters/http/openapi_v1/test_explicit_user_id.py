@@ -435,6 +435,7 @@ _NO_USER_DIMENSION = {
     # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/by_session"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -636,11 +637,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
 # The non-user Bot overview adds one Bot-path operation with no user_id.
-# The task_config match probe adds one operation without a path/query bot_id.
-# Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
+# The task_config match probe addresses a bot id in the request body, so the
+# operation contributes no path/query bot_id parameter.
+# Catalogue profile addresses the bot by ``bot_uuid`` in the path, a different
+# spelling from the ``bot_id`` parameter this rule counts.
 # The owner-scoped collaboration repair adds one path-addressed, user-scoped
 # operation; the non-user Bot overview stays path-addressed in the same total.
-_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 143}
+# The relay-session task read is account-level and carries no bot_id parameter.
+_BOT_ID_PLACEMENT = {"path": 220, "query": 1, "none": 144}
 
 
 

@@ -24,6 +24,7 @@ from agentclaw.community.core.task.domain.intake import (
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
+    TaskNodeSessionRef,
 )
 
 
@@ -143,6 +144,10 @@ class TaskServiceProtocol(Protocol):
         failure_reason: str | None = None,
         extend_props_patch: dict | None = None,
     ) -> NodeOpResult: ...
+
+    def get_task_node_by_session(self, session_id: str) -> TaskNodeSessionRef | None:
+        """Return the task and node executing in a chat session, or a miss."""
+        ...
 
     async def converge_by_session(
         self, session_id: str, *, success: bool, output: object = None,

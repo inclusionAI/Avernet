@@ -19,6 +19,9 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/list"): NoCheck(
         "a task, not a bot; filters records by the named user"
     ),
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): NoCheck(
+        "a task, not a bot; read-only relay task, node, and owner by chat session id"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): NoCheck(
         "a task, not a bot; paged read of BBS relay tasks"
     ),

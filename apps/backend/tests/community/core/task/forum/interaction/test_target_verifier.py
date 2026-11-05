@@ -64,8 +64,23 @@ def test_verify_bot_resolves_owner_scoped_default_identity(tmp_path):
     assert verifier.verify_bot("default:999999") is False
 
 
-def test_verify_bot_rejects_bare_default_but_keeps_named_bot_id_behaviour(tmp_path):
-    verifier, _db = _make_verifier(tmp_path)
+def test_verify_bot_rejects_bare_id_but_keeps_scoped_named_bot_id_behaviour(tmp_path):
+    verifier, db = _make_verifier(tmp_path)
+    with db.orm_session() as session:
+        session.add(
+            BotModel(
+                bot_id="bot-a",
+                entity_id="staff_149844",
+                entity_type="staff",
+                creator_id="149844",
+                owner_id="149844",
+                env=get_current_env(),
+                avernet_tenant=get_current_avernet_tenant(),
+            )
+        )
 
+    assert verifier.verify_bot("bot-a:149844") is True
+    assert verifier.verify_bot("bot-a:200001") is False
+    assert verifier.verify_bot("bot-a") is False
     assert verifier.verify_bot("default") is False
     assert verifier.verify_bot("ghost") is False
