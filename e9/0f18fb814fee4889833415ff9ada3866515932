@@ -1,0 +1,22 @@
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/http_clients.rs
+  s_af7e4aa7877e04::t_35d9e9fa8eb095 78-83
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_af7e4aa7877e04::t_d1967b92126a23 131-133
+  s_af7e4aa7877e04::t_35d9e9fa8eb095 21,27-29,136,205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e90f18fb814fee4889833415ff9ada3866515932",
+  "prompts": {},
+  "sessions": {
+    "s_af7e4aa7877e04": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9a1-4d83-7d53-9a74-f03170cbacd0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
