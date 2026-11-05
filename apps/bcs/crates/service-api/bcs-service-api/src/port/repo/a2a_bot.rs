@@ -21,7 +21,7 @@ pub trait A2aBotRepoPort: Send + Sync {
     async fn availability_many(&self, bot_uuids: &[String]) -> ServiceResult<Vec<A2aBotAvailability>>;
     /// Replace all configuration atomically on an existing, active Provider Bot.
     /// revision must be expected_revision + 1. False means stale/absent binding.
-    async fn compare_and_set_with_visibility(&self,record:&A2aBotRecord,expected:u64,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bool> {
+    async fn compare_and_set_with_visibility(&self,record:&A2aBotRecord,expected:u64,visibility:Option<A2aRegistrationVisibility>)->ServiceResult<bool> {
         if visibility.is_some() { return Err(crate::ServiceError::InternalError("visibility update unavailable".into())); }
         self.compare_and_set(record,expected).await
     }
