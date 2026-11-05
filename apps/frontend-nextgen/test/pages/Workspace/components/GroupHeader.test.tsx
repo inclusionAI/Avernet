@@ -7,6 +7,10 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 
+// 历史消息入口由 HISTORY_SEARCH_ENABLED 控制(默认 false 隐藏,后端检索就绪后置 true 恢复):
+// 本套件按「开关开」态覆盖图标顺序/面板开合行为,开关默认值由 featureFlags 单测守护。
+jest.mock('@/domain/conversation/featureFlags', () => ({ HISTORY_SEARCH_ENABLED: true }));
+
 const group: GroupView = {
   groupId: 'g1',
   name: '主站群',

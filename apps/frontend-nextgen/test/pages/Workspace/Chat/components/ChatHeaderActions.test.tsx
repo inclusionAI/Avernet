@@ -3,6 +3,10 @@ import { ChatHeaderActions } from '@/pages/Workspace/Chat/components/ChatHeaderA
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 
+// 历史消息入口由 HISTORY_SEARCH_ENABLED 控制(默认 false 隐藏,后端检索就绪后置 true 恢复):
+// 本套件按「开关开」态覆盖按钮行为,开关默认值由 featureFlags 单测守护。
+jest.mock('@/domain/conversation/featureFlags', () => ({ HISTORY_SEARCH_ENABLED: true }));
+
 const baseProps = {
   favorites: { favorite: false, disabled: false, onToggle: jest.fn() },
   openPanel: null,

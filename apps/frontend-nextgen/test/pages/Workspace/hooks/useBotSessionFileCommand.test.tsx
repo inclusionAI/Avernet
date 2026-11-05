@@ -11,6 +11,9 @@ jest.mock('@/services/workspace/botSessionFileService');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
 jest.mock('@/pages/Workspace/hooks/useBotSkills');
 jest.mock('sonner');
+// useBotResourceJump 引 @umijs/max 的 history:真实加载会带起 umi 运行时,在 jsdom 里触发
+// esbuild 的 Buffer/Uint8Array 不变式报错;stub 掉 history 避免重量级运行时进测试环境。
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
 
 it('未打开文件面板时,/file 唤起经 onSearch 动态拉取服务端已有文件并可引用到输入框', async () => {
   useBotSessionFileStore.getState().resetForSession();
