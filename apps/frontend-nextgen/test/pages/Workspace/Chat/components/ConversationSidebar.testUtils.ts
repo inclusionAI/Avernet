@@ -73,6 +73,7 @@ export const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): Co
   selectMineSession: jest.fn(),
   selectFriendBotSession: jest.fn(),
   createSession: jest.fn(),
+  isCreatingSession: jest.fn(() => false),
   retrySessions: jest.fn(),
   loadMoreSessions: jest.fn(),
   ...over,

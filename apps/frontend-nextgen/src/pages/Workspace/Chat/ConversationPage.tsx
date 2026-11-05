@@ -107,7 +107,6 @@ export default function ConversationPage(): JSX.Element {
   // 停用旧用户会话,防止上一用户的缓存/选中串号。
   const interactiveBot = identityChanged || !userId ? null : interactive.bot;
   const selectedSession = interactive.session;
-  const isCodingBot = interactiveBot?.isAgentCodingBot === true;
   const codingBotPreload = getCapabilities().getCodingBotConversationHost().value?.preload;
 
   // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
@@ -218,15 +217,15 @@ export default function ConversationPage(): JSX.Element {
               onLoadMore={() => void readonlyHistory.loadMore()}
               onOpenSessionList={() => setMobileListOpen(true)}
             />
-          ) : selectedCodingBot &&
-            (placeholder?.status === 'empty' || (!placeholder && isCodingBot && selectedSession)) ? (
-            // 确认无会话时仍保持 AIXCoding 控制面挂载，在上层覆盖 TeamClaw 统一空态；
-            // 创建成功后同一舞台只更新 sessionId，不重新挂载 qiankun 子应用。
+          ) : selectedCodingBot ? (
+            // managed/team Coding Bot 被选中即挂载 Stage；sessionId 只决定子应用打开的
+            // 会话，不决定 Runtime identity。loading / empty / unselected / error 等
+            // placeholder 统一覆盖在其上方，目标 controller 仍可完成注册。
             <CodingBotConversationStage
               bot={selectedCodingBot}
-              session={placeholder?.status === 'empty' ? null : selectedSession}
+              session={selectedSession}
               human={human}
-              emptyPlaceholder={placeholder?.status === 'empty' ? placeholder : null}
+              placeholder={placeholder}
               onOpenSessionList={() => setMobileListOpen(true)}
             />
           ) : placeholder ? (

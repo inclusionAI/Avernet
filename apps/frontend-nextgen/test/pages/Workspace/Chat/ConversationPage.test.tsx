@@ -427,6 +427,62 @@ describe('ConversationPage(Task 8 组合页)', () => {
     );
   });
 
+  it('managed Coding Bot 未选 Session 时仍挂载 Runtime，并用未选态覆盖在 Stage 上', async () => {
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => <div /> },
+      }),
+    });
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [agentCodingBot], friendBots: [] },
+    });
+    useConversationStore.setState({
+      ...conversationInitialState,
+      expandedBotIds: { [agentCodingBot.botId]: true },
+      originByManagedBotId: { [agentCodingBot.botId]: 'mine' },
+      selectedBotId: agentCodingBot.botId,
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: null,
+      sessionsByBotId: {
+        [agentCodingBot.botId]: {
+          botId: agentCodingBot.botId,
+          origin: 'mine',
+          scope: 'all',
+          sessions: {
+            ...emptyList,
+            items: [
+              {
+                sessionId: 'coding-s1',
+                botId: agentCodingBot.botId,
+                title: 'Coding 会话 1',
+                messageCount: 0,
+                gmtModified: '',
+                gmtCreate: '',
+              },
+            ],
+          },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+
+    render(<ConversationPage />);
+
+    const stage = await screen.findByTestId('coding-bot-stage');
+    expect(stage).toHaveAttribute('data-bot-id', 'coding-bot');
+    expect(stage).toHaveAttribute('data-session-id', '');
+    expect(screen.getByText('请选择一个会话')).toBeInTheDocument();
+    expect(stage.parentElement).toHaveAttribute('aria-hidden', 'true');
+  });
+
   it('识别出 Coding Bot 后，目标 Session 未就绪也先触发 Embedded 宿主预载', async () => {
     const preload = jest.fn();
     extendCapabilities({
