@@ -555,6 +555,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.applicable !== "boolean" || typeof body.success !== "boolean" || typeof body.summary !== "string") fail(422, "执行回报格式无效");
       await this.deps.business().finishApply(task.taskId, task.version, { applicable: body.applicable, success: body.success, summary: body.summary }, body.final_summary);
     } else if (body.kind === "owner_handoff") {
+      if (typeof body.summary !== "string" || !body.summary.trim()) fail(422, "Owner 转交需要保留完整调查说明");
       const handoff = body.handoff === undefined ? undefined : parseOwnerHandoffContent(body.handoff);
       if (body.owner_request !== undefined) {
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
