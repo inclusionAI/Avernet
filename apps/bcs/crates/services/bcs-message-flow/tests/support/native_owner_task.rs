@@ -184,7 +184,7 @@ async fn caller_parent_exchanges_its_exact_execution_token() {
     let row = h.drive("bot-observer", &worker.delivery_id).await;
     assert_eq!(row.state.status, Status::Running);
     assert_eq!(*h.identity.issued.lock().unwrap(), [Source::Human,
-        Source::Parent { run:h.run().into(), attempt:h.parent.attempt_no, token:format!("test-proof-{}", h.run()) }]);
+        Source::Parent { run:h.run().into(), attempt:h.parent.attempt_no, token:format!("<test-proof-{}>", h.run()) }]);
     assert!(h.io.sent.lock().await.is_empty());
 }
 

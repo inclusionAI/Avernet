@@ -71,10 +71,10 @@ impl bcs_service_api::ManagedDeliveryPreparationService for RecordingIo {
                 provider_id: "provider-runtime".into(),
                 provider_bot_ref: format!("ref-{}", row.target_bot_id),
                 webhook_url: "http://127.0.0.1:1/webhook".into(),
-                bcs_to_provider_token: RedactedToken::new("provider-svc-token"),
+                bcs_to_provider_token: RedactedToken::new("provider-test"),
                 protocol_version: "2.0".into(),
             },
-            service_credential: RedactedToken::new("provider-svc-token"),
+            service_credential: RedactedToken::new("provider-test"),
             provider_id: "provider-runtime".into(),
             provider_bot_ref: format!("ref-{}", row.target_bot_id),
         })
@@ -197,7 +197,7 @@ impl CallerIdentityPlugin for StubIdentity {
         self.issued.lock().unwrap().push(source);
         CallerExecutionToken::new(
             CallerProofFormat::Jwt,
-            format!("test-proof-{}", input.run.run_id),
+            format!("<test-proof-{}>", input.run.run_id),
             input.not_after_ms,
         )
         .map_err(|_| bcs_caller_identity_api::CallerIdentityError::InvalidRequest)

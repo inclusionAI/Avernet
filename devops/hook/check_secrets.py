@@ -326,6 +326,13 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
     # Borrowed optional string parameters are types, not bare credential values.
     if re.fullmatch(r"\s*\w+\s*:\s*Option<\s*&(?:'[A-Za-z_]\w*\s+)?str\s*>\s*,\s*", content):
         return True, False
+    # A borrowed named type is a parameter/field declaration, not a credential.
+    # Anchor the whole line so initializers or trailing fields remain checked.
+    if re.fullmatch(
+        r"\s*\w+\s*:\s*&(?:'[A-Za-z_]\w*\s+)?(?:mut\s+)?"
+        r"(?:[A-Za-z_]\w*::)*[A-Z]\w*\s*,\s*", content,
+    ):
+        return True, False
     # Compact declarations can contain several credential-named arguments or
     # fields. Only recognize declaration-only lines; literals were checked above.
     declaration = content.strip()
