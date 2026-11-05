@@ -103,8 +103,6 @@ def main(argv=None) -> int:
                 repository = sqlite_catalog_repository(
                     args.sqlite,
                     environment=args.environment,
-                    table="bcsfuse_tc_agent_cards",
-                    document_table="tc_search_index_documents",
                 )
             archive = None
             if args.archive:

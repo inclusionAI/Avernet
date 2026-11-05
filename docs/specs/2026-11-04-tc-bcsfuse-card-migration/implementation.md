@@ -28,8 +28,9 @@
 | OCB `internal/bcsfuse_internal/bootstrap/tc.py` | 延迟提供旧 ZDAS 仓储、环境后缀、原 collection；只在 legacy 使用 |
 
 本轮未修改公共 search-core 源码、支付宝业务源码、支付宝配置或通用 provider。
-TC 新 Card 为 `bcsfuse_tc_agent_cards`，新 Doc 为 `tc_search_index_documents`，新 Qdrant 使用
-TC 环境/索引代次空间。支付宝继续使用其原表、collection 和组装入口。
+TC 新 Card 使用 `bcsfuse_agent_cards`，新 Doc 使用 `search_index_documents`，与 zbcsfuse 表名一致。
+TC 继续使用原有 Worker Registry 数据源，跨业务通过独立数据源隔离，不修改 zbcsfuse 数据源或配置。
+新 Qdrant 继续使用 TC 环境/索引代次空间，避免旧、新链路混用集合。
 融合历史沿用原权威存储；它可能与旧资料共处同一物理库，card 模式不能撤掉融合历史访问权限。
 
 ## 兼容与资料规则
@@ -99,3 +100,9 @@ PYTHON=/path/to/python PYTHONPATH=src:packages/search-core/src bash scripts/run_
 历史双实例/代理结果不作为本方案验收依据。
 
 本轮没有执行 CI、发布、部署、真实 MySQL/ZDAS、Qdrant Server 或线上模型验证，未迁移线上数据。
+
+预发启动失败修正：撤掉 TC 专用 Card/Doc 表名，组装和迁移工具统一使用公共默认表名。
+数据源继续读取既有 `WORKER_REGISTRY_ZDAS_DATASOURCE`，没有修改配置文件或改接 zbcsfuse。
+本次表名修正验证：公开库 3529 passed / 167 skipped，内部库（含支付宝）646 passed / 16 skipped，
+原数据源选择契约通过，SQLite/Qdrant Local 同实例 HTTP 27 项通过。
+未对部署数据库执行 DDL 或迁移；预发需部署修正版本后再验收，不能据此称预发已恢复。

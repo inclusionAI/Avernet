@@ -75,10 +75,10 @@ python apps/bcsfuse/scripts/migrate_tc_cards.py /path/to/bcs_bots.csv \
 ```
 
 `--environment` 必须明确；其他环境计入 `skipped_environment`，不修改该环境的库。
-CLI 显式使用 `bcsfuse_tc_agent_cards` 与 `tc_search_index_documents`，不写支付宝默认的
-`bcsfuse_agent_cards / search_index_documents`。Card 和 Doc 同时分表，删除 TC 资料不会退役支付宝 Doc。
-同一 SQLite 文件中的不同环境由公共 catalog 按环境隔离；TC 使用独立源表及独立索引空间，
-不能只凭数据源别名推断物理数据库分离。部署注入仓储也须明确选择这两张 TC 表。
+CLI 和 TC 服务统一使用 `bcsfuse_agent_cards` 与 `search_index_documents`。表名与 zbcsfuse 相同，
+TC 继续使用原来的 Worker Registry 数据源，跨业务数据通过独立数据源隔离，不改接 zbcsfuse 数据源。
+SQLite 演练使用单独的 TC 文件；不要将 TC 与 zbcsfuse 指向同一个本地文件。
+同一 TC 数据源内的 pre/prod 仍由公共 catalog 按 environment 隔离；Qdrant 保留 TC 环境和索引代次空间。
 `--archive` 使用新文件且权限为 `0600`，已有文件会报错，避免覆盖证据。
 SQLite 新文件权限为 `0600`。原始 CSV、补充 JSONL、归档和本地数据库均不得提交到仓库。
 
