@@ -102,6 +102,15 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_live_by_bot_id(self, bot_id: str) -> List[Dict[str, Any]]:
+        """List ALL live rows sharing this bot_id in this env (no .first()).
+
+        共享 bot_id(如 ``default``,每用户一行)与启动订正的归属判定
+        都依赖看到全部 live 行。
+        """
+        ...
+
+    @abstractmethod
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -745,4 +754,14 @@ class RenderScreenRepository(Protocol):
     @abstractmethod
     def delete_by_id(self, *, record_id: int) -> None:
         """软删除（is_delete=1）。"""
+        ...
+
+    @abstractmethod
+    def list_all_for_backfill(self) -> list[RenderScreenRecord]:
+        """启动订正专用:当前 env 全量未删除记录,不带 owner 过滤。"""
+        ...
+
+    @abstractmethod
+    def update_owner_by_id(self, *, record_id: int, owner_id: str) -> None:
+        """启动订正专用:按主键归位记录的 owner scope。"""
         ...
