@@ -233,6 +233,115 @@ describe('ConversationSidebar', () => {
     expect(sessions.createSession).toHaveBeenCalledWith('bot-a:2088');
   });
 
+  it('hides Browse-only managed Coding Bot session actions but keeps the Bot row + create entry', () => {
+    const codingBotA: ConversationBotView = {
+      ...managedBotA,
+      bot: {
+        ...managedBotA.bot,
+        displayName: 'Coding Bot A',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+    };
+    const codingBotB: ConversationBotView = {
+      ...managedBotB,
+      bot: {
+        ...managedBotB.bot,
+        displayName: 'Coding Bot B',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+    };
+    const sessions = sessionsModel();
+    const store = seedStore((s) => {
+      s.selectConversation({
+        botId: codingBotA.bot.botId,
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: 's-a-current',
+      });
+      s.setExpandedBot(codingBotB.bot.botId, true);
+      s.setManagedBotCache(codingBotB.bot.botId, {
+        botId: codingBotB.bot.botId,
+        origin: 'mine',
+        scope: 'all',
+        sessions: { ...emptyList(), items: [sessionOf('s-b', codingBotB.bot.botId)] },
+        friendDirectory: { items: [], loading: false, error: null },
+        friendGroups: {},
+      });
+    });
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          managedBots: [codingBotA, codingBotB],
+          friendBots: [],
+          sessions,
+          store,
+          directory: directoryModel({ managedBots: [codingBotA, codingBotB], friendBots: [] }),
+        })}
+      />,
+    );
+
+    expect(screen.getByText('会话 s-b')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '收藏会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消收藏' })).not.toBeInTheDocument();
+    const botBRow = screen.getByRole('button', { name: 'Coding Bot B' }).closest('div.group') as HTMLElement;
+    const createButton = within(botBRow).getByRole('button', { name: '新建会话' });
+    expect(createButton).toBeInTheDocument();
+    fireEvent.click(createButton);
+    expect(sessions.createSession).toHaveBeenCalledWith(codingBotB.bot.botId);
+  });
+
+  it('shows managed Coding Bot session actions when it is the current runtime Bot', () => {
+    const codingBotB: ConversationBotView = {
+      ...managedBotB,
+      bot: {
+        ...managedBotB.bot,
+        displayName: 'Coding Bot B',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+    };
+    const sessions = sessionsModel();
+    const store = seedStore((s) => {
+      s.selectConversation({
+        botId: codingBotB.bot.botId,
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: null,
+      });
+      s.setExpandedBot(codingBotB.bot.botId, true);
+      s.setManagedBotCache(codingBotB.bot.botId, {
+        botId: codingBotB.bot.botId,
+        origin: 'mine',
+        scope: 'all',
+        sessions: { ...emptyList(), items: [sessionOf('s-b', codingBotB.bot.botId)] },
+        friendDirectory: { items: [], loading: false, error: null },
+        friendGroups: {},
+      });
+    });
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          managedBots: [codingBotB],
+          friendBots: [],
+          sessions,
+          store,
+          directory: directoryModel({ managedBots: [codingBotB], friendBots: [] }),
+        })}
+      />,
+    );
+
+    expect(screen.getByText('会话 s-b')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '会话更多操作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收藏会话' })).toBeInTheDocument();
+  });
+
   it('selects friend Bot sessions through the sessions model', () => {
     const sessions = sessionsModel();
     const store = seedStore((s) => {
