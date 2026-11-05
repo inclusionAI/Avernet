@@ -122,7 +122,10 @@ async def test_public_preview_checks_time_again_after_download(monkeypatch):
             now[0] = 301.0
             return super().get(*args, **kwargs)
 
-    world = CapabilityWorld(http=SlowHttp(_package()))
+    # The catalog digest and HTTP download describe one exact artifact;
+    # independent ZIP construction can differ in timestamp bytes under load.
+    package = _package()
+    world = CapabilityWorld(http=SlowHttp(package), package=package)
     target = DesiredCapabilities(
         skills=Declaration((DesiredSkill("weather", CenterSkillByCode("weather")),))
     )
