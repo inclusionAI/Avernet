@@ -107,8 +107,9 @@ def _history_speeches(text: str) -> list[tuple[int, str]]:
 # 遗言任务（cmd_render_ping）里的 history_block 行：
 #     第1轮 1号 阿和：「要通电」
 #     第1轮 PK 2号 老陈：「亮」
+#     第1轮 1号 Agent One：「要通电」   ← 显示名允许空格
 _EULOGY_HISTORY_RE = re.compile(
-    r"第\s*\d+\s*轮(?:\s*PK)?\s*(\d+)\s*号\s*[^\s：:「]+：「(.*?)」"
+    r"第\s*\d+\s*轮(?:\s*PK)?\s*(\d+)\s*号\s*[^：:「\r\n]+：「(.*?)」"
 )
 
 

@@ -68,10 +68,12 @@ function outerInstruction(instruction) {
 function classifyPhase(nodeId, displayName, instruction) {
   const outer = outerInstruction(instruction);
   if (nodeId.includes("vote_start") || displayName.includes("投票预备")) return "vote_start";
-  if (/(?:^|_)will(?:_|$)/.test(nodeId) || displayName.includes("遗言") || outer.includes("遗言")) {
-    return "will";
-  }
-  if (/(?:^|_)vote(?:_|$)/.test(nodeId) || /投票|我投\d|票箱|开投/.test(outer)) return "vote";
+  // Recognized node ids outrank instruction keywords: a living participant whose
+  // display name contains 遗言 must never turn an explicit vote node into a eulogy.
+  if (/(?:^|_)vote(?:_|$)/.test(nodeId)) return "vote";
+  if (/(?:^|_)will(?:_|$)/.test(nodeId)) return "will";
+  if (displayName.includes("遗言") || outer.includes("遗言")) return "will";
+  if (/投票|我投\d|票箱|开投/.test(outer)) return "vote";
   if (nodeId.includes("speak") || /发言|描述你的词|说钝一点/.test(outer)) return "speech";
   return "unknown";
 }
@@ -244,7 +246,7 @@ export class UndercoverNodeAgent {
 
   makeLastWords(task) {
     const history = [];
-    const pattern = /第\s*\d+\s*轮(?:\s*PK)?\s*(\d+)\s*号\s*[^\s：:「]+：「([^」]*)」/g;
+    const pattern = /第\s*\d+\s*轮(?:\s*PK)?\s*(\d+)\s*号\s*[^：:「\r\n]+：「([^」]*)」/g;
     for (const match of task.instruction.matchAll(pattern)) {
       if (Number(match[1]) !== task.seat && match[2].trim()) {
         history.push({ seat: Number(match[1]), text: match[2].trim() });

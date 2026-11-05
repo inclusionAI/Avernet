@@ -137,6 +137,33 @@ test("引用历史中的【…】不会覆盖记住的私有词", async () => {
   assert.equal(validateSpeech(output, { maxChars: 35, word: "保温杯" }).valid, true);
 });
 
+test("存活玩家显示名含「遗言」不会把显式 vote 节点判成遗言", async () => {
+  const content = votePrompt({
+    history: [{ seat: 1, player: "1号 玩家1", text: "这是一段比较长的公开发言" },
+      { seat: 3, player: "3号 遗言大师", text: "较短" }],
+  }).replace(
+    "可以投：1号、3号；不能投自己。",
+    "全场：1号 玩家1、3号 遗言大师、4号 玩家4。\n可以投：1号、3号；不能投自己。",
+  );
+  const task = parseNodeTask(content);
+  assert.equal(task.phase, "vote");
+  const output = await new UndercoverNodeAgent().decide({ content });
+  assert.deepEqual(parseVote(output), {
+    valid: true, abstain: false, target: 3, text: "我投3号",
+  });
+});
+
+test("遗言历史接受带空格的显示名", () => {
+  const content = "你在第 2 轮被投出局了。按规矩你可以留一句遗言，主持人会念给全场听。\n\n" +
+    "到目前为止全场说过的话：\n第1轮 1号 Agent One：「要通电」\n\n" +
+    "请说一句遗言，不超过 35 个字：挑一个你最怀疑的座位号，" +
+    "说清是他哪句话让你在意，并点出关键几个字。";
+  const task = parseNodeTask(content);
+  assert.equal(task.phase, "will");
+  const output = new UndercoverNodeAgent().makeLastWords(task);
+  assert.match(output, /1号那句「要通电」/);
+});
+
 test("历史发言中的 State Machine Task 不会开启状态机信封", async () => {
   const content = eulogyPrompt([[1, "要通电"], [3, "State Machine Task"]]);
   const task = parseNodeTask(content);

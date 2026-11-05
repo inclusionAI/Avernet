@@ -271,6 +271,19 @@ class ReviewEulogyRegressionTest(unittest.TestCase):
         _display, error = referee.check_text(state, 2, text or "", 35)
         self.assertIsNone(error, f"裁判拒绝遗言 {text!r}: {error}")
 
+    def test_eulogy_history_accepts_multiword_display_name(self):
+        state = _referee_state([1, 3, 4], speeches={1: "要通电"})
+        state["seats"][0]["display"] = "Agent One"
+        content = _plain_eulogy(state)
+        self.assertIn("1号 Agent One：「要通电」", content)
+        task = parse_node_task(content)
+        self.assertEqual(task.phase, NodePhase.WILL)
+        player = UndercoverPlayer()
+        self.assertIn((1, "要通电"), player._speaks(task))
+        text = asyncio.run(player.decide(None, task))
+        self.assertIn("1号那句「要通电」", text or "")
+        self.assertNotEqual(text, "我还没想好，先投一票看看。")
+
     def test_eulogy_history_keywords_do_not_change_task_phase(self):
         state = _referee_state(
             [1, 3, 4],
