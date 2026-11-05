@@ -469,6 +469,22 @@ describe('identityService.loadIdentities', () => {
     expect(res.ok).toBe(false);
   });
 
+  it.each([null, undefined, '', '  ', { name: '/wrong.png' }])(
+    'does not reinterpret missing or malformed mine avatar %p',
+    async (avatar_url) => {
+      listMyBots.mockResolvedValue({
+        code: 20000,
+        message: '',
+        request_id: 'avatar',
+        data: { items: [{ kind: 'bot', bot_id: 'b1', name: 'Alpha', avatar_url }], total: 1, offset: 0, limit: 50 },
+      });
+      const result = await identityService.loadIdentities();
+      expect(result.ok).toBe(true);
+      expect((result as SuccessResult).data.identities.find((i) => i.id === 'b1')?.avatarUrl).toBeUndefined();
+      expect(listMyBots).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('并发调用复用同一次 bots/mine 请求(模块级单飞)', async () => {
     let calls = 0;
     listMyBots.mockImplementation(async () => {

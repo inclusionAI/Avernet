@@ -89,6 +89,20 @@ describe('InlineIdentityList（dmore artboard-002 选择当前身份）', () => 
     expect(screen.getByText('没有匹配的身份，换个关键词试试。')).toBeInTheDocument();
   });
 
+  it('候选项以图片展示 Bot 与用户头像', () => {
+    render(
+      <InlineIdentityList
+        userIdentities={[{ id: 'human_900004', kind: 'user', name: '示例用户', avatar: '' }]}
+        botIdentities={[{ id: 'bot-helper:900004', kind: 'bot', name: '协作 Bot', avatar: '/bot-helper.png' }]}
+        activeId={null}
+        onSelect={jest.fn()}
+        userAvatarUrl="https://example.test/user.png"
+      />,
+    );
+    expect(screen.getByRole('img', { name: '协作 Bot' })).toHaveAttribute('src', '/bot-helper.png');
+    expect(screen.getByRole('img', { name: '示例用户' })).toHaveAttribute('src', 'https://example.test/user.png');
+  });
+
   it('点击未选中身份立即回调并携带 id；点击当前选中不触发', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: /风险监控服务/ }));

@@ -1,4 +1,3 @@
-import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
@@ -7,6 +6,7 @@ import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
 import { Check, Search } from 'lucide-react';
 import { useState } from 'react';
+import { IdentityAvatar } from './IdentitySelectorParts';
 
 const SEARCH_PLACEHOLDER = '搜索 Bot 名称、Bot ID 或引擎';
 
@@ -14,11 +14,6 @@ const SEARCH_PLACEHOLDER = '搜索 Bot 名称、Bot ID 或引擎';
 const USER_TAG = 'rounded-[4px] bg-muted px-1 text-[9px] font-medium leading-4 text-muted-foreground';
 // Bot 引擎为描边标签（dmore Background+Border：1px #E6E6E7、透明底）。
 const ENGINE_TAG = 'rounded-[4px] border border-divider px-1 text-[10px] font-medium leading-[15px] text-muted-foreground';
-
-function avatarUrl(identity: Identity, userAvatarUrl?: string): string | undefined {
-  const raw = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
-  return raw && /^https?:\/\//.test(raw) ? raw : undefined;
-}
 
 function SectionLabel({ title }: { title: string }) {
   // dmore 分组标签「用户/Bot」：10px/500、0.117px 字距、弱化灰。
@@ -53,11 +48,7 @@ function InlineIdentityOption({
         active ? 'bg-accent hover:bg-accent' : 'hover:bg-accent/50',
       )}
     >
-      <Avatar
-        name={identity.name}
-        src={avatarUrl(identity, userAvatarUrl)}
-        size={20}
-      />
+      <IdentityAvatar identity={identity} size={20} userAvatarUrl={userAvatarUrl} />
       <TooltipProvider delayDuration={200}>
         <Tooltip>
           <TooltipTrigger asChild>

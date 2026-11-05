@@ -79,6 +79,9 @@ export function useCollaborationPrivacy({
     const controller = new AbortController();
     if (identityStatus !== 'loading') void load(controller.signal);
     return () => {
+      // 先失效所有在途读取（含无 signal 的手动/修复后刷新），再 abort/reset：
+      // 否则迟到的成功/失败/finally 会改写已 reset 的共享 Store（切 Bot 时覆盖新 Bot 状态）。
+      latestLoadId.current += 1;
       controller.abort();
       useCollaborationPrivacyStore.getState().reset();
     };
