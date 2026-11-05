@@ -7,6 +7,7 @@ import {
   useSessionTaskPanelBootstrap,
 } from '@/hooks/useSessionTaskPanelBootstrap';
 import type { TaskListItem } from '@/domain/tasks/models';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -19,17 +20,33 @@ jest.mock('@/services/myTask', () => ({
   getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
   isEnvelopeFailure: (result?: { code?: number }) => result?.code !== 0,
   listMyTasks: (...args: unknown[]) => mockListMyTasks(...args),
-  normalizeMyTaskPage: (data: unknown) => ({ items: Array.isArray(data) ? data : [], total: 0, page: 1, pageSize: 10 }),
+  normalizeMyTaskPage: (data: unknown) => ({
+    items: Array.isArray(data) ? data : [],
+    total: 0,
+    page: 1,
+    pageSize: 10,
+  }),
 }));
 
-const taskRecord = (taskId: string, modified: string): TaskListItem =>
+const sessionRef = (taskId: string, nodeId = `node-${taskId}`) => ({
+  task_id: taskId,
+  owner_user_id: 'u1',
+  node_id: nodeId,
+  updated_at: '2026-11-05T10:00:00Z',
+});
+
+const taskRecord = (
+  taskId: string,
+  modified: string,
+  sessionId = 'sess-1',
+): TaskListItem =>
   ({
     id: 1,
     task_id: taskId,
     source_type: 'bot',
     owner_user_id: 'u1',
     owner_bot_id: 'b1',
-    execution_config: { task_type: 'dynamic', main_session_id: 'sess-1' },
+    execution_config: { task_type: 'dynamic', main_session_id: sessionId },
     task_spec: {
       context: { title: taskId, background: '', extend_props: {} },
       goal: { objective: '', acceptances: [] },
@@ -48,15 +65,17 @@ const makePanelRef = () => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetTaskBySession.mockResolvedValue({ ok: true, data: null });
+  mockListMyTasks.mockResolvedValue({ code: 0, data: [] });
   localStorage.clear();
   useTaskSidePanelStore.getState().resetAll();
+  useTaskSessionAssociationStore.getState().reset();
 });
 
 describe('findLatestTaskForSession', () => {
   it('只选择当前会话中最后更新的任务', () => {
     const older = taskRecord('task-old', '2026-10-27 10:00:00');
     const newer = taskRecord('task-new', '2026-10-27 11:30:00');
-    const otherSession = { ...newer, task_id: 'task-other', execution_config: { task_type: 'dynamic', main_session_id: 'sess-2' } } as TaskListItem;
+    const otherSession = taskRecord('task-other', '2026-10-27 12:00:00', 'sess-2');
 
     expect(findLatestTaskForSession([older, newer, otherSession], 'sess-1')?.task_id).toBe('task-new');
   });
@@ -72,8 +91,7 @@ describe('resolveSessionOwnerUserId', () => {
 
 describe('buildSessionTaskPanelTab', () => {
   it('构造幂等 task tab 和任务面板参数', () => {
-    const record = taskRecord('task-1', '2026-10-27 11:30:00');
-    const tab = buildSessionTaskPanelTab(record, 'u1');
+    const tab = buildSessionTaskPanelTab(taskRecord('task-1', '2026-10-27 11:30:00'), 'u1');
 
     expect(tab).toMatchObject({
       id: 'task-task-1',
@@ -108,55 +126,75 @@ describe('buildRelayTaskPanelTab', () => {
 });
 
 describe('useSessionTaskPanelBootstrap', () => {
-  it('第二棒会话命中后优先打开该任务，不查询任务列表', async () => {
+  it('by_session 返回多个 task 时默认打开最新 ref，并记录全部关联 task', async () => {
     const { ref, openTab } = makePanelRef();
     mockGetTaskBySession.mockResolvedValue({
       ok: true,
-      data: {
-        task_id: 'task-relay',
-        owner_user_id: '440718',
-        node_id: 'node-relay',
-      },
+      data: [sessionRef('task-new'), sessionRef('task-old')],
+    });
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [taskRecord('task-old', '2026-10-27 10:00:00'), taskRecord('task-new', '2026-10-27 11:30:00')],
     });
 
     renderHook(() =>
-      useSessionTaskPanelBootstrap({
-        sessionId: 'agent:main:session:sess-relay:user:440718',
-        userId: '146836',
-        panelRef: ref,
-      }),
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
     );
 
     await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
-    expect(mockGetTaskBySession).toHaveBeenCalledWith('agent:main:session:sess-relay:user:440718');
-    expect(mockListMyTasks).not.toHaveBeenCalled();
+    expect(mockGetTaskBySession).toHaveBeenCalledWith('sess-1');
+    expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
+    expect(openTab.mock.calls[0][0]).toMatchObject({
+      id: 'task-task-new',
+      title: 'task-new',
+      type: 'taskPanel.TaskLoopView',
+    });
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-new');
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
+    expect(useTaskSessionAssociationStore.getState().activeSessionTaskIds).toEqual([
+      'task-new',
+      'task-old',
+    ]);
+  });
+
+  it('任务列表失败但 by_session 命中时仍恢复最新 task', async () => {
+    const { ref, openTab } = makePanelRef();
+    mockGetTaskBySession.mockResolvedValue({
+      ok: true,
+      data: [sessionRef('task-relay')],
+    });
+    mockListMyTasks.mockResolvedValue({ code: 500000, message: 'failed', data: null });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
     expect(openTab.mock.calls[0][0]).toMatchObject({
       id: 'task-task-relay',
+      title: '任务',
       type: 'taskPanel.TaskLoopView',
     });
     expect(openTab.mock.calls[0][0].params).toMatchObject({
       taskId: 'task-relay',
-      userId: '146836',
+      userId: 'u1',
       taskApiBase: '/openapi/v1/collaboration/tasks',
     });
-    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-relay');
-    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
 
-  it('第二棒命中先于 PanelHandle 就绪时，短暂等待后仍自动拉起副屏', async () => {
+  it('by_session 命中先于 PanelHandle 就绪时，短暂等待后仍自动拉起副屏', async () => {
     jest.useFakeTimers();
     try {
       const { ref: readyRef, openTab } = makePanelRef();
       const nullRef: React.RefObject<PanelHandle | null> = { current: null };
       mockGetTaskBySession.mockResolvedValue({
         ok: true,
-        data: { task_id: 'task-relay', owner_user_id: 'owner-relay', node_id: 'node-relay' },
+        data: [sessionRef('task-relay')],
       });
 
       renderHook(() =>
         useSessionTaskPanelBootstrap({ sessionId: 'sess-relay', userId: 'u1', panelRef: nullRef }),
       );
-      // by_session 已返回，但深链持久副屏 owner 仍在同帧后的 React commit 中接管 ref。
       await act(async () => Promise.resolve());
       expect(openTab).not.toHaveBeenCalled();
 
@@ -173,68 +211,17 @@ describe('useSessionTaskPanelBootstrap', () => {
     }
   });
 
-  it('跨用户 list 兜底时按会话归属人查任务，但 panel 身份仍用当前登录人', async () => {
-    const sessionId = 'agent:main:session:sess-1:user:440718';
-    const ownerTask = {
-      ...taskRecord('task-owner', '2026-10-27 11:30:00'),
-      owner_user_id: '440718',
-      execution_config: { task_type: 'dynamic', main_session_id: sessionId },
-    } as TaskListItem;
-    const viewerTask = {
-      ...taskRecord('task-viewer', '2026-10-27 10:30:00'),
-      owner_user_id: '146836',
-      execution_config: { task_type: 'dynamic', main_session_id: 'agent:main:session:sess-other:user:146836' },
-    } as TaskListItem;
-    const { ref, openTab } = makePanelRef();
-    mockListMyTasks.mockResolvedValue({ code: 0, data: [ownerTask, viewerTask] });
-
-    renderHook(() =>
-      useSessionTaskPanelBootstrap({ sessionId, userId: '146836', panelRef: ref }),
-    );
-
-    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
-    expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: '440718' });
-    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-owner' });
-    expect(openTab.mock.calls[0][0].params).toMatchObject({ userId: '146836' });
-  });
-
-  it('进入会话即按任务记录打开最新 TaskPanel，不依赖历史消息分页', async () => {
-    const { ref, openTab } = makePanelRef();
-    mockListMyTasks.mockResolvedValue({
-      code: 0,
-      data: [
-        taskRecord('task-old', '2026-10-27 10:00:00'),
-        taskRecord('task-new', '2026-10-27 11:30:00'),
-      ],
-    });
-
-    const { rerender } = renderHook(
-      ({ sessionId }: { sessionId: string | null }) =>
-        useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef: ref }),
-      { initialProps: { sessionId: 'sess-1' } },
-    );
-
-    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
-    expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: 'u1' });
-    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-new' });
-    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-new');
-
-    rerender({ sessionId: 'sess-1' });
-    await act(async () => Promise.resolve());
-    expect(mockListMyTasks).toHaveBeenCalledTimes(1);
-    expect(openTab).toHaveBeenCalledTimes(1);
-  });
-
   it('任务列表进入对话时优先打开用户点击的任务，而不是会话最新任务', async () => {
     const { ref, openTab } = makePanelRef();
     useTaskSidePanelStore.getState().setActiveTask('task-current');
     useTaskSidePanelStore.getState().markTaskPanelOpenIntent('task-old');
+    mockGetTaskBySession.mockResolvedValue({
+      ok: true,
+      data: [sessionRef('task-new'), sessionRef('task-old')],
+    });
     mockListMyTasks.mockResolvedValue({
       code: 0,
-      data: [
-        taskRecord('task-old', '2026-10-27 10:00:00'),
-        taskRecord('task-new', '2026-10-27 11:30:00'),
-      ],
+      data: [taskRecord('task-old', '2026-10-27 10:00:00'), taskRecord('task-new', '2026-10-27 11:30:00')],
     });
 
     renderHook(() =>
@@ -247,19 +234,69 @@ describe('useSessionTaskPanelBootstrap', () => {
     expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
 
-  it('已有活跃任务面板时，by_session 未命中则不重新 bootstrap 当前副屏', async () => {
+  it('AixUI 已展示任务时，by_session 命中不同或相同 task 都不抢焦点', async () => {
     const { ref, openTab } = makePanelRef();
-    useTaskSidePanelStore.getState().setActiveTask('task-current');
-    mockListMyTasks.mockResolvedValue({ code: 0, data: [taskRecord('task-new', '2026-10-27 11:30:00')] });
+    type SessionRef = ReturnType<typeof sessionRef>;
+    let resolveSessionTask: (value: { ok: true; data: SessionRef[] | null }) => void = () => undefined;
+    mockGetTaskBySession.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSessionTask = resolve;
+        }),
+    );
 
     renderHook(() =>
       useSessionTaskPanelBootstrap({ sessionId: 'sess-1', userId: 'u1', panelRef: ref }),
     );
-    await act(async () => Promise.resolve());
 
-    expect(mockListMyTasks).not.toHaveBeenCalled();
+    await act(async () => Promise.resolve());
+    act(() => {
+      useTaskSidePanelStore.getState().setActiveTask('task-aixui');
+    });
+    await act(async () => {
+      resolveSessionTask({ ok: true, data: [sessionRef('task-relay')] });
+    });
+
     expect(openTab).not.toHaveBeenCalled();
-    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-current');
+    expect(mockListMyTasks).not.toHaveBeenCalled();
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-aixui');
+  });
+
+  it('by_session 未命中时按任务列表选择当前会话最新任务', async () => {
+    const { ref, openTab } = makePanelRef();
+    const sessionId = 'agent:main:session:sess-1:user:440718';
+    const ownerTask = taskRecord('task-owner', '2026-10-27 11:30:00', sessionId);
+    const viewerTask = taskRecord('task-viewer', '2026-10-27 10:30:00', 'sess-other');
+    mockListMyTasks.mockResolvedValue({ code: 0, data: [viewerTask, ownerTask] });
+
+    renderHook(() =>
+      useSessionTaskPanelBootstrap({ sessionId, userId: '146836', panelRef: ref }),
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    expect(mockListMyTasks).toHaveBeenCalledWith({ user_id: '440718' });
+    expect(openTab.mock.calls[0][0]).toMatchObject({ id: 'task-task-owner' });
+    expect(openTab.mock.calls[0][0].params).toMatchObject({ userId: '146836' });
+  });
+
+  it('同一 session bootstrap 只执行一次', async () => {
+    const { ref, openTab } = makePanelRef();
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [taskRecord('task-new', '2026-10-27 11:30:00')],
+    });
+
+    const { rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef: ref }),
+      { initialProps: { sessionId: 'sess-1' } },
+    );
+
+    await waitFor(() => expect(openTab).toHaveBeenCalledTimes(1));
+    rerender({ sessionId: 'sess-1' });
+    await act(async () => Promise.resolve());
+    expect(mockListMyTasks).toHaveBeenCalledTimes(1);
+    expect(openTab).toHaveBeenCalledTimes(1);
   });
 
   it('没有命中当前会话的任务时不打开副屏', async () => {
@@ -273,6 +310,7 @@ describe('useSessionTaskPanelBootstrap', () => {
     await act(async () => Promise.resolve());
     expect(openTab).not.toHaveBeenCalled();
     expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSessionAssociationStore.getState().activeSessionTaskIds).toEqual([]);
   });
 
   it('任务列表失败时静默不打扰会话', async () => {

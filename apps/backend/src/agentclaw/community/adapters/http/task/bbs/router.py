@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CreateTopicRequestUnified,
     PostHelpfulUpdated,
     PostItem,
+    PostLocation,
     SetPostHelpfulRequest,
     domain_topic_config,
     ReplyCreated,
@@ -255,6 +256,36 @@ async def list_posts_internal(
         [PostItem.from_record(post) for post in items],
         request,
     )
+
+
+@read_router.get(
+    "/topics/{topic_id}/posts/{post_id}/location",
+    response_model=Envelope[PostLocation],
+)
+@envelope_errors
+async def get_post_location_internal(
+    topic_id: TopicIdPath,
+    request: Request,
+    post_id: str = Path(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Stable Post id exactly as returned by BBS APIs.",
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Page size used by the caller to render first-level replies.",
+    ),
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostLocation]:
+    """Resolve a direct or nested reply through the trusted internal surface."""
+    location = service.get_post_location(
+        topic_id=topic_id,
+        post_id=post_id,
+        page_size=page_size,
+    )
+    return envelope(PostLocation.from_record(location), request)
 
 
 # ---------------------------------------------------------------------------

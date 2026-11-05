@@ -427,14 +427,16 @@ def relay_context_expired_attempt():
 
 # Authenticated mirrors of the public task read surfaces.
 def _seed_task_session(world) -> None:
-    def get_task_node_by_session(_self, _session_id: str):
-        return TaskNodeSessionRef(
-            task_id="task-endpoint-1",
-            node_id="node-endpoint-session-1",
-            owner_user_id="user-endpoint-1",
-        )
+    def get_task_nodes_by_session(_self, _session_id: str):
+        return [
+            TaskNodeSessionRef(
+                task_id="task-endpoint-1",
+                node_id="node-endpoint-session-1",
+                owner_user_id="user-endpoint-1",
+            )
+        ]
 
-    bind_overrides(world, TaskServiceProtocol, {"get_task_node_by_session": get_task_node_by_session})
+    bind_overrides(world, TaskServiceProtocol, {"get_task_nodes_by_session": get_task_nodes_by_session})
 
 
 @endpoint_test(
@@ -451,9 +453,15 @@ def _seed_task_session(world) -> None:
         json_contains={
             "code": 200000,
             "data": {
-                "task_id": "task-endpoint-1",
-                "owner_user_id": "user-endpoint-1",
-                "node_id": "node-endpoint-session-1",
+                "session_id": "session-endpoint-1",
+                "items": [
+                    {
+                        "task_id": "task-endpoint-1",
+                        "owner_user_id": "user-endpoint-1",
+                        "node_id": "node-endpoint-session-1",
+                    }
+                ],
+                "total": 1,
             },
         },
     ),

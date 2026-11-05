@@ -1,9 +1,14 @@
 import { TaskSwitcherControl } from '@/assets/TaskPanel/v2/TaskSwitcherControl';
 import { getCapabilities } from '@/capabilities';
-import { buildTaskConversationNavigationTarget, useTaskSwitcherTasks } from '@/hooks/useTaskSwitcherTasks';
+import {
+  buildTaskConversationNavigationTarget,
+  useTaskSwitcherTasks,
+} from '@/hooks/useTaskSwitcherTasks';
+import { resolveSessionOwnerUserId } from '@/hooks/useSessionTaskPanelBootstrap';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React from 'react';
@@ -23,7 +28,16 @@ export const TaskPanelSwitcherSlot: React.FC<{
   useWorkspaceStore((s) => s.identities);
   const human = getCapabilities().getHumanIdentity();
   const userId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
-  const { items, records } = useTaskSwitcherTasks(userId, { currentTaskId, enabled: Boolean(currentTaskId) });
+  const activeSessionId = useTaskSessionAssociationStore((state) => state.activeSessionId);
+  const associatedTaskIds = useTaskSessionAssociationStore((state) => state.activeSessionTaskIds);
+  const listUserId = activeSessionId
+    ? resolveSessionOwnerUserId(activeSessionId, userId ?? null) ?? userId
+    : userId;
+  const { items, records } = useTaskSwitcherTasks(listUserId, {
+    currentTaskId,
+    enabled: Boolean(currentTaskId),
+    associatedTaskIds,
+  });
   const activeTaskId = useTaskSidePanelStore((s) => s.activeTaskId);
   // I4:横条「当前」以本面板实例的任务为准——全局 activeTaskId 只服务发起任务后的 tab
   // 自动聚焦语义,不得让非活跃任务面板在自己的横条里显示别的任务为"当前"。
