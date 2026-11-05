@@ -47,3 +47,27 @@ their existing failure/unknown semantics.
   longer accepted by the report schema. No database/config migration is needed.
   Reverting this change restores the previous repair contract; normal caller
   identity-mode synchronization is not changed by this patch.
+
+## Singlebox manifest follow-up
+
+The first CI run exposed a missed consumer of the removed Plugin method:
+`singlebox_coverage_modules.yaml` still declared
+`BcsCollaborationMetadataPlugin.sync_caller` and its production evidence.
+The unchanged manifest validator correctly rejected this stale declaration.
+Remove only that non-existent operation; preserve the full Core paths, route,
+remaining `exists`/`update_profile`/`aclose` denominator, and all thresholds.
+
+- Reproduced the exact CI error with the production manifest-check CLI.
+- Added two registration regressions; both failed before the manifest fix.
+- The same manifest-check CLI passes after the fix.
+- The complete `singlebox/ci/tests` run yielded 222 passing tests and three
+  failures. All three failures were independently reproduced from a clean
+  `git archive HEAD` snapshot: two expect the absent `singlebox/ci/pre_push.sh`,
+  and one requires a historical workflow branch trigger. They are pre-existing
+  and outside this repair contract change; no checks were weakened or skipped.
+- An additional 15 backend boundary, repair-scope and consumer-conformance tests
+  passed. Live Singlebox stack/coverage execution is still not claimed.
+- Focused Singlebox coverage tooling suites passed: 45 tests and 14 subtests,
+  including manifest validation, report generation, registration, workflows,
+  and artifact verification. Changed-file Ruff and diff hygiene checks passed;
+  the added Python regression file is 53 lines.
