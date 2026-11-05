@@ -4,19 +4,43 @@ import { botManagementActionService } from '@/services/botWorkshop/botManagement
 import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
-export function useBotWorkshopActions(load: () => Promise<void>, userId?: string) {
+export const RESTART_CATCH_UP_DELAY_MS = 3_000;
+
+const RESTART_ACTIONS = new Set<BotManagementVerb>(['restart', 'engine_restart', 'restart_publish']);
+
+type BotWorkshopLoad = (options?: { silent?: boolean }) => Promise<void>;
+
+export function useBotWorkshopActions(load: BotWorkshopLoad, userId?: string) {
   const pending = useRef(new Set<string>());
+  const restartCatchUpTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(
+    () => () => {
+      if (restartCatchUpTimer.current) clearTimeout(restartCatchUpTimer.current);
+    },
+    [],
+  );
+
+  const scheduleRestartCatchUp = useCallback(() => {
+    if (restartCatchUpTimer.current) clearTimeout(restartCatchUpTimer.current);
+    restartCatchUpTimer.current = setTimeout(() => {
+      restartCatchUpTimer.current = undefined;
+      void load({ silent: true });
+    }, RESTART_CATCH_UP_DELAY_MS);
+  }, [load]);
+
   return useCallback(
     async (action: BotManagementVerb, bot: BotDomain) => {
       const key = `${bot.ownerId}:${bot.id}:${action}`;
       if (pending.current.has(key)) return;
       pending.current.add(key);
       try {
-        if (bot.runtime?.engine === 'teclaw' && ['restart', 'engine_restart', 'restart_publish'].includes(action))
+        if (bot.runtime?.engine === 'teclaw' && RESTART_ACTIONS.has(action)) {
           throw new Error('TeClaw 暂不支持重启操作');
+        }
         const result =
           action === 'activate'
             ? await botManagementActionService.run(action, bot, userId)
@@ -63,6 +87,10 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
         }
         toast.success(botManagementActionService.successMessage(action));
         await load();
+        // Mutation success only means the restart was accepted. The first
+        // inventory read can still observe the previous runtime status, so issue
+        // one bounded silent follow-up and let that response stay authoritative.
+        if (RESTART_ACTIONS.has(action)) scheduleRestartCatchUp();
       } catch (error) {
         const fallback = action === 'delete' ? 'Bot 删除失败，请稍后重试' : '操作失败';
         toast.error(getBotManagementErrorMessage(action, error, fallback));
@@ -71,6 +99,6 @@ export function useBotWorkshopActions(load: () => Promise<void>, userId?: string
         pending.current.delete(key);
       }
     },
-    [load, userId],
+    [load, scheduleRestartCatchUp, userId],
   );
 }
