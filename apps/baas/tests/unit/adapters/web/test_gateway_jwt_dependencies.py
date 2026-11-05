@@ -39,7 +39,11 @@ def auth_client():
 
     @app.get("/auth")
     def authenticated(context=Depends(validate_jwt_token)):
-        return {"tenant": context.tenant, "app": context.app}
+        return {
+            "tenant": context.tenant,
+            "app": context.app,
+            "claimed_bot_id": context.claimed_bot_id,
+        }
 
     return TestClient(app), secret, repository
 
@@ -102,10 +106,75 @@ def test_signed_token_keeps_authentication_semantics(auth_client, expired):
     if expired:
         repository.get_by_resource_key_and_tenant.assert_not_called()
     else:
-        assert response.json() == {"tenant": "test-tenant", "app": "test-app"}
+        assert response.json() == {
+            "tenant": "test-tenant",
+            "app": "test-app",
+            "claimed_bot_id": None,
+        }
         repository.get_by_resource_key_and_tenant.assert_called_once_with(
             "test-resource", "test-tenant"
         )
+
+
+class TestClaimedBotId:
+    """``app.bot_id`` is surfaced for authorization, absent reads as None."""
+
+    @staticmethod
+    def _token(app_block):
+        principal = {
+            "access_key": {"access_key": "test-resource"},
+            "tenant": "test-tenant",
+        }
+        if app_block is not None:
+            principal["app"] = app_block
+        return jwt.encode(
+            {
+                "exp": datetime.now(UTC) + timedelta(seconds=300),
+                "principals": [principal],
+            },
+            _KEY,
+            algorithm="HS256",
+        )
+
+    def test_claim_from_the_token_reaches_the_context(self, auth_client):
+        client, _, _ = auth_client
+
+        response = client.get(
+            "/auth",
+            headers={
+                "x-avernet-principal": self._token(
+                    {"app_name": "agentclaw-backend", "bot_id": "agent_swarm_a:49912"}
+                )
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["claimed_bot_id"] == "agent_swarm_a:49912"
+
+    def test_absent_claim_reads_as_none(self, auth_client):
+        client, _, _ = auth_client
+
+        response = client.get(
+            "/auth",
+            headers={
+                "x-avernet-principal": self._token({"app_name": "agentclaw-backend"})
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["claimed_bot_id"] is None
+
+    def test_principal_without_an_app_block_is_tolerated(self, auth_client):
+        # A third-party or older principal may carry no ``app`` block at all;
+        # that must read as "no claim", not fail validation.
+        client, _, _ = auth_client
+
+        response = client.get(
+            "/auth", headers={"x-avernet-principal": self._token(None)}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["claimed_bot_id"] is None
 
 
 def test_every_chat_route_documents_authentication_service_unavailability():

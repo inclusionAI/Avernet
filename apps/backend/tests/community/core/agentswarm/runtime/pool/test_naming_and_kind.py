@@ -184,7 +184,7 @@ class TestBotChatTimeoutOption:
 
         class _RecordingPlatform:
             def chat(self, bot_id, message, owner_id="", cancel_event=None,
-                     timeout_seconds=None):
+                     timeout_seconds=None, tenant=""):
                 captured.append({"bot_id": bot_id, "timeout": timeout_seconds})
                 return _json.dumps({"text": "ok"})
 
