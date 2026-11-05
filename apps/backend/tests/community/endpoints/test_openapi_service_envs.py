@@ -103,7 +103,7 @@ def _assert_publish_linked_quality_task(response, _world):
     assert response.json()["data"]["quality_task_uuid"] == _last_publish_biz_id
     assert task.ext == {
         "publish_id": 1, "bot_uuid": "eval-1", "baas_publish_id": 42,
-        "operator": "operator-1",
+        "operator": "operator-1", "task_purpose": "environment_publish",
     }
 
 
