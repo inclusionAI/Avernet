@@ -159,7 +159,7 @@ def create_router():
                     "min_score_compat_mode": "deprecated_ignored",
                     "min_score_stage": "none",
                     "enable_rerank": payload.enable_rerank,
-                    "candidate_source": f"tc_{runtime.index_source}",
+                    "candidate_source": "tc_card",
                     "status": result.status,
                     "reasons": list(result.reasons),
                     "score_sources": [i.score_source for i in result.items],
