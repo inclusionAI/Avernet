@@ -13,7 +13,7 @@
 | Release / transfer | 1 | per drain or rebalance |
 | Inbound round persist | 1 | per round (required by write-before-ack) |
 | Owner pickup of fallback input | 1 indexed query **per node per tick**, never per session | per node per tick |
-| Failure discovery | 1 indexed query per survivor per dead node per poll, reading only that survivor's buckets, at most one batch (2,000 rows) | while a node is dead |
+| Failure discovery | 1 indexed query per survivor per dead node per poll, reading only that survivor's buckets, at most one batch (2,000 rows) | while a node is dead, until it is retired; one per-tick budget across all dead nodes |
 | Transferred, not-yet-adopted leases | 1 indexed query per node per tick (`adopted = FALSE`, at most one 2,000-row batch; usually empty) | per node per tick |
 
 The rule behind every row: costs scale with **nodes**, never with

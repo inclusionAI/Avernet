@@ -35,8 +35,14 @@ They are listed here so each sibling item can design for them.
   failover). A recorded Message response is terminal.
 - **Make `messageId` the idempotency key** (deterministic per run, step and
   attempt), so even agents that only dedup on `messageId` benefit.
-- **Size the dedup window from the claim threshold**, which is this design's
-  effective lease TTL.
+- **Size the dedup window from the longest a request can stay in flight,
+  not from the claim threshold.** A paused or partitioned owner's request
+  that was already sent can arrive long after a successor took over. The
+  window must cover the maximum lifetime of one dispatch attempt (send
+  timeout × retry budget + maximum network and queue delay) plus takeover
+  (the claim threshold) plus reconciliation, and senders must enforce that
+  lifetime: an attempt older than it is never sent or retried. The claim
+  threshold is only one term.
 
 ## Item 4 — the BCN A2A profile
 

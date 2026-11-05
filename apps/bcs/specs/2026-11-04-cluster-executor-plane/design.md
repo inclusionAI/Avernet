@@ -442,7 +442,12 @@ dead node's sessions and split them without talking to each other.
    unprocessed input are taken first. Buckets whose first choice is also
    down are picked up after a short grace by the next-ranked node. Because
    the query repeats every poll, work that becomes pending later (a fallback
-   round) is found too. A node holding 300 k pending sessions spread over 19
+   round) is found too. A dead node is **retired from discovery** once its
+   leases are claimable and a query returns nothing: after that, late input
+   for its idle sessions doesn't need discovery, because the durable
+   fallback claims a claimable lease itself (§6). All dead nodes together
+   share one per-tick discovery budget, so a history of crashes adds no
+   standing load. A node holding 300 k pending sessions spread over 19
    survivors is claimed in under 10 s; claiming is cheap because state is
    reloaded lazily on first use.
 2. **Claim on demand.** Idle sessions are not scanned at all: the next round
