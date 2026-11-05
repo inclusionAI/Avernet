@@ -6,13 +6,13 @@ import { containsSecret } from "@avernet/clawweb-shared/server/services/redactio
 import { createHash, randomUUID } from "node:crypto";
 import { SessionRecoveryError } from "./errors.js";
 import { cronJobId } from "./session-identity.js";
-import { parseRequest } from "./validation.js";
+import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
 import { confirmOwnerRequest, requestOwnerCooperation } from "./owner-cooperation.js";
 import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore, RecoveryOwnerHandoffContent } from "./task-contracts.js";
 
 const EXECUTION_RETRY_DELAYS_MS = [20000, 60000] as const;
 const CRON_WAIT_MS = 5 * 60 * 1000;
@@ -28,7 +28,7 @@ export interface RecoveryTaskNotifier {
   notifyOwnerRequest?(input: { task: RecoveryStoredTask; updateOnly: boolean }): Promise<boolean>;
   /** False means notification is disabled; do not record a delivery attempt. */
   notify(input: { ownerId: string; botId: string; targetEnvironment: RecoveryRequest["target"]["env"];
-    taskId: string; sessionKey: string; kind: "plan" | "result"; summary: string; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
+    taskId: string; sessionKey: string; kind: "plan" | "result"; summary: string; handoff?: RecoveryOwnerHandoffContent; effect?: RecoveryJudgment["effect"] }): Promise<boolean>;
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
@@ -241,13 +241,15 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     await this.deps.agent.start(task);
   }
 
-  async requestOwner(taskId: string, version: number, input: import("./task-contracts.js").RecoveryOwnerRequestInput & { executionId: string }): Promise<void> {
+  async requestOwner(taskId: string, version: number, input: import("./task-contracts.js").RecoveryOwnerRequestInput & { executionId: string; reportSummary?: string }): Promise<void> {
+    if (input.reportSummary !== undefined && (typeof input.reportSummary !== "string" || !input.reportSummary.trim()
+      || input.reportSummary.length > 8000 || containsSecret(input.reportSummary))) this.fail(422, "Owner 转交的完整调查报告无效");
     const requestId = randomUUID();
     await this.mutate(taskId, version, value => {
       if (value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "旧执行不能提交 Owner 处理事项");
-      const { executionId: _execution, ...request } = input;
+      const { executionId: _execution, reportSummary, ...request } = input;
       return { ...value, ...requestOwnerCooperation(value, request, requestId, this.now()),
-        timeline: [...value.timeline, this.event("waiting", "agent", request.summary, { owner_request_id: requestId, phase: value.phase })] };
+        timeline: [...value.timeline, this.event("waiting", "agent", reportSummary ?? request.summary, { owner_request_id: requestId, phase: value.phase })] };
     });
   }
 
@@ -362,7 +364,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     this.notifyGroup(task, "result");
   }
 
-  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void> {
+  async finishForOwnerHandoff(taskId: string, version: number, input: { summary: string; handoff?: RecoveryOwnerHandoffContent; evidence_ids: string[]; executionId: string; effect?: Exclude<RecoveryJudgment["effect"], "not_intervened">; delivery?: RecoveryJudgment["delivery"]; response?: RecoveryJudgment["response"] }, finalSummary?: unknown): Promise<void> {
+    const handoff = input.handoff === undefined ? undefined : parseOwnerHandoffContent(input.handoff);
     const task = await this.mutate(taskId, version, value => {
       if (value.simulation || value.level === "debug" || value.status !== "running" || value.execution?.executionId !== input.executionId
         || value.execution.state === "ended" || value.phase === "apply") this.fail(409, "当前不能转交 Owner 处理");
@@ -379,10 +382,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         judgment: { delivery: input.delivery ?? value.judgment?.delivery ?? "unconfirmed", response: input.response ?? value.judgment?.response ?? "unknown",
           effect: input.effect ?? value.judgment?.effect ?? "unknown", summary: input.summary, evidence_ids: input.evidence_ids },
         timeline: [...value.timeline, this.event("termination", "agent", input.summary,
-          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase })] };
+          { completion_reason: "owner_handoff", evidence_ids: input.evidence_ids, phase: value.phase, ...(handoff ? { handoff } : {}) })] };
     }, finalSummary);
     // Terminal state prevents another Agent turn; the existing Owner notification records its own receipt.
-    try { await this.notify(task, "result", input.summary); }
+    try { await this.notify(task, "result", input.summary, handoff); }
     finally { await this.deps.agent.release(task); }
     this.notifyGroup(await this.required(taskId), "result");
   }
@@ -486,13 +489,13 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     }
   }
 
-  private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string): Promise<void> {
+  private async notify(task: RecoveryStoredTask, kind: "plan" | "result", summary: string, handoff?: RecoveryOwnerHandoffContent): Promise<void> {
     if (task.simulation) return;
     // Notification completion is a timeline fact, independent of Owner approval.
     let sent = false;
     try {
       const result = await this.deps.notifier.notify({ ownerId: task.request.target.entity_id, botId: task.request.target.bot_id,
-        targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind, summary,
+        targetEnvironment: task.request.target.env, taskId: task.taskId, sessionKey: task.request.session_key, kind, summary, ...(handoff ? { handoff } : {}),
         ...(kind === "result" ? { effect: task.judgment?.effect ?? "unknown" } : {}) });
       if (result === false) return;
       sent = true;

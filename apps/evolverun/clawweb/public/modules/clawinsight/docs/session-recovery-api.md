@@ -274,6 +274,14 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
+### Owner 业务交接内容
+
+支持 `bootstrap.ownerHandoffProtocol=session-recovery-handoff/v1` 的服务，在 `kind=owner_handoff` 中接收独立 `handoff={"summary":"具体问题说明","instructions":"Owner处理事项"}`。两项都是非空、无凭据的 Markdown 文本，各最多 1024 个 UTF-8 字节；问题说明简洁呈现实际阻塞或非阻塞建议，处理事项保留全部必要缺项、权限对象和已核实入口。它们由同一次 Agent 判断提供，不增加独立模型调用，不包含通知呈现或互动控制信息。主 `summary` 继续保存完整调查、判断和依据。
+
+普通转交将 `handoff` 保存于终止事件并直接用于 Owner 通知；权限待办复用相同交接内容写入既有 `ownerRequest.summary/instructions`，完整报告保留在 waiting 事件。新协议中的 `owner_request` 仅标明 `{"reason":"permission"}`。旧结果仍可省略 `handoff`，权限待办仍接受原 `owner_request.instructions`；存在冲突的两份处理事项会被拒绝，避免发送含糊指引。新包只在收到协议声明时输出 `handoff`，先部署后端再更新自愈包。
+
+交接内容不从 `effect` 拼接，不从自由 Markdown 标题中猜取，也不把调查报告的开头当作 Owner 事项。新交接文本完整发送；旧结果超长时明确指向任务详情中的完整说明或清单，不截断材料项、操作或 URL。Bot 和逻辑会话等定位字段沿用原任务身份。没有新增表、业务状态、应用配置或模板变量。
+
 ### 普通转交 Owner 自行处理（省略 owner_request）
 
 Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化建议满足“转交 Owner 自行处理并结束”的条件，且没有其他待调查或修复事项时，回报
@@ -301,11 +309,12 @@ Agent 根据适用手册及当前现场，确认剩余阻塞或非阻塞优化�
   "phase": "assess",
   "summary": "原任务所需文档拒绝读取，已核实需 Owner 申请权限",
   "evidence_ids": ["已留存的受控现场读取证据ID"],
-  "owner_request": { "reason": "permission", "instructions": "请通过原文档页面为任务执行身份申请读取权限。" }
+  "handoff": { "summary": "当前任务无法读取所需文档，仍缺少访问权限。", "instructions": "请通过原文档页面为任务执行身份申请读取权限。" },
+  "owner_request": { "reason": "permission" }
 }
 ```
 
-`reason` 仅接受 `permission`；补材料请省略 `owner_request`，使用普通转交。`summary` 与 `instructions` 均为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
+`reason` 仅接受 `permission`；补材料请省略 `owner_request`，使用普通转交。使用 `handoff` 时待办直接复用它的问题说明和处理事项；旧包的待办 `summary` 与 `instructions` 仍为非空字符串、各最多4,000字符，不含凭据。证据需已留存且至少包含受控 session_read、trajectory_read 或 runtime_inspect。Debug、仿真、apply 和旧执行禁止创建真实待办。其他转交仍省略此字段，保持上节的终止语义。
 
 新增 Task 可选 `ownerRequest`：后台生成 `requestId`、递增 `revision`、`status=pending|confirmed`，保存 `reason/summary/instructions/evidence_ids/resumePhase/createdAtMs` 和可选 `feedback={userId,text,atMs}`。复用 waiting_owner，无新业务状态、表、上游结果字段或空环境Plan。当前身份和状态留在Task配置；完整内容及反馈走已有详情对象。初始待办不会向上游发最终结果，不声明恢复，也不要求先干预Bot。
 
@@ -325,7 +334,7 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 
-原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；与正文一样按 UTF-8 字节截短，完整内容保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
+原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 
 ## 任务整体摘要
 

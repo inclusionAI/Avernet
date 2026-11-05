@@ -77,17 +77,23 @@ it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary h
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "shared-template" } } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre");
-  const summary = "请回原会话补充点击后页面截图、权益规则正文及图 1 原图。";
+  const summary = "完整调查报告：" + "原任务、现场证据、已做核查及未知项。".repeat(90);
+  const handoff = effect === "recovered"
+    ? { summary: "评审已完成，仍有可选的规则说明建议。", instructions: "可按需补充规则说明示例，无需重跑本次评审。" }
+    : { summary: "活动权益评审缺少必要材料，等待补充。", instructions: "请回原会话补充页面截图、权益规则正文及图 1 原图。" };
   expect(await notifier.notify({ ownerId: "123", botId: "bot", targetEnvironment: "prod", taskId: "SR-one",
-    sessionKey: "original", kind: "result", summary, effect })).toBe(true);
+    sessionKey: "original", kind: "result", summary, handoff, effect })).toBe(true);
   const sent = sender.sendCard.mock.calls[0][0];
   expect(sent).toMatchObject({ recipientUserId: "123", templateId: "shared-template", outTrackId: "sr-owner-handoff:pre:SR-one",
     cardParamMap: { task_id: "SR-one", request_id: "", control_plane: "pre", bot_id: "bot", session_key: "original",
-      instructions: summary, confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
+      summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
   expect(sent).not.toHaveProperty("callbackRouteKey");
   expect(sent.cardParamMap).not.toHaveProperty("config");
   expect(sent.cardParamMap.task_url).toContain("recoveryTaskId=SR-one");
-  expect(sent.cardParamMap.summary).toContain(effect === "recovered" ? "原任务已恢复" : effect === "not_recovered" ? "原任务仍受阻" : "尚未确认");
+  expect(sent.cardParamMap.summary).toBe(handoff.summary);
+  expect(sent.cardParamMap.instructions).toBe(handoff.instructions);
+  expect(sent.cardParamMap.summary).not.toContain("尚未确认");
+  expect(sent.cardParamMap.instructions).not.toContain("完整调查报告");
   expect(sender.sendNotification).not.toHaveBeenCalled(); expect(sender.updateCard).not.toHaveBeenCalled();
 });
 
@@ -109,4 +115,18 @@ it("does not fall back to Markdown or claim an ordinary card was sent without a 
   row.config_json = JSON.stringify({ card: { pre: { template_id: "template" } } });
   await expect(notifier.notify(input)).rejects.toThrow("delivery unknown");
   expect(sender.sendNotification).not.toHaveBeenCalled();
+});
+
+it("preserves complete legacy instructions or points to the complete Task instead of slicing a list or URL", async () => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+  }, "pre");
+  const longText = "完整问题及对象清单。".repeat(200) + "https://docs.invalid/last-required-resource";
+  await notifier.notifyOwnerRequest({ task: { ...task, ownerRequest: { ...task.ownerRequest!, summary: longText, instructions: longText } }, updateOnly: false });
+  const card = sender.sendCard.mock.calls[0][0].cardParamMap;
+  expect(card.summary).toContain("权限申请");
+  expect(card.instructions).toBe("请打开任务详情，查看完整的权限对象、处理事项和入口。");
+  expect(card.instructions).not.toContain("完整事项见任务页");
+  expect(card.task_url).toContain("recoveryTaskId=SR-one");
 });
