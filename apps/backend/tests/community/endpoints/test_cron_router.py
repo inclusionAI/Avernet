@@ -27,23 +27,47 @@ from tests.community.framework import (
 
 
 class _RecordingBotService:
-    """The slice of ``BotServiceProtocol`` ``_resolve_user_identity`` uses.
+    """The identity slice of ``BotServiceProtocol`` used by Cron routing.
 
     Hand-written rather than a mock so the recorded calls are the only thing
     the assertions can read: an unexpected method would raise here instead of
     being invented on demand.
     """
 
-    def __init__(self, *, bot: dict | None = None, error: Exception | None = None):
-        self.get_bot_calls: list[tuple[str, str]] = []
+    def __init__(
+        self,
+        *,
+        bot: dict | None = None,
+        error: Exception | None = None,
+        addressed_bot: dict | None = None,
+        addressed_error: Exception | None = None,
+    ):
         self._bot = bot
         self._error = error
+        self._addressed_bot = addressed_bot if addressed_bot is not None else bot
+        self._addressed_error = addressed_error
+        self.get_bot_calls: list[tuple[str, str]] = []
+        self.get_bot_by_id_calls: list[str] = []
+        self.get_bot_by_address_calls: list[tuple[str | None, str | None, bool]] = []
 
     def get_bot(self, bot_id, user_id):
+        """Keep the legacy owner-scoped contract observable, but unused."""
         self.get_bot_calls.append((bot_id, user_id))
         if self._error is not None:
             raise self._error
         return self._bot
+
+    def get_bot_by_id(self, bot_id):
+        self.get_bot_by_id_calls.append(bot_id)
+        if self._error is not None:
+            raise self._error
+        return self._bot
+
+    def get_bot_by_address(self, bot_id, user_id=None, *, allow_unique_bot_id=False):
+        self.get_bot_by_address_calls.append((bot_id, user_id, allow_unique_bot_id))
+        if self._addressed_error is not None:
+            raise self._addressed_error
+        return self._addressed_bot
 
 
 class _InterceptorContext:
@@ -81,116 +105,205 @@ def _json_request(body: bytes) -> Request:
 class TestResolveUserIdentity:
     """Tests for _resolve_user_identity helper function."""
 
-    def test_owner_scenario_returns_current_user(self):
-        """When owner_id is None, returns current user's identity."""
+    _cooperator = AuthenticatedUser(
+        id="u_contact",
+        staffId="u_contact",
+        nickName="Contact User",
+        operatorName="Contact User",
+    )
+
+    def test_authorized_bot_without_owner_uses_unique_address(self):
+        """No explicit owner_id still routes Relay to the target Bot owner.
+
+        Calling with the contact's identity would find no Bot and return the
+        production ``BotNotFoundError``, despite the interceptor's authorization.
+        """
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
-
-        user = AuthenticatedUser(
-            id="u001",
-            staffId="u001",
-            nickName="Test User",
-            operatorName="Test User",
-        )
-        bot_service = _RecordingBotService()
-        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
-
-        assert user_id == "u001"
-        assert nick_name == "Test User"
-        # bot_service should not be called when owner_id is None
-        assert bot_service.get_bot_calls == []
-
-    def test_owner_scenario_with_empty_owner_id(self):
-        """When owner_id is empty string, returns current user's identity."""
-        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
-
-        user = AuthenticatedUser(
-            id="u001",
-            staffId="u001",
-            nickName="Test User",
-            operatorName="Test User",
-        )
-        bot_service = _RecordingBotService()
-        user_id, nick_name = _resolve_user_identity("", "bot1", user, bot_service)
-
-        assert user_id == "u001"
-        assert nick_name == "Test User"
-        assert bot_service.get_bot_calls == []
-
-    def test_bot_id_all_returns_current_user(self):
-        """When bot_id is 'all', returns current user's identity regardless of owner_id."""
-        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
-
-        user = AuthenticatedUser(
-            id="u001",
-            staffId="u001",
-            nickName="Test User",
-            operatorName="Test User",
-        )
-        bot_service = _RecordingBotService()
-        # Even with owner_id set, bot_id="all" should use current user
-        user_id, nick_name = _resolve_user_identity("u_owner", "all", user, bot_service)
-
-        assert user_id == "u001"
-        assert nick_name == "Test User"
-        assert bot_service.get_bot_calls == []
-
-    def test_collaborator_scenario_returns_owner_identity(self):
-        """When owner_id is set, returns owner's identity from bot info."""
-        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
-
-        user = AuthenticatedUser(
-            id="u_collab",
-            staffId="u_collab",
-            nickName="Collab User",
-            operatorName="Collab User",
-        )
 
         bot_service = _RecordingBotService(
-            bot={"owner_id": "u_owner", "owner_name": "Owner User"},
+            bot={"owner_id": "u_observed_owner", "owner_name": "Observed Owner"},
         )
 
-        user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
+        user_id, nick_name = _resolve_user_identity(
+            None, "service-bot", self._cooperator, bot_service
+        )
 
-        assert user_id == "u_owner"
-        assert nick_name == "Owner User"
-        assert bot_service.get_bot_calls == [("bot1", "u_owner")]
+        assert user_id == "u_observed_owner"
+        assert nick_name == "Observed Owner"
+        assert bot_service.get_bot_by_address_calls == [("service-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
 
-    def test_collaborator_scenario_bot_not_found(self):
-        """When bot is not found, falls back to owner_id."""
+    def test_empty_owner_id_uses_stored_owner_identity(self):
+        """An empty locator is the same as an omitted locator on the wire."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            bot={"owner_id": "u_observed_owner", "owner_name": "Observed Owner"},
+        )
+
+        user_id, nick_name = _resolve_user_identity(
+            "", "service-bot", self._cooperator, bot_service
+        )
+
+        assert user_id == "u_observed_owner"
+        assert nick_name == "Observed Owner"
+        assert bot_service.get_bot_by_address_calls == [("service-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
+    def test_missing_stored_bot_without_owner_preserves_caller_identity(self):
+        """A failed identity lookup leaves the existing missing-Bot error path."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity(
+            None, "missing-bot", self._cooperator, bot_service
+        )
+
+        assert bot_service.get_bot_by_address_calls == [("missing-bot", None, True)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+        assert (user_id, nick_name) == ("u_contact", "u_contact")
+
+    def test_bot_id_all_returns_current_user_without_stored_lookup(self):
+        """The ``all`` aggregate is not a unique Bot address."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
         user = AuthenticatedUser(
-            id="u_collab",
-            staffId="u_collab",
-            nickName="Collab User",
-            operatorName="Collab User",
+            id="u001",
+            staffId="u001",
+            nickName="Test User",
+            operatorName="Test User",
+        )
+        bot_service = _RecordingBotService()
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "all", user, bot_service
         )
 
-        bot_service = _RecordingBotService(error=Exception("Bot not found"))
+        assert (user_id, nick_name) == ("u001", "Test User")
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_calls == []
 
-        user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
-
-        # Falls back to owner_id when bot lookup fails
-        assert user_id == "u_owner"
-        assert nick_name == "u_owner"
-
-    def test_collaborator_scenario_missing_owner_name(self):
-        """When bot has no owner_name, falls back to owner_id."""
+    def test_legacy_default_without_owner_uses_caller_without_unique_lookup(self):
+        """A legacy default Bot never borrows another Owner's same bot_id."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
-        user = AuthenticatedUser(
-            id="u_collab",
-            staffId="u_collab",
-            nickName="Collab User",
-            operatorName="Collab User",
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity(
+            None, "default", self._cooperator, bot_service
         )
 
-        bot_service = _RecordingBotService(bot={"owner_id": "u_owner"})
+        assert (
+            user_id,
+            nick_name,
+        ) == (self._cooperator.staffId, self._cooperator.nickName)
+        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
 
-        user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
+    def test_empty_bot_id_without_owner_uses_caller_without_lookup(self):
+        """The empty aggregate shape misses no owner locator before the relay."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
-        assert user_id == "u_owner"
-        assert nick_name == "u_owner"
+        bot_service = _RecordingBotService()
+
+        user_id, nick_name = _resolve_user_identity(
+            None, "", self._cooperator, bot_service
+        )
+
+        assert (
+            user_id,
+            nick_name,
+        ) == (self._cooperator.staffId, self._cooperator.nickName)
+        assert bot_service.get_bot_by_address_calls == []
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
+    def test_explicit_owner_uses_address_resolution_not_owner_scoped_get(self):
+        """The explicit wire locator uses BotAddressResolver semantics."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            addressed_bot={
+                "owner_id": "u_current_owner",
+                "owner_name": "Current Owner",
+            },
+        )
+
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "service-bot", self._cooperator, bot_service
+        )
+
+        assert (user_id, nick_name) == ("u_current_owner", "Current Owner")
+        assert bot_service.get_bot_by_address_calls == [("service-bot", "u_owner", False)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
+    def test_explicit_historical_owner_resolves_to_current_owner(self):
+        """Legacy locators continue working after owner handoff."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            addressed_bot={"owner_id": "u_new_owner"},
+        )
+
+        user_id, nick_name = _resolve_user_identity(
+            "u_historical_owner", "service-bot", self._cooperator, bot_service
+        )
+
+        assert user_id == "u_new_owner"
+        assert nick_name == "u_new_owner"
+        assert bot_service.get_bot_by_address_calls == [
+            ("service-bot", "u_historical_owner", False)
+        ]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
+
+    def test_explicit_bot_not_found_falls_back_to_locator(self):
+        """A missing explicit locator keeps the relay's fallback contract."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(addressed_error=Exception("Bot not found"))
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "missing-bot", self._cooperator, bot_service
+        )
+
+        assert (user_id, nick_name) == ("u_owner", "u_owner")
+        assert bot_service.get_bot_by_address_calls == [("missing-bot", "u_owner", False)]
+        assert bot_service.get_bot_by_id_calls == []
+
+    def test_explicit_missing_owner_name_falls_back_to_owner_id(self):
+        """Owner name is only identity presentation metadata."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            addressed_bot={"owner_id": "u_current_owner"},
+        )
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "service-bot", self._cooperator, bot_service
+        )
+
+        assert (user_id, nick_name) == ("u_current_owner", "u_current_owner")
+
+    def test_explicit_empty_bot_id_keeps_owner_locator(self):
+        """An empty bot_id cannot silently switch to the caller's identity."""
+        from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
+
+        bot_service = _RecordingBotService(
+            addressed_error=Exception("Bot not found"),
+        )
+        user_id, nick_name = _resolve_user_identity(
+            "u_owner", "", self._cooperator, bot_service
+        )
+
+        assert (user_id, nick_name) == ("u_owner", "u_owner")
+        assert bot_service.get_bot_by_address_calls == [("", "u_owner", False)]
+        assert bot_service.get_bot_by_id_calls == []
+        assert bot_service.get_bot_calls == []
 
 
 # =============================================================================
@@ -728,14 +841,18 @@ def get_cron_runs_collaborator():
 
 
 # =============================================================================
+# Missing-owner-id collaborator (all target bots)
+# =============================================================================
+
+# =============================================================================
 # Edge Cases
 # =============================================================================
 
 class TestResolveUserIdentityEdgeCases:
     """Tests for edge cases in _resolve_user_identity."""
 
-    def test_resolve_user_identity_with_none_nick_name(self):
-        """Handles user with None nick_name."""
+    def test_resolve_user_identity_with_none_nick_name_all_bots(self):
+        """Handles a user with None nick_name for the aggregate shape."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
         user = AuthenticatedUser(
@@ -745,13 +862,13 @@ class TestResolveUserIdentityEdgeCases:
             operatorName="Test User",
         )
         bot_service = _RecordingBotService()
-        user_id, nick_name = _resolve_user_identity(None, "bot1", user, bot_service)
+        user_id, nick_name = _resolve_user_identity(None, "all", user, bot_service)
 
         assert user_id == "u001"
         assert nick_name == "u001"  # Falls back to staffId
 
-    def test_resolve_user_identity_bot_returns_none(self):
-        """Handles bot service returning None."""
+    def test_explicit_owner_locator_bot_returns_none(self):
+        """Handles a service returning None under the explicit locator path."""
         from agentclaw.community.adapters.http.cron.router import _resolve_user_identity
 
         user = AuthenticatedUser(
@@ -761,13 +878,14 @@ class TestResolveUserIdentityEdgeCases:
             operatorName="Collab User",
         )
 
-        bot_service = _RecordingBotService(bot=None)
+        bot_service = _RecordingBotService(addressed_bot=None)
 
         user_id, nick_name = _resolve_user_identity("u_owner", "bot1", user, bot_service)
 
-        # Falls back to owner_id when bot is None
         assert user_id == "u_owner"
         assert nick_name == "u_owner"
+        assert bot_service.get_bot_by_address_calls == [("bot1", "u_owner", False)]
+        assert bot_service.get_bot_by_id_calls == []
 
 
 # =============================================================================
@@ -784,7 +902,6 @@ def _seed_bot_for_error(world):
     make_staff_user(world, user_id="u_owner")
     binding_id = make_active_local_device(world, owner_id="u_owner")
     make_bot(world, bot_id="bot_test", owner_id="u_owner", owner_name="Owner User", bot_type="service", status="ACTIVE", binding_id=binding_id)
-
 
 
 
