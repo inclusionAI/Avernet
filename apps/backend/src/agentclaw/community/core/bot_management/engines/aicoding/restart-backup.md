@@ -122,13 +122,12 @@ status, correlation fields, safe stack and frontend failure semantics remain.
 
 An initial failed detector logs `event=aicoding_restart_fastdisk_detect`; invalid
 probe output is `reason=detection_failed`, not a transport failure. Detection
-failure still means unconfirmed/non-fastdisk and retains the optional backup
-attempt. Errors before that optional helper confirms any backup activity use
-`event=aicoding_restart_probe`, not a backup-failed event. A confirmed fastdisk,
-an observed running backup, or an actual terminal backup receipt still uses
-`event=aicoding_restart_backup`, so a real backup failure is not hidden by an
-earlier failed detector. All three events retain bot/ARCA/owner/environment and
-operation correlation, without raw commands, helper output or credentials.
+failure means unconfirmed/non-fastdisk and skips the backup helper entirely.
+A successful non-fastdisk detection emits no backup event. Inventory/binding
+checks use `event=aicoding_restart_probe`, not a backup-failed event. Only a
+confirmed fastdisk target invokes the helper and emits
+`event=aicoding_restart_backup`. Diagnostic events retain their available
+correlation fields, without raw commands, helper output or credentials.
 These diagnostic changes preserve receipt checks, the blocking switch and
 other-engine behavior. Full and partial successful backup handling is unchanged.
 
@@ -141,20 +140,23 @@ Directory/source checks and symlink rejection remain in place. No live mounts
 means `skip_no_fastdisk`, even with stale ready/seeded/request markers or aliased
 paths; markers alone never confirm fastdisk. Partial mounts, source mismatches,
 unreadable mount tables and execution failures remain failed detections and use
-the existing unconfirmed/non-fastdisk compatibility policy.
+the non-fastdisk skip policy below.
 
 Publication/restore keeps the existing strict detector, including pending-state
 and stale-marker safeguards. Positive restart confirmations already persisted
-for the same operation remain authoritative across redelivery. The optional
-compatibility backup is still attempted for unconfirmed/non-fastdisk targets;
-its container-owned mount gate is unchanged and may still reject an invalid
-layout. This change classifies detection, not repairs mounts or backup failures.
-No shared orchestration, frontend, API, container script or blocking rule changes.
+for the same operation remain authoritative across redelivery. Non-fastdisk
+and failed initial detections return immediately without helper `start`/`status`,
+without reading the blocking switch and without storing a backup-failure warning.
+There is no second container-script mount check for those targets. Inventory,
+binding/ownership checks and mutation fences remain in place. The container-owned
+helper is unchanged and runs only after positive fastdisk confirmation. This
+change does not repair mounts or backup failures. No shared orchestration,
+frontend, API or container script changes.
 
 ## Confirmed-fastdisk policy (2026-10-30)
 
-Backend sends the embedded restart detector. Unknown/failed initial detection
-uses the best-effort policy below; with blocking explicitly enabled, a positively
+Backend sends the embedded restart detector. Non-fastdisk/unknown/failed initial
+detection skips backup; with blocking explicitly enabled, a positively
 confirmed fastdisk target requires
 a valid complete or partial backup receipt within 1500 seconds. Failure,
 missing capability or unconfirmed result blocks replacement; a validated
@@ -231,9 +233,9 @@ wait budget. With `false`, backup-only failures use the existing sanitized
 `action=continue_restart data_loss_risk=true` warning with bot/ARCA/owner/env
 correlation fields; they do not produce the restart-failed marker. A failed
 backup is not reported as successful. Binding changes, ownership/CAS failures
-and mutation fences still block. Non-coding engines and non-fastdisk/unknown
-initial detection keep their existing behavior. Ordinary BaaS, direct ARCA and
-published/Caller restarts all use the same coding strategy. Ordinary publication
+and mutation fences still block. Non-coding engines keep their existing
+behavior; non-fastdisk/unknown initial detection skips the helper entirely.
+Ordinary BaaS, direct ARCA and published/Caller restarts all use the same coding strategy. Ordinary publication
 and restore policy are unchanged.
 
 **Disabling blocking accepts data loss:** replacement can interrupt an unfinished
@@ -266,15 +268,20 @@ Confirm the response body's `success` is `true` (HTTP 200 alone is insufficient)
 The existing `POST /api/v1/common-config/get` accepts the same `business_code` and
 `param_code` for readback; its returned `env` identifies the effective environment.
 
-## Non-fastdisk / unconfirmed best-effort policy (2026-10-12)
+## Non-fastdisk / unconfirmed skip policy (2026-11-05)
 
-Backup is attempted, but backup-only failures log sanitized warnings and do not
-block restart. This includes inventory, command, timeout, receipt and runtime boot-identity
-failures. Changes to the captured Arca binding/sandbox target remain blocking. Warnings carry `action=continue_restart` and
-`data_loss_risk=true`; they are not successful backup receipts. Binding/engine
-checks, database failures and durable operation fences remain blocking.
-Restart can lose data newer than the last durable backup; a timeout does not
-cancel the old helper, and replacement may interrupt it. No runtime-script,
+An initial non-fastdisk result or detection failure skips backup entirely: no
+helper `start`, no helper `status`, no second mount check and no backup-failure
+log or UI warning. Detection failures retain their separate sanitized WARN
+`event=aicoding_restart_fastdisk_detect`; successful non-fastdisk detection is
+not a failure. Previously persisted positive confirmations for the same operation
+are not downgraded by redelivery.
+
+Binding/engine checks, database failures and durable operation fences retain
+their existing safety semantics. Inventory lookup failures remain handled by
+the existing strategy policy and are not successful backup receipts. Only a
+confirmed fastdisk target enters the helper: with blocking disabled, backup-only
+failures warn and continue; enabling blocking vetoes replacement. No runtime-script,
 shared service, frontend or restore-protocol changes are part of this policy.
 
 ## Boundary
@@ -318,9 +325,10 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only
 
-- Direct ARCA bindings now attempt the same asynchronous helper protocol before
-  their strategy-owned replacement flow, reusing the original stop/start primitives. Their physical target comes directly from the
-  old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
+- Direct ARCA bindings detect live mounts before their strategy-owned replacement
+  flow and invoke the asynchronous helper only for confirmed fastdisk targets,
+  reusing the original stop/start primitives. Their physical target comes directly
+  from the old binding's `device_props.sandbox_id`, exactly as destruction does; no BaaS
   inventory or sandbox-list query is involved. The existing provider execution
   hook retains ownership of sandbox suffix/tenant translation.
 - `BoundArcaRestartExecutor` in `aicoding/restart_arca.py` is a strategy-owned
@@ -341,8 +349,9 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   without this field capture the target at preparation and retain the existing
   binding/device/provider checks. Repeated helper calls use the same operation
   ID; backup waits outside the restart lock and verification runs under it.
-- Other non-BaaS providers retain their existing `exec_shell_new` backup attempts;
-  unavailable FAILED/STOPPED containers warn and continue without execution.
+- Other non-BaaS providers use their existing `exec_shell_new` to detect live
+  mounts and back up only confirmed fastdisk targets; unavailable FAILED/STOPPED
+  containers warn and continue without execution.
 - Coding restart calls the existing `list_devices_by_bot_uuid` client and
   `GET /bots/{uuid}/devices` for both prepare and verification. The endpoint
   returns device groups in descending Bot record ID order (excluding deleted
@@ -397,7 +406,7 @@ exception messages. Poll logs occur on transitions or at most once per minute.
 
 ## Restart failure alerts (2026-10-30)
 
-The coding strategy emits ERROR logs with `[AICODING_RESTART_FAILED]` and
+The coding strategy emits WARN logs with `[AICODING_RESTART_FAILED]` and
 `event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, receipt
 verification failures, and blocking preparation errors. Ordinary task and
 published-restart exception handlers retain the underlying backup diagnostics
@@ -430,14 +439,14 @@ as an ARCA ID. Failures without a resolved physical target have `arca_id=-` and
 must be correlated by Bot/operation; logging performs no extra inventory or
 database I/O.
 
-Alert on ERROR plus `event=aicoding_restart_failed` (or the bracketed marker).
+Alert on WARN plus `event=aicoding_restart_failed` (or the bracketed marker).
 Multiple phases can log the same failure: group/deduplicate by `bot_id` and
 `operation_id`, and use `arca_id`/`phase` for diagnosis. These logs cover this
 strategy's backup/precondition and exception failure boundaries, not a new
-universal event contract for all deployment/queue failures. Non-fastdisk or
-failed initial detection retains WARNING with `action=continue_restart`, without
-this failure marker. Lost-ownership `RestartSuperseded` also emits no new failure
-alarm. Other engines and shared lifecycle orchestration do not use this logger.
+universal event contract for all deployment/queue failures. Successful non-fastdisk
+detection emits no backup warning; failed initial detection uses its separate
+WARNING with `action=continue_restart`, without this failure marker.
+Lost-ownership `RestartSuperseded` also emits no new failure alarm. Other engines and shared lifecycle orchestration do not use this logger.
 
 ## Validation boundary
 

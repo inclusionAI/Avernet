@@ -179,7 +179,8 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
 
     now = [1498]
     context_reset_handle = current_restart.set(SimpleNamespace(
-        payload={'started_at': 0}, state=Mock(read=Mock(return_value={'ext': {}}))))
+        operation_id=OPERATION, payload={'started_at': 0},
+        state=Mock(read=Mock(return_value={'ext': {}}))))
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [
         {'provider_device_id': p, 'status': 'ACTIVE'} for p in ('p1', 'p2')]
@@ -217,7 +218,8 @@ def test_late_valid_inventory_becomes_baseline_without_starting_backup(caplog):
 
 
 @pytest.fixture(autouse=True)
-def nonfastdisk_compatibility_scope(monkeypatch):
-    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+def nonblocking_fastdisk_scope(monkeypatch):
+    """Exercise confirmed-fastdisk backup with blocking disabled; detection has its own suite."""
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: True)
+    monkeypatch.setattr(AicodingProvisioningStrategy, "_fastdisk_backup_blocking", lambda self: False)

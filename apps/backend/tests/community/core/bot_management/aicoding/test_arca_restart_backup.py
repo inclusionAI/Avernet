@@ -186,7 +186,8 @@ def test_running_backup_polls_before_final_verification(target):
 
 
 @pytest.fixture(autouse=True)
-def nonfastdisk_compatibility_scope(monkeypatch):
-    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+def nonblocking_fastdisk_scope(monkeypatch):
+    """Exercise confirmed-fastdisk backup with blocking disabled; detection has its own suite."""
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: True)
+    monkeypatch.setattr(AicodingProvisioningStrategy, "_fastdisk_backup_blocking", lambda self: False)

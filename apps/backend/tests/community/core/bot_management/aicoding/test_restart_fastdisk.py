@@ -80,7 +80,7 @@ def embedded_detector(command, tmp_path):
 
 
 @pytest.mark.parametrize('blocking', [False, True])
-def test_restart_ignores_ready_marker_without_live_mounts_and_keeps_optional_backup(tmp_path, blocking, caplog):
+def test_restart_without_live_mounts_ignores_ready_marker_and_skips_backup(tmp_path, blocking, caplog):
     for base in ('home', 'storage'):
         for name in ('sessions', 'workspace'):
             (tmp_path / base / name).mkdir(parents=True)
@@ -99,11 +99,12 @@ def test_restart_ignores_ready_marker_without_live_mounts_and_keeps_optional_bac
         check()
     result = backup.parse_detection_result(embedded_detector(calls[0], tmp_path))
     assert result['status'] == 'skip_no_fastdisk'
-    assert len(calls) == 2  # Do not remove the existing compatibility backup attempt.
+    assert len(calls) == 1  # Detection must be the only command; never invoke the backup helper.
     assert check.required is False
     guard.assert_not_called()
     warn.assert_not_called()
     assert 'event=aicoding_restart_fastdisk_detect' not in caplog.text
+    assert 'event=aicoding_restart_backup' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
@@ -259,14 +260,18 @@ def test_receipt_failure_after_confirmed_fastdisk_never_downgrades(failure):
     SimpleNamespace(exit_code=0, stdout='not-json'),
     SimpleNamespace(exit_code=0, stdout=json.dumps({'status': 'run', 'storage': '../unsafe', 'home': '/home'})),
 ])
-def test_detection_failure_or_nonfastdisk_retains_best_effort(detected, caplog):
+def test_detection_failure_or_nonfastdisk_skips_backup(detected, caplog):
     execute = executor([response('failed')], detected=detected)
     with patch('agentclaw.community.core.bot_management.engines.aicoding.restart_state.record_nonblocking_backup_warning') as warn:
         attempt(execute)()
     warn.assert_not_called()
     assert execute.call_args_list[0].args == (detection_command(),)
-    assert execute.call_count == 2
-    assert 'action=continue_restart' in caplog.text
+    execute.assert_called_once_with(detection_command())
+    if detected == detection('skip_no_fastdisk'):
+        assert 'event=aicoding_restart_fastdisk_detect' not in caplog.text
+    else:
+        assert 'event=aicoding_restart_fastdisk_detect' in caplog.text
+    assert 'event=aicoding_restart_backup' not in caplog.text
     assert 'private' not in caplog.text and 'secret detector' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
@@ -295,7 +300,7 @@ def test_confirmed_fastdisk_can_finish_after_the_old_timeout(blocking, caplog):
     (detection('unexpected'), 'detection_failed'),
     (SimpleNamespace(exit_code=1, stdout='private detection output'), 'detection_failed'),
 ])
-def test_detection_and_compatibility_probe_errors_are_not_backup_failures(detected, reason, caplog):
+def test_detection_errors_skip_helper_and_are_not_backup_failures(detected, reason, caplog):
     failure = SimpleNamespace(exit_code=1, stdout='private helper output')
     execute = executor([failure], detected=detected)
     blocking = Mock(return_value=True)
@@ -307,7 +312,7 @@ def test_detection_and_compatibility_probe_errors_are_not_backup_failures(detect
         check()
     blocking.assert_not_called()
     warn.assert_not_called()
-    assert execute.call_count == 2  # The existing best-effort backup is still attempted.
+    execute.assert_called_once_with(detection_command())
     assert check.required is False
     lines = [record.getMessage() for record in caplog.records]
     detected_logs = [line for line in lines if 'event=aicoding_restart_fastdisk_detect ' in line]
@@ -316,34 +321,35 @@ def test_detection_and_compatibility_probe_errors_are_not_backup_failures(detect
     assert f'reason={reason} ' in detected_logs[0]
     assert 'bot_id=b' in detected_logs[0] and 'arca_id=ARCA-SANDBOX-p@8' in detected_logs[0]
     assert 'owner_id=owner' in detected_logs[0] and 'env=' in detected_logs[0]
-    assert any('event=aicoding_restart_probe phase=prepare status=failed' in line for line in lines)
-    assert not any('event=aicoding_restart_backup ' in line and 'status=failed' in line for line in lines)
+    assert not any('event=aicoding_restart_probe ' in line for line in lines)
+    assert not any('event=aicoding_restart_backup ' in line for line in lines)
     assert 'AICODING_RESTART_FAILED' not in caplog.text
     assert 'private' not in caplog.text
 
 
 @pytest.mark.parametrize('prepared', [None, 'legacy', 'not_mounted'])
-def test_nonfastdisk_probe_failures_keep_their_own_event(prepared, caplog):
+def test_nonfastdisk_never_inspects_helper_results(prepared, caplog):
     failure = SimpleNamespace(exit_code=1, stdout='private helper output')
     results = [failure] if prepared is None else [response(prepared), failure]
     execute = executor(results, detected=detection('skip_no_fastdisk'))
     check = attempt(execute)
     check()
-    assert execute.call_count == (2 if prepared is None else 3)
-    assert 'event=aicoding_restart_probe ' in caplog.text
+    execute.assert_called_once_with(detection_command())
+    assert 'event=aicoding_restart_probe ' not in caplog.text
     assert 'event=aicoding_restart_fastdisk_detect ' not in caplog.text
     assert 'event=aicoding_restart_backup ' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
 
 
-def test_actual_backup_failure_is_not_hidden_by_an_initial_detection_error(caplog):
-    execute = executor([response('running'), response('failed')], detected=ConnectionError('private detector'))
-    attempt(execute)()
+def test_confirmed_fastdisk_failed_backup_keeps_backup_failure_event(caplog):
+    execute = executor([response('running'), response('failed')])
+    with pytest.raises(backup.RestartBackupBlocked):
+        attempt(execute)()
     assert execute.call_count == 3
-    assert 'event=aicoding_restart_fastdisk_detect ' in caplog.text
+    assert 'event=aicoding_restart_fastdisk_detect ' not in caplog.text
     assert 'event=aicoding_restart_backup phase=prepare status=failed' in caplog.text
     assert 'reason=backup_failed' in caplog.text
-    assert 'AICODING_RESTART_FAILED' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' in caplog.text
 
 
 def test_confirmed_fastdisk_poll_timeout_blocks():
@@ -548,7 +554,8 @@ def test_mixed_replicas_cannot_hide_failed_fastdisk_behind_nonfastdisk():
         strict_strategy('aicoding')._prepare_restart(
             BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'),
             device_id='old', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION)
-    assert plain.call_count == fast.call_count == 2
+    assert plain.call_count == 1
+    assert fast.call_count == 2
 
 
 def test_confirmed_fastdisk_uses_1500_second_budget():
@@ -667,7 +674,7 @@ def test_nonfastdisk_never_reads_blocking_config(detected):
     execute = executor([response('failed')], detected=detected)
     backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p',
                            blocking_enabled=config)()
-    assert execute.call_count == 2
+    execute.assert_called_once_with(detection_command())
     config.assert_not_called()
 
 

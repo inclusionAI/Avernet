@@ -15,7 +15,7 @@ from tests.community.core.bot_management.aicoding.test_restart_fastdisk import c
 @pytest.mark.parametrize('detected', [detection(), detection('skip_no_fastdisk'), ConnectionError('private probe')])
 @pytest.mark.parametrize('result', [partial_response(), partial_response(completeness='degraded'),
                                     committed(completeness='degraded')])
-def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(blocking, detected, result, caplog, monkeypatch):
+def test_partial_receipts_are_only_read_for_confirmed_fastdisk(blocking, detected, result, caplog, monkeypatch):
     monkeypatch.setenv('SERVER_ENV', 'pre')
     execute = executor([response('running'), result, result], detected=detected)
     with patch.object(backup.time, 'sleep'):
@@ -24,6 +24,12 @@ def test_valid_partial_is_terminal_success_and_rechecked_with_distinct_logs(bloc
             owner_id='o', blocking_enabled=lambda: blocking,
         )
         check()
+    if isinstance(detected, Exception) or json.loads(detected.stdout)['status'] != 'run':
+        assert execute.call_count == 1  # No helper or partial receipt without live mounts.
+        assert 'event=aicoding_restart_backup' not in caplog.text
+        assert 'status=partial_success' not in caplog.text
+        assert check.required is False
+        return
     assert execute.call_count == 4
     assert execute.call_args.args == (backup.command('status', OPERATION),)
     partial_logs = [r for r in caplog.records if 'status=partial_success' in r.getMessage()]

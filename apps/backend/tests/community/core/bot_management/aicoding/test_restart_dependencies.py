@@ -1,4 +1,5 @@
 """Unified restart assembly is lazy and preserves provider-specific safety policy."""
+import logging
 from types import SimpleNamespace
 from unittest.mock import Mock, create_autospec
 
@@ -13,7 +14,7 @@ from agentclaw.community.core.bot_management.engines.default import DefaultProvi
 from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
-from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION, response
+from tests.community.core.bot_management.aicoding.test_restart_backup import OPERATION
 
 
 def context(engine):
@@ -33,11 +34,18 @@ def binding_args(provider):
 
 @pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
 @pytest.mark.parametrize("provider", ["arca", "baas"])
-def test_di_envelope_resolves_only_selected_provider(engine, provider):
+@pytest.mark.parametrize("detect_failed", [False, True])
+def test_di_envelope_resolves_only_selected_provider(engine, provider, detect_failed, caplog):
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+
+    caplog.set_level(logging.INFO, logger=restart_backup.logger.name)
     runtime = create_autospec(BaasService, instance=True)
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, detection_command
     def result(cmd):
-        return detection('skip_no_fastdisk') if cmd == detection_command() else response('not_mounted')
+        assert cmd == detection_command()  # No helper start/status after a non-fastdisk result.
+        if detect_failed:
+            raise ConnectionError("private detection error")
+        return detection("skip_no_fastdisk")
     execute = Mock(side_effect=lambda **kw: result(kw['shell_cmd']))
     runtime.list_devices_by_bot_uuid.return_value = [
         {"provider_device_id": "physical", "status": "ACTIVE"},
@@ -48,19 +56,24 @@ def test_di_envelope_resolves_only_selected_provider(engine, provider):
     injector.get.side_effect = {BaasService: runtime, ArcaRestartTransport: transport}.__getitem__
     dependencies = BotManagementModule().restart_backup_dependencies(injector)
     injector.get.assert_not_called()  # Construction is cycle-safe and does no I/O.
+    guard = Mock(side_effect=AssertionError("non-fastdisk must not read blocking config"))
     verify = AicodingProvisioningStrategy(engine).prepare_restart(
-        context(engine), restart_dependencies=dependencies, **binding_args(provider),
+        context(engine), restart_dependencies=dependencies, blocking_enabled=guard, **binding_args(provider),
     )
     verify()
+    guard.assert_not_called()
+    assert "event=aicoding_restart_backup" not in caplog.text
+    assert "AICODING_RESTART_FAILED" not in caplog.text
+    assert "private detection error" not in caplog.text
     injector.get.assert_called_once_with(ArcaRestartTransport if provider == "arca" else BaasService)
     if provider == "arca":
-        assert execute.call_count == 3
+        assert execute.call_count == 1  # Non-fastdisk: detector only, no helper.
         assert all(call.kwargs["device"].device_props == {"sandbox_id": "old-sandbox@8"}
                    for call in execute.call_args_list)
         assert not runtime.mock_calls
     else:
         assert runtime.list_devices_by_bot_uuid.call_count == 2
-        assert runtime.post_bots_api.call_count == 3
+        assert runtime.post_bots_api.call_count == 1
         execute.assert_not_called()
 
 

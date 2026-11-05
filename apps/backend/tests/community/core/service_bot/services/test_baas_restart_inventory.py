@@ -84,7 +84,7 @@ def test_http_failure_never_means_released(status):
 
 
 @pytest.mark.parametrize('status', ['legacy', 'not_mounted'])
-def test_real_client_reaches_container_skip_and_rechecks_inventory(status):
+def test_real_client_skips_nonfastdisk_helper_and_rechecks_inventory(status):
     service, http = setup_service(GROUPS, GROUPS)
     operation = 'a' * 32
     def post(path, **kw):
@@ -101,6 +101,6 @@ def test_real_client_reaches_container_skip_and_rechecks_inventory(status):
     verify()
     assert http.get.call_args_list == 2 * [
         call(f'/api/v1/bots/{BOT}/devices', params={'tenant': service._tenant}, timeout=30.0)]
-    assert http.post.call_count == 3  # Backend detector plus helper start/status.
+    assert http.post.call_count == 1  # Non-fastdisk: backend detector only.
     assert all(c.args[0] == '/api/v1/paas/devices/physical/commands'
                for c in http.post.call_args_list)

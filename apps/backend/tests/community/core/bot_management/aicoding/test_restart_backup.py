@@ -472,12 +472,12 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
         assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
     if provider == 'baas':
         device._exec_shell_new.assert_not_called()
-        assert runtime.post_bots_api.call_count == 2
-        assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
+        runtime.post_bots_api.assert_called_once()
+        assert 'reason=helper_missing' in caplog.text
     else:
-        assert device._exec_shell_new.call_count == 2
+        device._exec_shell_new.assert_called_once()
         runtime.post_bots_api.assert_not_called()
-        assert 'reason=helper_absent' in caplog.text
+        assert 'reason=helper_missing' in caplog.text
     if provider == 'arca':
         stop.assert_called_once()
         start.assert_called_once()
@@ -523,7 +523,7 @@ async def test_legacy_published_or_caller_instance_without_script_is_allowed(eng
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
                                    device_id='instance-legacy', target_runtime=runtime)
-    assert runtime.post_bots_api.call_count == 2
+    runtime.post_bots_api.assert_called_once()
     assert all(call.kwargs['path'] == '/api/v1/paas/devices/physical-legacy/commands'
                for call in runtime.post_bots_api.call_args_list)
 
@@ -739,10 +739,13 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
     device.get_device.return_value = {
         'device_id': 'container-1', 'device_provider': provider, 'status': status,
     }
+    committed = response('committed', backup={
+        'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION,
+    })
     device.exec_shell_new.side_effect = (
         ConnectionError('unavailable') if failure == 'prepare' else
-        [response('not_mounted'), ConnectionError('unavailable')] if failure == 'verify' else
-        [response('not_mounted'), response('not_mounted')]
+        [committed, ConnectionError('unavailable')] if failure == 'verify' else
+        [committed, committed]
     )
     runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
     repository = Mock()
@@ -770,7 +773,8 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
 
 
 @pytest.fixture(autouse=True)
-def nonfastdisk_compatibility_scope(monkeypatch):
-    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+def nonblocking_fastdisk_scope(monkeypatch):
+    """Exercise confirmed-fastdisk backup with blocking disabled; detection has its own suite."""
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: True)
+    monkeypatch.setattr(AicodingProvisioningStrategy, "_fastdisk_backup_blocking", lambda self: False)

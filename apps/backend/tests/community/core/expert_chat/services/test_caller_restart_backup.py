@@ -68,7 +68,7 @@ async def test_real_coding_backup_transport_failure_still_upgrades_caller():
     result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
                                          owner_id=OWNER_ID, migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
-    assert svc._baas.post_bots_api.call_count == 2  # Detection fails, then legacy backup fails.
+    svc._baas.post_bots_api.assert_called_once()  # Detection fails: skip helper and restart normally.
     build.upgrade_async.assert_awaited_once()
 
 
