@@ -46,7 +46,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
         )[0]
         backend_ci = BACKEND_CI_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("    timeout-minutes: 25\n", backend_job)
+        self.assertIn("    timeout-minutes: 30\n", backend_job)
         self.assertIn("--max-worker-restart=0", backend_ci)
 
     def test_pr_module_diffs_use_the_checked_out_merge_parent(self) -> None:
