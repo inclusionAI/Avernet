@@ -20,6 +20,7 @@ from agentclaw.community.core.task.domain.intake import (
     TaskIntakeResult,
     TaskIntakeStatus,
 )
+from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -425,6 +426,53 @@ def relay_context_expired_attempt():
 
 
 # Authenticated mirrors of the public task read surfaces.
+def _seed_task_session(world) -> None:
+    def get_task_node_by_session(_self, _session_id: str):
+        return TaskNodeSessionRef(
+            task_id="task-endpoint-1",
+            node_id="node-endpoint-session-1",
+            owner_user_id="user-endpoint-1",
+        )
+
+    bind_overrides(world, TaskServiceProtocol, {"get_task_node_by_session": get_task_node_by_session})
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="happy_ok",
+    seed=_seed_task_session,
+    input=CaseInput(
+        headers=_STAFF_COOKIE,
+        query_params={"session_id": "session-endpoint-1"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "task-endpoint-1",
+                "owner_user_id": "user-endpoint-1",
+                "node_id": "node-endpoint-session-1",
+            },
+        },
+    ),
+)
+def by_session_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="err_unauthenticated",
+    input=CaseInput(query_params={"session_id": "session-endpoint-1"}),
+    expect=ExpectError(status=401),
+)
+def by_session_unauthenticated():
+    pass
+
+
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/dashboard",
