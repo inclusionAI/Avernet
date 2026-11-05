@@ -1,0 +1,20 @@
+apps/bcs/scripts/e2e-test/caller_delegation_chain_story.py
+  s_875e3f9d4d0db3::t_c039583a029352 214-224,227,235-254
+  s_875e3f9d4d0db3::t_c91fdfa4afd335 79-83,91-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "56c1c299501fa7d8558410d57641ab3d0a72d6a9",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+apps/backend/specs/2026-11-02-task-config/spec.md
+  s_d6c454b7153ccf::t_dd820acc03669d 40
+  s_d6c454b7153ccf::t_1ec527cbc8f65d 205-209
+  s_d6c454b7153ccf::t_12c4fd8ef4d8c6 235-241
+  s_d6c454b7153ccf::t_bbb659b75686f8 98,112,162-171,173-181,183-194,231,248
+  s_d6c454b7153ccf::t_42a28bd849947c 172
+  s_d6c454b7153ccf::t_faed074ce3d36f 148-151
+  s_d6c454b7153ccf::t_f47728bfc77832 182
+  s_d6c454b7153ccf::t_decdcf277da809 37-39
+  s_d6c454b7153ccf::t_026191aa20e5a9 41-43,95-97
+  s_d6c454b7153ccf::t_93ab9d29b41952 99-101,109-111
+  s_d6c454b7153ccf::t_a95e18755e4af1 113-115,145-147
+  s_d6c454b7153ccf::t_e7ecd566b73d38 152-154,159-161
+  s_d6c454b7153ccf::t_67289549a73b47 195-197,202-204
+  s_d6c454b7153ccf::t_c7e10ceb2a6b68 210-212,228-230
+  s_d6c454b7153ccf::t_1127aa1cfc3deb 232-234
+  s_d6c454b7153ccf::t_39b30b14185738 242-247
+  s_d6c454b7153ccf::t_75542fdcb6cb4e 249-251
+  s_4340597a84ab88::t_905c2a67e4c75c 1-36,44-94,102-108,116-144,155-158,198-201,213-227,252-320
+apps/backend/specs/2026-11-02-task-config/plan.md
+  s_d6c454b7153ccf::t_ab39132d57925a 512
+  s_d6c454b7153ccf::t_108f25e52ea1ec 1-511,513-625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f72194435fc9dae98673ae16d7e1d9cda9a1d9f9",
+  "prompts": {},
+  "sessions": {
+    "s_4340597a84ab88": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_4340597a84ab88",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_d6c454b7153ccf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "062d8408-8d1d-4158-8f3b-4c4ff1c16b30",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

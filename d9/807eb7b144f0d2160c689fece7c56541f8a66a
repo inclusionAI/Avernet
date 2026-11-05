@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_a455a34ce352c5::t_0f6f09def45d93 203-204,233-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9807eb7b144f0d2160c689fece7c56541f8a66a",
+  "prompts": {},
+  "sessions": {
+    "s_a455a34ce352c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18aba-6dab-7472-8910-ddb217b96d1c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

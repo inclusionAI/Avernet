@@ -1,0 +1,214 @@
+.github/workflows/singlebox-coverage.yml
+  h_059e888e5e4e82 269-270
+apps/backend/docs/bot-ownership-sync-operations.md
+  h_059e888e5e4e82 207-240
+apps/backend/scripts/ci_test.sh
+  h_059e888e5e4e82 97-99,105-107
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  h_059e888e5e4e82 196,462-465
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  h_059e888e5e4e82 50-53
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  h_059e888e5e4e82 6,43-46,48
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_metadata.py
+  h_059e888e5e4e82 1-19
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/collaboration_repair.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_collaboration_repair.py
+  h_059e888e5e4e82 1-143
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/response_envelopes.py
+  h_059e888e5e4e82 1-58
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  h_059e888e5e4e82 5-8,10-14,35,43-49,345-348,352,356-361
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/schemas_collaboration_repair.py
+  h_059e888e5e4e82 1-61
+apps/backend/src/agentclaw/community/api/README.md
+  h_059e888e5e4e82 107,228
+apps/backend/src/agentclaw/community/api/collaboration_repair_service.py
+  h_059e888e5e4e82 1-14
+apps/backend/src/agentclaw/community/core/agentswarm/README.md
+  h_059e888e5e4e82 353-356
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  h_059e888e5e4e82 22-23,50-53,78-79,124
+apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/README.md
+  h_059e888e5e4e82 1-247
+apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/profile.py
+  h_059e888e5e4e82 1-86
+apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/service.py
+  h_059e888e5e4e82 1-606
+apps/backend/src/agentclaw/community/core/bot_management/collaboration_repair/service_protocol.py
+  h_059e888e5e4e82 1-33
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_request.py
+  h_059e888e5e4e82 14-16,155-157
+apps/backend/src/agentclaw/community/core/bot_management/services/bcn_roster.py
+  h_059e888e5e4e82 1-164
+apps/backend/src/agentclaw/community/core/bot_management/services/bcn_service.py
+  h_059e888e5e4e82 7-13,22,27-39,76,107-110,119-121,136-140,145,149-151,167-168,176,204-206,210-214,217-219,230,245-247,296-297,353-355,363-369,377-381,491-494,500-506,512-516,592-594,601-607,613-617,626-627,645-650,658-664,701-704,730,735-741,760-762,769-773,781-785,787-789,798-807,820,826-828,831-834,839-841,872-874,877-883,885-889,936-939,944-950,955-959
+apps/backend/src/agentclaw/community/core/bot_management/services/bcn_transport_types.py
+  h_059e888e5e4e82 1-159
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  h_059e888e5e4e82 151-153,1697-1699,3350-3357,3697,3701-3705,3735-3736,3738-3761,3796,3803-3807,3829-3830,4716-4718,5217-5219
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_bot_service.py
+  h_059e888e5e4e82 71-73,227-229
+apps/backend/src/agentclaw/community/core/repository/README.md
+  h_059e888e5e4e82 143-144,379
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/collaboration_repair.py
+  h_059e888e5e4e82 1-161
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/manager_sync.py
+  h_059e888e5e4e82 56,69-70,117,376
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/ownership_sync.py
+  h_059e888e5e4e82 17-21,50,65
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/collaboration_repair.py
+  h_059e888e5e4e82 1-26
+apps/backend/src/agentclaw/community/di/container.py
+  h_059e888e5e4e82 104-106,276-279
+apps/backend/src/agentclaw/community/di/modules/collaboration_repair_module.py
+  h_059e888e5e4e82 1-353
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/bot_manager_sync.py
+  h_059e888e5e4e82 2-4,13-16,19,24-60,65-69,96-106
+apps/backend/src/agentclaw/community/kernel/bot_manager_sync.py
+  h_059e888e5e4e82 148-155,161-163
+apps/backend/src/agentclaw/community/kernel/collaboration_repair.py
+  h_059e888e5e4e82 1-294
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  h_059e888e5e4e82 17,32,150-154,191-206
+apps/backend/src/agentclaw/community/plugin_api/bcs_collaboration_metadata.py
+  h_059e888e5e4e82 1-77
+apps/backend/src/agentclaw/community/plugin_api/bcs_managers.py
+  h_059e888e5e4e82 62-64,70
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/host.py
+  h_059e888e5e4e82 441-444
+apps/backend/src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+  h_059e888e5e4e82 1-384
+apps/backend/src/agentclaw/community/plugins/community/bcs_managers.py
+  h_059e888e5e4e82 27,155-156
+apps/backend/src/agentclaw/community/plugins/local/README.md
+  h_059e888e5e4e82 11,18
+apps/backend/src/agentclaw/community/plugins/local/bcs_collaboration_metadata.py
+  h_059e888e5e4e82 1-120
+apps/backend/tests/community/acceptance/bot_ownership_sync/runtime/sitecustomize.py
+  h_059e888e5e4e82 20-21,29
+apps/backend/tests/community/acceptance/collaboration_repair/README.md
+  h_059e888e5e4e82 1-37
+apps/backend/tests/community/acceptance/collaboration_repair/conftest.py
+  h_059e888e5e4e82 1-26
+apps/backend/tests/community/acceptance/collaboration_repair/fixture_module.py
+  h_059e888e5e4e82 1-92
+apps/backend/tests/community/acceptance/collaboration_repair/live_case.py
+  h_059e888e5e4e82 1-432
+apps/backend/tests/community/acceptance/collaboration_repair/test_collaboration_repair_live.py
+  h_059e888e5e4e82 1-173
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_routing.py
+  h_059e888e5e4e82 160-165,169-171,180-183
+apps/backend/tests/community/adapters/http/openapi_v1/test_collaboration_repair.py
+  h_059e888e5e4e82 1-521
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  h_059e888e5e4e82 644-645,647-648,859-861
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  h_059e888e5e4e82 78-82
+apps/backend/tests/community/architecture/test_no_oversized_modules.py
+  h_059e888e5e4e82 62-65
+apps/backend/tests/community/contracts/test_bcs_collaboration_metadata.py
+  h_059e888e5e4e82 1-264
+apps/backend/tests/community/contracts/test_bcs_managers.py
+  h_059e888e5e4e82 85-86,101
+apps/backend/tests/community/contracts/test_file_count_runtime.py
+  h_059e888e5e4e82 91-92,98-105,111-122
+apps/backend/tests/community/core/agentswarm/runtime/worker/test_orphan_reaper.py
+  h_059e888e5e4e82 164-177,192,202-205
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  h_059e888e5e4e82 33,36,112-114,118-163,174-177,218,226,277-293,495-498,500,527,546-554,579,612
+apps/backend/tests/community/core/agentswarm/test_production_gates.py
+  h_059e888e5e4e82 100-116,166-168,214-217,221-222
+apps/backend/tests/community/core/bot_management/collaboration_repair/factories.py
+  h_059e888e5e4e82 1-267
+apps/backend/tests/community/core/bot_management/collaboration_repair/test_facts.py
+  h_059e888e5e4e82 1-379
+apps/backend/tests/community/core/bot_management/collaboration_repair/test_failure_boundaries.py
+  h_059e888e5e4e82 1-170
+apps/backend/tests/community/core/bot_management/collaboration_repair/test_report.py
+  h_059e888e5e4e82 1-94
+apps/backend/tests/community/core/bot_management/collaboration_repair/test_service.py
+  h_059e888e5e4e82 1-880
+apps/backend/tests/community/core/bot_management/collaboration_repair/test_service_contract_guards.py
+  h_059e888e5e4e82 1-94
+apps/backend/tests/community/core/bot_management/services/test_bcn_handoff_identity.py
+  h_059e888e5e4e82 54-56
+apps/backend/tests/community/core/bot_management/services/test_bcn_request_errors.py
+  h_059e888e5e4e82 1-284
+apps/backend/tests/community/core/bot_management/services/test_bcn_service_avatar.py
+  h_059e888e5e4e82 1-145
+apps/backend/tests/community/core/bot_management/services/test_bcn_service_list_bots_by_task_modes.py
+  h_059e888e5e4e82 5-7,72,99,118,130,148,178,188,197,206,219,230,240,250,260
+apps/backend/tests/community/core/bot_management/services/test_bcn_service_sync_caller_config.py
+  h_059e888e5e4e82 13-14,19,224-341
+apps/backend/tests/community/core/bot_management/services/test_bot_avatar_sync.py
+  h_059e888e5e4e82 1-587
+apps/backend/tests/community/core/bot_management/services/test_bot_service_bcn_sync.py
+  h_059e888e5e4e82 177-182,189,253,288,327
+apps/backend/tests/community/core/bot_management/services/test_bot_service_create_bcn_register.py
+  h_059e888e5e4e82 131,161,277,305,344,372,401,509-515
+apps/backend/tests/community/core/bot_management/services/test_bot_service_restart_baas_envs.py
+  h_059e888e5e4e82 328,752-758
+apps/backend/tests/community/core/bot_management/services/test_bot_service_restart_idempotency.py
+  h_059e888e5e4e82 1287
+apps/backend/tests/community/core/bot_management/services/test_bot_service_stop_start.py
+  h_059e888e5e4e82 301,348,380,408,445,478,509,620,783-789,811
+apps/backend/tests/community/core/desktop_bot/services/test_desktop_bot_service.py
+  h_059e888e5e4e82 2837-2843,2918-2924
+apps/backend/tests/community/core/space_knowledge/test_membership_activation_races.py
+  h_059e888e5e4e82 12,38,40,42-50,73-77,133
+apps/backend/tests/community/di/test_collaboration_repair_module.py
+  h_059e888e5e4e82 1-451
+apps/backend/tests/community/endpoints/test_collaboration_repair_endpoint.py
+  h_059e888e5e4e82 1-181
+apps/backend/tests/community/plugins/community/agentswarm/test_host_running_apply.py
+  h_059e888e5e4e82 1-44
+apps/backend/tests/community/plugins/community/test_bcs_collaboration_metadata.py
+  h_059e888e5e4e82 1-702
+apps/backend/tests/community/plugins/community/test_bcs_managers.py
+  h_059e888e5e4e82 438
+apps/backend/tests/community/plugins/community/test_collaboration_profile_confirmation.py
+  h_059e888e5e4e82 1-63
+apps/backend/tests/community/plugins/local/test_collaboration_repair_acceptance_fixture.py
+  h_059e888e5e4e82 1-54
+devops/hook/check_secrets.py
+  h_059e888e5e4e82 94-99,211-270,303-312,320-328,345,410-411,425-440
+docs/specs/2026-11-02-bot-avatar-collaboration-repair/backend-plan.md
+  h_059e888e5e4e82 18,23,26-45,83,92,96,98-101,103-105,159,298,300,303,310,325,377-378,495
+docs/specs/2026-11-02-bot-avatar-collaboration-repair/design.md
+  h_059e888e5e4e82 198,213-217,255,270-271,336
+singlebox/ci/collaboration_repair_provider.py
+  h_059e888e5e4e82 1-113
+singlebox/ci/singlebox_coverage.sh
+  h_059e888e5e4e82 24,127-132,201-203,218-220,234-237,242-244,248,252-261,338
+singlebox/ci/singlebox_coverage_modules.yaml
+  h_059e888e5e4e82 227-274
+singlebox/ci/tests/test_check_secrets_references.py
+  h_059e888e5e4e82 26-39,154-222
+singlebox/ci/tests/test_collaboration_repair_provider.py
+  h_059e888e5e4e82 1-120
+singlebox/ci/tests/test_singlebox_coverage_report.py
+  h_059e888e5e4e82 120
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  h_059e888e5e4e82 18-24
+singlebox/ci/tests/test_unit_test_workflow_diff.py
+  h_059e888e5e4e82 52-58
+singlebox/modules/bcs_runtime_config.sh
+  h_059e888e5e4e82 339-354
+singlebox/verity/test_singlebox_bcs_runtime_config.sh
+  h_059e888e5e4e82 203-223
+singlebox/verity/test_singlebox_coverage_gate.sh
+  h_059e888e5e4e82 67-87,125-132,193,275-276,279-280,314-337,387-388,513-531,559,566
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28ee5e93e29d1a167694db406db67381f91b6ea1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

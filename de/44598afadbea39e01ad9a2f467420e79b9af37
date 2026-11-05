@@ -1,0 +1,29 @@
+apps/backend/tests/community/services/test_bot_passport.py
+  s_b0e8371e1adacb::t_5f31eb3b4da846 161,167,205,212-213,243,250-251,299,307
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_46ad8ac31e72e5::t_f9728251cec0c8 5916,5925,5929-5930,5975,5979-5981,6220,6231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de44598afadbea39e01ad9a2f467420e79b9af37",
+  "prompts": {},
+  "sessions": {
+    "s_46ad8ac31e72e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21f-4d8d-75a2-a435-5f952a7f437c",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_b0e8371e1adacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21f-5610-7990-9a3d-cb5f73a648fd",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

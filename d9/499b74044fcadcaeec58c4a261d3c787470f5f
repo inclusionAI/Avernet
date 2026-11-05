@@ -1,0 +1,49 @@
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_89ee1c722ef961::t_e6760ff29f83d9 5-6,150-175,178-182
+  s_89ee1c722ef961::t_c4c95bb1c3c966 1-4,7-58,60-85,87-105,107-126,129-149
+  s_89ee1c722ef961::t_1e420e835c7184 59,86,106,127-128,176-177
+apps/bcsfuse/packages/search-core/README.md
+  s_89ee1c722ef961::t_a900e360c2d27b 14-16,45-66
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_89ee1c722ef961::t_2b61ea8e38a6e6 1-156
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_89ee1c722ef961::t_ab375e4f542075 73-107
+apps/bcsfuse/packages/search-core/pyproject.toml
+  s_89ee1c722ef961::t_fc8876f76b666a 14
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_89ee1c722ef961::t_bffdb2e573982b 1-149
+apps/bcsfuse/packages/search-core/src/search_core/api/cards.py
+  s_89ee1c722ef961::t_a2cf29a2b770a6 1-39
+apps/bcsfuse/packages/search-core/src/search_core/catalog/__init__.py
+  s_89ee1c722ef961::t_fa8360e7074eb7 1
+apps/bcsfuse/packages/search-core/src/search_core/catalog/cards.py
+  s_89ee1c722ef961::t_ea6368079f2f1c 1-56
+apps/bcsfuse/packages/search-core/src/search_core/core/card_management.py
+  s_89ee1c722ef961::t_fac2ac2df8e09f 1-39
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_documents.py
+  s_89ee1c722ef961::t_a60b8eb23eca44 1-26
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_89ee1c722ef961::t_27ba1eb45451a6 1-21
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  s_89ee1c722ef961::t_9df50b3592abf8 1-21
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  s_89ee1c722ef961::t_7acc927e448e40 1-55
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_89ee1c722ef961::t_aa0ac4fcd66505 1-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9499b74044fcadcaeec58c4a261d3c787470f5f",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
