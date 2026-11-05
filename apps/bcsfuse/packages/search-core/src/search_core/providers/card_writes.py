@@ -3,14 +3,22 @@
 from uuid import uuid4
 
 from search_core.api.cards import CatalogConflict
-from search_core.catalog.cards import CardSnapshot, SearchConfig, business_card
+from search_core.catalog.cards import (
+    CardSnapshot,
+    SearchConfig,
+    business_card,
+    is_label_filter,
+)
 from search_core.core.card_management import merge_fields
 
 
 class CardWrites:
     snapshot_type = CardSnapshot
 
-    def upsert(self, agent_id, fields, resource_type, search_config):
+    def validate_labels(self, kind, labels, *, creating, patch):
+        """Hosts may require business-specific labels on managed writes."""
+
+    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
         # Retry a bounded number of internal races, remerging onto the latest
         # snapshot each time so concurrent edits to different fields survive.
         for _ in range(8):
@@ -25,7 +33,27 @@ class CardWrites:
                 merge_fields(config.model_dump(mode="json"), search_config)
             )
             data = merge_fields(original, fields)
-            if active and data == original and config == current.card.search_config:
+            if not data:
+                raise ValueError("card required for creation")
+            merged = dict(current.card.labels) if active else {}
+            for key, values in (labels or {}).items():
+                if (
+                    not is_label_filter("labels." + key)
+                    or not isinstance(values, list)
+                    or any(not isinstance(v, str) or not v.strip() for v in values)
+                ):
+                    raise ValueError("invalid label key or value")
+                if values:
+                    merged[key] = list(dict.fromkeys(values))
+                else:
+                    merged.pop(key, None)
+            self.validate_labels(kind, merged, creating=not active, patch=labels)
+            if (
+                active
+                and data == original
+                and config == current.card.search_config
+                and merged == current.card.labels
+            ):
                 return current
             revision = current.revision if current else 0
             snapshot = self.snapshot_type(
@@ -34,6 +62,7 @@ class CardWrites:
                 # Legacy storage/artifact metadata only; not an upstream version.
                 source_version=uuid4().hex,
                 source_card=data,
+                labels=merged,
                 search_config=config,
             )
             try:

@@ -4,8 +4,7 @@
 和 `/api/v1/index-builds` 路径不再挂载，调用方需随服务升级修改 URL；
 请求体、响应字段和业务逻辑保持不变。TC 现有旧接口不受影响。
 
-实现归属：Avernet 的 `search-core` 包。OCB 复用这份实现；TC 当前未接入，
-现有 sync/Worker/Profile 接口不变，后续迁移时再由 TC 显式启用。
+Avernet 的 `search-core` 提供通用 Card 读写。TC V2 固定使用 Card/Doc 存储，V1 按已有迁移配置选择存储。
 
 Card 是完整业务 JSON。下列字段只是示例，不是白名单；新增字段、嵌套对象和数组
 都会保存，并通过读取接口返回。索引正文和前置标签由各业务构建器决定。
@@ -33,6 +32,7 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 ```json
 {
   "resource_type": "agent",
+  "labels": {"visibility": ["private"], "user_visibility": ["protected"]},
   "card": {
     "name": "账单助手",
     "description": "查询消费账单",
@@ -45,10 +45,13 @@ Agent 与 Group 共用这些接口。`id` 为 1～128 个字符，不允许空�
 
 | 请求字段 | 是否必填 | 说明 |
 | --- | --- | --- |
-| card | 是 | 非空 JSON 对象；创建时提供业务资料，更新时只放要修改的字段 |
+| card | 新建必填 | 完整业务 JSON；更新时允许只传 labels |
+| labels | 按业务约定 | 与 card 同级的字符串数组映射。按键合并，传数组替换该键，空数组删除普通标签，GET 返回完整标签。标签键支持字母、数字、下划线和连字符。 |
 | resource_type | 否 | agent/group；新建省略时为 agent，更新省略时保留原类型；已有 ID 不能改成另一种类型 |
 
 不接收外层 source_version、expected_revision 或 search_config。card.search_config 若由业务传入，仍原样保存，不控制运维行为。`card.version` 若存在，仍只是业务自己的字段，服务不要求修改它才能更新资料。
+
+只改标签示例：`{"labels":{"topic":["invoice"],"department":[]}}`。标签随 Card 版本发布，原检索正文相同可复用已保存的向量。查询使用 `filters["labels.topic"]=["invoice"]`。
 
 只改描述：
 
@@ -79,6 +82,7 @@ Group 创建示例：`PUT /api/v2/agent-cards/bcs_grp_example`
 ```json
 {
   "resource_type": "group",
+  "labels": {"visibility": ["public"]},
   "card": {
     "groupId": "bcs_grp_example",
     "name": "旅行服务群",
@@ -117,6 +121,7 @@ Doc 行保留为删除记录，供暂时离线的实例补同步，不承诺物�
 ```json
 {
   "resource_type": "agent",
+  "labels": {"visibility": ["private"], "user_visibility": ["protected"]},
   "card": {"name": "账单助手", "description": "查询消费账单"},
   "card_version": 1
 }

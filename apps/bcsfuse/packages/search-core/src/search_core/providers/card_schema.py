@@ -28,6 +28,8 @@ def initialize_sqlite_cards(conn, *, table=TABLE):
         gmt_create REAL NOT NULL DEFAULT 0, gmt_modify REAL NOT NULL DEFAULT 0,
         PRIMARY KEY(environment,agent_id))""")
     current = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if "labels" not in current:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN labels TEXT")
     if "resource_type" not in current:
         conn.execute(
             f"ALTER TABLE {table} ADD COLUMN resource_type TEXT NOT NULL DEFAULT 'agent'"

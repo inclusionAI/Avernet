@@ -190,6 +190,7 @@ def test_http_versions_use_caller_names_and_keep_card_fields_opaque(setup):
     }
     assert client.get(PATH).json() == {
         "card": business,
+        "labels": {},
         "resource_type": "agent",
         "card_version": 1,
     }
