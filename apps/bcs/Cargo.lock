@@ -625,6 +625,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1466,6 +1467,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.20",
  "ulid",
+ "url",
  "uuid",
 ]
 
@@ -2229,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "2.0.0"
+version = "3.1.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

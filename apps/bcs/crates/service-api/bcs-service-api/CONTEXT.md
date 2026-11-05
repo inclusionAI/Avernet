@@ -1,5 +1,16 @@
 # bcs-service-api Context
 
+## Version 3.0.0: Bot response avatars
+
+`PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
+struct literals must supply this field, requiring a major Service API version
+change. Workspace consumers rebuild together; external constructors should use
+`None` for an unset avatar and for Humans. JSON responses always include the
+nullable key, while serde still accepts older payloads without it. All V1 Bot
+projections share this shape, including mine, get, query, update and candidates.
+The application reuses `BotRegistryCoreService::avatar_urls`; no Plugin API,
+storage schema, HTTP route version, or configuration changes are needed.
+
 ## Version 2.0.0: avatar source compatibility
 
 The avatar extension adds fields to public Rust structs, including
@@ -758,3 +769,32 @@ allowlist uses exact user IDs and defaults to denying all callers. Gateway or
 OAuth authentication, a binding and non-user identities do not implicitly grant
 issuance. HTTP request bodies remain count-only; Rust callers must provide the
 caller when rebuilding. No persistence schema changes are required.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## Native task Service API compatibility
+
+`MessageFlowService::handle_native_task_dispatch(request_id, command)` is the
+inbound entry for authenticated native task requests without a wire parent key.
+The production Caller-aware implementation correlates accepted starts and checks
+BCS-owned parent identity; request IDs and model arguments never grant authority.
+The additive entry is versioned as bcs-service-api 3.1.0 on top of the 3.0.0 API.
+Workspace consumers rebuild together; existing implementations retain source
+compatibility with the 3.0.0 API.
+The additive default strips delegation and retains ordinary task dispatch only,
+not Caller inheritance. There is no identity Plugin API or task wire change.
+Bounded replay and composition semantics are specified in
+`apps/bcs/docs/native-task-caller.md` and exercised through the real task and
+protected-delivery application seams.

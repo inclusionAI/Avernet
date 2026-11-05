@@ -92,6 +92,13 @@ nonblank secret. Credential read failures propagate; issuance and upstream never
 read or require that credential. Bot creation and gateway projection are atomic in SQL;
 Human/owner-edge writes follow and failures propagate, without journal-based resume.
 Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
+New Provider registrations also preflight the active name within the current
+Provider/environment, including non-A2A Bots. Legacy Provider-admin registration
+uses BotProviderRepoPort before registry writes; trusted atomic registration
+performs the same fresh lookup in its store. Existing binding replay retains its
+idempotent behavior. The additional lookup returns at most one identifier and does
+not provide a cross-process uniqueness guarantee; a DB index is deferred pending
+production data repair. Lookup failures propagate rather than allowing registration.
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
 Both flows derive ordinary AgentPass Bot `agent_code` from `provider_bot_ref`.

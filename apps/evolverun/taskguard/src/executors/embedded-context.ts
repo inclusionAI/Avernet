@@ -12,6 +12,18 @@ export type EmbeddedAgentToolContext = {
   [key: string]: unknown;
 };
 
+/**
+ * Parent tool contexts are delivery-bound and may carry a session file. A
+ * child dispatch may reuse the process but must not reuse those identity fields.
+ */
+export function scopeToolContextForSession(
+  toolCtx: EmbeddedAgentToolContext | undefined,
+  sessionKey: string,
+): EmbeddedAgentToolContext | undefined {
+  if (!toolCtx) return undefined;
+  return typeof toolCtx.sessionKey !== "string" || toolCtx.sessionKey === sessionKey ? toolCtx : undefined;
+}
+
 export type EmbeddedAgentRuntimeApi = {
   runtime?: {
     config?: {

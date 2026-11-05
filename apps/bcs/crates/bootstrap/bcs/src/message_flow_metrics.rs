@@ -174,6 +174,20 @@ impl MessageFlowService for InstrumentedMessageFlowService {
         result
     }
 
+    async fn handle_native_task_dispatch(
+        &self,
+        request_id: &str,
+        cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        let result = self.inner.handle_native_task_dispatch(request_id, cmd).await;
+        self.record(
+            MessageFlowSource::BotWs,
+            MessageFlowOperation::TaskDispatch,
+            result.is_ok(),
+        );
+        result
+    }
+
     async fn handle_task_message(
         &self,
         cmd: TaskMessageCommand,

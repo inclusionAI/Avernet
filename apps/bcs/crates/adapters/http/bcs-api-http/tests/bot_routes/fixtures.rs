@@ -130,6 +130,7 @@ pub(crate) struct FakeBotService {
     pub(crate) get: Mutex<Option<GetBot>>,
     pub(crate) update: Mutex<Option<UpdateBot>>,
     pub(crate) mine: Mutex<Option<ListMyBots>>,
+    pub(crate) mine_items: Mutex<Option<Vec<Bot>>>,
 }
 
 #[derive(Default)]
@@ -305,9 +306,15 @@ impl BotService for FakeBotService {
 
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
         *self.mine.lock().expect("mine lock") = Some(command);
+        let items = self
+            .mine_items
+            .lock()
+            .expect("mine items lock")
+            .clone()
+            .unwrap_or_else(|| vec![Bot::Human(human_bot())]);
         Ok(Page {
-            items: vec![Bot::Human(human_bot())],
-            total: 1,
+            total: items.len() as u64,
+            items,
             offset: 2,
             limit: 3,
         })
@@ -541,6 +548,7 @@ pub(crate) fn physical_bot() -> PhysicalBot {
         bot_id: "bot-1".to_string(),
         kind: BotKind::Bot,
         name: "Bot One".to_string(),
+        avatar_url: Some("https://example.com/bot.png".into()),
         visibility: BotVisibility::Public,
         status: BotStatus::Online,
         env: "dev".to_string(),
@@ -570,6 +578,7 @@ pub(crate) fn human_bot() -> HumanBot {
         bot_id: "human_staff-1".to_string(),
         kind: BotKind::Human,
         name: "Human".to_string(),
+        avatar_url: None,
         visibility: BotVisibility::Protected,
         status: BotStatus::Online,
         env: "dev".to_string(),

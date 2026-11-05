@@ -40,11 +40,12 @@ export interface DefinitionValidationData {
 const BASE = '/api/v1/collaboration/definitions';
 
 /** 校验自定义协作 YAML：POST /api/v1/collaboration/definitions/validate。 */
-export function validateDefinition(body: { definition_yaml: string }) {
+export function validateDefinition(body: { definition_yaml: string }, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<DefinitionValidationData>>(`${BASE}/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     data: body,
     injectUserId: false,
+    ...(signal ? { signal } : {}),
   });
 }

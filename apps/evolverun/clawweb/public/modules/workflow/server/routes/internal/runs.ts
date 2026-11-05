@@ -4,8 +4,9 @@ import { RepairBatchError } from '../../contracts/repair-batch.js';
  */
 import { Router, type Request, type Response } from "express";
 import { FlowRunRepository } from "../../repositories/flow-run-repository.js";
+import { FanoutStorageError, type FanoutAdmissionConfig } from "../../repositories/fanout-state-repository.js";
+import { createInternalFanoutsRouter } from "./fanouts.js";
 import { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
-import type { FlowControlAppConfig } from "@avernet/clawweb-shared/server/db";
 import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
@@ -28,10 +29,11 @@ function scheduleTerminalObserver(
 export function createInternalRunsRouter(
   flowRunRepo: FlowRunRepository | null,
   nodeExecRepo?: NodeExecutionRepository | null,
-  flowControlConfig?: FlowControlAppConfig,
+  flowControlConfig?: FanoutAdmissionConfig,
   observers: { onTerminal?: RunTerminalObserver } = {},
 ): Router {
   const router = Router();
+  router.use(createInternalFanoutsRouter(flowRunRepo?.fanoutState?.withAdmissionConfig(flowControlConfig) ?? null));
 
   /** POST / — insert a flow run */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
@@ -548,6 +550,10 @@ export function createInternalRunsRouter(
       apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 200, bytes: state_json.length });
       res.json({ success: true });
     } catch (error) {
+      if (error instanceof FanoutStorageError) {
+        res.status(error.statusCode).json({ success: false, error: "Conflict", message: error.message });
+        return;
+      }
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/state`, { flowId, status: 500, error: msg });
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });

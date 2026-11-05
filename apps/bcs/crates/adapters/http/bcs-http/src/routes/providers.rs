@@ -648,6 +648,7 @@ async fn require_staff_no(
 
 fn provider_error(error: ServiceError) -> ProviderRouteError {
     match error {
+        ServiceError::A2aManagement(error)=>ProviderRouteError {status:super::a2a_management::status(error.code),message:error.reason.into()},
         ServiceError::Unauthorized(message) => ProviderRouteError {
             status: StatusCode::UNAUTHORIZED,
             message,

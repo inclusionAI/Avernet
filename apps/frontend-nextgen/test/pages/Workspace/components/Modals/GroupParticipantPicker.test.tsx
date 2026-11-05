@@ -158,7 +158,7 @@ it('keeps named selected member chips removable and uses compact list typography
   );
   fireEvent.click(screen.getByRole('button', { name: '移除Selected Bot' }));
   expect(onToggle).toHaveBeenCalledWith('selected-1');
-  expect(screen.getByText('Candidate 1')).toHaveClass('text-xs');
+  expect(screen.getByText('Candidate 1')).toHaveClass('text-sm');
 });
 
 it('does not show the redundant collaboration Bot range hint', () => {

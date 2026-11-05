@@ -32,12 +32,7 @@ impl BotServiceImpl {
             .mine_attempt(&staff_no, &command)
             .await?;
         if !first.drift {
-            return Ok(Page {
-                items: first.items,
-                total: first.total,
-                offset: command.offset,
-                limit: command.limit,
-            });
+            return self.project_mine_page(first, &command).await;
         }
 
         // Page drift (a page target deleted or its role
@@ -50,12 +45,7 @@ impl BotServiceImpl {
             .mine_attempt(&staff_no, &command)
             .await?;
         if !second.drift && second.composition == first.composition {
-            return Ok(Page {
-                items: second.items,
-                total: second.total,
-                offset: command.offset,
-                limit: command.limit,
-            });
+            return self.project_mine_page(second, &command).await;
         }
         Err(ApplicationError::conflict(
             ERROR_BOT_LIST_CHANGED,
@@ -138,7 +128,7 @@ impl BotServiceImpl {
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
         let mut drift = false;
-        let items = if page_ids.is_empty() {
+        let records = if page_ids.is_empty() {
             Vec::new()
         } else {
             // Batch page backfill; the provider
@@ -177,25 +167,44 @@ impl BotServiceImpl {
                                 *fresh_relation != candidate.access_relation
                             })
                 });
-            let ordered = page_ids
+            page_ids
                 .iter()
                 .filter_map(|bot_id| views_by_id.remove(bot_id))
-                .collect::<Vec<_>>();
-            self.project_records_with_activity(ordered, &snapshot.active_bot_ids)
-                .await?
+                .collect::<Vec<_>>()
         };
-        let items = items
-            .into_iter()
-            .map(|bot| {
-                let relation = relations.get(bot.bot_id()).cloned();
-                bot.with_mine_access_relation(relation)
-            })
-            .collect::<Vec<_>>();
         Ok(MineAttempt {
-            items,
+            records,
+            active_bot_ids: snapshot.active_bot_ids,
+            relations,
             total,
             drift,
             composition,
+        })
+    }
+
+    /// Only the accepted page reads display profiles. Discarded attempts and
+    /// changed retry compositions must preserve the list-conflict outcome.
+    async fn project_mine_page(
+        &self,
+        attempt: MineAttempt,
+        command: &ListMyBots,
+    ) -> Result<Page<Bot>, ApplicationError> {
+        let physical_ids = Self::physical_bot_ids(&attempt.records);
+        let items = self
+            .project_records_with_activity(attempt.records, &attempt.active_bot_ids, &physical_ids)
+            .await?;
+        let items = items
+            .into_iter()
+            .map(|bot| {
+                let relation = attempt.relations.get(bot.bot_id()).cloned();
+                bot.with_mine_access_relation(relation)
+            })
+            .collect::<Vec<_>>();
+        Ok(Page {
+            items,
+            total: attempt.total,
+            offset: command.offset,
+            limit: command.limit,
         })
     }
 
@@ -400,7 +409,9 @@ fn mine_relation_label(
 /// page target missing from the same store (deleted or
 /// otherwise unresolvable since the candidate sampling).
 struct MineAttempt {
-    items: Vec<Bot>,
+    records: Vec<BotControlPlaneView>,
+    active_bot_ids: HashSet<String>,
+    relations: HashMap<String, String>,
     total: u64,
     drift: bool,
     composition: Vec<(String, BotAccessRelation)>,

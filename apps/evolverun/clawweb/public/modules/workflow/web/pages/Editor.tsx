@@ -825,7 +825,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       {/* Version History Modal */}
       {showHistory && selectedWorkflowId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-card shadow-xl">
+          <div className="flex h-[88vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-lg bg-card shadow-xl">
             <WorkflowHistoryPanel
               workflowId={selectedWorkflowId}
               onActiveVersionChange={() => setDeploymentBaselineRevision((revision) => revision + 1)}

@@ -837,9 +837,11 @@ impl CallerDispatchPipeline {
                                 .as_ref()
                                 .map(|history| history.history_cutoff_seq)
                                 .unwrap_or(0),
-                            // Run budget only: the lineage's lifetime is the
-                            // run window, never a token/container advisory.
-                            expires_at_ms: effective_not_after,
+                            // The lineage window: run budget BOUNDED by the
+                            // established subject's TTL — identity may only
+                            // shorten the visible expiry, never relabel-up
+                            // (the identity plugin's MAC binding rejects it).
+                            expires_at_ms: effective_not_after.min(identity_deadline),
                             // spec §8.3 delegation-only material: the root's
                             // stable pseudonymous subject, runtime-only,
                             // from the claimed ingress actor — the delegate

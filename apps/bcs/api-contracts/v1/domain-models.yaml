@@ -144,6 +144,7 @@ PhysicalBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -166,6 +167,10 @@ PhysicalBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Current Bot display avatar URL, or null when unset.
     visibility:
       $ref: "#/BotVisibility"
     status:
@@ -234,6 +239,7 @@ HumanBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -252,6 +258,10 @@ HumanBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Always null; Human avatars are not stored in BCS.
     visibility:
       $ref: "#/BotVisibility"
     status:

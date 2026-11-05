@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createClawevolveModule } from "@avernet/clawevolve";
 import { createInsightRuntime, createInsightManagementRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
 import { createApprovalRouter } from "@avernet/workflow/server/routes/approval";
+import { createInternalRunsRouter } from "@avernet/workflow/server/routes/internal/runs";
+import { createInternalBotWorkflowPermissionsRouter } from "@avernet/workflow/server/routes/internal/bot-workflow-permissions";
 import { createInternalApprovalCardsRouter } from "@avernet/workflow/server/routes/internal/approval-cards";
 import { ApprovalCardRepository } from "@avernet/workflow/server/repositories/approval-card-repository";
 import {
@@ -32,6 +34,8 @@ import { MetricsRepository } from "@avernet/workflow/server/repositories/metrics
 import { AlertRepository } from "@avernet/workflow/server/repositories/alert-repository";
 import { FlowControlRepository } from "@avernet/workflow/server/repositories/flow-control-repository";
 import { ExecutionStepLogRepository } from "@avernet/workflow/server/repositories/execution-step-log-repository";
+import { RunSubworkflowsRepository } from "@avernet/workflow/server/repositories/run-subworkflows-repository";
+import { RunSubworkflowsService } from "@avernet/workflow/server/services/run-subworkflows-service";
 import { FacadeBindingRepository } from "@avernet/workflow/server/repositories/facade-binding-repository";
 import { AppConfigRepository } from "@avernet/workflow/server/repositories/app-config-repository";
 import { createAutoAnalysisSettings } from "@avernet/workflow/server/services/task-guard/auto-analysis-settings";
@@ -41,6 +45,8 @@ import {
   resolveAdminConfigFrom,
   resolveDynamicAdminConfig,
   resolveAutoHealConfig,
+  resolveSignatureConfig,
+  resolveFlowControlConfig,
 } from "@avernet/clawweb-shared/server/db";
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
@@ -53,6 +59,7 @@ import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
+import { createInternalEngineAuth } from "./internal-engine-auth.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
 
 /** Non-browser clients may omit Origin, but must still send the CSRF header. */
@@ -208,6 +215,14 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const alertRepo = new AlertRepository(db);
       const flowControlRepo = new FlowControlRepository(db);
       const execStepLogRepo = new ExecutionStepLogRepository(db);
+      const engineAuth = createInternalEngineAuth({
+        environment: context.environment,
+        publicKeyB64: resolveSignatureConfig().publicKeyB64,
+      });
+      app.use("/api/internal/runs", engineAuth, createInternalRunsRouter(
+        flowRunRepo, nodeExecRepo, resolveFlowControlConfig(),
+      ));
+      app.use("/api/internal/bot-workflow-permissions", engineAuth, createInternalBotWorkflowPermissionsRouter(botPermRepo));
       const facadeRepo = new FacadeBindingRepository(db);
       // The public development identity can come from an unverified cookie.
       // Do not expose scripts until a verified principal and Pack ACL exist.
@@ -273,6 +288,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         workflowSpecRepo,
         execStepLogRepo,
         facadeRepo,
+        new RunSubworkflowsService(new RunSubworkflowsRepository(db), botPermRepo),
       ));
       app.use(["/api/auto-heal/save", "/api/auto-heal/deploy"], packWriteGuard);
       app.use("/api/auto-heal", createAutoHealRouter({

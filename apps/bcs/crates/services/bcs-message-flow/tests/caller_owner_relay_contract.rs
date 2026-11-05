@@ -93,7 +93,7 @@ fn ingress(actor: &str) -> AuthenticatedHumanCallerIngress {
     .expect("valid ingress")
 }
 
-struct CallerEnabledControlPlane;
+struct CallerEnabledControlPlane { owner_driver: bool }
 
 /// The pure-Owner deployment shape: every bot reads caller-unconfigured, so
 /// the session fences as a Plain group and the Human's speech is ordinary
@@ -150,7 +150,7 @@ impl BotControlPlaneCoreService for CallerEnabledControlPlane {
             snapshot: Some(CallerIdentitySnapshot {
                 source_revision: 1,
                 caller_identity: CallerIdentityConfig {
-                    enabled: true,
+                    enabled: !self.owner_driver || _bot_id != "bot-driver",
                     minimum_isolation: CallerMinimumIsolation::CallerContainer,
                 },
             }),
@@ -210,7 +210,7 @@ async fn fixture_with_plane(
         if p.bot_uuid == "bot-observer" { p.role = ParticipantRole::Worker; }
     }
     support.group.upsert(group.clone()).await.unwrap();
-    let repo = Arc::new(MemoryMessageRepo::new());
+    let repo = Arc::new(MemoryMessageRepo::new().with_environment(resolve_env()));
     let service = Arc::new(ManagedMessageDelivery::new(repo.clone()));
     let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     live.scheduler_available.store(true, Ordering::SeqCst);
@@ -239,7 +239,7 @@ async fn fixture_with_plane(
             handoff: handoff.clone() as Arc<dyn HumanCallerDeliveryHandoffService>,
             admission: service.clone(),
             control_plane: if caller_enabled_plane {
-                Arc::new(CallerEnabledControlPlane)
+                Arc::new(CallerEnabledControlPlane { owner_driver: false })
             } else {
                 Arc::new(CallerUnconfiguredControlPlane)
             },
@@ -417,3 +417,6 @@ async fn a_frontend_group_chat_speech_is_captured_without_mentions() {
 // Keep the unused-variable lint honest for fixtures that ignore status.
 #[allow(dead_code)]
 fn _status_shape(_: Status) {}
+
+#[path = "support/native_owner_task.rs"]
+mod native_owner_task;

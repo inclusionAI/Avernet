@@ -182,7 +182,7 @@ impl BotRepoPort for PersistentBotRepo {
         let bots = bcs_observability::observe_value("bot.memory_lock.wait", self.bots.read()).await;
 
         if let Some(bot) = bots.get(bot_id) {
-            if !bot.is_expired() {
+            if !bot.is_expired() && self.use_cached_metadata(bot_id).await {
                 log_bot_cache_source("memory_hit");
                 return Ok(Some(bot.to_registered_bot()));
             }
@@ -226,7 +226,7 @@ impl BotRepoPort for PersistentBotRepo {
             let bots = self.bots.read().await;
             for bot_id in bot_ids {
                 match bots.get(bot_id) {
-                    Some(bot) if !bot.is_expired() => {
+                    Some(bot) if !bot.is_expired() && self.use_cached_metadata(bot_id).await => {
                         found.insert(bot_id.clone(), bot.to_registered_bot());
                     }
                     _ => missing.push(bot_id.clone()),
@@ -278,7 +278,7 @@ impl BotRepoPort for PersistentBotRepo {
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
         let bots = self.bots.read().await;
         if let Some(bot) = bots.get(bot_id) {
-            if !bot.is_expired() {
+            if !bot.is_expired() && self.use_cached_metadata(bot_id).await {
                 return Some(bot.to_registered_bot());
             }
         }

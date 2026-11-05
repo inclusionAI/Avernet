@@ -36,6 +36,10 @@ port = 21000
 bcs_endpoint = "http://127.0.0.1:21000"
 botchat_url = "http://localhost:8000"
 
+[metrics]
+enabled = false
+mode = "pull"
+
 [llm]
 type = "openai_compatible"
 base_url = "https://api.openai.com/v1"
@@ -85,6 +89,7 @@ test_local_llm_stays_disabled_without_env_config() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'type = "none"'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'legacy-template-secret'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'legacy-template-secret'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'enabled = false'
 }
 
 test_botchat_url_can_be_overridden() {
@@ -173,6 +178,8 @@ test_e2e_mock_takes_precedence_over_env_config() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'api_key_env = "BCS_E2E_JUDGE_API_KEY"'
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'model = "e2e-judge"'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'real-provider-model'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'enabled = true'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'enabled = true'
 }
 
 test_local_llm_stays_disabled_without_env_config

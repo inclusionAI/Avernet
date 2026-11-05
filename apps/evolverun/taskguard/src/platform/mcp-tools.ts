@@ -11,6 +11,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createDefaultExecutorDispatch } from "./default-executor.js";
+import type { ControllerDeps } from "../controller.js";
+import { configureFanoutApiHost } from "./fanout-host.js";
+import { ApiClient } from "../db/api-client.js";
 import { buildControllerDeps } from "./adapter-to-deps.js";
 import { ExecutionStepLogRepository } from "../db/repositories/execution-step-log-repository.js";
 import { ExecutionStepLogger } from "../execution-log/logger.js";
@@ -563,12 +566,14 @@ function buildToolDeps(
   commandRunnerFn?: CommandRunner,
 ) {
   const { adapter, embeddedAgentFn } = adapterFactory(context);
+  let controllerDeps: ControllerDeps;
   const executeNode = createDefaultExecutorDispatch({
     sessionKey: context.sessionKey,
     actionRegistry: deps.actionRegistry,
     abortSignal: context.abortSignal,
     embeddedAgentFn: embeddedAgentFn ?? deps.agentRunner ?? deps.samplingAgent,
     commandRunnerFn,
+    subworkflowDepsGetter: () => controllerDeps?.subworkflowDeps,
   });
 
   // Populate workflow catalog fields so handleRun/resolveWorkflow can find workflows.
@@ -593,7 +598,7 @@ function buildToolDeps(
     ` formatWorkflowCommand=${formatWorkflowCommand ? "yes" : "no"}`,
   );
 
-  return buildControllerDeps(adapter, {
+  controllerDeps = buildControllerDeps(adapter, {
     actionRegistry: deps.actionRegistry,
     executeNode,
     // Inject the resolved workflow catalog so run <workflowId> can locate workflow
@@ -626,6 +631,20 @@ function buildToolDeps(
       return new DynamicWorkflowEventEmitter({ logger: stepLogger });
     })(),
   });
+  if (controllerDeps.clawWebBaseUrl) {
+    const api = new ApiClient({ baseUrl: controllerDeps.clawWebBaseUrl, privateKeyB64: controllerDeps.signatureKey });
+    configureFanoutApiHost(controllerDeps, api, child => {
+      const scoped = adapterFactory({ ...context, sessionKey: child.sessionKey, sessionId: undefined, abortSignal: child.signal });
+      return createDefaultExecutorDispatch({
+        sessionKey: child.sessionKey, actionRegistry: deps.actionRegistry, abortSignal: child.signal,
+        embeddedAgentFn: scoped.embeddedAgentFn ?? deps.agentRunner ?? deps.samplingAgent,
+        commandRunnerFn, user: context.user ? { ...context.user, source: "delivery-context" } : undefined,
+        workflow: child.workflow, subworkflowDepsGetter: child.getSubworkflowDeps,
+      });
+    });
+  }
+  return controllerDeps;
+
 }
 
 /** Helper to run a workflow action and return MCP-formatted result. */

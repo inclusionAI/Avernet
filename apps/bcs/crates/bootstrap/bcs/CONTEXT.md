@@ -13,6 +13,10 @@ publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
 acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
 the existing metrics::InstrumentedMessageFlowService export.
+Native Task dispatch also forwards to the matching inner entrypoint with its
+request ID and command intact, rather than selecting the ordinary-dispatch
+fallback. Parent correlation, Caller inheritance and replay checks remain owned
+by the application; success and failure each record one Task dispatch metric.
 
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
@@ -264,3 +268,11 @@ application facade. Only exact verified user IDs are authorized for manual
 issuance, regardless of authentication source or the binding-gate switch.
 Configuration changes require restart; policy enforcement and creator audit
 metadata stay in application, not the router or authentication verifier.
+
+## A2A anonymous access policy
+
+`a2a_allow_anonymous` is a root boolean setting, false by default. Enabling it
+allows anonymous calls only for Cards that permit them. It is injected into
+Provider-admin registration, scoped registration and runtime target resolution.
+It does not disable Provider management authentication or satisfy a Card that
+requires Bearer, OAuth or another unsupported scheme.

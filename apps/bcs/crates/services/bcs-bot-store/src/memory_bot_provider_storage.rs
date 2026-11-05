@@ -27,6 +27,17 @@ fn binding_now_ms() -> ServiceResult<u64> {
 
 #[async_trait]
 impl BotProviderRepoPort for MemoryBotProviderStore {
+    async fn validate_provider_bot_name(&self, provider_id:&str, name:&str, exclude_bot:Option<&str>) -> ServiceResult<()> {
+        let records=self.records.read().await;
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==provider_id && Some(r.bot_uuid.as_str())!=exclude_bot) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
+        Ok(())
+    }
     async fn validate_provider_affiliation(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<()> {
         self.bindings.check_affiliation_scope(provider_id, bot_uuid).await
     }
@@ -131,6 +142,14 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         // sees it and conflicts (old create_provider_bot
         // discipline).
         let mut records = self.records.write().await;
+        let name=capabilities.name.as_deref().unwrap_or(&record.bot_uuid);
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==record.provider_id) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
         if records.contains_key(&record.bot_uuid) {
             return Err(conflict());
         }
@@ -182,6 +201,14 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
         }
         let mut records = self.records.write().await;
+        let name=capabilities.name.as_deref().unwrap_or(&record.bot_uuid);
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==record.provider_id) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
         let mut bindings = self.bindings.bindings_by_bot.write().await;
         let mut refs = self.bindings.binding_ref_index.write().await;
         let key = (record.provider_id.clone(), record.provider_bot_ref.clone());

@@ -41,6 +41,8 @@ export async function getSyncDiffText(
   };
 }
 import type { IDatabase } from "../db/types.js";
+import { freezeSubworkflowDependencies, assertDependencySnapshotPreserved, assertPublishedDependencyHistory } from "./subworkflow-dependencies.js";
+import { DependencyLockError } from "../workflow-dependencies.js";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -766,7 +768,8 @@ async function deployToClawWeb(deps: VersionCommandDeps, workflowId: string, pac
     const saved = await resp.json() as Record<string, unknown>;
     return saved;
   } catch {
-    // If we can't parse the response, return the input spec as fallback
+    if (spec.subworkflowDependencies !== undefined) throw new DependencyLockError("save acknowledgement is not JSON");
+    // Preserve the legacy fallback only for workflows without release locks.
     return spec;
   }
 }
@@ -1258,7 +1261,8 @@ function stripUiFields<T>(obj: T): T {
     const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
       if (key.startsWith("_")) continue;
-      result[key] = stripUiFields(val);
+      // Published snapshots are hashed content, not editable UI decoration.
+      result[key] = key === "subworkflowDependencies" ? val : stripUiFields(val);
     }
     return result as T;
   }
@@ -1515,6 +1519,13 @@ export async function handleDeploy(
     await ensurePackManifest(packsDir, packId);
   }
 
+  // Freeze before the first remote save; drafts/latest are never implicit locks.
+  try {
+    specObj = freezeSubworkflowDependencies(specObj);
+  } catch (err) {
+    return `❌ 发布依赖校验失败: ${err instanceof Error ? err.message : err}`;
+  }
+
   // 2b. Diff preview + timestamp check: prevent stale local from overwriting newer DB.
   try {
     const dbSpec = await fetchDbSpec(deps, workflowId);
@@ -1601,6 +1612,7 @@ export async function handleDeploy(
   let savedSpec: Record<string, unknown>;
   try {
     savedSpec = await deployToClawWeb(deps, workflowId, packId, specObj);
+    assertDependencySnapshotPreserved(specObj, savedSpec);
   } catch (err) {
     return `❌ DB 部署失败: ${err instanceof Error ? err.message : err}`;
   }
@@ -1802,14 +1814,19 @@ export async function handleDeploy(
   // So this insert should almost always succeed.
   if (apiRepo && newVersion !== undefined) {
     try {
-      await apiRepo.insert({
+      const recorded = await apiRepo.insert({
         packId, workflowId, deployNumber: nextNum, version: newVersion,
         tagName, action: "deploy", specJson,
         note: options?.note,
         botId: deps.botId, ownerId: deps.ownerId,
       });
+      if (specObj.subworkflowDependencies !== undefined) {
+        if (!recorded) throw new DependencyLockError("发布记录写入失败; saved spec is not a published release");
+        await assertPublishedDependencyHistory(apiRepo, { packId, workflowId, deployNumber: nextNum, version: newVersion, tagName, specJson });
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      if (specObj.subworkflowDependencies !== undefined) return `❌ 发布记录校验失败: ${errMsg}`;
       const is409 = errMsg.includes("409") || errMsg.toLowerCase().includes("conflict");
       if (is409) {
         // 409 means the version already exists in deploy_history (likely from save API's write).

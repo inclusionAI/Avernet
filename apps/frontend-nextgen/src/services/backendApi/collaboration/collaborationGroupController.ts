@@ -226,11 +226,12 @@ export async function getGroup(group_id: string) {
 }
 
 // 创建协作群组。
-export async function createGroup(body: CreateGroupBody) {
+export async function createGroup(body: CreateGroupBody, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<GroupDetailData>>('/openapi/v1/collaboration/groups', {
     method: 'POST',
     data: body,
     injectUserId: false,
+    ...(signal ? { signal } : {}),
   });
 }
 

@@ -563,6 +563,17 @@ pub trait MessageFlowService: Send + Sync {
         &self,
         cmd: TaskDispatchCommand,
     ) -> ServiceResult<TaskDispatchOutcome>;
+    /// Authenticated native assignment without a parent supplied by the Bot.
+    /// Caller-aware implementations correlate a prior accepted tool start and
+    /// validate the BCS-owned parent before admission. Legacy implementations
+    /// retain ordinary dispatch (and their existing Caller delivery gate), not
+    /// Caller inheritance. The request ID is a replay key, never authority.
+    async fn handle_native_task_dispatch(
+        &self, _request_id: &str, mut cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        cmd.caller_delegation = None;
+        self.handle_task_dispatch(cmd).await
+    }
     async fn handle_task_message(
         &self,
         _cmd: TaskMessageCommand,
