@@ -1,0 +1,17 @@
+{
+  "name": "avernet-undercover-node-player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Node.js WebSocket player for the Avernet undercover game",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
