@@ -92,6 +92,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
         store.setSessionKeyFilter(botId, nextKey);
         store.setExpandedBot(botId, true);
       }}
+      createSessionPending={sessions.isCreatingSession(botId)}
       onCreateSession={() => void sessions.createSession(botId)}
       onSelectSession={(sessionId) => sessions.selectMineSession(botId, sessionId)}
       onLoadMore={() => void sessions.loadMoreSessions(botId, view.section, scope)}

@@ -91,6 +91,7 @@ const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): Conversat
   selectMineSession: jest.fn(),
   selectFriendBotSession: jest.fn(),
   createSession: jest.fn(),
+  isCreatingSession: jest.fn(() => false),
   retrySessions: jest.fn(),
   loadMoreSessions: jest.fn(),
   ...over,

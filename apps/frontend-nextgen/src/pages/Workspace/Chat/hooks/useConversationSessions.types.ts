@@ -11,5 +11,7 @@ export interface ConversationSessionsModel {
   selectFriendBotSession(botId: string, sessionId: string): void;
   retrySessions(botId: string, section: ConversationBotSection): void;
   createSession(botId: string): Promise<void>;
+  /** Bot 级会话创建在途标记；用于行尾 + 与空态创建按钮共享同一 pending。 */
+  isCreatingSession(botId: string): boolean;
   loadMoreSessions(botId: string, section: ConversationBotSection, scope: ConversationSessionScope): Promise<void>;
 }

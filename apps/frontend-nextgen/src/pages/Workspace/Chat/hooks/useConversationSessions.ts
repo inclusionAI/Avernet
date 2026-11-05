@@ -46,7 +46,7 @@ export function useConversationSessions(options: {
     return map;
   }, [managedBots, friendBots]);
   const expandBot = useConversationBotExpansion(userId);
-  const createSession = useConversationSessionCreation(userId, botByBotId);
+  const sessionCreation = useConversationSessionCreation(userId, botByBotId);
   // 请求上下文(代次/在途去重)挂载一份;分页请求主体拆见 ./conversationSessionPageRequest。
   const requestCtxRef = useRef<ConversationSessionRequestContext | null>(null);
   if (!requestCtxRef.current) requestCtxRef.current = createSessionRequestContext(userId);
@@ -197,7 +197,8 @@ export function useConversationSessions(options: {
     selectMineSession: (botId, sessionId) =>
       selectSession(botByBotId.get(botId)?.section ?? 'managed', botId, sessionId),
     selectFriendBotSession: (botId, sessionId) => selectSession('friend', botId, sessionId),
-    createSession,
+    createSession: sessionCreation.createSession,
+    isCreatingSession: sessionCreation.isCreatingSession,
     retrySessions,
     loadMoreSessions,
   };

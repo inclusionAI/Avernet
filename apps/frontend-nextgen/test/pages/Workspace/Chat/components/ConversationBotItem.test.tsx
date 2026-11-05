@@ -24,6 +24,7 @@ function renderBotItem(
     onToggle?: () => void;
     bot?: Partial<ChatBotView>;
     botSelected?: boolean;
+    createSessionPending?: boolean;
     onOpenBotManagement?: (bot: ChatBotView) => void;
   } = {},
 ) {
@@ -45,6 +46,7 @@ function renderBotItem(
       onSearchSession={noop}
       onCreateSession={noop}
       onSelectSession={noop}
+      createSessionPending={overrides.createSessionPending}
       onLoadMore={noop}
       onToggleFavorite={noop}
       isFavoritePending={() => false}
@@ -233,6 +235,15 @@ describe('ConversationBotItem 右侧操作组收起按钮', () => {
     // 整行只剩主按钮，无会话操作组。
     expect(container.querySelectorAll('button').length).toBe(1);
     expect(screen.queryByRole('button', { name: '收起会话列表' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationBotItem 新建会话 pending', () => {
+  it('新建会话在途时按钮禁用并切换为 loading 图标', () => {
+    renderBotItem({ bot: { isAgentCodingBot: true }, createSessionPending: true });
+    const createButton = screen.getByRole('button', { name: '新建会话' });
+    expect(createButton).toBeDisabled();
+    expect(createButton.querySelector('.animate-spin')).not.toBeNull();
   });
 });
 
