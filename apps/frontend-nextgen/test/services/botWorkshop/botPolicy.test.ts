@@ -235,7 +235,7 @@ describe('Bot 授权入口跟随空间类型', () => {
   });
 });
 
-describe('通用配置菜单项门禁（collab-permission-entry-migration AC-02/AC-03）', () => {
+describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/AC-03）', () => {
   test('Bot 管理员（Owner）且无锁时可打开', () => {
     expect(getGeneralConfigAvailability(true, false)).toEqual({ enabled: true });
   });
@@ -243,7 +243,7 @@ describe('通用配置菜单项门禁（collab-permission-entry-migration AC-02/
   test('非 Bot 管理员禁用并说明原因', () => {
     expect(getGeneralConfigAvailability(false, false)).toEqual({
       enabled: false,
-      disabledReason: '仅 Bot 管理员可变更通用配置',
+      disabledReason: '仅 Bot 管理员可变更公开设置',
     });
   });
 
@@ -255,6 +255,6 @@ describe('通用配置菜单项门禁（collab-permission-entry-migration AC-02/
   });
 
   test('非管理员与持锁同时存在时管理员原因优先', () => {
-    expect(getGeneralConfigAvailability(false, true).disabledReason).toBe('仅 Bot 管理员可变更通用配置');
+    expect(getGeneralConfigAvailability(false, true).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
   });
 });

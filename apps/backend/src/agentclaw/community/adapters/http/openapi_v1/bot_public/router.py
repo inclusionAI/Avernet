@@ -35,6 +35,7 @@ from .schemas import (
     PublicBot,
     PublicBotCapability,
     PublicBotProfile,
+    PublicBotSkill,
     RuntimeState,
 )
 from agentclaw.community.core.bot_management.avatar import bot_avatar_url
@@ -358,6 +359,18 @@ def _public_bot_profile(profile: Mapping[str, Any]) -> PublicBotProfile:
                         capability_id=capability_id, display_name=display_name
                     )
                 )
+    skills = profile.get("skills")
+    skill_items: list[PublicBotSkill] = []
+    if isinstance(skills, Sequence) and not isinstance(skills, (str, bytes)):
+        for skill in skills:
+            if not isinstance(skill, Mapping):
+                continue
+            skill_id = str(skill.get("skill_id") or "").strip()
+            display_name = str(skill.get("display_name") or "").strip()
+            if skill_id and display_name:
+                skill_items.append(
+                    PublicBotSkill(skill_id=skill_id, display_name=display_name)
+                )
     return PublicBotProfile(
         bot_id=str(profile.get("bot_id") or ""),
         bot_uuid=str(profile.get("bot_uuid") or ""),
@@ -366,6 +379,7 @@ def _public_bot_profile(profile: Mapping[str, Any]) -> PublicBotProfile:
         description=str(profile.get("description") or ""),
         engine_name=str(profile.get("engine_name") or ""),
         capabilities=capability_items,
+        skills=skill_items,
     )
 
 

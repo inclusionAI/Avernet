@@ -134,10 +134,10 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       {
         id: 'actions',
         header: '操作',
-        width: 'w-[284px]',
+        // 240px：最宽按钮行（对话/查看/编辑/日志 + 管理菜单）实测内容约 224px，留 16px 余量。
+        width: 'w-[240px]',
         align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (bot) => {
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;

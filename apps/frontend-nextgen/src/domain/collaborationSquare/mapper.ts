@@ -25,6 +25,7 @@ export interface BotProfileTransport {
   description?: string | null;
   engine_name?: string | null;
   capabilities?: Array<{ capability_id: string; display_name: string }>;
+  skills?: Array<{ skill_id: string; display_name: string }>;
   [key: string]: unknown;
 }
 export interface PublicGroupTransport {
@@ -297,6 +298,12 @@ export function mapBotProfileTransport(value: BotProfileTransport): PublicBotPro
           .filter((item) => item?.capability_id && item?.display_name)
           .map((item) => ({ id: item.capability_id, name: item.display_name }))
       : [],
+    // 已公开技能（profile 端点 skills；与 MCP 能力同口径、区分类别展示）。
+    skills: Array.isArray(value.skills)
+      ? value.skills
+          .filter((item) => item?.skill_id && item?.display_name)
+          .map((item) => ({ id: item.skill_id, name: item.display_name }))
+      : [],
   };
 }
 
@@ -313,6 +320,7 @@ export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotPr
     ...(bot.isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
     capabilities: [],
+    skills: [],
   };
 }
 

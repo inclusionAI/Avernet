@@ -56,6 +56,13 @@ class PublicBotCapability(BaseModel):
     display_name: str = Field(description="Public capability display name.")
 
 
+class PublicBotSkill(BaseModel):
+    """One published skill of a public Bot profile."""
+
+    skill_id: str = Field(description="Stable skill identifier.")
+    display_name: str = Field(description="Public skill display name.")
+
+
 class PublicBotProfile(BaseModel):
     """Public catalog Bot profile shown before requesting friendship."""
 
@@ -70,6 +77,10 @@ class PublicBotProfile(BaseModel):
     capabilities: list[PublicBotCapability] = Field(
         default_factory=list,
         description="Published MCP capabilities of the Bot.",
+    )
+    skills: list[PublicBotSkill] = Field(
+        default_factory=list,
+        description="Published skills of the Bot.",
     )
 
 

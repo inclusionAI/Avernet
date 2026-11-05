@@ -60,6 +60,15 @@ class TaskInfoRecord:
 
 
 @dataclass(frozen=True)
+class TaskNodeSessionRef:
+    """Read-side reference from a chat session to its executing task node."""
+
+    task_id: str
+    node_id: str
+    owner_user_id: str
+
+
+@dataclass(frozen=True)
 class TaskNodeRecord:
     id: int
     task_id: str

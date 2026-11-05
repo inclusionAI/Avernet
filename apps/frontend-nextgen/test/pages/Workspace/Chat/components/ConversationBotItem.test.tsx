@@ -139,15 +139,19 @@ describe('ConversationBotItem 操作区', () => {
     expect(cover.className).toContain('mask-[linear-gradient(to_right,transparent,black_10px)]');
   });
 
-  it('展开时文字为右侧 4 个操作按钮预留 112px，图标不被文字压底', () => {
+  it('展开态收起指示器常显让位 pr-9,hover 全组让位 112px(2026-11-04 显隐重构)', () => {
     const { container } = renderBotItem({ expanded: true });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[112px]');
+    // 收起指示器是展开状态的行级指示(同日修正:hover 别处不消失),静态让位单按钮 36px。
+    const column = title?.parentElement as HTMLElement;
+    expect(column).toHaveClass('pr-9');
+    expect(column.className).toContain('group-hover:pr-[112px]');
+    expect(screen.getByRole('button', { name: '收起会话列表' }).className).not.toContain('opacity-0');
   });
 
-  it('展开且有「更多操作」入口时让位扩至 pr-[138px]（5 按钮紧凑几何）', () => {
+  it('展开且有「更多操作」入口时 hover 让位 5 按钮 138px（紧凑几何）', () => {
     const { container } = renderBotItem({
       expanded: true,
       bot: { spaceId: '101' },
@@ -156,7 +160,7 @@ describe('ConversationBotItem 操作区', () => {
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    expect(title?.parentElement).toHaveClass('pr-[138px]');
+    expect((title?.parentElement as HTMLElement).className).toContain('group-hover:pr-[138px]');
     // 非钉住态(收起且无筛选/检索)走临时让位变体,菜单打开期间(data-state=open)同样让位,
     // 鼠标移出行、菜单仍开时不塌缩。
     const { container: collapsed } = renderBotItem({
@@ -335,19 +339,17 @@ describe('ConversationBotItem 会话ID检索入口', () => {
     expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
   });
 
-  it('生效中的检索在收起时仍可见:操作区常驻并给行名称让位', () => {
+  it('生效中的检索在收起时仍可见:🔍 常显并给行名称让位', () => {
     const { container } = renderRow({ sessionKey: 'agent:main:live', expanded: false });
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
     ) as HTMLElement;
-    // 生效中的检索钉住操作区,行名称让位 pr-[86px]。
-    expect(title?.parentElement).toHaveClass('pr-[86px]');
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    expect(actions.className).toContain('opacity-100');
-    // 🔍 按钮激活态主色,标记生效条件。
-    expect(screen.getByRole('button', { name: '会话ID检索' })).toHaveClass('text-primary');
+    // 生效中的检索:🔍 icon 级常显(2026-11-04 显隐重构),行名称仅按激活 icon 让位 pr-9。
+    expect(title?.parentElement).toHaveClass('pr-9');
+    // 🔍 按钮激活态常显 + 品牌蓝标记生效条件。
+    const searchButton = screen.getByRole('button', { name: '会话ID检索' });
+    expect(searchButton).toHaveClass('opacity-100');
+    expect(searchButton).toHaveClass('text-primary');
   });
 
   it('提交检索透传 onSearchSession(已 trim),清空提交传播空串', () => {
@@ -457,11 +459,8 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
       bot: { status: 'FAILED', spaceId: '101' },
       onOpenBotManagement,
     });
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    // 常驻可见;不随 hover 变化。
-    expect(actions.className).toContain('opacity-100');
+    // 常驻可见(2026-11-04 显隐重构:常驻下移至 icon 级,容器不整体控制);不随 hover 变化。
+    expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('opacity-100');
     // 不可用行让位收敛到单按钮几何:10 渐隐区+「…」+右内边距(2026-11-03 紧凑化),不从 hover 变化。
     const title = Array.from(container.querySelectorAll('span')).find((el) =>
       el.className.includes('truncate'),
@@ -478,12 +477,15 @@ describe('ConversationBotItem 「更多操作」菜单（#2990 还原）', () =>
     await waitFor(() => expect(onOpenBotManagement).toHaveBeenCalledTimes(1));
   });
 
-  it('菜单打开期间操作区钉住:strip 含 data-state=open 钉住类(静态类断言,jsdom 不算选择器)', () => {
-    const { container } = renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
-    const actions = Array.from(container.querySelectorAll('div')).find((el) =>
-      el.className.includes('right-2'),
-    ) as HTMLElement;
-    expect(actions.className).toContain('group-has-[[data-state=open]]:opacity-100');
+  it('菜单打开期间操作区钉住:icon 级含 data-state=open 钉住类(静态类断言,jsdom 不算选择器)', () => {
+    renderBotItem({ bot: { spaceId: '101' }, onOpenBotManagement: noop });
+    // 显隐下沉 icon 级(2026-11-04):钉住类在每个按钮上,菜单打开期间整组可见、鼠标移出不塌缩。
+    expect(screen.getByRole('button', { name: '更多操作' }).className).toContain(
+      'group-has-[[data-state=open]]:opacity-100',
+    );
+    expect(screen.getByRole('button', { name: '新建会话' }).className).toContain(
+      'group-has-[[data-state=open]]:opacity-100',
+    );
   });
 
   it('origin=others 只读视角不渲染「更多操作」入口', () => {
@@ -565,11 +567,12 @@ describe('ConversationBotItem 行徽标', () => {
     expect(label.parentElement).not.toHaveClass('flex-col');
   });
 
-  it('引擎徽章让位优先于名称(2026-11-03 紧凑化):展开钉住时整徽章隐藏', () => {
+  it('展开态徽章让位于常显收起指示器(2026-11-04 收起常显修正):整徽章隐藏', () => {
     const { container } = renderBotItem({ expanded: true, bot: { engine: 'openclaw' } });
     const badge = Array.from(container.querySelectorAll('span')).find((el) =>
       el.textContent === 'OpenClaw',
     ) as HTMLElement;
+    // 收起指示器常显在操作组首位(距右 18px),静态让位 36px 下 badge 与其重叠,恒让位。
     expect(badge).toHaveClass('hidden');
   });
 

@@ -12,7 +12,7 @@ export type ConversationOrigin = 'mine' | 'others';
 export type ConversationSessionScope = 'all' | 'favorite';
 export type ConversationBotSection = 'managed' | 'team' | 'friend';
 
-/** 团队 Bot 与管理 Bot 共用来源/范围及只读他人会话能力；friend 不参与。 */
+/** 团队空间 Bot 与管理 Bot 共用来源/范围及只读他人会话能力；friend 不参与。 */
 export function isManagedConversationSection(
   section: ConversationBotSection | null | undefined,
 ): section is 'managed' | 'team' {
@@ -24,9 +24,9 @@ export interface ConversationRouteState {
   botId?: string;
   /** 缺省表示 section 尚未解析,由 Hook 的目录匹配推导;规范 URL 必须写出。 */
   section?: ConversationBotSection;
-  /** 只对管理 / 团队 Bot 生效;缺省按 mine 处理;好友 Bot URL 不携带该字段。 */
+  /** 只对管理 / 团队空间 Bot 生效;缺省按 mine 处理;好友 Bot URL 不携带该字段。 */
   origin?: ConversationOrigin;
-  /** 只对管理 / 团队 Bot 的 origin=mine 生效;缺省按 all 处理;others 强制按 all 处理。 */
+  /** 只对管理 / 团队空间 Bot 的 origin=mine 生效;缺省按 all 处理;others 强制按 all 处理。 */
   scope?: ConversationSessionScope;
   /** 纯用户 ID(归一化移除 human_ 前缀);仅 origin=others 使用。 */
   friendUserId?: string;

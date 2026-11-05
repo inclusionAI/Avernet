@@ -61,7 +61,7 @@ const BotWorkshopDetailPage: React.FC = () => {
     requestIdentity.userId,
     detail.bot,
     isOwner,
-    desktopPolicy.routines,
+    false,
     additionalTabs,
     JSON.stringify([addressedOwnerId, runtimeStage, currentSpaceId]),
   );

@@ -266,6 +266,8 @@ jobs:
           path: |
             singlebox/.dependencies/logs/**
             singlebox/.dependencies/coverage/singlebox/**
+            !singlebox/.dependencies/coverage/**/collaboration-repair-provider.json
+            !singlebox/.dependencies/coverage/**/.repair-provider-*
             singlebox/.dependencies/standalone/**
             .standalone-openclaw/logs/**
             apps/bcs/target/cov-e2e/cobertura.xml

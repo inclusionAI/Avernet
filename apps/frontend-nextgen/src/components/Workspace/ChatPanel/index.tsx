@@ -252,7 +252,7 @@ export function ChatPanel({
             loading={isRequesting}
             disabled={target.status !== 'available' || !isInteractive || isRequesting}
             submitType="enter"
-            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'}
+            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/skill 调用能力'}
             fileChip={fileChip}
             command={command}
             slots={{ header: composerHeader }}

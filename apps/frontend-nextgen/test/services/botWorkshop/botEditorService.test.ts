@@ -359,7 +359,7 @@ it('协作者加载编辑配置时为非敏感 Bot 子资源透传 owner', async
   expect(controller.listSkillSetSkills).toHaveBeenCalledWith('bot-1', '600005', 'owner-1');
   expect(controller.listResources).toHaveBeenCalledWith('bot-1', '', 'owner-1');
   expect(controller.listRenderScreens).toHaveBeenCalledWith('bot-1', 'owner-1');
-  expect(controller.listRoutines).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.listRoutines).not.toHaveBeenCalled();
   expect(controller.getEngineConfig).not.toHaveBeenCalled();
   expect(controller.getEngineStatus).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(controller.getApprovalConfig).not.toHaveBeenCalled();
@@ -390,28 +390,10 @@ it('引擎默认配置按需读取并只返回 config 对象', async () => {
   expect(controller.getEngineDefaultConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
 });
 
-it('定时任务响应映射模型和超时时间', async () => {
-  controller.listRoutines.mockResolvedValue({
-    data: {
-      total: 1,
-      items: [
-        {
-          routine_id: 'routine-1',
-          bot_id: 'bot-1',
-          name: '日报',
-          trigger: { type: 'schedule', cron: '0 9 * * *' },
-          command: '生成日报',
-          enabled: true,
-          model: 'qwen-max',
-          timeout_secs: 1800,
-        },
-      ],
-    },
-  });
-
+it('编辑配置不再加载已迁移到独立管理页的定时任务', async () => {
   const result = await botEditorService.load('bot-1');
-
-  expect(result.routines).toEqual([expect.objectContaining({ id: 'routine-1', model: 'qwen-max', timeoutSecs: 1800 })]);
+  expect(controller.listRoutines).not.toHaveBeenCalled();
+  expect(result.routines).toEqual([]);
 });
 
 it('定时任务模型通过 Bot 模型 OpenAPI 按需加载', async () => {

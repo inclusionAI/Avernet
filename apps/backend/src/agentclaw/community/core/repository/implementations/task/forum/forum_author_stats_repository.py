@@ -26,6 +26,18 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 
+def _author_identity_pairs(actors: tuple[ForumActorRef, ...]) -> list[tuple[str, str]]:
+    return [
+        (actor.type.value, identity_id)
+        for actor in actors
+        for identity_id in (actor.id, *(() if actor.id_alias is None else (actor.id_alias,)))
+    ]
+
+
+def _actor_identity_ids(actor: ForumActorRef) -> tuple[str, ...]:
+    return (actor.id, *(() if actor.id_alias is None else (actor.id_alias,)))
+
+
 class ForumAuthorStatsRepository(ForumAuthorStatsRepositoryProtocol):
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -76,7 +88,7 @@ class ForumAuthorStatsRepository(ForumAuthorStatsRepositoryProtocol):
                     ForumTopicModel.env == get_current_env(),
                     ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
                     tuple_(ForumTopicModel.author_type, ForumTopicModel.author_id).in_(
-                        (actor.type.value, actor.id) for actor in unique_actors
+                        _author_identity_pairs(unique_actors)
                     ),
                 )
                 .group_by(ForumTopicModel.author_type, ForumTopicModel.author_id)
@@ -96,7 +108,7 @@ class ForumAuthorStatsRepository(ForumAuthorStatsRepositoryProtocol):
                     ForumTopicModel.env == get_current_env(),
                     ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
                     tuple_(ForumPostModel.author_type, ForumPostModel.author_id).in_(
-                        (actor.type.value, actor.id) for actor in unique_actors
+                        _author_identity_pairs(unique_actors)
                     ),
                 )
                 .group_by(ForumPostModel.author_type, ForumPostModel.author_id)
@@ -119,7 +131,7 @@ class ForumAuthorStatsRepository(ForumAuthorStatsRepositoryProtocol):
                     ForumTopicModel.topic_type == TOPIC_TYPE_HELP,
                     ForumPostModel.reply_to_post_id.is_(None),
                     tuple_(ForumPostModel.author_type, ForumPostModel.author_id).in_(
-                        (actor.type.value, actor.id) for actor in unique_actors
+                        _author_identity_pairs(unique_actors)
                     ),
                 )
                 .all()
@@ -140,10 +152,19 @@ class ForumAuthorStatsRepository(ForumAuthorStatsRepositoryProtocol):
                 helpful_counts[key] = helpful_counts.get(key, 0) + 1
 
         for actor in unique_actors:
-            key = (actor.type.value, actor.id)
+            identity_ids = _actor_identity_ids(actor)
             result[actor] = ForumAuthorStatsRecord(
-                topic_count=topic_counts.get(key, 0),
-                reply_count=reply_counts.get(key, 0),
-                accepted_reply_count=helpful_counts.get(key, 0),
+                topic_count=sum(
+                    topic_counts.get((actor.type.value, identity_id), 0)
+                    for identity_id in identity_ids
+                ),
+                reply_count=sum(
+                    reply_counts.get((actor.type.value, identity_id), 0)
+                    for identity_id in identity_ids
+                ),
+                accepted_reply_count=sum(
+                    helpful_counts.get((actor.type.value, identity_id), 0)
+                    for identity_id in identity_ids
+                ),
             )
         return result

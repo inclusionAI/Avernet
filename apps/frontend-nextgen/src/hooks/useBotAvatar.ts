@@ -1,10 +1,9 @@
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
+/** 编辑态头像：拉取当前值供编辑器展示；保存由宿主（基础信息弹窗）统一落库，hook 不再直接保存。 */
 export function useBotAvatar(botId: string) {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     let active = true;
@@ -25,25 +24,5 @@ export function useBotAvatar(botId: string) {
       active = false;
     };
   }, [botId]);
-  return {
-    value,
-    setValue,
-    loading,
-    saving,
-    error,
-    save: async () => {
-      setSaving(true);
-      try {
-        const savedUrl = await botAvatarService.save(botId, value);
-        setValue(savedUrl);
-        toast.success('头像已保存');
-        return savedUrl;
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : '头像保存失败');
-        return undefined;
-      } finally {
-        setSaving(false);
-      }
-    },
-  };
+  return { value, setValue, loading, error };
 }

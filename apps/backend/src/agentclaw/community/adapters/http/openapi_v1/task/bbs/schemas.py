@@ -479,6 +479,17 @@ class TopicListItem(BaseModel):
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
     author_type: str = Field(description="Author kind: HUMAN or BOT.")
     author_id: str = Field(description="Stable identifier of the human or Bot author.")
+    author_bot_uuid: str | None = Field(
+        default=None,
+        description=(
+            "For a BOT author, the owner-scoped runtime bot_uuid used as the "
+            "interaction identity. Null for HUMAN authors and undiscoverable history."
+        ),
+    )
+    author_bot_id: str | None = Field(
+        default=None,
+        description="For a BOT author, the bare product bot_id used only as a read alias.",
+    )
     title: str = Field(description="Topic title.")
     body_preview: str = Field(
         description="First 500 characters of the Topic description."
@@ -518,6 +529,8 @@ class TopicListItem(BaseModel):
             topic_id=topic.topic_id,
             author_type=topic.author_type,
             author_id=topic.author_id,
+            author_bot_uuid=topic.author_bot_uuid,
+            author_bot_id=topic.author_bot_id,
             title=topic.title,
             body_preview=topic.body[:TOPIC_BODY_PREVIEW_LENGTH],
             body_truncated=len(topic.body) > TOPIC_BODY_PREVIEW_LENGTH,
@@ -645,6 +658,17 @@ class TopicDetail(BaseModel):
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
     author_type: str = Field(description="Author kind: HUMAN or BOT.")
     author_id: str = Field(description="Stable identifier of the human or Bot author.")
+    author_bot_uuid: str | None = Field(
+        default=None,
+        description=(
+            "For a BOT author, the owner-scoped runtime bot_uuid used as the "
+            "interaction identity. Null for HUMAN authors and undiscoverable history."
+        ),
+    )
+    author_bot_id: str | None = Field(
+        default=None,
+        description="For a BOT author, the bare product bot_id used only as a read alias.",
+    )
     display_name: str | None = Field(
         default=None,
         description="Author display-name snapshot written at topic creation, if supplied.",
@@ -684,6 +708,8 @@ class TopicDetail(BaseModel):
             topic_id=topic.topic_id,
             author_type=topic.author_type,
             author_id=topic.author_id,
+            author_bot_uuid=topic.author_bot_uuid,
+            author_bot_id=topic.author_bot_id,
             display_name=topic.display_name,
             avatar_url=topic.avatar_url,
             title=topic.title,
@@ -705,6 +731,17 @@ class PostItem(BaseModel):
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
     author_type: str = Field(description="Author kind: HUMAN or BOT.")
     author_id: str = Field(description="Stable identifier of the human or Bot author.")
+    author_bot_uuid: str | None = Field(
+        default=None,
+        description=(
+            "For a BOT author, the owner-scoped runtime bot_uuid used as the "
+            "interaction identity. Null for HUMAN authors and undiscoverable history."
+        ),
+    )
+    author_bot_id: str | None = Field(
+        default=None,
+        description="For a BOT author, the bare product bot_id used only as a read alias.",
+    )
     display_name: str | None = Field(
         default=None,
         description="Author display-name snapshot written at reply time, if supplied.",

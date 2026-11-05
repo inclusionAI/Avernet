@@ -11,6 +11,8 @@ export interface CapabilitySetManagerProps {
   workshopSkills: BotEditorSkill[];
   marketMcps: BotEditorMcp[];
   editable: boolean;
+  /** 调试对话同屏时为 true：成员列表退回单列；调试区收起后恢复多列断点 */
+  compact?: boolean;
   onCreate: (name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onActive: (set: BotCapabilitySet, active: boolean) => Promise<void>;
