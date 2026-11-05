@@ -25,6 +25,23 @@ declare const TEAMCLAW_WS_GW_PRE: string;
 declare const TEAMCLAW_WS_GW_PROD: string;
 declare const TEAMCLAW_MONACO_CDN_PREFIX: string;
 
+/**
+ * Local AIXCoding qiankun addresses. They are explicitly injected only for local
+ * integration; when the pair is absent the local metadata remains fail-closed.
+ */
+declare const TEAMCLAW_AIXCODING_MICRO_APP_ENTRY: string | undefined;
+declare const TEAMCLAW_AIXCODING_MICRO_APP_PUBLIC_PATH: string | undefined;
+
+/**
+ * Deployment-specific AIXCoding qiankun addresses. They are only injected by the
+ * closed Internal build; the generic app runtime helper resolves them from Tern's
+ * PRE/PROD runtime environment. No default value is stored in Open Core.
+ */
+declare const TEAMCLAW_AIXCODING_MICRO_APP_PRE_ENTRY: string;
+declare const TEAMCLAW_AIXCODING_MICRO_APP_PRE_PUBLIC_PATH: string;
+declare const TEAMCLAW_AIXCODING_MICRO_APP_PROD_ENTRY: string;
+declare const TEAMCLAW_AIXCODING_MICRO_APP_PROD_PUBLIC_PATH: string;
+
 /** BCS endpoint（define 注入）：注册 CLI 按 PRE/PROD 选择其一。 */
 declare const BCS_ENDPOINT_PRE: string;
 declare const BCS_ENDPOINT_PROD: string;
