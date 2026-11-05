@@ -13,9 +13,23 @@ from agentclaw.community.core.skill_center.skill_set_batch import (
 )
 
 
+from agentclaw.community.core.skill_center.skill_set_apply import (
+    BotCapabilityScope, DefaultExclusionChange, ResolvedSkillSetWrite,
+    SkillSetApplyResult, SkillSetApplySnapshot,
+)
+
+
 @runtime_checkable
 class SkillSetManagementServiceProtocol(Protocol):
     """Operate one exact Bot identified by its durable owner and identifier."""
+
+    def read_apply_snapshot(self, *, bot_id: str, owner_id: str, actor_id: str) -> SkillSetApplySnapshot:
+        """Read raw planning facts without reconciling Installation."""
+        ...
+
+    async def replace_apply_skill_sets(self, *, scope: BotCapabilityScope, actor_id: str, sets: tuple[ResolvedSkillSetWrite, ...], remove_names: tuple[str, ...], default_change: DefaultExclusionChange, platform_default_codes: frozenset[str], project: bool) -> SkillSetApplyResult:
+        """Replace the planned names and exclusion keys in one relationship UoW."""
+        ...
 
     def list_sets(
         self, *, bot_id: str, owner_id: str, user_id: str

@@ -2679,8 +2679,8 @@ def test_direct_skill_installation_mirrors_the_mcp_pair():
         )
 
 
-def test_an_excluded_default_member_refuses_direct_control_for_skills_and_mcps():
-    """Exclusion is not a hand-back: the member stays Set-managed (R1)."""
+def test_an_excluded_default_member_allows_direct_control_for_skills_and_mcps():
+    """An actual scoped exclusion releases Default ownership for Direct commands."""
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
     with db.transactional_orm_session() as session:
@@ -2724,10 +2724,7 @@ def test_an_excluded_default_member_refuses_direct_control_for_skills_and_mcps()
             dict(server_code="mcp.member", platform_default_codes=frozenset()),
         ),
     ]:
-        with pytest.raises(
-            SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_SKILL_SET"
-        ):
-            command(bot_id="bot", owner_id="owner", **scope, **address)
+        command(bot_id="bot", owner_id="owner", **scope, **address)
 
 
 def test_direct_skill_installation_validates_existence_and_name_uniqueness():
