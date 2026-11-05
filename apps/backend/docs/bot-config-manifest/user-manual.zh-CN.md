@@ -117,6 +117,14 @@ GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities
 `constructs` 结构上表达不了「组合」这个问题——而表达不了，正是这张表从前会
 和代码走散的原因。
 
+当前执行类别只有一个 `capabilities` 负责 Direct Skills、SkillSet/Default 与 MCP；
+历史 `skills`、`mcp` 不作为独立执行类别发布。`source_matrix` 的 capabilities 行
+描述 Local Skill 包传输，不能用 `git` 可用推断共享 Repo 引用可用。
+`skill_references` 另列 `package`、`repo_path`、`skill_uuid`、`skill_code` 四种引用的
+`supported` / `reason`，Direct 与 Set 复用同一判断。结论针对当前 Bot/engine；
+DeepSeek Harness 当前只支持 Local/Repo，Center UUID/code 会返回不支持原因。
+具体资产权限、在线状态与版本在解析时核验。
+
 ### 2.2 路径 A：还没有 bot
 
 **第 1 步：写一份最小清单。**下面这份不需要 git 仓库、不需要凭证、不需要任何
@@ -1657,22 +1665,37 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `engine_type` | string | 结论是按哪个引擎算的 |
 | `bot_type` | string | 结论是按哪个 bot 类型算的 |
 | `schema_versions` | int[] | 本部署接受的 `schema_version` 取值，今天是 `[1]` |
-| `constructs` | object[] | 每个构造一行，**支持与不支持的都在**，见下 |
+| `constructs` | object[] | 每个当前构造一行，**支持与不支持的都在**，见下 |
+| `source_matrix` | object[] | 每个当前类别与传输协议一行；capabilities 行描述 Local Skill 包传输 |
+| `skill_references` | object[] | package、repo_path、skill_uuid、skill_code 四种引用各一行，Direct 与 Set 共用 |
 
 `constructs[]` 每一行：
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `kind` | enum | `category`（`manifest` 下的六个类目）/ `section`（顶层非类目段，今天只有 `script`）/ `source`（条目怎么指定来源） |
+| `kind` | string | `category`（当前执行类别）/ `section`（顶层非类目段，今天只有 `script`） |
 | `name` | string | 该 `kind` 内的名字。取值见 B.7 |
 | `supported` | bool | 能不能写 |
 | `reason` | string | 不支持时说明原因；**支持时是空串** |
 
-> 这张表与 `PUT` 的拒绝**是同一个函数算的**，所以不会出现「这里说支持、`PUT` 却
-> 拒绝」。唯一它答不了的是「类目 × 源形态」的组合（`resources` 不能用 `from`/git，
-> 附录 C）——那由条目校验逐条拒绝，`reason` 里会点名类目。
->
-> 不认识的引擎**什么都不支持**，每一行的 `reason` 都会这么说。
+`source_matrix[]` 每行含 `category`、`protocol`、`supported`、`reason`。
+`skill_references[]` 每行含 `reference`、`supported`、`reason`；支持时 reason 为空串。
+例如，支持四种引用的 Bot 返回以下片段（实际值以查询结果为准）：
+
+```json
+{
+  "skill_references": [
+    {"reference": "package", "supported": true, "reason": ""},
+    {"reference": "repo_path", "supported": true, "reason": ""},
+    {"reference": "skill_uuid", "supported": true, "reason": ""},
+    {"reference": "skill_code", "supported": true, "reason": ""}
+  ]
+}
+```
+
+这三张表与 `PUT`、创建校验及 compiler 共用支持判断；不认识的引擎没有支持项，
+每一行给出原因。`constructs` 不再发布独立 `skills` / `mcp` 执行类别。
+资产权限、在线状态和版本在解析时校验，能力发现不代表某个具体资产已经可用。
 
 ---
 
