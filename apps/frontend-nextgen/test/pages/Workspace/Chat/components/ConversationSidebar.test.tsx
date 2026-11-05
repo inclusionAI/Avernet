@@ -1049,7 +1049,7 @@ it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () =>
 });
 
 describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指示 / infoHint）', () => {
-  it('onOpenBotManagement 仅经管理/团队行传导:两行出「更多操作」,好友行不出(好友无空间上下文)', () => {
+  it('onOpenBotManagement 仅经管理/团队行传导:两行出「跳转至 Bot 管理」,好友行不出(好友无空间上下文)', () => {
     const onOpenBotManagement = jest.fn();
     const spaceManaged = { ...managedBotA, bot: { ...managedBotA.bot, spaceId: '101' } };
     const spaceTeam = { ...teamBot, bot: { ...teamBot.bot, spaceId: '202' } };
@@ -1068,12 +1068,11 @@ describe('ConversationSidebar #2990 还原接线（菜单传导 / 回复中指�
         })}
       />,
     );
-    // 「更多操作」入口仅出现在管理行与团队行;好友行不渲染。
-    const entries = screen.getAllByRole('button', { name: '更多操作' });
+    // 「跳转至 Bot 管理」入口仅出现在管理行与团队行;好友行不渲染。
+    const entries = screen.getAllByRole('button', { name: '跳转至 Bot 管理' });
     expect(entries).toHaveLength(2);
-    // 管理行打开菜单点击「Bot 管理」,回调携带所属空间信息。
+    // 管理行前置直达:直接点击触发回调,携带所属空间信息(跳转侧带 ?keyword 过滤该 Bot)。
     fireEvent.click(entries[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Bot 管理/ }));
     expect(onOpenBotManagement).toHaveBeenCalledTimes(1);
     expect(onOpenBotManagement).toHaveBeenCalledWith(
       expect.objectContaining({ botId: 'bot-a:2088', spaceId: '101' }),

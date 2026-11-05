@@ -163,12 +163,13 @@ export default function ConversationPage(): JSX.Element {
   };
   // #2990 新增「Bot 管理」入口保留：带该 Bot 所属空间上下文跳转 Bot 管理页；Coding Bot
   // 本期不再跳 coding-chat 专用页，而是进入普通会话列表并挂载 embedded Stage。
+  // ?keyword=Bot 名称(2026-11-05 前置直达微调):落地按名称过滤定位到该 Bot(接口 keyword 按名称包含匹配)。
   const openBotManagement = useCallback((bot: ChatBotView) => {
     const spaceId = bot.spaceId ? Number(bot.spaceId) : undefined;
     if (spaceId !== undefined && Number.isFinite(spaceId)) {
       useSpaceContextStore.getState().setCurrentSpaceId(spaceId);
     }
-    history.push('/bot-workshop');
+    history.push(`/bot-workshop?keyword=${encodeURIComponent(bot.displayName)}`);
   }, []);
   // 创建入口确认弹窗落地(2026-11-05 验收微调,同日二轮):带所选空间上下文跳 Bot 管理页,
   // ?create=cloud 让 Bot 管理页挂载时默认唤起云端创建(与 #2990「Bot 管理」菜单项同一空间落地模式)。
