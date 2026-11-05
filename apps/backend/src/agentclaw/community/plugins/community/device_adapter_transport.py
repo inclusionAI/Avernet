@@ -18,6 +18,7 @@ from injector import inject
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
+    HttpConnectionInfo,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -56,12 +57,29 @@ def _binding_id(conn_info: dict[str, Any]) -> int:
     return binding_id
 
 
+_PROXYPASS_AUTH_HEADER = "x-proxypass-token"
+
+
 class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
     """Forward engine-adapter requests through BaaS ``/http-info``."""
 
     @inject
     def __init__(self, baas_service: BaasService) -> None:
         self._baas_service = baas_service
+
+    @staticmethod
+    def _resolve_proxypass_http_info(
+        conn_info: dict[str, Any],
+        path: str,
+    ) -> HttpConnectionInfo | None:
+        url = conn_info.get("url", "")
+        if "/proxypass/" not in url:
+            return None
+        headers = conn_info.get("headers") or {}
+        token = headers.get(_PROXYPASS_AUTH_HEADER, "")
+        if not token:
+            return None
+        return HttpConnectionInfo(http_url=url + path, token=token)
 
     @staticmethod
     def _invoke_kwargs(
@@ -71,6 +89,7 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         body: Optional[dict[str, Any]],
         params: Optional[dict[str, Any]],
         timeout: float | None,
+        http_info: HttpConnectionInfo | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "bind_id": _binding_id(conn_info),
@@ -86,6 +105,8 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         }
         if timeout is not None:
             kwargs["timeout"] = timeout
+        if http_info is not None:
+            kwargs["http_info"] = http_info
         return kwargs
 
     @staticmethod
@@ -109,9 +130,10 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         timeout: float | None = None,
     ) -> dict[str, Any]:
         try:
+            http_info = self._resolve_proxypass_http_info(conn_info, path)
             response = await asyncio.to_thread(
                 self._baas_service.invoke_http,
-                **self._invoke_kwargs(conn_info, method, path, body, params, timeout),
+                **self._invoke_kwargs(conn_info, method, path, body, params, timeout, http_info=http_info),
             )
             response.raise_for_status()
             result = response.json()

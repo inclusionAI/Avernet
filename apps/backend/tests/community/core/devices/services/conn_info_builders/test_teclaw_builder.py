@@ -59,3 +59,26 @@ def test_build_raises_conn_info_build_error(fake_binding, fake_baas_service):
 
     with pytest.raises(ConnInfoBuildError):
         builder.build(fake_binding, user_id="user-1")
+
+
+def test_build_passes_user_id_and_device_uuid_to_conn_info(fake_binding, fake_baas_service):
+    """user_id and device_uuid must be forwarded to build_baas_conn_info_for_http
+    so that conn_info carries device_affinity and device_uuid — matching
+    BaasConnInfoBuilder.build."""
+    builder = TeclawConnInfoBuilder(baas_service=fake_baas_service)
+
+    conn_info = builder.build(fake_binding, user_id="user-99", device_uuid="dev-uuid-1")
+
+    assert conn_info.get("device_affinity") == "user-99"
+    assert conn_info.get("device_uuid") == "dev-uuid-1"
+
+
+def test_build_omits_device_affinity_and_uuid_when_none(fake_binding, fake_baas_service):
+    """When user_id is empty and device_uuid is None, neither field should
+    appear in conn_info — preserving backward-compatible behaviour."""
+    builder = TeclawConnInfoBuilder(baas_service=fake_baas_service)
+
+    conn_info = builder.build(fake_binding, user_id="", device_uuid=None)
+
+    assert "device_affinity" not in conn_info
+    assert "device_uuid" not in conn_info
