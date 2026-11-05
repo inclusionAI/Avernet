@@ -184,6 +184,14 @@ DB 冻结/Attempt 创建与 `TaskQueueService.enqueue()` 当前不是一个跨�
 
 `services/skill_version_materializer.py` 是 Public/Team SC 精确下载的统一物化入口。它核对 exact code/version、下载 SHA-256、包结构，调用 `validate_skill_center_exact_zip`，写并验证 Canonical Store，然后发布 Version。
 
+Manifest Direct 与 Set 来源共用 `skill_reference_contract.py` 的窄 Service API；
+UUID 只解析当前 scope 的已准备资产，公开 code 优先使用实际存储 UUID 和最新
+PUBLISHED Version。首次公开引用通过 Materializer 的 `preview_exact` 只读校验
+exact 包；实际下载字节数留在私有内容值，供整次 Apply 预算计费。真实 write
+使用同一已验证内容，经 `prepare_public_reference` 发布并确保 Track Latest。
+首次准备的 Ready 复用/名称依赖复核/其他准备中版本拒绝，与版本分配处于同一个
+已有 Skill 锁事务；该守卫只覆盖 Apply，不重定义异步 Reference/Sync 的合同。
+
 SC 下载物化不调用本地 Scanner。MCP 信息来自精确下载响应的 `mcp_services`，持久化在 `ac_skill_version.metadata_json.mcp_dependencies`；不要只更新主 Skill 字段。Local/Repo 自有扫描链路仍按各自合同执行。外部 MCP 字段的 null/缺失兼容由 Gateway adapter 归一化；修改时检查 adapter 和 conformance tests。
 
 `canonical_center_store.py` 定义精确版本 Store contract，`services/canonical_center_store.py` 提供实现；文件型 Runtime 和 Teclaw 消费同一版本内容，物理交付不同。

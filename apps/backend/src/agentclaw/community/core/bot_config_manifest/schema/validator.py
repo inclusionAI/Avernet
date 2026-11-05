@@ -49,6 +49,7 @@ from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_ENTRIES_PER_CATEGORY,
     MAX_SCRIPT_BYTES,
 )
+from agentclaw.community.core.bot_config_manifest.schema.skill_sets import CAPABILITY_KEYS, validate_capabilities
 from agentclaw.community.core.bot_config_manifest.schema.violations import (
     ManifestValidationError,
 )
@@ -275,7 +276,10 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
         ctx.add("manifest", "invalid_manifest", "'manifest' must be a mapping")
         return
 
+    validate_capabilities(ctx, manifest)
     for key, value in manifest.items():
+        if key in CAPABILITY_KEYS or key == "capabilities":
+            continue
         location = f"manifest.{key}"
         category = parse_category(key)
         if category is None:

@@ -15,6 +15,7 @@ two copies of one grammar drift, and the document is the one users read.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
@@ -75,7 +76,7 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 CATEGORY_ENTRY_KEYS: dict[Category, frozenset[str]] = {
     Category.RESOURCES: _COMMON_SOURCE_KEYS
     | {"path", "unpack", "strip_components"},
-    Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
+    Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack", "origin"},
     Category.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
     Category.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference with an optional Bot-scoped connection override.
@@ -702,9 +703,15 @@ def validate_resource_entry(
 
 
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:
-    """A local skill. Returns its ``name`` when the name is usable."""
-    check_entry_keys(ctx, location, entry, Category.SKILLS)
+    """A Local package or stable shared reference; return the usable runtime name."""
+    origin = entry.get("origin", "local")
     name = entry.get("name")
+    if origin != "local":
+        return _validate_shared_skill(ctx, location, entry, origin)
+    verdict = ctx.capabilities.skill_reference("package")
+    if not verdict.supported:
+        ctx.add(location, "unsupported_skill_reference", verdict.reason)
+    check_entry_keys(ctx, location, entry, Category.SKILLS)
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
     source = resolve_source(ctx, location, entry, Category.SKILLS)
     check_unpack(ctx, location, entry, source=source, archive_expected=True)
@@ -791,3 +798,40 @@ def validate_cli_tool_entry(
     # protocol, reaching a git source by name and writing one inline are the
     # same thing, because they are.
     return name if name_ok and isinstance(name, str) else None
+
+
+def _validate_shared_skill(ctx: Context, location: str, entry: dict[str, Any], origin: Any) -> str | None:
+    name = entry.get("name")
+    usable = check_name(ctx, f"{location}.name", name, what="a skill name")
+    if origin == "repo":
+        reference = "repo_path"
+    elif origin == "center":
+        choices = [key for key in ("skill_uuid", "skill_code") if key in entry]
+        if len(choices) != 1:
+            ctx.add(location, "invalid_skill_reference", "center requires exactly one of skill_uuid or skill_code")
+        reference = choices[0] if choices else "skill_uuid"
+    else:
+        ctx.add(f"{location}.origin", "invalid_origin", "origin must be local, repo or center")
+        return name if usable else None
+    allowed = {"name", "origin", reference}
+    for key in entry.keys() - allowed:
+        if key != "apply_once":
+            ctx.add(f"{location}.{key}", "unknown_field", f"unknown field {key!r} for {origin} skill")
+    verdict = ctx.capabilities.skill_reference(reference)
+    if not verdict.supported:
+        ctx.add(location, "unsupported_skill_reference", verdict.reason)
+    value = entry.get(reference)
+    if reference == "repo_path":
+        refusal = resource_path_refusal(value, what="repo_path")
+        if refusal:
+            ctx.add(f"{location}.{reference}", refusal[0], refusal[1])
+    elif reference == "skill_uuid":
+        try:
+            if not isinstance(value, str):
+                raise ValueError("not a string")
+            UUID(value)
+        except ValueError:
+            ctx.add(f"{location}.{reference}", "invalid_skill_reference", "skill_uuid must be a UUID")
+    elif not isinstance(value, str) or not value.strip() or value != value.strip():
+        ctx.add(f"{location}.{reference}", "invalid_skill_reference", "skill_code must be a non-empty identifier")
+    return name if usable and isinstance(name, str) else None
