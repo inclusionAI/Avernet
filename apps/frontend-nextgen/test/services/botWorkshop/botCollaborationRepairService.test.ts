@@ -11,10 +11,11 @@ afterEach(() => {
   jest.resetAllMocks();
 });
 
-type ItemStatus = 'succeeded' | 'failed' | 'unknown' | 'skipped_dependency' | 'not_applicable';
+type ItemStatus = 'succeeded' | 'failed' | 'unknown' | 'skipped_dependency';
 type Item = { component: string; status: string; error_code: string | null };
 
-const COMPONENTS = ['ownership', 'profile', 'managers', 'caller_config'] as const;
+// 修复报告契约（backend #3663 收窄后）：固定三项 ownership / profile / managers；caller_config 移出修复范围。
+const COMPONENTS = ['ownership', 'profile', 'managers'] as const;
 
 const items = (statuses: readonly ItemStatus[]): Item[] =>
   COMPONENTS.map((component, index) => ({
@@ -33,20 +34,16 @@ const expectInvalid = (value: unknown) =>
   expect(() => parseCollaborationRepairReport(value)).toThrow('未能确认修复结果，请稍后重试');
 
 describe('parseCollaborationRepairReport', () => {
-  it('derives succeeded when every applicable component succeeded and not_applicable is not a failure', () => {
-    const parsed = parseCollaborationRepairReport(
-      report('succeeded', ['succeeded', 'succeeded', 'succeeded', 'not_applicable']),
-    );
+  it('derives succeeded when all three components succeeded', () => {
+    const parsed = parseCollaborationRepairReport(report('succeeded', ['succeeded', 'succeeded', 'succeeded']));
 
     expect(parsed.status).toBe('succeeded');
-    expect(parsed.items).toHaveLength(4);
-    expect(parsed.items[3]).toEqual({ component: 'caller_config', status: 'not_applicable', error_code: null });
+    expect(parsed.items).toHaveLength(3);
+    expect(parsed.items[2]).toEqual({ component: 'managers', status: 'succeeded', error_code: null });
   });
 
   it('derives partial_failed when some components succeeded and others failed or unknown', () => {
-    const parsed = parseCollaborationRepairReport(
-      report('partial_failed', ['succeeded', 'succeeded', 'unknown', 'not_applicable']),
-    );
+    const parsed = parseCollaborationRepairReport(report('partial_failed', ['succeeded', 'succeeded', 'unknown']));
 
     expect(parsed.status).toBe('partial_failed');
     expect(parsed.items[2]).toEqual({ component: 'managers', status: 'unknown', error_code: null });
@@ -54,13 +51,12 @@ describe('parseCollaborationRepairReport', () => {
 
   it('derives failed when no component succeeded', () => {
     expect(
-      parseCollaborationRepairReport(report('failed', ['failed', 'unknown', 'skipped_dependency', 'not_applicable']))
-        .status,
+      parseCollaborationRepairReport(report('failed', ['failed', 'unknown', 'skipped_dependency'])).status,
     ).toBe('failed');
   });
 
   it('keeps an unknown error_code from changing the item status', () => {
-    const value = report('partial_failed', ['succeeded', 'succeeded', 'unknown', 'not_applicable']);
+    const value = report('partial_failed', ['succeeded', 'succeeded', 'unknown']);
     value.items[2].error_code = 'some_future_reason';
 
     const parsed = parseCollaborationRepairReport(value);
@@ -70,14 +66,37 @@ describe('parseCollaborationRepairReport', () => {
 
   it.each([
     ['non-object report', null],
-    ['missing bot_id', { status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded', 'succeeded']) }],
+    ['missing bot_id', { status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded']) }],
     [
       'empty bot_id',
-      { bot_id: '  ', status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded', 'succeeded']) },
+      { bot_id: '  ', status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded']) },
     ],
     [
       'missing an item',
-      { bot_id: 'b1', status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded']).slice(0, 3) },
+      { bot_id: 'b1', status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded']).slice(0, 2) },
+    ],
+    [
+      'legacy four-item report with caller_config',
+      {
+        bot_id: 'b1',
+        status: 'succeeded',
+        items: [
+          ...items(['succeeded', 'succeeded', 'succeeded']),
+          { component: 'caller_config', status: 'succeeded', error_code: null },
+        ],
+      },
+    ],
+    [
+      'legacy not_applicable status',
+      {
+        bot_id: 'b1',
+        status: 'succeeded',
+        items: [
+          { component: 'ownership', status: 'succeeded', error_code: null },
+          { component: 'profile', status: 'succeeded', error_code: null },
+          { component: 'managers', status: 'not_applicable', error_code: null },
+        ],
+      },
     ],
     [
       'duplicate component',
@@ -88,7 +107,6 @@ describe('parseCollaborationRepairReport', () => {
           { component: 'ownership', status: 'succeeded', error_code: null },
           { component: 'ownership', status: 'succeeded', error_code: null },
           { component: 'managers', status: 'succeeded', error_code: null },
-          { component: 'caller_config', status: 'succeeded', error_code: null },
         ],
       },
     ],
@@ -101,13 +119,12 @@ describe('parseCollaborationRepairReport', () => {
           { component: 'profile', status: 'succeeded', error_code: null },
           { component: 'ownership', status: 'succeeded', error_code: null },
           { component: 'managers', status: 'succeeded', error_code: null },
-          { component: 'caller_config', status: 'succeeded', error_code: null },
         ],
       },
     ],
     [
       'illegal item status',
-      { bot_id: 'b1', status: 'succeeded', items: items(['succeeded', 'succeeded', 'succeeded', 'ok' as never]) },
+      { bot_id: 'b1', status: 'succeeded', items: items(['succeeded', 'succeeded', 'ok' as never]) },
     ],
     [
       'non-string error_code',
@@ -118,16 +135,15 @@ describe('parseCollaborationRepairReport', () => {
           { component: 'ownership', status: 'failed', error_code: 500 },
           { component: 'profile', status: 'failed', error_code: null },
           { component: 'managers', status: 'failed', error_code: null },
-          { component: 'caller_config', status: 'failed', error_code: null },
         ],
       },
     ],
     [
       'declared succeeded but contains a failure',
-      report('succeeded', ['succeeded', 'succeeded', 'failed', 'not_applicable']),
+      report('succeeded', ['succeeded', 'succeeded', 'failed']),
     ],
-    ['declared partial_failed but all succeeded', report('partial_failed', ['succeeded', 'succeeded', 'succeeded', 'succeeded'])],
-    ['declared failed but one succeeded', report('failed', ['succeeded', 'failed', 'failed', 'failed'])],
+    ['declared partial_failed but all succeeded', report('partial_failed', ['succeeded', 'succeeded', 'succeeded'])],
+    ['declared failed but one succeeded', report('failed', ['succeeded', 'failed', 'failed'])],
   ])('rejects %s', (_label, value) => {
     expectInvalid(value);
   });

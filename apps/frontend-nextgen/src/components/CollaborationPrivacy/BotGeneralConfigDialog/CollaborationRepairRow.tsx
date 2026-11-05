@@ -6,14 +6,16 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { useBotCollaborationRepair } from '@/hooks/useBotCollaborationRepair';
+import type { CollaborationRepairReport } from '@/services/botWorkshop/botCollaborationRepairService';
 
-const componentText = { ownership: '归属', profile: '基本资料', managers: '协作者', caller_config: '调用配置' };
-const statusText = {
+type ReportItem = CollaborationRepairReport['items'][number];
+// 报告分项固定三项（backend 不再下发 caller_config）。
+const componentText: Record<ReportItem['component'], string> = { ownership: '归属', profile: '基本资料', managers: '协作者' };
+const statusText: Record<ReportItem['status'], string> = {
   succeeded: '已修复',
   failed: '修复失败',
   unknown: '结果未确认',
   skipped_dependency: '前置步骤未完成',
-  not_applicable: '不适用',
 };
 
 export function CollaborationRepairRow({
@@ -35,12 +37,32 @@ export function CollaborationRepairRow({
   );
   return (
     <div className="py-3" aria-label="修复 Bot 信息">
-      <div className="flex items-start justify-between gap-4">
+      {/* 标题/按钮始终相对整行内容垂直居中；分项与错误归入文本列，行展开后布局不偏移。 */}
+      <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="m-0 text-sm font-medium text-foreground">修复 Bot 信息</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             修复当前 Bot 在「协作群」中的基本信息（名称、头像、归属、协作者等）
           </p>
+          {repair.report && repair.report.status !== 'succeeded' && (
+            <ul aria-live="polite" className="mt-2 text-xs text-muted-foreground">
+              {repair.report.items.map((item) => (
+                <li key={item.component}>
+                  {componentText[item.component]}：{statusText[item.status]}
+                </li>
+              ))}
+            </ul>
+          )}
+          {repair.error && (
+            <p role="alert" className="mt-2 text-xs text-destructive">
+              {repair.error}
+            </p>
+          )}
+          {(repair.refreshError || (refreshFailed && repair.report && repair.report.status !== 'failed')) && (
+            <p role="status" className="mt-2 text-xs text-muted-foreground">
+              修复请求已完成，配置刷新失败，请重新打开查看
+            </p>
+          )}
         </div>
         {disabled && disabledReason ? (
           <TooltipProvider>
@@ -57,25 +79,6 @@ export function CollaborationRepairRow({
           action
         )}
       </div>
-      {repair.report && repair.report.status !== 'succeeded' && (
-        <ul aria-live="polite" className="mt-2 text-xs text-muted-foreground">
-          {repair.report.items.map((item) => (
-            <li key={item.component}>
-              {componentText[item.component]}：{statusText[item.status]}
-            </li>
-          ))}
-        </ul>
-      )}
-      {repair.error && (
-        <p role="alert" className="mt-2 text-xs text-destructive">
-          {repair.error}
-        </p>
-      )}
-      {(repair.refreshError || (refreshFailed && repair.report && repair.report.status !== 'failed')) && (
-        <p role="status" className="mt-2 text-xs text-muted-foreground">
-          修复请求已完成，配置刷新失败，请重新打开查看
-        </p>
-      )}
     </div>
   );
 }

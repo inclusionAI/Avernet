@@ -27,7 +27,6 @@ const partialReport: CollaborationRepairReport = {
     { component: 'ownership', status: 'succeeded', error_code: null },
     { component: 'profile', status: 'failed', error_code: 'sync_failed' },
     { component: 'managers', status: 'unknown', error_code: 'delivery_timeout' },
-    { component: 'caller_config', status: 'skipped_dependency', error_code: null },
   ],
 };
 
@@ -73,25 +72,17 @@ it('partial_failed 报告按固定组件名和分项状态渲染', () => {
   expect(screen.getByText('归属：已修复')).toBeInTheDocument();
   expect(screen.getByText('基本资料：修复失败')).toBeInTheDocument();
   expect(screen.getByText('协作者：结果未确认')).toBeInTheDocument();
-  expect(screen.getByText('调用配置：前置步骤未完成')).toBeInTheDocument();
   expect(screen.getByText('归属：已修复').closest('ul')).toHaveAttribute('aria-live', 'polite');
 });
 
-it('not_applicable 分项显示「不适用」', () => {
-  render(
-    <CollaborationRepairRow
-      repair={repairState({
-        report: {
-          ...partialReport,
-          items: [{ component: 'caller_config', status: 'not_applicable', error_code: null }],
-        },
-      })}
-      disabled={false}
-      refreshFailed={false}
-    />,
-  );
+it('报告列表展示后，标题与按钮所在行仍垂直居中，分项归入文本列', () => {
+  render(<CollaborationRepairRow repair={repairState({ report: partialReport })} disabled={false} refreshFailed={false} />);
 
-  expect(screen.getByText('调用配置：不适用')).toBeInTheDocument();
+  const button = screen.getByRole('button', { name: '修复信息' });
+  const row = button.closest('.flex');
+  expect(row).toHaveClass('items-center', 'justify-between');
+  const titleColumn = screen.getByText('修复 Bot 信息').closest('.min-w-0');
+  expect(titleColumn).toContainElement(screen.getByText('归属：已修复').closest('ul'));
 });
 
 it('全部成功时不渲染分项列表', () => {

@@ -37,7 +37,6 @@ const successReport: CollaborationRepairReport = {
     { component: 'ownership', status: 'succeeded', error_code: null },
     { component: 'profile', status: 'succeeded', error_code: null },
     { component: 'managers', status: 'succeeded', error_code: null },
-    { component: 'caller_config', status: 'succeeded', error_code: null },
   ],
 };
 
@@ -48,7 +47,6 @@ const partialReport: CollaborationRepairReport = {
     { component: 'ownership', status: 'succeeded', error_code: null },
     { component: 'profile', status: 'succeeded', error_code: null },
     { component: 'managers', status: 'unknown', error_code: 'delivery_timeout' },
-    { component: 'caller_config', status: 'skipped_dependency', error_code: null },
   ],
 };
 
@@ -369,7 +367,8 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
     expect(screen.getByText('归属：已修复')).toBeInTheDocument();
     expect(screen.getByText('基本资料：已修复')).toBeInTheDocument();
     expect(screen.getByText('协作者：结果未确认')).toBeInTheDocument();
-    expect(screen.getByText('调用配置：前置步骤未完成')).toBeInTheDocument();
+    // 修复分项固定三项（backend 移出 caller_config），不再出现「调用配置」。
+    expect(screen.queryByText(/调用配置：/)).not.toBeInTheDocument();
     // 分项结果已由列表承载，不再额外弹出错误提示。
     expect(toast.warning).toHaveBeenCalledTimes(1);
     expect(toast.error).not.toHaveBeenCalled();

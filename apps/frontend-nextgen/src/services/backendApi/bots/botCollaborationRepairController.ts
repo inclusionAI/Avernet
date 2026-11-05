@@ -2,8 +2,9 @@ import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 import { userScopedParams } from './botController';
 
-export type RepairComponent = 'ownership' | 'profile' | 'managers' | 'caller_config';
-export type RepairItemStatus = 'succeeded' | 'failed' | 'unknown' | 'skipped_dependency' | 'not_applicable';
+// backend 修复报告固定三项（ownership / profile / managers）；caller_config 于 #3663 移出修复范围。
+export type RepairComponent = 'ownership' | 'profile' | 'managers';
+export type RepairItemStatus = 'succeeded' | 'failed' | 'unknown' | 'skipped_dependency';
 
 export interface CollaborationRepairReport {
   bot_id: string;

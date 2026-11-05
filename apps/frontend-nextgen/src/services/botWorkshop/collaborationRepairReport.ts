@@ -1,17 +1,19 @@
 import type { CollaborationRepairReport, RepairItemStatus } from '@/services/backendApi/bots/botCollaborationRepairController';
 
-const components = ['ownership', 'profile', 'managers', 'caller_config'] as const;
-const states: readonly RepairItemStatus[] = ['succeeded', 'failed', 'unknown', 'skipped_dependency', 'not_applicable'];
+// 报告契约（backend 收窄后）：固定三项 ownership / profile / managers；caller_config 不在修复范围。
+const components = ['ownership', 'profile', 'managers'] as const;
+const states: readonly RepairItemStatus[] = ['succeeded', 'failed', 'unknown', 'skipped_dependency'];
 
 /**
  * 唯一的修复报告 parser：同时校验结构与整体状态一致性，不让「HTTP 200 + 假成功」通过。
- * `not_applicable` 不算失败；未知 error_code 只透传原因码，不改变分项结果。
+ * 旧四项报告（含 caller_config）或 not_applicable 状态与当前契约不符，一律视为未能确认。
+ * 未知 error_code 只透传原因码，不改变分项结果。
  */
 export function parseCollaborationRepairReport(value: unknown): CollaborationRepairReport {
   const invalid = () => new Error('未能确认修复结果，请稍后重试');
   if (!value || typeof value !== 'object') throw invalid();
   const r = value as Record<string, unknown>;
-  if (typeof r.bot_id !== 'string' || !r.bot_id.trim() || !Array.isArray(r.items) || r.items.length !== 4) {
+  if (typeof r.bot_id !== 'string' || !r.bot_id.trim() || !Array.isArray(r.items) || r.items.length !== 3) {
     throw invalid();
   }
   const items = r.items.map((value: unknown, index: number) => {

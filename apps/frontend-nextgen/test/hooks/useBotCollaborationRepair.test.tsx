@@ -22,7 +22,6 @@ const successReport: CollaborationRepairReport = {
     { component: 'ownership', status: 'succeeded', error_code: null },
     { component: 'profile', status: 'succeeded', error_code: null },
     { component: 'managers', status: 'succeeded', error_code: null },
-    { component: 'caller_config', status: 'succeeded', error_code: null },
   ],
 };
 
