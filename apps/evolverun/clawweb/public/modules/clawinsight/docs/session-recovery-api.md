@@ -323,7 +323,9 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，原markdown方案审批／纯转交通知不变。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试，首次创建后只更新固定outTrackId，不重建未知卡。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
-内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。标准卡片按钮为“已处理，继续核验”；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
+内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。卡片按钮按待办类型显示“已获取权限，继续任务”或“已补齐材料，继续任务”；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
+
+原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`、`config`。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；与正文一样按 UTF-8 字节截短，完整内容保留在任务中。模板只保留一个确认按钮，原生按钮状态绑定 `confirm_status`（`normal`／`disabled`），点击条件同时使用 `confirm_enabled`（`"true"`／`"false"`）；两者仅在任务未结束且当前待办仍为 pending 时启用。`config` 值为 JSON 字符串 `{"autoLayout":true}`，位于参数 Map 内，支持桌面端自适应宽度，手机端仍受容器限制。模板变量将其声明为 object；此参数不是 `ce_app_config` 的新增配置项。
 
 ## 任务整体摘要
 

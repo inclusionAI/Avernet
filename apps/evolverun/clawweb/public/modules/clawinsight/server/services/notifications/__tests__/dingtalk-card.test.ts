@@ -13,9 +13,12 @@ it("reuses authenticated token delivery for an Owner native card and updates the
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as { port: number };
   const sender = new DingTalkNotificationSender({ appKey: "app", appSecret: "secret", robotCode: "robot", apiBaseUrl: `http://127.0.0.1:${address.port}`, publicBaseUrl: "https://cw.invalid" });
-  await sender.sendCard({ recipientUserId: "123", outTrackId: "owner-pre-task", templateId: "template", callbackRouteKey: "pre-route", cardParamMap: { instructions: "请补图1" } });
-  await sender.updateCard({ outTrackId: "owner-pre-task", cardParamMap: { status: "核验中" } });
+  const config = JSON.stringify({ autoLayout: true });
+  await sender.sendCard({ recipientUserId: "123", outTrackId: "owner-pre-task", templateId: "template", callbackRouteKey: "pre-route", cardParamMap: { instructions: "请补图1", config, confirm_status: "normal" } });
+  await sender.updateCard({ outTrackId: "owner-pre-task", cardParamMap: { status: "核验中", config, confirm_status: "disabled" } });
   expect(calls.map(call => [call.method, call.url])).toEqual([["POST", "/v1.0/oauth2/accessToken"], ["POST", "/v1.0/card/instances/createAndDeliver"], ["PUT", "/v1.0/card/instances"]]);
-  expect(calls[1]).toMatchObject({ token: "fixture", body: { outTrackId: "owner-pre-task", callbackType: "HTTP", callbackRouteKey: "pre-route", cardTemplateId: "template", openSpaceId: "dtv1.card//IM_ROBOT.000123", imRobotOpenDeliverModel: { robotCode: "robot" }, cardData: { cardParamMap: { instructions: "请补图1" } } } });
-  expect(calls[2]).toMatchObject({ token: "fixture", body: { outTrackId: "owner-pre-task", cardData: { cardParamMap: { status: "核验中" } } } });
+  expect(calls[1]).toMatchObject({ token: "fixture", body: { outTrackId: "owner-pre-task", callbackType: "HTTP", callbackRouteKey: "pre-route", cardTemplateId: "template", openSpaceId: "dtv1.card//IM_ROBOT.000123", imRobotOpenDeliverModel: { robotCode: "robot" }, cardData: { cardParamMap: { instructions: "请补图1", config, confirm_status: "normal" } } } });
+  expect(calls[2]).toMatchObject({ token: "fixture", body: { outTrackId: "owner-pre-task", cardData: { cardParamMap: { status: "核验中", config, confirm_status: "disabled" } } } });
+  expect(calls[1].body).not.toHaveProperty("config");
+  expect(calls[2].body).not.toHaveProperty("config");
 });
