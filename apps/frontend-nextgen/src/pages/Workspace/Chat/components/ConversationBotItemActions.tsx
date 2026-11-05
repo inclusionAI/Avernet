@@ -4,8 +4,8 @@
 // - 「更多操作」菜单开关随本组件内聚,检索开关(searchInputOpen)留在父级(显隐计算依赖);
 // - 不可用 Bot(FAILED/PENDING)的「更多操作」常驻显示(2026-10-21 运维直达),菜单仅「Bot 管理」;
 // - 菜单打开期间经触发器 data-state=open 在行容器上钉住操作区显隐与标题让位(group-has 变体);
-// - 显隐下沉到 icon 级(2026-11-04 重构):操作组仅 hover/键盘/触屏显示,展开态不再整组钉住;
-//   激活了特殊条件的单个 icon 常显(🔍 检索/实例标记、归属/范围筛选非默认项),其余 hover 才出现。
+// - 显隐下沉到 icon 级(2026-11-04 重构):操作组仅 hover/键盘/触屏/菜单打开显示,展开态不再整组钉住;
+//   收起按钮与会话操作同组显隐;激活了特殊条件的单个 icon 常显(🔍 检索/实例标记、归属/范围筛选非默认项)。
 //   容器不再整体 opacity(父子相乘会把常显 icon 一并隐藏),群发条件逐 icon 重复保持等价语义。
 import type { ConversationOrigin, ConversationSessionScope } from '@/domain/conversation/types';
 import { Button, IconButton } from '@/components/ui';
@@ -107,14 +107,14 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
       )}
     >
       {/* 展开态的结构控制与其余会话操作并排，避免宽侧栏下角标与操作组视觉脱节。
-          2026-11-04 显隐重构修正:收起指示器是展开状态的行级指示(icon 常显),
-          不随操作组 hover 规则收起——用户反馈 hover 别处时它消失,失去收起入口。 */}
+          2026-11-05 回归修正:它不是常驻状态指示,而是普通行操作;鼠标移开时应与新
+          建/检索/筛选/更多操作一起隐藏,hover、键盘聚焦、触屏和菜单打开时同组显示。 */}
       {expanded && !unavailable && (
         <IconButton
           label="收起会话列表"
           size="sm"
           icon={<ChevronDown className="h-3.5 w-3.5" />}
-          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          className={cn('h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground', iconVisibility)}
           onClick={(event) => {
             event.stopPropagation();
             onCollapse();
