@@ -127,7 +127,7 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         "env": get_current_env(),
         "tenant": "",
         "trigger": "explicit",
-        "lock_token": "no-such-token",
+        "lock_token": "other",
         "started_at": None,
         "phase": None,
         "state": {"kind": "manifest"},
