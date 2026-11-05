@@ -75,11 +75,12 @@ export class DingTalkNotificationSender {
   }
 
   /** Standard native card API; uses the same robot credentials and token cache. */
-  async sendCard(input: { recipientUserId: string; outTrackId: string; templateId: string; callbackRouteKey: string; cardParamMap: Record<string, string> }): Promise<void> {
-    if (![input.recipientUserId, input.outTrackId, input.templateId, input.callbackRouteKey].every(value => typeof value === "string" && value.trim())) throw new Error("DingTalk card configuration is incomplete");
+  async sendCard(input: { recipientUserId: string; outTrackId: string; templateId: string; callbackRouteKey?: string; cardParamMap: Record<string, string> }): Promise<void> {
+    if (![input.recipientUserId, input.outTrackId, input.templateId].every(value => typeof value === "string" && value.trim())) throw new Error("DingTalk card configuration is incomplete");
+    if (input.callbackRouteKey !== undefined && (typeof input.callbackRouteKey !== "string" || !input.callbackRouteKey.trim())) throw new Error("DingTalk callback route is empty");
     const body = await this.cardRequest("POST", "/v1.0/card/instances/createAndDeliver", {
       cardTemplateId: input.templateId, outTrackId: input.outTrackId,
-      callbackType: "HTTP", callbackRouteKey: input.callbackRouteKey, userIdType: 1,
+      ...(input.callbackRouteKey ? { callbackType: "HTTP", callbackRouteKey: input.callbackRouteKey } : {}), userIdType: 1,
       openSpaceId: `dtv1.card//IM_ROBOT.${this.normalizeUserId(input.recipientUserId)}`,
       imRobotOpenDeliverModel: { robotCode: this.config.robotCode },
       imRobotOpenSpaceModel: { supportForward: false }, cardData: { cardParamMap: input.cardParamMap },

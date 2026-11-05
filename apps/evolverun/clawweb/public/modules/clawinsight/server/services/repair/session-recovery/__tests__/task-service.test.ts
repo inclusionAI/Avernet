@@ -62,16 +62,16 @@ describe("self-healing task orchestration", () => {
     const { service, records, deps } = setup();
     const { task_id } = await service.create(request, actor); await flush();
     const task = records.get(task_id)!; task.status = "waiting_owner";
-    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "materials", summary: "补料", instructions: "补规则和图1", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "文档权限不足", instructions: "请申请原文档权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
     let finishOld!: (value: boolean) => void;
     const notify = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finishOld = resolve; })).mockResolvedValue(true);
     deps.notifier.notifyOwnerRequest = notify;
     await service.maintenance(); await flush();
-    records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "只剩图1" };
+    records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "仍缺写权限" };
     await service.maintenance(); await flush();
     finishOld(true); await flush();
     expect(notify).toHaveBeenCalledTimes(3);
-    expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "只剩图1" } } });
+    expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "仍缺写权限" } } });
   });
   it("saves Owner feedback before asynchronously waking the same task, with Owner and control-plane checks", async () => {
     const { service, records, agent, deps } = setup();
@@ -79,8 +79,8 @@ describe("self-healing task orchestration", () => {
     const task = records.get(task_id)!;
     task.execution = { executionId: "exec", stepId: "step", ticketDigest: "digest", jobId: "job", ccSessionId: null,
       state: "running", leaseExpiresAt: 1000, decisionDeadlineAt: null, lastHeartbeatAt: 1, invalidatedAt: null };
-    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺图1" }];
-    await service.requestOwner(task_id, task.version, { reason: "materials", summary: "缺图1", instructions: "在原会话补图1", evidence_ids: ["read"], executionId: "exec" });
+    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺文档权限" }];
+    await service.requestOwner(task_id, task.version, { reason: "permission", summary: "缺文档权限", instructions: "申请原文档读取权限", evidence_ids: ["read"], executionId: "exec" });
     const pending = records.get(task_id)!;
     expect(pending).toMatchObject({ status: "waiting_owner", plan: null, pending_results: [] });
     const id = pending.ownerRequest!.requestId;
@@ -148,7 +148,7 @@ describe("self-healing task orchestration", () => {
     await service.plan(task.taskId, task.version, { summary: "需要 Owner 开通权限", basis: "已核实权限受限", scope: "目标服务权限",
       verification: "权限恢复后核查原任务", actions: [], owner_cooperation: [{ request: "申请服务权限", basis: "服务明确拒绝访问" }] });
     expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, kind: "plan", summary: "需要 Owner 开通权限" });
+      taskId: task.taskId, sessionKey: task.request.session_key, kind: "plan", summary: "需要 Owner 开通权限" });
     const saved = records.get(task.taskId)!;
     expect(saved.status).toBe("waiting_owner");
     expect(saved.timeline.some(event => event.kind === "notification")).toBe(false);
