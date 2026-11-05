@@ -471,7 +471,7 @@ it("keeps a legacy ended permission handoff terminal and sends a card without fe
   await expect(notifier.notify({ ownerId: "owner-fixture", botId: "bot", targetEnvironment: "prod", taskId: "SR-permission",
     sessionKey: "original", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
   expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recipientUserId: "owner-fixture",
-    cardParamMap: expect.objectContaining({ instructions: "请在能力集中申请 MCP 服务权限。", confirm_visible: "false", confirm_status: "disabled" }) }));
+    cardParamMap: expect.objectContaining({ summary: "请在能力集中申请 MCP 服务权限。", instructions: "请查看下方任务详情，按完整处理事项继续。", confirm_visible: "false", confirm_status: "disabled" }) }));
   expect(sender.sendCard.mock.calls[0][0]).not.toHaveProperty("callbackRouteKey");
   expect(sender.sendNotification).not.toHaveBeenCalled();
 });
@@ -482,7 +482,7 @@ it("notifies the Owner of nonblocking suggestions after recovery without request
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre");
   await notifier.notify({ ownerId: "owner", botId: "bot", targetEnvironment: "prod", taskId: "SR-suggestion", sessionKey: "original", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
   expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({
-    title: "会话自愈已恢复，有后续建议", instructions: expect.stringContaining("原任务已完成"),
+    title: "会话自愈已恢复，有后续建议", summary: expect.stringContaining("原任务已完成"), instructions: "请查看下方任务详情，按完整处理事项继续。",
     confirm_visible: "false", status: "本次自愈已结束，后续建议可按需处理",
   }) }));
   expect(sender.sendNotification).not.toHaveBeenCalled();

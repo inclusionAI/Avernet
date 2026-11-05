@@ -60,6 +60,12 @@ function cardText(text: string): string {
   return `${prefix}\n（完整事项见任务页）`;
 }
 
+// Actionable text is either complete or explicitly delegated to the full Task.
+// Never cut a material list or a permission URL in the middle.
+function ownerCardText(text: string, overflow: string): string {
+  return Buffer.byteLength(text) <= 1024 ? text : overflow;
+}
+
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   constructor(private readonly sender: RecoveryNotificationSender | null | undefined,
     private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore,
@@ -81,7 +87,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     const canConfirm = !terminal && request.status === "pending";
     const cardParamMap = { task_id: task.taskId, request_id: request.requestId, control_plane: environment,
       bot_id: cardText(task.request.target.bot_id), session_key: cardText(task.request.session_key), title: "请处理权限申请",
-      summary: cardText(request.summary), instructions: cardText(request.instructions), task_url: url.href,
+      summary: ownerCardText(request.summary, "当前任务需要处理权限申请，具体对象和操作请见下方。"),
+      instructions: ownerCardText(request.instructions, "请打开任务详情，查看完整的权限对象、处理事项和入口。"), task_url: url.href,
       status: terminal ? task.status === "canceled" ? "任务已停止" : task.judgment?.effect === "recovered" ? "已核验恢复" : "本次处理已结束，详见任务"
         : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
@@ -121,9 +128,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
         templateId: config.template_id,
         cardParamMap: { task_id: input.taskId, request_id: "", control_plane: environment,
           bot_id: cardText(input.botId), session_key: cardText(input.sessionKey), title,
-          summary: recovered ? "原任务已恢复，以下事项为后续优化建议。"
-            : input.effect === "not_recovered" ? "原任务仍受阻，需要您继续处理。" : "原任务的恢复情况尚未确认，需要您进一步核查。",
-          instructions: cardText(input.summary), task_url: url.href,
+          summary: input.handoff?.summary ?? ownerCardText(input.summary, "处理说明较长，请打开任务详情查看完整内容。"),
+          instructions: input.handoff?.instructions ?? "请查看下方任务详情，按完整处理事项继续。", task_url: url.href,
           status: recovered ? "本次自愈已结束，后续建议可按需处理" : "本次自愈已结束，已转交 Owner",
           confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
       return true;

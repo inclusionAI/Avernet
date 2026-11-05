@@ -12,6 +12,7 @@ import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/serv
 import { SessionRecoveryTaskRepository } from "../../../../repositories/repair/session-recovery-task-repository.js";
 import { AgentToolCallRepository } from "../../../../repositories/repair/agent-tool-call-repository.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
+import { SessionRecoveryNotifier } from "../notification.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
 const exec = promisify(execFile), flush = () => new Promise(resolve => setImmediate(resolve));
@@ -431,4 +432,59 @@ it("keeps ordinary blocked for a proven failed delivery and an unrepairable plan
   const planning = await toPlan(await create("approval", { event_id: "unrepairable-plan", delivery_key: "unrepairable-plan" }));
   await agent.report(planning, { kind: "blocked", phase: "plan", summary: "已独立调查，当前授权和能力下没有可行修复，保留具体依据" });
   expect(await current(planning.taskId)).toMatchObject({ status: "failed", phase: "plan" });
+});
+
+function useNativeOwnerCards() {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const cards = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+  }, "pre");
+  notifier.notify.mockImplementation(input => cards.notify(input));
+  notifier.notifyOwnerRequest = vi.fn(input => cards.notifyOwnerRequest(input));
+  return sender;
+}
+
+it("delivers all three material requirements while retaining the complete report and ending ordinary handoff", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "materials-brief"); task = await current(task.taskId);
+  const report = "## 调查与核实\n" + "原Bot已核实材料缺失，正确等待用户补充；现场和证据均已检查。\n".repeat(50);
+  const handoff = { summary: "抽奖活动权益评审缺少必要材料，当前等待补充。", instructions: "请回原会话补充：\n1. 活动页面文案；\n2. 权益实际发放规则；\n3. 图1（领取路径截图）。" };
+  await agent.report(task, { kind: "owner_handoff", phase: "assess", effect: "unknown", summary: report, handoff, evidence_ids: [read.evidenceId] });
+  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  expect(saved).toMatchObject({ status: "completed", completionReason: "owner_handoff", judgment: { effect: "unknown", summary: report }, execution: { state: "ended" } });
+  expect(saved.ownerRequest).toBeUndefined();
+  expect(saved.timeline.findLast(event => event.kind === "termination")).toMatchObject({ summary: report, payload: { handoff } });
+  expect(card.cardParamMap).toMatchObject({ summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false" });
+  expect(card.cardParamMap.instructions).toContain("3. 图1");
+  expect(card.cardParamMap.summary).not.toContain("恢复情况尚未确认");
+  expect(card).not.toHaveProperty("callbackRouteKey"); expect(card.cardParamMap).not.toHaveProperty("config");
+  expect(runtime.sendMessage).not.toHaveBeenCalled(); expect(sender.sendCard).toHaveBeenCalledOnce();
+});
+
+it("uses the same Owner brief for permission handling and preserves its full investigation in the waiting timeline", async () => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "permission-brief"); task = await current(task.taskId);
+  expect((await agent.bootstrap(task)).ownerHandoffProtocol).toBe("session-recovery-handoff/v1");
+  const report = "## 权限调查\n" + "原会话和配置已核实，实际请求仍明确返回权限不足，详见完整证据。\n".repeat(45);
+  const handoff = { summary: "原资料读取被权限拦截，信息查询尚未完成。", instructions: "请为原资料申请读取权限：https://docs.invalid/access/source 。" };
+  await agent.report(task, { kind: "owner_handoff", phase: "assess", summary: report, handoff, owner_request: { reason: "permission" }, evidence_ids: [read.evidenceId] });
+  await vi.waitFor(() => expect(sender.sendCard).toHaveBeenCalledOnce());
+  const saved = await current(task.taskId), card = sender.sendCard.mock.calls[0][0];
+  expect(saved).toMatchObject({ status: "waiting_owner", ownerRequest: { reason: "permission", summary: handoff.summary, instructions: handoff.instructions, status: "pending" } });
+  expect(saved.timeline.find(event => event.kind === "waiting")).toMatchObject({ summary: report });
+  expect(card).toMatchObject({ callbackRouteKey: "route", cardParamMap: { summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "true" } });
+  expect(card.cardParamMap.summary).not.toContain("权限调查"); expect(card.cardParamMap).not.toHaveProperty("config");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it.each([
+  { summary: "问题已明确", instructions: "材".repeat(342) },
+  { summary: "问题已明确" },
+  { summary: "问题已明确", instructions: "请补资料", template_id: "not-a-business-field" },
+])("rejects invalid handoff content before changing workflow or notifying: %j", async handoff => {
+  const sender = useNativeOwnerCards();
+  let task = await create(); const read = await inspect(task, "invalid-brief"); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: "assess", summary: "完整调查报告", handoff, evidence_ids: [read.evidenceId] })).rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled(); expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
