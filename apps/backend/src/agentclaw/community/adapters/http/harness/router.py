@@ -93,6 +93,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     with_interceptors,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 
 logger = get_logger()
 
@@ -1057,6 +1058,7 @@ async def admin_apply_patch(
     engine: PatchEngineProtocol = Injected(PatchEngineProtocol),
     patch_repo: HarnessPatchRepository = Injected(HarnessPatchRepository),
     patch_record_repo: HarnessPatchRecordRepository = Injected(HarnessPatchRecordRepository),
+    binding_repo: DeviceBindingRepository = Injected(DeviceBindingRepository),
 ):
     """Admin-only: Apply a patch without collaborator permission check."""
     _check_admin(user)
@@ -1070,6 +1072,24 @@ async def admin_apply_patch(
     # Mode 1: Apply by record_id (from ac_harness_patch_record)
     if body.record_id:
         try:
+            # Pre-check: verify device binding is ACTIVE before attempting writes
+            try:
+                binding = binding_repo.get_active_by_bot_and_owner(body.bot_id, body.entity_id or "")
+                if binding is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Cannot apply: no active device binding found for bot {body.bot_id}",
+                    )
+                if binding.status != "ACTIVE":
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Cannot apply: device binding is {binding.status}, not ACTIVE",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("[/apply] Failed to check binding status: %s", e)
+
             record = patch_record_repo.get_by_id(body.record_id)
             logger.info("[/admin/apply] fetched record: id=%s, status=%s", record.id if record else None, record.status if record else None)
             if record is None:
@@ -2190,6 +2210,7 @@ async def apply_patch(
     engine: PatchEngineProtocol = Injected(PatchEngineProtocol),
     patch_repo: HarnessPatchRepository = Injected(HarnessPatchRepository),
     patch_record_repo: HarnessPatchRecordRepository = Injected(HarnessPatchRecordRepository),
+    binding_repo: DeviceBindingRepository = Injected(DeviceBindingRepository),
 ):
     """Apply a patch.
 
@@ -2206,6 +2227,24 @@ async def apply_patch(
     # Mode 1: Apply by record_id (from ac_harness_patch_record)
     if body.record_id:
         try:
+            # Pre-check: verify device binding is ACTIVE before attempting writes
+            try:
+                binding = binding_repo.get_active_by_bot_and_owner(body.bot_id, body.entity_id or "")
+                if binding is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Cannot apply: no active device binding found for bot {body.bot_id}",
+                    )
+                if binding.status != "ACTIVE":
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Cannot apply: device binding is {binding.status}, not ACTIVE",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("[/apply] Failed to check binding status: %s", e)
+
             record = patch_record_repo.get_by_id(body.record_id)
             logger.info("[/apply] fetched record: id=%s, status=%s", record.id if record else None, record.status if record else None)
             if record is None:
@@ -2248,6 +2287,26 @@ async def apply_patch(
     # Mode 2: Apply by patch_id_list (from ac_harness_patch)
     try:
         import json
+
+        # Pre-check: verify device binding is ACTIVE before attempting writes
+        try:
+            binding = binding_repo.get_active_by_bot_and_owner(body.bot_id, body.entity_id or "")
+            if binding is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Cannot apply: no active device binding found for bot {body.bot_id}",
+                )
+            if binding.status != "ACTIVE":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Cannot apply: device binding is {binding.status}, not ACTIVE",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("[/apply] Failed to check binding status: %s", e)
+            # Proceed — binding check is best-effort; the apply will fail with
+            # a clearer error if the device is truly unavailable.
 
         for patch_id in body.patch_id_list:
             patch_def = patch_repo.get_by_id(patch_id)
