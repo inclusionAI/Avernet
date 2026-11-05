@@ -443,9 +443,14 @@ dead node's sessions and split them without talking to each other.
    down are picked up after a short grace by the next-ranked node. Because
    the query repeats every poll, work that becomes pending later (a fallback
    round) is found too. A dead node is **retired from discovery** once its
-   leases are claimable and a query returns nothing: after that, late input
-   for its idle sessions doesn't need discovery, because the durable
-   fallback claims a claimable lease itself (§6). All dead nodes together
+   leases are claimable and no pending work is left in *any* bucket. An
+   empty share of one's own buckets is not enough: if another survivor then
+   died, nobody would query its share. So a survivor whose own query comes
+   back empty checks all buckets with one indexed probe
+   (`… WHERE node_id = :D AND has_pending_work LIMIT 1`) and retires D only
+   if that is empty too. After that, late input for D's idle sessions
+   doesn't need discovery, because the durable fallback claims a claimable
+   lease itself (§6). All dead nodes together
    share one per-tick discovery budget, so a history of crashes adds no
    standing load. A node holding 300 k pending sessions spread over 19
    survivors is claimed in under 10 s; claiming is cheap because state is
