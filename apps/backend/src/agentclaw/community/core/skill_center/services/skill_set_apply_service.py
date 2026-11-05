@@ -102,6 +102,7 @@ class SkillSetApplyService:
                 skills=True,
                 mcp=bool(mutation.mcp_codes),
                 claimed_mcp=mutation.mcp_codes,
+                released_mcp=mutation.mcp_codes,
             ),
             mutation=lambda: self._repository.replace_apply_skill_sets(
                 scope=scope,

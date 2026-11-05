@@ -946,7 +946,10 @@ class _DefaultTargetRepository(_Repository):
         self.exclusion_calls.append(("exclude_default_mcp", kwargs))
         return replace(self._mutation(), mcp_codes=frozenset({kwargs["server_code"]}))
 
-    def unexclude_default_mcp(self, **kwargs) -> DesiredStateMutation:
+    def unexclude_default_mcp(
+        self, *, platform_default_codes: frozenset[str], **kwargs
+    ) -> DesiredStateMutation:
+        kwargs["platform_default_codes"] = platform_default_codes
         self.exclusion_calls.append(("unexclude_default_mcp", kwargs))
         return replace(self._mutation(), mcp_codes=frozenset({kwargs["server_code"]}))
 
