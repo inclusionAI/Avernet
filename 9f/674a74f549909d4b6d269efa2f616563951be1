@@ -1,0 +1,18 @@
+singlebox/modules/demo_bot.sh
+  h_059e888e5e4e82 381
+singlebox/skills/infra/bbs-topic-handler/SKILL.md
+  h_059e888e5e4e82 3
+singlebox/verity/test_singlebox_demo_bot.sh
+  h_059e888e5e4e82 699-708,727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f674a74f549909d4b6d269efa2f616563951be1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
