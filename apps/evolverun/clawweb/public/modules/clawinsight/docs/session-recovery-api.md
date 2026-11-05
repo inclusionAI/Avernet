@@ -325,7 +325,7 @@ Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 
-原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`、`config`。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；与正文一样按 UTF-8 字节截短，完整内容保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。`config` 值为 JSON 字符串 `{"autoLayout":true}`，位于参数 Map 内，支持桌面端自适应宽度，手机端仍受容器限制。模板变量将其声明为 object；此参数不是 `ce_app_config` 的新增配置项。
+原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；与正文一样按 UTF-8 字节截短，完整内容保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 
 ## 任务整体摘要
 
