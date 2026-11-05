@@ -565,13 +565,12 @@ class TestBbsEscalationNoMarket:
 
 
 class TestLegacyIdentityCompatibility:
-    def test_dashboard_reverse_resolves_legacy_bare_bot_owner(self):
+    def test_dashboard_uses_initiator_for_legacy_bare_bot_owner(self):
         from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
         class BotService:
             def get_bot_by_id(self, bot_id):
-                assert bot_id == "legacy-bot"
-                return {"owner_id": "35983"}
+                raise AssertionError("legacy bare identity must not trigger Bot lookup")
 
         graph_service = TaskGraphService()
         facade = TaskService(graph_service, bot_service=BotService())
@@ -587,14 +586,14 @@ class TestLegacyIdentityCompatibility:
         dashboard = facade.get_task_dashboard("legacy-dashboard")
         root = dashboard.tasks[0]
         assert root.run_info.assignee == "legacy-bot"
-        assert root.run_info.extend_props["assignee_owner_id"] == "35983"
+        assert root.run_info.extend_props["assignee_owner_id"] == "146836"
 
-    def test_task_list_reverse_resolves_legacy_bare_bot_owner(self):
+    def test_task_list_uses_initiator_for_legacy_bare_bot_owner(self):
         from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
         class BotService:
             def get_bot_by_id(self, bot_id):
-                return {"owner_id": "35983"}
+                raise AssertionError("legacy bare identity must not trigger Bot lookup")
 
         facade = TaskService(None, bot_service=BotService())
         record = TaskInfoRecord(

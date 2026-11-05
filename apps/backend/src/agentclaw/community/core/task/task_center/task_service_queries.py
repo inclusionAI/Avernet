@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import Callable
 
 from agentclaw.community.core.task.domain.identity import (
     resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
@@ -35,9 +34,7 @@ logger = logging.getLogger("task.service")
 
 
 def _hydrate_root_dashboard_runtime(
-    graph: TaskExecutionGraph,
-    task_id: str,
-    owner_lookup: Callable[[str], str | None] | None = None,
+    graph: TaskExecutionGraph, task_id: str
 ) -> None:
     """Fill missing root runtime identity for dashboard compatibility.
 
@@ -80,7 +77,6 @@ def _hydrate_root_dashboard_runtime(
 
     if not root.run_info.run_mode and run_mode:
         root.run_info.run_mode = run_mode
-    is_group_root = str(root.run_info.run_mode or "").strip() == "coop_group"
     if (
         not root.run_info.assignee
         or not root.run_info.extend_props.get("assignee_owner_id")
@@ -88,7 +84,6 @@ def _hydrate_root_dashboard_runtime(
         entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
             graph_props.get("owner_bot_id"),
             graph_props.get("owner_user_id"),
-            None if is_group_root else owner_lookup,
         )
         if not root.run_info.assignee and entry_bot_id:
             root.run_info.assignee = entry_bot_id
@@ -172,7 +167,7 @@ def get_task_dashboard(
     graph = self._graph.query_task_dashboard(task_id, node_id)
     if node_id is None:
         _hydrate_root_dashboard_runtime(
-            graph, task_id, owner_lookup=self._resolve_entry_bot_owner
+            graph, task_id
         )
     if include_action_log:
         self._graph.load_action_logs(graph)
@@ -270,11 +265,10 @@ def _enrich_task_owner_display(
     if not records:
         return []
 
-    owner_lookup = self._resolve_entry_bot_owner
     normalized: list[tuple[TaskInfoRecord, str, str]] = []
     for record in records:
         bot_id, owner_id = resolve_entry_bot_identity(
-            record.owner_bot_id, record.owner_user_id, owner_lookup
+            record.owner_bot_id, record.owner_user_id
         )
         normalized.append((record, bot_id, owner_id))
 
