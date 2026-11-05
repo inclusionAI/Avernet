@@ -50,6 +50,13 @@ async def test_apply_set_admission_preserves_effective_bot_override(default: boo
         DefaultSkillSetRef() if default else DesiredSkillSet("expert", True, (), ("mcp.one",)),
     )))
     before = world.snapshot()
+    validation = world.config.validate_bot_override(
+        user_id="owner", server_code="mcp.one",
+        config=before.mcp_overrides["mcp.one"], engine_type="moltis",
+    )
+    assert validation["valid"] is True
+    assert validation["mcp_data"]["serverCode"] == "mcp.one"
+    assert validation["mcp_data"]["endpoints"][0]["url"] == "https://center.example/pre/mcp.one"
     preview = await apply(world.ctx, world.materialiser, target, dry_run=True)
     assert preview.status.value == "SUCCEEDED"
     assert world.snapshot() == before

@@ -34,7 +34,11 @@ class MCPConfigServiceProtocol(Protocol):
         config: dict[str, Any] | None,
         engine_type: str | None = None,
     ) -> dict[str, Any]:
-        """Validate the effective Center endpoint without persisting it."""
+        """Validate the effective Center endpoint without persisting it.
+
+        A valid result includes ``mcp_data``, the Center detail used for validation,
+        so admission can select that record's deliverable endpoint before writing.
+        """
         ...
 
     def validate_effective_scoped_config(
