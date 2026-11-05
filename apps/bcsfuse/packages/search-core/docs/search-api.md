@@ -231,12 +231,22 @@ for log rotation, retention and collection.
 
 ### Search stage timings
 
-For one HTTP or TR search, filter the INFO logs by `"event":"search_steps"`
+For intermediate records, filter INFO by trace ID and `"event":"search_progress"`.
+The received record carries the transport, query text (up to 256 characters,
+masking bearer credentials, email addresses and mainland Chinese mobile numbers),
+requested limit, supplied retrieval switches and recognized filters (up to 20 values
+per field). A result-cache hit skips recall and ranking. Executed branches report
+raw hits, `recall_merge` reports counts after per-branch filtering and grouping,
+and fusion and reranking report candidate counts. Records are enqueued when the
+stage finishes, including failures.
+
+For the final HTTP or TR search record, filter the INFO logs by `"event":"search_steps"`
 and the trace ID. Each line reports the operation, request ID, outcome, result
 count, result-cache status, service elapsed time and `stage_ms` for the stages
-that ran. Concurrent stages appear in completion order. The host flushes
+that ran. `results` contains up to the first 20 returned IDs (up to 256 characters),
+with rank, score and score source. Concurrent stages appear in completion order. The host flushes
 these lines in the background alongside the summaries. If the separate
-4,096-request buffer fills, `search_steps_dropped` counts omitted lines.
+4,096-record buffer fills, `search_steps_dropped` counts omitted lines.
 Cache snapshots are emitted on the first poll and when their counters or size
 change.
 
