@@ -129,13 +129,57 @@ def test_progress_shows_input_branch_counts_and_returned_ids(caplog, timing_logs
     )
     final = next(r for r in records if r["event"] == "search_steps")
     assert final["results"] == [
-        {"rank": 1, "item_id": "a", "score": 0.8, "score_source": "reranker"}
+        {
+            "rank": 1,
+            "item_id": "a",
+            "score": 0.8,
+            "score_source": "reranker",
+            "score_details": {
+                "keyword": {"value": 2.0, "rank": 1},
+                "vector": {"value": 0.9, "rank": 1},
+                "rrf": {"value": 2 / 61, "rank": 1},
+                "reranker": {"value": 0.8, "rank": 1},
+            },
+        }
     ]
     assert all(
         r["request_id"] == final["request_id"] and r["trace_id"] == "incoming"
         for r in progress.values()
     )
+    assert final["timestamp"] >= progress["received"]["timestamp"]
     assert "private card" not in json.dumps(records)
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_configured_disabled_branches_only_warn_on_actual_failure(
+    failure, caplog, timing_logs
+):
+    class Ranker:
+        async def rerank(self, *args):
+            raise TimeoutError("private failure")
+
+    app = application(
+        vector_enabled=False,
+        allow_partial=True,
+        reranker=Ranker() if failure else None,
+    )
+    result = asyncio.run(
+        app.execute(SearchCommand("bill", 1, "search"), VerifiedIdentity("caller"))
+    )
+    summaries = timing_logs()
+    assert summaries[-1]["reason"] == ("degraded" if failure else "ok")
+    records = [
+        json.loads(r.message) for r in caplog.records if r.name == "search_core.events"
+    ]
+    warnings = [r for r in records if r["event"] == "search_degraded"]
+    assert [r["reason"] for r in warnings] == (
+        ["reranker_unavailable"] if failure else []
+    )
+    final = next(r for r in records if r["event"] == "search_steps")
+    assert final["reasons"] == list(result.reasons)
+    assert final["results"][0]["score_details"]["keyword"] == {"value": 2.0, "rank": 1}
+    assert final["results"][0]["score_details"]["vector"] is None
+    assert final["results"][0]["score_details"]["reranker"] is None
 
 
 def test_trace_id_is_captured_before_background_log_flush(timing_logs):
@@ -147,9 +191,7 @@ def test_trace_id_is_captured_before_background_log_flush(timing_logs):
     previous = active_trace.set("upstream-trace")
     try:
         asyncio.run(
-            service.execute(
-                SearchCommand("q", 1, "search"), VerifiedIdentity("caller")
-            )
+            service.execute(SearchCommand("q", 1, "search"), VerifiedIdentity("caller"))
         )
     finally:
         active_trace.reset(previous)
@@ -175,9 +217,7 @@ def test_embedding_timeout_preserves_keyword_result_and_timing(timing_logs):
             )
         )
         result = asyncio.run(
-            app.execute(
-                SearchCommand("hidden", 1, "search"), VerifiedIdentity("x")
-            )
+            app.execute(SearchCommand("hidden", 1, "search"), VerifiedIdentity("x"))
         )
     assert result.items[0].item_id == "a"
     assert result.reasons == ("embedding_unavailable",)
@@ -205,7 +245,7 @@ def test_validation_failure_still_has_request_timing(timing_logs):
     assert "secret" not in json.dumps(sample)
 
 
-def test_concurrent_requests_do_not_share_stages(timing_logs):
+def test_concurrent_requests_do_not_share_stages(timing_logs, caplog):
     async def run():
         await asyncio.gather(
             application(reranker=Reranker()).execute(
@@ -217,11 +257,15 @@ def test_concurrent_requests_do_not_share_stages(timing_logs):
         )
 
     asyncio.run(run())
-    samples = [log["sample"] for log in timing_logs()]
-    assert len(samples) == 2  # distinct ok/degraded buckets
+    timing_logs()
+    records = [
+        json.loads(r.message) for r in caplog.records if r.name == "search_core.events"
+    ]
+    samples = [r for r in records if r["event"] == "search_steps"]
+    assert len(samples) == 2
     assert len({s["request_id"] for s in samples}) == 2
-    assert sorted("embedding" in s["stages"] for s in samples) == [False, True]
-    assert sorted("reranker" in s["stages"] for s in samples) == [False, True]
+    assert sorted("embedding" in s["stage_ms"] for s in samples) == [False, True]
+    assert sorted("reranker" in s["stage_ms"] for s in samples) == [False, True]
 
 
 def test_cache_hit_does_not_replay_old_stage_timings(timing_logs, caplog):
@@ -300,9 +344,7 @@ def test_cancelled_request_records_elapsed_time(timing_logs):
             HybridRetrievalService(index=PendingIndex(), embedding=Embedding())
         )
         task = asyncio.create_task(
-            app.execute(
-                SearchCommand("secret", 1, "search"), VerifiedIdentity("x")
-            )
+            app.execute(SearchCommand("secret", 1, "search"), VerifiedIdentity("x"))
         )
         await started.wait()
         task.cancel()

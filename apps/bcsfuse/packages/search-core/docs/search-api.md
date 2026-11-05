@@ -247,6 +247,20 @@ these lines in the background alongside the summaries. If the separate
 Cache snapshots are emitted on the first poll and when their counters or size
 change.
 
+Final records include a Unix `timestamp` in seconds captured at search completion,
+so they can be ordered with progress records despite buffered log output.
+Each result's `score_details` contains keyword, vector, RRF and reranker values
+and ranks already retained by retrieval. A missing stage is `null`; providers
+without score details yield `score_details: null`. Cache hits retain the score
+details of the reused result.
+
+Logging treats configured branch disabling and default-candidate selection as
+successful execution. These reasons remain in `reasons`, while `outcome` (and
+the timing summary reason) is `ok` if there is no actual failure. Actual
+dependency failures still emit `search_degraded` warnings. Response `status`
+retains the existing API semantics described above.
+
+
 `CatalogSearchApplication` emits `search_timing` through that same background
 sink for HTTP and TR callers. Each five-second window is grouped by `reason`
 (`ok`, `degraded`, `error`, `cancelled`), with `count`, `avg_ms`, `max_ms` and
