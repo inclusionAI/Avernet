@@ -12,7 +12,12 @@ export function useCollaborationDraftLaunch(reference: CollaborationDraftReferen
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    const timeout = window.setTimeout(() => {
+      // 身份加载是共享请求；超时后仅使本次加载失效，忽略迟到结果。
+      cancelled = true;
+      setError('读取协作版本和自有 Bot 超时，请重试');
+      controller.abort();
+    }, 15_000);
     setData(null);
     setError(undefined);
     void Promise.all([loadCollaborationDraft(reference, controller.signal), identityService.loadIdentities()])
@@ -26,6 +31,9 @@ export function useCollaborationDraftLaunch(reference: CollaborationDraftReferen
         }
         applyIdentityLoadResult(identities.data);
         setData({ draft: draft.data, bots: identities.data.identities.filter((identity) => identity.kind === 'bot') });
+      })
+      .catch(() => {
+        if (!cancelled) setError('读取协作版本和自有 Bot 失败，请重试');
       })
       .finally(() => window.clearTimeout(timeout));
     return () => {

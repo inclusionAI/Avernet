@@ -71,6 +71,21 @@ it('preflights edited YAML then posts only the OpenAPI group contract', async ()
   });
 });
 
+it('preserves empty bindings when all declared participant slots are optional and unbound', async () => {
+  request
+    .mockResolvedValueOnce(validation({ participants: [{ binding: 'observer', required: false }] }))
+    .mockResolvedValueOnce({ code: 20100, data: { group_id: 'group-optional' } });
+  const result = await launchCollaborationGroup({
+    ...input(),
+    participants: [{ actor_id: 'bot-B:owner' }],
+    participantBindings: [],
+  });
+  expect(result).toMatchObject({ ok: true, data: { groupId: 'group-optional' } });
+  expect(request.mock.calls[1][1]?.data).toMatchObject({
+    collaboration: { strategy: 'state_machine', participant_bindings: [] },
+  });
+});
+
 it('freezes the driver, YAML, goal, participants and bindings before asynchronous preflight', async () => {
   let finish!: (value: unknown) => void;
   request.mockReturnValueOnce(
