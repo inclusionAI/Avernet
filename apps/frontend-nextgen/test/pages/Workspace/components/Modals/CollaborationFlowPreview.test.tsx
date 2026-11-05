@@ -13,8 +13,8 @@ jest.mock('@xyflow/react', () => ({
   Controls: () => null,
   getBezierPath: () => ['M 0 0 L 1 1', 0, 0],
   BaseEdge: ({ label }: { label: string }) => <text>{label}</text>,
-  ReactFlow: ({ nodes, edges, nodeTypes, edgeTypes }: any) => (
-    <div>
+  ReactFlow: ({ nodes, edges, nodeTypes, edgeTypes, translateExtent }: any) => (
+    <div data-testid="flow-canvas" data-extent={JSON.stringify(translateExtent)}>
       {nodes.map((node: any) => {
         const Component = nodeTypes[node.type];
         return <div key={node.id} data-testid={node.id} data-parent={node.parentId}><Component data={node.data} /></div>;
@@ -82,16 +82,21 @@ it('collapses nested loops independently while keeping distinct exits and restor
   const graph = nestedFixture();
   const before = JSON.stringify(graph);
   render(<CollaborationFlowPreview graph={graph} initialNodes={['prepare-1']} bindingViews={{}} />);
+  const expandedExtent = JSON.parse(screen.getByTestId('flow-canvas').getAttribute('data-extent')!);
   fireEvent.click(screen.getByRole('button', { name: '收起循环 Inner' }));
   expect(screen.queryByTestId('draft-1-1')).not.toBeInTheDocument();
   expect(screen.getByTestId('prepare-1')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '收起循环 Outer' }));
+  const collapsedExtent = JSON.parse(screen.getByTestId('flow-canvas').getAttribute('data-extent')!);
+  expect(collapsedExtent[1][1]).toBeLessThan(expandedExtent[1][1]);
+  expect(collapsedExtent.flat().every(Number.isFinite)).toBe(true);
   expect(screen.queryByTestId('loop-container:outer/inner')).not.toBeInTheDocument();
   expect(screen.getByTestId('publish')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '展开循环 Outer' }));
   expect(screen.getByRole('button', { name: '展开循环 Inner' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '展开循环 Inner' }));
   expect(screen.getByTestId('draft-1-1')).toBeInTheDocument();
+  expect(JSON.parse(screen.getByTestId('flow-canvas').getAttribute('data-extent')!)).toEqual(expandedExtent);
   expect(JSON.stringify(graph)).toBe(before);
 });
 
@@ -101,6 +106,7 @@ it('keeps ordinary DAG previews free of loop controls and reports unsupported gr
   ], edges: [] };
   const { rerender } = render(<CollaborationFlowPreview graph={graph} initialNodes={['work']} bindingViews={{}} />);
   expect(screen.getByText('普通工作')).toBeInTheDocument();
+  expect(JSON.parse(screen.getByTestId('flow-canvas').getAttribute('data-extent')!)).toEqual([[-169, -64], [169, 168]]);
   expect(screen.queryByText('循环限制')).not.toBeInTheDocument();
   rerender(<CollaborationFlowPreview graph={{ ...graph, graph_mode: 'hierarchical' }} initialNodes={['work']} bindingViews={{}} />);
   expect(screen.getByText('暂不支持 hierarchical 模式的协作流程预览')).toBeInTheDocument();

@@ -83,8 +83,9 @@ export function DraftGroupForm({
   };
   return (
     <>
-      <div className="app-scrollbar min-h-0 overflow-y-auto px-6 py-4">
-        <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
+      <div className="app-scrollbar col-start-1 row-start-2 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-6"
+        onScroll={({ currentTarget: el }) => { if (el.scrollHeight - el.scrollTop - el.clientHeight < 80 && originator && binding.yamlValidation.isValidated) picker.loadMore(); }}>
+        <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-6 border-0 p-0 [&>*]:shrink-0">
           {originatorSlot}
           <GroupConfigFields
             fixedKind
@@ -124,6 +125,8 @@ export function DraftGroupForm({
             <GroupParticipantPicker
               picker={picker}
               selectedIds={activeBot ? [activeBot] : []}
+              activeRoleName={binding.yamlValidation.participantDefinitions.find((role) => role.key === binding.activeParticipantKey)?.displayName || binding.activeParticipantKey}
+              listViewportClassName="max-h-none overflow-visible"
               selectedOptions={boundOptions}
               showMineTab={false}
               routing={routing}

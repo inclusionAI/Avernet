@@ -36,7 +36,7 @@ function LoadedDraftDialog({ draft, bots }: { draft: CollaborationDraft; bots: I
         size="lg"
         closeLabel="关闭发起协作弹窗"
         showClose={!submission.creating}
-        className="h-[min(860px,calc(100vh-2rem))] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 xl:left-[calc(50%-248px)] xl:overflow-visible 2xl:left-[calc(50%-288px)]"
+        className="h-dvh max-h-dvh w-full max-w-[720px] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[min(900px,calc(100dvh-3rem))] sm:w-[calc(100vw-3rem)] sm:rounded-2xl sm:border [&:has([data-flow-aside])]:xl:max-w-[1320px] [&:has([data-flow-aside])]:xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
       >
         <CreateGroupHeader />
         <DraftGroupForm

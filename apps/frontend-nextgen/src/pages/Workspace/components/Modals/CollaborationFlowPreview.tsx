@@ -1,7 +1,7 @@
 import { Button, Empty } from '@/components/ui';
 import type { CollaborationDefinitionGraphPreview } from '@/domain/collaboration/graphTypes';
 import { cn } from '@/utils/cn';
-import { Background, Controls, Handle, Position, ReactFlow, type ReactFlowInstance } from '@xyflow/react';
+import { Background, Controls, Handle, Position, ReactFlow, type CoordinateExtent, type ReactFlowInstance } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildCollaborationLoopLayout, hasLogicalLoopDescriptors } from './collaborationLoopLayout';
@@ -13,6 +13,7 @@ import { collapseCollaborationLoops } from './collapseCollaborationLoops';
 import { CollaborationNodeDetails } from './CollaborationNodeDetails';
 import {
   COLLABORATION_FLOW_NODE_WIDTH,
+  COLLABORATION_FLOW_NODE_HEIGHT,
   COLLABORATION_NODE_KIND_LABELS,
   getCollaborationNodeTone,
   type CollaborationBindingView,
@@ -105,6 +106,7 @@ const nodeTypes = { collaboration: CollaborationNode, loopContainer: Collaborati
 const edgeTypes = { loop: CollaborationLoopEdge, transition: CollaborationTransitionEdge };
 const FIT_VIEW_OPTIONS = { padding: 0.12, minZoom: 0.85, maxZoom: 1 };
 const LOOP_FIT_VIEW_OPTIONS = { padding: 0.05, minZoom: 0.85, maxZoom: 1 };
+const VIEWPORT_PADDING = 64;
 
 /** 协作流程图预览（ReactFlow），显示在校验通过后的自定义协作创建弹窗中。 */
 export function CollaborationFlowPreview({
@@ -125,7 +127,21 @@ export function CollaborationFlowPreview({
   const result = useMemo(() => {
     try {
       const fullLayout = buildCollaborationLoopLayout(graph, initialNodes, bindingViews);
-      return { fullLayout, layout: collapseCollaborationLoops(fullLayout, collapsedLoops), error: null as string | null };
+      const layout = collapseCollaborationLoops(fullLayout, collapsedLoops);
+      // 顶层循环容器已包含嵌套节点与返回线；子节点的位置是相对坐标，不参与全局边界计算。
+      const boxes = [
+        ...layout.groups.filter((group) => !group.parentId),
+        ...layout.nodes.filter((node) => !node.parentId).map((node) => ({
+          position: node.position, width: COLLABORATION_FLOW_NODE_WIDTH, height: COLLABORATION_FLOW_NODE_HEIGHT,
+        })),
+      ];
+      const translateExtent: CoordinateExtent = [
+        [Math.min(...boxes.map(({ position }) => position.x)) - VIEWPORT_PADDING,
+          Math.min(...boxes.map(({ position }) => position.y)) - VIEWPORT_PADDING],
+        [Math.max(...boxes.map(({ position, width }) => position.x + width)) + VIEWPORT_PADDING,
+          Math.max(...boxes.map(({ position, height }) => position.y + height)) + VIEWPORT_PADDING],
+      ];
+      return { fullLayout, layout, translateExtent, error: null as string | null };
     } catch (error) {
       return { layout: null, error: error instanceof Error ? error.message : '协作流程数据无效' };
     }
@@ -213,12 +229,15 @@ export function CollaborationFlowPreview({
           onMoveStart={(event) => { if (event) userViewportRef.current = true; }}
           minZoom={0.2}
           maxZoom={2}
+          translateExtent={result.translateExtent}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
           nodesFocusable={false}
           panOnDrag
-          zoomOnScroll
+          panOnScroll
+          panOnScrollSpeed={1}
+          zoomOnScroll={false}
           zoomOnPinch
           zoomOnDoubleClick={false}
           preventScrolling
