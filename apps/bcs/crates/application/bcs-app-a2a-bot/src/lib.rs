@@ -79,7 +79,10 @@ impl A2aBotManagementService for A2aBotManagement {
         self.public_get(token,name).await
     }
     async fn update_agent(&self,token:&str,name:&str,source:A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(token,name,source).await
+        self.public_update(token,name,Some(source),None).await
+    }
+    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        self.public_update(token,name,source,visibility).await
     }
     async fn refresh_agent(&self,token:&str,name:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.public_refresh(token,name).await

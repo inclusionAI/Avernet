@@ -38,6 +38,7 @@ pub struct ManagedA2aCard {
 }
 #[derive(Clone)]
 pub struct RegisterAgentCommand {
+    pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
     pub provider_admin_token:String, pub owners:Vec<String>, pub summary:Option<String>,
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
 }
@@ -52,6 +53,10 @@ pub trait A2aBotManagementService: Send + Sync {
     }
     async fn update_agent(&self,_token:&str,_name:&str,_source:crate::types::a2a_bot::A2aCardSource)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))
+    }
+    async fn update_agent_with_visibility(&self,token:&str,name:&str,source:Option<crate::types::a2a_bot::A2aCardSource>,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<ManagedA2aCard> {
+        if visibility.is_none() { if let Some(source)=source { return self.update_agent(token,name,source).await; } }
+        Err(crate::ServiceError::InternalError("visibility update unavailable".into()))
     }
     async fn refresh_agent(&self,_token:&str,_name:&str)->ServiceResult<ManagedA2aCard> {
         Err(crate::ServiceError::InternalError("public A2A management unavailable".into()))

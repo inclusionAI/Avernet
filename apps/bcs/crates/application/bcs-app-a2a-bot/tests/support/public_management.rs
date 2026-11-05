@@ -29,6 +29,7 @@ async fn public_fixture() -> (RegistrationChain, A2aBotManagement) {
 }
 fn request(raw: serde_json::Value) -> RegisterAgentCommand {
     RegisterAgentCommand {
+        visibility: Default::default(),
         provider_admin_token: "test-admin".into(),
         owners: vec!["delegated-owner".into()],
         summary: None,
@@ -222,4 +223,41 @@ async fn url_registration_and_refresh_preserve_the_source_and_full_card() {
     let refreshed = service.refresh_agent("test-admin", "Remote").await.unwrap();
     assert_eq!(refreshed.bot_id, initial.bot_id);
     assert_eq!(refreshed.agent_card, initial.agent_card);
+}
+
+#[tokio::test]
+async fn registration_persists_visibility_atomically_and_card_updates_preserve_it() {
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected, Public};
+    for visibility in [Protected, Public] {
+        let (chain, service) = public_fixture().await;
+        let mut command = request(card("可见性测试", None));
+        command.visibility = visibility;
+        let registered = service.register_agent(command).await.unwrap();
+        let read_visibility = || DbStatement::with_params(
+            "SELECT visibility FROM bcs_bots WHERE bot_uuid=?",
+            vec![registered.bot_id.clone().into()]);
+        let rows = chain.db.query(read_visibility()).await.unwrap();
+        assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(), Some(visibility.as_str()));
+        service.update_agent("test-admin", "可见性测试",
+            A2aCardSource::Inline(card("更新后的助手", None))).await.unwrap();
+        let rows = chain.db.query(read_visibility()).await.unwrap();
+        assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(), Some(visibility.as_str()));
+    }
+}
+
+#[tokio::test]
+async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on_failure() {
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected,Public};
+    let (chain,service)=public_fixture().await;
+    let raw=card("权限测试",None);
+    let registered=service.register_agent(request(raw.clone())).await.unwrap();
+    let updated=service.update_agent_with_visibility("test-admin","权限测试",None,Some(Public)).await.unwrap();
+    assert_eq!(updated.agent_card,raw);
+    let read=|| DbStatement::with_params("SELECT visibility FROM bcs_bots WHERE bot_uuid=?",vec![registered.bot_id.clone().into()]);
+    assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
+    chain.db.execute(DbStatement::new("CREATE TRIGGER reject_visibility BEFORE UPDATE OF visibility ON bcs_bots BEGIN SELECT RAISE(ABORT,'visibility failure'); END")).await.unwrap();
+    assert!(service.update_agent_with_visibility("test-admin","权限测试",Some(A2aCardSource::Inline(card("改名失败",None))),Some(Protected)).await.is_err());
+    assert_eq!(service.get_agent("test-admin","权限测试").await.unwrap().agent_card,raw);
+    assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
+    assert!(service.update_agent_with_visibility("wrong-token","权限测试",None,Some(Protected)).await.is_err());
 }

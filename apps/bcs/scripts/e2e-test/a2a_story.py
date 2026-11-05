@@ -31,6 +31,7 @@ class Peer:
         self.requests = []
         self.tasks = {}
         self.poll_queries = {}
+        self.observed_task_queries = set()
         self.methods = []
         self.cancels = []
         self.stops = {}
@@ -72,6 +73,7 @@ class Peer:
                 elif path.startswith("/a2a/tasks/") and self.authenticated():
                     with peer.lock:
                         task_id = unquote(path.rsplit("/", 1)[-1])
+                        peer.observed_task_queries.add(task_id)
                         if task_id in peer.poll_queries:
                             peer.poll_queries[task_id] += 1
                             if peer.poll_queries[task_id] >= 2:
@@ -476,7 +478,7 @@ class A2aStory(Story):
                         assert result["state"] == "cancelled", result
                         break
                     with self.peer.lock:
-                        admitted = "peer-task-18" in self.peer.tasks
+                        admitted = "peer-task-18" in self.peer.observed_task_queries
                     if admitted:
                         canceled = self.request("POST", run_path + "/cancel", {}, token=token)
                         if canceled["cancelled"]:
@@ -505,7 +507,9 @@ class A2aStory(Story):
             while time.monotonic() < deadline:
                 if mode == "poll_wait":
                     with self.peer.lock:
-                        admitted = task_id in self.peer.tasks
+                        # A remote Task can exist before BCS receives SendMessage's
+                        # response. Its first GetTask proves identity was saved.
+                        admitted = task_id in self.peer.observed_task_queries
                     if admitted:
                         result = abort_task(self.base, self.owner, group, session, bot_id)
                         if result["payload"]["aborted"]:

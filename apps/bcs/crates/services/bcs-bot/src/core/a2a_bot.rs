@@ -55,6 +55,14 @@ impl A2aBotCoreService for A2aBotCore {
         self.cards.replace(&record).await
     }
 
+    async fn commit_card_with_visibility(&self,record:A2aBotRecord,expected:u64,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<A2aBotRecord> {
+        let binding=self.provider_binding(&record.provider_id,&record.bot_uuid).await?;
+        if binding.provider_bot_ref!=record.provider_bot_ref {return Err(ServiceError::Conflict("A2A Bot binding changed".into()));}
+        if !self.cards.compare_and_set_with_visibility(&record,expected,visibility).await? {
+            return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
+        }
+        Ok(record)
+    }
     async fn commit_card(&self, record: A2aBotRecord, expected_revision: u64) -> ServiceResult<A2aBotRecord> {
         let binding = self.provider_binding(&record.provider_id, &record.bot_uuid).await?;
         if binding.provider_bot_ref != record.provider_bot_ref {

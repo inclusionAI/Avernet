@@ -25,6 +25,8 @@ struct Name {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registration {
+    #[serde(default)]
+    visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
     owners: Vec<String>,
     summary: Option<String>,
     agent_card_url: Option<String>,
@@ -33,6 +35,7 @@ struct Registration {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Update {
+    visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
     agent_name: String,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
@@ -254,6 +257,7 @@ async fn execute(
             .unwrap_or(0);
         let card = service
             .register_agent(RegisterAgentCommand {
+                visibility: input.visibility,
                 provider_admin_token: token,
                 owners: input.owners,
                 summary: input.summary,
@@ -264,13 +268,17 @@ async fn execute(
         Ok((StatusCode::CREATED, card))
     } else if parts.method == axum::http::Method::PUT {
         let input: Update = body(&bytes)?;
+        if input.visibility.is_none() && input.agent_card_url.is_none() && input.agent_card.is_none() {
+            return Err(error(Code::InvalidRequest,"","UPDATE_REQUIRED"));
+        }
         Ok((
             StatusCode::OK,
             service
-                .update_agent(
+                .update_agent_with_visibility(
                     &token,
                     &input.agent_name,
-                    source(input.agent_card_url, input.agent_card)?,
+                    if input.agent_card_url.is_none() && input.agent_card.is_none() {None} else {Some(source(input.agent_card_url, input.agent_card)?)},
+                    input.visibility,
                 )
                 .await?,
         ))
