@@ -46,6 +46,8 @@ _WRITE_ALLOWLIST: dict[str, str] = {
 #: Modules allowed to import the ``tables`` command modules — the UoW and
 #: the command mixins it composes.
 _TABLES_IMPORTER_ALLOWLIST = {
+    # Bulk named Set/Default UoW composes table commands in its single transaction.
+    "community/core/repository/implementations/skill_center/apply_skill_set_commands.py",
     "community/core/repository/implementations/skill_center/capability_desired_state.py",
     "community/core/repository/implementations/skill_center/bot_skillset_installations.py",
     "community/core/repository/implementations/skill_center/default_exclusion_commands.py",

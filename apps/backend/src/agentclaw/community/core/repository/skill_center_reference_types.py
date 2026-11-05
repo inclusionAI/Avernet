@@ -42,6 +42,14 @@ class PublicCenterVersionTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicCenterReferenceAsset:
+    """One exact public locator in the current tenant/environment."""
+
+    skill_id: int
+    skill_uuid: str
+
+
+@dataclass(frozen=True, slots=True)
 class MaterializedPublicCenterAsset:
     skill_id: int
     skill_code: str
@@ -52,6 +60,7 @@ class MaterializedPublicCenterAsset:
 __all__ = [
     "MaterializedPublicCenterAsset",
     "PublicCenterVersionTarget",
+    "PublicCenterReferenceAsset",
     "SkillCenterReferenceWorkBatch",
     "SkillCenterReferenceWorkItem",
 ]

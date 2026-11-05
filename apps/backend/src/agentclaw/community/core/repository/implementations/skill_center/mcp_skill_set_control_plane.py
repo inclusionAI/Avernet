@@ -312,11 +312,16 @@ class McpSkillSetControlPlaneCommands:
         with self._db.transactional_orm_session() as session:
             require_direct_mcp_control_allowed(
                 server_code=server_code,
-                platform_default_codes=platform_default_codes,
+                platform_default_codes=self._effective_direct_policy(
+                    session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                    platform_default_codes=platform_default_codes, engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                ),
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,
+                member=server_code,
                 set_ids=self._mcp_referencing_set_ids(
                     session, server_code=server_code
                 ),
@@ -361,12 +366,17 @@ class McpSkillSetControlPlaneCommands:
             if not manifest_direct:
                 require_direct_mcp_control_allowed(
                     server_code=server_code,
-                    platform_default_codes=platform_default_codes,
+                    platform_default_codes=self._effective_direct_policy(
+                        session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                        platform_default_codes=platform_default_codes, engine_type=engine_type,
+                        default_engine_types=default_engine_types,
+                    ),
                 )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if not manifest_direct:
                 self._require_not_set_managed(
                     session,
+                    member=server_code,
                     set_ids=self._mcp_referencing_set_ids(
                         session, server_code=server_code
                     ),
@@ -428,12 +438,17 @@ class McpSkillSetControlPlaneCommands:
             if not manifest_direct:
                 require_direct_mcp_control_allowed(
                     server_code=server_code,
-                    platform_default_codes=platform_default_codes,
+                    platform_default_codes=self._effective_direct_policy(
+                        session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                        platform_default_codes=platform_default_codes, engine_type=engine_type,
+                        default_engine_types=default_engine_types,
+                    ),
                 )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if not manifest_direct:
                 self._require_not_set_managed(
                     session,
+                    member=server_code,
                     set_ids=self._mcp_referencing_set_ids(
                         session, server_code=server_code
                     ),
@@ -469,3 +484,34 @@ class McpSkillSetControlPlaneCommands:
         with self._db.orm_session() as session:
             return self._mcp_installations(session, bot_id, owner_id)
 
+
+    def _effective_direct_policy(
+        self,
+        session,
+        *,
+        bot_id,
+        owner_id,
+        server_code,
+        platform_default_codes,
+        engine_type,
+        default_engine_types,
+    ):
+        excluded_ids = default_exclusions.lock_mcp_exclusions(
+            session, bot_id=bot_id, owner_id=owner_id, server_code=server_code
+        )
+        applicable = {
+            int(row.id)
+            for row in self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            if row.is_default
+        }
+        return (
+            platform_default_codes - {server_code}
+            if applicable and applicable <= excluded_ids
+            else platform_default_codes
+        )
