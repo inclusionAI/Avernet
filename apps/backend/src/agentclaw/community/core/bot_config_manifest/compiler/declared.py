@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Section
+from agentclaw.community.core.apply_engine.constructs import ApplyConstruct, Category, Section
 
 __all__ = ["declared_entries"]
 
@@ -54,6 +54,13 @@ def declared_entries(parsed: Mapping[str, Any], construct: ApplyConstruct) -> Se
         # explicitly-null section is a declaration that there is none.
         return [section] if isinstance(section, dict) else []
     manifest = parsed.get("manifest")
+    if construct is Category.CAPABILITIES:
+        if not isinstance(manifest, dict):
+            return None
+        if "capabilities" in manifest:
+            return [manifest["capabilities"]]
+        keys = {"skills", "skill_sets", "mcp"}.intersection(manifest)
+        return [{key: manifest[key] for key in keys}] if keys else None
     if not isinstance(manifest, dict) or construct.value not in manifest:
         return None
     entries = manifest.get(construct.value)

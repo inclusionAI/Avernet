@@ -37,10 +37,10 @@ from agentclaw.community.core.bot_config_manifest.compiler.declared import decla
 from agentclaw.community.core.bot_config_manifest.compiler.entries.cli_tools import compile_cli_tools
 from agentclaw.community.core.bot_config_manifest.compiler.entries.engine_config import compile_engine_config
 from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
-from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
 from agentclaw.community.core.bot_config_manifest.compiler.entries.resources import compile_resources
 from agentclaw.community.core.bot_config_manifest.compiler.entries.script import compile_script
-from agentclaw.community.core.bot_config_manifest.compiler.entries.skills import compile_skills
+from agentclaw.community.core.bot_config_manifest.compiler.entries.capabilities import compile_capabilities
+from agentclaw.community.core.bot_config_manifest.schema.skill_sets import capability_input
 from agentclaw.community.core.bot_config_manifest.compiler.session import CompileSession
 from agentclaw.community.core.bot_config_manifest.schema import ManifestValidationError
 from agentclaw.community.core.bot_config_manifest.binding import (
@@ -153,8 +153,10 @@ class ManifestCompiler(DesiredStateCompiler):
         script = declared(Section.SCRIPT)
         identity = declared(Category.IDENTITY)
         resources = declared(Category.RESOURCES)
-        skills = declared(Category.SKILLS)
-        mcp = declared(Category.MCP)
+        include_capabilities = (
+            (only is None or Category.CAPABILITIES in only)
+            and capabilities.supports(Category.CAPABILITIES)
+        )
         cli_tools = declared(Category.CLI_TOOLS)
         manifest = parsed.get("manifest")
         engine_config_declared = (
@@ -168,12 +170,10 @@ class ManifestCompiler(DesiredStateCompiler):
             script=compile_script(session, script) if script is not None else None,
             identity=await compile_identity(session, identity, **kwargs) if identity is not None else None,
             resources=await compile_resources(session, resources, **kwargs) if resources is not None else None,
-            skills=(
-                await compile_skills(session, skills, validator=self._validator, **kwargs)
-                if skills is not None
-                else None
+            capabilities=(
+                await compile_capabilities(session, capability_input(manifest or {}), validator=self._validator, **kwargs)
+                if include_capabilities else None
             ),
-            mcp=compile_mcp(mcp) if mcp is not None else None,
             engine_config=compile_engine_config(manifest.get("engine_config")) if engine_config_declared else None,
             cli_tools=await compile_cli_tools(session, cli_tools, **kwargs) if cli_tools is not None else None,
         )

@@ -121,6 +121,9 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.RESOURCES, SourceKind.CONTENT): None,
     (Category.RESOURCES, SourceKind.OSS): None,
     (Category.RESOURCES, SourceKind.GIT): None,
+    (Category.CAPABILITIES, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
+    (Category.CAPABILITIES, SourceKind.OSS): None,
+    (Category.CAPABILITIES, SourceKind.GIT): None,
     # A skill is a package; only a fetch can deliver one.
     (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
     (Category.SKILLS, SourceKind.OSS): None,
