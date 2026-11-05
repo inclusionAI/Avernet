@@ -1,0 +1,134 @@
+apps/bcs/scripts/e2e-test/caller_delegation_chain_story.py
+  s_875e3f9d4d0db3::t_c039583a029352 283,293-294,296-298,301-308,310
+  s_875e3f9d4d0db3::t_c91fdfa4afd335 81-87
+  h_7ecb107b24dd7d 2,4-9,59,72-73,90,97-104,110-116,124,145-154,156,158-165,207,209-222,225-228,234-237,239-240,257,261-262,267-268,276-278,280-282,285-289,291-292,295,299-300,309,317,324-343,346-347,355-361,366-379,388-392,400-401
+apps/bcs/scripts/e2e_coverage.sh
+  h_7ecb107b24dd7d 398-400
+apps/bcs/scripts/test_changed_line_cov.py
+  h_7ecb107b24dd7d 5-6,184-188,200-202,204-216
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/support/caller_sse_contract.rs
+  s_eff5e7103f16a9::t_d618969f35d1da 179-319
+  s_eff5e7103f16a9::t_354f3a70be4d96 1-2,4-178
+  s_eff5e7103f16a9::t_0545984a010628 3
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send.rs
+  s_eff5e7103f16a9::t_17248bcfd2de84 17-18,24-25,31,183,185,187,192,224-227,268,271-288,301-304,330
+apps/bcs/crates/adapters/http/bcs-provider-http/src/caller_send/reception.rs
+  s_eff5e7103f16a9::t_17248bcfd2de84 1-132
+apps/bcs/crates/adapters/http/bcs-provider-http/tests/caller_execution_send_contract.rs
+  s_eff5e7103f16a9::t_354f3a70be4d96 541-543
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/orchestration.rs
+  s_7d9f4f65cedfaf::t_d49bed09168cbd 439-444
+  s_7d9f4f65cedfaf::t_ab41c51bed9293 359-363
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_7d9f4f65cedfaf::t_5722e1657f1e79 840-843
+  s_7d9f4f65cedfaf::t_15f40a7a272fa4 844
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_7d9f4f65cedfaf::t_3e3f0adc585d0d 1-73,75-76,78-199,201-232
+  h_7ecb107b24dd7d 74,77,200
+apps/bcs/docs/native-task-caller.md
+  s_7d9f4f65cedfaf::t_c8486e34ada78d 12-14
+  s_7d9f4f65cedfaf::t_e3869d206433a0 22-24
+  s_7d9f4f65cedfaf::t_62fc1f1f737b02 19-21
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 15,17-18
+  s_c99700e6891408::t_2b764c4930f3d8 1-8,25-199
+  s_7d9f4f65cedfaf::t_ae11d76aba8884 9-11
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher/tasks.rs
+  s_c99700e6891408::t_4ee23962339c37 119
+apps/bcs/crates/services/bcs-message-flow/src/bot_event.rs
+  s_c99700e6891408::t_08975cd2977a19 315
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_c99700e6891408::t_aa8fa91a266c7d 7-14,96-110,172,176,180,239
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_7d9f4f65cedfaf::t_c1deaeed2fe045 716,787-792,796-800
+apps/bcs/crates/adapters/ws/bcs-ws/CONTEXT.md
+  s_c99700e6891408::t_5550d26e8cb8a5 196-206
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/persistence.rs
+  s_c99700e6891408::t_ab1b387e2a6d85 383-384
+apps/bcs/crates/services/bcs-message-flow/src/native_task.rs
+  s_c99700e6891408::t_9f9ade9582c874 1-155
+apps/bcs/crates/services/bcs-message-flow/src/task_flow.rs
+  s_c99700e6891408::t_164580cf274dc8 10
+apps/bcs/scripts/ci/README.md
+  s_c99700e6891408::t_f22b20414cb1d8 108-120
+apps/bcs/scripts/ci/check-import-rules.sh
+  s_c99700e6891408::t_389ea4995dad44 40-45
+apps/bcs/crates/services/bcs-message-flow/src/lib.rs
+  s_c99700e6891408::t_9b55154a5009ef 12
+apps/bcs/crates/services/bcs-message-flow/tests/support/native_owner_task.rs
+  s_c99700e6891408::t_f75d0c5e8336c2 1-186,188-327
+  h_7ecb107b24dd7d 187
+apps/bcs/crates/services/bcs-message-flow/src/caller_delegation.rs
+  s_c99700e6891408::t_e2f9d7ebc91df2 88-150
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_flow.rs
+  s_c99700e6891408::t_00fe3a3fc299d0 566-576
+apps/bcs/scripts/ci/tests/import_scope_regression.sh
+  s_c99700e6891408::t_fec351a8b1ac16 1-55
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_c99700e6891408::t_285cf9904df1eb 466-479
+apps/bcs/crates/plugins/openclaw-channel-bcn/test/native-task-ordering.test.ts
+  s_c99700e6891408::t_1ad76ccbb2568f 1-80
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_c99700e6891408::t_bb3a649cafc541 69,167,770-773
+  s_c99700e6891408::t_b3cb3b100421e2 774-775
+apps/bcs/crates/services/bcs-message-flow/tests/caller_owner_relay_contract.rs
+  s_c99700e6891408::t_6690ae765ec48a 96,153,213,242,420-422
+apps/bcs/scripts/e2e-test/caller_identity_story.sh
+  h_7ecb107b24dd7d 58-70
+apps/bcs/scripts/e2e-test/native_task_caller_story.py
+  h_7ecb107b24dd7d 1-320
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  h_7ecb107b24dd7d 16-19
+apps/bcs/crates/bootstrap/bcs/src/message_flow_metrics.rs
+  h_7ecb107b24dd7d 177-190
+apps/bcs/crates/bootstrap/bcs/tests/metrics_wrappers.rs
+  h_7ecb107b24dd7d 187-227,460-487
+devops/hook/check_secrets.py
+  h_7ecb107b24dd7d 329-335
+devops/hook/test_check_secrets.py
+  h_7ecb107b24dd7d 132-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2c9be76b862ebc973fb4c68bc2db574afefa9ade",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_7d9f4f65cedfaf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3e32aee1-425a-45d9-a866-5e98ac005613",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_c99700e6891408": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_c99700e6891408",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_eff5e7103f16a9": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7b84de6d-b85f-4b7c-907a-c67f6ff58970",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
