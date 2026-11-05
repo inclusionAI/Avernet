@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-network-tracing.workspace = true
 bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
 bcs-channel-api = { workspace = true }
@@ -52,6 +53,9 @@ reqwest         = { workspace = true }
 bcs-test-support = { workspace = true }
 
 [dev-dependencies]
+bcs-tracing-api = { workspace = true }
+bcs-network-tracing = { workspace = true, features = ["blocking", "reqwest13"] }
+bcs-provider-http = { workspace = true }
 bcs-collaboration-draft = { workspace = true }
 bcs-app-collaboration-draft = { workspace = true }
 bcs-message-flow = { workspace = true }

@@ -432,6 +432,7 @@ dependencies = [
  "bcs-message",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-network-tracing",
  "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
@@ -457,6 +458,7 @@ dependencies = [
  "bcs-storage-local",
  "bcs-system-message",
  "bcs-test-support",
+ "bcs-tracing-api",
  "bcs-user-directory-api",
  "bcs-user-identity",
  "bcs-webhook-client",
@@ -524,10 +526,12 @@ dependencies = [
  "bcs-interaction",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-network-tracing",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
+ "bcs-tracing-api",
  "futures",
  "hex",
  "percent-encoding",
@@ -1602,6 +1606,7 @@ name = "bcs-fuse-client"
 version = "0.1.4-beta.3"
 dependencies = [
  "bcs-config-api",
+ "bcs-network-tracing",
  "bcs-observability",
  "reqwest 0.12.28",
  "serde",
@@ -1730,8 +1735,10 @@ dependencies = [
  "bcs-group-store",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-network-tracing",
  "bcs-observability",
  "bcs-protocol",
+ "bcs-provider-http",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-services-container",
@@ -1742,6 +1749,7 @@ dependencies = [
  "bcs-storage-api",
  "bcs-telemetry",
  "bcs-test-support",
+ "bcs-tracing-api",
  "bcs-user-directory-api",
  "bytes",
  "chrono",
@@ -1801,6 +1809,7 @@ dependencies = [
  "async-trait",
  "bcs-config-api",
  "bcs-human-notify-api",
+ "bcs-network-tracing",
  "futures",
  "inventory",
  "jsonwebtoken",
@@ -1954,6 +1963,7 @@ name = "bcs-message-flow"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "axum",
  "bcs-app-group",
  "bcs-bot",
  "bcs-bot-store",
@@ -1974,7 +1984,10 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
+ "bcs-human-notify-api",
+ "bcs-human-notify-work-order",
  "bcs-message-store",
+ "bcs-network-tracing",
  "bcs-observability",
  "bcs-protocol",
  "bcs-relation",
@@ -1983,6 +1996,7 @@ dependencies = [
  "bcs-session-store",
  "bcs-system-message",
  "bcs-test-support",
+ "bcs-tracing-api",
  "chrono",
  "futures",
  "hex",
@@ -1993,6 +2007,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.20",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2020,6 +2035,20 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-network-tracing"
+version = "0.1.4-beta.3"
+dependencies = [
+ "axum",
+ "bcs-tracing-api",
+ "futures",
+ "reqwest 0.12.28",
+ "reqwest 0.13.5",
+ "tokio",
+ "tower",
+ "tower-http",
 ]
 
 [[package]]
@@ -2083,6 +2112,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-domain",
+ "bcs-network-tracing",
  "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
@@ -2370,8 +2400,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bcs-domain",
+ "bcs-network-tracing",
  "bcs-observability",
  "bcs-storage-api",
+ "bcs-tracing-api",
  "chrono",
  "percent-encoding",
  "reqwest 0.12.28",
@@ -2461,6 +2493,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "bcs-tracing-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]

@@ -18,9 +18,13 @@ import tempfile
 import threading
 import time
 import urllib.error
+from urllib.parse import urlencode
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+TRACE_QUERY_MARKER = 'redact-this-value'
 
 
 def free_port():
@@ -35,6 +39,7 @@ class Provider(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        self.server.traces.put((self.path, self.headers.get('X-E2E-Trace-Id'), self.headers.get('X-E2E-Span-Id')))
         # Group setup may emit unrelated welcome/inject messages. Track only
         # this story's user sends, including any invalid sends that leak through.
         if 'caller-e2e-message' in json.dumps(body.get('message', {})):
@@ -62,7 +67,8 @@ class Story:
     def request(self, method, path, body=None, status=200, headers=None):
         if body is None and method in ('POST', 'PUT', 'PATCH'):
             body = {}
-        hdr = {'Content-Type': 'application/json', 'X-Mock-User-Id': 'callere2eowner'}
+        hdr = {'Content-Type': 'application/json', 'X-Mock-User-Id': 'callere2eowner',
+               'X-E2E-Trace-Id': 'caller-network-e2e'}
         hdr.update(headers or {})
         req = urllib.request.Request(self.base + path, method=method, headers=hdr,
             data=None if body is None else json.dumps(body).encode())
@@ -122,9 +128,12 @@ class Story:
 
     def run(self):
         self.request('POST', '/me/ensure-human')
+        trace_query = urlencode({
+            'trace_secret': TRACE_QUERY_MARKER,
+        })
         self.registration = self.request('POST', '/providers', {
             'name': 'Caller E2E', 'auth': {'mode': 'static_bearer'}, 'protocol_version': '2.0',
-            'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback'})
+            'webhook_url': f'http://127.0.0.1:{self.provider.server_port}/callback?{trace_query}'})
         bot = self.request('POST', '/providers/' + self.registration['provider_id'] + '/bots', {
             'name': 'Caller E2E Bot', 'owners': ['callere2eowner'], 'provider_bot_ref': 'caller-bot'},
             headers={'Authorization': 'Bearer ' + self.registration['provider_admin_token']})
@@ -184,6 +193,35 @@ class Story:
         print(f'Caller HTTP/queue/provider E2E: {self.checks} HTTP assertions passed', flush=True)
 
 
+def verify_network_traces(path, provider):
+    raw = path.read_text()
+    records = json.loads(raw)
+    servers = [record for record in records if record['kind'] == 'http_server']
+    clients = [record for record in records if record['kind'] == 'http_client']
+    assert servers and clients, 'live server did not record both HTTP directions'
+    assert all(record['trace_id'] == 'caller-network-e2e' for record in servers), 'incoming trace header lost'
+    assert all(record['endpoint'] != '/health' for record in servers), 'health probe created a business trace'
+    assert all('?' not in record['endpoint'] for record in records), 'query leaked into trace metadata'
+    assert TRACE_QUERY_MARKER not in raw and 'test-token' not in raw, 'trace metadata contains credentials'
+    assert any(record['outcome'] == 'Http(401)' for record in servers), 'business auth failure was not traced'
+    assert any(record['outcome'] == 'Http(422)' for record in servers), 'business validation failure was not traced'
+    indexed = {record['span_id']: record for record in clients}
+    delivered = []
+    while not provider.traces.empty():
+        endpoint, trace_id, span_id = provider.traces.get_nowait()
+        assert span_id and int(span_id) in indexed, 'Provider received no matching client trace'
+        record = indexed[int(span_id)]
+        assert record['trace_id'] == trace_id, 'client trace propagation changed on the wire'
+        assert record['outcome'] == 'Http(200)', 'successful Provider call recorded an incorrect result'
+        assert record['request_size'] > 0, 'Provider request size was not measured'
+        assert record['response_size'] > 0, 'Provider response size was not measured'
+        assert record['endpoint'] == f'http://127.0.0.1:{provider.server_port}' + endpoint.split('?')[0]
+        delivered.append(endpoint)
+    assert any(endpoint.startswith('/callback?') for endpoint in delivered), 'query sanitization was not exercised'
+    assert '/sse' in delivered, 'streaming Provider delivery was not traced'
+    print(f'Live network tracing: {len(servers)} server and {len(clients)} client records verified', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
@@ -191,6 +229,7 @@ def main():
     binary = str(Path(args.binary).resolve())
     provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
     provider.received = queue.Queue()
+    provider.traces = queue.Queue()
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='bcs-caller-e2e-') as directory:
         root = Path(directory)
@@ -215,7 +254,9 @@ def main():
                    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
         # Keep instrumented LLVM_PROFILE_FILE from the runner for real server coverage.
         with (root / 'server.log').open('w') as log:
-            process = subprocess.Popen([binary, '-c', str(config_path)], cwd=root, env=env, stdout=log, stderr=log)
+            traces = root / 'network-traces.json'
+            process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces)],
+                cwd=root, env=env, stdout=log, stderr=log)
             try:
                 story = Story(f'http://127.0.0.1:{port}', key, provider)
                 for _ in range(150):
@@ -242,6 +283,8 @@ def main():
                 assert len(queued) == 1, 'expected one paused caller delivery'
                 process.send_signal(signal.SIGTERM)
                 process.wait(timeout=30)
+                assert process.returncode == 0, 'traced BCS did not shut down cleanly'
+                verify_network_traces(traces, provider)
                 process = subprocess.Popen([binary, '-c', str(config_path)], cwd=root, env=env, stdout=log, stderr=log)
                 for _ in range(150):
                     if process.poll() is not None:

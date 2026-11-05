@@ -1,6 +1,7 @@
 //! Caller-targeted history replay on the existing Provider chat.inject envelope.
 //! Ordinary inject ACK is not ready: completion must echo the exact snapshot and
 //! digest after applying all messages in the addressed Caller/session environment.
+use bcs_network_tracing::RequestBuilderExt;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -113,7 +114,7 @@ impl bcs_service_api::port::HistoryBackfillPort for HttpProviderTransport {
             .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
             .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
             .json(&body)
-            .send();
+            .send_traced();
         let deadline = tokio::time::Instant::now() + Duration::from_millis(HISTORY_COMPLETE_TOTAL_TIMEOUT_MS);
         let mut response = tokio::time::timeout_at(deadline, request_fut)
             .await

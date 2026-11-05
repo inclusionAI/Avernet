@@ -25,9 +25,11 @@ required-features = ["test-utils"]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-test-utils = []
+test-utils = ["dep:bcs-tracing-api"]
 
 [dependencies]
+bcs-network-tracing.workspace = true
+bcs-tracing-api = { workspace = true, optional = true }
 bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime

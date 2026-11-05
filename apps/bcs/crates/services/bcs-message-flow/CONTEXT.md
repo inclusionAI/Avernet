@@ -47,6 +47,16 @@ fail-closed: an unavailable or failed policy read logs and skips the external
 notification without failing the message flow, while mode/driver comparison is
 synchronous and injects no extra await after admission.
 
+The helper captures the public network-tracing provider, opaque parent and
+ambient propagation snapshot before spawning notification delivery. The
+request-owned retained terminal-event task captures them too, so Bot final
+events do not lose lineage before reaching the same helper. This adds no DB
+reads, persistence fields or retry behavior; the existing policy read remains
+one per eligible candidate. Explicit capture does not activate native SDK/log
+contexts or join detached notification tasks at shutdown. The tracing test
+drives real WebSend/BotEvent services through HTTP into the work-order backend,
+including delivery after the request scope ends and a disabled provider scope.
+
 IM queue hints are best-effort and appear only after ten seconds of continued
 Queued state. The Channel `/cacel` command (with `/cancel` compatibility alias)
 cancels the authenticated Human's newest still-unsent IM message in the current

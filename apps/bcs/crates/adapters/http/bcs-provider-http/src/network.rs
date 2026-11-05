@@ -1,3 +1,4 @@
+use bcs_network_tracing::ClientExt;
 use super::*;
 
 pub(super) async fn post_provider<T: DeserializeOwned>(
@@ -216,7 +217,7 @@ pub(super) async fn send_provider_request_with_policy(
     let request = request.json(body).build().map_err(|_| ServiceError::DeliveryNotSent {
         code: "provider_request_build_failed", retryable: false,
     })?;
-    let send = request_client.execute(request);
+    let send = request_client.execute_traced(request);
     let response_result =
         if let Some(response_header_timeout) = client_policy.response_header_timeout {
             match tokio::time::timeout(response_header_timeout, send).await {

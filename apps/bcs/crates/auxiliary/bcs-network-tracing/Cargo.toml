@@ -1,0 +1,24 @@
+[package]
+name = "bcs-network-tracing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+reqwest13 = ["dep:reqwest13"]
+blocking = ["reqwest/blocking"]
+
+[dependencies]
+reqwest13 = { package = "reqwest", version = "0.13", default-features = false, optional = true }
+bcs-tracing-api = { workspace = true }
+axum = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+futures = { workspace = true }
+tower-http = { workspace = true, features = ["catch-panic", "cors"] }
+
+[lints]
+workspace = true

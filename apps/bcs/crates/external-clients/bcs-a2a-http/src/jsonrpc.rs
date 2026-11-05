@@ -1,5 +1,6 @@
 //! A2A 1.0 JSON-RPC binding. No legacy method aliases or binding retries.
 use a2a::A2AError;
+use bcs_network_tracing::{ClientWithDefaults, RequestBuilderExt};
 use futures::stream::BoxStream;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -7,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 pub struct JsonRpcClient {
-    http: reqwest::Client,
+    http: ClientWithDefaults<reqwest::Client>,
     url: String,
     tenant: Option<String>,
 }
@@ -40,8 +41,9 @@ pub(super) fn decode(value: Value, id: &str) -> Result<Value, A2AError> {
 }
 
 impl JsonRpcClient {
-    pub fn new(http: reqwest::Client, url: String, tenant: Option<String>) -> Self {
-        Self { http, url, tenant }
+    /// Supply custom defaults via `ClientWithDefaults`, before trace propagation.
+    pub fn new(http: impl Into<ClientWithDefaults<reqwest::Client>>, url: String, tenant: Option<String>) -> Self {
+        Self { http: http.into(), url, tenant }
     }
     fn request<T: Serialize>(&self, method: &str, params: &T) -> Result<(String, Value), A2AError> {
         let id = REQUEST_ID.fetch_add(1, Ordering::Relaxed).to_string();
@@ -62,8 +64,8 @@ impl JsonRpcClient {
     ) -> Result<R, A2AError> {
         let (id, request) = self.request(method, params)?;
         tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            let mut response = self.http.post(&self.url).header("A2A-Version", "1.0")
-                .json(&request).send().await
+            let mut response = self.http.request(|http| http.post(&self.url).header("A2A-Version", "1.0")
+                .json(&request)).send_traced().await
                 .map_err(|_| A2AError::internal("A2A JSON-RPC request interrupted"))?;
             let status = response.status();
             let mut body = Vec::new();

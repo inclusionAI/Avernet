@@ -1,5 +1,6 @@
 //! Protected Caller send over the existing Provider webhook. Association
 //! fields reuse envelope routing; dispatch control remains internal to BCS.
+use bcs_network_tracing::RequestBuilderExt;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -210,7 +211,7 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             .header(bcs_protocol::http::BCN_TRANSPORT_HEADER, transport)
             .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
             .json(&body)
-            .send();
+            .send_traced();
         let response = match tokio::time::timeout(
             Duration::from_millis(command.callback_timeout_ms),
             request_fut,
@@ -402,7 +403,7 @@ mod dns_rebinding_pinning_tests {
         let response = pinned
             .post(guarded.as_str())
             .json(&serde_json::json!({ "probe": true }))
-            .send()
+            .send_traced()
             .await
             .expect("the pinned client must connect to the guarded addrs");
         assert!(response.status().is_success());

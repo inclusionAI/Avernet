@@ -320,7 +320,7 @@ impl BotDeliveryPort for A2aHttpTransport {
         };
         if !finished {
             let transport = self.clone();
-            tokio::spawn(async move {
+            tokio::spawn(bcs_network_tracing::in_current_context(async move {
                 let _lease = lease;
                 let result=if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll {
                     transport.drive_poll(&mut record,&mut projection,receiver).await
@@ -328,7 +328,7 @@ impl BotDeliveryPort for A2aHttpTransport {
                 if result.is_err() {
                     transport.tracking_failed(&mut record).await;
                 }
-            });
+            }));
         }
         Ok(BotDeliveryResult { target_bot_id: bot_id.clone(), delivered: true, error: None })
     }

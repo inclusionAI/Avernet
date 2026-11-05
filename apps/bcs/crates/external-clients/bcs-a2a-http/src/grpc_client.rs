@@ -33,11 +33,41 @@ impl GrpcClient {
         request
     }
 
+    async fn invoke<T, R, F, Fut>(&self, body: T, method: &'static str, invoke: F)
+        -> Result<tonic::Response<R>, Status>
+    where
+        F: FnOnce(A2aServiceClient<Channel>, Request<T>) -> Fut,
+        Fut: Future<Output = Result<tonic::Response<R>, Status>>,
+    {
+        use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo, with_context};
+        let mut request = self.request(body, method);
+        let target = self.headers.get("sofa_head_target_app").and_then(|v| v.to_str().ok()).unwrap_or("");
+        let service = self.headers.get("sofa_head_target_service").and_then(|v| v.to_str().ok()).unwrap_or("lf.a2a.v1.A2AService");
+        let incoming = request.metadata().iter().filter_map(|entry| match entry {
+            tonic::metadata::KeyAndValueRef::Ascii(key, value) => value.to_str().ok().map(|value| (key.to_string(), value.to_owned())),
+            tonic::metadata::KeyAndValueRef::Binary(_, _) => None,
+        }).collect();
+        let call = Call::start(&RequestInfo { kind: Kind::RpcClient, method, endpoint: service, route: None, target_app: target, request_size: None }, &incoming);
+        for name in call.remove_headers() {
+            if let Ok(name) = tonic::metadata::MetadataKey::<tonic::metadata::Ascii>::from_bytes(name.as_bytes()) {
+                request.metadata_mut().remove(name);
+            }
+        }
+        for (name, value) in call.headers() {
+            if let (Ok(name), Ok(value)) = (tonic::metadata::MetadataKey::<tonic::metadata::Ascii>::from_bytes(name.as_bytes()), tonic::metadata::MetadataValue::try_from(value.as_str())) {
+                request.metadata_mut().insert(name, value);
+            }
+        }
+        let result = with_context(call.context(), invoke(self.sdk.clone(), request)).await;
+        call.finish(Outcome::Rpc(result.as_ref().err().map(|s| s.code() as u32).unwrap_or(0)), None);
+        result
+    }
+
     pub async fn send_message(&self, request: &a2a::SendMessageRequest)
         -> Result<a2a::SendMessageResponse, A2AError> {
         let mut body = pbconv::to_proto_send_message_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.sdk.clone().send_message(self.request(body,"SendMessage")).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "SendMessage", |mut sdk, request| async move { sdk.send_message(request).await }).await.map_err(grpc_error)?.into_inner();
         pbconv::from_proto_send_message_response(&response)
             .ok_or_else(|| A2AError::parse_error("empty A2A gRPC submission response"))
     }
@@ -46,21 +76,21 @@ impl GrpcClient {
         -> Result<BoxStream<'static, Result<a2a::StreamResponse, A2AError>>, A2AError> {
         let mut body = pbconv::to_proto_send_message_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.sdk.clone().send_streaming_message(self.request(body,"SendStreamingMessage")).await.map_err(grpc_error)?;
+        let response = self.invoke(body, "SendStreamingMessage", |mut sdk, request| async move { sdk.send_streaming_message(request).await }).await.map_err(grpc_error)?;
         Ok(events(response.into_inner()))
     }
 
     pub async fn get_task(&self, request: &a2a::GetTaskRequest) -> Result<a2a::Task, A2AError> {
         let mut body = pbconv::to_proto_get_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.sdk.clone().get_task(self.request(body,"GetTask")).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "GetTask", |mut sdk, request| async move { sdk.get_task(request).await }).await.map_err(grpc_error)?.into_inner();
         Ok(pbconv::from_proto_task(&response))
     }
 
     pub async fn cancel_task(&self, request: &a2a::CancelTaskRequest) -> Result<a2a::Task, A2AError> {
         let mut body = pbconv::to_proto_cancel_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.sdk.clone().cancel_task(self.request(body,"CancelTask")).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "CancelTask", |mut sdk, request| async move { sdk.cancel_task(request).await }).await.map_err(grpc_error)?.into_inner();
         Ok(pbconv::from_proto_task(&response))
     }
 
@@ -68,7 +98,7 @@ impl GrpcClient {
         -> Result<BoxStream<'static, Result<a2a::StreamResponse, A2AError>>, A2AError> {
         let mut body = pbconv::to_proto_subscribe_to_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.sdk.clone().subscribe_to_task(self.request(body,"SubscribeToTask")).await.map_err(grpc_error)?;
+        let response = self.invoke(body, "SubscribeToTask", |mut sdk, request| async move { sdk.subscribe_to_task(request).await }).await.map_err(grpc_error)?;
         Ok(events(response.into_inner()))
     }
 }

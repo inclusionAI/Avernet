@@ -122,7 +122,7 @@ pub(crate) async fn spawn_human_mention_notify(
     };
     let port = port.clone();
     let sessions = sessions.clone();
-    tokio::spawn(async move {
+    tokio::spawn(bcs_tracing_api::in_current_context(async move {
         // Resolve optional display metadata off the message's critical path and
         // only for an actual notification. Never borrow a title from another group.
         if let Some(sessions) = sessions.filter(|_| !notification.session_id.is_empty()) {
@@ -141,7 +141,7 @@ pub(crate) async fn spawn_human_mention_notify(
             }
         }
         let _ = port.notify_mentioned_humans(notification).await;
-    });
+    }));
 }
 
 #[cfg(test)]
