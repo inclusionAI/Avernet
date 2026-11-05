@@ -1,7 +1,7 @@
 """End-to-end coverage for the admin device-repair endpoint.
 
 Repairs a LIVE device record through
-``POST /api/v1/admin/devices/{device_uuid}/status`` against the real DI
+``POST /api/v1/admin/devices/{device_uuid}/repair`` against the real DI
 container and its in-memory SQLite database:
 
 - status and provider binding written together, one call
@@ -62,7 +62,7 @@ class TestAdminDeviceRepair:
         self._insert_device(device_uuid=device_uuid, tenant=api.tenant)
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={
                 "status": "ACTIVE",
@@ -93,7 +93,7 @@ class TestAdminDeviceRepair:
         self._insert_device(device_uuid=device_uuid, status="ACTIVE", tenant=api.tenant)
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={"provider_device_id": "sandbox-rebound", "operator": "ops-alice"},
         )
@@ -121,7 +121,7 @@ class TestAdminDeviceRepair:
         )
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={"status": "FAILED", "operator": "ops-alice"},
         )
@@ -145,7 +145,7 @@ class TestAdminDeviceRepair:
         self._insert_device(device_uuid=device_uuid, tenant=api.tenant)
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={
                 "status": bad_status,
@@ -170,7 +170,7 @@ class TestAdminDeviceRepair:
         self._insert_device(device_uuid=device_uuid, tenant=api.tenant)
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={"provider_device_id": "x" * 129, "operator": "ops-bob"},
         )
@@ -192,7 +192,7 @@ class TestAdminDeviceRepair:
         )
 
         response = await api.client.post(
-            f"/api/v1/admin/devices/{device_uuid}/status",
+            f"/api/v1/admin/devices/{device_uuid}/repair",
             params=api.params(),
             json={"status": "UPDATING", "operator": "ops-carol"},
         )
