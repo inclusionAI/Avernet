@@ -80,7 +80,6 @@ async def resolve_skill(materialiser, ctx, snapshot, entry):
             expected_name=entry.name,
         )
         if isinstance(ready, PublicSkillPreview) and budget is not None:
-            budget.charge(ready.content.download_size)
             if reason := budget.expired():
                 raise ValueError(reason)
     else:

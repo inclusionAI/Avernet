@@ -24,6 +24,7 @@ SCOPE = BotCapabilityScope("bot", "owner", "openclaw", ("openclaw",), "teamclaw"
 def test_bulk_replacement_reuses_name_and_reports_actual_noop():
     repo = CapabilityDesiredStateRepository(_Database())
     first = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(ResolvedSkillSetWrite("expert", "works"),),
         remove_names=(),
@@ -31,6 +32,7 @@ def test_bulk_replacement_reuses_name_and_reports_actual_noop():
         platform_default_codes=frozenset(),
     )
     repeated = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(ResolvedSkillSetWrite("expert", "works"),),
         remove_names=(),
@@ -78,6 +80,9 @@ def test_bulk_members_exclusions_and_installations_commit_and_rollback_together(
         add_mcps=frozenset({(10, "default.mcp"), (10, "policy.mcp")}),
     )
     result = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={
+            "expert.mcp": {"name": "expert.mcp", "description": None, "icon": None}
+        },
         scope=SCOPE,
         sets=(
             ResolvedSkillSetWrite("expert", skill_ids=(2,), mcp_codes=("expert.mcp",)),
@@ -94,6 +99,7 @@ def test_bulk_members_exclusions_and_installations_commit_and_rollback_together(
     assert after.mcp_installations == {"expert.mcp"}
     with pytest.raises(Exception):
         repo.replace_apply_skill_sets(
+            mcp_catalog_entries={},
             scope=SCOPE,
             sets=(ResolvedSkillSetWrite("expert", skill_ids=(9999,)),),
             remove_names=(),
@@ -207,6 +213,7 @@ def test_excluded_default_skill_and_policy_mcp_allow_explicit_direct_control():
         )
         session.add(SkillSetSkill(skill_set_id=10, skill_id=1, env="dev"))
     repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -268,6 +275,7 @@ def test_delete_is_by_planned_name_in_current_scope_not_previous_id():
         engine_type="openclaw",
     )
     result = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=("expert",),
@@ -321,6 +329,7 @@ def test_default_snapshot_cleanup_handles_unavailable_raw_members_and_preserves_
             )
         )
     repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -371,6 +380,7 @@ def test_storage_failure_rolls_back_exclusion_and_members_as_one_unit():
     event.listen(db.engine, "before_cursor_execute", reject_members)
     with pytest.raises(RuntimeError, match="injected storage failure"):
         repo.replace_apply_skill_sets(
+            mcp_catalog_entries={},
             scope=SCOPE,
             sets=(ResolvedSkillSetWrite("expert", skill_ids=(2,)),),
             remove_names=(),
@@ -412,6 +422,7 @@ def test_current_direct_same_runtime_name_blocks_new_set_even_if_later_direct_re
     )
     with pytest.raises(SkillRuntimeNameConflictError):
         repo.replace_apply_skill_sets(
+            mcp_catalog_entries={},
             scope=SCOPE,
             sets=(ResolvedSkillSetWrite("expert", skill_ids=(2,)),),
             remove_names=(),
@@ -476,6 +487,7 @@ def test_default_restore_rechecks_direct_ownership_before_omitted_set_deletion()
         )
         session.add(SkillSetSkill(skill_set_id=10, skill_id=1, env="dev"))
     repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -493,6 +505,7 @@ def test_default_restore_rechecks_direct_ownership_before_omitted_set_deletion()
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
     ):
         repo.replace_apply_skill_sets(
+            mcp_catalog_entries={},
             scope=SCOPE,
             sets=(),
             remove_names=(),
@@ -532,6 +545,7 @@ def test_planned_default_exclusion_does_not_expand_to_later_member():
             ]
         )
     repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -576,6 +590,7 @@ def test_removing_stale_default_exclusion_does_not_restore_other_excluded_member
             ]
         )
     repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -608,6 +623,7 @@ def test_default_confirmation_distinguishes_noop_exclusion_from_unrelated_set_cr
         session.add(SkillSetSkill(skill_set_id=10, skill_id=1, env="dev"))
     change = DefaultExclusionChange(add_skills=frozenset({(10, 1)}))
     first = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(),
         remove_names=(),
@@ -616,6 +632,7 @@ def test_default_confirmation_distinguishes_noop_exclusion_from_unrelated_set_cr
     )
     assert first.details["default_removed"] is True
     repeated = repo.replace_apply_skill_sets(
+        mcp_catalog_entries={},
         scope=SCOPE,
         sets=(ResolvedSkillSetWrite("new"),),
         remove_names=(),

@@ -9,6 +9,7 @@ import logging
 import time
 from urllib.parse import urlsplit
 
+from agentclaw.community.core.apply_engine.fetch_budget import current_fetch_budget
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersion,
     CanonicalCenterVersionIdentity,
@@ -142,6 +143,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             return self._download_exact(
                 request, lambda _stage: None, lambda *_args: None
             )
+        except SkillVersionMaterializationError:
+            raise
         except Exception as exc:
             raise SkillVersionMaterializationError(
                 "Exact package preview failed"
@@ -329,10 +332,22 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             raise ValueError("Skill Center returned a different exact Version")
         expected_digest = exact.sha256.lower()
         advance_stage("package_download")
+        budget = current_fetch_budget()
+        if budget is not None and (reason := budget.expired()):
+            raise SkillVersionMaterializationError(reason, stage="package_download")
         response = self._http.get(exact.download_url, timeout=30.0)
         capture(exact.download_url, response)
-        response.raise_for_status()
-        package_bytes = bytes(response.content)
+        if budget is not None:
+            # HttpClient.get eagerly consumes even an error response body.
+            package_bytes = bytes(response.content)
+            budget.charge(len(package_bytes))
+            response.raise_for_status()
+            if reason := budget.expired():
+                raise SkillVersionMaterializationError(reason, stage="package_download")
+        else:
+            # Preserve the Reference/Sync caller's historical error ordering.
+            response.raise_for_status()
+            package_bytes = bytes(response.content)
         advance_stage("digest_verify")
         if hashlib.sha256(package_bytes).hexdigest() != expected_digest:
             raise ValueError("downloaded package digest does not match SC")

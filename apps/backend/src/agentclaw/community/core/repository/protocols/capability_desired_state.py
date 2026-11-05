@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.skill_set_apply import (
@@ -34,7 +34,16 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def replace_apply_skill_sets(self, *, scope: BotCapabilityScope, sets: tuple[ResolvedSkillSetWrite, ...], remove_names: tuple[str, ...], default_change: DefaultExclusionChange, platform_default_codes: frozenset[str]) -> DesiredStateMutation:
+    def replace_apply_skill_sets(
+        self,
+        *,
+        scope: BotCapabilityScope,
+        sets: tuple[ResolvedSkillSetWrite, ...],
+        remove_names: tuple[str, ...],
+        default_change: DefaultExclusionChange,
+        platform_default_codes: frozenset[str],
+        mcp_catalog_entries: Mapping[str, Mapping[str, Any]],
+    ) -> DesiredStateMutation:
         """Commit planned named Sets, members, exclusions and Installation atomically."""
         ...
 

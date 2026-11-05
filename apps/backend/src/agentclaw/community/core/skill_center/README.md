@@ -144,6 +144,7 @@ consumes:
   - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
+  - agentclaw.community.core.apply_engine.fetch_budget # execution ledger shared by exact package acquisition; absent outside Apply
   - agentclaw.community.core.ports.mcp_config  # shared Direct MCP preserve / clear / replace command types
   - agentclaw.community.core.expert_market
   - agentclaw.community.core.digital_employee.contracts
