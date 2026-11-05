@@ -241,6 +241,8 @@ class QueueTaskMessageDispatcher:
         cache_key = f"run:{run_id}:seq"
         deadline = asyncio.get_event_loop().time() + timeout if timeout else None
         last_status_check: float | None = None
+        # An observation, not a generation/fencing token: re-entry may reopen a run.
+        completed_candidate: tuple[Any, str] | None = None
 
         try:
             while True:
@@ -271,11 +273,13 @@ class QueueTaskMessageDispatcher:
                     except ValueError:
                         pass
 
-                # 3. seq 有变化 → 查 DB 取新 chunks
+                # After observing completion, drain even with a stale/missing cache.
                 fetched = 0
-                if wm_seq > last_seq:
+                drained_completion = False
+                if wm_seq > last_seq or completed_candidate is not None:
                     chunks = self._chunk_repository.get_chunks_after(run_id, last_seq)
                     fetched = len(chunks)
+                    drained_completion = not chunks and completed_candidate is not None
                     for chunk_rec in chunks:
                         last_seq = chunk_rec.seq
                         if chunk_rec.chunk_type == "agent":
@@ -322,7 +326,7 @@ class QueueTaskMessageDispatcher:
                 if fetched:
                     # 活跃流：本轮取到新 chunk，重置到起步档保持低取数延迟
                     poll_interval = _POLL_BASE_INTERVAL_SECONDS
-                else:
+                elif not drained_completion:
                     # seq 没变（或行尚不可见）：指数退避，空闲越久间隔越长，
                     # 空转频率从 20 QPS 降到最低 2 QPS
                     await asyncio.sleep(poll_interval)
@@ -333,7 +337,8 @@ class QueueTaskMessageDispatcher:
                 #    _RUN_STATUS_CHECK_INTERVAL_SECONDS 秒查一次 DB。
                 now = asyncio.get_event_loop().time()
                 if (
-                    last_status_check is None
+                    drained_completion
+                    or last_status_check is None
                     or now - last_status_check >= _RUN_STATUS_CHECK_INTERVAL_SECONDS
                 ):
                     last_status_check = now
@@ -345,6 +350,22 @@ class QueueTaskMessageDispatcher:
                             content=f"run terminated with status {run.status}",
                         )
                         return
+                    if run and run.status == "COMPLETED":
+                        content = (
+                            run.result_content_long
+                            if run.result_content_long is not None
+                            else run.result_content or ""
+                        )
+                        current = (run.completed_at, content)
+                        if drained_completion and current == completed_candidate:
+                            # Revalidate without throttling before synthetic success.
+                            # Separate reads do not fence a concurrent writer.
+                            yield StreamChunk(type="final", content=content)
+                            return
+                        # Changed completion must get its own post-observation drain.
+                        completed_candidate = current
+                    else:
+                        completed_candidate = None
 
         finally:
             if self._should_cleanup_chunks():
