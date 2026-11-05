@@ -13,6 +13,23 @@ export function canReadRun(scope: RunViewScope, run: RunIdentity): boolean {
     : run.origin_bot_id === `${botId}:${ownerId}`);
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const requestHash = (key: string) => createHash('sha256').update(key, 'utf8').digest('hex');
+
+// Ordinary associations do not encode node or group identity. Ensure every
+// flat item's actual request hash is unique across the entire parent snapshot,
+// including items that are not yet bound. Approved attempts snapshots retain
+// their existing legacy behavior and are not ordinary request associations.
+function readGroups(map: Record<string, unknown>, parentFlowId: string): FanoutStateView[] {
+  const groups = Object.entries(map).map(([nodeId, value]) => readFanoutState(value, parentFlowId, nodeId));
+  const seen = new Set<string>();
+  for (const group of groups) for (const item of group.children) for (const attempt of item.attempts) {
+    if (attempt.associationKey === null) continue;
+    const key = requestHash(attempt.associationKey);
+    if (seen.has(key)) throw new FanoutReadError('invalid_state', 'Ambiguous fanout association identity');
+    seen.add(key);
+  }
+  return groups;
+}
 const activeStatuses = new Set(['dispatch_pending', 'dispatch_unknown', 'running', 'waiting', 'cancel_requested']);
 
 export class RunSubworkflowsService implements RunSubworkflowsReader {
@@ -63,23 +80,35 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
 
   private async visibility(group: FanoutStateView, scope: (id: string) => Promise<RunViewScope>, parentScope: RunViewScope) {
     const current = group.children.map(item => ({ item, attempt: item.attempts.find(a => a.attemptNumber === item.activeAttemptNumber)! }));
-    const identities = new Map((await this.store.readIdentities(current.map(({ attempt }) => attempt.childFlowId))).map(row => [row.flow_id, row]));
     const childScope = await scope(group.childWorkflowId);
-    const visible = current.filter(({ attempt }) => {
-      const child = identities.get(attempt.childFlowId);
-      // Missing/unproven origins and foreign workflows never inherit parent access.
-      return child && child.workflow_id === group.childWorkflowId && canReadRun(childScope, child);
+    const legacyIds = current.flatMap(({ attempt }) => attempt.associationKey === null && attempt.nativeFlowId !== null
+      ? [attempt.nativeFlowId] : []);
+    // Flat children are not observable without authoritative group provenance;
+    // do not query association storage when its result cannot change that.
+    const legacy = legacyIds.length ? await this.store.readIdentities(legacyIds) : [];
+    const identities = new Map(legacy.map(row => [row.flow_id, row]));
+    const visible = current.flatMap(({ item, attempt }) => {
+      if (attempt.nativeFlowId === null) return [];
+      // Ordinary associations prove only parent + request key, not the group,
+      // node or item. Legacy flat checkpoints can be forged by ordinary POST.
+      // Neither is enough authority to reveal a flat child; only the already
+      // approved attempts-format legacy path remains observable.
+      const child = attempt.associationKey === null ? identities.get(attempt.nativeFlowId) : undefined;
+      return child && child.workflow_id === group.childWorkflowId && canReadRun(childScope, child)
+        ? [{ item, attempt, child }] : [];
     });
     return { visible, full: parentScope === 'all' && childScope === 'all' && visible.length === current.length,
-      authorization: [parentScope, childScope, visible.map(({ attempt }) => identities.get(attempt.childFlowId))] };
+      authorization: [parentScope, childScope, visible.map(({ child }) => child)] };
   }
 
   async inspectRun(actor: RunReader, flowId: string): Promise<RunReadInspection> {
     const { run, scope, parentScope } = await this.authorizedRun(actor, flowId);
-    const groups = Object.entries(readFanoutMap(run)).map(([nodeId, value]) => readFanoutState(value, flowId, nodeId));
+    const groups = readGroups(readFanoutMap(run), flowId);
     let restricted = false;
     for (const group of groups) if (!(await this.visibility(group, scope, parentScope)).full) restricted = true;
-    return { run, managed: groups.length > 0, restricted,
+    // The incarnation marker is internal proof, not part of run detail APIs.
+    const { ordinary_run_marker: _marker, ...publicRun } = run;
+    return { run: publicRun, managed: groups.length > 0, restricted,
       groups: groups.map(group => ({ nodeId: group.groupNodeId, groupExecutionId: group.groupExecutionId })) };
   }
 
@@ -91,7 +120,7 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
     const { run, scope, parentScope } = await this.authorizedRun(actor, flowId);
     const map = readFanoutMap(run);
     if (!Object.hasOwn(map, nodeId)) throw new FanoutReadError('not_found', 'No persisted fanout for this node');
-    const group = readFanoutState(map[nodeId], flowId, nodeId);
+    const group = readGroups(map, flowId).find(value => value.groupNodeId === nodeId)!;
     if (group.groupExecutionId !== query.groupExecutionId) throw new FanoutReadError('identity_conflict', 'Group execution changed; refresh the parent run');
     const { visible, full, authorization } = await this.visibility(group, scope, parentScope);
     const snapshotId = hash([actor, group.groupExecutionId, group.revision, group.parentFlowId, group.groupNodeId, authorization, visible]);
@@ -113,7 +142,7 @@ export class RunSubworkflowsService implements RunSubworkflowsReader {
     for (const { attempt } of visible) counts[countKey[attempt.status] ?? 'pendingCount']++;
     const children = visible.slice(offset, offset + limit).map(({ item, attempt }, index) => ({
       displayIndex: offset + index, ...(full ? { itemIndex: item.itemIndex } : {}), itemId: item.itemId,
-      attemptNumber: attempt.attemptNumber, childFlowId: attempt.childFlowId, status: attempt.status, error: attempt.error,
+      attemptNumber: attempt.attemptNumber, childFlowId: attempt.nativeFlowId!, status: attempt.status, error: attempt.error,
     }));
     const nextOffset = offset + children.length;
     return { schemaVersion: 'fanout.v1', parentFlowId: flowId, groupNodeId: nodeId, groupExecutionId: group.groupExecutionId,

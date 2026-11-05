@@ -10,11 +10,16 @@ export type RunListMetadata = RunIdentity & {
   status: string; workflow_title: string | null; started_at: number; completed_at: number | null;
   total_duration_ms: number | null; [key: string]: unknown;
 };
-export type StoredRunSnapshot = RunListMetadata & { state_json: string | null; origin_session_key: string | null; origin_session_id: string | null };
+export type StoredRunSnapshot = RunListMetadata & { state_json: string | null; origin_session_key: string | null; origin_session_id: string | null;
+  ordinary_run_marker?: string | null };
+/** Internal proof; markers are only used to pin authorization/cursors and are never returned as API data. */
+export type AssociatedRunIdentity = RunIdentity & { request_key_hash: string; parent_run_marker: string; child_run_marker: string };
+export type AssociationCandidate = { requestKeyHash: string; nativeFlowId: string };
 export interface RunSubworkflowsStore {
   listRuns(query: AuthorizedRunListQuery, scopes: Map<string, RunViewScope> | null): Promise<AuthorizedRunList>;
   readRun(flowId: string): Promise<StoredRunSnapshot | null>;
   readIdentities(flowIds: string[]): Promise<RunIdentity[]>;
+  readAssociatedIdentities(parent: StoredRunSnapshot, childWorkflowId: string, candidates: AssociationCandidate[]): Promise<AssociatedRunIdentity[]>;
 }
 export type AuthorizedRunListQuery = {
   workflowId?: string; botId?: string; status?: string; statuses?: string[]; from?: number; to?: number;
@@ -25,7 +30,7 @@ export type AuthorizedWorkflowStats = { workflow_id: string; workflow_title: str
 export type FanoutReadErrorCode = 'unauthenticated' | 'forbidden' | 'not_found' | 'invalid_query'
   | 'identity_conflict' | 'snapshot_changed' | 'invalid_state' | 'unavailable';
 export class FanoutReadError extends Error {
-  constructor(public readonly code: FanoutReadErrorCode, message: string) { super(message); }
+  constructor(public readonly code: FanoutReadErrorCode, message: string, options?: ErrorOptions) { super(message, options); }
 }
 export type FanoutErrorSummary = { category: string; code: string; message: string; retryable: boolean; sourceNodeId?: string };
 export type FanoutChildView = {

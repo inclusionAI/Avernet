@@ -11,12 +11,12 @@ import type { IDatabase, FlowControlAppConfig } from '@avernet/clawweb-shared/se
 type ObjectValue = Record<string, unknown>;
 type Child = ObjectValue & {
   parentFlowId: string; parentNodeId: string; groupExecutionId: string; itemId: string;
-  itemIndex: number; attemptNumber: number; childFlowId: string; sessionKey: string;
-  stateDirRef: string; depth: number; params: ObjectValue; status: string;
+  itemIndex: number; attemptNumber: number; childFlowId: string; sessionKey?: string;
+  stateDirRef?: string; depth: number; params: ObjectValue; status: string;
 };
 type Group = ObjectValue & {
   parentFlowId: string; groupNodeId: string; groupExecutionId: string; revision: number;
-  status: string; deadlineAt: string; childWorkflow: ObjectValue; childPublishedVersion: number; children: Child[];
+  status: string; deadlineAt: string; childWorkflow: ObjectValue; childPublishedVersion?: number; children: Child[];
 };
 type RunRow = { flow_id: string; workflow_id: string; status: string; origin_session_key: string | null; state_json: string | null };
 export type FanoutChildRecord = {
@@ -63,6 +63,16 @@ function canonical(value: unknown): string {
 }
 function equal(a: unknown, b: unknown): boolean { return canonical(a) === canonical(b); }
 function digest(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex'); }
+/** ClawMind workflow-dependencies.ts sorts keys lexically, including integer-like keys. */
+function canonicalWorkflow(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkflow).join(',')}]`;
+  if (object(value)) return `{${Object.keys(value).sort().filter(key => value[key] !== undefined)
+    .map(key => `${JSON.stringify(key)}:${canonicalWorkflow(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+function workflowDigest(value: unknown): string {
+  return `sha256:${createHash('sha256').update(canonicalWorkflow(value), 'utf8').digest('hex')}`;
+}
 /** Match buildChildFlowState's legacy string-valued parameter boundary. */
 function legacyParams(params: ObjectValue): Record<string, string> {
   return Object.fromEntries(Object.entries(params).map(([key, value]) => [key, typeof value === 'string' ? value : JSON.stringify(value)]));
@@ -70,6 +80,51 @@ function legacyParams(params: ObjectValue): Record<string, string> {
 /** Credential-bearing transport fields are neither stored nor returned by this API. */
 function clean<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (key, item) => credentialKeys.has(key) ? undefined : item)) as T;
+}
+// Inside immutable workflow specs, credential-named fields are permitted only
+// as unresolved, whole-value references. Literal/mixed values fail closed:
+// deleting one would change the spec digest and retaining it could leak secrets.
+function safeCredentialTemplate(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value === 'string') return /^\{\{\s*(?:params|item|nodeOutput|input\.params)(?:\.[\w@-]+(?:\[\d+\])*)+\s*\}\}$/.test(value);
+  if (Array.isArray(value)) return value.every(safeCredentialTemplate);
+  return object(value) && Object.values(value).every(safeCredentialTemplate);
+}
+function safeWorkflowSnapshot(value: unknown): unknown {
+  const snapshot: unknown = JSON.parse(JSON.stringify(value));
+  const visit = (item: unknown): void => {
+    if (Array.isArray(item)) { item.forEach(visit); return; }
+    if (!object(item)) return;
+    for (const [key, child] of Object.entries(item)) {
+      if (credentialKeys.has(key) && !safeCredentialTemplate(child)) {
+        throw new FanoutStorageError(400, 'Workflow snapshot contains unsafe credential values', 'UNSAFE_WORKFLOW_CREDENTIALS');
+      }
+      visit(child);
+    }
+  };
+  visit(snapshot);
+  return snapshot;
+}
+/** Preserve validated immutable specs verbatim while cleaning other group fields. */
+function cleanGroup(value: ObjectValue): ObjectValue {
+  const spec = value.childWorkflow === undefined ? undefined : safeWorkflowSnapshot(value.childWorkflow);
+  const resolvedSpec = object(value.childResolved) && value.childResolved.spec !== undefined
+    ? safeWorkflowSnapshot(value.childResolved.spec) : undefined;
+  const group = clean(value);
+  if (spec !== undefined) group.childWorkflow = spec;
+  if (resolvedSpec !== undefined && object(group.childResolved)) group.childResolved.spec = resolvedSpec;
+  return group;
+}
+/** Preserve the managed child's immutable spec; only trusted durable groups survive checkpoints. */
+function cleanChildState(value: ObjectValue, preserveGroups = false): ObjectValue {
+  const spec = value.workflowSnapshot === undefined ? undefined : safeWorkflowSnapshot(value.workflowSnapshot);
+  const state = clean(value);
+  if (spec !== undefined) state.workflowSnapshot = spec;
+  if (preserveGroups && object(value.subworkflowFanouts)) {
+    state.subworkflowFanouts = Object.fromEntries(Object.entries(value.subworkflowFanouts)
+      .map(([key, group]) => [key, object(group) ? cleanGroup(group) : clean(group)]));
+  }
+  return state;
 }
 function parseState(raw: string | null): ObjectValue {
   if (raw === null) return {};
@@ -98,22 +153,47 @@ function validateGroup(value: unknown, parentFlowId: string, nodeId: string): as
   valid((text(config.items) || (Array.isArray(config.items) && config.items.every(object)))
     && Array.isArray(config.itemIdFrom) && config.itemIdFrom.length > 0 && config.itemIdFrom.every(text), 'Invalid fanout items');
   valid(integer(config.concurrency, 1) && typeof config.groupTimeoutSeconds === 'number' && Number.isFinite(config.groupTimeoutSeconds)
-    && config.groupTimeoutSeconds > 0 && typeof config.cancelGraceSeconds === 'number'
-    && Number.isFinite(config.cancelGraceSeconds) && config.cancelGraceSeconds > 0, 'Invalid fanout limits');
-  valid(integer(value.childPublishedVersion, 1), 'Invalid child published version');
+    && config.groupTimeoutSeconds > 0 && (config.cancelGraceSeconds === undefined || (typeof config.cancelGraceSeconds === 'number'
+    && Number.isFinite(config.cancelGraceSeconds) && config.cancelGraceSeconds > 0)), 'Invalid fanout limits');
+  valid(value.childPublishedVersion === undefined || integer(value.childPublishedVersion, 1), 'Invalid child published version');
   valid(object(value.childWorkflow) && text(value.childWorkflow.id)
     && (value.childWorkflow.version === undefined || integer(value.childWorkflow.version, -1))
     && Array.isArray(value.childWorkflow.nodes) && value.childWorkflow.nodes.every(node => object(node) && text(node.id) && object(node.executor)), 'Invalid child workflow snapshot');
+  if (value.childResolved !== undefined) {
+    const resolved = value.childResolved;
+    valid(object(resolved) && resolved.id === value.childWorkflow.id && object(resolved.spec)
+      && resolved.spec.id === value.childWorkflow.id && workflowDigest(resolved.spec) === workflowDigest(value.childWorkflow)
+      && text(resolved.digest) && typeof resolved.absolutePath === 'string'
+      && object(resolved.pack) && ['id', 'version', 'root', 'digest'].every(key => typeof resolved.pack[key] === 'string')
+      && object(resolved.source) && ['workspace-pack', 'configured-pack', 'remote-snapshot', 'db', 'deploy-history'].includes(String(resolved.source.kind))
+      && (!['workspace-pack', 'configured-pack'].includes(String(resolved.source.kind)) || text(resolved.source.root))
+      && (resolved.workflowVersion === undefined || (typeof resolved.workflowVersion === 'number' && Number.isFinite(resolved.workflowVersion)))
+      && (resolved.deployNumber === undefined || (typeof resolved.deployNumber === 'number' && Number.isFinite(resolved.deployNumber)))
+      && (resolved.tagName === undefined || typeof resolved.tagName === 'string'), 'Invalid resolved child snapshot');
+  }
+  if (value.childRelease !== undefined) {
+    const release = value.childRelease;
+    valid(object(release) && integer(release.publishedVersion, 1) && release.publishedVersion === value.childPublishedVersion
+      && text(release.releaseId) && typeof release.digest === 'string' && /^sha256:[a-f0-9]{64}$/.test(release.digest)
+      && release.digest === workflowDigest(value.childWorkflow), 'Invalid child release identity');
+  }
   valid(text(value.inputDigest) && Array.isArray(value.children), 'Invalid group input or children');
   const childIds = new Set<string>();
   const itemIds = new Set<string>();
+  const nativeIds = new Set<string>();
   for (const [index, child] of value.children.entries()) {
     valid(object(child) && child.parentFlowId === parentFlowId && child.parentNodeId === nodeId
       && child.groupExecutionId === value.groupExecutionId, 'Invalid child parent identity');
     valid(text(child.itemId) && child.itemIndex === index && child.attemptNumber === 1 && text(child.childFlowId)
-      && text(child.sessionKey) && text(child.stateDirRef) && integer(child.depth, 1), 'Invalid v1 child attempt');
+      && (child.sessionKey === undefined || text(child.sessionKey)) && (child.stateDirRef === undefined || text(child.stateDirRef))
+      && (child.nativeFlowId === undefined || child.nativeFlowId === null || text(child.nativeFlowId))
+      && integer(child.depth, 1), 'Invalid v1 child attempt');
     valid(!childIds.has(child.childFlowId) && !itemIds.has(child.itemId), 'Duplicate child identity');
     childIds.add(child.childFlowId); itemIds.add(child.itemId);
+    if (text(child.nativeFlowId)) {
+      valid(!nativeIds.has(child.nativeFlowId), 'Duplicate native child identity');
+      nativeIds.add(child.nativeFlowId);
+    }
     valid(object(child.item) && object(child.params) && childStatuses.has(String(child.status))
       && (child.result === null || object(child.result)) && errorValue(child.error), 'Invalid child snapshot');
   }
@@ -148,8 +228,45 @@ function storedGroup(state: ObjectValue, parentFlowId: string, nodeId: string): 
 }
 function frozenGroup(g: Group): unknown {
   return { parentFlowId: g.parentFlowId, groupNodeId: g.groupNodeId, groupExecutionId: g.groupExecutionId,
-    createdAt: g.createdAt, deadlineAt: g.deadlineAt, config: g.config, childWorkflow: g.childWorkflow, childPublishedVersion: g.childPublishedVersion, inputDigest: g.inputDigest,
-    children: g.children.map(({ status: _status, result: _result, error: _error, ...identity }) => identity) };
+    createdAt: g.createdAt, deadlineAt: g.deadlineAt, config: g.config, childWorkflow: g.childWorkflow, childPublishedVersion: g.childPublishedVersion, childRelease: g.childRelease, childResolved: g.childResolved, inputDigest: g.inputDigest,
+    children: g.children.map(({ status: _status, result: _result, error: _error, nativeFlowId: _nativeFlowId, ...identity }) => identity) };
+}
+/** Compare request-key hashes exactly as the ordinary association store does.
+ * Already persisted conflicts may advance unchanged (including cancellation),
+ * but no write may introduce or enlarge an ambiguity. */
+function assertNoNewKeyConflicts(state: ObjectValue, nodeId: string, current: Group | null, next: Group): void {
+  const hashKey = (key: string) => createHash('sha256').update(key, 'utf8').digest('hex');
+  const counts = (children: Child[]) => {
+    const result = new Map<string, number>();
+    for (const child of children) {
+      const hash = hashKey(child.childFlowId);
+      result.set(hash, (result.get(hash) ?? 0) + 1);
+    }
+    return result;
+  };
+  const others = new Map<string, number>();
+  for (const [otherNode, value] of Object.entries(groupsOf(state))) {
+    if (otherNode === nodeId) continue;
+    if (!object(value) || !Array.isArray(value.children)) throw new Error('Invalid durable fanout snapshot');
+    // The approved attempts layout predates ordinary associations and has no
+    // flat request keys. Unknown malformed layouts must not be silently skipped.
+    if (value.config === undefined) {
+      if (!value.children.every(child => object(child) && Array.isArray(child.attempts))) throw new Error('Invalid durable fanout snapshot');
+      continue;
+    }
+    for (const child of value.children) {
+      if (!object(child) || !text(child.childFlowId)) throw new Error('Invalid durable fanout snapshot');
+      const hash = hashKey(child.childFlowId);
+      others.set(hash, (others.get(hash) ?? 0) + 1);
+    }
+  }
+  const before = counts(current?.children ?? []);
+  for (const [hash, after] of counts(next.children)) {
+    const prior = before.get(hash) ?? 0;
+    const other = others.get(hash) ?? 0;
+    const conflicts = (count: number) => count * other + count * (count - 1) / 2;
+    conflict(conflicts(after) <= conflicts(prior), 'Fanout request key conflicts with another item or group');
+  }
 }
 function mergeMirror(current: ObjectValue, incoming: ObjectValue): ObjectValue {
   const { subworkflowFanouts: _untrustedGroups, ...rest } = incoming;
@@ -210,7 +327,8 @@ export class FanoutStateRepository {
 
   async getGroup(parentFlowId: string, nodeId: string): Promise<{ group: ObjectValue | null; parentStatus: string }> {
     const row = await this.require(parentFlowId);
-    return { group: clean(storedGroup(parseState(row.state_json), parentFlowId, nodeId)), parentStatus: row.status };
+    const group = storedGroup(parseState(row.state_json), parentFlowId, nodeId);
+    return { group: group && cleanGroup(group), parentStatus: row.status };
   }
 
   async saveGroup(parentFlowId: string, nodeId: string, input: {
@@ -220,7 +338,7 @@ export class FanoutStateRepository {
     valid(!['__proto__', 'constructor', 'prototype'].includes(nodeId), 'Invalid node id');
     valid(input.expectedRevision === null || integer(input.expectedRevision), 'Invalid expectedRevision');
     valid(input.parentState === undefined || object(input.parentState), 'Invalid parentState');
-    const next = clean(input.group);
+    const next = cleanGroup(input.group);
     validateGroup(next, parentFlowId, nodeId);
     valid(next.revision === (input.expectedRevision === null ? 0 : input.expectedRevision + 1), 'revision must advance by exactly one');
     const persist = async (db: IDatabase) => {
@@ -234,12 +352,14 @@ export class FanoutStateRepository {
           conflict(current.groupExecutionId === next.groupExecutionId && equal(frozenGroup(current), frozenGroup(next)), 'Group launch identity conflict');
           conflict(!terminal.has(current.status), 'Group is terminal');
           current.children.forEach((child, index) => {
+            if (text(child.nativeFlowId)) conflict(child.nativeFlowId === next.children[index].nativeFlowId, 'Native child identity is immutable');
             if (terminal.has(child.status)) conflict(equal(child, next.children[index]), 'Terminal child snapshot is immutable');
           });
           if (current.status === 'cancelling') conflict(next.status !== 'running' && next.status !== 'succeeded', 'Cancellation cannot be reversed');
           if (current.cancelRequestedAt !== null) conflict(equal(current.cancelRequestedAt, next.cancelRequestedAt)
             && equal(current.cancelDeadlineAt, next.cancelDeadlineAt), 'Cancellation deadline is immutable');
         }
+        assertNoNewKeyConflicts(state, nodeId, current, next);
         conflict(!['running', 'succeeded'].includes(next.status) || parentActive.has(row.status), 'Parent is cancelled or terminal');
         const mirrorEmpty = Object.keys(state).every(key => key === 'subworkflowFanouts');
         const base = mirrorEmpty && input.parentState ? clean(input.parentState) : state;
@@ -275,6 +395,7 @@ export class FanoutStateRepository {
 
   private childRecord(row: RunRow, parentFlowId: string): FanoutChildRecord {
     const state = parseState(row.state_json);
+    const sanitized = cleanChildState(state, true);
     conflict(object(state.subworkflowMeta) && state.subworkflowMeta.parentFlowId === parentFlowId, 'Child parent identity conflict');
     if (!integer(state._fanoutRevision, 1) || !object(state._fanoutIdentity) || typeof state._fanoutStarted !== 'boolean') throw new Error('Invalid durable child checkpoint');
     const identity = state._fanoutIdentity;
@@ -282,7 +403,7 @@ export class FanoutStateRepository {
       && identity.workflowId === row.workflow_id && identity.sessionKey === row.origin_session_key, 'Child launch identity conflict');
     this.validateChildState(state, identity);
     return { flowId: row.flow_id, workflowId: row.workflow_id, status: row.status, sessionKey: row.origin_session_key!,
-      stateJson: clean(state), revision: state._fanoutRevision };
+      stateJson: sanitized, revision: state._fanoutRevision };
   }
 
   async getChild(parentFlowId: string, childFlowId: string): Promise<FanoutChildRecord> {
@@ -307,7 +428,7 @@ export class FanoutStateRepository {
     for (const key of ['parentNodeId', 'groupExecutionId', 'itemId', 'workflowId', 'sessionKey']) valid(text(input[key]), `Invalid ${key}`);
     valid(input.attemptNumber === 1 && object(input.stateJson), 'Invalid child attempt or stateJson');
     for (const key of ['workflowTitle', 'originBotId', 'userId']) valid(input[key] === undefined || typeof input[key] === 'string', `Invalid ${key}`);
-    const initial = clean(input.stateJson);
+    const initial = cleanChildState(input.stateJson);
     valid(initial._fanoutStarted === undefined || initial._fanoutStarted === false, 'A new child cannot be pre-claimed');
     valid(initial.subworkflowFanouts === undefined || (object(initial.subworkflowFanouts)
       && Object.keys(initial.subworkflowFanouts).length === 0), 'Nested fanouts require group CAS');
@@ -375,7 +496,7 @@ export class FanoutStateRepository {
       && object(input.stateJson), 'Invalid checkpoint revision or state');
     valid(checkpointStatuses.has(input.status), 'Invalid checkpoint status');
     valid(input.currentStep === undefined || typeof input.currentStep === 'string', 'Invalid currentStep');
-    const incoming = clean(input.stateJson);
+    const incoming = cleanChildState(input.stateJson);
     valid(incoming._fanoutStarted === undefined || typeof incoming._fanoutStarted === 'boolean', 'Invalid child started flag');
     this.available();
     return this.db.transaction(async tx => {

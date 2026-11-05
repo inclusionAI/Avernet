@@ -34,7 +34,7 @@ export default function ChildRunDrawer({ childFlowId, parentFlowId, onClose }: {
       : !detail ? <p role="status" className="text-muted-foreground">正在读取子运行…</p>
       : <div className="space-y-4 text-sm text-foreground">
         <h3 className="font-semibold">{detail.run.workflow_title || detail.run.workflow_id || childFlowId}</h3>
-        <p>状态：{detail.run.status} · 子运行节点：{detail.run.node_count ?? detail.nodes.length}</p>
+        <p>子运行当前状态：{detail.run.status} · 子运行节点：{detail.run.node_count ?? detail.nodes.length}</p>
         <p className="text-xs text-muted-foreground">子运行节点不计入父运行节点统计。</p>
         {detail.nodes.length === 0 ? <p>暂无节点执行记录</p> : <table className="w-full text-left">
           <thead><tr className="border-b border-input"><th className="py-2">节点</th><th>状态</th></tr></thead>
