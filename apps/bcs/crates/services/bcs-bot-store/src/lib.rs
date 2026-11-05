@@ -18,7 +18,8 @@ use tracing::debug;
 #[cfg(test)]
 use std::sync::Arc;
 #[cfg(test)]
-use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement};
+use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_api::DbSqlFlavor;
 use bcs_db_api::DbValue as Value;
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
@@ -97,7 +98,7 @@ pub fn caller_config_cache_statistics() -> [u64; 6] {
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
 
 fn bot_info_json_set(
-    flavor: bcs_db_api::DbSqlFlavor,
+    flavor: DbSqlFlavor,
     updates: Vec<(&'static str, serde_json::Value)>,
 ) -> ServiceResult<(String, Vec<Value>)> {
     let mut expressions = Vec::with_capacity(updates.len());
@@ -109,12 +110,12 @@ fn bot_info_json_set(
         })?));
     }
     let unwrapped = match flavor {
-        bcs_db_api::DbSqlFlavor::Mysql => "JSON_UNQUOTE(bot_info)",
-        bcs_db_api::DbSqlFlavor::Sqlite => "json_extract(bot_info, '$')",
+        DbSqlFlavor::Mysql => "JSON_UNQUOTE(bot_info)",
+        DbSqlFlavor::Sqlite => "json_extract(bot_info, '$')",
     };
     let string_type = match flavor {
-        bcs_db_api::DbSqlFlavor::Mysql => "string",
-        bcs_db_api::DbSqlFlavor::Sqlite => "text",
+        DbSqlFlavor::Mysql => "string",
+        DbSqlFlavor::Sqlite => "text",
     };
     Ok((
         format!(
