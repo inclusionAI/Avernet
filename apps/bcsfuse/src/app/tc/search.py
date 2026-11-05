@@ -28,19 +28,9 @@ class InvalidTcFilters(ValueError):
 
 class TcSearch:
     def __init__(
-        self,
-        catalog,
-        index,
-        embedding,
-        reranker,
-        *,
-        embedding_key,
-        instance_id,
-        legacy_source=None,
+        self, catalog, index, embedding, reranker, *, embedding_key, instance_id
     ):
         self.catalog, self.index, self.reranker = catalog, index, reranker
-        self.legacy_source = legacy_source
-        self.index_source = "legacy" if legacy_source is not None else "card"
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tc-search")
         self.caches = SearchCaches(
             result_entries=1024,
@@ -118,14 +108,8 @@ class TcSearch:
             from app.infra.reranker.http_reranker import get_reranker
 
             selected_reranker = get_reranker(reranker_model)
-        query_index, query_scope = DocumentIndex(self.index), self.updates
-        if self.legacy_source is not None:
-            query_index = await asyncio.to_thread(
-                self.legacy_source.query_index, filters, scope
-            )
-            query_scope = query_index
         pipeline = HybridRetrievalService(
-            index=query_index,
+            index=DocumentIndex(self.index),
             embedding=self.embedding,
             reranker=selected_reranker if rerank else None,
             group_by_source=True,
@@ -134,21 +118,19 @@ class TcSearch:
             allow_partial=True,
             execution=self.execution,
         )
-        retrieval = CatalogRetrieval(pipeline, query_scope)
-        if self.legacy_source is None:
-            retrieval = CachedRetrieval(
-                retrieval,
-                self.result_cache,
-                self.caches,
-                namespace=(rerank, expand_factor, reranker_model),
-            )
+        retrieval = CachedRetrieval(
+            CatalogRetrieval(pipeline, self.updates),
+            self.result_cache,
+            self.caches,
+            namespace=(rerank, expand_factor, reranker_model),
+        )
         request = RetrievalRequest(
             question, limit, {k: tuple(v) for k, v in filters.items()}, scope
         )
         result = await retrieval.retrieve(request)
         # TC exact identity priority never bypasses visibility or lifecycle rules.
         exact = self.catalog.get(question.strip())
-        if exact and query_scope.eligible(exact.card.agent_id, request.filters, scope):
+        if exact and self.updates.eligible(exact.card.agent_id, request.filters, scope):
             from dataclasses import replace
 
             from search_core.api.models import SearchItem
@@ -244,7 +226,7 @@ class TcSearch:
             selected_candidates=len(candidates),
             metadata={
                 "min_score_compat_mode": "deprecated_ignored",
-                "candidate_source": f"tc_{self.index_source}",
+                "candidate_source": "tc_card",
             },
         )
 
