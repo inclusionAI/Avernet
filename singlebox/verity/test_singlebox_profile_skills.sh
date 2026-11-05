@@ -36,7 +36,7 @@ cat > "${BOTS_PROFILE_DIR}/bots.json" <<'JSON'
   "port_start": 30801,
   "port_step": 10,
   "bots": [
-    {"source": "referee", "profile": "host", "name": "Host", "summary": "Host", "domains": "game", "skills": "metadata-only"},
+    {"source": "referee", "profile": "host", "name": "Host", "display_name": "Host Display", "summary": "Host", "domains": "game", "skills": "metadata-only"},
     {"source": "player", "profile": "guest", "name": "Guest", "summary": "Guest", "domains": "game", "skills": "metadata-only"},
     {"source": "empty", "profile": "empty", "name": "Empty", "summary": "Empty", "domains": "game", "skills": "metadata-only"}
   ]
@@ -79,6 +79,8 @@ bots_dynamic_check_ports_free() { :; }
 setup_bcn_plugin() { :; }
 bots_bcn_plugin_load_dir() { printf '%s\n' "${TEMPORARY}/plugin"; }
 bots_dynamic_model_source_has_fields() { return 1; }
+bots_dynamic_models_json() { printf 'null\n'; }
+bots_dynamic_agent_model_fields_json() { printf '{}\n'; }
 bots_dynamic_config_has_required_model() { :; }
 bots_dynamic_config_has_bcs_core_tools() { :; }
 bots_dynamic_config_matches() { :; }
@@ -99,6 +101,17 @@ bots_dynamic_start_openclaw() {
     fi
     printf 'start %s\n' "$2" >> "${TEMPORARY}/events"
 }
+
+DISPLAY_CONFIG_DIR="${TEMPORARY}/display-config"
+mkdir -p "$DISPLAY_CONFIG_DIR"
+bots_dynamic_write_openclaw_config \
+    Host host 30801 Host game metadata-only local \
+    "$DISPLAY_CONFIG_DIR" "${TEMPORARY}/display-workspace" "${TEMPORARY}/plugin"
+jq -e '
+  .channels.bcs.botId == "Host"
+  and .channels.bcs.botName == "Host Display"
+' "${DISPLAY_CONFIG_DIR}/openclaw.json" >/dev/null \
+    || fail 'profile display_name was not separated from the stable bot id'
 
 EXPECTED_HOST_CONTENT='host v1'
 bots_start
@@ -225,4 +238,44 @@ diff -r "${BOTS_PROFILE_DIR}/referee/skills" "${TEMPORARY}/real-referee/skills"
 bots_dynamic_copy_profile_files player-laochen "${TEMPORARY}/real-player"
 diff -r "${BOTS_PROFILE_DIR}/player-laochen/skills" "${TEMPORARY}/real-player/skills"
 
+# The collaboration help profile must receive its private authoring skill next
+# to the shared coordination schema, without overriding session URL discovery.
+BOTS_PROFILE_DIR="${PROJECT_ROOT}/singlebox/agents/avernet-help"
+HELP_WORKSPACE="${TEMPORARY}/real-avernet-help"
+bots_dynamic_validate_manifest
+bots_dynamic_copy_profile_files collaboration "$HELP_WORKSPACE"
+bots_dynamic_setup_bcs_skill "$HELP_WORKSPACE"
+diff -r "${BOTS_PROFILE_DIR}/collaboration/skills/avernet-collaboration-help" \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help"
+cmp "${BCS_DIR}/crates/tools/bcs-cli/bcs-coordination/SKILL.md" \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/custom-collaboration.md" ] \
+    || fail 'collaboration help runtime is missing the public workflow reference'
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/custom-collaboration-schema.md" ] \
+    || fail 'collaboration help runtime is missing the public schema reference'
+grep -Fq 'bcs-cli collaboration draft create "$candidate_file" --draft-id "$draft_id"' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not upload the authoring file'
+grep -Fq 'JSON 的 `message` 字段' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not deliver the tool-generated short reference'
+grep -Fq '不调用 BCS 消息发送、不寻找私聊 Session' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill bypasses normal chat delivery'
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/collaboration-drafts.md" ] \
+    || fail 'collaboration help runtime is missing the fixed-version contract'
+grep -Fq '[references/authoring-workflow.md](references/authoring-workflow.md)' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not require its authoring workflow'
+if grep -Fq 'export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"; then
+    fail 'shared coordination skill forces a localhost API URL'
+fi
+if grep -Fq 'bcs-cli --url "$BCS_API_BASE_URL"' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"; then
+    fail 'shared coordination skill bypasses session URL discovery'
+fi
+grep -Fxq 'bcs-cli health' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md" \
+    || fail 'shared coordination skill is missing the session-discovered CLI example'
 printf 'PASS: singlebox profile skill start/restart and refresh tests\n'

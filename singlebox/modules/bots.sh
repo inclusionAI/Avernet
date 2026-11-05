@@ -339,6 +339,16 @@ bots_dynamic_specs() {
     ' "$manifest"
 }
 
+bots_dynamic_display_name() {
+    local name="$1"
+    local profile="$2"
+    local display_name
+    display_name="$(jq -r --arg profile "$profile" '
+      first(.bots[] | select(.profile == $profile) | (.display_name // .name)) // empty
+    ' "$(bots_dynamic_manifest)")"
+    printf '%s\n' "${display_name:-$name}"
+}
+
 bots_dynamic_count() {
     jq -r --arg excluded_source "${BOTS_EXCLUDED_PROFILE_SOURCE:-}" \
         '[.bots[] | select($excluded_source == "" or (.source // "") != $excluded_source)] | length' \
@@ -373,6 +383,7 @@ bots_dynamic_validate_manifest() {
         def common_bot:
             (.profile | type == "string" and test("^[A-Za-z0-9_-]+$"))
             and (.name | type == "string" and length > 0)
+            and ((has("display_name") | not) or (.display_name | type == "string" and length > 0))
             and (.summary | type == "string" and length > 0)
             and (.domains | type == "string" and length > 0)
             and (.skills | type == "string" and length > 0);
@@ -398,7 +409,7 @@ bots_dynamic_validate_manifest() {
                 and (.name | type == "string" and length > 0)
                 and all(.bots[];
                     common_bot
-                    and keys_allowed(["source", "profile", "name", "summary", "domains", "skills", "scopes", "runtime"])
+                    and keys_allowed(["source", "profile", "name", "display_name", "summary", "domains", "skills", "scopes", "runtime"])
                     and ((.runtime.type // "openclaw") as $runtime
                         | ($runtime == "openclaw" or $runtime == "rule")
                         and (
@@ -536,6 +547,20 @@ bots_dynamic_config_plugin_matches() {
         ' "$config_file" >/dev/null 2>&1
 }
 
+bots_dynamic_config_display_name_matches() {
+    local name="$1"
+    local profile="$2"
+    local profile_dir config_file display_name
+
+    profile_dir="$(bcs_bot_profile_dir "$profile")"
+    config_file="${profile_dir}/openclaw.json"
+    display_name="$(bots_dynamic_display_name "$name" "$profile")"
+
+    [ -f "$config_file" ] || return 1
+    jq -e --arg display_name "$display_name" \
+        '.channels.bcs.botName == $display_name' "$config_file" >/dev/null 2>&1
+}
+
 bots_dynamic_config_matches() {
     local name="$1"
     local profile="$2"
@@ -543,7 +568,8 @@ bots_dynamic_config_matches() {
     local source="${4:-$profile}"
 
     bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source" || return 1
-    bots_dynamic_config_plugin_matches "$profile"
+    bots_dynamic_config_plugin_matches "$profile" || return 1
+    bots_dynamic_config_display_name_matches "$name" "$profile"
 }
 
 bots_dynamic_runtime_matches() {
@@ -552,7 +578,7 @@ bots_dynamic_runtime_matches() {
     local port="$3"
     local source="${4:-$profile}"
     port_is_listening "$port" || return 1
-    bots_dynamic_config_matches "$name" "$profile" "$port" "$source"
+    bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source"
 }
 
 bots_dynamic_group_fully_running() {
@@ -653,7 +679,7 @@ bots_dynamic_check_profile_configs() {
         profile_dir="$(bcs_bot_profile_dir "$profile")"
         if [ -f "${profile_dir}/openclaw.json" ] && ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
             if bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source"; then
-                log_info "${name} profile will be refreshed with current BCN plugin path: ${profile_dir}"
+                log_info "${name} profile will be refreshed with current mutable config: ${profile_dir}"
             else
                 log_error "${name} profile exists but does not match this --profile-dir group: ${profile_dir}"
                 log_error "Expected port=${port}, BCS URL=ws://127.0.0.1:${BCS_PORT}/ws/bot, workspace=$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
@@ -787,8 +813,9 @@ bots_dynamic_write_openclaw_config() {
     local plugin_path="${10}"
     local gateway_token="singlebox_${profile}_gateway_token"
     local bcs_url="ws://127.0.0.1:${BCS_PORT}/ws/bot"
-    local models_json model_fields_json
+    local display_name models_json model_fields_json
 
+    display_name="$(bots_dynamic_display_name "$name" "$profile")"
     models_json="$(bots_dynamic_models_json)"
     model_fields_json="$(bots_dynamic_agent_model_fields_json)"
 
@@ -796,6 +823,7 @@ bots_dynamic_write_openclaw_config() {
         --arg workspace "$workspace_dir" \
         --arg bcs_url "$bcs_url" \
         --arg bot_id "$name" \
+        --arg bot_name "$display_name" \
         --arg summary "$summary" \
         --arg domains "$domains" \
         --arg skills "$skills" \
@@ -870,7 +898,7 @@ bots_dynamic_write_openclaw_config() {
               enabled: true,
               bcsUrl: $bcs_url,
               botId: $bot_id,
-              botName: $bot_id,
+              botName: $bot_name,
               capabilities: {
                 summary: $summary,
                 domains: csv($domains),
@@ -1079,12 +1107,13 @@ bots_dynamic_wait_ready() {
 
 bots_dynamic_onboard() {
     local bcs_cli; bcs_cli="$(bcs_cli_path)"
-    local name profile port source summary domains skills scopes runtime profile_dir session_file token
+    local name profile port source summary domains skills scopes runtime profile_dir session_file token display_name
 
     while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         profile_dir="$(bcs_bot_profile_dir "$profile")"
         session_file="${profile_dir}/.bcs/session.json"
         token="$(bots_session_token "$session_file")"
+        display_name="$(bots_dynamic_display_name "$name" "$profile")"
         if [ -z "$token" ]; then
             log_error "Cannot onboard ${name}: session token not found at ${session_file}"
             return 1
@@ -1094,7 +1123,7 @@ bots_dynamic_onboard() {
         if ! BOT_DATA_DIR="$profile_dir" BCS_API_BASE_URL="http://127.0.0.1:${BCS_PORT}" \
             "$bcs_cli" --url "http://127.0.0.1:${BCS_PORT}" onboard \
                 --token "$token" \
-                --name "$name" \
+                --name "$display_name" \
                 --summary "$summary" \
                 --domains "$domains" \
                 --skills "$skills" \
@@ -1421,27 +1450,28 @@ bots_dynamic_status() {
     bots_dynamic_validate_manifest || return 1
     echo "  Bots (--profile-dir ${BOTS_PROFILE_DIR}):"
 
-    local name profile port source summary domains skills scopes runtime session_file bot_uuid behavior
+    local name profile port source summary domains skills scopes runtime session_file bot_uuid behavior display_name
     while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
         bot_uuid="$(bots_session_bot_uuid "$session_file")"
+        display_name="$(bots_dynamic_display_name "$name" "$profile")"
         if [ "$runtime" = "rule" ] && bots_dynamic_rule_profile_ready "$profile"; then
             behavior="$(bots_dynamic_rule_profile_behavior "$profile")"
             if [ -n "$bot_uuid" ]; then
-                echo "    ${name}: Running (runtime: rule, behavior: ${behavior}, profile: ${profile}, bot_uuid: ${bot_uuid})"
+                echo "    ${display_name}: Running (runtime: rule, behavior: ${behavior}, profile: ${profile}, bot_uuid: ${bot_uuid})"
             else
-                echo "    ${name}: Connected (runtime: rule, behavior: ${behavior}, profile: ${profile}, session: missing bot_uuid)"
+                echo "    ${display_name}: Connected (runtime: rule, behavior: ${behavior}, profile: ${profile}, session: missing bot_uuid)"
             fi
         elif [ "$runtime" = "rule" ]; then
-            echo "    ${name}: Stopped (runtime: rule, profile: ${profile})"
+            echo "    ${display_name}: Stopped (runtime: rule, profile: ${profile})"
         elif port_is_listening "$port"; then
             if [ -n "$bot_uuid" ]; then
-                echo "    ${name}: Running (port: ${port}, profile: ${profile}, bot_uuid: ${bot_uuid})"
+                echo "    ${display_name}: Running (port: ${port}, profile: ${profile}, bot_uuid: ${bot_uuid})"
             else
-                echo "    ${name}: Port occupied (port: ${port}, profile: ${profile}, session: missing bot_uuid)"
+                echo "    ${display_name}: Port occupied (port: ${port}, profile: ${profile}, session: missing bot_uuid)"
             fi
         else
-            echo "    ${name}: Stopped (port: ${port}, profile: ${profile})"
+            echo "    ${display_name}: Stopped (port: ${port}, profile: ${profile})"
         fi
     done < <(bots_dynamic_specs)
 }

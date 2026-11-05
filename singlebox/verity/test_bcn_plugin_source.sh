@@ -355,6 +355,9 @@ test_dynamic_config_refreshes_plugin_path() {
   local profile_dir="${profile_root}/.openclaw-ceo"
   local workspace_dir="${workspace_root}/ceo/workspace"
   mkdir -p "$profile_dir" "$workspace_dir" "$npm_plugin" "$profile_source"
+  cat > "${profile_source}/bots.json" <<'JSON'
+{"bots": [{"profile": "ceo", "name": "CEO"}]}
+JSON
   cat > "${profile_dir}/openclaw.json" <<JSON
 {
   "agents": {
