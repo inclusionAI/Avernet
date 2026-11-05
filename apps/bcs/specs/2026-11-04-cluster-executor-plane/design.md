@@ -60,8 +60,8 @@ split also turns an executor deploy into moving leases (§8).
 | Mechanism | Answers | Wrong answer costs |
 | --- | --- | --- |
 | **Roster** — one row per node, with a heartbeat | Which gateways and executors are alive? | Latency only |
-| **Placement** — rendezvous hashing over the executors | Which executor *should* drive session S? | One extra hop or one rehydration |
-| **Lease + fencing token** — one row per session | Which executor *does* drive S? | — this is the correctness mechanism |
+| **Placement** — rendezvous hashing of 4,096 buckets over the executors | Which executor *should* own S's bucket? | One extra hop or one rehydration |
+| **Lease + fencing token** — one row per bucket | Which executor *does* own S's bucket, and so drive S? | — this is the correctness mechanism |
 | **Routing** — forward to the owner, redirect on mismatch | How does a round reach the owner fast? | Falls back to a durable write |
 | **Event log + session channel** | How does every stream see every state change and every token, across owner changes? | Seconds of delay, never a lost state change |
 
@@ -91,14 +91,15 @@ shared database is the only place they meet.
 | `member_name` | Stable identity of a node slot (e.g. host name); survives restarts. Used for placement |
 | `node_id` | Identity of one process run (`member_name` + a fresh ULID). Used for ownership |
 | `advertise_addr` | Internal `host:port` peers use to reach this node |
-| Owner | The executor whose `node_id` is on S's lease row and whose heartbeat is fresh |
+| Bucket | `xxh3(user_id ‖ session_id) mod 4096`: the unit of ownership (§4) |
+| Owner | The executor whose `node_id` is on the lease row of S's bucket and whose heartbeat is fresh |
 | Entry gateway | The gateway that accepted the PA's connection for a request |
 | Dispatch gateway | The gateway running one dispatch: it holds the stream to the supply agent |
 | Session channel | S's topic on the pub/sub; the owner publishes, gateways subscribe (§7.4) |
 | Subscriber | A gateway subscribed to S's channel, relaying to a client stream |
 | Delta | A piece of output text or artifact (a "token" chunk); goes to the owner, is fanned out, never stored |
 | Control event | Anything that changes what should happen next; recorded by the owner (§7.3) |
-| Claim / Release / Transfer | Take an unowned lease / give one up / hand one to a chosen successor |
+| Claim / Transfer | Take a bucket nobody holds / hand one to a chosen successor |
 | Episode | The period an executor keeps S loaded in memory (a cache lifetime, not data) |
 
 ---
@@ -121,14 +122,14 @@ for no gain. Cost: one tiny write per node per second.
 **Two identities.** `node_id` changes on every process start: a restarted
 process has none of the old memory, so it is a *different owner*, and "is
 this my lease?" becomes a simple equality check. `member_name` stays the
-same, so placement (§4) gives a restarted executor the same sessions as
+same, so placement (§4) gives a restarted executor the same buckets as
 before.
 
 **Restart at the same address.** When a node registers, it marks every other
 roster row with the same `advertise_addr` as no longer fresh (heartbeat set
 to NULL). Two processes cannot listen on one address, so that row belongs to
 a dead run, and its leases become claimable at once instead of after a
-timeout. The row itself is kept so survivors can still find its sessions.
+timeout. The row itself is kept so survivors can still find its buckets.
 
 **One clock.** All time comparisons use the database's `NOW()`, never node
 clocks, so clock skew between nodes cannot make a live node look dead.
@@ -159,38 +160,42 @@ same 5 s; that is when its dispatches are moved (§7.6).
 
 ---
 
-## 4. Placement: rendezvous hashing
+## 4. Placement: rendezvous hashing of buckets
 
-![Rendezvous hashing: each live executor scores hash(key ‖ member_name); the highest score wins. When D joins only sessions D now wins move; when B leaves, only B's sessions move, each to its own second-ranked node.](assets/hrw-placement.svg)
+![Rendezvous hashing over buckets: for each bucket every live executor scores hash(bucket ‖ member_name); the highest score owns it. When D joins only the buckets D now wins move; when B leaves, only B's buckets move, each to its own second-ranked executor.](assets/hrw-placement.svg)
 
-For session S, every live executor gets a score:
+Sessions are grouped into a fixed set of **buckets**, and buckets — not
+sessions — are what executors own:
 
 ```
-bucket(S)    = xxh3(user_id ‖ session_id) mod 4096               -- fixed seed, stored on the lease row
-score(node)  = xxh3(bucket(S) ‖ node.member_name)
-preferred(S) = the active executor with the highest score
+bucket(S)    = xxh3(user_id ‖ session_id) mod 4096     -- fixed seed and count; stored on the session row
+score(b, E)  = xxh3(b ‖ E.member_name)
+preferred(b) = the active executor with the highest score
 ```
-
-Hashing the session's **bucket** rather than the session itself keeps every
-property below (4096 buckets ≫ nodes, so balance is unaffected) and lets
-failover split a dead node's sessions with an indexed column (§9).
 
 Every node — gateways included — computes the same ranking in microseconds
-with no coordination. When an executor joins or leaves, only the sessions
-whose winner changed move — the minimum possible (1/N) — and a departed
-node's sessions spread evenly, each to its own second-ranked node. The
-sorted scores double as a fallback order. A bounded-load variant (skip
-overloaded nodes while walking the list) can be swapped in later.
+with no coordination. 4,096 buckets ≫ executors, so each of N executors
+holds about 4096/N buckets and load stays balanced (about 200 each at 20
+executors, still about 10 at 400). When an executor joins or leaves, only
+the buckets whose winner changed move — the minimum possible (1/N) — and a
+departed executor's buckets spread evenly, each to its own second-ranked
+executor. The sorted scores double as a fallback order. A bounded-load
+variant (skip overloaded executors while walking the list) can be swapped in
+later.
+
+The bucket count is fixed for the life of the system: it is stored on every
+session row, and changing it would remap every session. Choose it once,
+before launch (§14).
 
 Why rendezvous rather than alternatives: `hash % N` reshuffles everything on
 every change; a ring needs ~100+ virtual nodes per node to balance; jump hash
 cannot remove a node from the middle (a crash); a fixed slot map needs a
 coordinator.
 
-**Placement is not ownership.** Placement only decides *who should claim* a
-session that nobody owns. After an executor joins, the hash may say D while
-the lease still says A — existing leases don't move. So the hash is a guess
-that the target executor checks (§6).
+**Placement is not ownership.** Placement says who *should* own a bucket;
+the lease (§5) says who *does*. After an executor joins, the hash may say D
+while the lease still says A, until A hands the bucket over (§10). So the
+hash is a guess that the target executor checks (§6).
 
 ---
 
@@ -201,90 +206,112 @@ that the target executor checks (§6).
 ![Zombie scenario: A holds token 7 and pauses; the lease becomes claimable; B claims token 8 and writes; A wakes and its write carrying token 7 is rejected by the database.](assets/zombie-fencing.svg)
 
 A node can pause (GC, VM migration, kernel stall) or be cut off, then wake up
-believing it still owns S. Any "am I still the owner?" check can be followed
+believing it still owns bucket b. Any "am I still the owner?" check can be followed
 by another pause before its write lands. **Only the storage the write lands
 in can reject it.** So every ownership change increments a **fencing token**,
 every owner write carries its token, and the database refuses a stale one.
 
 ### 5.2 The lease row
 
-`bcs_task_leases` has one row per session: `node_id` (owner, or `''` when
-released), `fencing_token` (only ever increases), `expires_at` (NULL while
-held), `adopted` (has the owner started driving it?), `bucket` (§4),
-`write_seq`, and `has_pending_work` + `pending_seq` (§5.4).
+`bcs_task_leases` has **one row per bucket** — 4,096 rows, created once and
+never deleted: `bucket`, `node_id` (owner, or `''` before anyone has claimed
+it), `fencing_token` (only ever increases) and `adopted` (has the owner
+started driving it? §8.2). A session has no lease of its own: **S is owned by
+whoever owns bucket(S), under that bucket's token.**
 
-**A lease is claimable** when it is released, or its owner's heartbeat is
-stale (with the recovery grace above), or its owner's run is known dead
-(same-address restart). There is no per-lease renewal: one node heartbeat
-keeps all of that node's leases alive. Per-lease renewal would cost one row
-write per session per tick — about 120 k writes/s at 600 k active sessions.
+The per-session state this design needs lives on the session's own row:
+`bucket`, `has_pending_work` + `pending_seq` (§5.4) and `write_seq` (§5.5).
+
+**A lease is claimable** when nobody has claimed it yet, or its owner's
+heartbeat is stale (with the recovery grace above), or its owner's run is
+known dead (same-address restart). There is no per-lease renewal: one
+executor heartbeat keeps all of its buckets alive.
+
+**Why buckets, not one lease per session.** Every ownership operation is per
+bucket, so it costs O(buckets), never O(sessions): a cold session needs no
+claim (its bucket already has an owner), a failover claims about 4096/N rows
+instead of one per session, a drain transfers a few hundred rows, and the
+whole bucket → owner map is small enough for every gateway to keep (§6).
 
 ### 5.3 Operations
 
-**Claim** — one transaction, no prior knowledge of the token needed:
+**Claim** — take a bucket nobody holds (failover, first start). One
+transaction, no prior knowledge of the token needed:
 
 ```sql
 UPDATE bcs_task_leases
-   SET fencing_token = 1 + fencing_token, node_id = :me
- WHERE session_id = :s AND <lease is claimable>;
-SELECT node_id, fencing_token FROM bcs_task_leases WHERE session_id = :s;
+   SET fencing_token = 1 + fencing_token, node_id = :me, adopted = TRUE
+ WHERE bucket = :b AND <lease is claimable>;
+SELECT node_id, fencing_token FROM bcs_task_leases WHERE bucket = :b;
 ```
 
-If the read-back shows `node_id = me`, I own S with that token; otherwise it
-names the current owner. Exactly one claimant wins: the update takes the row
-lock, and a racing claimant then sees a fresh owner and changes nothing. The
-same read-back also tells a successor it already owns S if a handoff notice
-was lost.
+If the read-back shows `node_id = me`, I own b — and every session in it —
+with that token; otherwise it names the current owner. Exactly one claimant
+wins: the update takes the row lock, and a racing claimant then sees a fresh
+owner and changes nothing. The same read-back also tells a successor it
+already owns b if a handoff notice was lost.
 
-**Release** — give S up with no successor (only for sessions with nothing to
-do). **Transfer** — hand S directly to a chosen successor with token + 1
-(only the current holder can do this; used by drain, §8).
+**Transfer** — hand b directly to a chosen successor with token + 1 and
+`adopted = FALSE` (only the current holder can do this; used by drain and
+rebalancing, §8 and §10). There is no release: while any executor is alive,
+every bucket has an owner.
 
 Rules:
 
-- **Tokens never go backwards.** Lease rows are never deleted while the
-  session lives; release clears `node_id` instead. A re-created row starting
-  at 1 would let an old zombie token match again.
+- **Tokens never go backwards.** Lease rows are never deleted or
+  re-created, so an old zombie token can never match again.
 - **Expiry decides who may claim; the token decides who may write.** A late
   owner whose lease nobody has claimed can still write safely.
-- **Pending work is never released, only transferred.** A released lease is
-  invisible to failure discovery (§9), so a session that still needs a driver
-  must always have one.
+- **Moving a bucket moves all of its sessions at once.** After a claim or
+  transfer, every in-flight write of the old owner, for any session in b,
+  fails.
 
 ### 5.4 The pending-work flag
 
-`has_pending_work` says "this session needs a driver now": a run in
-progress, queued deliveries, a timer, or input nobody has processed. Every
-write that **sets** it also increments `pending_seq`. Every **clear** —
-including the one inside a release — only succeeds if `pending_seq` still
-equals the value the owner saw when it confirmed it had processed
-everything. So input that arrives at the last moment can never be erased or
-stranded on a released lease: the release simply fails and the owner keeps
-the session.
+`has_pending_work`, on the session row, says "this session needs a driver
+now": a run in progress, queued deliveries, a timer, or input nobody has
+processed. It is how a new owner finds which sessions of a bucket it just
+took need driving (§9), and how input recorded while the owner was
+unreachable gets picked up (§6). Every write that **sets** it also
+increments `pending_seq`. Every **clear** only succeeds if `pending_seq`
+still equals the value the owner saw when it confirmed it had processed
+everything. So input that arrives at the last moment can never be erased:
+the clear simply fails and the owner processes the input.
 
 ### 5.5 Fenced writes
 
-![A fenced write is one transaction: first a checked update of the session's lease row (token must match; write_seq increments), then the durable writes. A stale token makes step 1 touch zero rows and the whole transaction rolls back.](assets/fenced-write.svg)
+![A fenced write is one transaction: first the session's bucket lease row is locked in shared mode and its token checked, then the durable writes. A token that is not the writer's makes the whole transaction roll back; a claim or transfer of the bucket waits for in-flight fenced writes.](assets/fenced-write.svg)
 
-Every durable write an owner makes is one transaction whose first step is:
+Every durable write an owner makes is one transaction whose first step locks
+S's bucket row and checks the token:
 
 ```sql
-UPDATE bcs_task_leases SET write_seq = write_seq + 1
- WHERE session_id = :s AND fencing_token = :mine      -- must touch exactly 1 row
+SELECT fencing_token FROM bcs_task_leases
+ WHERE bucket = :b FOR SHARE;            -- must equal :mine, else LeaseLost
 ```
 
-followed by the real writes (run state, checkpoints, dispatch records,
-control events for subscribers…). If the token is stale, the first step
-touches 0 rows, the whole transaction rolls back, and the caller gets
-**LeaseLost**: stop driving S, drop it from memory, never retry. The row lock
-makes a concurrent claim wait until the write commits, so there is no gap
-between "check" and "write" for a pause to fall into. (`write_seq` always
-changes, so "1 row" is reliable; it also lets a handoff successor see what
-changed.)
+followed by the real writes for S (run state, checkpoints, dispatch records,
+control events for subscribers…, and `write_seq = write_seq + 1` on S's
+row). If the token is not mine, the transaction rolls back and the caller
+gets **LeaseLost**: stop driving the bucket's sessions, drop them from
+memory, never retry. The shared lock lets all of a bucket's sessions write
+concurrently, while a claim or transfer — an exclusive update of the same
+row — waits until every in-flight fenced write has committed; fenced writes
+that start after it see the new token. So there is no gap between "check"
+and "write" for a pause to fall into. (`write_seq` lets a handoff successor
+see what changed for each session.)
+
+**If the database offers no shared row locks,** use `FOR UPDATE`. It is just
+as safe, but it serializes fenced writes within a bucket: one transaction at
+a time, roughly a few hundred per second per bucket and about a million per
+second across 4,096 buckets. That is far above the expected control-write
+rate, but a hot bucket (one very busy group session, or skew) meets the
+limit first. Measure before choosing (§14).
 
 Rules: the check and the writes are in **one transaction**, in the **same
-database**, for **one session**. If a commit's outcome is unknown (an error
-during a storage leader switch), **read back** — never blindly repeat.
+database**, for **one session** behind its bucket's check. If a commit's
+outcome is unknown (an error during a storage leader switch), **read back** —
+never blindly repeat.
 
 **Not fenced:** recording an inbound round as *input* (any executor may do
 this), reads, and the lease operations themselves.
@@ -308,32 +335,41 @@ memory and forwards; the target executor checks against what it knows.
 
 ```
 ENTRY GATEWAY
-  target = hint_cache[S] or HRW(S)                 -- microseconds, no database
+  b = bucket(S); target = bucket_map[b] or HRW(b)  -- microseconds, no database
   send Submit(round) to target
   on NOT_OWNER(X): remember X, send to X           -- at most 2 hops
   on unreachable: try the next-ranked executor; if no executor answers at
                   all → retryable error to the PA
 
 TARGET EXECUTOR
-  do I hold S's lease?  (in memory)  → serve: dedup, persist the round (fenced), reply with the Task
-  otherwise → claim transaction       → I own it now: serve
-                                      → owned by X, reachable: reply NOT_OWNER(X)
-                                      → owner dead, not yet claimable: durable fallback
+  do I own bucket(S)?  (in memory) → serve: dedup, persist the round (fenced), reply with the Task
+  otherwise → b claimable: claim b   → I own b and all its sessions now: serve
+            → owned by X, reachable  → reply NOT_OWNER(X)
+            → owner dead, not yet claimable → durable fallback
 ```
 
 | Case | What happens | Cost |
 | --- | --- | --- |
 | Stable cluster | The guess is the owner | One hop, ~2–7 ms added to TTFT |
-| Just after an executor joins | Hash says D, lease says A → `NOT_OWNER(A)` → remembered | One extra hop, once |
-| Cold session | The preferred executor claims it | One claim transaction |
-| Owner crashed | Next-ranked executor claims if possible, else durable fallback | TTFT ≤ takeover time |
+| While a bucket is being handed over | Map says A, lease says B → `NOT_OWNER(B)` → remembered | One extra hop, once |
+| Cold session | The bucket's owner loads it from the database | One read, no claim |
+| Owner crashed | Next-ranked executor claims the bucket if possible, else durable fallback | TTFT ≤ takeover time |
 | Forward timed out but the owner did process it | Two copies of one round | Deduplicated on `(caller, session, messageId)` |
 
-**Durable fallback** — one transaction on S's lease row, run by whichever
-executor received the round: if the lease is claimable, that executor claims
-S itself and serves (placement is only a preference); otherwise it records
-the round as input, sets the pending-work flag, and acknowledges. Recovery
-(§9) picks it up. Gateways never touch leases.
+Every gateway keeps the whole **bucket → owner map** (4,096 entries). It is
+corrected by every `NOT_OWNER` and refreshed in full every 10 s from any
+executor (`BucketMap`), so the guess is almost always right.
+
+**Durable fallback**, run by whichever executor received the round: if S's
+bucket is claimable, that executor claims it and serves (placement is only a
+preference). Otherwise, in one transaction that holds the bucket row in
+shared mode, it records the round as input on S, sets S's pending-work flag,
+and acknowledges. Because of that lock, the fallback commits either before a
+claim of the bucket — so the new owner's scan of its new bucket (§9) finds
+the input — or after it, when it sees the new owner and forwards instead. An
+owner that is alive but unreachable from the gateway finds such input with
+its per-tick pickup (one indexed query over its buckets). Gateways never
+touch leases.
 
 The entry gateway subscribes to S's session channel (§7.4) **before** it
 sends `Submit`, so nothing the owner publishes for this round can be missed,
@@ -460,8 +496,9 @@ close the gaps:
 1. **Gap detection.** `event_seq` has no holes. A subscriber that sees #43
    after #41 reads #42 from the log (`ReadEvents(S, after = 41)`) before
    relaying #43.
-2. **Republish on takeover.** A new owner republishes each claimed session's
-   latest event and its step buffer. That reveals any event the old owner
+2. **Republish on takeover.** A new owner republishes, for each session of a
+   bucket it claimed that has an unfinished Task, the latest event and the
+   step buffer. That reveals any event the old owner
    committed but never published: even the last one, which no later event
    would expose. Subscribers drop repeats by `event_seq` and `chunk_seq`.
 3. **Subscribe before reading.** A gateway subscribes to S *before* it asks
@@ -566,66 +603,66 @@ time. Executors hold no streams, so **draining one only moves leases**.
 **Principle: move ownership before the process stops, and keep serving until
 the move.** Draining never means refusing work.
 
-![Executor drain timeline: stop signal; roster draining; sessions released or handed off cheapest first; leftovers transferred at the deadline; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
+![Executor drain timeline: stop signal; roster draining; each of A's buckets handed off to its successor; leftovers transferred at the deadline; roster row deleted; restart with same address and member_name.](assets/drain-timeline.svg)
 
 ### 8.1 The sequence for executor A
 
 1. **Stop signal:** roster `state = draining` (gateways and peers stop placing
    on A), stop claiming. Keep serving every session A still owns.
-2. **Move sessions, cheapest first** (a session that just got a round jumps
-   the queue):
-   - **cold** (nothing in memory) → release;
-   - **everything else** → hand off (§8.2), including sessions whose step is
-     still streaming: the stream lives on a gateway, and its deltas and result
-     go to the successor.
+2. **Move buckets** — about 4096/N of them, the busiest first. Each goes to
+   its successor by handoff (§8.2). Cold sessions need nothing: they simply
+   belong to the new owner, which loads them on their next round. Warm
+   sessions move inside the handoff, including those whose step is still
+   streaming: the stream lives on a gateway, and its deltas and result go to
+   the successor.
 3. **Deadline** (25 s, inside the platform's stop timeout): transfer whatever
-   is left to its successors.
+   buckets are left, without a PREPARE.
 4. Delete the roster row and exit. On restart: same address and
-   `member_name`, new `node_id` → leftovers are claimable at once and the node
-   gets its old placement back.
+   `member_name`, new `node_id` → leftover buckets are claimable at once and
+   the executor gets its old buckets back.
 
-Successors must be outside G, or a session would move twice: a draining node
+Successors must be outside G, or a bucket would move twice: a draining node
 refuses a handoff and the next-ranked node is tried. If the deploy platform
 can mark a whole group draining at once, double moves disappear entirely.
 
 ### 8.2 Handoff
 
-![Handoff: A sends PREPARE with S's step buffers; B loads S and replies READY; A pauses S; A transfers the lease to B with token n+1; A sends COMMIT; B checks write_seq, drives S and publishes on S's channel; later deltas and events from gateways go to B.](assets/handoff-sequence.svg)
+![Handoff of bucket b: A sends PREPARE with b's warm sessions and step buffers; B loads them and replies READY; A pauses b; A transfers b's lease to B with token n+1; A sends COMMIT; B checks each session's write_seq, drives b's sessions and publishes on their channels; later deltas and events from gateways go to B.](assets/handoff-sequence.svg)
 
-1. **PREPARE** — A asks successor B to load S into memory and hands it S's
-   step buffers (B is not owner yet).
-2. **Pause** — A finishes its current write for S and holds new events for a
+1. **PREPARE** — A asks successor B to load bucket b's warm sessions into
+   memory and hands it their step buffers (B is not owner yet).
+2. **Pause** — A finishes its current writes for b and holds new events for a
    few milliseconds.
-3. **Transfer** — one database update: owner = B, token + 1.
-4. **COMMIT** — A tells B; B starts driving and publishing on S's channel,
-   re-reading only what changed since PREPARE.
+3. **Transfer** — one database update: owner of b = B, token + 1.
+4. **COMMIT** — A tells B; B starts driving b's sessions and publishing on
+   their channels, re-reading only what changed since PREPARE (by each
+   session's `write_seq`).
 5. A forwards anything it held, deltas included; later arrivals get
    `NOT_OWNER(B)`. Dispatch gateways send their next message to B, because
    they look the owner up per message. Subscribers notice nothing: they are
-   on S's channel, not on A.
+   on the sessions' channels, not on A.
 
-The gap for S is one database write plus one network round trip: the PA's
+The gap for b is one database write plus one network round trip: the PA's
 stream pauses for milliseconds. If anything fails midway, existing rules
-cover it: B dies → ordinary takeover; the COMMIT is lost → B finds S anyway;
+cover it: B dies → ordinary takeover; the COMMIT is lost → B finds b anyway;
 A writes after the transfer → fenced out; A publishes after the transfer →
 subscribers drop its lower token.
 
 How B finds it: a transfer sets `adopted = FALSE` on the lease row; a claim
-sets it `TRUE` in the same transaction; a new owner sets it `TRUE` (fenced)
-when it starts driving. Every executor reads, each heartbeat, its leases
-that are not yet adopted (`WHERE node_id = :me AND adopted = FALSE`,
-indexed, usually empty), at most one batch per tick (the same 2,000-row
-bound and backoff as failure discovery; state is reloaded lazily, so
-adopting is cheap). Adopted rows leave the result set, so paging needs no
-cursor either. There is no timestamp or cursor, so a transfer that commits
-late can't be skipped: an unadopted row stays visible until it is adopted.
+sets it `TRUE` in the same transaction; a new owner sets it `TRUE` when it
+starts driving. Every executor reads, each heartbeat, its buckets that are
+not yet adopted (`WHERE node_id = :me AND adopted = FALSE`, indexed, at most
+a few hundred rows, usually none). There is no timestamp or cursor, so a
+transfer that commits late can't be skipped: an unadopted row stays visible
+until it is adopted.
 The same read covers transfers made without a PREPARE (drain deadline,
 watchdog).
 
 ### 8.3 When is it safe to move a run mid-flight?
 
-A run can move between any two durable writes, because its whole position is
-in the database and its connections are on gateways:
+A bucket can move between any two durable writes of its sessions, because
+each run's whole position is in the database and its connections are on
+gateways:
 
 | The run is… | Move now? |
 | --- | --- |
@@ -645,64 +682,52 @@ in the database and its connections are on gateways:
   and gateways talk to both, so schema and protocol changes go expand →
   migrate → contract across releases; new durable formats ship the reader
   first and the writer later; a node that meets a format it can't read hands
-  the session back instead of guessing. The lease protocol and the placement
+  the bucket back instead of guessing. The lease protocol and the placement
   hash are frozen across versions.
 
 ---
 
 ## 9. Failover: when an executor crashes
 
-There is no handoff message after a crash. Survivors must **discover** the
-dead executor's sessions and split them without talking to each other.
-Meanwhile client streams stay open on their gateways; output pauses until
-the takeover, then continues.
+There is no handoff message after a crash. Survivors take the dead
+executor's buckets without talking to each other, then resume the sessions
+in them that need driving. Meanwhile client streams stay open on their
+gateways; output pauses until the takeover, then continues.
 
-![Failover: executor D stops heart-beating; once D's leases are claimable, each survivor queries D's sessions with pending work at every roster poll and claims those HRW assigns to it; idle sessions are claimed on demand by their next round.](assets/failover-discovery.svg)
+![Failover: executor D stops heart-beating; once D's leases are claimable, each survivor reads D's buckets and claims those it ranks first for without D; for each claimed bucket it resumes the sessions whose pending-work flag is set; idle sessions are loaded on their next round.](assets/failover-discovery.svg)
 
-1. **Roster poll finds a dead executor, then bounded, split queries.** Every
-   heartbeat each executor already reads the roster. While D is dead, each
-   survivor computes which buckets rank it first without D, and reads only
-   those, in bounded pages:
-   `SELECT … FROM bcs_task_leases WHERE node_id = :D AND has_pending_work
-   AND bucket IN (:mine) LIMIT :batch` (index on `node_id, has_pending_work,
-   bucket`). So each survivor reads only its own share, never the whole set.
-   Per poll it claims at most one batch (default 2,000), polls every 1 s
-   while a backlog remains, and backs off on storage errors. Sessions with
-   unprocessed input are taken first. Buckets whose first choice is also
-   down are picked up after a short grace by the next-ranked node. Because
-   the query repeats every poll, work that becomes pending later (a fallback
-   round) is found too. A dead node is **retired from discovery** once its
-   leases are claimable and no pending work is left in *any* bucket. An
-   empty share of one's own buckets is not enough: if another survivor then
-   died, nobody would query its share. So a survivor whose own query comes
-   back empty checks all buckets with one indexed probe
-   (`… WHERE node_id = :D AND has_pending_work LIMIT 1`) and retires D only
-   if that is empty too. After that, late input for D's idle sessions
-   doesn't need discovery, because the durable fallback claims a claimable
-   lease itself (§6). All dead nodes together
-   share one per-tick discovery budget, so a history of crashes adds no
-   standing load. A node holding 300 k pending sessions spread over 19
-   survivors is claimed in under 10 s; claiming is cheap because state is
-   reloaded lazily on first use.
-2. **Claim on demand.** Idle sessions are not scanned at all: the next round
-   (or a gateway asking for a snapshot) finds the owner dead and the
-   preferred survivor claims it — a normal cold start.
-3. **Safety-net sweep** every 30–60 s for anything missed.
+1. **Claim the dead executor's buckets.** Every heartbeat each executor
+   already reads the roster. Once D's leases are claimable, each survivor
+   reads D's buckets — `SELECT bucket FROM bcs_task_leases WHERE node_id = :D`
+   (indexed, about 4096/N rows) — and claims those it ranks first for without
+   D. A bucket whose first choice is also down is claimed after a 1 s grace
+   by the next-ranked survivor. That is a handful of claims per survivor
+   (about 10 each when 19 survivors split 200 buckets), done in
+   milliseconds. Once they are claimed, D's `node_id` is on no lease row, so
+   there is nothing left to watch.
+2. **Resume pending sessions.** For each claimed bucket the new owner reads
+   the sessions that need a driver —
+   `… WHERE bucket = :b AND has_pending_work LIMIT 2000` on the session rows
+   (indexed), batch after batch, those with unprocessed input first — and
+   resumes them. Idle sessions are not touched at all: they belong to the new
+   owner, which loads them on their next round. State is reloaded lazily, so
+   300 k pending sessions spread over 19 survivors resume in under 10 s.
+3. **Safety-net sweep** every 30–60 s: buckets whose owner is stale, and
+   sessions whose pending flag is set but which nobody is driving.
 
-After claiming: reload state from the database (exactly like resuming a cold
-session — *failover is a cache miss*), check each in-flight dispatch's
-gateway in the roster (a live one hands over the step's output with
-`FetchBuffer` and sends further deltas to the new owner; a dead one means
-the dispatch is moved, §7.6), republish the session's latest event and step
-buffer (§7.4, rule 2), and resume.
+For each resumed session: reload state from the database (exactly like
+resuming a cold session — *failover is a cache miss*), check each in-flight
+dispatch's gateway in the roster (a live one hands over the step's output
+with `FetchBuffer` and sends further deltas to the new owner; a dead one
+means the dispatch is moved, §7.6), republish the session's latest event and
+step buffer (§7.4, rule 2), and resume.
 
 **Taking over earlier on evidence.** Because fencing makes a wrong guess
 safe, evidence can replace waiting: a restart at the same address frees the
-old run's leases at once; a process that panics marks its own roster row
-dead on the way out (heartbeat set to NULL) and keeps its leases, so
-survivors find them through the normal dead-node query (§9, step 1) at once —
-pending work is never released. A node that is alive but silently unreachable gives no evidence —
-for it, wait the claim threshold.
+old run's buckets at once; a process that panics marks its own roster row
+dead on the way out (heartbeat set to NULL), so survivors claim its buckets
+through step 1 at once. A node that is alive but silently unreachable gives
+no evidence — for it, wait the claim threshold.
 
 | Situation | PA's stream | Sessions resume after |
 | --- | --- | --- |
@@ -721,19 +746,20 @@ and the recovery grace.
 
 ## 10. Episodes: warm state is only a cache
 
-- An episode starts when an executor claims or receives S (loading lazily)
-  and ends on release, lease loss, or 10 minutes idle.
+- An episode starts when an executor loads S (on a round, a resume or a
+  handoff, lazily) and ends when S's bucket moves away, on lease loss, or
+  after 10 minutes idle.
 - **Write-through only.** Every durable fact is written before it is
   acknowledged; memory never holds the only copy. That is why idle eviction,
   resuming a months-old task, and crash failover are the same operation:
   reload from the database. (Step buffers are the one exception: soft, and
   backed by the dispatch gateway's copy and the agent's own task, §7.5.)
-- **Rebalancing touches only cold sessions.** When an executor is no longer
-  the preferred one for a session that has gone cold, it releases the lease
-  and the preferred executor claims it on the next round — free, so it never
-  costs TTFT.
-- A **stuck-session watchdog** (~5 min without progress) transfers a session
-  whose driver is wedged on an otherwise healthy executor; a stuck-dispatch
+- **Rebalancing moves buckets.** When an executor joins or returns, current
+  owners hand over the buckets it now ranks first for (§8.2), a few per
+  second so rehydration never spikes, idlest first.
+- A **stuck-session watchdog** (~5 min without progress) drops a wedged
+  driver and reloads the session on the same owner; a session that keeps
+  wedging is failed and reported; a stuck-dispatch
   watchdog (no progress count from the gateway) moves a wedged dispatch.
 
 ---
@@ -750,7 +776,10 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 | Observer recovery grace | 5 s (= claim threshold) |
 | Self-fence margin | 1 s |
 | Claim grace for non-preferred nodes | 1 s |
-| Failure discovery: batch per poll / poll interval while backlog remains | 2,000 rows / 1 s |
+| Buckets (fixed before launch) | 4,096 |
+| Pending sessions read per query when resuming a bucket | 2,000 |
+| Rebalance pace after an executor joins | 5 buckets/s |
+| Bucket map refresh at gateways | 10 s |
 | Safety-net sweep | 30–60 s |
 | Executor drain deadline | 25 s |
 | Gateway–executor channel keepalive / dead after | 1 s / 3 s |
@@ -771,10 +800,13 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 - `bcs_node_roster`: `node_id`, `member_name`, `role` (`executor` |
   `gateway`), `state`, `started_at`, `last_heartbeat_at`, `advertise_addr`,
   `build_version`.
-- `bcs_task_leases`: `session_id`, `bucket`, `node_id`, `fencing_token`,
-  `expires_at`, `adopted`, `write_seq`, `has_pending_work`, `pending_seq`.
-  Indexes: `(node_id, has_pending_work, bucket)` for failure discovery,
-  `(node_id, adopted)` for leases transferred but not yet adopted.
+- `bcs_task_leases`: one row per bucket — `bucket` (primary key, 0–4095),
+  `node_id`, `fencing_token`, `adopted`; 4,096 rows created once. Index:
+  `(node_id, adopted)`, for a dead executor's buckets and for buckets
+  transferred but not yet adopted.
+- **Session row** (columns this design needs on the session record):
+  `bucket`, `has_pending_work`, `pending_seq`, `write_seq`. Index:
+  `(bucket, has_pending_work)`, for resuming a bucket's pending sessions.
 - **Session event log** (logical): `session_id`, `event_seq`, event, written
   only in fenced commits; kept until the Task ends plus item 4's retention
   floor. Its physical home is open (§14).
@@ -785,14 +817,15 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 single-node implementation and a no-op one):
 
 - **Roster** — register, heartbeat, set draining, read the live roster.
-- **Placement policy** — rank executors for a session (rendezvous by
+- **Placement policy** — rank executors for a bucket (rendezvous by
   default); choose a gateway for a dispatch (the caller's, else the least
   loaded).
-- **Task leases** — claim, release, transfer, list owned sessions, and a
-  **fence step** other components put first in their transactions (item 3's
-  dispatch records use it).
+- **Task leases** — claim, transfer, list owned buckets, and a **fence
+  step** (lock the session's bucket row in shared mode and check the token)
+  that other components put first in their transactions (item 3's dispatch
+  records use it).
 - **Gateway–executor protocol**:
-  - gateway → executor: `Submit(round)`, `Snapshot(S)`,
+  - gateway → executor: `Submit(round)`, `BucketMap()`, `Snapshot(S)`,
     `ReadEvents(S, after_seq)`, `DispatchDelta(D, chunk_seq, chunk)`
     (unacknowledged), `DispatchEvent(D, seq, event)`,
     `DispatchResult(D, seq, output)`, `Progress(D)`, `Abandoned(D)`;
@@ -813,7 +846,7 @@ its local database, so the takeover path is exercised everywhere.
 
 | # | Doc 02 says | This design | Why |
 | --- | --- | --- | --- |
-| D1 | Each write carries `WHERE lease_token = my_token` | The first step of each transaction checks the session's lease row | Stronger: protects every write from the moment of a claim, with no extra column on every table |
+| D1 | Each write carries `WHERE lease_token = my_token` | The first step of each transaction locks and checks the lease row of the session's bucket | Stronger: protects every write from the moment of a claim, with no extra column on every table |
 | D2 | — | Recovery and dispatch run per lease, not on a single leader | Required for N > 1 nodes |
 | D3 | "node id" | `node_id` is per process run | Makes restarts and renewal simple |
 | D4 | "consistent hashing" | Rendezvous hashing | Same family, no tuning |
@@ -822,6 +855,7 @@ its local database, so the takeover path is exercised everywhere.
 | D7 | — | Stable `member_name` for placement | Placement survives restarts |
 | D8 | Any node serves any request; the owning node runs its own dial-out streams; dial-in sockets land on any node (planes 1 and 3) | A gateway tier holds every long-lived connection; executors hold none; every supply agent is dial-out | An executor crash or deploy pauses streams instead of closing them, and executor drain becomes moving leases |
 | D9 | — | The owner fans out on a per-session channel of a non-durable pub/sub; a durable per-session event log is the truth | Fan-out stays BCN's logic; owner changes are invisible to subscribers; no durable queue on the token path |
+| D10 | A lease per task session | One lease per bucket (4,096 fixed buckets); sessions inherit their bucket's owner and token | Ownership work is O(buckets): no claim per cold session, a failover claims ~4096/N rows, a drain transfers a few hundred, and the whole owner map fits in every gateway |
 
 ---
 
@@ -839,6 +873,8 @@ its local database, so the takeover path is exercised everywhere.
 | 8 | Exact replay by `Last-Event-ID` | Optional extension once the step buffer exists; snapshots are enough for A2A |
 | 9 | Pub/sub product for session channels | Redis 7+ sharded pub/sub or NATS core; TBase only if it supports sharded pub/sub |
 | 10 | Delta transport from dispatch gateway to owner if long-lived internal channels are not allowed | A per-dispatch channel on the same pub/sub, subscribed by the owner |
+| 11 | Shared row locks for the fence step | Use `FOR SHARE` if OceanBase supports it; otherwise `FOR UPDATE`, and measure per-bucket write rates for hot buckets |
+| 12 | Bucket count | 4,096, fixed before launch |
 
 ---
 
@@ -858,7 +894,8 @@ its local database, so the takeover path is exercised everywhere.
 | A message queue on the request path (e.g. a consistent-hash exchange) | A third membership view, lost ordering on rebalance, a second lease mechanism, and it cannot join the lease-row transaction the durable fallback relies on |
 | Every input and token through a cache's streams (queue-centric executor) | Storage operations grow with tokens, a queue hop before every round, and acknowledged-message durability rests on the cache's failover |
 | Redis as the system of record | Asynchronous replication can lose acknowledged writes and reissue a token |
-| Per-session lease renewal | O(sessions) writes per tick |
+| One lease per session | O(sessions) claims for cold starts and failover, and failure discovery over millions of lease rows; buckets give the same safety with ~4096/N lease operations per failover |
+| Per-lease renewal | O(leases) writes per tick |
 | Polling for new rounds | Adds up to 1 s to TTFT |
 
 The only pub/sub on the hot path is the non-durable session channel (§7.4).

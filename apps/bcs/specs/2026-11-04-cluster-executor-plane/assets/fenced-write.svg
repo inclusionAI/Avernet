@@ -6,38 +6,38 @@
   </defs>
   <rect x="0" y="0" width="960" height="480" fill="#fafbf9"/>
   <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">A fenced write is one transaction: check the token, then write</text>
-  <text x="24" y="52" font-size="12" fill="#5c6a62">Step 1 must touch exactly one row; if it doesn't, the whole transaction is rolled back.</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Step 1 locks the session's bucket lease row and checks the token; if it isn't yours, the whole transaction rolls back.</text>
 
   <rect x="24" y="74" width="560" height="250" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.6"/>
   <text x="44" y="98" font-size="13" font-weight="bold" fill="#2457a6">One transaction (atomic)</text>
   <rect x="44" y="112" width="520" height="92" rx="8" fill="#e3f0e9" stroke="#157a55"/>
-  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · check the token (must affect exactly 1 row)</text>
-  <text x="60" y="156" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420">UPDATE bcs_task_leases SET write_seq = write_seq + 1</text>
-  <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE env = ? AND session_id = ? AND fencing_token = :mine </text>
-  <text x="60" y="194" font-size="10.5" fill="#5c6a62">verifies the token AND takes the lease-row lock</text>
+  <text x="60" y="134" font-size="12" font-weight="bold" fill="#157a55">Step 1 · lock the bucket row (shared) and check the token</text>
+  <text x="60" y="156" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT fencing_token FROM bcs_task_leases</text>
+  <text x="60" y="174" font-size="11.5" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE bucket = :b FOR SHARE      -- must equal :mine</text>
+  <text x="60" y="194" font-size="10.5" fill="#5c6a62">shared: the bucket's other sessions keep writing in parallel</text>
   <rect x="44" y="216" width="520" height="92" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="60" y="238" font-size="12" font-weight="bold" fill="#1c2420">Step 2…n · the durable writes for this session</text>
-  <text x="60" y="260" font-size="11.5" fill="#1c2420">run status · node-run progress · checkpoints · history</text>
+  <text x="60" y="260" font-size="11.5" fill="#1c2420">run status · checkpoints · history · write_seq + 1 on S's row</text>
   <text x="60" y="278" font-size="11.5" fill="#1c2420">dispatch / delivery records (item 3) · durable timers</text>
   <text x="60" y="298" font-size="10.5" fill="#5c6a62">all in the same database as the lease row</text>
 
   <rect x="610" y="74" width="326" height="116" rx="10" fill="#e3f0e9" stroke="#157a55"/>
   <text x="626" y="98" font-size="13" font-weight="bold" fill="#157a55">Token matches</text>
-  <text x="626" y="120" font-size="11.5" fill="#1c2420">step 1 touches 1 row → steps run → COMMIT</text>
-  <text x="626" y="142" font-size="11.5" fill="#1c2420">write_seq always changes, so the count is 1</text>
-  <text x="626" y="160" font-size="11.5" fill="#1c2420">(a no-op SET x = x would report 0 rows)</text>
-  <text x="626" y="180" font-size="10.5" fill="#5c6a62">write_seq also tells a handoff successor what changed</text>
+  <text x="626" y="120" font-size="11.5" fill="#1c2420">step 1 returns :mine → steps run → COMMIT</text>
+  <text x="626" y="142" font-size="11.5" fill="#1c2420">the shared lock is held until COMMIT, so a claim</text>
+  <text x="626" y="160" font-size="11.5" fill="#1c2420">or transfer of the bucket cannot commit in between</text>
+  <text x="626" y="180" font-size="10.5" fill="#5c6a62">S's write_seq tells a handoff successor what changed</text>
   <rect x="610" y="206" width="326" height="118" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
-  <text x="626" y="230" font-size="13" font-weight="bold" fill="#b3402e">Token is stale (someone claimed S)</text>
-  <text x="626" y="252" font-size="11.5" fill="#1c2420">step 1 touches 0 rows → whole transaction rolls back</text>
+  <text x="626" y="230" font-size="13" font-weight="bold" fill="#b3402e">Token is stale (someone claimed bucket b)</text>
+  <text x="626" y="252" font-size="11.5" fill="#1c2420">step 1 returns another token → it all rolls back</text>
   <text x="626" y="274" font-size="11.5" fill="#1c2420">caller gets LeaseLost →</text>
-  <text x="626" y="292" font-size="11.5" font-weight="bold" fill="#b3402e">stop driving S, evict it, never retry</text>
+  <text x="626" y="292" font-size="11.5" font-weight="bold" fill="#b3402e">stop driving b's sessions, evict them, never retry</text>
   <line x1="584" y1="160" x2="606" y2="140" stroke="#5c6a62" marker-end="url(#ar)"/>
   <line x1="584" y1="160" x2="606" y2="250" stroke="#5c6a62" marker-end="url(#ar)"/>
 
   <rect x="24" y="344" width="912" height="118" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="44" y="368" font-size="13" font-weight="bold" fill="#1c2420">Why a concurrent claim can't slip in between check and commit</text>
-  <text x="44" y="392" font-size="11.5" fill="#1c2420">A claim (or a handoff transfer) also updates the lease row, so it needs the same row lock. It waits until the fenced transaction commits,</text>
-  <text x="44" y="410" font-size="11.5" fill="#1c2420">then bumps the token. Every later fenced write by the old owner fails step 1. Check and write are never separated by a gap a pause can fall into.</text>
-  <text x="44" y="436" font-size="11.5" fill="#5c6a62">Rules: same transaction · same database · one session per transaction · LeaseLost means stop · unknown commit outcome → read back, never blind-retry.</text>
+  <text x="44" y="392" font-size="11.5" fill="#1c2420">A claim (or a handoff transfer) updates the bucket row, so it needs an exclusive lock. It waits until every in-flight fenced transaction commits,</text>
+  <text x="44" y="410" font-size="11.5" fill="#1c2420">then bumps the token. Every later fenced write by the old owner fails step 1. No shared locks? Use FOR UPDATE: just as safe, one write at a time per bucket.</text>
+  <text x="44" y="436" font-size="11.5" fill="#5c6a62">Rules: same transaction · same database · one session behind its bucket's check · LeaseLost means stop · unknown commit outcome → read back, never blind-retry.</text>
 </svg>

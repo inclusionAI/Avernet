@@ -35,7 +35,9 @@ builds it to this contract:
 
 ## Item 3 — execution correctness
 
-- **Use the fence step** in every dispatch-record transaction.
+- **Use the fence step** in every dispatch-record transaction: lock the
+  session's bucket row in `bcs_task_leases` (one row per bucket) and check
+  the token. A session has no lease of its own.
 - **Record where each dispatch runs:** the dispatch record names its gateway,
   written fenced. When that gateway dies, the owner moves the dispatch to
   another gateway, which reconciles by the recorded task id (read or

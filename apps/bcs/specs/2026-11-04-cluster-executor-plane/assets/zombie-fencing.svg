@@ -18,7 +18,7 @@
   <text x="180" y="90" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#b3402e">Node A (old owner)</text>
   <text x="180" y="105" font-size="10.5" text-anchor="middle" fill="#b3402e">pauses → zombie</text>
   <rect x="390" y="72" width="180" height="40" rx="8" fill="#eef2fa" stroke="#2457a6"/>
-  <text x="480" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared DB (lease row S)</text>
+  <text x="480" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#2457a6">Shared DB (lease row of bucket b)</text>
   <rect x="690" y="72" width="180" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
   <text x="780" y="97" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">Node B (new owner)</text>
   <line x1="180" y1="112" x2="180" y2="540" stroke="#b9c6bf" stroke-dasharray="3 4"/>
@@ -54,12 +54,12 @@
   <text x="30" y="426" font-size="11" fill="#5c6a62">t = 41 s</text>
   <text x="180" y="414" font-size="11" text-anchor="middle" fill="#b3402e">A wakes, still "owner"</text>
   <line x1="184" y1="430" x2="476" y2="430" stroke="#b3402e" stroke-width="1.6" marker-end="url(#ab)"/>
-  <text x="330" y="446" font-size="11" text-anchor="middle" fill="#b3402e">fenced write: WHERE fencing_token = 7</text>
+  <text x="330" y="446" font-size="11" text-anchor="middle" fill="#b3402e">fenced write: token 7, but the row says 8</text>
   <rect x="404" y="456" width="152" height="40" rx="5" fill="#f8e6e1" stroke="#b3402e"/>
-  <text x="480" y="473" font-size="11" font-weight="bold" text-anchor="middle" fill="#b3402e">0 rows → rollback</text>
+  <text x="480" y="473" font-size="11" font-weight="bold" text-anchor="middle" fill="#b3402e">mismatch → rollback</text>
   <text x="480" y="488" font-size="10.5" text-anchor="middle" fill="#b3402e">nothing lands</text>
   <line x1="476" y1="516" x2="184" y2="516" stroke="#b3402e" marker-end="url(#ab)"/>
-  <text x="330" y="510" font-size="11" text-anchor="middle" fill="#b3402e">LeaseLost → A stops driving S, evicts it</text>
+  <text x="330" y="510" font-size="11" text-anchor="middle" fill="#b3402e">LeaseLost → A stops driving b's sessions</text>
 
   <rect x="600" y="420" width="340" height="110" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
   <text x="616" y="442" font-size="12" font-weight="bold" fill="#1c2420">What correctness did not need</text>

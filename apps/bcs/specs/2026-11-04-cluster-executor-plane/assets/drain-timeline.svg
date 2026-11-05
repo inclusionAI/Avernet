@@ -13,16 +13,16 @@
   <text x="44" y="118" font-size="11.5" fill="#1c2420">roster state = draining (gateways and peers stop placing on A) · stop claiming · keep serving every session A still owns</text>
 
   <rect x="24" y="146" width="912" height="190" rx="8" fill="#e3f0e9" stroke="#157a55"/>
-  <text x="44" y="170" font-size="13" font-weight="bold" fill="#157a55">2 · Sessions, cheapest first (a session that just received a round jumps the queue)</text>
+  <text x="44" y="170" font-size="13" font-weight="bold" fill="#157a55">2 · Buckets (~4096/N of them), busiest first</text>
   <rect x="44" y="184" width="280" height="136" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
-  <text x="184" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Cold</text>
+  <text x="184" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Cold sessions</text>
   <text x="58" y="230" font-size="11" fill="#1c2420">nothing in memory</text>
-  <text x="58" y="254" font-size="11.5" font-weight="bold" fill="#157a55">→ RELEASE</text>
-  <text x="58" y="274" font-size="11" fill="#5c6a62">node_id = '', 1 statement; the next</text>
-  <text x="58" y="290" font-size="11" fill="#5c6a62">round's preferred executor claims it</text>
+  <text x="58" y="254" font-size="11.5" font-weight="bold" fill="#157a55">→ nothing to do</text>
+  <text x="58" y="274" font-size="11" fill="#5c6a62">they belong to the bucket's new owner,</text>
+  <text x="58" y="290" font-size="11" fill="#5c6a62">which loads them on their next round</text>
   <rect x="340" y="184" width="580" height="136" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
-  <text x="630" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Everything else — including steps that are still streaming</text>
-  <text x="354" y="230" font-size="11.5" font-weight="bold" fill="#157a55">→ HANDOFF: PREPARE (+ step buffers) · pause · TRANSFER · COMMIT to B</text>
+  <text x="630" y="206" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Each bucket — warm sessions move with it, even mid-stream</text>
+  <text x="354" y="230" font-size="11.5" font-weight="bold" fill="#157a55">→ HANDOFF: PREPARE (+ warm sessions) · pause · TRANSFER · COMMIT to B</text>
   <text x="354" y="254" font-size="11" fill="#1c2420">a streaming step keeps running on its dispatch gateway; its next deltas, events and result go to B</text>
   <text x="354" y="272" font-size="11" fill="#1c2420">PA streams stay subscribed to S's channel; B publishes there now, so they pause for milliseconds</text>
   <text x="354" y="296" font-size="11" fill="#5c6a62">only wait: a durable write or a dispatch start in progress (milliseconds)</text>
@@ -30,7 +30,7 @@
 
   <rect x="24" y="348" width="912" height="62" rx="8" fill="#ffffff" stroke="#5c6a62"/>
   <text x="44" y="372" font-size="13" font-weight="bold" fill="#1c2420">3 · Deadline (25 s, inside the platform stop timeout)</text>
-  <text x="44" y="394" font-size="11.5" fill="#1c2420">TRANSFER whatever is left to its HRW successors (pending work is never released) · later arrivals get NOT_OWNER(B)</text>
+  <text x="44" y="394" font-size="11.5" fill="#1c2420">TRANSFER whatever buckets are left to their HRW successors, without PREPARE · later arrivals get NOT_OWNER(B)</text>
 
   <rect x="24" y="422" width="440" height="78" rx="8" fill="#ffffff" stroke="#5c6a62"/>
   <text x="44" y="446" font-size="13" font-weight="bold" fill="#1c2420">4 · Delete roster row, exit</text>
@@ -38,6 +38,6 @@
   <line x1="464" y1="461" x2="490" y2="461" stroke="#5c6a62" marker-end="url(#ar)"/>
   <rect x="496" y="422" width="440" height="78" rx="8" fill="#e3f0e9" stroke="#157a55"/>
   <text x="516" y="446" font-size="13" font-weight="bold" fill="#157a55">5 · Restart: same address, new node_id</text>
-  <text x="516" y="468" font-size="11.5" fill="#1c2420">leftovers claimable at once · same member_name →</text>
-  <text x="516" y="486" font-size="11.5" fill="#1c2420">same placement</text>
+  <text x="516" y="468" font-size="11.5" fill="#1c2420">leftover buckets claimable at once · same member_name →</text>
+  <text x="516" y="486" font-size="11.5" fill="#1c2420">same buckets back</text>
 </svg>
