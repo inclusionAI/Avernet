@@ -65,6 +65,9 @@ from agentclaw.community.core.bot_collaborator.services.credentials_admins_write
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
+from agentclaw.community.core.bot_management.render_screen.backfill import (
+    RenderScreenOwnerScopeBackfill,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
@@ -303,6 +306,13 @@ class BotManagementModule(Module):
         # ``BcnService`` is built by the ``bcn_service`` provider below — it needs
         # the bcn-qualified HttpClient injected.
         binder.bind(RenderScreenService, to=RenderScreenService, scope=singleton)
+        # Lifecycle 参与方:startup 阶段归位协作者 scope 漂移的存量/增量
+        # render screen 记录(discover_lifecycle_participants 经 bindings 自动发现并调度)。
+        binder.bind(
+            RenderScreenOwnerScopeBackfill,
+            to=RenderScreenOwnerScopeBackfill,
+            scope=singleton,
+        )
         # BotRepository: single unified ORM impl — runs on prod
         # OceanBase and SQLite via the injected DatabasePlugin.
         # RenderScreenRepository was already unified earlier.
