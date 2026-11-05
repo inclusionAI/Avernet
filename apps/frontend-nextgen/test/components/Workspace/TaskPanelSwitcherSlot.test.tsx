@@ -5,6 +5,7 @@ import type { TaskListItem } from '@/domain/tasks/models';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import { persistPanelWidthPercent } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -63,6 +64,7 @@ const openPanelTabMock = jest.spyOn(chatBridge, 'openPanelTab').mockImplementati
 describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
   beforeEach(() => {
     useTaskSidePanelStore.getState().resetAll();
+    useTaskSessionAssociationStore.getState().reset();
     useTaskConversationNavigationStore.getState().resetAll();
     mockUseTaskSwitcherTasks.mockClear();
   });
@@ -71,7 +73,24 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
     render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
     expect(mockUseTaskSwitcherTasks).toHaveBeenCalledWith(
       undefined,
-      expect.objectContaining({ currentTaskId: 'task-current' }),
+      expect.objectContaining({ currentTaskId: 'task-current', associatedTaskIds: [] }),
+    );
+  });
+
+  it('跨用户会话使用 session owner 查询，并传入 by_session 关联 task', () => {
+    useTaskSessionAssociationStore.getState().setActiveSession('agent:main:session:sess-1:user:440718');
+    useTaskSessionAssociationStore
+      .getState()
+      .setActiveSessionTaskIds('agent:main:session:sess-1:user:440718', ['task-current', 'task-relay']);
+
+    render(<TaskPanelSwitcherSlot currentTaskId="task-current" params={{ taskId: 'task-current' }} />);
+
+    expect(mockUseTaskSwitcherTasks).toHaveBeenCalledWith(
+      '440718',
+      expect.objectContaining({
+        currentTaskId: 'task-current',
+        associatedTaskIds: ['task-current', 'task-relay'],
+      }),
     );
   });
 
@@ -143,6 +162,7 @@ describe('TaskPanelSwitcherSlot(聊天宿主)', () => {
 describe('TaskPanelSwitcherSlot 切任务 openTab 宽度(拖宽记忆)', () => {
   beforeEach(() => {
     useTaskSidePanelStore.getState().resetAll();
+    useTaskSessionAssociationStore.getState().reset();
     useTaskConversationNavigationStore.getState().resetAll();
     localStorage.clear();
     openPanelTabMock.mockClear();

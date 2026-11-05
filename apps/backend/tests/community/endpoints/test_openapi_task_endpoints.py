@@ -135,17 +135,20 @@ def execute_unauthenticated():
 
 
 def _seed_task_session(world) -> None:
-    def get_task_node_by_session(_self, session_id: str):
-        return TaskNodeSessionRef(
-            task_id="public-task-dashboard",
-            node_id="public-task-node",
-            owner_user_id="public-task-owner",
-        )
+    def get_task_nodes_by_session(_self, session_id: str):
+        assert session_id == "public-task-session"
+        return [
+            TaskNodeSessionRef(
+                task_id="public-task-dashboard",
+                node_id="public-task-node",
+                owner_user_id="public-task-owner",
+            ),
+        ]
 
     bind_overrides(
         world,
         TaskServiceProtocol,
-        {"get_task_node_by_session": get_task_node_by_session},
+        {"get_task_nodes_by_session": get_task_nodes_by_session},
     )
 
 
@@ -163,9 +166,15 @@ def _seed_task_session(world) -> None:
         json_contains={
             "code": 200000,
             "data": {
-                "task_id": "public-task-dashboard",
-                "owner_user_id": "public-task-owner",
-                "node_id": "public-task-node",
+                "session_id": "public-task-session",
+                "items": [
+                    {
+                        "task_id": "public-task-dashboard",
+                        "owner_user_id": "public-task-owner",
+                        "node_id": "public-task-node",
+                    }
+                ],
+                "total": 1,
             },
         },
     ),
@@ -195,7 +204,7 @@ def by_session_unauthenticated():
         bind_overrides(
             w,
             TaskServiceProtocol,
-            {"get_task_node_by_session": lambda _self, _session_id: None},
+            {"get_task_nodes_by_session": lambda _self, _session_id: []},
         ),
     ),
     input=CaseInput(
@@ -425,7 +434,7 @@ _SKILL_INSTALL_RESULT = {
 
 
 def _seed_bbs_skill_install_runner(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         return _SKILL_INSTALL_RESULT
 
     bind_overrides(
@@ -436,7 +445,7 @@ def _seed_bbs_skill_install_runner(world) -> None:
 
 
 def _seed_bbs_skill_install_not_found(world) -> None:
-    async def trigger_install_bbs_skills(_self, *, bot_id):
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
         raise NotFound("subscription not found")
 
     bind_overrides(
@@ -455,7 +464,7 @@ def _seed_bbs_skill_install_not_found(world) -> None:
         _seed_bbs_skill_install_runner(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectSuccess(
         status=200,
@@ -475,7 +484,7 @@ def bbs_skill_install_public_happy():
         _seed_bbs_skill_install_not_found(w),
     ),
     input=CaseInput(
-        path_params={"bot_id": "bot-install"}, headers=_headers(), json_body={}
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
     ),
     expect=ExpectError(status=404),
 )

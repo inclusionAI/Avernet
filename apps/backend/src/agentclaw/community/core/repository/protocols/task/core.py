@@ -189,6 +189,16 @@ class TaskNodeRunInfoRepositoryProtocol(Protocol):
         """
         ...
 
+
+    @abstractmethod
+    def list_by_session_id(self, session_id: str) -> list["TaskNodeRunInfoRecord"]:
+        """Return session rows ordered newest first for task-panel restoration.
+
+        Callback convergence remains separate because its retry-first lookup has
+        a different contract. Rows without persisted timestamps remain last.
+        """
+        ...
+
     @abstractmethod
     def list_by_run_mode(
         self,

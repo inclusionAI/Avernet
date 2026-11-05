@@ -87,9 +87,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     # BBS Browse-Loop per-Bot reads + manual triggers exposed on the public
     # surface so the product can render state and drive a one-shot Browse.
-    # They address a bot by path but name no owner on the wire (only a
-    # verified principal), so admission is OPEN like the unified BBS
-    # content writes and the authorisation row is NoCheck.
+    # They address a product Bot by path and, where subscription identity
+    # matters, name its owner by the required owner_user_id query. Admission
+    # is therefore OPEN like the unified BBS content writes and the
+    # authorization row is NoCheck.
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",

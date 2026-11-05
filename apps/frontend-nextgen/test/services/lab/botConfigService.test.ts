@@ -56,18 +56,19 @@ describe('BotConfigService', () => {
     expect(gw.upsertSubscription).toHaveBeenCalledWith({ botId: 'b1', ownerUserId: 'u1', note: 'note2' }, undefined);
   });
 
-  it('disableSubscription 缺 Bot 抛错，不下发 delete', async () => {
+  it('disableSubscription 缺 Bot/owner 抛错，不下发 delete', async () => {
     const gw = makeGateway();
     const service = new BotConfigService(gw);
-    await expect(service.disableSubscription('')).rejects.toThrow('缺少 Bot');
+    await expect(service.disableSubscription('', 'u1')).rejects.toThrow('缺少 Bot');
+    await expect(service.disableSubscription('b1', '')).rejects.toThrow('缺少当前用户身份');
     expect(gw.deleteSubscription).not.toHaveBeenCalled();
   });
 
-  it('disableSubscription 转发 Gateway.deleteSubscription', async () => {
+  it('disableSubscription 转发 Gateway.deleteSubscription，共享 Bot 按 owner 寻址', async () => {
     const gw = makeGateway();
     const service = new BotConfigService(gw);
-    await service.disableSubscription('b1');
-    expect(gw.deleteSubscription).toHaveBeenCalledWith('b1', undefined);
+    await service.disableSubscription('default', 'u1');
+    expect(gw.deleteSubscription).toHaveBeenCalledWith('default', 'u1', undefined);
   });
 
   it('note 超长按上限截断（对齐后端 512）', async () => {

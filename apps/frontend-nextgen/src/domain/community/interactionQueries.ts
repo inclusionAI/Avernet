@@ -8,32 +8,39 @@ import type {
   InteractionSummaryQuery,
 } from '@/domain/community/types';
 
-function botIdentity(author: CommunityAuthor): { id: string; idAlias?: string } | undefined {
-  const trimmedId = author.id.trim();
-  const botUuid = author.botUuid?.trim() || (trimmedId.includes(':') ? trimmedId : undefined);
-  const botId = author.botId?.trim() || (trimmedId ? trimmedId.split(':')[0] : undefined);
-  if (!botUuid || !botId) {
-    // A bare legacy Bot id has no owner suffix and cannot satisfy the query.
-    return undefined;
-  }
-  return botId === 'default'
-    ? { id: botUuid }
-    : { id: botUuid, idAlias: botId };
+type BotIdentity = { id: string; idAlias?: string };
+
+function scopedBotId(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized || !normalized.includes(':')) return undefined;
+  const botId = normalized.split(':')[0];
+  if (!botId) return undefined;
+  return normalized;
 }
 
-export function forumAuthorRef(author: CommunityAuthor): ForumActorRef {
+function botIdentity(author: CommunityAuthor): BotIdentity | undefined {
+  // Identity metadata is best-effort on the read side. Prefer the explicit
+  // owner-scoped uuid, then a scoped author id; a bare historical id alone
+  // cannot be used by the summary API, so such author queries are skipped.
+  const uuid = scopedBotId(author.botUuid) ?? scopedBotId(author.id);
+  if (!uuid) return undefined;
+  const botId = uuid.split(':')[0];
+  return botId === 'default' ? { id: uuid } : { id: uuid, idAlias: botId };
+}
+
+export function forumAuthorRef(author: CommunityAuthor): ForumActorRef | undefined {
   if (author.type === 'bot') {
     const identity = botIdentity(author);
-    if (identity) return { actorType: 'BOT', ...identity };
-    throw new Error('BOT 作者缺少互动身份，无法查询统计');
+    if (!identity) return undefined;
+    return { actorType: 'BOT', ...identity };
   }
   return { actorType: 'HUMAN', id: author.id };
 }
 
-export function summaryTargetRef(author: CommunityAuthor): ForumTargetRef {
+export function summaryTargetRef(author: CommunityAuthor): ForumTargetRef | undefined {
   if (author.type === 'bot') {
     const identity = botIdentity(author);
-    if (!identity) throw new Error('default Bot 缺少工号后缀，无法查询互动统计');
+    if (!identity) return undefined;
     return { targetType: 'BOT', ...identity };
   }
   return { targetType: 'HUMAN', id: author.id };
@@ -42,7 +49,7 @@ export function summaryTargetRef(author: CommunityAuthor): ForumTargetRef {
 export function interactionTargetRef(author: CommunityAuthor): ForumTargetRef {
   if (author.type === 'bot') {
     const identity = botIdentity(author);
-    if (!identity?.id.includes(':')) {
+    if (!identity) {
       throw new Error('BOT 缺少带工号后缀的 bot_uuid，无法记录互动');
     }
     return { targetType: 'BOT', ...identity };
@@ -77,11 +84,14 @@ export function buildTopicListSummaryQueries(
     if (!viewer) return;
 
     const actor = forumAuthorRef(topic.author);
-    add({ actor });
-    add({
-      actor: viewer,
-      target: summaryTargetRef(topic.author),
-    });
+    const target = summaryTargetRef(topic.author);
+    if (actor) add({ actor });
+    if (target) {
+      add({
+        actor: viewer,
+        target,
+      });
+    }
   });
 
   if (queries.size > MAX_INTERACTION_SUMMARY_BATCH) {
@@ -113,8 +123,12 @@ export function buildTopicSummaryQueries(options: {
   const uniqueAuthors = new Map<string, CommunityAuthor>();
   authors.forEach((author) => uniqueAuthors.set(`${author.type}:${author.id}`, author));
   uniqueAuthors.forEach((author) => {
-    add({ actor: forumAuthorRef(author) });
-    add({ actor: viewer, target: summaryTargetRef(author) });
+    const actor = forumAuthorRef(author);
+    const target = summaryTargetRef(author);
+    if (actor) add({ actor });
+    if (target) {
+      add({ actor: viewer, target });
+    }
   });
   visiblePosts(replies).forEach((reply) => {
     const replyTarget: ForumTargetRef = { targetType: 'POST', id: reply.id };
