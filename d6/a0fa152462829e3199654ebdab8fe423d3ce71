@@ -1,0 +1,18 @@
+apps/backend/specs/2026-11-03-relay-session-task-panel/spec.md
+  h_059e888e5e4e82 146-148,177-180,206-207
+apps/frontend-nextgen/src/assets/TaskPanel/fixture.ts
+  h_059e888e5e4e82 2
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  h_059e888e5e4e82 5-16,20,53,65,79-81,85-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d6a0fa152462829e3199654ebdab8fe423d3ce71",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
