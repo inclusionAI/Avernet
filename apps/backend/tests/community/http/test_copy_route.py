@@ -9,14 +9,17 @@ not-found / non-copyable-lifecycle refused before any side effect.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from agentclaw.community.adapters.http.openapi_v1.bots.copy import (
     BotCopyRequest,
+    copy_bot,
+    retry_copy_bot,
     submit_copy,
 )
 from agentclaw.community.core.bot_copy.types import BotCopyStatus
@@ -47,7 +50,9 @@ def _mocks(script_body="echo hello"):
     manifest_seam = MagicMock()
     passport = MagicMock()
     space_context = MagicMock()
-    space_context.resolve_current.return_value = SimpleNamespace(numeric_id=100)
+    space_context.resolve_current.return_value = SimpleNamespace(
+        numeric_id=100, kind="personal"
+    )
     return bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, space_context
 
 
@@ -175,3 +180,82 @@ def test_submit_copy_passport_no_token_no_url_is_500_after_persist():
         _call({}, {}, mocks=mocks)
     assert exc_info.value.status_code == 500
     manifest_seam.start_job.assert_not_called()
+
+
+def _request():
+    # A minimal ASGI request scope is enough for `envelope(result, request)`,
+    # which reads only request_id and the app's envelope helper.
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/openapi/v1/bots/copy",
+            "headers": [],
+            "query_string": b"",
+            "client": ("127.0.0.1", 8000),
+        }
+    )
+
+
+def test_copy_bot_handler_returns_envelope_with_result():
+    # Handler-level (not submit_copy-level): covers the `del caller` + the
+    # `return envelope(result, request)` path the ASGI adapter answers with.
+    mocks = _mocks()
+    bot_repo, bot_copy_repo, _, manifest_seam, passport, space_context = mocks
+    bot_repo.get_by_id.return_value = _source_bot()
+    passport.apply_agent_passport.return_value = {"token": "tok_1"}
+
+    result = asyncio.run(
+        copy_bot(
+            body=BotCopyRequest(source_bot_id=_SOURCE_BOT_ID, bot_name="copied"),
+            request=_request(),
+            owner_id=_OWNER,
+            owner_name="owner",
+            caller=MagicMock(),
+            bot_repo=bot_repo,
+            bot_copy_repo=bot_copy_repo,
+            bot_script_service=mocks[2],
+            manifest_seam=manifest_seam,
+            passport_plugin=passport,
+            space_context=space_context,
+        )
+    )
+    # envelope(result, request) → a populated Envelope carrying the submit_copy result.
+    assert result.data is not None
+    assert result.data.type == "success"
+    assert result.code == 200000
+
+
+def test_retry_copy_bot_handler_returns_envelope_with_result():
+    # Handler-level: covers retry_copy_bot's `del caller` + `return envelope(...)`.
+    mocks = _mocks()
+    bot_repo, bot_copy_repo, _, manifest_seam, _, space_context = mocks
+    bot_repo.get_by_id.return_value = _source_bot(status="ACTIVE")
+    bot_copy_repo.get_by_dst_bot_id.return_value = MagicMock(
+        operation_id="op_1",
+        source_bot_id=_SOURCE_BOT_ID,
+        dst_owner_id=_OWNER,
+        operator_id=_OWNER,
+        env="dev",
+    )
+    bot_copy_repo.cas_retry.return_value = True
+    apply_repo = MagicMock()
+    apply_repo.recent.return_value = []
+
+    result = asyncio.run(
+        retry_copy_bot(
+            bot_id="dst_1",
+            request=_request(),
+            owner_id=_OWNER,
+            caller=MagicMock(),
+            bot_copy_repo=bot_copy_repo,
+            apply_repo=apply_repo,
+            bot_repo=bot_repo,
+            manifest_seam=manifest_seam,
+            space_context=space_context,
+        )
+    )
+    assert result.data is not None
+    assert result.data.operation_id == "op_1"
+    assert result.code == 200000
+

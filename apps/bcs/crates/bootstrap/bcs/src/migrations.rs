@@ -157,6 +157,8 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 38, name: "task_handle_lookup" },
     SqliteMigration { version: 39, name: "bot_a2a" },
     SqliteMigration { version: 40, name: "bot_avatar" },
+    SqliteMigration { version: 41, name: "group_agent_cards" },
+    SqliteMigration { version: 42, name: "auth_session_version" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -537,6 +539,17 @@ async fn apply_sqlite_migration_body(
             .await?;
             Ok(())
         }
+        41 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/041_group_agent_cards.sql"))
+                .into_iter()
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
+            Ok(())
+        }
+        // Versioned login sessions on the shared identity row (spec §8.5/§9):
+        // `session_id` / `session_revision` / `session_expires_at` columns plus
+        // the one-time historical token/expiry clear.
+        42 => add_sqlite_auth_session_version_schema(db).await,
         _ => Ok(()),
     }
 }
@@ -662,6 +675,10 @@ fn is_create_index(sql: &str) -> bool {
 mod tests;
 
 #[cfg(test)]
+#[path = "migrations/auth_session_version_migration_tests.rs"]
+mod auth_session_version_migration_tests;
+
+#[cfg(test)]
 #[path = "migrations/collection_migration_tests.rs"]
 mod collection_migration_tests;
 
@@ -672,3 +689,7 @@ mod eventing_migration_tests;
 #[cfg(test)]
 #[path = "migrations/a2a_tests.rs"]
 mod a2a_tests;
+
+#[cfg(test)]
+#[path = "migrations/group_card_tests.rs"]
+mod group_card_tests;

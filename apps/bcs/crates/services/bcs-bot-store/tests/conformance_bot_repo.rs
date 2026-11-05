@@ -722,7 +722,7 @@ async fn persistent_repo_update_capabilities_returns_not_found_for_unknown_bot()
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
-        "CREATE TABLE bcs_bots (
+        "CREATE TABLE bcs_bots (agent_card TEXT,
                 connection_mode TEXT DEFAULT 'plugin',
             bot_uuid TEXT NOT NULL,
             name TEXT,
@@ -743,4 +743,22 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
     .await
     .expect("create bcs_bots table");
     db
+}
+
+#[tokio::test]
+async fn stale_lifecycle_capabilities_preserve_card_owned_name() {
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::new(db.clone());
+    repo.register("card-owned".into(), BotCapabilities {
+        name: Some("Old Name".into()), ..Default::default()
+    }).await.unwrap();
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Card Name', agent_card='{\"name\":\"Card Name\"}' WHERE bot_uuid='card-owned'")).await.unwrap();
+    repo.update_capabilities("card-owned", BotCapabilities {
+        name: Some("Stale Name".into()), summary: Some("Updated summary".into()), ..Default::default()
+    }).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT name, bot_info FROM bcs_bots WHERE bot_uuid='card-owned'")).await.unwrap();
+    let name: String = bcs_db_api::db_get_column(&rows[0], "name").unwrap();
+    let info: String = bcs_db_api::db_get_column(&rows[0], "bot_info").unwrap();
+    assert_eq!(name, "Card Name");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&info).unwrap()["summary"], "Updated summary");
 }

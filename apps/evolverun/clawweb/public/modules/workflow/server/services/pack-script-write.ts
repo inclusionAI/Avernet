@@ -1,6 +1,6 @@
+import { createConfiguredTemporaryDirectory } from '@avernet/clawweb-shared/server/env';
 import { executeGit, withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { parse as parseYaml } from 'yaml';
@@ -60,7 +60,7 @@ export async function writePackScripts(input: PackScriptWriteInput): Promise<{ c
     }
   }
   return withGitOperation({}, async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), 'pack-write-'));
+    const temp = await createConfiguredTemporaryDirectory('pack-write');
     try {
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))) as NodeJS.ProcessEnv;
       Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_INDEX_FILE: path.join(temp, 'index'), GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email });

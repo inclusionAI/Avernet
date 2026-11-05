@@ -9,6 +9,87 @@
  *   - "pre"   — pre-production / prepub
  *   - "prod"  — production or gray
  */
+import type { Stats } from "node:fs";
+import { mkdtemp, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const temporaryDirectoryScopePattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const temporaryDirectoryUnavailableMessage = "临时目录不可用或配置无效";
+
+/** A server-safe error whose public message does not disclose paths, environment values, or raw OS errors. */
+export class TemporaryDirectoryError extends Error {
+  constructor(cause: unknown) {
+    super(temporaryDirectoryUnavailableMessage, { cause });
+    this.name = "TemporaryDirectoryError";
+  }
+}
+
+function configuredTemporaryDirectoryParent(): {
+  parent: string;
+  configuredValue: string | null;
+  source: "CLAWWEB_TEMP_DIR" | "TMPDIR" | "OS_TMPDIR";
+} {
+  if (process.env.CLAWWEB_TEMP_DIR) {
+    return {
+      parent: resolve(process.env.CLAWWEB_TEMP_DIR),
+      configuredValue: process.env.CLAWWEB_TEMP_DIR,
+      source: "CLAWWEB_TEMP_DIR",
+    };
+  }
+  if (process.env.TMPDIR) {
+    return {
+      parent: resolve(process.env.TMPDIR),
+      configuredValue: process.env.TMPDIR,
+      source: "TMPDIR",
+    };
+  }
+  return { parent: resolve(tmpdir()), configuredValue: null, source: "OS_TMPDIR" };
+}
+
+/** Create a request-local directory under the configured shared temporary volume. */
+export async function createConfiguredTemporaryDirectory(scope: string): Promise<string> {
+  if (!temporaryDirectoryScopePattern.test(scope)) throw new Error(`Invalid temporary directory scope: ${scope}`);
+  const { parent, configuredValue, source } = configuredTemporaryDirectoryParent();
+  const prefix = join(parent, `${scope}-`);
+  let parentStat: Stats;
+  try {
+    parentStat = await stat(parent);
+  } catch (error) {
+    throw new TemporaryDirectoryError({
+      configuredValue,
+      operation: "stat-parent",
+      parent,
+      rawError: error,
+      scope,
+      source,
+    });
+  }
+  if (!parentStat.isDirectory()) {
+    throw new TemporaryDirectoryError({
+      configuredValue,
+      operation: "stat-parent",
+      parent,
+      rawError: new Error("Configured temporary-directory parent is not a directory"),
+      scope,
+      source,
+    });
+  }
+  try {
+    return await mkdtemp(prefix);
+  } catch (error) {
+    throw new TemporaryDirectoryError({
+      configuredValue,
+      operation: "mkdtemp",
+      parent,
+      prefix,
+      rawError: error,
+      scope,
+      source,
+    });
+  }
+}
+
 
 const ENV_PRIORITY = ["SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"] as const;
 const DEFAULT_TRUSTED_REMOTE_ORIGINS = new Set([

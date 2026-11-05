@@ -364,6 +364,7 @@ dependencies = [
  "bcs-a2a-http",
  "bcs-api-http",
  "bcs-app-a2a-bot",
+ "bcs-app-auth",
  "bcs-app-bot",
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-draft",
@@ -481,6 +482,7 @@ dependencies = [
  "rand 0.8.7",
  "regex",
  "reqwest 0.12.28",
+ "rsa",
  "secrecy",
  "serde",
  "serde_json",
@@ -578,7 +580,9 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-auth",
  "bcs-auth-api",
+ "bcs-auth-oauth",
  "bcs-bot-store",
  "bcs-config",
  "bcs-config-api",
@@ -621,6 +625,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-app-auth"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "bcs-test-support",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -899,8 +917,11 @@ dependencies = [
  "axum",
  "bcs-auth-api",
  "bcs-jwt",
+ "bcs-test-support",
+ "subtle",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1446,6 +1467,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.20",
  "ulid",
+ "url",
  "uuid",
 ]
 
@@ -1706,7 +1728,6 @@ dependencies = [
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
- "bcs-jwt",
  "bcs-message-flow",
  "bcs-message-store",
  "bcs-observability",
@@ -2210,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "2.0.0"
+version = "3.1.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -2413,6 +2434,7 @@ dependencies = [
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",
+ "bcs-auth-oauth",
  "bcs-bot",
  "bcs-bot-store",
  "bcs-cache-api",
@@ -2424,6 +2446,7 @@ dependencies = [
  "bcs-edge-permission",
  "bcs-edge-permission-store",
  "bcs-human-notify-api",
+ "bcs-jwt",
  "bcs-llm-api",
  "bcs-observability",
  "bcs-protocol",
@@ -2453,11 +2476,16 @@ name = "bcs-user-identity"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-service-api",
  "bcs-test-support",
+ "mysql_async",
+ "sha2",
  "tokio",
+ "tokio-test",
  "tracing",
  "uuid",
 ]

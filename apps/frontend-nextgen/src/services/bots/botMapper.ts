@@ -1,5 +1,5 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
-import type { BotDomain, BotRuntimeDomain } from '@/domain/botWorkshop';
+import type { BotCopyStateSummary, BotCopyStatus, BotDomain, BotRuntimeDomain } from '@/domain/botWorkshop';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
 import { getBcnCapability, getServiceBotCapability } from './botCapability';
 import { resolveBotLifecycle } from './botLifecycleResolver';
@@ -11,6 +11,38 @@ const asString = (value: unknown) => (typeof value === 'string' && value.trim() 
 const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const asRecord = (value: unknown): BackendUnknownRecord =>
   value && typeof value === 'object' ? (value as BackendUnknownRecord) : {};
+
+const COPY_STATUSES: readonly BotCopyStatus[] = [
+  'INITIAL',
+  'CREATED',
+  'AUTH_PENDING',
+  'CONFIG_COPIED',
+  'FILE_SYNCED',
+  'BOT_STARTED',
+  'CAPSET_SYNCED',
+  'CONVERGED',
+  'FAILED',
+];
+const COPY_STATUS_SET = new Set<string>(COPY_STATUSES);
+
+/**
+ * 后端 `copy_state` derive-on-read 字段镜像:仅复制流程创建的 dst bot 携带。
+ * CONVERGED 时后端返回 null(此处镜像为 null);未走复制流程的字段缺省(undefined)。
+ * 任一字段缺失或 status 越界 → undefined,避免 FE 渲染出半残的状态徽标。
+ */
+function copyStateFrom(dto: BackendUnknownRecord): BotCopyStateSummary | null | undefined {
+  if (!('copy_state' in dto) || dto.copy_state === null) {
+    // null 是合法值(CONVERGED);缺省(undefined)表示非复制 bot。
+    return dto.copy_state === null ? null : undefined;
+  }
+  const raw = asRecord(dto.copy_state);
+  const operationId = asString(raw.operation_id);
+  const statusRaw = asString(raw.status);
+  const sourceBotId = asString(raw.source_bot_id);
+  if (!operationId || !statusRaw || !sourceBotId) return undefined;
+  if (!COPY_STATUS_SET.has(statusRaw)) return undefined;
+  return { operationId, status: statusRaw as BotCopyStatus, sourceBotId };
+}
 
 function templateConfigFrom(dto: BackendUnknownRecord) {
   const engineProperties = asRecord(dto.engine_properties);
@@ -217,6 +249,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
         : undefined,
     completeness: warnings.length ? 'partial' : 'complete',
     warnings,
+    copyState: copyStateFrom(dto),
     actions: Array.isArray(dto.actions)
       ? dto.actions.filter((value): value is string => typeof value === 'string')
       : [],

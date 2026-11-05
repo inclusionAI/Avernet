@@ -3,6 +3,9 @@
 ## Provides
 
 System producers choose recipient text, Send/Inject intent and history visibility.
+SessionContext honors explicit Send/Inject intent for Chat drivers and ManagerWorker
+Managers, defaulting to Send; other Bots receive Inject. Manager/Worker instructions
+are determined by participant role independently of delivery intent.
 The dispatcher invokes the application SystemMessageQueueService before legacy
 persistence or I/O. A successful queue batch owns all history for the event;
 its managed recipients are never sent again through BotDeliveryPort. Failure

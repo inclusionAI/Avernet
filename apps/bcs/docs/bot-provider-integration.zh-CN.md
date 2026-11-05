@@ -49,15 +49,18 @@ Provider 接入至少会产生 Provider 管理 token 和 BCS 到 Provider 的下
 
 这些 token 只应保存在 Bot Provider 自己的安全存储中，不要写入仓库、镜像或公开配置示例。实际部署也可以启用自有 bot 身份体系；这属于部署侧扩展，不影响本文描述的 HTTP Provider 基线协议。
 
+同一环境、同一 Provider 下，所有未删除 Bot（包括非 A2A Bot）的当前名称唯一，按大小写区分。注册或改名重名返回 409，改名及软删除后名称可以复用；不同 Provider 可以使用相同名称。
+
 ## 按 Provider slug 查询基本信息
 
 `POST /providers` 可传 `"slug": "coding-provider"`。使用现有 Provider admin
 认证与 Human owner 校验，`PATCH /providers/{provider_id}` 可设置或重命名 slug；
 省略或传 `null` 保留原值。存量 Provider 可以暂不设置 slug。
 
-slug 长度为 1–64，只允许小写 ASCII 字母、数字和连字符，首尾必须为字母或数字。
+slug 长度为 1–64。A2A 名称格式为 `[a-z][a-z0-9_-]{0,63}`；同时兼容原有仅含小写 ASCII 字母、数字、连字符且首尾为字母或数字的 slug。
 同一环境内唯一，禁用的 Provider 也占用该 slug。非法值返回 HTTP 400；重复值
 返回 409，且本次提交的 name/config/slug 均不变。重命名后旧 slug 不再可查询。
+Provider 经授权使用 A2A 名称管理入口，或成功解析到有效 A2A Bot 后，slug 会被保留，后续不能改名；不存在或无有效绑定的目标查询不会触发该保留。
 
 旧入口 `GET /providers/by-slug/{slug}` 保留兼容，响应和错误语义相同。
 

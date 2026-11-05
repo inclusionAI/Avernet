@@ -50,10 +50,10 @@ written. The repository's claims refuse the same entries under their own
 lock, so Direct and set supply never share an Installation row.
 
 An MCP entry carries a configuration action separately from its supply:
-Manifest's absent `config` preserves the saved override; explicit `{}` clears
-it; a nonempty object replaces it. Resolve validates the configuration that
-will be retained, and a preserve claim never rewrites it. Genome revisions
-continue to declare complete state: absent configuration clears an override.
+Manifest treats an absent `config` and an explicit `{}` as clearing the
+saved Bot override. A nonempty object replaces it. Resolve validates the
+resulting configuration, including inherited configuration after a clear.
+Genome compiles absent configuration to the same clear intent.
 Removing a Direct or override-only MCP entry still clears its configuration;
 currently Set-supplied entries remain outside this removal scope.
 
@@ -99,6 +99,7 @@ provides:
   - Intent
   - ResolveResult
   - CategoryPlan
+  - CategoryWriteResult  # every writer returns entry outcomes and confirmed removals
   - build_materialisers
   - ApplyOrchestrator
   - ApplyContext

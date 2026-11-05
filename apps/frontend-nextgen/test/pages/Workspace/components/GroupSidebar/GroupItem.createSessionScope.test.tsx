@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import type { GroupView } from '@/domain/collaboration';
+import { CreateSessionMenu } from '@/pages/Workspace/components/GroupSidebar/CreateSessionMenu';
 import { GroupItem } from '@/pages/Workspace/components/GroupSidebar/GroupItem';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -30,7 +31,7 @@ const group: GroupView = {
 };
 
 function renderItem(
-  onCreateSession: (groupId: string, scope?: 'full' | 'participant') => void,
+  onCreateSession: (groupId: string, scope?: 'full' | 'participant', contextDelivery?: 'send' | 'inject') => void,
   viewerKind: 'user' | 'bot',
 ) {
   return render(
@@ -63,23 +64,73 @@ describe('GroupItem 新建会话视角菜单', () => {
     const onCreateSession = jest.fn();
     renderItem(onCreateSession, 'user');
     fireEvent.click(screen.getByRole('button', { name: /新建会话/ }));
-    fireEvent.click(screen.getByText('参与者视角'));
-    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant');
+    fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+    fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+    fireEvent.click(screen.getByRole('button', { name: '消息视角' }));
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant', 'inject');
   });
 
   it('human 身份：选完整视角以 full 创建', () => {
     const onCreateSession = jest.fn();
     renderItem(onCreateSession, 'user');
     fireEvent.click(screen.getByRole('button', { name: /新建会话/ }));
-    fireEvent.click(screen.getByText('完整视角'));
-    expect(onCreateSession).toHaveBeenCalledWith('g1', 'full');
+    expect(screen.getByRole('button', { name: 'Group context 投递方式' })).toHaveTextContent('Send');
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', 'full', 'send');
   });
 
-  it('bot 身份：点「+」不弹菜单，直接以单参创建（不传 scope）', () => {
+  it('bot 身份：支持 Inject 创建且不传 human scope', () => {
     const onCreateSession = jest.fn();
     renderItem(onCreateSession, 'bot');
     fireEvent.click(screen.getByRole('button', { name: /新建会话/ }));
     expect(screen.queryByText('参与者视角')).toBeNull();
-    expect(onCreateSession).toHaveBeenCalledWith('g1');
+    fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+    fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+    fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', undefined, 'inject');
   });
+});
+
+it('Manager-Worker supports Inject without changing its group strategy', () => {
+  const onCreateSession = jest.fn();
+  render(
+    <GroupItem
+      group={{ ...group, kind: 'task_master_slave' }}
+      viewerKind="bot"
+      expanded={false}
+      sessions={[]}
+      sessionTab="all"
+      onSessionTabChange={jest.fn()}
+      favoriteSessionIds={[]}
+      selectedSessionId={null}
+      onToggleGroupExpanded={jest.fn()}
+      onSelectSession={jest.fn()}
+      onToggleFavorite={jest.fn()}
+      onCreateSession={onCreateSession}
+      onManageGroup={jest.fn()}
+      onManageSession={jest.fn()}
+      onShareGroup={jest.fn()}
+      onDissolveGroup={jest.fn()}
+      hasMoreSessions={false}
+      isLoadingMoreSessions={false}
+      onLoadMoreSessions={jest.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+  fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+  fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+  expect(onCreateSession).toHaveBeenCalledWith('g1', undefined, 'inject');
+});
+
+it('reopening the creation menu resets delivery to Send', () => {
+  render(<CreateSessionMenu viewerKind="bot" onCreate={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Group context 投递方式' }));
+  fireEvent.click(screen.getByRole('option', { name: /Inject/ }));
+  fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+  fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
+  expect(screen.getByRole('button', { name: 'Group context 投递方式' })).toHaveTextContent('Send');
 });

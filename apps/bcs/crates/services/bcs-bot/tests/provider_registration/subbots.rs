@@ -8,6 +8,7 @@ async fn two_subbots_register_with_one_parent_and_distinct_refs() {
     let a = f.core.register(a).await.unwrap();
     let mut b = request(&f, ProviderRegistrationMode::Plugin);
     b.provider_bot_ref = "stable-ref:coder".into();
+    b.bot_name = "Coder bot".into();
     let b = f.core.register(b).await.unwrap();
     assert_ne!(a.record.bot_uuid, b.record.bot_uuid);
     assert_eq!(a.record.provider_bot_ref, "stable-ref:reviewer");
@@ -17,6 +18,7 @@ async fn two_subbots_register_with_one_parent_and_distinct_refs() {
     }
     let mut duplicate = request(&f, ProviderRegistrationMode::Plugin);
     duplicate.provider_bot_ref = "stable-ref:reviewer".into();
+    duplicate.bot_name = "Distinct name with duplicate ref".into();
     assert!(matches!(f.core.register(duplicate).await, Err(ServiceError::Conflict(_))));
 }
 

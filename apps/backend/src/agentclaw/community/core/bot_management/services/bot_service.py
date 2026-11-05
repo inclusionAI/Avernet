@@ -141,6 +141,9 @@ from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
 )
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
+)
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -1783,6 +1786,8 @@ class BotService(BotServiceProtocol):
             raise BotServiceError(
                 "applicationCoding workspace creation returned no id"
             ) from exc
+        except TemplateWriteInvalidInput:
+            raise
         except Exception as exc:
             raise BotServiceError(
                 "applicationCoding workspace creation failed"
@@ -1800,6 +1805,8 @@ class BotService(BotServiceProtocol):
                 template_type=template_type,
                 active_engine=active_engine,
             )
+        except TemplateWriteInvalidInput:
+            raise
         except Exception as exc:
             logger.error(
                 "[bot_service.create_bot] Failed to create template for bot %s: %s",
@@ -3246,6 +3253,14 @@ class BotService(BotServiceProtocol):
                         old_template_config=old_template_config,
                         new_template_config=template_config,
                     )
+            except TemplateWriteInvalidInput:
+                # The corp/template-write overlay owns candidate validation.
+                # Preserve the existing best-effort behavior for unrelated
+                # template failures, but never swallow an intentional domain
+                # rejection: the HTTP layer must return the documented 400 and
+                # the bot update must not report success with a missing template
+                # write.
+                raise
             except Exception as e:
                 logger.error(f"[bot_service.update_bot] Failed to update template for bot {bot_id}: {e}")
                 # Don't fail bot update if template update fails
@@ -4832,6 +4847,9 @@ class BotService(BotServiceProtocol):
             # confirmed_template_update 的 MCP/软链刷新由 engine 自己在
             # refresh_restart_authorization 里判断并执行；replacement restart
             # 等新设备 apply 成功后再 resolve 并调用，避免写到旧设备上。
+        except TemplateWriteInvalidInput:
+            # An intentional write rejection must not become a successful restart.
+            raise
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.
             logger.warning(

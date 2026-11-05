@@ -26,7 +26,8 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use bcs_api_http::{
-    ApiState, PrincipalVerificationError, PrincipalVerifier, router,
+    ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+    VerifiedRequestIdentity, router,
 };
 use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::application::v1::{
@@ -109,14 +110,22 @@ impl PrincipalVerifier for GatewaySignatureVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         let token = headers
             .get(PRINCIPAL_HEADER)
             .and_then(|value| value.to_str().ok())
             .ok_or(PrincipalVerificationError::Missing)?;
-        self.verifier
+        let caller = self
+            .verifier
             .verify(token)
-            .map_err(|error| PrincipalVerificationError::Invalid(error.to_string()))
+            .map_err(|error| PrincipalVerificationError::Invalid(error.to_string()))?;
+        // Same provenance pin as the real Gateway wrapper: fixed by this
+        // adapter, never from request content (V1 API auth plan, spec §7.4).
+        Ok(VerifiedRequestIdentity::pin(
+            caller,
+            "gateway",
+            CredentialKind::GatewayPrincipalHeader,
+        ))
     }
 }
 

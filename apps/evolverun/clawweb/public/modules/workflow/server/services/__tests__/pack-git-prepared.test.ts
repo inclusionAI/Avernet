@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
@@ -57,7 +57,7 @@ beforeEach(() => {
   git(seed, 'add', '.'); git(seed, 'commit', '-m', 'current'); current = git(seed, 'rev-parse', 'HEAD');
   git(seed, 'push', remote, `${current}:refs/heads/wf/flow`);
 });
-afterEach(() => { vi.restoreAllMocks(); rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe('prepared save primitives with a real bare remote', () => {
   it('exposes exact serializable metadata before push and touches saved only', async () => {
@@ -455,4 +455,61 @@ describe('prepared object validation boundaries', () => {
     await expect(restorePreparedGitBundle(dir, b64('not a bundle'))).rejects.toThrow('self-contained');
     await expect(restorePreparedGitBundle(dir, b64(`# v2 git bundle\n${current} refs/heads/base\n\nPACK broken`))).rejects.toThrow();
   });
+
+describe('configured temporary parent for prepared objects', () => {
+  const configuredParent = () => {
+    const parent = path.join(root, 'configured-temp'); mkdirSync(parent);
+    vi.stubEnv('CLAWWEB_TEMP_DIR', parent);
+    return parent;
+  };
+
+  it('creates deploy-tag staging under the configured parent', async () => {
+    const parent = configuredParent();
+    const saved = await save(); const dir = await clone();
+    let tagFile = '';
+    const execute = gitExecution.executeGit;
+    vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
+      if (args[0] === 'hash-object' && args.includes('-w')) tagFile = String(args.at(-1));
+      return execute(args, options);
+    });
+    await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 2, author);
+    expect(tagFile.startsWith(path.join(parent, 'cw-prepared-tag-'))).toBe(true);
+    expect(readdirSync(parent)).toEqual([]);
+  });
+
+  it('fails deploy-tag preparation when the configured parent is missing', async () => {
+    const parent = configuredParent();
+    const saved = await save(); const dir = await clone();
+    vi.stubEnv('CLAWWEB_TEMP_DIR', path.join(parent, 'missing'));
+    await expect(prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 2, author))
+      .rejects.toThrow('临时目录不可用或配置无效');
+  });
+
+  it('creates bundle staging under the configured parent', async () => {
+    const parent = configuredParent();
+    const prepared = await withPreparedPackCandidate(input(), async candidate => candidate);
+    const recovered = path.join(root, 'empty-bundle'); mkdirSync(recovered); git(recovered, 'init');
+    git(recovered, 'remote', 'add', 'origin', remote);
+    let bundleFile = '';
+    const execute = gitExecution.executeGit;
+    vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
+      if (args[0] === 'bundle' && args[1] === 'verify') bundleFile = String(args.at(-1));
+      return execute(args, options);
+    });
+    await restorePreparedGitBundle(recovered, prepared.bundleBase64);
+    expect(path.dirname(bundleFile).startsWith(path.join(parent, 'cw-prepared-bundle-'))).toBe(true);
+    expect(readdirSync(parent)).toEqual([]);
+  });
+
+  it('fails bundle restoration when the configured parent is missing', async () => {
+    const parent = configuredParent();
+    const prepared = await withPreparedPackCandidate(input(), async candidate => candidate);
+    const recovered = path.join(root, 'missing-bundle-parent'); mkdirSync(recovered); git(recovered, 'init');
+    git(recovered, 'remote', 'add', 'origin', remote);
+    vi.stubEnv('CLAWWEB_TEMP_DIR', path.join(parent, 'missing'));
+    await expect(restorePreparedGitBundle(recovered, prepared.bundleBase64))
+      .rejects.toThrow('临时目录不可用或配置无效');
+  });
+});
+
 });

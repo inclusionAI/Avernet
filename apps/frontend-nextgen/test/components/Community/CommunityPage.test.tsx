@@ -46,6 +46,7 @@ const mockCommunityState = {
   loadMoreError: null,
   publishing: false,
   openTopic: jest.fn(),
+  openTopicById: jest.fn(),
   closeDetail: jest.fn(),
   closeTopic: jest.fn(),
   setPostHelpful: jest.fn(),
@@ -62,13 +63,32 @@ jest.mock('@/hooks/useCommunity', () => ({
   useCommunity: () => mockCommunityState,
   COMMUNITY_REPLY_PAGE_SIZE: 10,
 }));
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+let mockSearch = '';
+jest.mock('@umijs/max', () => ({
+  history: { push: jest.fn() },
+  useSearchParams: () => [new URLSearchParams(mockSearch)],
+}));
 
 /**
  * 滚动结构回归：列表滚动依赖「h-full flex flex-col 外层 + main(min-h-0 flex-1 overflow-y-auto)」
  * 的 CSS 链。AppShell 内容区是块级 overflow-hidden 容器——若 main 直接作为其子项（无 flex 外层
  * 锚定高度），flex-1/min-h-0 全部失效，内容被截断且无滚动条（详见社区滚动 bug 修复）。
  */
+describe('CommunityPage 通知深链', () => {
+  test('携带 topicId/postId 时打开对应主题并定位楼层', () => {
+    mockSearch = '?topicId=topic-1&postId=post-1';
+    try {
+      render(<CommunityPage />);
+      expect(mockCommunityState.openTopicById).toHaveBeenCalledWith({
+        topicId: 'topic-1',
+        postId: 'post-1',
+      });
+    } finally {
+      mockSearch = '';
+    }
+  });
+});
+
 describe('CommunityPage 滚动容器结构', () => {
   test('列表视：滚动 main 必须是 h-full flex 外层的 flex 子项，否则 overflow-y-auto 失效', () => {
     render(<CommunityPage />);

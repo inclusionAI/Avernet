@@ -74,6 +74,7 @@ from agentclaw.community.core.apply_engine.outcomes import (
 )
 from agentclaw.community.core.apply_engine.registry import (
     CategoryPlan,
+    CategoryWriteResult,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -111,8 +112,11 @@ class IdentityMaterialiser(Materialiser):
         plan    -> CategoryPlan(
                        entries=(PlannedEntry(<that intent>, "updated"),),
                        removals=("OKR.md",))
-        write   -> (EntryResult(Category.IDENTITY, "SOUL.md",
-                                EntryOutcome.UPDATED),)
+        write   -> CategoryWriteResult(
+            entries=(EntryResult(Category.IDENTITY, "SOUL.md",
+                                EntryOutcome.UPDATED),),
+            removals=("OKR.md",),
+        )
 
     A removal is an **empty write**, not a delete: the domain reads absent and
     empty as one state, and ``IdentityService`` exposes no delete. ``MEMORY.md``
@@ -216,7 +220,7 @@ class IdentityMaterialiser(Materialiser):
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
-    ) -> Sequence[EntryResult]:
+    ) -> CategoryWriteResult:
         """Execute the plan: write each changed file, empty each removal.
 
         An ``unchanged`` entry calls nothing — that absence is what the
@@ -262,7 +266,7 @@ class IdentityMaterialiser(Materialiser):
             await self._identity.update_bot_file(
                 entity_type, entity_id, ctx.bot_id, file_type, "", ctx.actor_id
             )
-        return tuple(results)
+        return CategoryWriteResult(tuple(results), plan.removals)
 
 
 def _coords(ctx: ApplyContext) -> tuple[str, str]:

@@ -538,3 +538,6 @@ async fn observe_always_routes_by_subject_with_optional_paired_ensure_references
         }
     }
 }
+
+#[path = "support/caller_sse_contract.rs"]
+mod sse_contract;

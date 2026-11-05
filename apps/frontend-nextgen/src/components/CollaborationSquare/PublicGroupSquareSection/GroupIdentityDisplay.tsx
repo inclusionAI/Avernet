@@ -15,7 +15,7 @@ export function GroupIdentityDisplay() {
             aria-label={`当前协作身份：${name}`}
             aria-disabled="true"
             tabIndex={0}
-            className="flex h-9 w-full max-w-[280px] shrink-0 cursor-not-allowed items-center gap-2 rounded-lg border border-input bg-muted px-2.5 text-xs text-muted-foreground"
+            className="flex h-8 w-full shrink-0 cursor-not-allowed items-center gap-2 rounded-lg bg-muted px-2.5 text-[13px] text-foreground"
           >
             <IdentityAvatar
               identity={{ id: identity?.userId || 'user', name, kind: 'user', avatar: name }}

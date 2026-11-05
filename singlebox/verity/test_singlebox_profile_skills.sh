@@ -225,4 +225,44 @@ diff -r "${BOTS_PROFILE_DIR}/referee/skills" "${TEMPORARY}/real-referee/skills"
 bots_dynamic_copy_profile_files player-laochen "${TEMPORARY}/real-player"
 diff -r "${BOTS_PROFILE_DIR}/player-laochen/skills" "${TEMPORARY}/real-player/skills"
 
+# The collaboration help profile must receive its private authoring skill next
+# to the shared coordination schema, without overriding session URL discovery.
+BOTS_PROFILE_DIR="${PROJECT_ROOT}/singlebox/agents/avernet-help"
+HELP_WORKSPACE="${TEMPORARY}/real-avernet-help"
+bots_dynamic_validate_manifest
+bots_dynamic_copy_profile_files collaboration "$HELP_WORKSPACE"
+bots_dynamic_setup_bcs_skill "$HELP_WORKSPACE"
+diff -r "${BOTS_PROFILE_DIR}/collaboration/skills/avernet-collaboration-help" \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help"
+cmp "${BCS_DIR}/crates/tools/bcs-cli/bcs-coordination/SKILL.md" \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/custom-collaboration.md" ] \
+    || fail 'collaboration help runtime is missing the public workflow reference'
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/custom-collaboration-schema.md" ] \
+    || fail 'collaboration help runtime is missing the public schema reference'
+grep -Fq 'bcs-cli collaboration draft create "$candidate_file" --draft-id "$draft_id"' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not upload the authoring file'
+grep -Fq 'JSON 的 `message` 字段' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not deliver the tool-generated short reference'
+grep -Fq '不调用 BCS 消息发送、不寻找私聊 Session' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill bypasses normal chat delivery'
+[ -f "${HELP_WORKSPACE}/skills/bcs-coordination/references/collaboration-drafts.md" ] \
+    || fail 'collaboration help runtime is missing the fixed-version contract'
+grep -Fq '[references/authoring-workflow.md](references/authoring-workflow.md)' \
+    "${HELP_WORKSPACE}/skills/avernet-collaboration-help/SKILL.md" \
+    || fail 'collaboration help skill does not require its authoring workflow'
+if grep -Fq 'export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"; then
+    fail 'shared coordination skill forces a localhost API URL'
+fi
+if grep -Fq 'bcs-cli --url "$BCS_API_BASE_URL"' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md"; then
+    fail 'shared coordination skill bypasses session URL discovery'
+fi
+grep -Fxq 'bcs-cli health' \
+    "${HELP_WORKSPACE}/skills/bcs-coordination/SKILL.md" \
+    || fail 'shared coordination skill is missing the session-discovered CLI example'
 printf 'PASS: singlebox profile skill start/restart and refresh tests\n'

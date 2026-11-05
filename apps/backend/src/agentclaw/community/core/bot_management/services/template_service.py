@@ -25,9 +25,13 @@ from typing import Optional, Dict, Any, List
 from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
-from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    NoopTemplateWriteExtension,
+    TemplateWriteExtension,
+)
 
 logger = get_logger()
 
@@ -63,9 +67,17 @@ class TemplateService:
     """
 
     @inject
-    def __init__(self, repository: TemplateRepository, vault: TokenVault) -> None:
+    def __init__(
+        self,
+        repository: TemplateRepository,
+        vault: TokenVault,
+        write_extension: Optional[TemplateWriteExtension] = None,
+    ) -> None:
         self._repository = repository
         self._vault = vault
+        # The write seam is optional for DI-less construction paths (unit
+        # tests, tooling): absent bindings behave exactly like the noop.
+        self._write_extension = write_extension or NoopTemplateWriteExtension()
 
     def _validate_ext_content(self, ext_content: Any) -> None:
         """Validate template ext content (stored in the 'ext' field of ac_templates table).
@@ -122,6 +134,39 @@ class TemplateService:
             return template_config
         return {**template_config, "token": self._vault.encrypt(token)}
 
+    def _invoke_write_hook(
+        self,
+        bot_id: str,
+        template_config: Dict[str, Any],
+        source: str,
+    ) -> Dict[str, Any]:
+        """Run the template-write extension for one persistence.
+
+        The hook is the single choke every ``ac_templates.ext`` write passes
+        (create / update / the create-or-update wrapper reaches it through
+        those two). It runs BEFORE validation is over and encryption/persist,
+        so the raised :class:`TemplateWriteInvalidInput` escapes this
+        service's ``except Exception`` wrapping and surfaces as the mapped
+        form family on its own. The candidate the hook returns (or the
+        untouched incoming one for a noop call) is what the write continues
+        with."""
+        candidate = self._write_extension.validate_template_write(
+            bot_id=bot_id,
+            template_config=template_config,
+            source=source,
+            existing_ext=self.get_template_config_strict(bot_id),
+        )
+        if candidate is None:
+            return template_config
+        if not isinstance(candidate, dict):
+            logger.warning(
+                "[template_service.write_hook] extension returned a non-dict "
+                "candidate for bot %s (source=%s): %s",
+                bot_id, source, type(candidate).__name__,
+            )
+            raise TemplateValidationError("Template ext content must be a dictionary")
+        return candidate
+
     def create_template(
         self,
         bot_id: str,
@@ -151,6 +196,8 @@ class TemplateService:
             TemplateServiceError: If template creation fails
         """
         logger.info("[template_service.create_template] Creating template for bot %s", bot_id)
+
+        template_config = self._invoke_write_hook(bot_id, template_config, "create")
 
         try:
             # Validate ext content (template_config is stored in the ext field)
@@ -343,6 +390,8 @@ class TemplateService:
             TemplateServiceError: If update fails
         """
         logger.info("[template_service.update_template] Updating template for bot %s", bot_id)
+
+        template_config = self._invoke_write_hook(bot_id, template_config, "update")
 
         try:
             # Validate ext content (template_config is stored in the ext field)

@@ -65,6 +65,35 @@ export interface BotDomain {
   warnings: string[];
   actions: string[];
   disabledActions: Record<string, string>;
+  /**
+   * 复制进度(derive-on-read);仅由复制流程创建的 dst bot 携带,后端按 apply+device
+   * 状态实时推导。CONVERGED 后后端返回 null,此字段亦为 null —— 一个复制完成后的
+   * bot 即普通 bot,不再展示复制进度/重试入口。未走复制流程的 bot 字段缺失(undefined)。
+   */
+  copyState?: BotCopyStateSummary | null;
+}
+
+/**
+ * 复制状态机(与后端 `BotCopyStatus` 9 值枚举一一对应,锁定线上契约)。
+ * INITIAL/CREATED/AUTH_PENDING/CONFIG_COPIED/FILE_SYNCED/BOT_STARTED/CAPSET_SYNCED
+ * 为进行中态;CONVERGED 终态(成功);FAILED 终态(可重试)。
+ */
+export type BotCopyStatus =
+  | 'INITIAL'
+  | 'CREATED'
+  | 'AUTH_PENDING'
+  | 'CONFIG_COPIED'
+  | 'FILE_SYNCED'
+  | 'BOT_STARTED'
+  | 'CAPSET_SYNCED'
+  | 'CONVERGED'
+  | 'FAILED';
+
+/** 后端 `BotCopyStateSummary` 的 FE 镜像 —— 与 `ac_bot_copy` 记录关联的操作 id + 当前推导状态。 */
+export interface BotCopyStateSummary {
+  operationId: string;
+  status: BotCopyStatus;
+  sourceBotId: string;
 }
 
 export interface BotListQuery {
@@ -198,8 +227,20 @@ export interface BotCopyInput {
   excludes: string[];
 }
 
-/** 复制结果与创建结果同构:AgentPass 授权流程一致,便于复用 AuthorizationPanel。 */
-export type BotCopyResult = BotCreateResult;
+/**
+ * 复制结果(后端 `BotCopyResponse` 镜像):
+ * - `issued` —— type=success:复制已提交,dst bot 由 create_job 异步创建,FE 刷新列表
+ *   即可见并跟随 copy_state 进度。响应只回 bot_id,**无 BotDto**。
+ * - `authorization_required` —— type=auth_required:内网 AgentPass 授权闸 pending,
+ *   回 iframe/redirect。**与创建同款处理**:携带 `request`(AvernetBotCreateRequest)
+ *   交由 `useBotCreateAuthorization` 轮询 dst bot 的 auth-status,ISSUED 后收敛 ——
+ *   dst bot 在 ac_bots 已注册(即便仍在复制中),auth-status 端点对 copy dst 同样适用。
+ */
+export type BotCopyResult =
+  | { type: 'issued'; botId: string; operationId: string }
+  | BotCreateAuthorization;
+
+/** 复制授权视图 —— 与 `BotCreateAuthorization` 同构,复用 `AuthorizationPanel` + 轮询。 */
 export type BotCopyAuthorization = BotCreateAuthorization;
 
 /**

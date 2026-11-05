@@ -31,6 +31,22 @@ const UNKNOWN_SUFFIX = 'UNKNOWN' as const;
  * applicant_name/reason）；列表/通知 content 已是字符串，原样透传不走此处。
  * 提取对象中的展示文案；空间申请对象只给「动作 + 空间」，申请人/理由交给 drawer 的 dl 行，避免重复。
  */
+function bbsTargetFrom(contentObj: BackendUnknownRecord | undefined, bizType: string) {
+  if (bizType !== 'BBS' || !contentObj) return undefined;
+  const target = contentObj.target;
+  if (typeof target !== 'object' || target === null || Array.isArray(target)) return undefined;
+  const rawTarget = target as BackendUnknownRecord;
+  const topicId = asString(rawTarget.topicId);
+  const rawPostIds = contentObj.post_ids;
+  const legacyFirstPostId = Array.isArray(rawPostIds) ? asString(rawPostIds[0]) : undefined;
+  // An aggregate notification is read in event order: its deep link starts at
+  // the first event, while target.postId is retained for older payloads.
+  const postId =
+    asString(contentObj.first_post_id) ?? legacyFirstPostId ?? asString(rawTarget.postId);
+  if (!topicId) return undefined;
+  return postId ? { topicId, postId } : { topicId };
+}
+
 function synthesizeContentDisplay(contentObj: BackendUnknownRecord): string {
   // 消息类通知使用 { text: string } 承载正文；优先按纯文本透传，保留内部换行。
   const text = asString(contentObj.text);
@@ -148,6 +164,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
   if (itemType === UNKNOWN_SUFFIX) warnings.push('未知 item_type');
   if (status === UNKNOWN_SUFFIX) warnings.push('未知 status');
 
+  const bizType = asString(dto.biz_type) ?? '';
   // content 契约不对称：详情为结构化对象（见 synthesizeContentDisplay），列表/通知为字符串。
   // content = 列表/铃铛用的合成文案（保留）；contentRaw = 详情抽屉用的原始 JSON（仅对象 content 填充）。
   const rawContent = dto.content;
@@ -155,6 +172,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     typeof rawContent === 'object' && rawContent !== null && !Array.isArray(rawContent)
       ? (rawContent as BackendUnknownRecord)
       : undefined;
+  const bbsTarget = bbsTargetFrom(contentObj, bizType);
   const contentDisplay =
     typeof rawContent === 'string'
       ? asString(rawContent) ?? ''
@@ -187,7 +205,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     workOrderNo: asString(dto.work_order_no),
     notificationId: asNumber(dto.notification_id) ?? 0,
     notificationCategory: asString(dto.notification_category),
-    bizType: asString(dto.biz_type) ?? '',
+    bizType,
     // 契约更新后 biz_id 为字符串（如 "10001"），兼容历史数字
     bizId: asString(dto.biz_id) ?? String(asNumber(dto.biz_id) ?? ''),
     applicantUserId,
@@ -203,6 +221,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     content: summary ?? contentDisplay,
     contentRaw,
     sessionUrl,
+    bbsTarget,
     detailUrl,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],

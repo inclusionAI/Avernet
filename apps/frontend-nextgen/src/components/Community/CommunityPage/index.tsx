@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
-import type { CommunityTopicFilter } from '@/domain/community/types';
+import type { CommunityTopicFilter, CommunityTopicOpenTarget } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
 import { ArrowLeft, Plus, Search, UserRound } from 'lucide-react';
@@ -16,6 +16,7 @@ import { EditTopicModal } from '../CommunityTopicDetail/EditTopicModal';
 import { CommunityTopicList } from '../CommunityTopicList';
 import { TopicTypeIcon } from '../TopicTypeIcon';
 import { PublishTopicModal } from '../PublishTopicModal';
+import { useNotificationTopicDeepLink } from './useNotificationTopicDeepLink';
 
 type CommunityTopicView = CommunityTopicFilter | 'following';
 
@@ -40,6 +41,12 @@ export function CommunityPage() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [showPersonalCenter, setShowPersonalCenter] = useState(false);
+  useNotificationTopicDeepLink({
+    openTopicById: community.openTopicById,
+    setPublishOpen,
+    setEditOpen,
+    setShowPersonalCenter,
+  });
   const topicView: CommunityTopicView =
     community.scope === 'following' ? 'following' : community.topicType;
   const hasFilter =
@@ -52,8 +59,8 @@ export function CommunityPage() {
   const personalCenter = (
     <CommunityPersonalCenter
       onBack={() => setShowPersonalCenter(false)}
-      onOpenTopic={(topicId) => {
-        void community.openTopicById?.(topicId);
+      onOpenTopic={(target: CommunityTopicOpenTarget) => {
+        void community.openTopicById?.(target);
       }}
       currentUserId={community.currentUserId}
       getAuthorSummary={community.getAuthorSummary}
@@ -133,6 +140,8 @@ export function CommunityPage() {
       replyPageCount={community.replyPageCount}
       replyPageSize={COMMUNITY_REPLY_PAGE_SIZE}
       onGoToReplyPage={(page) => void community.goToReplyPage?.(page)}
+      pendingPostLocation={community.pendingPostLocation}
+      onClearPendingPostLocation={community.clearPendingPostLocation}
     />
   ) : null;
 

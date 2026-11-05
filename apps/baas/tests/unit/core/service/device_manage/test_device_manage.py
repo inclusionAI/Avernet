@@ -18,10 +18,13 @@ from secbaas.community.api.device_manage import (
     DestroyDeviceResponse,
     DeviceConfig,
     DeviceCreate,
+    DeviceFacadeException,
     DeviceResponse,
     DeviceStatus,
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
+    ErrorCode,
+    PaasError,
 )
 from secbaas.community.api.template_manage import (
     ArcaTemplateConfig,
@@ -605,6 +608,7 @@ class TestDefaultDeviceService:
     async def test_destroy_device_not_found(self, service, mock_repo, mock_env):
         """D-05: NOT_FOUND returns success=True."""
         mock_repo.get_active_or_updating_by_device_uuid.return_value = None
+        mock_repo.get_by_device_uuid_only.return_value = None
 
         result = await service.destroy_device_by_uuid(
             tenant="test-tenant", device_uuid="DEVICE-nonexistent", modifier="u"
@@ -612,6 +616,469 @@ class TestDefaultDeviceService:
 
         assert result.success is True
         assert result.error_message is None
+
+    @pytest.mark.asyncio
+    async def test_destroy_stopped_device_releases_record(
+        self, service, mock_repo, mock_paas_facade, mock_env
+    ):
+        """A STOPPED device keeps its record for restart but must be destroyable.
+
+        The ACTIVE/UPDATING lookup filters STOPPED out, so destroy falls back
+        to the record lookup. The provider reports the sandbox as absent (it was
+        torn down at stop time) with DEVICE_NOT_FOUND, which counts as a
+        successful idempotent destroy rather than blocking the publish.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 7
+        record.device_uuid = "DEVICE-stopped"
+        record.status = DeviceStatus.STOPPED.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-stopped"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = None
+        mock_repo.get_by_device_uuid_only.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-stopped",
+            original_error=PaasError(
+                ErrorCode.DEVICE_NOT_FOUND, "Device not found: sandbox 'sb-stopped'"
+            ),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-stopped", modifier="u"
+        )
+
+        assert result.success is True
+        assert result.error_message is None
+        # The fallback must actually reach the provider, not short-circuit.
+        mock_paas_facade.destroy_device.assert_awaited_once_with("sb-stopped")
+        mock_repo.update_status_by_device_uuid.assert_called_with(
+            device_uuid="DEVICE-stopped",
+            tenant="test-tenant",
+            env="test",
+            status=DeviceStatus.RELEASED.value,
+        )
+
+    @pytest.mark.asyncio
+    async def test_destroy_stopped_device_real_failure_is_not_success(
+        self, service, mock_repo, mock_paas_facade, mock_env
+    ):
+        """A STOPPED device with a genuine provider failure still fails.
+
+        Releasing a STOPPED device must not blanket-succeed: an error that is
+        not a completion signal (here a timeout) means the teardown outcome is
+        unknown, so the publish must surface it rather than claim success.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 8
+        record.device_uuid = "DEVICE-stopped-bad"
+        record.status = DeviceStatus.STOPPED.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-stopped-bad"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = None
+        mock_repo.get_by_device_uuid_only.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-stopped-bad",
+            original_error=PaasError(ErrorCode.COMMAND_TIMEOUT, "timed out"),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-stopped-bad", modifier="u"
+        )
+
+        assert result.success is False
+        assert result.error_message is not None
+        assert "timed out" in result.error_message
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status",
+        [
+            DeviceStatus.ACTIVE.value,
+            DeviceStatus.FAILED.value,
+            DeviceStatus.PENDING.value,
+            DeviceStatus.OFFLINE.value,
+        ],
+        ids=["active", "failed", "pending", "offline"],
+    )
+    async def test_destroy_non_stopped_fallback_does_not_teardown(
+        self, service, mock_repo, mock_paas_facade, mock_env, status
+    ):
+        """Only STOPPED is released through the fallback lookup.
+
+        A device that is not ACTIVE/UPDATING and not STOPPED stays a no-op, so
+        this change cannot accidentally widen which records get released.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 12
+        record.device_uuid = "DEVICE-other"
+        record.status = status
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-other"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = None
+        mock_repo.get_by_device_uuid_only.return_value = record
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-other", modifier="u"
+        )
+
+        assert result.success is True
+        mock_paas_facade.destroy_device.assert_not_awaited()
+        mock_repo.update_status_by_device_uuid.assert_not_called()
+        mock_repo.soft_delete_by_device_uuid.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_destroy_stopped_device_soft_deletes_record(
+        self, service, mock_repo, mock_paas_facade, mock_env
+    ):
+        """Releasing a STOPPED device clears the record and its bot binding."""
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 13
+        record.device_uuid = "DEVICE-stopped-gone"
+        record.status = DeviceStatus.STOPPED.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-stopped-gone"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = None
+        mock_repo.get_by_device_uuid_only.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-stopped-gone",
+            original_error=PaasError(ErrorCode.DEVICE_NOT_FOUND, "not found"),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-stopped-gone", modifier="u"
+        )
+
+        assert result.success is True
+        mock_repo.soft_delete_by_device_uuid.assert_called_once_with(
+            device_uuid="DEVICE-stopped-gone",
+            tenant="test-tenant",
+            env="test",
+            modifier="u",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code,message",
+        [
+            (ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"),
+            (
+                ErrorCode.DEVICE_DESTROY_FAILED,
+                "Failed to connect sync sandbox, sandbox id: sb-1",
+            ),
+            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
+            (ErrorCode.PLATFORM_UNAVAILABLE, "not found endpoint down"),
+            (ErrorCode.AUTH_FAILED, "token expired"),
+        ],
+        ids=[
+            "destroy_failed_conn_refused",
+            "destroy_failed_unreachable_sandbox",
+            "device_unavailable",
+            "platform_unavailable",
+            "auth_failed",
+        ],
+    )
+    async def test_destroy_without_residue_permission_stays_failure(
+        self, service, mock_repo, mock_paas_facade, mock_env, code, message
+    ):
+        """Without allow_residue_success only DEVICE_NOT_FOUND counts.
+
+        SCALE_DOWN destroys a surplus device while the bot keeps running on the
+        survivors, so a teardown it cannot confirm must stay a failure rather
+        than be reported as a completed scale-down.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 21
+        record.device_uuid = "DEVICE-scaledown"
+        record.status = DeviceStatus.UPDATING.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-scaledown"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-scaledown",
+            original_error=PaasError(code, message),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-scaledown", modifier="u"
+        )
+
+        assert result.success is False
+        assert result.error_message is not None
+
+    @pytest.mark.asyncio
+    async def test_destroy_without_residue_permission_still_accepts_not_found(
+        self, service, mock_repo, mock_paas_facade, mock_env
+    ):
+        """DEVICE_NOT_FOUND is a typed absence, so it succeeds on every path."""
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 22
+        record.device_uuid = "DEVICE-scaledown-gone"
+        record.status = DeviceStatus.UPDATING.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-scaledown-gone"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-scaledown-gone",
+            original_error=PaasError(ErrorCode.DEVICE_NOT_FOUND, "Device not found"),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-scaledown-gone", modifier="u"
+        )
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code,message",
+        [
+            (ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"),
+            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
+        ],
+        ids=["destroy_failed_conn_refused", "device_unavailable"],
+    )
+    async def test_stop_treats_unreachable_sandbox_as_success(
+        self, service, mock_repo, mock_paas_facade, mock_env, code, message
+    ):
+        """STOP already tore the sandbox down, so an unreachable one is done."""
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 23
+        record.device_uuid = "DEVICE-stop"
+        record.status = DeviceStatus.ACTIVE.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-stop"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-stop",
+            original_error=PaasError(code, message),
+        )
+
+        result = await service.stop_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-stop", modifier="u"
+        )
+
+        assert result.success is True
+
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            (ErrorCode.DEVICE_NOT_FOUND, True),
+            (ErrorCode.DEVICE_DESTROY_FAILED, True),
+            (ErrorCode.NOT_FOUND, False),
+            (ErrorCode.DEVICE_UNAVAILABLE, True),
+            (ErrorCode.PLATFORM_UNAVAILABLE, False),
+            (ErrorCode.AUTH_FAILED, False),
+            (ErrorCode.RATE_LIMITED, False),
+            (ErrorCode.COMMAND_TIMEOUT, False),
+            (ErrorCode.PLATFORM_ERROR, False),
+            (ErrorCode.TEMPLATE_NOT_FOUND, False),
+            (ErrorCode.CONFIG_INVALID, False),
+            (None, False),
+        ],
+        ids=[
+            "device_not_found",
+            "device_destroy_failed",
+            "bare_not_found",
+            "device_unavailable",
+            "platform_unavailable",
+            "auth_failed",
+            "rate_limited",
+            "command_timeout",
+            "platform_error",
+            "template_not_found",
+            "config_invalid",
+            "no_code",
+        ],
+    )
+    def test_is_absent_sandbox_error_is_code_only(self, code, expected):
+        """Absence is decided by code alone; message text is never consulted."""
+        from secbaas.community.core.service.device_manage._device_service import (
+            _is_absent_sandbox_error,
+        )
+
+        assert _is_absent_sandbox_error(code) is expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code,message",
+        [
+            (ErrorCode.DEVICE_NOT_FOUND, "Device not found: sandbox 'x' not found"),
+            (ErrorCode.DEVICE_NOT_FOUND, ""),
+            (ErrorCode.DEVICE_NOT_FOUND, "does not exist"),
+            (ErrorCode.DEVICE_UNAVAILABLE, "sandbox unreachable"),
+            (ErrorCode.DEVICE_UNAVAILABLE, "connection error"),
+            (ErrorCode.DEVICE_UNAVAILABLE, ""),
+            (ErrorCode.DEVICE_DESTROY_FAILED, "connection refused"),
+            (
+                ErrorCode.DEVICE_DESTROY_FAILED,
+                "Failed to connect sync sandbox, sandbox id: sb-1",
+            ),
+            (
+                ErrorCode.DEVICE_DESTROY_FAILED,
+                "sandbox is not running, status: STOPPED",
+            ),
+            (ErrorCode.DEVICE_DESTROY_FAILED, ""),
+        ],
+        ids=[
+            "device_not_found_typed",
+            "device_not_found_empty_message",
+            "device_not_found_absence_text",
+            "device_unavailable",
+            "device_unavailable_connection",
+            "device_unavailable_empty_message",
+            "destroy_failed_connection_refused",
+            "destroy_failed_unreachable_sandbox",
+            "destroy_failed_not_running",
+            "destroy_failed_empty_message",
+        ],
+    )
+    async def test_destroy_absent_sandbox_is_success(
+        self, service, mock_repo, mock_paas_facade, mock_env, code, message
+    ):
+        """A teardown that cannot reach the sandbox is reported as complete.
+
+        DEVICE_NOT_FOUND is the typed SDK NotFoundException. DEVICE_UNAVAILABLE
+        is an unreachable sandbox. DEVICE_DESTROY_FAILED is what Arca's
+        connect_sync_sandbox collapses every connect failure into (transport
+        error, not-running status, even a 404), so a sandbox that cannot be
+        connected to is treated as already torn down.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 9
+        record.device_uuid = "DEVICE-absent"
+        record.status = DeviceStatus.UPDATING.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-absent"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-absent",
+            original_error=PaasError(code, message),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant",
+            device_uuid="DEVICE-absent",
+            modifier="u",
+            allow_residue_success=True,
+        )
+
+        assert result.success is True
+        assert result.error_message is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "code,message",
+        [
+            (ErrorCode.PLATFORM_UNAVAILABLE, "not found endpoint down"),
+            (ErrorCode.PLATFORM_UNAVAILABLE, "connection refused"),
+            (ErrorCode.PLATFORM_ERROR, "sandbox not found"),
+            (ErrorCode.PLATFORM_ERROR, "internal server error"),
+            (ErrorCode.NOT_FOUND, "does not exist"),
+            (ErrorCode.AUTH_FAILED, "token expired"),
+            (ErrorCode.RATE_LIMITED, "slow down"),
+            (ErrorCode.TEMPLATE_NOT_FOUND, "no template"),
+            (ErrorCode.COMMAND_TIMEOUT, "timed out"),
+        ],
+        ids=[
+            "platform_unavailable",
+            "platform_unavailable_conn_refused",
+            "platform_error_absence_text",
+            "generic_platform_error",
+            "bare_not_found_code",
+            "auth_failed",
+            "rate_limited",
+            "template_not_found",
+            "command_timeout",
+        ],
+    )
+    async def test_destroy_real_failure_is_not_success(
+        self, service, mock_repo, mock_paas_facade, mock_env, code, message
+    ):
+        """Codes outside the completion set still report a failed teardown.
+
+        Message text is deliberately ignored: an absence-sounding message under
+        another code (or under DEVICE_NOT_FOUND's sibling NOT_FOUND) does not
+        prove the sandbox is gone, and releasing the device would leak a
+        sandbox that may still be running.
+        """
+        record = MagicMock(spec=DeviceRecord)
+        record.id = 11
+        record.device_uuid = "DEVICE-broken"
+        record.status = DeviceStatus.UPDATING.value
+        record.provider_type = "ARCA"
+        record.provider_device_id = "sb-broken"
+        record.provider_device_props = None
+        record.extra_config = None
+        record.domain = "d"
+
+        mock_repo.get_active_or_updating_by_device_uuid.return_value = record
+        mock_paas_facade.destroy_device.side_effect = DeviceFacadeException(
+            operation="destroy_device",
+            platform_type="ARCA",
+            template_id=1,
+            paas_device_id="sb-broken",
+            original_error=PaasError(code, message),
+        )
+
+        result = await service.destroy_device_by_uuid(
+            tenant="test-tenant", device_uuid="DEVICE-broken", modifier="u"
+        )
+
+        assert result.success is False
+        assert result.error_message is not None
 
     @pytest.mark.asyncio
     async def test_destroy_device_success(

@@ -155,7 +155,7 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
                 packages[tomllib.loads(manifest.read_text())['package']['name']] = manifest.parent
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  backend:', 1)[0]
         selections = re.findall(r'ci_contract_test.py --package (\S+) --binary (\S+) --test (\w+)', workflow)
-        self.assertEqual(len(selections), 13)
+        self.assertEqual(len(selections), 14)
         for package, binary, test in selections:
             with self.subTest(package=package, binary=binary, test=test):
                 source_root = packages[package]
@@ -174,12 +174,13 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
         bcs_job = workflow.split('\n  backend:', 1)[0]
         self.assertIn('bash scripts/ci_test.sh --coverage --reuse-build', bcs_job)
-        self.assertEqual(bcs_job.count('python3 scripts/ci_contract_test.py'), 13)
+        self.assertEqual(bcs_job.count('python3 scripts/ci_contract_test.py'), 14)
         self.assertNotIn('run: cargo test ', bcs_job)
         for inventory in ['edge-authority scenarios=63', 'provider-lifecycle scenarios=30',
                           'group-authorization scenarios=9', 'session-authorization scenarios=6']:
             self.assertEqual(bcs_job.count(inventory), 1)
-        for gate in ['--pass-rate-min 100', '--overall-line-min 84', '--changed-line-min 80']:
+        for gate in ['--pass-rate-min 100', '--overall-line-min 87', '--changed-line-min 85',
+                     '--changed-line-min-lines 51']:
             self.assertIn(gate, bcs_job)
 
 

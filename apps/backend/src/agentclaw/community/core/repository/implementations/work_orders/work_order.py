@@ -816,6 +816,29 @@ class WorkOrderRepository(
             env=env,
         )
 
+    def merge_notice(
+        self,
+        *,
+        recipient_user_id: str,
+        event_type: str,
+        group_id: str,
+        biz_type: str,
+        biz_id: str,
+        title: str,
+        content_factory,
+        env: str,
+    ) -> int:
+        return self._notifications.merge_notice(
+            recipient_user_id=recipient_user_id,
+            event_type=event_type,
+            group_id=group_id,
+            biz_type=biz_type,
+            biz_id=biz_id,
+            title=title,
+            content_factory=content_factory,
+            env=env,
+        )
+
     def get_notification(
         self,
         *,

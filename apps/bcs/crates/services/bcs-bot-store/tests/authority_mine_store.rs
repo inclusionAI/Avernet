@@ -41,7 +41,7 @@ fn resolve_env() -> String {
 // ---------------------------------------------------------------------------
 
 const SCHEMA: &[&str] = &[
-    "CREATE TABLE bcs_bots (\
+    "CREATE TABLE bcs_bots (agent_card TEXT,\
         bot_uuid TEXT NOT NULL, \
         env TEXT NOT NULL, \
         name TEXT NOT NULL DEFAULT '', \

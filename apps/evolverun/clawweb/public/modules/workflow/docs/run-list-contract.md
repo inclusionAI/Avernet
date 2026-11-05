@@ -79,3 +79,156 @@ empty permissions, and the admin view. Run it with:
 ```sh
 npm test --workspace @avernet/workflow -- server/repositories/__tests__/run-list-search.test.ts
 ```
+
+## Fanout observation (fanout.v1)
+
+The public bootstrap injects `RunSubworkflowsService`, its read-only
+`RunSubworkflowsStore`, and the host's owner-preserving `RunViewPermissions`
+implementation (including `resolveRunViewScope`). The module-local Service API
+and response types are in `server/contracts/run-subworkflows.ts`. The new
+repository is intentionally separate from the engine/CAS write repository;
+it issues only SELECTs, does not select credential values, and propagates
+storage failures. The HTTP adapters live in `server/services/run-read-http.ts`
+and `run-subworkflows-http.ts` because the existing runs route was split at its
+read/write boundary. They are delivery adapters, not domain/core services.
+
+### Endpoint and authoritative state
+
+```http
+GET /api/runs/:flowId/nodes/:nodeId/subworkflows?groupExecutionId=:id&limit=30
+GET /api/runs/:flowId/nodes/:nodeId/subworkflows?groupExecutionId=:id&limit=30&cursor=:cursor
+```
+
+`groupExecutionId` is required and must match exactly. `limit` is an integer
+from 1 through 100 (default 30); query parameters must be scalar. A read loads
+one persisted parent row and parses `state_json.subworkflowFanouts[nodeId]`
+once. It does not use event reconstruction, live engine polling, node output,
+or the result projection as a fallback. Parent/group/child execution identity
+mismatches are errors, not empty groups. No query starts, rejoins, resumes,
+retries, cancels, seals, or writes a runtime state.
+
+Production shape is taskguard's `FanoutState`:
+
+- identity and `revision` are at the group root;
+- policies and concurrency are in `group.config`;
+- the child workflow ID is `group.childWorkflow.id`;
+- `children` contains flat `FanoutChildState` values with parent/group identity,
+  `itemIndex`, `itemId`, `attemptNumber`, `childFlowId`, `status`, `result`, and
+  `error`. v1 has one attempt per item.
+
+For already persisted design-preview snapshots, the reader also accepts the
+approved older shape with root policies/concurrency, `dependencySnapshot`,
+and `children[].activeAttemptNumber/attempts`. Only the active attempt is
+counted or returned. Unknown/malformed shapes fail closed rather than silently
+becoming a zero-child success. Neither version's raw `result`, exports, item
+inputs, params, session keys, filesystem references or attempt history is
+returned by this endpoint. Error DTOs expose only the authorized category,
+code, message, retryability (missing means false), and optional source node.
+Runtime writers must supply already-redacted error messages, not full logs.
+
+### Authorization, counts and pagination
+
+The caller identity comes from the host request identity resolver, **never**
+`botOwnerId`. Authorize the parent workflow and its full stored origin first.
+Then authorize each referenced child using its actual workflow and complete
+`origin_bot_id = botId:ownerId`; an explicit `ownerId: '*'` grant retains its
+all-owner semantics. Parent access does not grant child access. Missing child
+rows, unproven origins, or references to another workflow are not visible.
+Each request, including a cursor request, resolves current permissions again.
+
+Response fields include:
+
+- `schemaVersion`, `parentFlowId`, `groupNodeId`, `groupExecutionId`, `revision`,
+  opaque `snapshotId`, group `status`, `childWorkflowId`, `successPolicy`,
+  `concurrency` and visible `activeCount`;
+- `countScope: 'full' | 'visible'` (the implemented field is singular);
+- `groupTotal`, `visibleTotal`, `returnedCount`, `counts`, `nextCursor`;
+- `children[]`: continuous zero-based `displayIndex`, `itemId`, `attemptNumber`,
+  `childFlowId`, `status`, and `error`. `itemIndex` is included only in a full view.
+
+`countScope: full` requires unrestricted grants for both workflows and all
+current child origins to be proven. A bot-limited grant is not a full-statistics
+grant even if it happens to expose every current row. Otherwise `groupTotal`
+is null and every count is calculated **after filtering**, before pagination.
+`visibleTotal` covers the entire authorized snapshot, while `returnedCount`
+is the number of rows in this page. `counts` contains `successCount`,
+`failedCount`, `pendingCount`, `cancelledCount`, `timedOutCount`, and
+`rejectedCount`. Only confirmed terminal states leave the pending bucket.
+The group status remains the persisted collector status; a succeeded
+`all_done` group may contain failed children.
+
+Cursors bind the exact parent/group/execution, revision, actor, current grants
+and visible origins/data to an offset. They are not authorization tokens.
+They are rejected with 409 when that snapshot cannot continue; callers must
+refresh page one instead of merging pages from different snapshots.
+
+### Closing legacy read bypasses
+
+With the new reader injected, the run list and workflow run statistics apply
+workflow plus **owner-qualified** origin predicates before counts and paging.
+`botOwnerId` no longer supplies identity; `botId` may only narrow the view.
+Legacy isolated callers that do not inject this reader retain the previous
+list behavior; the fanout route returns 503 there. Production hosts must wire
+the reader, as the public bootstrap does.
+
+All per-run GET/HEAD requests, including direct child links, nodes and events, use the same
+owner-preserving run guard and no-store policy. HEAD derives its response metadata
+from the same authorized, redacted representation as GET, never the raw row.
+A parent with persisted fanout groups exposes
+`subworkflowGroups: [{ nodeId, groupExecutionId }]` for UI discovery, but not
+its raw state/input/params/result or opaque node payloads. All parent nodes
+are reduced to execution metadata, since downstream outputs can copy a group
+result. Parent events are omitted in this minimal read-only view; use the
+authorized group snapshot instead. Restricted parents cannot use the legacy
+steps/replay/dynamic/topology endpoints to fetch equivalent unfiltered data.
+Input keyword search also excludes fanout parents' opaque input (and corrupt
+state), preventing search/counts from becoming a hidden-item oracle.
+No existing mutation handler is changed or newly authorized by these reads.
+
+### Errors and client lifecycle
+
+| HTTP | Meaning |
+| --- | --- |
+| 400 | Invalid/missing/repeated parameter, malformed cursor or limit |
+| 401 | Request identity missing |
+| 403 | Parent/direct child denied, or restricted raw-parent read |
+| 404 | Run or persisted node fanout absent |
+| 409 | Identity/generation mismatch, revision or permission-bound cursor stale |
+| 500 | Corrupt persisted state or failed storage/permission read; no raw exception text |
+| 503 | Observation service not configured |
+
+A genuinely empty group and a nonempty group with no visible children are both
+200, distinguished by the authorized count scope/total and persisted status;
+absence (404), denial (403), and failure (500) are not rendered as empty data.
+Responses use `Cache-Control: private, no-store`.
+
+The existing node detail panel mounts the group component only while expanded.
+It uses module-local API/hooks, refreshes every three seconds, cancels requests
+on close/identity changes, suppresses lower revisions, and discards stale
+pagination replies. A permission/read error removes stale rows rather than
+leaving an old authorized snapshot onscreen. Before the first durable snapshot,
+a fanout node declared by the workflow spec shows a no-data entry without
+inventing an execution ID. Child selection reuses the native `DetailDrawer`
+container for a read-only run summary and node list, with a parent-context back
+button and a separately authorized full-run link. Child nodes never contribute
+to the parent's node counters.
+
+### Observation verification
+
+- `server/services/__tests__/run-subworkflows.test.ts`: real Express routes,
+  SQLite persistence, flat/legacy state, exact identities, full owners,
+  parent-first authorization, filtered counts/pages, stale cursors, no mutation,
+  storage failures, and legacy read/search bypasses.
+- `web/components/subworkflows/__tests__/SubworkflowPanel.test.tsx`: the real
+  node detail mount, API fetch boundary, dialog/back navigation, states/errors,
+  polling, revoked access, execution changes, and stale pagination/revisions.
+
+Run those suites with the workflow workspace's Vitest command, and run
+`npm run ci:build` from the ClawWeb workspace to rebuild package exports and the
+host application. All tests use synthetic in-memory data, not live services.
+
+The read repository supports old schemas without the optional
+`evolution_analysis_status` projection column. It retries only an exact
+SQLite/MySQL missing-column error for that column, omitting that column on the
+retry. Missing required columns, connection errors and fallback failures still
+propagate; they never become empty successful reads.

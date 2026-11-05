@@ -35,8 +35,21 @@ async fn user_only_notice_persists_and_publishes_without_bot_delivery() {
 }
 
 async fn fixture() -> (support::FlowTestSupport, Arc<BcsMessageFlow>, Arc<ManagedMessageDelivery>, Arc<MemoryMessageRepo>, Arc<MemoryBotRunContextStore>) {
+    fixture_with_strategy(GroupStrategy::Chat).await
+}
+
+async fn fixture_with_strategy(strategy: GroupStrategy) -> (support::FlowTestSupport, Arc<BcsMessageFlow>, Arc<ManagedMessageDelivery>, Arc<MemoryMessageRepo>, Arc<MemoryBotRunContextStore>) {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
-    let group = support.group.get("group-1").await.unwrap();
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = strategy;
+    if strategy == GroupStrategy::ManagerWorker {
+        for participant in &mut group.participants {
+            participant.role = if participant.bot_uuid == "bot-driver" {
+                ParticipantRole::Manager
+            } else { ParticipantRole::Worker };
+        }
+        support.group.upsert(group.clone()).await.unwrap();
+    }
     let repo = Arc::new(MemoryMessageRepo::new());
     let service = Arc::new(ManagedMessageDelivery::new(repo.clone()));
     let contexts = Arc::new(MemoryBotRunContextStore::default());
@@ -269,4 +282,39 @@ async fn driver_capacity_rejection_keeps_other_bots_initial_context() {
     assert_eq!(rows.iter().filter(|r| r.state.status == Status::RejectedCapacity).count(), 1);
     assert_eq!(rows.iter().filter(|r| r.state.status == Status::PendingContext && r.target_bot_id == "bot-observer").count(), 1);
     assert!(support.bot_delivery.frames().await.is_empty());
+}
+
+
+#[tokio::test]
+async fn manager_injected_context_waits_for_user_send_and_keeps_manager_instructions() {
+    let (support, flow, service, repo, contexts) = fixture_with_strategy(GroupStrategy::ManagerWorker).await;
+    let group = support.group.get("group-1").await.unwrap();
+    let dispatcher = SystemMessageDispatcherImpl::builder().with_registry(support.registry.clone())
+        .with_delivery(support.bot_delivery.clone()).with_frontend_delivery(support.frontend_delivery.clone())
+        .with_message_repo(repo).with_bot_run_context(contexts).with_queue(flow.system_queue_port())
+        .register(SessionContextMessageProducer).build().unwrap();
+    dispatcher.dispatch(SystemMessageEvent::SessionContext { group_id:group.id.clone(),
+        session_id:"group-1:system".into(), reason:"初始化目标".into(), session_input:None,
+        task_ledger:None, driver_delivery:Some(DeliveryType::Inject) },
+        &group, "group-1:system", &group.participants).await.unwrap();
+    let initial = service.snapshot(None).await.unwrap();
+    assert_eq!(initial.len(), 2);
+    assert!(initial.iter().all(|row| row.state.kind == DeliveryType::Inject
+        && row.state.status == Status::PendingContext && row.run_id.is_none()));
+    assert!(support.bot_delivery.frames().await.is_empty(), "Inject must not start a Bot turn");
+
+    let mut command = user_send();
+    command.mentions.clear();
+    flow.handle_web_send(command).await.unwrap();
+    let rows = service.snapshot(None).await.unwrap();
+    let sends = rows.iter().filter(|row| row.state.kind == DeliveryType::Send).collect::<Vec<_>>();
+    assert_eq!(sends.len(), 1, "only the user message starts a turn");
+    assert_eq!(sends[0].target_bot_id, "bot-driver");
+    let preparer = QueuedGroupPreparation { flow:Arc::downgrade(&flow), deliveries:service.clone() };
+    let prepared = preparer.prepare(sends[0]).await.unwrap();
+    let wire = serde_json::to_value(&prepared.command.frame).unwrap().to_string();
+    assert!(wire.contains("初始化目标") && wire.contains("请检查当前需求"));
+    assert!(wire.contains("你是主 Bot") && wire.contains("bcs_assign_task"));
+    assert!(!wire.contains("你是子 Bot"), "Manager must not inherit Worker instructions");
+    assert_eq!(prepared.transport_context_json["context_selection"]["selected"].as_array().unwrap().len(), 1);
 }

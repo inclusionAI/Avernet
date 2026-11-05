@@ -26,6 +26,8 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 #[derive(Debug, Default)]
 pub struct MemoryGroupRepo {
     groups: RwLock<HashMap<String, DomainGroup>>,
+    // Lock order: groups, then templates; no standalone Card read API.
+    card_templates: RwLock<HashMap<String, serde_json::Value>>,
     message_counts: RwLock<HashMap<String, usize>>,
     event_store: Option<Arc<MemoryEventStore>>,
     event_env: Option<String>,
@@ -158,6 +160,7 @@ impl GroupRepoPort for MemoryGroupRepo {
         let mut candidate = current;
         apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
 
+        let mut cards = self.card_templates.write().await;
         if let Some(event) = command.event.as_ref() {
             let event_store =
                 self.event_store
@@ -205,11 +208,18 @@ impl GroupRepoPort for MemoryGroupRepo {
         } else {
             groups.insert(command.group_id.clone(), candidate.clone());
         }
+        if deleting {
+            cards.remove(&command.group_id);
+        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some()) {
+            super::card_template::update_memory_template(&mut cards, &candidate);
+        }
         Ok(candidate)
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
+        let mut cards = self.card_templates.write().await;
+        super::card_template::update_memory_template(&mut cards, &group);
         debug!(group_id = %group.id, "Group upserted");
         groups.insert(group.id.clone(), group);
         Ok(())
@@ -224,8 +234,10 @@ impl GroupRepoPort for MemoryGroupRepo {
         let group = groups
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        let mut cards = self.card_templates.write().await;
         if let Some(label) = patch.label {
             group.label = Some(label);
+            super::card_template::update_memory_template(&mut cards, group);
         }
         if let Some(context) = patch.context {
             group.context = Some(context);
@@ -409,7 +421,9 @@ impl GroupRepoPort for MemoryGroupRepo {
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
 
+        let mut cards = self.card_templates.write().await;
         group.label = label;
+        super::card_template::update_memory_template(&mut cards, group);
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -433,6 +447,8 @@ impl GroupRepoPort for MemoryGroupRepo {
 
     async fn delete(&self, id: &str) -> ServiceResult<Option<DomainGroup>> {
         let mut groups = self.groups.write().await;
+        let mut cards = self.card_templates.write().await;
+        cards.remove(id);
         Ok(groups.remove(id))
     }
 
@@ -699,3 +715,7 @@ use mutation::apply_memory_group_mutation;
 #[cfg(test)]
 #[path = "memory_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "memory_card_tests.rs"]
+mod card_tests;

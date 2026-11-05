@@ -80,6 +80,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
+    avatarUrl: dto.avatar_url?.trim() || undefined,
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',

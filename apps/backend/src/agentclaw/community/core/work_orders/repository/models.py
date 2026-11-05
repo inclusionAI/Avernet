@@ -157,6 +157,47 @@ class WorkOrderNotificationModel(Base):
         )
 
 
+class WorkOrderNotificationGroupModel(Base):
+    """One open aggregate for a recipient/group until the notice is read.
+
+    The group row is a persistence lock and maps the stable group identity to
+    the single ``ac_work_order_notification`` row that remains unread. Reading
+    that notification closes and removes the group, so later events open a new
+    aggregate instead of resurrecting an already-read notice.
+    """
+
+    __tablename__ = "ac_work_order_notification_group"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    recipient_user_id = Column(String(256), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    group_id = Column(String(128), nullable=False)
+    notification_id = Column(AutoIncrementBigInteger, nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_created = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "recipient_user_id",
+            "event_type",
+            "group_id",
+            "env",
+            name="uk_work_order_notification_group",
+        ),
+        Index(
+            "idx_work_order_notification_group_notice",
+            "avernet_tenant",
+            "notification_id",
+            "env",
+        ),
+    )
+
+
 class WorkOrderApproverModel(Base):
     __tablename__ = "ac_work_order_approver"
 
@@ -181,3 +222,4 @@ class WorkOrderApproverModel(Base):
 
 register_avernet_tenant_guard(WorkOrderModel)
 register_avernet_tenant_guard(WorkOrderNotificationModel)
+register_avernet_tenant_guard(WorkOrderNotificationGroupModel)

@@ -66,6 +66,7 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyRepository,
 )
 from agentclaw.community.core.task_queue.types import Complete
+from ._empty_cli_tools import EmptyCliTools
 from ._fakes import (
     FakeGitClient,
     FakeManifestContent,
@@ -176,11 +177,10 @@ def _service(db, *, scripts, manifests=None, queue=None):
         completion_handlers={},
         # The delivery seam, assembled the way the composition root
         # assembles it: a bundle of device-backed ports, one strategy
-        # over it, and a lookup. The categories this suite's document
-        # does not declare are never reached, but their ports must
-        # exist for the registry to register them.
+        # over it, and a lookup. The document clears omitted supported
+        # categories, so the ports also model their initially empty areas.
         delivery_strategies=arca_only_delivery(
-            device_port_bundle(script_service=scripts, content=content)
+            device_port_bundle(script_service=scripts, content=content, cli_tool_service=EmptyCliTools())
         ),
     )
 

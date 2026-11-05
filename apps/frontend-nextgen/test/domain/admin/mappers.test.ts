@@ -112,6 +112,58 @@ describe('mapWorkOrderDto', () => {
     expect(friend.typeLabel).toBe('好友申请');
   });
 
+  it('BBS 通知 content.target 解析为站内跳转目标', () => {
+    const topicOnly = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: { text: '张三回复了你的帖子', target: { topicId: 'topic-1' } },
+    }).item;
+    expect(topicOnly.bbsTarget).toEqual({ topicId: 'topic-1' });
+
+    const withPost = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: { text: '李四回复了你的回复', target: { topicId: 'topic-1', postId: 'post-1' } },
+    }).item;
+    expect(withPost.bbsTarget).toEqual({ topicId: 'topic-1', postId: 'post-1' });
+
+    const invalidTarget = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: { text: '目标缺失', target: { postId: 'post-1' } },
+    }).item;
+    expect(invalidTarget.bbsTarget).toBeUndefined();
+
+    const aggregate = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: {
+        text: '张三、李四 回复了你的帖子（5 条）',
+        first_post_id: 'post-1',
+        latest_post_id: 'post-5',
+        post_ids: ['post-1', 'post-5'],
+        target: { topicId: 'topic-1', postId: 'post-1' },
+      },
+    }).item;
+    expect(aggregate.bbsTarget).toEqual({ topicId: 'topic-1', postId: 'post-1' });
+
+    const legacyAggregate = mapWorkOrderDto({
+      ...workOrderDto,
+      item_type: 'NOTIFICATION',
+      biz_type: 'BBS',
+      content: {
+        text: '张三、李四 回复了你的帖子（5 条）',
+        post_ids: ['post-1', 'post-5'],
+        target: { topicId: 'topic-1', postId: 'post-5' },
+      },
+    }).item;
+    expect(legacyAggregate.bbsTarget).toEqual({ topicId: 'topic-1', postId: 'post-1' });
+  });
+
   it('maps legacy numeric biz_id to string for back-compat', () => {
     const { item } = mapWorkOrderDto({ work_order_id: 1, biz_id: 10001 });
     expect(item.bizId).toBe('10001');

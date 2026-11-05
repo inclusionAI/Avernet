@@ -4,6 +4,8 @@ use strum::AsRefStr;
 #[derive(Debug, thiserror::Error, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ServiceError {
+    #[error(transparent)]
+    A2aManagement(#[from] bcs_domain::a2a_management::ManagementError),
     /// Transport proves the request was never submitted and no sender remains.
     /// Only the transport may classify this; timeouts are not such proof.
     #[error("delivery not sent: {code}")]
@@ -167,6 +169,7 @@ impl ServiceError {
     /// internal details must not be exposed (IoError, JsonError).
     pub fn error_params(&self) -> serde_json::Value {
         match self {
+            Self::A2aManagement(error)=>serde_json::json!({"code":error.code,"field":error.field,"reason":error.reason}),
             Self::DeliveryNotSent { code, retryable } => serde_json::json!({"code": code, "retryable": retryable}),
             Self::BotNotFound(id)
             | Self::BotNotRegistered(id)
@@ -231,6 +234,213 @@ impl ServiceError {
             | Self::CannotRejectAccepted
             | Self::PrivateBotCannotCollaborate
             | Self::RegistrationReconciliationRequired => serde_json::Value::Null,
+        }
+    }
+}
+
+pub const ERROR_EVENT_SUBSCRIPTION_NOT_FOUND: &str = "event_subscription_not_found";
+pub const ERROR_EVENT_DELIVERY_NOT_FOUND: &str = "event_delivery_not_found";
+pub const ERROR_INVALID_EVENT_FILTER: &str = "invalid_event_filter";
+pub const ERROR_INVALID_EVENT_SCOPE: &str = "invalid_event_scope";
+pub const ERROR_INVALID_WEBHOOK_URL: &str = "invalid_webhook_url";
+pub const ERROR_EVENT_SUBSCRIPTION_LIMIT_REACHED: &str = "event_subscription_limit_reached";
+pub const ERROR_EVENT_SUBSCRIPTION_REVISION_CONFLICT: &str = "event_subscription_revision_conflict";
+pub const ERROR_EVENT_SUBSCRIPTION_FORBIDDEN: &str = "event_subscription_forbidden";
+pub const ERROR_EVENT_DELIVERY_NOT_REPLAYABLE: &str = "event_delivery_not_replayable";
+pub const ERROR_EVENT_DELIVERY_LANE_BLOCKED: &str = "event_delivery_lane_blocked";
+
+pub const ERROR_INVITE_CODE_REQUIRED: &str = "invite_code_required";
+pub const ERROR_INVITE_CODE_ALREADY_BOUND: &str = "invite_code_already_bound";
+pub const ERROR_INVITE_CODE_UNAVAILABLE: &str = "invite_code_unavailable";
+pub const ERROR_INVITE_CODE_NOT_APPLICABLE: &str = "invite_code_not_applicable";
+pub const ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED: &str = "invite_code_claim_limit_reached";
+
+/// Transport-independent error vocabulary for OpenAPI v1 use cases.
+///
+/// Lives in `types` (the shared low-level module every contract layer may
+/// reference without reverse dependencies) so the outbound ports — e.g.
+/// [`crate::port::oauth`] — can type their results with the same
+/// vocabulary the application-layer use cases translate into.
+#[derive(Debug, thiserror::Error)]
+pub enum ApplicationError {
+    #[error("{code}: {message}")]
+    InvalidInput { code: String, message: String },
+    #[error("authentication is required")]
+    Unauthenticated,
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    #[error("{code}: {message}")]
+    ForbiddenCode { code: String, message: String },
+    #[error("{code}: {message}")]
+    NotFound { code: String, message: String },
+    #[error("{code}: {message}")]
+    Conflict { code: String, message: String },
+    #[error("{code}: {message}")]
+    Gone { code: String, message: String },
+    #[error("{code}: {message}")]
+    QuotaExceeded { code: String, message: String },
+    #[error("{code}: {message}")]
+    PayloadTooLarge { code: String, message: String },
+    #[error("{code}: {message}")]
+    Unprocessable { code: String, message: String },
+    #[error("{code}: {message}")]
+    BadGateway { code: String, message: String },
+    /// An auth-flow backing dependency (pending-login store, session
+    /// identity store, verifier) is unreachable. Carries a stable
+    /// sanitized `code`/`message` pair only — never underlying storage,
+    /// endpoint, or credential text. Distinct from `BadGateway` (kept for
+    /// the existing Bot identity store 502 family); the HTTP envelope
+    /// maps this to 503 / 50300 / `auth_dependency_unavailable`.
+    #[error("{code}: {message}")]
+    Unavailable { code: String, message: String },
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+impl ApplicationError {
+    pub fn invalid(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidInput {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::Forbidden(message.into())
+    }
+
+    pub fn forbidden_code(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::ForbiddenCode {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn not_found(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::NotFound {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn conflict(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Conflict {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn payload_too_large(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::PayloadTooLarge {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn unprocessable(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Unprocessable {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn bad_gateway(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::BadGateway {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Dependency-unreachable failure with a stable sanitized code.
+    pub fn unavailable(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Unavailable {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(message.into())
+    }
+
+    pub fn event_subscription_not_found(message: impl Into<String>) -> Self {
+        Self::not_found(ERROR_EVENT_SUBSCRIPTION_NOT_FOUND, message)
+    }
+
+    pub fn event_delivery_not_found(message: impl Into<String>) -> Self {
+        Self::not_found(ERROR_EVENT_DELIVERY_NOT_FOUND, message)
+    }
+
+    pub fn invalid_event_filter(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_EVENT_FILTER, message)
+    }
+
+    pub fn invalid_event_scope(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_EVENT_SCOPE, message)
+    }
+
+    pub fn invalid_webhook_url(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_WEBHOOK_URL, message)
+    }
+
+    pub fn event_subscription_limit_reached(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_SUBSCRIPTION_LIMIT_REACHED, message)
+    }
+
+    pub fn event_subscription_revision_conflict(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_SUBSCRIPTION_REVISION_CONFLICT, message)
+    }
+
+    pub fn event_subscription_forbidden(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_EVENT_SUBSCRIPTION_FORBIDDEN, message)
+    }
+
+    pub fn event_delivery_not_replayable(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_DELIVERY_NOT_REPLAYABLE, message)
+    }
+
+    pub fn event_delivery_lane_blocked(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_EVENT_DELIVERY_LANE_BLOCKED, message)
+    }
+
+    pub fn invite_code_required(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_INVITE_CODE_REQUIRED, message)
+    }
+
+    pub fn invite_code_already_bound(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_INVITE_CODE_ALREADY_BOUND, message)
+    }
+
+    pub fn invite_code_unavailable(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_INVITE_CODE_UNAVAILABLE, message)
+    }
+
+    pub fn invite_code_not_applicable(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_INVITE_CODE_NOT_APPLICABLE, message)
+    }
+
+    pub fn invite_code_claim_limit_reached(message: impl Into<String>) -> Self {
+        Self::QuotaExceeded {
+            code: ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED.to_string(),
+            message: message.into(),
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        match self {
+            Self::InvalidInput { code, .. }
+            | Self::NotFound { code, .. }
+            | Self::Conflict { code, .. }
+            | Self::Gone { code, .. }
+            | Self::QuotaExceeded { code, .. }
+            | Self::PayloadTooLarge { code, .. }
+            | Self::Unprocessable { code, .. }
+            | Self::BadGateway { code, .. } => code,
+            Self::Unavailable { code, .. } => code,
+            Self::Unauthenticated => "unauthenticated",
+            Self::Forbidden(_) => "forbidden",
+            Self::ForbiddenCode { code, .. } => code,
+            Self::Internal(_) => "internal_error",
         }
     }
 }

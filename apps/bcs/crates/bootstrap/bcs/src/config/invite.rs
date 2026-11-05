@@ -21,6 +21,11 @@ pub struct InviteConfig {
     #[serde(default = "default_public_claim_max_count")]
     pub public_claim_max_count: u64,
 
+    /// Verified user IDs authorized to initialize invite codes. Empty denies all.
+    /// These are raw auth user IDs, not usernames or BCS human_ Actor IDs.
+    #[serde(default)]
+    pub issuer_user_ids: Vec<String>,
+
     #[serde(default = "default_invite_ttl_seconds")]
     pub default_ttl_seconds: u64,
 
@@ -42,6 +47,7 @@ impl Default for InviteConfig {
             invite_code_gate_enabled: false,
             public_claim_enabled: false,
             public_claim_max_count: default_public_claim_max_count(),
+            issuer_user_ids: Vec::new(),
             default_ttl_seconds: default_invite_ttl_seconds(),
             base_url: None,
             group_link_url: None,

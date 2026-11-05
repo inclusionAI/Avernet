@@ -84,7 +84,9 @@
     },
     "openapi": {
       "bot_access_check": {
-        "allowed_app_names": []
+        "allowed_app_names": [
+          "acmng"
+        ]
       },
       "user_id_bypass": []
     },

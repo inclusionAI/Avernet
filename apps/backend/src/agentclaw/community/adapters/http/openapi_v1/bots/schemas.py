@@ -19,6 +19,7 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
 from .schemas_inventory import InventoryPublication
 from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
     EditLock,
@@ -76,13 +77,14 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
 
     entity_id: str = Field(default="", description="Immutable Bot resource locator.")
     bcn_bot_id: str = Field(
         default="", description="Established BCN address; stable across Owner handoff."
     )
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -440,7 +442,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
@@ -909,6 +911,10 @@ class BotInventoryItem(BaseModel):
     )
     status: str = Field(
         description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
+    )
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="Derive-on-read copy operation state for this bot; null when the bot is not a copy dst or the copy already converged. FE uses it for the copy-progress badge and retry action on inventory cards.",
     )
     publish: InventoryPublication | None = Field(
         default=None,

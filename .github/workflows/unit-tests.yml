@@ -103,6 +103,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # The OAuth session contract applies the full chain to an EMPTY schema.
+      mysql_auth_session:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: bcs_auth_session
+          MYSQL_USER: bcs
+          MYSQL_PASSWORD: bcs_test_only
+          MYSQL_ROOT_PASSWORD: root_test_only
+        ports:
+          - 3311:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -uroot -proot_test_only"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       CARGO_TERM_COLOR: always
       BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3306/bcs_contract
@@ -258,6 +273,12 @@ jobs:
           echo "$output" | grep -q 'authority-mysql-gate=session-authorization scenarios=6' \
             || { echo "session snapshot scenario inventory unfinished" >&2; exit 1; }
 
+      - name: Run OAuth session MySQL conformance and cross-connection race
+        if: steps.changes.outputs.skip-bcs != 'true'
+        env:
+          BCS_TEST_MYSQL_URL: mysql://bcs:bcs_test_only@127.0.0.1:3311/bcs_auth_session
+        run: python3 scripts/ci_contract_test.py --package bcs-user-identity --binary conformance_auth_session_mysql --test auth_session_mysql_contract_and_two_connection_race
+
       - name: Run MySQL Eventing migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
         run: python3 scripts/ci_contract_test.py --package bcs-admin --binary bcs-admin --test eventing_mysql_migration_applies_to_real_mysql
@@ -292,8 +313,9 @@ jobs:
             --base-ref "$BCS_BASE_REF" \
             --bcs-dir "$PWD" \
             --pass-rate-min 100 \
-            --overall-line-min 84 \
-            --changed-line-min 80
+            --overall-line-min 87 \
+            --changed-line-min 85 \
+            --changed-line-min-lines 51
 
       - name: Upload BCS test results
         if: always() && steps.changes.outputs.skip-bcs != 'true'

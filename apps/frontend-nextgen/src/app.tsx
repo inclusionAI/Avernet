@@ -1,5 +1,6 @@
 import { extendCapabilities, getCapabilities, sealExtensions } from '@/capabilities';
 import { ExternalLoginPromptModal } from '@/components/ExternalLoginPromptModal';
+import { CollaborationGroupLaunchObserver } from '@/components/CollaborationGroupLaunchObserver';
 import { InviteCodeBindingModal } from '@/components/InviteCodeBindingModal';
 import { Toaster } from '@/components/ui/sonner';
 import { appExtension, registerSidePanelWiring } from '@/extensions';
@@ -81,6 +82,7 @@ export function rootContainer(container: React.ReactNode) {
     React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
     TaskObserver ? React.createElement(TaskObserver) : null,
+    React.createElement(CollaborationGroupLaunchObserver),
     React.createElement(ExternalLoginPromptModal),
     React.createElement(InviteCodeBindingModal),
     React.createElement(Toaster),

@@ -8,20 +8,29 @@ impl BcsServer {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
             .expect("Secret provider configuration must be valid");
-        let gateway_principal_verifier = std::thread::scope(|scope| {
-            scope
-                .spawn(|| {
-                    tokio::runtime::Runtime::new()
-                        .expect("temp runtime for Gateway Principal verifier build")
-                        .block_on(build_gateway_principal_verifier_from_secret_access(
-                            &config.gateway_principal,
-                            group_session_secret_access.clone(),
-                        ))
+        // N4: an explicit [api.auth] chain that does not select `gateway`
+        // must never read the legacy signing key, so the compat verifier is
+        // only requested (and its secret only resolved) outside that mode.
+        let gateway_principal_verifier = if config.api.auth.is_some() {
+            None
+        } else {
+            Some(
+                std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| {
+                            tokio::runtime::Runtime::new()
+                                .expect("temp runtime for Gateway Principal verifier build")
+                                .block_on(build_gateway_principal_verifier_from_secret_access(
+                                    &config.gateway_principal,
+                                    group_session_secret_access.clone(),
+                                ))
+                        })
+                        .join()
+                        .expect("Gateway Principal verifier build thread panicked")
                 })
-                .join()
-                .expect("Gateway Principal verifier build thread panicked")
-        })
-        .expect("Gateway Principal verifier configuration must be valid");
+                .expect("Gateway Principal verifier configuration must be valid"),
+            )
+        };
         Self::new_with_outbound_url_guards(
             config,
             outbound_url_guard.clone(),
@@ -42,7 +51,7 @@ impl BcsServer {
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             group_session_secret_access,
-            gateway_principal_verifier_for_tests(),
+            Some(gateway_principal_verifier_for_tests()),
             true,
         )
     }
@@ -54,7 +63,7 @@ impl BcsServer {
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
         group_session_secret_access: Arc<dyn SecretAccessPort>,
-        gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
+        gateway_principal_verifier: Option<Arc<dyn PrincipalVerifier>>,
         allow_local_eventing_endpoints: bool,
     ) -> Self {
         let invite_token_secret = resolve_invite_token_secret(&config);
@@ -105,6 +114,7 @@ impl BcsServer {
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
@@ -479,6 +489,36 @@ impl BcsServer {
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
+        // Authentication selection (V1 API auth plan, Task 12): the legacy
+        // chain feeds the native Human router; an explicit [api.auth]
+        // replaces the V1 selection through the same assembly the durable
+        // path uses (N4 applies — the legacy gateway key is only consumed
+        // by the compat path that actually mounts it).
+        let auth_config = crate::auth_wiring::resolve_auth_config(
+            &config.auth,
+            crate::config_loader::Environment::resolve().as_str(),
+        );
+        let identity_ports = crate::identity_wiring::memory_identity_ports();
+        let v1_selection = super::auth_resources::select_v1_authentication_blocking(
+            &config,
+            Some(identity_ports.auth_session_identity.clone()),
+            group_session_secret_access.clone(),
+        )
+        .expect("explicit [api.auth], when configured, must assemble at startup");
+        let (principal_verifier, v1_origins, explicit_api_auth) =
+            super::auth_resources::resolve_v1_selection(
+                v1_selection,
+                gateway_principal_verifier.clone(),
+            )
+            .expect("in-memory server keeps a constructible authentication selection");
+        let user_identity_port = Some(identity_ports.user_identity.clone());
+        let auth_session_identity = Some(identity_ports.auth_session_identity.clone());
+        let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
+            &auth_config,
+            bot_registry.clone(),
+            Some(identity_ports.user_identity.clone()),
+            Some(identity_ports.auth_session_identity.clone()),
+        ));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -503,7 +543,7 @@ impl BcsServer {
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
-            gateway_principal_verifier.clone(),
+            principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
@@ -548,6 +588,12 @@ impl BcsServer {
             openapi_v1.with_channel_service(channel_service.clone())
         } else {
             openapi_v1
+        };
+        // Per-actual-source CSRF origins composed by the explicit-chain
+        // assembly attach to the SAME ApiState the verifier lives in.
+        let openapi_v1 = match &v1_origins {
+            Some(origins) => openapi_v1.with_trusted_browser_origins(origins.clone()),
+            None => openapi_v1,
         };
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
@@ -627,16 +673,6 @@ impl BcsServer {
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
-        let auth_config = crate::auth_wiring::resolve_auth_config(
-            &config.auth,
-            crate::config_loader::Environment::resolve().as_str(),
-        );
-        let user_identity_port = Some(crate::identity_wiring::memory_user_identity_port());
-        let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
-            &auth_config,
-            bot_registry.clone(),
-            user_identity_port.clone(),
-        ));
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
@@ -661,6 +697,7 @@ impl BcsServer {
             metrics,
             auth_chain,
             auth_config,
+            explicit_api_auth,
             bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
@@ -668,6 +705,7 @@ impl BcsServer {
             internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
+            auth_session_identity,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
             connect_service: Arc::new(bcs_test_support::NoopConnectService),

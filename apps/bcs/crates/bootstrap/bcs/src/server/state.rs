@@ -88,6 +88,13 @@ pub struct BcsServerState {
     /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
     pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
 
+    /// The V1 auth application facade assembled from an EXPLICIT
+    /// `[api.auth]` chain with an enabled OAuth source, plus the externally
+    /// addressable public base URL. `None` keeps the compat
+    /// `[auth.oauth]`-derived mount (or none at all); `/user` never 404s on
+    /// a missing facade — it projects the verified Human caller.
+    pub explicit_api_auth: Option<crate::api_auth_wiring::ExplicitApiAuthFacade>,
+
     /// Invite-token HMAC secret resolved once for every HTTP surface.
     pub invite_token_secret: Vec<u8>,
 
@@ -102,6 +109,12 @@ pub struct BcsServerState {
 
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
+
+    /// Strict session identity port over the SAME store as
+    /// `user_identity_port` (V1 API auth plan, Task 11): the login
+    /// entries install/refresh/revoke sessions through it, and
+    /// integration tests seed strict sessions via this handle.
+    pub auth_session_identity: Option<Arc<dyn bcs_auth_api::session::AuthSessionIdentityPort>>,
 
     /// User-controlled outbound HTTP URL security policy.
     pub outbound_url_guard: OutboundUrlGuard,
@@ -148,6 +161,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("auth_chain", &"<AuthPluginChain>")
             .field("auth_config", &self.auth_config)
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
+            .field("explicit_api_auth", &self.explicit_api_auth.is_some())
             .field("invite_token_secret", &"<redacted>")
             .field("openapi_v1", &"<ApiState>")
             .field(
@@ -218,6 +232,7 @@ impl Default for BcsServerState {
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
@@ -757,11 +772,14 @@ impl Default for BcsServerState {
             &config.auth,
             crate::config_loader::Environment::resolve().as_str(),
         );
-        let user_identity_port = Some(crate::identity_wiring::memory_user_identity_port());
+        let identity_ports = crate::identity_wiring::memory_identity_ports();
+        let user_identity_port = Some(identity_ports.user_identity.clone());
+        let auth_session_identity = Some(identity_ports.auth_session_identity.clone());
         let auth_chain = Arc::new(crate::auth_wiring::build_auth_chain(
             &auth_config,
             bot_registry.clone(),
-            user_identity_port.clone(),
+            Some(identity_ports.user_identity.clone()),
+            Some(identity_ports.auth_session_identity.clone()),
         ));
         let bot_ws_admission = config.bot_ws_admission.build();
 
@@ -791,11 +809,13 @@ impl Default for BcsServerState {
             auth_config,
             bot_ws_admission,
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
+            explicit_api_auth: None,
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
             group_session_secret_access,
             user_identity_port,
+            auth_session_identity,
             outbound_url_guard,
             admin_invocation_runs,
             connect_service: Arc::new(bcs_test_support::NoopConnectService),

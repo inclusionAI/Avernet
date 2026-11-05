@@ -172,7 +172,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
         <div className="p-8 text-center text-sm text-gray-400">暂无已发布版本</div>
       ) : (
         <div className="flex flex-1 overflow-hidden bg-slate-100">
-          <aside className="flex w-[340px] shrink-0 flex-col border-r border-slate-200 bg-white">
+          <aside className="flex w-[272px] shrink-0 flex-col border-r border-slate-200 bg-white">
             <div className="border-b border-slate-100 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">已发布版本 · 选择两项进行比较</div>
             <div className="flex-1 overflow-y-auto px-2 py-2">
               {history.map((h) => {
@@ -247,7 +247,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
               </div>
             ) : (
               <div className="flex h-full items-center justify-center p-8 text-center">
-                <div><div className="text-sm font-medium text-slate-600">选择一个版本查看内容</div><div className="mt-1 text-xs text-slate-400">勾选两个版本后，可在这里阅读精简差异</div></div>
+                <div><div className="text-sm font-medium text-slate-600">选择一个版本查看内容</div><div className="mt-1 text-xs text-slate-400">勾选两个版本后，可在这里并排对比内容</div></div>
               </div>
             )}
           </main>

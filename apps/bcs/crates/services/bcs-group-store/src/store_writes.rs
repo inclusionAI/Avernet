@@ -19,6 +19,7 @@ impl MySqlGroupStore {
                     "DELETE FROM bcs_groups WHERE group_id = ? AND env = ?",
                     vec![Value::from(group_id), Value::from(env)],
                 )),
+                self.card_template_delete_step(DbTransactionParam::value(group_id)),
             ])
             .await
             .map_err(|e| {
@@ -124,7 +125,7 @@ impl MySqlGroupStore {
             upsert = upsert_clause,
         );
 
-        let mut steps = Vec::with_capacity(2 + g_participants.len());
+        let mut steps = Vec::with_capacity(3 + g_participants.len());
         let guard_step = if let Some(lock) = self.public_provider_lock(&group)? {
             steps.push(DbTransactionStep::Query(lock));
             steps.push(DbTransactionStep::Query(self.public_bot_lock(&group)));
@@ -183,6 +184,7 @@ impl MySqlGroupStore {
             )));
         }
 
+        steps.push(self.card_template_upsert_step(&group_id)?);
         if let Some(guard) = guard_step {
             // Bind the first group_id INSERT value to the assertion row. An
             // empty assertion fails before the write and rolls back the txn.
@@ -238,6 +240,7 @@ impl MySqlGroupStore {
             }
         };
 
+        let updates_label = patch.label.is_some();
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(label) = patch.label {
@@ -299,14 +302,29 @@ impl MySqlGroupStore {
                 .and_then(|(_, stored_json)| stored_json.as_deref());
             params.push(Value::from(stored_json));
         }
-        let affected_rows = self
-            .db
-            .execute_with(&self.logical_db, &sql, params)
-            .await
-            .map_err(|error| {
-                warn!(group_id = %id, error = %error, "Failed to patch mutable group fields");
-                ServiceError::InternalError(error.to_string())
-            })?;
+        let affected_rows = if updates_label {
+            let statement = DbStatement::with_params(&sql, params);
+            let write = if guard_routing_policy {
+                DbTransactionStep::ExecuteChecked { statement, expected_affected_rows: 1 }
+            } else {
+                DbTransactionStep::Execute(statement)
+            };
+            match self.db.plugin().transaction(vec![
+                write, self.card_template_upsert_step(id)?,
+            ]).await {
+                Ok(results) => match results.first() {
+                    Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
+                    _ => return Err(ServiceError::InternalError("Missing Group patch result".into())),
+                },
+                // The transaction has rolled back. Reuse the zero-row path
+                // below to invalidate cache and distinguish deletion from CAS conflict.
+                Err(DbError::ConditionFailed { .. }) if guard_routing_policy => 0,
+                Err(error) => return Err(ServiceError::InternalError(error.to_string())),
+            }
+        } else {
+            self.db.execute_with(&self.logical_db, &sql, params).await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        };
 
         // Invalidate instead of reconstructing the row so hidden routing fields
         // changed concurrently are always reloaded from the authoritative store.
@@ -641,35 +659,21 @@ impl MySqlGroupStore {
 
     /// Update session label.
     pub(crate) async fn update_label_sql(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
-
-        // Persist to MySQL using parameter binding
-        self.db
-            .execute_with(
-                &self.logical_db,
+        self.try_get(id).await?
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        // Even a cleared/unchanged label must leave a current template. The
+        // SELECT in the second step cannot create one for a deleted Group.
+        let results = self.db.plugin().transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
                 "UPDATE bcs_groups SET label = ? WHERE group_id = ? AND env = ?",
-                vec![
-                    Value::from(label.as_deref()),
-                    Value::from(id),
-                    Value::from(self.env.as_str()),
-                ],
-            )
-            .await
-            .map_err(|e| {
-                warn!(group_id = %id, error = %e, "Failed to update group label");
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        debug!(group_id = %id, "Group label updated");
-        // Update cache
-        {
-            let mut cache = self.cache.write().await;
-            if let Some(group) = cache.get_mut(id) {
-                group.label = label;
-            }
+                vec![Value::from(label.as_deref()), Value::from(id), Value::from(self.env.as_str())],
+            )),
+            self.card_template_upsert_step(id)?,
+        ]).await.map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        self.cache.write().await.remove(id);
+        if matches!(results.first(), Some(DbTransactionStepResult::Executed(result)) if result.affected_rows == 0)
+            && self.try_get(id).await?.is_none() {
+            return Err(ServiceError::GroupNotFound(id.to_string()));
         }
         Ok(())
     }

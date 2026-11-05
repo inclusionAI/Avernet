@@ -1,0 +1,75 @@
+InitInviteCodesPath:
+  post:
+    operationId: init_invite_codes
+    tags: ["Collaboration / Invite Codes"]
+    summary: Issue invite codes as an explicitly authorized user.
+    description: >-
+      Requires the verified user ID to be explicitly listed in
+      invite.issuer_user_ids; an absent or empty allowlist denies all issuance.
+      Authentication, a trusted browser Origin, an existing binding, or a
+      Bot/App/AccessKey identity alone does not grant permission. Authorization
+      is enforced in the application before any generation or repository access,
+      independently of invite_code_gate_enabled and public_claim_max_count.
+      Cookie-authenticated writes also require a trusted Origin. Authorization
+      failure never retries another authentication source.
+    x-avernet-security:
+      user: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [count]
+            properties:
+              count:
+                type: integer
+                minimum: 1
+    responses:
+      "200":
+        description: Codes generated and persisted with the authorized issuer's audit ID.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, message, data, request_id]
+              properties:
+                code: {const: 20000}
+                message: {type: string}
+                request_id:
+                  $ref: ../shared.yaml#/RequestId
+                data:
+                  type: object
+                  required: [codes]
+                  properties:
+                    codes:
+                      type: array
+                      items:
+                        type: string
+                        pattern: '^[0-9A-Z]{6}$'
+      "400":
+        description: Invalid count or request body.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: No valid authentication source accepted the request.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Caller is not an authorized issuer, or Cookie Origin validation failed.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+      "503":
+        $ref: ../shared.yaml#/AuthDependencyUnavailableResponse

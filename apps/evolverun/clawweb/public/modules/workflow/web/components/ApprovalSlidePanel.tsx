@@ -95,9 +95,8 @@ async function resolveApproval(
   action: 'approve' | 'reject',
   comment?: string,
   detail?: Record<string, unknown>,
-  workbench = false,
 ): Promise<ResolveResult> {
-  const res = await fetch(workbench ? `/api/approval/workbench/${id}/resolve` : `/api/approval/${id}/resolve/session`, {
+  const res = await fetch(`/api/approval/${id}/resolve/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, comment, detail }),
@@ -256,7 +255,7 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved, wor
         const detail = isSectionMode && data.sections
           ? buildDetailPayload(data.sections, sectionSelection)
           : undefined
-        const res = await resolveApproval(card.id, action, comment || undefined, detail, workbench)
+        const res = await resolveApproval(card.id, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
           const fresh = await fetchApproval(card.id, workbench)

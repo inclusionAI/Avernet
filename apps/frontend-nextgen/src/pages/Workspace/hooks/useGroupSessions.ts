@@ -1,5 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 import type { DomainError, DomainResult } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -135,13 +135,9 @@ export function useGroupSessions(
       title?: string,
       contextQuery?: string,
       messageViewScope?: MessageViewScope,
+      contextDelivery?: GroupContextDelivery,
     ): Promise<SessionView | null> => {
-      const res: DomainResult<SessionView> = await sessionService.createNewSession(
-        gid,
-        title,
-        contextQuery,
-        messageViewScope,
-      );
+      const res = await sessionService.createNewSession(gid, title, contextQuery, messageViewScope, contextDelivery);
       if (!res.ok) {
         notifyError(errOf(res));
         return null;
