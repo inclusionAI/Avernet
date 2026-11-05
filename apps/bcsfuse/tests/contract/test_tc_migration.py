@@ -36,7 +36,7 @@ def row(worker_id="bot:owner:worker", **changes):
                 "summary": "Source description",
                 "skills": [{"name": "Actual skill", "description": "Skill detail"}],
                 "domains": ["finance"],
-                "agent_token": "DO-NOT-COPY-THIS-CREDENTIAL",
+                "agent_token": "<test-token>",
             }
         ),
     }
@@ -93,7 +93,7 @@ def test_csv_maps_real_fields_without_md_expert_or_credentials(repo):
     }
     assert card.resource_type == "agent"
     assert report.counts["migrated"] == 1
-    assert "DO-NOT-COPY" not in json.dumps(report.as_dict())
+    assert "<test-token>" not in json.dumps(report.as_dict())
 
 
 @pytest.mark.parametrize("encoding_depth", [0, 1, 2, 3])
@@ -407,7 +407,7 @@ def test_cli_defaults_to_dry_run_and_explicit_sqlite_write_is_isolated(tmp_path)
         ).read_card("bot:owner:worker")
         is None
     )
-    assert "DO-NOT-COPY" not in dry.stdout + written.stdout
+    assert "<test-token>" not in dry.stdout + written.stdout
 
 
 def test_cli_legacy_jsonl_joins_full_identity_and_archives_material(tmp_path):
