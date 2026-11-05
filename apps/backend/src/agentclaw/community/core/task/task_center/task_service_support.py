@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from agentclaw.community.core.task.domain.identity import (
     parse_scoped_bot_identity,

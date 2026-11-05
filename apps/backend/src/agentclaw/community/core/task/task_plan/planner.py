@@ -19,7 +19,7 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
 
 
 import logging
-from typing import Any
+from typing import Any, Callable
 from agentclaw.community.core.task.domain.models import (
     PlanResult,
     RelationType,
@@ -53,8 +53,10 @@ class TaskPlanner:
         pool: list[PlanningStrategy] | None = None,
     ) -> None:
         """graph: TaskGraphService(派生查询用;策略 apply 收显式 target 经 graph 快照);
-        pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。"""
+        pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。
+        owner_lookup 仅用于历史 bare Bot id 反查真实 owner。"""
         self._graph = graph
+        self._owner_lookup = owner_lookup
         self._strategies: list[PlanningStrategy] = (
             list(pool)
             if pool is not None
