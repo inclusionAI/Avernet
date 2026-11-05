@@ -25,7 +25,9 @@ builds it to this contract:
 - **Subscribe by session, never by owner** (design §7.4): subscribe to S's
   channel before asking for a snapshot; drop messages the snapshot already
   covers or that carry an older fencing token; read missing events from the
-  log on a gap in `event_seq`; poll the log while the channel is down.
+  log on a gap in `event_seq`; after a pub/sub disconnect, catch up in
+  batches (up to 500 sessions per `ReadEvents` call) within a concurrency
+  budget, never with one poll per session.
   Fan-out decisions are the owner's; the gateway only relays what is
   published to it.
 - **Keep each in-flight dispatch's output** until the owner acknowledges the

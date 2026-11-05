@@ -16,7 +16,7 @@
 | Failure discovery | 1 indexed query per survivor per dead node per poll, reading only that survivor's buckets, at most one batch (2,000 rows); once its own share is empty, 1 `LIMIT 1` probe over all buckets | while a node is dead, until it is retired; one per-tick budget across all dead nodes |
 | Transferred, not-yet-adopted leases | 1 indexed query per node per tick (`adopted = FALSE`, at most one 2,000-row batch; usually empty) | per node per tick |
 | Session event (control event for subscribers) | +1 insert inside an existing fenced transaction, no extra round trip | per state change, interrupt or step result — a few per step, never per token |
-| Event log read | 1 indexed range read (`event_seq > :last`) | per gap, reconnect snapshot, or poll while a session channel is down |
+| Event log read | 1 indexed range read (`event_seq > :last`); catch-up reads up to 500 sessions per query | per gap or reconnect snapshot; batched catch-up only after a pub/sub disconnect, plus a safety check per unfinished session silent for 30 s — at 300 k streams ≤ 10 k sessions/s, i.e. ~20 queries/s |
 | Tokens (deltas) | **0** database statements. Per 200 ms batch: 1 message dispatch gateway → owner and 1 publish on the session channel, fanned out by the pub/sub | — (network and pub/sub capacity, never storage) |
 | Gateway ↔ executor messages | 1 per round, per control event, per delta batch and per dispatch result | — (network, not storage) |
 

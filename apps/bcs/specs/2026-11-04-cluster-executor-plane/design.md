@@ -441,8 +441,15 @@ Messages on the channel:
 - `Delta(dispatch, chunk_seq, token, chunk)` — output text, never stored.
 
 Every message carries the publisher's **fencing token**. A subscriber drops
-any message with a token lower than the highest it has seen, so a paused
-former owner that wakes up and publishes cannot reach clients.
+any message with a token lower than the highest it has seen. A stale owner's
+`Event` never exists (its fenced commit fails), but a `Delta` is not stored,
+so two more rules keep a paused former owner's deltas away from clients:
+the **first thing a new owner publishes** after a claim or transfer is an
+`Owner(token)` marker, and every snapshot (§7.5) carries the current token,
+so a gateway that subscribes later knows it before it relays anything. A
+stale delta can still slip through in the moment between a claim and its
+marker; the new owner's republished step buffer is an `append: false`
+replacement and overwrites it.
 
 The pub/sub keeps nothing, so **the event log is the truth** and four rules
 close the gaps:
@@ -457,10 +464,16 @@ close the gaps:
 3. **Subscribe before reading.** A gateway subscribes to S *before* it asks
    for a snapshot, and drops what the snapshot already contains (§7.5), so
    nothing falls in between.
-4. **Poll when the channel is down.** If the pub/sub is unavailable, or a
-   subscriber's channel stays silent for 2 s while its Task is not finished,
-   the subscriber polls the log every 2 s until the channel recovers. Tokens
-   pause; state changes are never lost.
+4. **Catch up in batches, never per session.** Silence on a channel is
+   normal (long steps, human waits), so it triggers nothing by itself. A
+   gateway catches up when its pub/sub connection breaks or a shard fails
+   over: it re-subscribes and reads every affected session's missed events
+   with batched `ReadEvents([(S, after)…])` calls (up to 500 sessions per
+   call, answered by one indexed query), within a per-gateway budget of
+   concurrent calls, backing off on storage errors, every 2 s until the
+   connection is back. A slow safety check (each unfinished session silent
+   for 30 s, in the same batches) catches a message the pub/sub dropped
+   without a disconnect. Tokens pause; state changes are never lost.
 
 > **Guarantee:** every committed control event reaches every live subscriber
 > at least once and in order, however often ownership changes. Deltas are
@@ -527,8 +540,9 @@ there:
   durable, queryable tasks (items 3 and 6).
 - **Bot sockets** drop; bots redial through the load balancer.
 
-**A pub/sub outage** stalls tokens but loses no state change: subscribers
-poll the event log until channels recover (§7.4, rule 4).
+**A pub/sub outage** stalls tokens but loses no state change: gateways
+catch up from the event log in batches until channels recover (§7.4,
+rule 4).
 
 **Bot sockets.** A dial-in bot keeps one WebSocket to the gateway it reached.
 That gateway is **transport only**: it forwards the bot's events to the
@@ -750,7 +764,8 @@ All configurable; defaults sized for a crash takeover in under ~10 s.
 | Executor drain deadline | 25 s |
 | Gateway–executor channel keepalive / dead after | 1 s / 3 s |
 | Delta batch interval (dispatch gateway → owner) | 200 ms |
-| Silent channel before polling the event log / poll interval | 2 s / 2 s |
+| Catch-up while a pub/sub connection is down: interval / sessions per call | 2 s / 500 |
+| Safety check for an unfinished, silent session | 30 s |
 | Dispatch progress count | every 5 s |
 | Gateway drain deadline | sized to the platform's stop timeout (e.g. 60 s) |
 | Episode idle eviction | 10 min |
