@@ -8,6 +8,7 @@ from search_core.api.models import RetrievalRequest
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
 from search_core.application.catalog_retrieval import CatalogRetrieval
 from search_core.application.emergency import SearchCachePolicy
+from search_core.catalog.cards import is_label_filter
 from search_core.catalog.updates import CardUpdates
 from search_core.core.execution import DeadlineExecutor
 from search_core.core.retrieval import HybridRetrievalService
@@ -74,9 +75,7 @@ class TcSearch:
         )
         if updates is not None:
             updates.on_change = self.caches.changing
-        self.retrieval_index = (
-            retrieval_index if retrieval_index is not None else index
-        )
+        self.retrieval_index = retrieval_index if retrieval_index is not None else index
         self.execution = {
             name: DeadlineExecutor(self.pool, name=name, timeout_seconds=timeout)
             for name, timeout in (
@@ -96,12 +95,15 @@ class TcSearch:
         rerank=True,
         expand_factor=10,
         reranker_model=None,
+        legacy_defaults=True,
     ):
         filters = dict(filters or {})
-        filters.setdefault("runtime_state", ["online"])
-        filters.setdefault("availability", ["protected", "public"])
-        filters.setdefault("lifecycle_state", ["active"])
-        if filters.keys() - FILTER_FIELDS - {"profile_key", "worker_id"}:
+        if legacy_defaults:
+            filters.setdefault("runtime_state", ["online"])
+            filters.setdefault("availability", ["protected", "public"])
+            filters.setdefault("lifecycle_state", ["active"])
+        extra = filters.keys() - FILTER_FIELDS - {"profile_key", "worker_id"}
+        if any(legacy_defaults or not is_label_filter(key) for key in extra):
             raise InvalidTcFilters("unsupported TC filter")
         for field, values in filters.items():
             if isinstance(values, str):

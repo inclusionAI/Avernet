@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from search_core.api.cards import CatalogConflict, IndexTargetMismatch
 from search_core.api.index_builds import IndexBuildConflict
-from search_core.catalog.cards import CardSnapshot
+from search_core.catalog.cards import CardSnapshot, is_label_filter, label_filters
 from search_core.catalog.conversion import DefaultCardDocumentConverter
 from search_core.catalog.documents import build_documents, load_group, source_id
 from search_core.catalog.inspection import inspect_documents, inspect_index
@@ -183,7 +183,6 @@ class CardUpdates(CardManagementService):
             agent_id in self._active
             and entry is not None
             and not entry[1]
-
             and all(
                 values and set(values).intersection(entry[2].get(key, ()))
                 for key, values in filters.items()
@@ -372,10 +371,15 @@ class CardUpdates(CardManagementService):
 
     def _publish_pending(self, row):
         key = row.card.agent_id
-        # Pending business edits are not projected on every replica. Until the
-        # builder publishes, retain the last applied labels; deletion is immediate.
+        # Explicit source labels are authoritative as soon as observed. Keep
+        # converter-derived filters until the next document projection arrives.
         previous = self._eligibility.get(key)
-        filters = previous[2] if previous else {}
+        filters = (
+            {k: v for k, v in previous[2].items() if not is_label_filter(k)}
+            if previous
+            else {}
+        )
+        filters.update(label_filters(row.card.labels))
         self._observe_eligibility(row.card, row.revision, filters)
         if row.card.deleted:
             self._active = self._active - {key}

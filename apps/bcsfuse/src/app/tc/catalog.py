@@ -1,7 +1,7 @@
 """One current TC Card per Worker, with legacy read projections for Fuse."""
 
 from search_core.api.cards import CatalogConflict
-from search_core.catalog.cards import business_card
+from search_core.catalog.cards import business_card, label_filters
 from search_core.plugin_api.card_documents import CardProjection
 from search_core.plugin_api.index_documents import DocumentText
 
@@ -38,8 +38,15 @@ class TcDocumentConverter:
             if isinstance(v, str) and v.strip()
         )
         labels = {}
+        worker_defaults = {
+            "type": "bot",
+            "runtime_state": "offline",
+            "availability": "private",
+            "trust_level": "guarded",
+            "lifecycle_state": "active",
+        }
         for key in FILTER_FIELDS:
-            value = data.get(key)
+            value = data.get(key, worker_defaults.get(key))
             values = [value] if isinstance(value, str) else value
             if values:
                 labels[key] = tuple(values)
@@ -89,7 +96,10 @@ def sync_changes(current, payload):
 def matches_row(row, filters):
     if row is None:
         return False
-    labels = TcDocumentConverter().convert(row.card).filters
+    labels = {
+        **TcDocumentConverter().convert(row.card).filters,
+        **label_filters(row.card.labels),
+    }
     return all(
         values and set(values).intersection(labels.get(key, ()))
         for key, values in filters.items()
@@ -165,7 +175,9 @@ class TcCatalog:
             ):
                 raise ValueError("invalid Worker list field")
         lifecycle = WorkerLifecycleState(data.get("lifecycle_state", "active"))
-        state = WorkerState.model_validate(data)
+        state = WorkerState.model_validate(
+            {"availability": "private", "trust_level": "guarded", **data}
+        )
         if state.runtime_state == "online" and lifecycle != WorkerLifecycleState.ACTIVE:
             raise ValueError("inactive or disabled Worker cannot be online")
         WorkerProfileContent(
@@ -231,7 +243,7 @@ class TcCatalog:
             domains=data.get("domains", []),
             capabilities=[],
             state={
-                "availability": data.get("availability", "protected"),
+                "availability": data.get("availability", "private"),
                 "runtime_state": data.get("runtime_state", "offline"),
                 "trust_level": data.get("trust_level", "guarded"),
             },

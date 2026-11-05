@@ -106,9 +106,25 @@ class QdrantRetrievalIndex:
     def upsert(self, points: list[VectorPoint]) -> None:
         if not points:
             return
+        # Qdrant interprets a dotted filter key as a nested payload path.
+        indexed = []
+        for point in points:
+            labels = {
+                k[7:]: v for k, v in point.payload.items() if k.startswith("labels.")
+            }
+            if labels:
+                payload = {
+                    k: v
+                    for k, v in point.payload.items()
+                    if not k.startswith("labels.")
+                }
+                point = point.model_copy(
+                    update={"payload": {**payload, "labels": labels}}
+                )
+            indexed.append(point)
         with self._lock:
-            self._dense.upsert(points)
-            self._keyword.upsert(points)
+            self._dense.upsert(indexed)
+            self._keyword.upsert(indexed)
 
     def delete(self, ids: list[str]) -> None:
         with self._lock:

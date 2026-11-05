@@ -78,6 +78,7 @@ def test_csv_maps_real_fields_without_md_expert_or_credentials(repo):
     report = migrate([row()], repo, environment="pre", dry_run=False)
     card = repo.read_card("bot:owner:worker").card
     assert card.agent_id == "bot:owner:worker"
+    assert card.labels == {"visibility": ["protected"]}
     assert card.source_card == {
         "name": "Source name",
         "description": "Source description",
@@ -94,6 +95,18 @@ def test_csv_maps_real_fields_without_md_expert_or_credentials(repo):
     assert card.resource_type == "agent"
     assert report.counts["migrated"] == 1
     assert "<test-token>" not in json.dumps(report.as_dict())
+
+
+def test_csv_preserves_user_visibility_independently_of_runtime_state(repo):
+    migrate(
+        [row(visibility="private", user_visibility="protected", status="offline")],
+        repo,
+        environment="pre",
+        dry_run=False,
+    )
+    card = repo.read_card("bot:owner:worker").card
+    assert card.labels == {"visibility": ["private"], "user_visibility": ["protected"]}
+    assert "user_visibility" not in card.source_card
 
 
 @pytest.mark.parametrize("encoding_depth", [0, 1, 2, 3])

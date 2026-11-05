@@ -63,6 +63,7 @@ class ApiMigrationRepository:
                 agent_id=agent_id,
                 source_version=str(revision),
                 source_card=data,
+                labels={} if deleted else body.get("labels", {}),
                 resource_type=resource_type,
                 deleted=deleted,
             ),
@@ -93,9 +94,10 @@ class ApiMigrationRepository:
             time.sleep(0.1)
         raise TimeoutError("TC index synchronization timed out")
 
-    def upsert(self, agent_id, fields, resource_type, search_config):
+    def upsert(self, agent_id, fields, resource_type, search_config, *, labels=None):
         response = self.client.put(
-            self._path(agent_id), json={"card": fields, "resource_type": resource_type}
+            self._path(agent_id),
+            json={"card": fields, "resource_type": resource_type, "labels": labels},
         )
         response.raise_for_status()
         self._wait(agent_id, response.json()["card_version"])

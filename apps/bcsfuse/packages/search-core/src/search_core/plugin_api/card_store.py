@@ -17,5 +17,7 @@ class CardStore(Protocol):
         fields: dict[str, Any],
         resource_type: str | None,
         search_config: dict[str, Any],
+        *,
+        labels: dict[str, list[str]] | None = None,
     ) -> CardRecord: ...
     def remove(self, agent_id: str) -> None: ...

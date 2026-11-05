@@ -5,6 +5,7 @@ import math
 from dataclasses import replace
 from uuid import NAMESPACE_URL, uuid5
 
+from search_core.catalog.cards import label_filters
 from search_core.plugin_api.card_documents import CardProjection
 from search_core.plugin_api.index_documents import IndexDocument
 from search_core.plugin_api.vector_point import VectorPoint
@@ -77,7 +78,7 @@ def build_documents(row, model, embedding_key, filter_fields, converter, previou
             "document_key": expressions[0].key,
             "conversion_version": converter.version,
         },
-        filters=projection.filters,
+        filters={**projection.filters, **label_filters(row.card.labels)},
     )
     return complete_document_group(main, expressions, previous, model, embedding_key)
 
