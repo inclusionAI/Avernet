@@ -374,6 +374,32 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it('修复成功后配置静默刷新，面板不切入加载骨架', async () => {
+    let finish!: (report: CollaborationRepairReport) => void;
+    mockRepair.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    let refreshInFlight!: (value: ReturnType<typeof overviewWithBot>) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBot(makeBot('bot-1:900004')))
+      .mockImplementation(() => new Promise((resolve) => { refreshInFlight = resolve; }));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '修复信息' }));
+
+    await act(async () => {
+      finish(successReport);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 刷新在途期间：内容保持展示，不出现整面板加载骨架。
+    expect(screen.queryByLabelText('正在加载公开设置')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('修复 Bot 信息')).toBeInTheDocument();
+    expect(refreshInFlight).toBeDefined();
+  });
+
   it('请求失败只走全局错误提示一次，行内展示错误文案', async () => {
     mockRepair.mockRejectedValue(new Error('后端超时'));
     jest

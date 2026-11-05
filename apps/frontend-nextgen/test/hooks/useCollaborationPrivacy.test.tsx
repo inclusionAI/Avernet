@@ -527,3 +527,76 @@ describe('useCollaborationPrivacy 外部 Bot 不查询公开风险', () => {
     expect(currentRisk.mock.calls).toEqual(expectedCalls);
   });
 });
+
+describe('静默刷新（silent 选项，修复后自动刷新不闪整面板）', () => {
+  const readyHuman = () =>
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+
+  it('silent 刷新不再进入 loading，成功后照常更新 overview', async () => {
+    readyHuman();
+    let finish!: (value: typeof overviewWithBots) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.load(undefined, { silent: true });
+    });
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      finish(overviewWithBots);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.overview).toEqual(overviewWithBots);
+  });
+
+  it('silent 刷新失败时写 error，但不翻转 loading', async () => {
+    readyHuman();
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockRejectedValueOnce(new Error('网络异常'));
+    const { result } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      await result.current.load(undefined, { silent: true });
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.overview).toEqual(overviewWithBots);
+  });
+
+  it('silent 读取同样按 loadId 失效：卸载后迟到响应不写共享 Store', async () => {
+    readyHuman();
+    let late!: (value: typeof overviewWithBots) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBots)
+      .mockImplementationOnce(() => new Promise((resolve) => { late = resolve; }));
+    const { result, unmount } = renderHook(() => useCollaborationPrivacy());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      void result.current.load(undefined, { silent: true });
+    });
+    unmount();
+    const storeAfterReset = useCollaborationPrivacyStore.getState();
+
+    await act(async () => {
+      late({ ...overviewWithBots, bots: [] as never });
+    });
+    const state = useCollaborationPrivacyStore.getState();
+    expect(state.overview).toEqual(storeAfterReset.overview);
+    expect(state.error).toEqual(storeAfterReset.error);
+    expect(state.loading).toEqual(storeAfterReset.loading);
+  });
+});

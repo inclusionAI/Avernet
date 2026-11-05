@@ -82,7 +82,10 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   );
   const repairEnabled = repairVisible && human.status === 'ready' && availability.enabled;
   // 请求寻址使用 Backend 列表行 bot.id 与当前认证 Human，不使用 BCS targetBot.id。
-  const repair = useBotCollaborationRepair(bot.id, userId, repairEnabled, privacy.load);
+  // 修复后的配置刷新走静默读取：只更新数据，不把整个「公开设置」切回加载骨架（刷新范围收敛到修复行自身的状态反馈）。
+  const repair = useBotCollaborationRepair(bot.id, userId, repairEnabled, () =>
+    privacy.load(undefined, { silent: true }),
+  );
   const repairRow = repairVisible ? (
     <CollaborationRepairRow
       repair={repair}

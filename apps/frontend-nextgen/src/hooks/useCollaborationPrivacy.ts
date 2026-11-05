@@ -42,14 +42,17 @@ export function useCollaborationPrivacy({
     [activeIdentityId, identityViews],
   );
   const load = useCallback(
-    async (signal?: AbortSignal) => {
+    async (signal?: AbortSignal, options?: { silent?: boolean }) => {
       const loadId = ++latestLoadId.current;
+      const silent = options?.silent ?? false;
       if (!userId) {
         store.setLoading(false);
         store.setError(identityError ?? '当前用户身份未就绪，无法加载协作权限');
         return;
       }
-      store.setLoading(true);
+      // silent（修复后自动刷新）只在开始时不切入整面板 loading；失败仍写 error 供行内提示，
+      // finally 不跳过——否则它会使更早的非静默读取代次失效后，loading 卡死在 true。
+      if (!silent) store.setLoading(true);
       store.setError(null);
       try {
         const loadScope = fixedBotId
