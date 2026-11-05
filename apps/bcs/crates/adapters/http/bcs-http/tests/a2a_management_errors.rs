@@ -666,6 +666,7 @@ async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fi
         .store_token_mapping("test-admin".into(), "caller-bot".into())
         .await;
     let management = Arc::new(Management {
+        visibility: Default::default(),
         failure: None,
         calls: AtomicUsize::new(0),
     });
