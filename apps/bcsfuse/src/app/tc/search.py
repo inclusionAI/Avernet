@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 from search_core.api.models import RetrievalRequest
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
@@ -150,8 +151,6 @@ class TcSearch:
         # TC exact identity priority never bypasses visibility or lifecycle rules.
         exact = self.catalog.get(question.strip())
         if exact and self.eligible(exact.card.agent_id, request.filters, scope):
-            from dataclasses import replace
-
             from search_core.api.models import SearchItem
 
             item = SearchItem(
@@ -163,7 +162,19 @@ class TcSearch:
                     :limit
                 ],
             )
-        return result
+        items = []
+        for item in result.items:
+            row = self.catalog.get(item.item_id)
+            if row is not None:
+                data = row.card.source_card
+                items.append(
+                    replace(
+                        item,
+                        name=data["name"],
+                        summary=data.get("description") or "",
+                    )
+                )
+        return replace(result, items=tuple(items))
 
     def eligible(self, worker_id, filters, allowed_ids):
         return self.updates.eligible(worker_id, filters, allowed_ids) and matches_row(
