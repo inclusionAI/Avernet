@@ -47,7 +47,7 @@ def test_strict_backup_alarm_includes_exact_container_and_failure_stage(
     assert alarms
     for record in alarms:
         line = record.getMessage()
-        assert record.levelno == logging.ERROR
+        assert record.levelno == logging.WARNING
         assert f'bot_id=b arca_id={expected} target_id={target}' in line
         assert f'operation_id={OPERATION}' in line
         assert f'phase={phase} ' in line
@@ -144,6 +144,7 @@ def test_inventory_verification_failure_retains_resolved_arca_owner_and_env(capl
     assert all('owner_id=owner' in line and 'env=pre' in line for line in alarms)
     assert all('private inventory' not in line for line in alarms)
     assert runtime.list_devices_by_bot_uuid.call_count == 2  # Logging adds no lookup.
+    assert all(record.levelno == logging.WARNING for record in caplog.records)
 
 
 @pytest.mark.parametrize(('server_env', 'expected'), [

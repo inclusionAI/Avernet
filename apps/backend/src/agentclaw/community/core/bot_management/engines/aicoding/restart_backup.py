@@ -27,7 +27,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
-from .fastdisk_probe import detection_command, parse_detection_result
+from .fastdisk_probe import FastdiskDetectionError, detection_command, parse_detection_result
 from .restart_state import ENGINES, RestartSuperseded
 from ..restart_contract import PublishedRestartServices
 
@@ -110,7 +110,7 @@ def log_restart_failure(
                if details['arca_id'] == "-" and details['physical_targets']
                else [(details['target_id'], details['arca_id'])])
     for target_id, arca_id in targets:
-        logger.error(
+        logger.warning(
             "[%s] event=aicoding_restart_failed status=failed "
             "bot_id=%s arca_id=%s target_id=%s operation_id=%s "
             "phase=%s reason=%s error_type=%s cause_types=%s "
@@ -130,8 +130,8 @@ ENTRY = '/opt/agentclaw/bin/restart_backup'
 POLL_SECONDS = 2
 # Covers runtime termination (330s) plus archive budget (900s) and exec overhead.
 DEADLINE_SECONDS = 1500
-# Confirmed fastdisk: stop waiting after five minutes, never turn timeout into permission.
-FASTDISK_TIMEOUT = 300
+# Confirmed fastdisk shares the 25-minute budget; timeout never permits replacement.
+FASTDISK_TIMEOUT = 1500
 
 
 class RestartBackupError(RuntimeError):
@@ -165,7 +165,8 @@ class _PreparedBackup:
 
 
 def error_reason(error):
-    return getattr(error, 'reason', 'timeout' if isinstance(error, TimeoutError) else 'transport_error')
+    return getattr(error, 'reason', 'detection_failed' if isinstance(error, FastdiskDetectionError) else
+                   'timeout' if isinstance(error, TimeoutError) else 'transport_error')
 
 
 def command(action: str, operation: str) -> str:
@@ -237,10 +238,12 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
 
     def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
         partial = status == 'partial_success'
+        event = 'aicoding_restart_backup' if require_backup or observed_status in {
+            'running', 'committed', 'partial_success', 'failed'} else 'aicoding_restart_probe'
         getattr(logger, 'warning' if partial else level)(
-            "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
+            "event=%s phase=%s status=%s bot_id=%s "
             "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s arca_id=%s env=%s owner_id=%s%s",
-            phase, status, safe_log_field(bot_id), safe_log_field(target_id), operation_id,
+            event, phase, status, safe_log_field(bot_id), safe_log_field(target_id), operation_id,
             int((time.monotonic() - started) * 1000), safe_log_field(generation), error_type, reason,
             arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
             " action=continue_restart data_loss_risk=true" if partial else "",
@@ -352,7 +355,8 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     return verify
 
 
-def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None, on_degraded=None):
+def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None,
+                 on_degraded=None, event='aicoding_restart_backup'):
     """Downgrade only backup I/O/result failures, never lifecycle writes/fences.
 
     No raw exception/output is logged: platform errors can contain credentials.
@@ -365,10 +369,10 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id
     except Exception as error:
         failure = error
     logger.warning(
-        "event=aicoding_restart_backup phase=%s status=degraded action=continue_restart "
+        "event=%s phase=%s status=degraded action=continue_restart "
         "bot_id=%s target_id=%s operation_id=%s error_type=%s reason=%s "
         "data_loss_risk=true arca_id=%s env=%s owner_id=%s",
-        phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
+        event, phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
         arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
     )
     if on_degraded is not None:
@@ -376,9 +380,9 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id
     return None
 
 
-def _backup_policy(callback, *, required, physical_targets=(), on_degraded=None, **identity):
+def _backup_policy(callback, *, required, physical_targets=(), on_degraded=None, event='aicoding_restart_backup', **identity):
     if not required:
-        return _best_effort(callback, on_degraded=on_degraded, **identity)
+        return _best_effort(callback, on_degraded=on_degraded, event=event, **identity)
     try:
         return callback()
     except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
@@ -398,7 +402,7 @@ def _detect_fastdisk(execute, **identity):
             raise TimeoutError('detection budget exhausted')
         return parse_detection_result(execute(detection_command()))['status'] == 'run'
 
-    return _best_effort(detect, phase='detect', **identity) is True
+    return _best_effort(detect, phase='detect', event='aicoding_restart_fastdisk_detect', **identity) is True
 
 
 def _confirmed_targets():
@@ -427,6 +431,7 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
     known = _confirmed_targets()
     fastdisk = identity['target_id'] in known or _detect_fastdisk(kwargs['execute'], **identity)
     required = fastdisk and blocking_enabled()
+    identity['event'] = 'aicoding_restart_backup' if fastdisk else 'aicoding_restart_probe'
     def warn():
         from .restart_state import record_nonblocking_backup_warning
         try:
@@ -953,7 +958,7 @@ class AicodingRestartBackupMixin:
             def verify():
                 current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
                 if not isinstance(current, dict) or current.get('binding_id') != binding_id:
-                    logger.error("event=aicoding_restart_backup phase=verify status=blocked "
+                    logger.warning("event=aicoding_restart_backup phase=verify status=blocked "
                                  "reason=binding_changed bot_id=%s binding_id=%s", ctx.bot_id, binding_id)
                     raise RestartBackupError('binding_changed', '备份后绑定已变化，禁止替换其他容器')
                 if provider == 'arca' and check is None:
@@ -973,7 +978,7 @@ class AicodingRestartBackupMixin:
                                 physical_targets=log_targets,
                                 sandbox_id=log_sandbox, operation_id=operation_id,
                                 binding_id=binding_id, phase="precondition")
-            logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
+            logger.warning("event=aicoding_restart_backup phase=precondition status=blocked "
                          "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
                          ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))
             raise

@@ -112,12 +112,32 @@ receipts still count as success and retain their distinct logs without a new
 backup-failure toast. The shared lifecycle and generic response schemas are
 unchanged.
 
+## Restart wait and diagnostic events (2026-11-05)
+
+Confirmed fastdisk waits up to 1500 seconds, with or without backup blocking.
+Durable queue time, all replicas and task redelivery still share the existing
+1500-second backup budget; increasing the per-target limit does not reset it.
+Backup/restart failure diagnostics use WARN rather than ERROR. Their failed
+status, correlation fields, safe stack and frontend failure semantics remain.
+
+An initial failed detector logs `event=aicoding_restart_fastdisk_detect`; invalid
+probe output is `reason=detection_failed`, not a transport failure. Detection
+failure still means unconfirmed/non-fastdisk and retains the optional backup
+attempt. Errors before that optional helper confirms any backup activity use
+`event=aicoding_restart_probe`, not a backup-failed event. A confirmed fastdisk,
+an observed running backup, or an actual terminal backup receipt still uses
+`event=aicoding_restart_backup`, so a real backup failure is not hidden by an
+earlier failed detector. All three events retain bot/ARCA/owner/environment and
+operation correlation, without raw commands, helper output or credentials.
+No detection decision, receipt check, blocking switch or other-engine behavior
+changes. Full and partial successful backup handling remains unchanged.
+
 ## Confirmed-fastdisk policy (2026-10-30)
 
 Backend sends the embedded publication detector. Unknown/failed initial detection
 uses the best-effort policy below; with blocking explicitly enabled, a positively
 confirmed fastdisk target requires
-a valid complete or partial backup receipt within 300 seconds. Failure,
+a valid complete or partial backup receipt within 1500 seconds. Failure,
 missing capability or unconfirmed result blocks replacement; a validated
 `partial_success` permits restart with a distinct warning, even when blocking is enabled. Ordinary durable
 restarts persist positive confirmations across redelivery.
@@ -187,7 +207,7 @@ value under the old name. Insert the new `fastdisk_fail_block` key in the target
 environment; existing old-key rows alone leave blocking disabled. No database
 configuration is automatically written or migrated by this code change.
 
-Both values still attempt the same helper and retain the fastdisk 300-second
+Both values still attempt the same helper and retain the fastdisk 1500-second
 wait budget. With `false`, backup-only failures use the existing sanitized
 `action=continue_restart data_loss_risk=true` warning with bot/ARCA/owner/env
 correlation fields; they do not produce the restart-failed marker. A failed
