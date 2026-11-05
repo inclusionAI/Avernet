@@ -304,19 +304,23 @@ impl BotServiceImpl {
         &self,
         records: Vec<BotControlPlaneView>,
     ) -> Result<Vec<Bot>, ApplicationError> {
-        let physical_ids = records
-            .iter()
-            .filter(|bot| bot.record.kind == ActorKind::Bot)
-            .map(|bot| bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
+        let physical_ids = Self::physical_bot_ids(&records);
         let runtime_active = self
             .registry
             .list_runtime_active_bot_ids(&physical_ids)
             .await
             .into_iter()
             .collect::<HashSet<_>>();
-        self.project_records_with_activity(records, &runtime_active)
+        self.project_records_with_activity(records, &runtime_active, &physical_ids)
             .await
+    }
+
+    fn physical_bot_ids(records: &[BotControlPlaneView]) -> Vec<String> {
+        records
+            .iter()
+            .filter(|bot| bot.record.kind == ActorKind::Bot)
+            .map(|bot| bot.record.bot_id.clone())
+            .collect()
     }
 
     /// Project records onto the public Bot shapes using an
@@ -329,19 +333,15 @@ impl BotServiceImpl {
         &self,
         records: Vec<BotControlPlaneView>,
         runtime_active: &HashSet<String>,
+        physical_ids: &[String],
     ) -> Result<Vec<Bot>, ApplicationError> {
         // Read only physical Bots in this authorized result page. Core owns
         // deduplication and bounded store batches; failures must not become nulls.
-        let physical_ids = records
-            .iter()
-            .filter(|bot| bot.record.kind == ActorKind::Bot)
-            .map(|bot| bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
         let avatars = if physical_ids.is_empty() {
             HashMap::new()
         } else {
             self.registry
-                .avatar_urls(&physical_ids)
+                .avatar_urls(physical_ids)
                 .await
                 .map_err(map_service_error)?
         };

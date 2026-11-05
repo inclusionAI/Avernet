@@ -16,7 +16,12 @@
   Projection reads only returned physical Bot IDs through one batched registry
   Core call after authorization/filtering/pagination. Empty and Human-only pages
   issue no avatar read. Missing avatars and Humans serialize null; read failures
-  propagate. The mine flow retains its existing runtime sampling and drift retry.
+  propagate. Mine reads avatars only after accepting the sampled page, including
+  its drift retry and composition comparison. Rejected attempts issue no avatar
+  read and retain `bot_list_changed`; an accepted page's avatar failure remains
+  an application error. Projection uses that attempt's runtime sampling and
+  relation labels. Other Bot queries reuse the same collected physical IDs for
+  runtime activity and avatars.
 
 ## Consumes
 

@@ -857,3 +857,6 @@ fn humans(page: &bcs_service_api::application::v1::Page<Bot>) -> Vec<String> {
 
 #[path = "authority_mine/cases.rs"]
 mod cases;
+
+#[path = "authority_mine/avatar_drift.rs"]
+mod avatar_drift;
