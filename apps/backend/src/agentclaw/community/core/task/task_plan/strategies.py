@@ -34,6 +34,9 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 
 logger = logging.getLogger("task.planner")
 
@@ -104,9 +107,14 @@ class GapBasedPlanningStrategy:
     rule_id = "gap_based"
     priority = 99
 
-    def __init__(self, bot=None) -> None:
-        """bot: OpenApiBotPort(真实 round-trip);None= stub 路径(无规划端口,返有 gap 拆不出→HUNG)。"""
+    def __init__(self, bot=None, owner_lookup=None) -> None:
+        """Initialize the planning port and optional legacy-owner reverse lookup.
+
+        ``owner_lookup`` is only used to disambiguate historical bare
+        ``owner_bot_id`` rows; canonical composite identities never call it.
+        """
         self._bot = bot
+        self._owner_lookup = owner_lookup
 
     async def matches(self, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
@@ -118,10 +126,12 @@ class GapBasedPlanningStrategy:
                 children=[], has_gap=True, gap_detail="no_planning_port",
                 strategy_name="gap_based",
             )
-        owner = compose_bot_identity(
-            str(graph.extend_props.get("owner_bot_id") or ""),
+        entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+            graph.extend_props.get("owner_bot_id"),
             graph.extend_props.get("owner_user_id"),
+            self._owner_lookup,
         )
+        owner = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
         if not owner:
             # 有端口但无 owner bot(owner_bot_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
             return PlanResult(

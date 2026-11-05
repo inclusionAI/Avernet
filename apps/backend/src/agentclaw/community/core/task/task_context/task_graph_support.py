@@ -18,6 +18,7 @@ from agentclaw.community.core.task.domain.errors import (
     TaskNotFoundError,
     TaskStateError,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
     DoneOutput,
     NodeOpResult,
@@ -39,6 +40,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
     graph_node_attempt,
+)
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
 )
 
 DEFAULT_MAX_DEPTH = 2
@@ -65,7 +69,12 @@ def _used_executor_ids(graph: TaskExecutionGraph) -> list[str]:
             assignee = runtime.extend_props.get("bbs_owner") or runtime.assignee
         else:
             continue
-        candidate = str(assignee or "").strip()
+        # S5D exclusion operates on the same composite candidate identity the
+        # Relay /search endpoint returns, not the split node projection.
+        candidate = compose_bot_identity(
+            str(assignee or "").strip(),
+            runtime.extend_props.get("assignee_owner_id"),
+        )
         if candidate and candidate not in {"NOT_DECIDED"}:
             used_ids.add(candidate)
     return sorted(used_ids)
@@ -140,6 +149,9 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     if relay_mode:
         root_extend_props["relay_root"] = True
         root_extend_props["relay_token"] = uuid.uuid4().hex
+    entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+        task_info.owner_bot_id, task_info.owner_user_id
+    )
     root = TaskNode(
         node_id=task_id,
         task_id=task_id,
@@ -147,9 +159,16 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
         task_spec=task_info.task_spec,
         run_info=RuntimeInfo(
             run_mode="single_bot" if relay_mode else None,
-            assignee=task_info.owner_bot_id if relay_mode else None,
+            assignee=entry_bot_id if relay_mode else None,
             start_time=started_at,
-            extend_props=root_extend_props,
+            extend_props={
+                **root_extend_props,
+                **(
+                    {"assignee_owner_id": entry_bot_owner_id}
+                    if relay_mode and entry_bot_owner_id
+                    else {}
+                ),
+            },
         ),
         node_run_graph=None,  # type: ignore[arg-type]
     )
@@ -189,12 +208,33 @@ def initialize_intake_graph(
         target = task_info.execution_config.get("initial_target") or {}
         root = graph.tasks[0]
         if graph.is_relay:
+            target_type = str(target.get("target_type") or "").upper()
             root.run_info.run_mode = (
-                "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
+                "coop_group" if target_type == "GROUP" else "single_bot"
             )
-            root.run_info.assignee = str(
-                target.get("target_id") or task_info.owner_bot_id
-            )
+            if target_type == "GROUP":
+                root.run_info.assignee = str(
+                    target.get("target_id") or task_info.owner_bot_id
+                )
+                root.run_info.extend_props.pop("assignee_owner_id", None)
+            else:
+                target_bot_id, target_owner_id = resolve_entry_bot_identity(
+                    str(
+                        target.get("target_id")
+                        or root.run_info.assignee
+                        or task_info.owner_bot_id
+                        or ""
+                    ),
+                    root.run_info.extend_props.get("assignee_owner_id")
+                    or task_info.owner_user_id,
+                )
+                root.run_info.assignee = target_bot_id
+                if target_owner_id:
+                    root.run_info.extend_props["assignee_owner_id"] = target_owner_id
+                else:
+                    root.run_info.extend_props.pop("assignee_owner_id", None)
+        else:
+            root.run_info.extend_props.pop("assignee_owner_id", None)
         version = self._graph_repo.create_intake_graph(task_info, graph, session_id)
         self._graph_versions[task_id] = version
         self._graphs[task_id] = graph

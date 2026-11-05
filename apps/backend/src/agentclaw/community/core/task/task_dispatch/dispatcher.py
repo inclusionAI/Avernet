@@ -23,6 +23,7 @@ import dataclasses
 import logging
 from typing import Protocol
 
+from agentclaw.community.core.task.domain.identity import parse_scoped_bot_identity
 from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskNode,
@@ -268,8 +269,14 @@ class TaskDispatcher:
                     return node  # exec_error/超时重试:保留原模式+原执行者,不重搜推
                 result = await self._select_and_apply(node, graph)
                 if result.outcome == SearchOutcome.HIT_SINGLE:
+                    scoped_bot_id = parse_scoped_bot_identity(result.bot_id)
+                    if scoped_bot_id is not None:
+                        product_bot_id, embedded_owner_id = scoped_bot_id
+                        result.bot_id = product_bot_id
+                        if result.owner_id is None:
+                            result.owner_id = embedded_owner_id
                     node.run_info.run_mode = "single_bot"
-                    node.run_info.assignee = result.bot_id
+                    node.run_info.assignee = str(result.bot_id or "").strip() or None
                     if result.bot_name is not None:
                         node.run_info.extend_props["assignee_name"] = result.bot_name
                     if result.owner_id is not None:

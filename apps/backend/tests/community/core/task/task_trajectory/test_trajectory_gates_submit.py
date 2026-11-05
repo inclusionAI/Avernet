@@ -95,7 +95,7 @@ class _TrajRepo:
         return record
 
 
-from tests.community.core.task.task_trajectory._task_context_support import _tcs
+from tests.community.core.task.task_trajectory._task_context_support import _tcs  # noqa: E402
 
 
 class _CaseTaskService(TaskService):
@@ -242,7 +242,7 @@ class TestSubmitGateEmission:
         assert payload["source"] == "api"          # source_type.value
         assert payload["task_type"] == "dynamic"   # TaskType.DYNAMIC.value
         assert payload["owner_user_id"] == "U1"
-        assert payload["owner_bot_id"] == "B1"
+        assert payload["owner_bot_id"] == "B1:U1"
         # submitted_at = the persist timestamp (int ms); within [before, after]
         assert isinstance(payload["submitted_at"], int)
         assert before <= payload["submitted_at"] <= after
