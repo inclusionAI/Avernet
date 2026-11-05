@@ -1,17 +1,17 @@
 """The one authority for who controls a capability's activation state.
 
 R1 — Set-managed, no direct control. A capability that is a member of ANY
-     Set of the Bot's — the Default Set included, excluded or not — is
+     ordinary Set or unexcluded applicable Default of the Bot is
      activated/deactivated only through Set-level operations (activate/
      deactivate the Set; exclude/un-exclude for Default-Set members).
 R2 — Deactivate before joining. A capability holding a direct Installation
      row cannot be added to a Set (checked before R3 — today's precedence).
 R3 — One effective Set source per capability: another ordinary Set or an
      unexcluded Default Set blocks joining. An excluded Default membership
-     is released for ordinary Set addition only.
+     releases that Default source for explicit Direct or ordinary Set addition.
 
 The Skill and MCP add-to-ordinary-Set commands treat an excluded Default
-membership as released by that source; Direct control keeps R1-R3.
+membership as released by that source; Direct callers filter actual scoped exclusions before R1.
 Callers read the facts; this module decides the resulting conflict.
 """
 
@@ -38,9 +38,8 @@ def is_set_managed(
     True ⇒ direct activate/deactivate must be refused. ``referencing_sets``
     are the Sets holding a membership row for the capability; Sets that are
     not the Bot's — another Bot's, another engine's — are filtered out here.
-    There is deliberately no exclusion carve-out: an excluded Default-Set
-    member stays Set-managed, and re-activating it means removing the
-    exclusion, never the capability-level command.
+    Direct callers remove actually excluded applicable Defaults from these
+    referencing facts before invoking this policy.
     """
     return any(
         _set_belongs_to_bot(
@@ -80,8 +79,8 @@ def require_direct_mcp_control_allowed(
     """Refuse Direct control of an engine/template Default MCP.
 
     Platform Default MCPs are code policy rather than Set membership, so R1's
-    membership walk cannot see them. They remain policy-managed even after a
-    Bot excludes them; exclusion/un-exclusion is their only control surface.
+    membership walk cannot see them. The transactional caller filters actual
+    applicable Default exclusions before applying this policy.
     """
     require_non_platform_mcp(server_code=server_code, platform_default_codes=platform_default_codes)
 
@@ -92,8 +91,8 @@ def require_non_platform_mcp(
     """Policy-owned MCPs cannot be directly controlled or joined unexcluded.
 
     Pass the complete applicable engine/template policy, before exclusions:
-    Direct control remains forbidden after exclusion. Ordinary-Set addition
-    applies its own source-scoped exclusion rule in the transactional command.
+    Transactional callers filter actual applicable Default exclusions before
+    invoking this policy for Direct or ordinary Set commands.
     """
     if server_code in platform_default_codes:
         raise SkillSetControlPlaneConflictError(

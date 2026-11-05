@@ -78,7 +78,10 @@ from agentclaw.community.core.skill_center.services.skill_set_resource_projectio
 )
 
 
-class SkillSetManagementService(SkillSetManagementServiceProtocol):
+from .skill_set_apply_service import SkillSetApplyService
+
+
+class SkillSetManagementService(SkillSetApplyService, SkillSetManagementServiceProtocol):
     @inject
     def __init__(
         self,
