@@ -19,7 +19,7 @@ def services(app):
 
 async def authenticate(request: Request):
     require_oss_auth(request)
-    return VerifiedIdentity("tc-api", None)
+    return VerifiedIdentity("tc-api")
 
 
 class CardOperations:

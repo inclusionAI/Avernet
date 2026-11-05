@@ -22,17 +22,13 @@ class DefaultCandidates:
             page = self.repository.page(after, 100)
             if not page:
                 break
-            ids = [
-                key
-                for key, _ in page
-                if request.allowed_ids is None or key in request.allowed_ids
-            ]
+            ids = [key for key, _ in page]
             cards = self.repository.get_many_cards(ids)
             for key in ids:
                 card = cards.get(key)
                 if card is None or card.deleted:
                     continue
-                if not self.catalog.eligible(key, request.filters, request.allowed_ids):
+                if not self.catalog.eligible(key, request.filters):
                     continue
                 selected.append(key)
                 if len(selected) == request.limit:
@@ -56,7 +52,6 @@ class DefaultCandidates:
                 revision,
                 request.limit,
                 {k: sorted(v) for k, v in request.filters.items()},
-                None if request.allowed_ids is None else sorted(request.allowed_ids),
             ]
         )
         hit = self.cache.get(key) if revision is not None else None
@@ -87,7 +82,7 @@ class DefaultCandidates:
 
     async def retrieve(self, request):
         with stage_timing("default_candidates") as stage:
-            if request.allowed_ids == frozenset() or any(
+            if any(
                 not v for v in request.filters.values()
             ):
                 ids = ()

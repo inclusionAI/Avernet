@@ -177,13 +177,13 @@ class CardUpdates(CardManagementService):
     def searchable_ids(self):
         return self._active
 
-    def eligible(self, agent_id, filters, allowed_ids):
+    def eligible(self, agent_id, filters):
         entry = self._eligibility.get(agent_id)
         return (
             agent_id in self._active
             and entry is not None
             and not entry[1]
-            and (allowed_ids is None or agent_id in allowed_ids)
+
             and all(
                 values and set(values).intersection(entry[2].get(key, ()))
                 for key, values in filters.items()

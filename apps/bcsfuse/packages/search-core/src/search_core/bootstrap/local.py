@@ -22,7 +22,7 @@ async def local_identity(request: Request):
     origin = request.headers.get("origin")
     if origin and origin != str(request.base_url).rstrip("/"):
         raise HTTPException(403, "cross-origin access to local catalog denied")
-    return VerifiedIdentity("local-operator", None)
+    return VerifiedIdentity("local-operator")
 
 
 def create_local_app(

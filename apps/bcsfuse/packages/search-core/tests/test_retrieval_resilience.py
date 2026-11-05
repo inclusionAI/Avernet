@@ -34,11 +34,11 @@ def test_embedding_failure_retains_keyword_only_when_opted_in():
     async def run():
         service = HybridRetrievalService(index=Index(), embedding=BrokenEmbedding())
         with pytest.raises(SearchUnavailable):
-            await service.retrieve(RetrievalRequest("x", 1, {}, None))
+            await service.retrieve(RetrievalRequest("x", 1, {}))
         service = HybridRetrievalService(
             index=Index(), embedding=BrokenEmbedding(), allow_partial=True
         )
-        result = await service.retrieve(RetrievalRequest("x", 1, {}, None))
+        result = await service.retrieve(RetrievalRequest("x", 1, {}))
         assert result.items[0].item_id == "a"
         assert result.status == "degraded" and result.reasons == (
             "embedding_unavailable",
@@ -64,7 +64,7 @@ def test_stages_expose_one_query_vector_and_reranker_failure_keeps_fused_order()
         service = HybridRetrievalService(
             index=Index(), embedding=embedding, reranker=Reranker(), allow_partial=True
         )
-        request = RetrievalRequest("x", 1, {}, None)
+        request = RetrievalRequest("x", 1, {})
         recall = await service.recall(request)
         assert recall.query_vector == (1.0, 0.0)
         result = await service.rank(request, recall)
@@ -145,7 +145,7 @@ def test_provider_quota_errors_do_not_trigger_retries_or_a_local_circuit():
         asyncio.run(run(executor))
 
 
-def test_no_success_when_all_recall_paths_fail_and_no_hidden_scope_bypass():
+def test_no_success_when_all_recall_paths_fail():
     class BrokenIndex(Index):
         def keyword_search(self, *args):
             raise RuntimeError("down")
@@ -154,16 +154,11 @@ def test_no_success_when_all_recall_paths_fail_and_no_hidden_scope_bypass():
         service = HybridRetrievalService(
             index=BrokenIndex(), embedding=Embedding(), allow_partial=True
         )
-        request = RetrievalRequest("x", 1, {}, None)
+        request = RetrievalRequest("x", 1, {})
         recall = await service.recall(request)
         assert not recall.available
         assert set(recall.reasons) == {"vector_unavailable", "keyword_unavailable"}
         with pytest.raises(SearchUnavailable):
             await service.rank(request, recall)
-        service = HybridRetrievalService(
-            index=Index(), embedding=BrokenEmbedding(), allow_partial=True
-        )
-        with pytest.raises(SearchUnavailable, match="unauthorized"):
-            await service.retrieve(RetrievalRequest("x", 1, {}, frozenset({"b"})))
 
     asyncio.run(run())

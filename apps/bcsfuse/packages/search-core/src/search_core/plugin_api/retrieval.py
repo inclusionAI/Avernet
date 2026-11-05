@@ -1,4 +1,4 @@
-"""Synchronous index operations; applications supply authorized IDs and filters."""
+"""Synchronous index operations; applications supply business filters."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class RetrievalIndex(Protocol):
         vector: list[float],
         limit: int,
         filters: dict[str, tuple[str, ...]],
-        allowed_ids: frozenset[str] | None,
+
     ) -> list[VectorSearchHit]: ...
 
     def keyword_search(
@@ -23,7 +23,7 @@ class RetrievalIndex(Protocol):
         query: str,
         limit: int,
         filters: dict[str, tuple[str, ...]],
-        allowed_ids: frozenset[str] | None,
+
     ) -> list[VectorSearchHit]: ...
 
 

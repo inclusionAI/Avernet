@@ -80,9 +80,10 @@ class LegacyCatalog(TcCatalog):
                     yield row
             offset += len(workers)
 
-    def candidate_ids(self, filters, allowed_ids):
+    def candidate_ids(self, filters):
         """Read filter labels in batches; retrieval never needs Profile/MD data."""
-        scope = sorted(allowed_ids) if allowed_ids is not None else None
+        scope = filters.get("source_id")
+        labels_filter = {key: values for key, values in filters.items() if key != "source_id"}
         offset = 0
         while True:
             if scope is None:
@@ -110,7 +111,7 @@ class LegacyCatalog(TcCatalog):
                 }
                 if all(
                     values and set(values).intersection(labels.get(key, ()))
-                    for key, values in filters.items()
+                    for key, values in labels_filter.items()
                 ):
                     yield worker.id
             offset += 100

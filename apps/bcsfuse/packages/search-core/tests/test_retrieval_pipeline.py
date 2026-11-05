@@ -46,11 +46,11 @@ def test_real_qdrant_recall_filters_and_restart(tmp_path):
             index=index, embedding=Embedding(), candidate_limit=10
         )
         request = RetrievalRequest(
-            "支付", 2, {"category": ("payment",)}, frozenset({"pay"})
+            "支付", 2, {"category": ("payment",)}
         )
         result = asyncio.run(service.retrieve(request))
         assert [x.item_id for x in result.items] == ["pay"]
-        assert index.keyword_search("pay", 3, {}, None) == []
+        assert index.keyword_search("pay", 3, {}) == []
         index.delete(["pay"])
         assert asyncio.run(service.retrieve(request)).items == ()
     finally:
@@ -74,12 +74,12 @@ def test_keyword_branch_starts_while_embedding_waits():
             return []
 
     service = HybridRetrievalService(index=Index(), embedding=BlockingEmbedding())
-    assert asyncio.run(service.retrieve(RetrievalRequest("x", 1, {}, None))).items == ()
+    assert asyncio.run(service.retrieve(RetrievalRequest("x", 1, {}))).items == ()
 
 
-def test_empty_authorization_never_calls_dependencies():
+def test_empty_filter_never_calls_dependencies():
     service = HybridRetrievalService(index=object(), embedding=object())
     assert (
-        asyncio.run(service.retrieve(RetrievalRequest("x", 1, {}, frozenset()))).items
+        asyncio.run(service.retrieve(RetrievalRequest("x", 1, {"category": ()}))).items
         == ()
     )

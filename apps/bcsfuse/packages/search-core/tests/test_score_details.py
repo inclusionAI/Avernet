@@ -35,7 +35,7 @@ def retrieve(**kwargs):
     service = HybridRetrievalService(
         index=Index(), embedding=Model(), group_by_source=True, **kwargs
     )
-    return asyncio.run(service.retrieve(RetrievalRequest("q", 2, {}, None)))
+    return asyncio.run(service.retrieve(RetrievalRequest("q", 2, {})))
 
 
 def test_grouped_scores_and_ranks_survive_rerank_without_changing_order():
@@ -86,7 +86,7 @@ def test_embedding_failure_keeps_keyword_score_and_empty_stages():
     service = HybridRetrievalService(
         index=Index(), embedding=Broken(), group_by_source=True, allow_partial=True
     )
-    result = asyncio.run(service.retrieve(RetrievalRequest("q", 2, {}, None)))
+    result = asyncio.run(service.retrieve(RetrievalRequest("q", 2, {})))
     assert "embedding_unavailable" in result.reasons
     assert result.items[0].score_details.keyword.rank == 1
     assert result.items[0].score_details.vector is None

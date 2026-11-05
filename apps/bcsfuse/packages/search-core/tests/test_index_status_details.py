@@ -38,7 +38,7 @@ def world(tmp_path):
             )
 
     async def auth():
-        return VerifiedIdentity("operator", None)
+        return VerifiedIdentity("operator")
 
     repo = sqlite_catalog_repository(str(tmp_path / "cards.db"))
     index = QdrantRetrievalIndex(path=str(tmp_path / "qdrant"), dimension=16)

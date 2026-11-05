@@ -45,7 +45,7 @@ class Application:
 async def authenticate(request: Request):
     if request.headers.get("authorization") != "Bearer test-only":
         raise HTTPException(401, "authentication required")
-    return VerifiedIdentity("caller", frozenset({"agent:1"}))
+    return VerifiedIdentity("caller")
 
 
 def client_for(service, **kwargs):
@@ -82,7 +82,7 @@ def test_same_request_and_response_contract(operation):
         "default",
         operation,
     )
-    assert identity.allowed_ids == frozenset({"agent:1"})
+    assert identity.subject == "caller"
 
 
 def test_unauthenticated_request_never_reaches_business_service():

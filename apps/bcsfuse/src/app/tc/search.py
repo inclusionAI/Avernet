@@ -7,7 +7,6 @@ from dataclasses import replace
 from search_core.api.models import RetrievalRequest
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
 from search_core.application.catalog_retrieval import CatalogRetrieval
-from search_core.application.document_index import DocumentIndex
 from search_core.application.emergency import SearchCachePolicy
 from search_core.catalog.updates import CardUpdates
 from search_core.core.execution import DeadlineExecutor
@@ -76,7 +75,7 @@ class TcSearch:
         if updates is not None:
             updates.on_change = self.caches.changing
         self.retrieval_index = (
-            retrieval_index if retrieval_index is not None else DocumentIndex(index)
+            retrieval_index if retrieval_index is not None else index
         )
         self.execution = {
             name: DeadlineExecutor(self.pool, name=name, timeout_seconds=timeout)
@@ -123,6 +122,8 @@ class TcSearch:
                     if (key := self.catalog.resolve(value)) is not None
                 )
                 scope = keys if scope is None else scope & keys
+        if scope is not None:
+            filters["source_id"] = sorted(scope)
         selected_reranker = self.reranker
         if reranker_model and rerank:
             from app.infra.reranker.http_reranker import get_reranker
@@ -145,12 +146,12 @@ class TcSearch:
             namespace=(rerank, expand_factor, reranker_model),
         )
         request = RetrievalRequest(
-            question, limit, {k: tuple(v) for k, v in filters.items()}, scope
+            question, limit, {k: tuple(v) for k, v in filters.items()}
         )
         result = await retrieval.retrieve(request)
         # TC exact identity priority never bypasses visibility or lifecycle rules.
         exact = self.catalog.get(question.strip())
-        if exact and self.eligible(exact.card.agent_id, request.filters, scope):
+        if exact and self.eligible(exact.card.agent_id, request.filters):
             from search_core.api.models import SearchItem
 
             item = SearchItem(
@@ -176,9 +177,12 @@ class TcSearch:
                 )
         return replace(result, items=tuple(items))
 
-    def eligible(self, worker_id, filters, allowed_ids):
-        return self.updates.eligible(worker_id, filters, allowed_ids) and matches_row(
-            self.catalog.get(worker_id), filters, allowed_ids
+    def eligible(self, worker_id, filters):
+        if "source_id" in filters and worker_id not in filters["source_id"]:
+            return False
+        labels = {key: values for key, values in filters.items() if key != "source_id"}
+        return self.updates.eligible(worker_id, labels) and matches_row(
+            self.catalog.get(worker_id), labels
         )
 
     def candidate(self, row, score, *, supplement=False, reasons=None):

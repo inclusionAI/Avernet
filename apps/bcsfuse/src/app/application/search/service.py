@@ -58,14 +58,12 @@ class TcSearchApplication:
             "trust_level",
         }:
             raise UnsupportedSearchOption("unsupported TC filter")
-        if identity.allowed_ids == frozenset() or any(
+        if any(
             not values for values in command.filters.values()
         ):
             return SearchResult()
         filters = {key: list(values) for key, values in command.filters.items()}
         filters.setdefault("availability", ["protected", "public"])
-        if identity.allowed_ids is not None:
-            filters["profile_key"] = sorted(identity.allowed_ids)
         config = {"expand_factor": 10}
         if not rerank:
             config["reranker_model"] = None
@@ -105,7 +103,5 @@ class TcSearchApplication:
                     },
                 )
                 for candidate in result.recommendations
-                if identity.allowed_ids is None
-                or candidate.profile_key in identity.allowed_ids
             )[: command.limit]
         )

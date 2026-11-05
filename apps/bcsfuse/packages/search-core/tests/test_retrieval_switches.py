@@ -27,7 +27,7 @@ def test_only_enabled_branches_are_called(keyword, vector):
     service = HybridRetrievalService(
         index=Index(), embedding=Model(), keyword_enabled=keyword, vector_enabled=vector
     )
-    result = asyncio.run(service.retrieve(RetrievalRequest("test", 1, {}, None)))
+    result = asyncio.run(service.retrieve(RetrievalRequest("test", 1, {})))
     assert ("keyword" in calls) == keyword
     assert ("embedding" in calls) == vector
     assert ("vector" in calls) == vector
@@ -43,7 +43,7 @@ def test_disabled_branch_does_not_mask_failure_of_only_enabled_branch():
         index=Index(), embedding=object(), vector_enabled=False, allow_partial=True
     )
     with pytest.raises(SearchUnavailable):
-        asyncio.run(service.retrieve(RetrievalRequest("test", 1, {}, None)))
+        asyncio.run(service.retrieve(RetrievalRequest("test", 1, {})))
 
 
 def test_cannot_disable_all_recall():

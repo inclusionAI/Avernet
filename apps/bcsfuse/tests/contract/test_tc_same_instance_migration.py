@@ -538,12 +538,13 @@ def test_legacy_recall_batches_filter_labels_without_loading_profiles(
         monkeypatch.setattr(catalog.profiles, "get_active", fail)
         if scoped:
             monkeypatch.setattr(catalog.workers, "list", fail)
-        scope = frozenset({"visible:batch", "offline:batch"}) if scoped else None
+        filters = {"runtime_state": ("online",), "availability": ("public",)}
+        if scoped:
+            filters["source_id"] = ("visible:batch", "offline:batch")
         hits = registry.require("tc_search").retrieval_index.keyword_search(
             "needle",
             1,
-            {"runtime_state": ("online",), "availability": ("public",)},
-            scope,
+            filters,
         )
         assert [hit.payload["source_id"] for hit in hits] == ["visible:batch"]
 

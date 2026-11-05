@@ -31,12 +31,12 @@ def test_keyword_results_survive_slow_vector_search():
             execution=pools,
         )
         try:
-            result = await service.retrieve(RetrievalRequest("x", 1, {}, None))
+            result = await service.retrieve(RetrievalRequest("x", 1, {}))
             assert entered.is_set()
             assert result.status == "degraded"
             assert result.reasons == ("vector_unavailable",)
             assert result.items[0].item_id == "a"
-            again = await service.retrieve(RetrievalRequest("x", 1, {}, None))
+            again = await service.retrieve(RetrievalRequest("x", 1, {}))
             assert again.items and again.status == "degraded"
         finally:
             release.set()
@@ -73,7 +73,7 @@ def test_budget_returns_keyword_without_waiting_for_slow_embedding_or_rerank():
         )
         started = time.monotonic()
         with request_budget(0.03):
-            result = await service.retrieve(RetrievalRequest("x", 1, {}, None))
+            result = await service.retrieve(RetrievalRequest("x", 1, {}))
         assert time.monotonic() - started < 0.12
         assert result.items[0].score_source == "rrf"
         assert set(result.reasons) == {

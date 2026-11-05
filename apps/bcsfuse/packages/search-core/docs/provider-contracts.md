@@ -2,11 +2,11 @@
 
 Service API: `RetrievalService.retrieve(RetrievalRequest) -> SearchResult`.
 Plugin API: `RetrievalIndex`, `EmbeddingProvider`, `Reranker`. Business applications
-construct these providers at bootstrap and supply trusted authorized item IDs.
+construct these providers at bootstrap.
 
 | Provider | Input and output | Required behavior |
 | --- | --- | --- |
-| RetrievalIndex | query/vector, limit, attribute filters, allowed IDs → ranked hits | Different filter fields AND; values within a field OR. Filter before top-k. `None` scope is unrestricted; empty scope matches nothing. IDs remain opaque. |
+| RetrievalIndex | query/vector, limit, attribute filters → ranked hits | Different filter fields AND; values within a field OR. Filter before top-k. An empty list of values for a filter matches nothing. IDs remain opaque. |
 | EmbeddingProvider | text → vector | Dimension/model must match the stored index. HTTP/status/parse failures remain errors. Explicit configuration supplied by composition. |
 | Reranker | query, candidate IDs and text, top-k → scored IDs | Preserve candidate identity; finite model scores. No business profile lookup or LLM answer synthesis. |
 

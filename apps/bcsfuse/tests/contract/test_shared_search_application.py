@@ -43,7 +43,7 @@ class Candidates:
 
 
 async def authenticate(request: Request):
-    return VerifiedIdentity("caller", frozenset({"bot:owner:profile"}))
+    return VerifiedIdentity("caller")
 
 
 def test_optional_common_routes_preserve_tc_identity_and_v1_surface(monkeypatch):
@@ -65,7 +65,7 @@ def test_optional_common_routes_preserve_tc_identity_and_v1_surface(monkeypatch)
             paths = client.get("/openapi.json").json()["paths"]
             assert "/api/v1/recommend" in paths
             assert "/api/v1/groups/{group_id}/fuse" in paths
-    assert candidates.calls[0]["filters"]["profile_key"] == ["bot:owner:profile"]
+    assert candidates.calls[0]["filters"] == {"availability": ["protected", "public"]}
 
 
 def test_tc_factory_mounts_new_search_on_the_card_backend(monkeypatch):
@@ -95,7 +95,7 @@ def test_cancelled_request_retains_capacity_until_sync_work_finishes():
         candidates = BlockingCandidates()
         service = TcSearchApplication(candidates, executor=executor, max_inflight=1)
         command = SearchCommand("助手", 5, "search")
-        identity = VerifiedIdentity("caller", None)
+        identity = VerifiedIdentity("caller")
         task = asyncio.create_task(service.execute(command, identity))
         try:
             assert await asyncio.to_thread(started.wait, 2)
@@ -123,7 +123,7 @@ def test_closed_executor_reports_unavailable():
     with pytest.raises(SearchUnavailable):
         asyncio.run(
             service.execute(
-                SearchCommand("助手", 5, "search"), VerifiedIdentity("caller", None)
+                SearchCommand("助手", 5, "search"), VerifiedIdentity("caller")
             )
         )
 
@@ -138,7 +138,7 @@ def test_rerank_option_disables_or_inherits_host_configuration(enabled):
                 SearchCommand(
                     "助手", 5, "recommend", extensions={"enable_rerank": enabled}
                 ),
-                VerifiedIdentity("caller", None),
+                VerifiedIdentity("caller"),
             )
         )
     config = candidates.calls[0]["runtime_config"]
