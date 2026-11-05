@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <rect x="0" y="0" width="960" height="520" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">对桶做会合(HRW)哈希:给每个存活执行器打分,最高分胜出</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">bucket(S) = xxh3(session_id) mod 4096;score = xxh3(bucket ‖ member_name)。每个节点排名相同,无需协调。</text>
+
+  <!-- panel 1 -->
+  <rect x="24" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="169" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">1 · 执行器 A、B、C</text>
+  <text x="44" y="134" font-size="12" fill="#1c2420">A</text>
+  <rect x="64" y="122" width="218" height="18" rx="3" fill="#157a55"/>
+  <text x="274" y="135" font-size="11" text-anchor="end" fill="#ffffff">0.91</text>
+  <text x="44" y="170" font-size="12" fill="#1c2420">B</text>
+  <rect x="64" y="158" width="113" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="186" y="171" font-size="11" fill="#1c2420">0.47</text>
+  <text x="44" y="206" font-size="12" fill="#1c2420">C</text>
+  <rect x="64" y="194" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="102" y="207" font-size="11" fill="#1c2420">0.12</text>
+  <rect x="44" y="236" width="250" height="36" rx="6" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="169" y="259" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">桶 b 首选 A</text>
+  <text x="44" y="300" font-size="11.5" fill="#5c6a62">排序后的分数同时也是</text>
+  <text x="44" y="317" font-size="11.5" fill="#5c6a62">回退顺序:A,然后 B,然后 C。</text>
+  <text x="44" y="345" font-size="11.5" fill="#5c6a62">有界负载变体(以后):沿列表</text>
+  <text x="44" y="362" font-size="11.5" fill="#5c6a62">往下走,跳过过载的节点。</text>
+
+  <!-- panel 2 -->
+  <rect x="335" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="480" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">2 · D 加入(分数 0.95)</text>
+  <text x="355" y="134" font-size="12" fill="#1c2420">D</text>
+  <rect x="375" y="122" width="228" height="18" rx="3" fill="#157a55"/>
+  <text x="595" y="135" font-size="11" text-anchor="end" fill="#ffffff">0.95</text>
+  <text x="355" y="170" font-size="12" fill="#1c2420">A</text>
+  <rect x="375" y="158" width="218" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="585" y="171" font-size="11" text-anchor="end" fill="#1c2420">0.91</text>
+  <text x="355" y="206" font-size="12" fill="#1c2420">B</text>
+  <rect x="375" y="194" width="113" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="355" y="242" font-size="12" fill="#1c2420">C</text>
+  <rect x="375" y="230" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <rect x="355" y="266" width="250" height="36" rx="6" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="480" y="289" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">b 现在首选 D</text>
+  <text x="355" y="328" font-size="11.5" fill="#5c6a62">只有现在归 D 的桶才移动(约 1/4)。</text>
+  <text x="355" y="345" font-size="11.5" fill="#5c6a62">租约在 A 交接 b 时才移动</text>
+  <text x="355" y="362" font-size="11.5" fill="#5c6a62">(限速再平衡,每秒几个桶)。</text>
+
+  <!-- panel 3 -->
+  <rect x="646" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="791" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">3 · A 死亡(接面板 1)</text>
+  <text x="666" y="134" font-size="12" fill="#b3402e">A</text>
+  <rect x="686" y="122" width="218" height="18" rx="3" fill="#f8e6e1" stroke="#b3402e" stroke-dasharray="4 3"/>
+  <text x="795" y="135" font-size="11" text-anchor="middle" fill="#b3402e">移出花名册</text>
+  <text x="666" y="170" font-size="12" fill="#1c2420">B</text>
+  <rect x="686" y="158" width="113" height="18" rx="3" fill="#157a55"/>
+  <text x="791" y="171" font-size="11" text-anchor="end" fill="#ffffff">0.47</text>
+  <text x="666" y="206" font-size="12" fill="#1c2420">C</text>
+  <rect x="686" y="194" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <rect x="666" y="236" width="250" height="36" rx="6" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="791" y="259" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">b 落到它的第二位:B</text>
+  <text x="666" y="300" font-size="11.5" fill="#5c6a62">A 的每个桶都落到它自己的</text>
+  <text x="666" y="317" font-size="11.5" fill="#5c6a62">第二位节点,所以 A 的负载均匀地</text>
+  <text x="666" y="334" font-size="11.5" fill="#5c6a62">摊到各幸存者上(不像没有大量</text>
+  <text x="666" y="351" font-size="11.5" fill="#5c6a62">虚拟节点的哈希环)。</text>
+
+  <!-- bottom note -->
+  <rect x="24" y="396" width="912" height="104" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="44" y="422" font-size="13.5" font-weight="bold" fill="#b3402e">放置是猜测,不是所有权</text>
+  <text x="44" y="446" font-size="12" fill="#1c2420">放置说明桶应该归谁;桶的租约行说明它实际归谁。在面板 2 中,HRW 说是 D,但在交接之前租约</text>
+  <text x="44" y="464" font-size="12" fill="#1c2420">说是 A —— 所以路由到 D 的一轮请求会得到 NOT_OWNER(A),多一跳。猜错只花时延,绝不损害正确性。</text>
+  <text x="44" y="488" font-size="11.5" fill="#5c6a62">对稳定的 member_name(重启后不变)做哈希,绝不用每次运行都变的 node_id;使用固定种子的哈希,绝不用 Rust 的 DefaultHasher。</text>
+</svg>

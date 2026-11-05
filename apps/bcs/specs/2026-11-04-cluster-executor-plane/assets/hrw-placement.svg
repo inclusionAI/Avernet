@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" font-family="Arial, Helvetica, sans-serif">
+  <rect x="0" y="0" width="960" height="520" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Rendezvous (HRW) hashing of buckets: score every live executor, highest wins</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">bucket(S) = xxh3(session_id) mod 4096; score = xxh3(bucket ‖ member_name). Same ranking on every node, no coordination.</text>
+
+  <!-- panel 1 -->
+  <rect x="24" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="169" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">1 · Executors A, B, C</text>
+  <text x="44" y="134" font-size="12" fill="#1c2420">A</text>
+  <rect x="64" y="122" width="218" height="18" rx="3" fill="#157a55"/>
+  <text x="274" y="135" font-size="11" text-anchor="end" fill="#ffffff">0.91</text>
+  <text x="44" y="170" font-size="12" fill="#1c2420">B</text>
+  <rect x="64" y="158" width="113" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="186" y="171" font-size="11" fill="#1c2420">0.47</text>
+  <text x="44" y="206" font-size="12" fill="#1c2420">C</text>
+  <rect x="64" y="194" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="102" y="207" font-size="11" fill="#1c2420">0.12</text>
+  <rect x="44" y="236" width="250" height="36" rx="6" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="169" y="259" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">bucket b prefers A</text>
+  <text x="44" y="300" font-size="11.5" fill="#5c6a62">The sorted scores are also the</text>
+  <text x="44" y="317" font-size="11.5" fill="#5c6a62">fallback order: A, then B, then C.</text>
+  <text x="44" y="345" font-size="11.5" fill="#5c6a62">Bounded-load variant (later): walk</text>
+  <text x="44" y="362" font-size="11.5" fill="#5c6a62">the list, skip overloaded nodes.</text>
+
+  <!-- panel 2 -->
+  <rect x="335" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="480" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">2 · D joins (score 0.95)</text>
+  <text x="355" y="134" font-size="12" fill="#1c2420">D</text>
+  <rect x="375" y="122" width="228" height="18" rx="3" fill="#157a55"/>
+  <text x="595" y="135" font-size="11" text-anchor="end" fill="#ffffff">0.95</text>
+  <text x="355" y="170" font-size="12" fill="#1c2420">A</text>
+  <rect x="375" y="158" width="218" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="585" y="171" font-size="11" text-anchor="end" fill="#1c2420">0.91</text>
+  <text x="355" y="206" font-size="12" fill="#1c2420">B</text>
+  <rect x="375" y="194" width="113" height="18" rx="3" fill="#b9c6bf"/>
+  <text x="355" y="242" font-size="12" fill="#1c2420">C</text>
+  <rect x="375" y="230" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <rect x="355" y="266" width="250" height="36" rx="6" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="480" y="289" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#9a6b0a">b now prefers D</text>
+  <text x="355" y="328" font-size="11.5" fill="#5c6a62">Only buckets D now wins move (~1/4).</text>
+  <text x="355" y="345" font-size="11.5" fill="#5c6a62">The lease moves when A hands b over</text>
+  <text x="355" y="362" font-size="11.5" fill="#5c6a62">(paced rebalancing, a few buckets/s).</text>
+
+  <!-- panel 3 -->
+  <rect x="646" y="76" width="290" height="300" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="791" y="102" font-size="14" font-weight="bold" text-anchor="middle" fill="#1c2420">3 · A dies (from panel 1)</text>
+  <text x="666" y="134" font-size="12" fill="#b3402e">A</text>
+  <rect x="686" y="122" width="218" height="18" rx="3" fill="#f8e6e1" stroke="#b3402e" stroke-dasharray="4 3"/>
+  <text x="795" y="135" font-size="11" text-anchor="middle" fill="#b3402e">out of the roster</text>
+  <text x="666" y="170" font-size="12" fill="#1c2420">B</text>
+  <rect x="686" y="158" width="113" height="18" rx="3" fill="#157a55"/>
+  <text x="791" y="171" font-size="11" text-anchor="end" fill="#ffffff">0.47</text>
+  <text x="666" y="206" font-size="12" fill="#1c2420">C</text>
+  <rect x="686" y="194" width="29" height="18" rx="3" fill="#b9c6bf"/>
+  <rect x="666" y="236" width="250" height="36" rx="6" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="791" y="259" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">b falls to its #2: B</text>
+  <text x="666" y="300" font-size="11.5" fill="#5c6a62">Each of A's buckets falls to its own</text>
+  <text x="666" y="317" font-size="11.5" fill="#5c6a62">second-ranked node, so A's load spreads</text>
+  <text x="666" y="334" font-size="11.5" fill="#5c6a62">evenly over the survivors (unlike a ring</text>
+  <text x="666" y="351" font-size="11.5" fill="#5c6a62">without many virtual nodes).</text>
+
+  <!-- bottom note -->
+  <rect x="24" y="396" width="912" height="104" rx="10" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="44" y="422" font-size="13.5" font-weight="bold" fill="#b3402e">Placement is a guess, not ownership</text>
+  <text x="44" y="446" font-size="12" fill="#1c2420">Placement says who should own a bucket; the bucket's lease row says who does. In panel 2, HRW says D but until the handoff the lease</text>
+  <text x="44" y="464" font-size="12" fill="#1c2420">says A — so a round routed to D gets NOT_OWNER(A) and one extra hop. A wrong guess costs latency, never correctness.</text>
+  <text x="44" y="488" font-size="11.5" fill="#5c6a62">Hash on the stable member_name (survives restarts), never on the per-run node_id; use a fixed-seed hash, never Rust's DefaultHasher.</text>
+</svg>

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="560" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">排空执行器 A(组 G 原地重启)</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">A 把自己的每个桶交给 G 之外的后继 B。流一直在网关上保持打开;只有所有权移动。</text>
+
+  <rect x="24" y="72" width="912" height="50" rx="8" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="44" y="94" font-size="13" font-weight="bold" fill="#1c2420">1 · 不再认领</text>
+  <text x="44" y="112" font-size="11.5" fill="#1c2420">花名册 state = draining(网关和其他节点不再往 A 上放工作)· 继续服务 A 仍持有的每个会话</text>
+
+  <rect x="24" y="134" width="912" height="246" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="44" y="158" font-size="13" font-weight="bold" fill="#157a55">对每个桶 b(约 4096/N 个,最忙的先移,几个同时进行)</text>
+  <rect x="44" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="58" y="192" font-size="12" font-weight="bold" fill="#1c2420">2 · PREPARE</text>
+  <text x="58" y="214" font-size="11" fill="#1c2420">B 把 b 的热会话</text>
+  <text x="58" y="232" font-size="11" fill="#1c2420">加载进内存(还不是所有者)</text>
+  <text x="58" y="256" font-size="11" fill="#5c6a62">A 继续处理增量</text>
+  <text x="58" y="272" font-size="11" fill="#5c6a62">并转发</text>
+  <rect x="268" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="282" y="192" font-size="12" font-weight="bold" fill="#1c2420">3 · 停止 b 的增量</text>
+  <text x="282" y="214" font-size="11" fill="#1c2420">A 停止订阅 b 的</text>
+  <text x="282" y="232" font-size="11" fill="#1c2420">增量频道</text>
+  <text x="282" y="256" font-size="11" fill="#5c6a62">并处理完已经收到的</text>
+  <text x="282" y="272" font-size="11" fill="#5c6a62">增量</text>
+  <rect x="492" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="506" y="192" font-size="12" font-weight="bold" fill="#1c2420">4 · Ownership 转交</text>
+  <text x="506" y="214" font-size="11" fill="#1c2420">租约表:b 的所有者 = B,</text>
+  <text x="506" y="232" font-size="11" fill="#1c2420">令牌 + 1</text>
+  <text x="506" y="256" font-size="11" fill="#5c6a62">然后 COMMIT 通知 B:你现在</text>
+  <text x="506" y="272" font-size="11" fill="#5c6a62">是 b 的所有者,请开始处理</text>
+  <rect x="716" y="170" width="204" height="196" rx="8" fill="#ffffff" stroke="#157a55"/>
+  <text x="730" y="192" font-size="12" font-weight="bold" fill="#157a55">6 · B 追上</text>
+  <text x="730" y="214" font-size="11" fill="#1c2420">再加载一次状态(仅 PREPARE</text>
+  <text x="730" y="232" font-size="11" fill="#1c2420">到 COMMIT 间的增量,write_seq)</text>
+  <text x="730" y="256" font-size="11" fill="#1c2420">订阅 deltas:{b}</text>
+  <text x="730" y="280" font-size="11" fill="#1c2420">经派发网关向供给智能体</text>
+  <text x="730" y="298" font-size="11" fill="#1c2420">查询可能丢失的</text>
+  <text x="730" y="316" font-size="11" fill="#1c2420">输出</text>
+  <text x="730" y="340" font-size="11" fill="#5c6a62">以 append: false 重新发布</text>
+  <line x1="254" y1="268" x2="266" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <line x1="478" y1="268" x2="490" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <line x1="702" y1="268" x2="714" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+
+  <rect x="24" y="392" width="912" height="62" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="44" y="416" font-size="13" font-weight="bold" fill="#b3402e">5 · 超时(需要低于发布平台 stop hook 的 timeout)</text>
+  <text x="44" y="438" font-size="11.5" fill="#1c2420">A 直接转交剩下的桶,不再等待第 2–3 步 · 丢失的增量由 B 在第 6 步自己查询</text>
+
+  <rect x="24" y="466" width="440" height="76" rx="8" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="44" y="490" font-size="13" font-weight="bold" fill="#1c2420">7 · stop hook 完成,A 下线</text>
+  <text x="44" y="512" font-size="11.5" fill="#5c6a62">删除花名册行</text>
+  <line x1="464" y1="504" x2="490" y2="504" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <rect x="496" y="466" width="440" height="76" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="516" y="490" font-size="13" font-weight="bold" fill="#157a55">重启:同一地址,新的 node_id</text>
+  <text x="516" y="512" font-size="11.5" fill="#1c2420">剩下的桶立即可认领 · 同一 member_name →</text>
+  <text x="516" y="530" font-size="11.5" fill="#1c2420">拿回原来的桶</text>
+</svg>

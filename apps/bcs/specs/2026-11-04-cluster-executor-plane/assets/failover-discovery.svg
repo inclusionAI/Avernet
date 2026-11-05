@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="560" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Failover: claiming a dead executor's buckets (no COMMIT message)</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">A survivor learns it owns bucket b when its own claim succeeds. Every survivor computes the same HRW split, so no coordination is needed.</text>
+
+  <!-- timeline -->
+  <line x1="60" y1="110" x2="920" y2="110" stroke="#1c2420" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="926" y="114" font-size="11" fill="#5c6a62">t</text>
+  <circle cx="90" cy="110" r="6" fill="#b3402e"/>
+  <text x="90" y="92" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#b3402e">D's last heartbeat</text>
+  <text x="90" y="134" font-size="11" text-anchor="middle" fill="#5c6a62">0 s · D crashes</text>
+  <rect x="100" y="100" width="420" height="20" fill="#f8e6e1" stroke="#b3402e" stroke-dasharray="4 3"/>
+  <text x="310" y="114" font-size="11" text-anchor="middle" fill="#b3402e">claim threshold (5 s): D's leases not yet claimable</text>
+  <circle cx="520" cy="110" r="5" fill="#9a6b0a"/>
+  <text x="520" y="134" font-size="11" text-anchor="middle" fill="#9a6b0a">5 s · claimable</text>
+  <circle cx="610" cy="110" r="6" fill="#157a55"/>
+  <text x="610" y="92" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#157a55">next roster poll</text>
+  <text x="610" y="134" font-size="11" text-anchor="middle" fill="#157a55">≤ 6 s · detect</text>
+  <rect x="620" y="100" width="150" height="20" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="695" y="114" font-size="11" text-anchor="middle" fill="#157a55">claim buckets · resume</text>
+  <circle cx="790" cy="110" r="6" fill="#157a55"/>
+  <text x="790" y="134" font-size="11" text-anchor="middle" fill="#157a55">~6–8 s · resumed</text>
+
+  <!-- trigger 1 -->
+  <rect x="24" y="160" width="440" height="200" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
+  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">Step 1 · claim D's buckets</text>
+  <text x="44" y="208" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT bucket FROM bcs_task_leases</text>
+  <text x="44" y="224" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE node_id = :D          -- ~4096/N rows</text>
+  <text x="44" y="240" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">-- claim those that rank me first without D</text>
+  <text x="44" y="264" font-size="11.5" fill="#1c2420">a handful of claims per survivor, in milliseconds</text>
+  <text x="44" y="282" font-size="11.5" fill="#1c2420">next-ranked survivor after a 1 s grace if #1 is down too</text>
+  <text x="44" y="306" font-size="11" fill="#5c6a62">then D's node_id is on no lease row:</text>
+  <text x="44" y="322" font-size="11" fill="#5c6a62">nothing left to watch</text>
+  <text x="44" y="344" font-size="11" fill="#5c6a62">idle sessions: loaded on their next round</text>
+
+  <!-- trigger 2 -->
+  <rect x="496" y="160" width="440" height="96" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.4"/>
+  <text x="516" y="184" font-size="13" font-weight="bold" fill="#2457a6">Step 2 · resume pending sessions, per bucket</text>
+  <text x="516" y="206" font-size="11.5" fill="#1c2420">… WHERE bucket = :b AND has_pending_work LIMIT 2000</text>
+  <text x="516" y="224" font-size="11.5" fill="#1c2420">batch after batch, unprocessed input first; state reloads</text>
+  <text x="516" y="242" font-size="11.5" fill="#1c2420">lazily; input recorded by the fallback is found here too.</text>
+
+  <!-- trigger 3 -->
+  <rect x="496" y="266" width="440" height="94" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="516" y="290" font-size="13" font-weight="bold" fill="#1c2420">Step 3 · safety-net sweep (30–60 s)</text>
+  <text x="516" y="312" font-size="11.5" fill="#1c2420">Buckets with a stale owner; pending sessions nobody</text>
+  <text x="516" y="330" font-size="11.5" fill="#1c2420">drives: catches failed claims, restarting nodes, etc.</text>
+
+  <!-- evidence -->
+  <rect x="24" y="380" width="912" height="160" rx="10" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="44" y="404" font-size="13" font-weight="bold" fill="#9a6b0a">Taking over earlier on evidence (fencing makes a wrong guess safe; it only costs a rehydration)</text>
+  <text x="44" y="430" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Same advertise_addr, new node_id</tspan> — the process restarted in place; two processes can't listen on one address → old run's buckets</text>
+  <text x="44" y="448" font-size="11.5" fill="#1c2420">claimable as soon as the new roster row is seen. RTO ≈ restart time + ≤ 1 s.</text>
+  <text x="44" y="474" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Mark own roster row dead on panic</tspan> — survivors claim its buckets at once; best effort (not on OOM kill / kill -9).</text>
+  <text x="44" y="500" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">Relative staleness</tspan> — stale(D) = max(heartbeats) − heartbeat(D), plus a recovery grace: nobody claims until its own heartbeats are healthy for 5 s.</text>
+  <text x="44" y="524" font-size="11.5" fill="#5c6a62">A node that is alive but silently unreachable gives no evidence: wait the claim threshold.</text>
+</svg>

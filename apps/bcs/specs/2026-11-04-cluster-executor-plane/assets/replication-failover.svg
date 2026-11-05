@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="600" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Storage failover: when the store says OK, how many machines have the write?</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">Same scenario on both: A (a BCN node) crashed; B claims session S, raising the fencing token 7 → 8; then the storage primary dies.</text>
+
+  <!-- left: async -->
+  <rect x="24" y="72" width="444" height="420" rx="10" fill="#ffffff" stroke="#b3402e" stroke-width="1.4"/>
+  <text x="246" y="98" font-size="14" font-weight="bold" text-anchor="middle" fill="#b3402e">Asynchronous replication (Redis, MySQL async)</text>
+  <rect x="64" y="118" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="139" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Master M</text>
+  <rect x="280" y="118" width="150" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="355" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Replica R</text>
+  <text x="44" y="186" font-size="11.5" fill="#1c2420">1. B: claim on M → token 8, owner B. M replies OK.</text>
+  <line x1="214" y1="200" x2="276" y2="200" stroke="#b9c6bf" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+  <text x="245" y="216" font-size="10.5" text-anchor="middle" fill="#5c6a62">copy "later"</text>
+  <text x="44" y="240" font-size="11.5" fill="#b3402e">2. M dies before the copy reached R.</text>
+  <text x="44" y="264" font-size="11.5" fill="#1c2420">3. R promoted. Lease S on R: owner A, token 7.</text>
+  <text x="44" y="288" font-size="11.5" fill="#1c2420">4. C claims on R: 7 → 8, owner C. OK.</text>
+  <rect x="44" y="304" width="404" height="56" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="246" y="326" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#b3402e">B and C both hold "token 8"</text>
+  <text x="246" y="346" font-size="11" text-anchor="middle" fill="#1c2420">both pass the fence → two writers; B's earlier writes lost</text>
+  <text x="44" y="388" font-size="11" fill="#5c6a62">Also: during a partition the cut-off master keeps accepting writes</text>
+  <text x="44" y="404" font-size="11" fill="#5c6a62">until its node timeout; they are discarded when it rejoins.</text>
+  <text x="44" y="428" font-size="11" fill="#5c6a62">WAIT does not fix it: failover may promote a replica without</text>
+  <text x="44" y="444" font-size="11" fill="#5c6a62">the write, and a timed-out WAIT does not undo the write.</text>
+  <text x="44" y="472" font-size="11.5" font-weight="bold" fill="#b3402e">"OK" = the write is in one machine's memory</text>
+
+  <!-- right: majority -->
+  <rect x="492" y="72" width="444" height="420" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
+  <text x="714" y="98" font-size="14" font-weight="bold" text-anchor="middle" fill="#157a55">Majority replication (OceanBase Paxos, Raft)</text>
+  <rect x="512" y="118" width="120" height="40" rx="8" fill="#ffffff" stroke="#1c2420"/>
+  <text x="572" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#1c2420">Leader L</text>
+  <rect x="654" y="118" width="120" height="40" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="714" y="143" font-size="12" font-weight="bold" text-anchor="middle" fill="#157a55">Replica 1 ✓</text>
+  <rect x="796" y="118" width="120" height="40" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="856" y="143" font-size="12" text-anchor="middle" fill="#5c6a62">Replica 2</text>
+  <text x="512" y="186" font-size="11.5" fill="#1c2420">1. B: claim → log on L and Replica 1 (2 of 3) → OK.</text>
+  <text x="512" y="210" font-size="11.5" fill="#b3402e">2. L dies.</text>
+  <text x="512" y="234" font-size="11.5" fill="#1c2420">3. Election needs a majority; any two majorities of</text>
+  <text x="512" y="250" font-size="11.5" fill="#1c2420">   three overlap, and only an up-to-date replica can win</text>
+  <text x="512" y="266" font-size="11.5" fill="#1c2420">   → the new leader has token 8, owner B.</text>
+  <text x="512" y="290" font-size="11.5" fill="#1c2420">4. C claims WHERE token = 7 → 0 rows.</text>
+  <rect x="512" y="304" width="404" height="56" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="714" y="326" font-size="12.5" font-weight="bold" text-anchor="middle" fill="#157a55">One owner: B</text>
+  <text x="714" y="346" font-size="11" text-anchor="middle" fill="#1c2420">no acknowledged write can disappear</text>
+  <text x="512" y="388" font-size="11" fill="#5c6a62">A leader cut off on the minority side cannot reach a majority,</text>
+  <text x="512" y="404" font-size="11" fill="#5c6a62">so its commits fail: clients get an error, never a false OK.</text>
+  <text x="512" y="428" font-size="11" fill="#5c6a62">Price: a few ms per commit; writes stall for a few seconds</text>
+  <text x="512" y="444" font-size="11" fill="#5c6a62">during a leader switch.</text>
+  <text x="512" y="472" font-size="11.5" font-weight="bold" fill="#157a55">"OK" = the write is on disk on a majority</text>
+
+  <rect x="24" y="508" width="912" height="72" rx="10" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="44" y="532" font-size="12.5" font-weight="bold" fill="#9a6b0a">Implementation consequence: a commit's outcome can be unknown</text>
+  <text x="44" y="554" font-size="11.5" fill="#1c2420">A transaction in flight during a leader switch can return an error or time out even though it committed. Resolve it by reading back</text>
+  <text x="44" y="570" font-size="11.5" fill="#1c2420">(lease owner and token, write_seq, the row) — never by blindly repeating a non-idempotent write.</text>
+</svg>

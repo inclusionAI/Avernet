@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="560" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">Draining executor A (group G restarts in place)</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">A hands each of its buckets to a successor B outside G. Streams stay open on gateways; only ownership moves.</text>
+
+  <rect x="24" y="72" width="912" height="50" rx="8" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="44" y="94" font-size="13" font-weight="bold" fill="#1c2420">1 · Stop claiming</text>
+  <text x="44" y="112" font-size="11.5" fill="#1c2420">roster state = draining (gateways and peers stop placing on A) · keep serving every session A still owns</text>
+
+  <rect x="24" y="134" width="912" height="246" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="44" y="158" font-size="13" font-weight="bold" fill="#157a55">For each bucket b (~4096/N, busiest first, several at a time)</text>
+  <rect x="44" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="58" y="192" font-size="12" font-weight="bold" fill="#1c2420">2 · PREPARE</text>
+  <text x="58" y="214" font-size="11" fill="#1c2420">B loads b's warm sessions</text>
+  <text x="58" y="232" font-size="11" fill="#1c2420">into memory (not owner yet)</text>
+  <text x="58" y="256" font-size="11" fill="#5c6a62">A keeps processing deltas</text>
+  <text x="58" y="272" font-size="11" fill="#5c6a62">and forwarding them</text>
+  <rect x="268" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="282" y="192" font-size="12" font-weight="bold" fill="#1c2420">3 · Stop b's deltas</text>
+  <text x="282" y="214" font-size="11" fill="#1c2420">A unsubscribes from b's</text>
+  <text x="282" y="232" font-size="11" fill="#1c2420">delta channel</text>
+  <text x="282" y="256" font-size="11" fill="#5c6a62">and finishes the deltas</text>
+  <text x="282" y="272" font-size="11" fill="#5c6a62">it already received</text>
+  <rect x="492" y="170" width="210" height="196" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="506" y="192" font-size="12" font-weight="bold" fill="#1c2420">4 · Transfer ownership</text>
+  <text x="506" y="214" font-size="11" fill="#1c2420">lease table: owner of b = B,</text>
+  <text x="506" y="232" font-size="11" fill="#1c2420">token + 1</text>
+  <text x="506" y="256" font-size="11" fill="#5c6a62">then COMMIT to B: you own</text>
+  <text x="506" y="272" font-size="11" fill="#5c6a62">b now, start driving it</text>
+  <rect x="716" y="170" width="204" height="196" rx="8" fill="#ffffff" stroke="#157a55"/>
+  <text x="730" y="192" font-size="12" font-weight="bold" fill="#157a55">6 · B catches up</text>
+  <text x="730" y="214" font-size="11" fill="#1c2420">re-reads only what changed</text>
+  <text x="730" y="232" font-size="11" fill="#1c2420">since PREPARE (write_seq)</text>
+  <text x="730" y="256" font-size="11" fill="#1c2420">subscribes to deltas:{b}</text>
+  <text x="730" y="280" font-size="11" fill="#1c2420">asks the agents, via the</text>
+  <text x="730" y="298" font-size="11" fill="#1c2420">dispatch gateways, for</text>
+  <text x="730" y="316" font-size="11" fill="#1c2420">missed output</text>
+  <text x="730" y="340" font-size="11" fill="#5c6a62">republishes it append: false</text>
+  <line x1="254" y1="268" x2="266" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <line x1="478" y1="268" x2="490" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <line x1="702" y1="268" x2="714" y2="268" stroke="#5c6a62" marker-end="url(#ar)"/>
+
+  <rect x="24" y="392" width="912" height="62" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="44" y="416" font-size="13" font-weight="bold" fill="#b3402e">5 · Deadline (set below the platform's stop-hook timeout)</text>
+  <text x="44" y="438" font-size="11.5" fill="#1c2420">A transfers whatever buckets are left at once, without waiting for steps 2–3 · B recovers the lost deltas in step 6</text>
+
+  <rect x="24" y="466" width="440" height="76" rx="8" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="44" y="490" font-size="13" font-weight="bold" fill="#1c2420">7 · Stop hook completes, A exits</text>
+  <text x="44" y="512" font-size="11.5" fill="#5c6a62">roster row deleted</text>
+  <line x1="464" y1="504" x2="490" y2="504" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <rect x="496" y="466" width="440" height="76" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="516" y="490" font-size="13" font-weight="bold" fill="#157a55">Restart: same address, new node_id</text>
+  <text x="516" y="512" font-size="11.5" fill="#1c2420">leftover buckets claimable at once · same member_name →</text>
+  <text x="516" y="530" font-size="11.5" fill="#1c2420">same buckets back</text>
+</svg>

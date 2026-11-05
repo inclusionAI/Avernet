@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 660" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#b3402e"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="660" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">把会话 S 的一轮请求路由到所有者</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">哈希 = 快速猜测(入口网关)· 租约 = 事实(目标执行器)· 持久写入 = 回退。最多两跳转发。</text>
+
+  <!-- column headers -->
+  <rect x="24" y="70" width="430" height="30" rx="6" fill="#ffffff" stroke="#5c6a62"/>
+  <text x="239" y="90" font-size="13" font-weight="bold" text-anchor="middle" fill="#1c2420">入口网关(持有 PA 的流)</text>
+  <rect x="506" y="70" width="430" height="30" rx="6" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="721" y="90" font-size="13" font-weight="bold" text-anchor="middle" fill="#157a55">目标执行器(猜测对象)</text>
+
+  <!-- entry steps -->
+  <rect x="44" y="120" width="390" height="56" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="60" y="142" font-size="12" font-weight="bold" fill="#1c2420">① target = bucket_map[bucket(S)] 或 HRW(bucket(S))</text>
+  <text x="60" y="162" font-size="11" fill="#5c6a62">在内存中,微秒级,不访问 DB</text>
+  <line x1="239" y1="176" x2="239" y2="204" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <rect x="44" y="208" width="390" height="40" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="60" y="233" font-size="12" font-weight="bold" fill="#1c2420">② 向目标发送 Submit(round)</text>
+  <line x1="434" y1="228" x2="526" y2="160" stroke="#2457a6" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="440" y="262" font-size="11" fill="#2457a6">Submit</text>
+
+  <!-- target steps -->
+  <rect x="526" y="120" width="390" height="56" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="542" y="142" font-size="12" font-weight="bold" fill="#1c2420">我拥有 bucket(S) 吗?(内存中的拥有集合)</text>
+  <text x="542" y="162" font-size="11" fill="#5c6a62">不读 DB</text>
+
+  <line x1="600" y1="176" x2="600" y2="214" stroke="#157a55" marker-end="url(#ar)"/>
+  <text x="608" y="200" font-size="11" fill="#157a55">是</text>
+  <rect x="526" y="218" width="190" height="72" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="542" y="240" font-size="12" font-weight="bold" fill="#157a55">(a) 服务</text>
+  <text x="542" y="258" font-size="11" fill="#1c2420">去重 · 持久化该轮(带围栏)</text>
+  <text x="542" y="275" font-size="11" fill="#1c2420">回复 Task · 驱动</text>
+
+  <line x1="840" y1="176" x2="840" y2="214" stroke="#5c6a62" marker-end="url(#ar)"/>
+  <text x="848" y="200" font-size="11" fill="#5c6a62">否</text>
+  <rect x="730" y="218" width="186" height="72" rx="8" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="746" y="240" font-size="12" font-weight="bold" fill="#1c2420">认领事务</text>
+  <text x="746" y="258" font-size="11" fill="#1c2420">针对 bucket(S),若可认领</text>
+  <text x="746" y="275" font-size="11" fill="#5c6a62">无需事先知道令牌</text>
+
+  <line x1="760" y1="290" x2="660" y2="324" stroke="#157a55" marker-end="url(#ar)"/>
+  <text x="590" y="304" font-size="11" fill="#157a55">读回 = 我</text>
+  <rect x="526" y="328" width="190" height="56" rx="8" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="542" y="350" font-size="12" font-weight="bold" fill="#157a55">(b) 无主的桶:</text>
+  <text x="542" y="368" font-size="11" fill="#1c2420">现在是 b 的所有者(n+1)→ 服务</text>
+  <line x1="840" y1="290" x2="840" y2="324" stroke="#b3402e" marker-end="url(#ab)"/>
+  <text x="848" y="312" font-size="11" fill="#b3402e">读回 = X</text>
+  <rect x="730" y="328" width="186" height="56" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="746" y="350" font-size="12" font-weight="bold" fill="#9a6b0a">(c) 归 X 所有</text>
+  <text x="746" y="368" font-size="10.5" fill="#1c2420">回复 NOT_OWNER(X)</text>
+
+  <!-- back to entry -->
+  <polyline points="823,384 823,432 470,432 470,298 438,298" fill="none" stroke="#9a6b0a" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="600" y="426" font-size="11" fill="#9a6b0a">NOT_OWNER(X) 返回入口网关</text>
+  <rect x="44" y="270" width="390" height="56" rx="8" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="60" y="292" font-size="12" font-weight="bold" fill="#9a6b0a">③ bucket_map[b] = X;向 X 发送 Submit</text>
+  <text x="60" y="312" font-size="11" fill="#1c2420">第二跳也是最后一跳;X 必须服务或认领</text>
+
+  <rect x="44" y="346" width="390" height="74" rx="8" fill="#f8e6e1" stroke="#b3402e"/>
+  <text x="60" y="368" font-size="12" font-weight="bold" fill="#b3402e">④ 被拒绝 / 超时 → 排名下一位的执行器</text>
+  <text x="60" y="388" font-size="11" fill="#1c2420">它服务、在可认领时认领 bucket(S),或把该轮记录为输入</text>
+  <text x="60" y="405" font-size="11" fill="#1c2420">(持久回退)并确认 · 一个执行器都没有 → 可重试错误</text>
+
+  <!-- bottom: cases -->
+  <rect x="24" y="464" width="912" height="176" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="44" y="488" font-size="13" font-weight="bold" fill="#1c2420">各种情形</text>
+  <text x="44" y="512" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">集群稳定</tspan> —— 猜的就是所有者:一跳,没有额外 DB 读。TTFT 增加约 2–7 ms(轮询方式平均约 500 ms)。</text>
+  <text x="44" y="534" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">桶交接期间</tspan> —— 映射说 A,租约说 B:多一跳,仅一次;桶映射随即被纠正。</text>
+  <text x="44" y="556" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">冷会话</tspan> —— 由桶的所有者加载:一次读,无需认领。</text>
+  <text x="44" y="578" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">所有者崩溃</tspan> —— Submit 失败 → 排名下一位的执行器在可认领时认领该桶,否则持久回退;TTFT ≤ 接管时间。</text>
+  <text x="44" y="600" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">超时,但所有者其实已处理</tspan> —— 同一轮有两份:必须按 (principal, session_id, messageId) 去重。</text>
+  <text x="44" y="624" font-size="11" fill="#5c6a62">不依赖负载均衡器:唯一的 node_id、共享 DB、节点间直连可达、每个节点哈希相同。网关从不碰租约。</text>
+</svg>

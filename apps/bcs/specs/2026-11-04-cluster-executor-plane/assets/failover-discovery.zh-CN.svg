@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#5c6a62"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="560" fill="#fafbf9"/>
+  <text x="24" y="32" font-size="17" font-weight="bold" fill="#1c2420">故障转移:认领死亡执行器的桶(没有 COMMIT 消息)</text>
+  <text x="24" y="52" font-size="12" fill="#5c6a62">幸存者在自己的认领成功时得知它拥有桶 b。每个幸存者算出同样的 HRW 划分,所以无需协调。</text>
+
+  <!-- timeline -->
+  <line x1="60" y1="110" x2="920" y2="110" stroke="#1c2420" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="926" y="114" font-size="11" fill="#5c6a62">t</text>
+  <circle cx="90" cy="110" r="6" fill="#b3402e"/>
+  <text x="90" y="92" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#b3402e">D 的最后一次心跳</text>
+  <text x="90" y="134" font-size="11" text-anchor="middle" fill="#5c6a62">0 s · D 崩溃</text>
+  <rect x="100" y="100" width="420" height="20" fill="#f8e6e1" stroke="#b3402e" stroke-dasharray="4 3"/>
+  <text x="310" y="114" font-size="11" text-anchor="middle" fill="#b3402e">认领阈值(5 s):D 的租约尚不可认领</text>
+  <circle cx="520" cy="110" r="5" fill="#9a6b0a"/>
+  <text x="520" y="134" font-size="11" text-anchor="middle" fill="#9a6b0a">5 s · 可认领</text>
+  <circle cx="610" cy="110" r="6" fill="#157a55"/>
+  <text x="610" y="92" font-size="11.5" font-weight="bold" text-anchor="middle" fill="#157a55">下一次花名册轮询</text>
+  <text x="610" y="134" font-size="11" text-anchor="middle" fill="#157a55">≤ 6 s · 发现</text>
+  <rect x="620" y="100" width="150" height="20" fill="#e3f0e9" stroke="#157a55"/>
+  <text x="695" y="114" font-size="11" text-anchor="middle" fill="#157a55">认领桶 · 恢复</text>
+  <circle cx="790" cy="110" r="6" fill="#157a55"/>
+  <text x="790" y="134" font-size="11" text-anchor="middle" fill="#157a55">约 6–8 s · 已恢复</text>
+
+  <!-- trigger 1 -->
+  <rect x="24" y="160" width="440" height="200" rx="10" fill="#ffffff" stroke="#157a55" stroke-width="1.4"/>
+  <text x="44" y="184" font-size="13" font-weight="bold" fill="#157a55">第 1 步 · 认领 D 的桶</text>
+  <text x="44" y="208" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">SELECT bucket FROM bcs_task_leases</text>
+  <text x="44" y="224" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420"> WHERE node_id = :D          -- 约 4096/N 行</text>
+  <text x="44" y="240" font-size="11" font-family="Menlo, Consolas, monospace" fill="#1c2420">-- 认领去掉 D 后把我排第一的桶</text>
+  <text x="44" y="264" font-size="11.5" fill="#1c2420">每个幸存者只需几次认领,几毫秒完成</text>
+  <text x="44" y="282" font-size="11.5" fill="#1c2420">若第一选择也宕了,1 s 宽限后由排名下一位的幸存者认领</text>
+  <text x="44" y="306" font-size="11" fill="#5c6a62">之后 D 的 node_id 不在任何租约行上:</text>
+  <text x="44" y="322" font-size="11" fill="#5c6a62">再没有需要盯着的东西</text>
+  <text x="44" y="344" font-size="11" fill="#5c6a62">空闲会话:在下一轮请求时加载</text>
+
+  <!-- trigger 2 -->
+  <rect x="496" y="160" width="440" height="96" rx="10" fill="#ffffff" stroke="#2457a6" stroke-width="1.4"/>
+  <text x="516" y="184" font-size="13" font-weight="bold" fill="#2457a6">第 2 步 · 逐桶恢复待处理会话</text>
+  <text x="516" y="206" font-size="11.5" fill="#1c2420">… WHERE bucket = :b AND has_pending_work LIMIT 2000</text>
+  <text x="516" y="224" font-size="11.5" fill="#1c2420">一批接一批,有未处理输入的优先;状态惰性</text>
+  <text x="516" y="242" font-size="11.5" fill="#1c2420">重新加载;回退记录的输入也在这里被找到。</text>
+
+  <!-- trigger 3 -->
+  <rect x="496" y="266" width="440" height="94" rx="10" fill="#ffffff" stroke="#b9c6bf"/>
+  <text x="516" y="290" font-size="13" font-weight="bold" fill="#1c2420">第 3 步 · 兜底扫描(30–60 s)</text>
+  <text x="516" y="312" font-size="11.5" fill="#1c2420">所有者已过期的桶;无人驱动的待处理会话:</text>
+  <text x="516" y="330" font-size="11.5" fill="#1c2420">兜住失败的认领、正在重启的节点等。</text>
+
+  <!-- evidence -->
+  <rect x="24" y="380" width="912" height="160" rx="10" fill="#f7eed7" stroke="#9a6b0a"/>
+  <text x="44" y="404" font-size="13" font-weight="bold" fill="#9a6b0a">凭证据提前接管(围栏让猜错也安全;代价只是一次状态重新加载)</text>
+  <text x="44" y="430" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">advertise_addr 相同、node_id 不同</tspan> —— 进程原地重启;两个进程不能监听同一地址 → 旧运行的桶</text>
+  <text x="44" y="448" font-size="11.5" fill="#1c2420">一看到新的花名册行就可认领。RTO ≈ 重启时间 + ≤ 1 s。</text>
+  <text x="44" y="474" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">panic 时把自己的花名册行标记为死亡</tspan> —— 幸存者立即认领它的桶;尽力而为(OOM kill / kill -9 时做不到)。</text>
+  <text x="44" y="500" font-size="11.5" fill="#1c2420"><tspan font-weight="bold">相对过期</tspan> —— stale(D) = max(heartbeats) − heartbeat(D),外加恢复宽限:自己的心跳健康满 5 s 之前谁都不认领。</text>
+  <text x="44" y="524" font-size="11.5" fill="#5c6a62">活着却悄无声息地不可达的节点不提供任何证据:等满认领阈值。</text>
+</svg>
