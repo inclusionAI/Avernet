@@ -1,7 +1,7 @@
 //! Recording plugin installed only by the test-utils process composition.
 //! Completion stays in memory; file I/O happens after graceful server shutdown.
 use std::{path::Path, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}};
-use bcs_tracing_api::{Carrier, Context, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace};
+use bcs_tracing_api::{Carrier, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace};
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -22,9 +22,9 @@ impl Record for Completion {
 }
 
 impl NetworkTracer for Recorder {
-    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: Option<&Context>) -> StartedTrace {
+    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         let span_id = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        let parent = parent.and_then(|context| context.downcast_ref::<TraceContext>());
+        let parent = parent.local.and_then(|context| context.downcast_ref::<TraceContext>());
         let trace_id = parent.map(|context| context.trace_id.clone())
             .or_else(|| incoming.iter().find(|(name, _)| name == "x-e2e-trace-id").map(|(_, value)| value.clone()))
             .unwrap_or_else(|| format!("e2e-{span_id}"));

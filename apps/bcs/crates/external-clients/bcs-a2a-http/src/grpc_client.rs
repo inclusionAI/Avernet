@@ -43,7 +43,11 @@ impl GrpcClient {
         let mut request = self.request(body, method);
         let target = self.headers.get("sofa_head_target_app").and_then(|v| v.to_str().ok()).unwrap_or("");
         let service = self.headers.get("sofa_head_target_service").and_then(|v| v.to_str().ok()).unwrap_or("lf.a2a.v1.A2AService");
-        let call = Call::start(&RequestInfo { kind: Kind::RpcClient, method, endpoint: service, target_app: target, request_size: None }, &Vec::new());
+        let incoming = request.metadata().iter().filter_map(|entry| match entry {
+            tonic::metadata::KeyAndValueRef::Ascii(key, value) => value.to_str().ok().map(|value| (key.to_string(), value.to_owned())),
+            tonic::metadata::KeyAndValueRef::Binary(_, _) => None,
+        }).collect();
+        let call = Call::start(&RequestInfo { kind: Kind::RpcClient, method, endpoint: service, route: None, target_app: target, request_size: None }, &incoming);
         for (name, value) in call.headers() {
             if let (Ok(name), Ok(value)) = (tonic::metadata::MetadataKey::<tonic::metadata::Ascii>::from_bytes(name.as_bytes()), tonic::metadata::MetadataValue::try_from(value.as_str())) {
                 request.metadata_mut().insert(name, value);

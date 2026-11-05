@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 use std::{sync::{Arc, Mutex}, time::Duration};
 use axum::{Router, body::Bytes, http::{HeaderMap, StatusCode}, routing::post};
-use bcs_tracing_api::{Carrier, Context, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_context, with_provider};
+use bcs_tracing_api::{Carrier, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_context, with_provider};
 
 #[derive(Debug, PartialEq)]
 struct RequestMetadata {
@@ -10,6 +10,7 @@ struct RequestMetadata {
     endpoint: String,
     size: Option<u64>,
     parent: Option<String>,
+    existing_trace: Option<String>,
 }
 
 #[derive(Default)]
@@ -27,13 +28,14 @@ impl Record for Completion {
 
 struct Provider(Arc<Spy>);
 impl NetworkTracer for Provider {
-    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: Option<&Context>) -> StartedTrace {
+    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         assert_eq!(info.kind, Kind::HttpClient);
         assert!(info.target_app.is_empty());
-        assert!(incoming.is_empty());
+        assert!(info.route.is_none());
         self.0.requests.lock().unwrap().push(RequestMetadata {
             method: info.method.to_owned(), endpoint: info.endpoint.to_owned(), size: info.request_size,
-            parent: parent.and_then(|context| context.downcast_ref::<String>()).cloned(),
+            parent: parent.local.and_then(|context| context.downcast_ref::<String>()).cloned(),
+            existing_trace: incoming.iter().find(|(name, _)| name == "x-trace-id").map(|(_, value)| value.clone()),
         });
         StartedTrace {
             context: Arc::new(String::from("child")),
@@ -117,7 +119,7 @@ macro_rules! async_client_tests {
                 for request in requests.iter() {
                     assert_eq!(request, &RequestMetadata {
                         method: "POST".into(), endpoint: format!("{}/echo", server.url),
-                        size: Some(7), parent: Some("parent".into()),
+                        size: Some(7), parent: Some("parent".into()), existing_trace: Some("stale".into()),
                     });
                 }
                 assert_eq!(*spy.completions.lock().unwrap(), vec![(Outcome::Http(503), Some(5)); 2]);
@@ -203,7 +205,7 @@ mod blocking {
         })).await;
         assert_eq!(*spy.requests.lock().unwrap(), vec![RequestMetadata {
             method: "POST".into(), endpoint: format!("{}/echo", server.url),
-            size: Some(7), parent: Some("parent".into()),
+            size: Some(7), parent: Some("parent".into()), existing_trace: Some("stale".into()),
         }]);
         assert_eq!(*spy.completions.lock().unwrap(), vec![(Outcome::Http(503), Some(5))]);
     }

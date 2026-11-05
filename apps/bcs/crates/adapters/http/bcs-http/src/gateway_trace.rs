@@ -75,7 +75,10 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
         };
 
         let parent = global::get_text_map_propagator(|propagator| {
-            propagator.extract(&HeaderExtractor(request.headers()))
+            let network = request.extensions().get::<bcs_network_tracing::HttpServerContext>()
+                .map(|context| propagator.extract_with_context(&opentelemetry::Context::new(), &HeaderExtractor(&context.0)));
+            network.filter(|context| context.span().span_context().is_valid())
+                .unwrap_or_else(|| propagator.extract(&HeaderExtractor(request.headers())))
         });
         if matches!(path, "/bot/events") || path.ends_with("/chat-async") {
             if !parent.span().span_context().is_valid() {

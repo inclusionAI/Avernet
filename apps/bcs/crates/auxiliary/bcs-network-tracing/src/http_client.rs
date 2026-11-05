@@ -46,10 +46,13 @@ macro_rules! client_adapter {
                 let _ = endpoint.set_password(None);
                 endpoint.set_query(None);
                 endpoint.set_fragment(None);
+                let incoming = request.headers().iter().filter_map(|(name, value)| {
+                    value.to_str().ok().map(|value| (name.to_string(), value.to_owned()))
+                }).collect();
                 let call = Call::start(&RequestInfo {
                     kind: Kind::HttpClient, method: request.method().as_str(), endpoint: endpoint.as_str(),
-                    target_app: "", request_size: request.body().and_then(|body| body.as_bytes()).map(|bytes| bytes.len() as u64),
-                }, &Vec::new());
+                    route: None, target_app: "", request_size: request.body().and_then(|body| body.as_bytes()).map(|bytes| bytes.len() as u64),
+                }, &incoming);
                 for (name, value) in call.headers() {
                     if let (Ok(name), Ok(value)) = ($client::header::HeaderName::from_bytes(name.as_bytes()), $client::header::HeaderValue::from_str(value)) {
                         request.headers_mut().insert(name, value);

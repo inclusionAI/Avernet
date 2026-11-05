@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use bcs_storage_api::{StorageHandle, StoragePlugin};
 use bcs_storage_baas::{config::BaasConfig, BaasReadyHandle, BaasStoragePlugin};
-use bcs_tracing_api::{Carrier, Context, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_context, with_provider};
+use bcs_tracing_api::{Carrier, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_context, with_provider};
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
 
 struct Provider(Arc<Mutex<Vec<Outcome>>>);
@@ -12,10 +12,10 @@ impl Record for Completion {
     }
 }
 impl NetworkTracer for Provider {
-    fn start(&self, info: &RequestInfo<'_>, _: &Carrier, parent: Option<&Context>) -> StartedTrace {
+    fn start(&self, info: &RequestInfo<'_>, _: &Carrier, parent: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         assert_eq!(info.kind, Kind::HttpClient);
         assert_eq!(info.method, "DELETE");
-        assert_eq!(parent.unwrap().downcast_ref::<String>().unwrap(), "business-parent");
+        assert_eq!(parent.local.unwrap().downcast_ref::<String>().unwrap(), "business-parent");
         StartedTrace { context: Arc::new(()), headers: vec![("sofatraceid".into(), "business-parent".into())],
             record: Box::new(Completion(self.0.clone())) }
     }

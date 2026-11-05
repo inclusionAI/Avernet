@@ -13,6 +13,8 @@ pub struct RequestInfo<'a> {
     pub method: &'a str,
     /// Sanitized URL (no credentials/query/fragment), or RPC service name.
     pub endpoint: &'a str,
+    /// Matched HTTP server route template; absent for client/RPC calls.
+    pub route: Option<&'a str>,
     pub target_app: &'a str,
     pub request_size: Option<u64>,
 }
@@ -31,17 +33,33 @@ pub struct StartedTrace {
     pub record: Box<dyn Record>,
 }
 
+/// Separate parent sources: adapters never merge ambient context into headers.
+#[derive(Clone, Copy)]
+pub struct ParentContext<'a> {
+    pub local: Option<&'a Context>,
+    /// Current SDK/business context, or its explicitly captured spawn snapshot.
+    /// Client providers prefer valid fields of their protocol here over a local
+    /// ancestor, then fall back to local context, existing headers, or a root.
+    /// Server providers extract the remote parent from incoming headers instead.
+    pub ambient: &'a Carrier,
+}
+
 /// Trusted in-process plugin. Install once at bootstrap before serving requests.
 /// No provider means no tracing and no injected headers. Implementations must
 /// preserve business results and keep contexts safe across concurrent tasks.
 pub trait NetworkTracer: Send + Sync {
-    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: Option<&Context>) -> StartedTrace;
+    fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: ParentContext<'_>) -> StartedTrace;
+
+    /// Optional SDK bridge. Return only valid propagation fields, never bind a
+    /// thread-local guard across await. The default preserves SPI-only behavior.
+    fn capture_ambient(&self) -> Carrier { Vec::new() }
 }
 
 static PROVIDER: OnceLock<Arc<dyn NetworkTracer>> = OnceLock::new();
 tokio::task_local! {
     static CURRENT: Option<Context>;
     static SCOPED_PROVIDER: Option<Arc<dyn NetworkTracer>>;
+    static AMBIENT: Carrier;
 }
 
 pub fn install(provider: Arc<dyn NetworkTracer>) -> Result<(), &'static str> {
@@ -69,14 +87,22 @@ pub async fn with_context<F: Future>(context: Option<Context>, future: F) -> F::
 pub fn in_current_context<F: Future>(future: F) -> impl Future<Output = F::Output> {
     let context = current_context();
     let provider = provider();
-    async move { with_provider(provider, with_context(context, future)).await }
+    let ambient = capture_ambient(provider.as_deref());
+    async move { with_provider(provider, with_context(context, AMBIENT.scope(ambient, future))).await }
 }
 
 /// Capture at the async caller before handing work to spawn_blocking.
 pub fn in_current_context_blocking<F: FnOnce() -> R, R>(work: F) -> impl FnOnce() -> R {
     let context = current_context();
     let provider = provider();
-    move || SCOPED_PROVIDER.sync_scope(provider, || CURRENT.sync_scope(context, work))
+    let ambient = capture_ambient(provider.as_deref());
+    move || SCOPED_PROVIDER.sync_scope(provider, || CURRENT.sync_scope(context, || AMBIENT.sync_scope(ambient, work)))
+}
+
+fn capture_ambient(provider: Option<&dyn NetworkTracer>) -> Carrier {
+    let Some(provider) = provider else { return Vec::new(); };
+    let current = provider.capture_ambient();
+    if current.is_empty() { AMBIENT.try_with(Clone::clone).unwrap_or_default() } else { current }
 }
 
 fn provider() -> Option<Arc<dyn NetworkTracer>> {
@@ -87,7 +113,10 @@ pub struct Call(Option<StartedTrace>);
 
 impl Call {
     pub fn start(info: &RequestInfo<'_>, incoming: &Carrier) -> Self {
-        Self(provider().map(|provider| provider.start(info, incoming, current_context().as_ref())))
+        Self(provider().map(|provider| {
+            let ambient = capture_ambient(Some(provider.as_ref()));
+            provider.start(info, incoming, ParentContext { local: current_context().as_ref(), ambient: &ambient })
+        }))
     }
 
     pub fn context(&self) -> Option<Context> { self.0.as_ref().map(|trace| trace.context.clone()) }

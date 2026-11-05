@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used)]
 use std::{convert::Infallible, sync::{Arc, Mutex}, time::Duration};
 use axum::{Router, body::Body, extract::Query, http::{Request, StatusCode}, middleware, response::sse::{Event, Sse}, routing::get};
-use bcs_tracing_api::{Carrier, Context, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_provider};
+use bcs_tracing_api::{Carrier, Kind, NetworkTracer, Outcome, Record, RequestInfo, StartedTrace, with_provider};
 use tower::ServiceExt;
 
 #[derive(Default)]
@@ -14,7 +14,7 @@ impl Record for Completion {
 }
 struct Provider(Arc<Spy>);
 impl NetworkTracer for Provider {
-    fn start(&self, info: &RequestInfo<'_>, _: &Carrier, _: Option<&Context>) -> StartedTrace {
+    fn start(&self, info: &RequestInfo<'_>, _: &Carrier, _: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         assert_eq!(info.kind, Kind::HttpServer);
         assert!(!info.endpoint.contains('?'));
         StartedTrace { context: Arc::new(()), headers: vec![], record: Box::new(Completion(self.0.clone())) }
@@ -90,7 +90,7 @@ async fn excluded_routes_and_preflights_suppress_the_entire_trace_scope() {
         // Even a client instrumented for a business call must remain disabled
         // when it is invoked from a probe. Provider would reject HttpClient.
         let call = Call::start(&RequestInfo { kind: Kind::HttpClient, method: "GET",
-            endpoint: "/dependency", target_app: "", request_size: None }, &vec![]);
+            endpoint: "/dependency", route: None, target_app: "", request_size: None }, &vec![]);
         assert!(call.headers().is_empty());
         call.finish(Outcome::Http(200), None);
         "unchanged"
