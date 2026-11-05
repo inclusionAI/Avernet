@@ -9,7 +9,6 @@ import { useGatewayLoginRedirect } from '@/hooks/useGatewayLoginRedirect';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { history } from '@umijs/max';
 import { useTaskSessionNavigationObserver } from '@/pages/Workspace/Chat/hooks/taskSessionNavigation';
-import { applyAixcodingMicroAppRuntimeConfig, type QiankunRuntimeConfig } from '@/qiankun/aixcodingMicroAppRuntime';
 import React from 'react';
 
 extendCapabilities(appExtension.capabilities);
@@ -31,18 +30,23 @@ export { request } from './requestConfig';
  * <script> 注入路径，避免子应用 loader 被 qiankun 改写为 fetch+eval 后在宿主安全策略下
  * 失败。前缀只由 Internal overlay 的 define 注入；Open Core 下为空时原样返回配置。
  */
+interface QiankunRuntimeConfig {
+  master?: {
+    excludeAssetFilter?: (assetUrl: string) => boolean;
+  };
+}
+
 export const qiankun = (config: QiankunRuntimeConfig = {}) => {
-  const configWithAixcoding = applyAixcodingMicroAppRuntimeConfig(config);
   const monacoCdnPrefix =
     typeof TEAMCLAW_MONACO_CDN_PREFIX !== 'undefined'
       ? TEAMCLAW_MONACO_CDN_PREFIX
       : '';
-  if (!monacoCdnPrefix) return configWithAixcoding;
+  if (!monacoCdnPrefix) return config;
 
   return {
-    ...configWithAixcoding,
+    ...config,
     master: {
-      ...configWithAixcoding.master,
+      ...config.master,
       excludeAssetFilter: (assetUrl: string) =>
         assetUrl.startsWith(`${monacoCdnPrefix}/`),
     },
