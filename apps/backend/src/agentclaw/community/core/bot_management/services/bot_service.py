@@ -6022,7 +6022,7 @@ class BotService(BotServiceProtocol):
                 bindings = [{
                     "binding_id": personal_result.get("binding_id"),
                     "type": "personal",
-                    "device_count": len(devices),
+                    "device_count": personal_result.get("device_count", len(devices)),
                     "devices": devices,
                 }]
             else:
@@ -6122,12 +6122,16 @@ class BotService(BotServiceProtocol):
         # ========== 步骤 4: 调用热更新接口更新设备 header ==========
         update_result = service.update_device_headers(device=device, agent_pass_token=token, agent_code=agent_code)
         devices = update_result if isinstance(update_result, list) else []
+        # Direct ARCA acknowledges its single sandbox with an exact True;
+        # BaaS/teclaw report physical devices as a list. Do not invent inventory
+        # or accept truthy values / another provider's boolean as confirmation.
+        device_count = 1 if binding.device_provider == "arca" and update_result is True else len(devices)
         logger.info(
             f"[_hot_update_by_device_binding] Hot-update succeeded: "
             f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, "
-            f"device_id={binding.device_id}, updated_devices={len(devices)}"
+            f"device_id={binding.device_id}, updated_devices={device_count}"
         )
-        return {"binding_id": binding_id, "devices": devices}
+        return {"binding_id": binding_id, "devices": devices, "device_count": device_count}
 
     def _hot_update_service_bot_passport_token(
         self, bot_id: str, user_id: str, token: str, bot: dict, agent_code: str = ""
@@ -6172,7 +6176,7 @@ class BotService(BotServiceProtocol):
                 updated_bindings.append({
                     "binding_id": draft_binding_id,
                     "type": "draft",
-                    "device_count": len(devices),
+                    "device_count": draft_result.get("device_count", len(devices)),
                     "devices": devices,
                 })
             except Exception as e:
