@@ -236,25 +236,64 @@ describe('Bot 授权入口跟随空间类型', () => {
 });
 
 describe('公开设置菜单项门禁（collab-permission-entry-migration AC-02/AC-03）', () => {
+  // 个人 Bot：不受服务 Bot 发布态约束，用以验证 Owner / 编辑锁门禁。
+  const personalBot = mapBotDto({ bot_id: 'personal-bot', engine: 'openclaw', actions: ['view'] }).item;
+  const publishedServiceBot = {
+    ...mapBotDto({
+      bot_id: 'service-bot',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      actions: ['view'],
+    }).item,
+    serviceMode: 'service' as const,
+    lifecycle: 'running' as const,
+  };
+
   test('Bot 管理员（Owner）且无锁时可打开', () => {
-    expect(getGeneralConfigAvailability(true, false)).toEqual({ enabled: true });
+    expect(getGeneralConfigAvailability(personalBot, true, false)).toEqual({ enabled: true });
   });
 
   test('非 Bot 管理员禁用并说明原因', () => {
-    expect(getGeneralConfigAvailability(false, false)).toEqual({
+    expect(getGeneralConfigAvailability(personalBot, false, false)).toEqual({
       enabled: false,
       disabledReason: '仅 Bot 管理员可变更公开设置',
     });
   });
 
   test('他人持编辑锁时禁用并说明原因', () => {
-    expect(getGeneralConfigAvailability(true, true)).toEqual({
+    expect(getGeneralConfigAvailability(personalBot, true, true)).toEqual({
       enabled: false,
       disabledReason: '该 Bot 正被他人编辑，请先抢锁',
     });
   });
 
   test('非管理员与持锁同时存在时管理员原因优先', () => {
-    expect(getGeneralConfigAvailability(false, true).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
+    expect(getGeneralConfigAvailability(personalBot, false, true).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
+  });
+
+  test('已发布（运行中）的服务 Bot 管理员可打开', () => {
+    expect(getGeneralConfigAvailability(publishedServiceBot, true, false)).toEqual({ enabled: true });
+  });
+
+  test.each(['draft', 'deploying', 'prestable', 'offline', 'failed', 'unknown'] as const)(
+    '服务 Bot 未发布（lifecycle=%s）时管理员也禁用，并说明原因',
+    (lifecycle) => {
+      const bot = { ...publishedServiceBot, lifecycle };
+      expect(getGeneralConfigAvailability(bot, true, false)).toEqual({
+        enabled: false,
+        disabledReason: '服务 Bot 未发布前暂不可变更公开设置',
+      });
+    },
+  );
+
+  test('未发布的个人 Bot 不受服务 Bot 发布态约束，仍可打开', () => {
+    const draftPersonalBot = { ...personalBot, lifecycle: 'draft' as const };
+    expect(getGeneralConfigAvailability(draftPersonalBot, true, false)).toEqual({ enabled: true });
+  });
+
+  test('未发布服务 Bot 的非管理员命中管理员原因优先', () => {
+    const draftServiceBot = { ...publishedServiceBot, lifecycle: 'draft' as const };
+    expect(getGeneralConfigAvailability(draftServiceBot, false, false).disabledReason).toBe('仅 Bot 管理员可变更公开设置');
   });
 });
