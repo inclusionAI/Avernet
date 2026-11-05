@@ -1,5 +1,6 @@
 """Exercise request-scoped image overrides through HTTP, SQLite, and stub PaaS."""
 
+import logging
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -152,7 +153,6 @@ async def test_deployment_obeys_update_only_image_reset_scope(
         ("update-devices", "requested:image"),
     ],
 )
-@pytest.mark.parametrize("write_failure", ["exception", "zero-rows"])
 async def test_failed_config_write_is_terminal_even_with_retry_budget(
     api,
     unique_id,
@@ -160,7 +160,6 @@ async def test_failed_config_write_is_terminal_even_with_retry_budget(
     monkeypatch,
     operation,
     image,
-    write_failure,
 ):
     bot = await create_test_bot(
         api,
@@ -190,9 +189,7 @@ async def test_failed_config_write_is_terminal_even_with_retry_budget(
                 assert not service._publish_record_repo.list_stale_processing_records(
                     publish_id, -1, api.tenant, env
                 )
-                if write_failure == "exception":
-                    raise RuntimeError("simulated configuration write failure")
-                return 0
+                raise RuntimeError("simulated configuration write failure")
 
             patcher.setattr(devices, "update_device", fail_write)
             retry = AsyncMock(wraps=service._drive_record_attempt)
@@ -223,11 +220,7 @@ async def test_failed_config_write_is_terminal_even_with_retry_budget(
             batches[0].id, api.tenant, env
         )
         assert len(records) == 1 and records[0].result_status == "FAILED"
-        assert records[0].result_message == (
-            "simulated configuration write failure"
-            if write_failure == "exception"
-            else "Device configuration update affected no rows"
-        )
+        assert records[0].result_message == "simulated configuration write failure"
         assert records[0].extra_config["publish_max_retry_times"] == 2
         assert not await service._drive_record_attempt(
             record=records[0],
@@ -242,6 +235,79 @@ async def test_failed_config_write_is_terminal_even_with_retry_budget(
             ]
             == "previous:image"
         )
+    finally:
+        await cleanup_bot(api, bot["bot_uuid"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["update", "update-devices"])
+async def test_zero_row_config_update_warns_and_completes_publish(
+    api, unique_id, bootstrap_init, monkeypatch, caplog, operation
+):
+    bot = await create_test_bot(
+        api,
+        f"image-noop-{unique_id}",
+        device_count=1,
+        deploy_config={"docker_image": "previous:image"},
+        publish_max_retry_times=2,
+    )
+    try:
+        await activate_bot(api, bot)
+        env = get_current_env()
+        devices = bootstrap_init.repository.device_repository()
+        old = devices.list_by_bot_id(bot_id=bot["id"], tenant=api.tenant, env=env)[0]
+        service = bootstrap_init.services.publish_service()
+        update_device = devices.update_device
+        zero_row_writes = []
+
+        def unchanged_config(**kwargs):
+            if "extra_config" in kwargs:
+                assert kwargs["device_id"] == old.id
+                assert (
+                    kwargs["extra_config"]["deploy_config"]
+                    == old.extra_config["deploy_config"]
+                )
+                assert (
+                    kwargs["extra_config"]["template_uuid"]
+                    == old.extra_config["template_uuid"]
+                )
+                zero_row_writes.append(kwargs)
+                return 0
+            return update_device(**kwargs)
+
+        body = {
+            "operator": "test",
+            "request_id": uuid4().hex,
+            "config": {"deploy_config": {"docker_image": "previous:image"}},
+        }
+        if operation == "update":
+            body["template_uuid"] = bot["template_uuid"]
+        else:
+            body["device_uuids"] = [old.device_uuid]
+        with monkeypatch.context() as patcher:
+            patcher.setattr(devices, "update_device", unchanged_config)
+            provision = AsyncMock(
+                wraps=service._device_service._paas_facade.create_device
+            )
+            patcher.setattr(
+                service._device_service._paas_facade, "create_device", provision
+            )
+            with caplog.at_level(logging.WARNING, logger="core-service"):
+                response = await api.client.post(
+                    f"{api.bot_url(bot['bot_uuid'])}/{operation}",
+                    params=api.params(),
+                    json=body,
+                )
+                assert response.status_code == 200, response.text
+                publish_id = response.json()["data"]["publish_id"]
+                assert (
+                    await approve_and_complete(api, publish_id, max_iterations=5)
+                    == "SUCCESS"
+                )
+            assert zero_row_writes
+            assert provision.await_count > 0
+            assert "Device configuration update affected no rows" in caplog.text
+            assert f"device_id={old.id}, publish_id={publish_id}" in caplog.text
     finally:
         await cleanup_bot(api, bot["bot_uuid"])
 
