@@ -5,11 +5,9 @@ the real repository and sends through the recording Plugin implementations
 installed by this module — the same shape Rule 25 asks for: an upper-layer
 consumer driven against the local implementation as the executable spec.
 
-The seeded Bot has never established a caller config (revision ``0``), so
-``caller_config`` is ``not_applicable`` and the recorded sends are exactly
-the metadata probe plus the profile update. Applicability is deliberate: a
-suite that silently sent a caller item would weaken the call-sequence
-assertion below.
+Only presence probes and profile writes belong to this metadata port, even
+for Bots with established caller configuration. Caller identity-mode updates
+retain their separate normal synchronization path.
 """
 
 from __future__ import annotations
@@ -188,27 +186,28 @@ async def test_all_components_use_the_established_registration_reference(
 
     assert report.status == "succeeded"
     assert metadata.calls[0] == ("exists", expected)
-    assert [operation for operation, _ in metadata.calls] == ["exists", "profile", "caller"]
+    assert [operation for operation, _ in metadata.calls] == ["exists", "profile"]
     assert all(snapshot.bcs_bot_id == expected for _, snapshot in metadata.calls[1:])
     assert [snapshot.bcs_bot_id for snapshot in world.get(BcsOwnershipPlugin).calls] == [expected]
     assert [snapshot.bcs_bot_id for snapshot in world.get(BcsManagersPlugin).calls] == [expected]
 
 
 @pytest.mark.asyncio
-async def test_consumer_reports_unconfirmed_summary_without_losing_other_items(
-    world, repair_world,
+@pytest.mark.parametrize("summary", ["", " \t\n"])
+async def test_consumer_accepts_blank_summary_without_losing_other_items(
+    world, repair_world, summary,
 ):
     command, service, metadata = repair_world
     await service.repair(command)
     metadata.calls.clear()
     with avernet_tenant_scope(_TENANT), world.get(DatabasePlugin).orm_session() as session:
-        session.query(BotModel).filter(BotModel.id == _BOT_PK).update({"bot_desc": ""})
+        session.query(BotModel).filter(BotModel.id == _BOT_PK).update({"bot_desc": summary})
 
     report = await service.repair(command)
 
-    assert report.status == "partial_failed"
-    assert report.items[1].status == "unknown"
-    assert report.items[1].error_code == "collaboration_summary_unconfirmed"
+    assert report.status == "succeeded"
+    assert report.items[1].status == "succeeded"
+    assert report.items[1].error_code is None
     assert report.items[2].status == "succeeded"
     assert metadata.profiles[_STABLE].summary == "Saved summary"
     assert [operation for operation, _ in metadata.calls] == ["exists", "profile"]
@@ -236,7 +235,6 @@ async def test_success_records_the_ownership_and_manager_writes(world, repair_wo
         "ownership",
         "profile",
         "managers",
-        "caller_config",
     ]
     assert [call.bcs_bot_id for call in ownership.calls] == [_STABLE]
     assert [call.bcs_bot_id for call in managers.calls] == [_STABLE]
@@ -256,7 +254,7 @@ async def test_manager_facts_failure_keeps_confirmed_plugin_outcomes(
     report = await service.repair(command)
     assert report.status == "partial_failed"
     assert [item.status for item in report.items] == [
-        "succeeded", "succeeded", "failed", "not_applicable"
+        "succeeded", "succeeded", "failed"
     ]
     assert report.items[2].error_code == "collaboration_facts_read_error"
     assert [name for name, value in metadata.calls] == ["exists", "profile"]

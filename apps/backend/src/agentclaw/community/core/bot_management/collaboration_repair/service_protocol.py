@@ -1,4 +1,4 @@
-"""Core-owned collaboration repair Service API v1.
+"""Core-owned collaboration repair Service API v2.
 
 The api package re-exports this Protocol; Core never imports api.
 """
@@ -20,8 +20,7 @@ class CollaborationRepairServiceProtocol(Protocol):
 
     @abstractmethod
     async def repair(self, command: RepairCommand) -> RepairReport:
-        """Repair the fixed component set (ownership, profile, managers,
-        caller_config) once, from a fresh facts read.
+        """Repair ownership, profile and managers once from fresh facts.
 
         Preconditions fail with the kernel's ``RepairPreconditionError``
         codes; component outcomes are reported per item and never

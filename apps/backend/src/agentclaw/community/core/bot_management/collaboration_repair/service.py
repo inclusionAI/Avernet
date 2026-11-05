@@ -1,4 +1,4 @@
-"""One-shot repair of committed Bot facts, with four bounded report items.
+"""One-shot repair of committed Bot facts, with three bounded report items.
 
 Execution order and failure/deadline semantics are defined in this module's
 README. Facts reads run in worker threads; timed-out results are discarded
@@ -39,7 +39,6 @@ from agentclaw.community.kernel.bot_manager_sync import (
 )
 from agentclaw.community.kernel.collaboration_repair import (
     COMPONENT_ORDER,
-    CallerSnapshot,
     Component,
     ItemStatus,
     MetadataDeliveryErrorCode,
@@ -205,7 +204,7 @@ class CollaborationRepairService(
         self._clock = clock
 
     async def repair(self, command: RepairCommand) -> RepairReport:
-        """Run the four bounded items against current committed facts."""
+        """Run the three bounded items against current committed facts."""
         deadline = self._clock() + self._timeout_seconds
         remaining(deadline, self._clock)
 
@@ -231,7 +230,6 @@ class CollaborationRepairService(
                 ownership_item,
                 self._skipped("profile"),
                 self._skipped("managers"),
-                self._stopped_caller(facts),
             )
 
         profile_item = await self._repair_profile(facts.profile, deadline)
@@ -241,7 +239,6 @@ class CollaborationRepairService(
                 ownership_item,
                 profile_item,
                 self._skipped("managers"),
-                self._stopped_caller(facts),
             )
 
         try:
@@ -259,26 +256,10 @@ class CollaborationRepairService(
             )
             return self._report(
                 facts, ownership_item, profile_item,
-                RepairItem("managers", "failed", code), self._stopped_caller(facts),
+                RepairItem("managers", "failed", code),
             )
-        if managers_item.status == "skipped_dependency" and (
-            managers_item.error_code == RepairItemErrorCode.OWNER_DRIFT
-        ):
-            return self._report(
-                facts,
-                ownership_item,
-                profile_item,
-                managers_item,
-                self._stopped_caller(facts),
-            )
-        caller_item: RepairItem
-        if self._target_gone(managers_item) or self._deadline_dead(managers_item):
-            # A missing target or exhausted budget forbids another write.
-            caller_item = self._stopped_caller(facts)
-        else:
-            caller_item = await self._repair_caller(facts.caller, deadline)
         return self._report(
-            facts, ownership_item, profile_item, managers_item, caller_item
+            facts, ownership_item, profile_item, managers_item
         )
 
     # ------------------------------------------------------------------
@@ -407,8 +388,8 @@ class CollaborationRepairService(
         The stable address and the owner are re-validated on every read; a
         roster read failure raises a facts error — an empty roster is a
         state BCS confirmed, never a fallback for facts we could not read.
-        Owner drift found here freezes the managers item (and its caller
-        dependency) instead of writing a stale roster.
+        Owner drift found here freezes the managers item instead of
+        writing a stale roster.
         """
         facts = await _read_mapped(
             self._managers_reader.read_facts, key, deadline, self._clock
@@ -446,26 +427,6 @@ class CollaborationRepairService(
         )
         return item
 
-    async def _repair_caller(
-        self, caller: CallerSnapshot | None, deadline: float
-    ) -> RepairItem:
-        """One caller sync for an established config, disabled included.
-
-        ``None`` is the kernel's only "no established config" marker: the
-        component is absent, so the item is ``not_applicable`` and nothing
-        is sent. A disabled-but-established config (``enabled=False``) is
-        a valid payload and still syncs, at the saved revision.
-        """
-        if caller is None:
-            return RepairItem("caller_config", "not_applicable")
-        item, _ = await self._attempt(
-            "caller_config",
-            lambda budget: self._metadata.sync_caller(
-                caller, timeout_seconds=budget
-            ),
-            deadline,
-        )
-        return item
 
     # ------------------------------------------------------------------
     # One bounded send: classification only, no retry, no queue
@@ -544,19 +505,6 @@ class CollaborationRepairService(
         return RepairItem(component, "skipped_dependency")
 
     @staticmethod
-    def _stopped_caller(facts: RepairFacts) -> RepairItem:
-        """The caller item a stopped tail reports.
-
-        Applicability first: with no established config the component is
-        ``not_applicable`` even when the request never reached it; an
-        established config stopped by drift or an earlier failure is a
-        plain ``skipped_dependency``.
-        """
-        if facts.caller is None:
-            return RepairItem("caller_config", "not_applicable")
-        return RepairItem("caller_config", "skipped_dependency")
-
-    @staticmethod
     def _target_gone(item: RepairItem) -> bool:
         """A definitive vanished-target failure freezes the tail."""
         return item.status == "failed" and item.error_code == (
@@ -584,15 +532,9 @@ class CollaborationRepairService(
         ownership: RepairItem,
         profile: RepairItem,
         managers: RepairItem,
-        caller_config: RepairItem,
     ) -> RepairReport:
-        """The four items, named one per parameter.
-
-        The signature makes a three-item report impossible to build: every
-        caller must supply exactly one item per kernel component, in that
-        order, and ``report_status`` then sees the fixed four.
-        """
-        items = (ownership, profile, managers, caller_config)
+        """Exactly one item per component, in the kernel's fixed order."""
+        items = (ownership, profile, managers)
         for item, expected in zip(items, COMPONENT_ORDER, strict=True):
             if item.component != expected:
                 raise ValueError(

@@ -23,7 +23,6 @@ from agentclaw.community.core.repository.implementations.bot.collaboration_repai
 )
 from agentclaw.community.kernel.bot_manager_sync import SyncKey
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     ProfileSnapshot,
     RepairFacts,
     RepairFactsError,
@@ -59,7 +58,7 @@ def _reader(db: DatabasePlugin) -> SqlCollaborationRepairReadRepository:
     return SqlCollaborationRepairReadRepository(db)
 
 
-def test_read_facts_projects_saved_profile_owner_and_caller(db: DatabasePlugin) -> None:
+def test_read_facts_projects_saved_profile_and_owner(db: DatabasePlugin) -> None:
     key = seed_sync_facts(
         db, tenant="t", env="dev", bot_pk=7, entity_id="stable", owner_id="B"
     )
@@ -85,11 +84,6 @@ def test_read_facts_projects_saved_profile_owner_and_caller(db: DatabasePlugin) 
             avatar_url="https://example.com/a.png",
         ),
         owner_user_id="B",
-        caller=CallerSnapshot(
-            bcs_bot_id="bot-stable:stable",
-            enabled=True,
-            source_revision=3,
-        ),
     )
 
 
@@ -102,7 +96,6 @@ def test_facts_re_read_after_avatar_and_owner_update(db: DatabasePlugin) -> None
     assert before.profile.avatar_url == "https://example.com/first.png"
     assert before.profile.name == "bot-stable"
     assert before.profile.summary == ""
-    assert before.caller is None
 
     _update_bot(
         db,
@@ -163,7 +156,7 @@ def test_owner_change_never_leaks_into_the_stable_address(db: DatabasePlugin) ->
         ("service", "b", "b:original-owner", "b:original-owner"),
     ],
 )
-def test_profile_and_caller_use_the_registered_reference(
+def test_profile_uses_the_registered_reference(
     db: DatabasePlugin, bot_type: str, bot_id: str,
     reference: str | None, expected: str,
 ) -> None:
@@ -180,7 +173,6 @@ def test_profile_and_caller_use_the_registered_reference(
     facts = _reader(db).read_facts(key)
 
     assert facts.profile.bcs_bot_id == expected
-    assert facts.caller == CallerSnapshot(expected, True, 3)
 
 
 @pytest.mark.parametrize("reference", ["", "other:owner", "b:", 123])
@@ -305,47 +297,6 @@ def test_unresolvable_identity_is_a_facts_error(
     assert excinfo.value.code == "collaboration_bot_identity_unresolved"
 
 
-@pytest.mark.parametrize("call_type", ["owner", "caller"])
-def test_established_caller_config_syncs_enabled_and_disabled(
-    db: DatabasePlugin, call_type: str
-) -> None:
-    """revision>0 + call_type=owner 是合法的已建立 disabled 配置，仍要同步。"""
-    key = seed_sync_facts(
-        db, tenant="t", env="dev", bot_pk=17, entity_id="stable", owner_id="B"
-    )
-    _update_bot(db, 17, call_type=call_type, caller_config_revision=4)
-
-    caller = _reader(db).read_facts(key).caller
-
-    assert caller == CallerSnapshot(
-        bcs_bot_id="bot-stable:stable",
-        enabled=(call_type == "caller"),
-        source_revision=4,
-    )
-
-
-@pytest.mark.parametrize("call_type", ["owner", "caller"])
-def test_revision_zero_means_no_established_caller_config(
-    db: DatabasePlugin, call_type: str
-) -> None:
-    key = seed_sync_facts(
-        db, tenant="t", env="dev", bot_pk=18, entity_id="stable", owner_id="B"
-    )
-    _update_bot(db, 18, call_type=call_type, caller_config_revision=0)
-
-    assert _reader(db).read_facts(key).caller is None
-
-
-def test_invalid_saved_call_type_is_a_facts_error(db: DatabasePlugin) -> None:
-    key = seed_sync_facts(
-        db, tenant="t", env="dev", bot_pk=19, entity_id="stable", owner_id="B"
-    )
-    _update_bot(db, 19, call_type="bogus", caller_config_revision=1)
-    with pytest.raises(RepairFactsError) as excinfo:
-        _reader(db).read_facts(key)
-    assert excinfo.value.code == "collaboration_call_type_invalid"
-
-
 def test_reads_are_select_only_and_never_bump_caller_revision(
     db: DatabasePlugin,
 ) -> None:
@@ -361,19 +312,30 @@ def test_reads_are_select_only_and_never_bump_caller_revision(
 
     event.listen(Session, "do_orm_execute", record)
     try:
-        first = reader.read_facts(key)
-        second = reader.read_facts(key)
+        reader.read_facts(key)
+        reader.read_facts(key)
     finally:
         event.remove(Session, "do_orm_execute", record)
 
     assert len(statements) == 2
     assert all(state.is_select for state in statements)
     assert all(state.all_mappers == [inspect(BotModel)] for state in statements)
-    assert first.caller is not None and second.caller is not None
-    assert first.caller.source_revision == second.caller.source_revision == 6
 
     with avernet_tenant_scope("t"), db.orm_session() as session:
         saved = session.get(BotModel, 20)
         assert saved is not None
         assert saved.caller_config_revision == 6
         assert saved.call_type == "caller"
+
+
+@pytest.mark.parametrize("call_type,revision", [("owner", 0), ("caller", 4), ("bogus", 1)])
+def test_repair_facts_ignore_caller_configuration(db, call_type, revision):
+    key = seed_sync_facts(
+        db, tenant="t", env="dev", bot_pk=21, entity_id="stable", owner_id="B"
+    )
+    _update_bot(db, 21, call_type=call_type, caller_config_revision=revision)
+
+    facts = _reader(db).read_facts(key)
+
+    assert facts.profile.bcs_bot_id == "bot-stable:stable"
+    assert not hasattr(facts, "caller")

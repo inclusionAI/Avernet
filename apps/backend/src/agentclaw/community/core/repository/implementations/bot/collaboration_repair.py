@@ -2,8 +2,8 @@
 
 Each call binds its explicit tenant and opens one short session, closes
 it before returning, and touches nothing but the Bot table. It calls no
-business mutator, writes no state, and never bumps
-``caller_config_revision``. Unreadable required values surface as
+business mutator, writes no state, and does not read or change
+caller configuration. Unreadable required values surface as
 ``RepairFactsError`` codes instead of becoming default payloads.
 """
 
@@ -18,13 +18,11 @@ from agentclaw.community.core.bot_management.bcn_identity import bcn_bot_referen
 from agentclaw.community.core.bot_management.collaboration_repair.profile import (
     avatar_from_record,
 )
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.repository.protocols.bot.collaboration_repair import (
     CollaborationRepairReadRepository,
 )
 from agentclaw.community.kernel.bot_manager_sync import SyncKey
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     ProfileSnapshot,
     RepairFacts,
     RepairFactsError,
@@ -71,8 +69,7 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
 
         Fields read from the row: ``bot_id``, ``entity_id`` (stable
         address), ``bot_name``/``bot_desc`` (profile text), ``ext``
-        (avatar projection), ``owner_id`` (current Owner), ``call_type``
-        and ``caller_config_revision`` (caller applicability). The
+        (avatar projection), ``owner_id`` (current Owner). The
         session is still open here; the frozen facts are returned only
         after it closes.
         """
@@ -92,7 +89,6 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
                 avatar_url=avatar_url,
             ),
             owner_user_id=bot.owner_id,
-            caller=self._caller(bot, bcs_bot_id),
         )
 
     @staticmethod
@@ -132,30 +128,3 @@ class SqlCollaborationRepairReadRepository(CollaborationRepairReadRepository):
             raise RepairFactsError(
                 RepairFactsErrorCode.COLLABORATION_AVATAR_UNREADABLE
             ) from exc
-
-    @staticmethod
-    def _caller(bot: BotModel, bcs_bot_id: str) -> CallerSnapshot | None:
-        """Project caller applicability from the saved revision.
-
-        A saved ``caller_config_revision`` of 0 means no caller config
-        has ever been established (nothing applicable to repair), which
-        is the only ``None`` case. An established config is always
-        reported, enabled or disabled: ``enabled`` follows the saved
-        aggregate call type and is never used as the applicability
-        marker, the saved revision travels unchanged, and an unknown
-        saved call type raises instead of being parsed into a default.
-        """
-        try:
-            parsed = McpCallType.parse(bot.call_type)
-        except (TypeError, ValueError) as exc:
-            raise RepairFactsError(
-                RepairFactsErrorCode.COLLABORATION_CALL_TYPE_INVALID
-            ) from exc
-        revision = int(bot.caller_config_revision)
-        if revision <= 0:
-            return None
-        return CallerSnapshot(
-            bcs_bot_id=bcs_bot_id,
-            enabled=parsed is McpCallType.CALLER,
-            source_revision=revision,
-        )

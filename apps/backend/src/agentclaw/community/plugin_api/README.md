@@ -189,18 +189,20 @@ The v1 consumer is `BotOwnershipSyncService`; implementations are
 service through `world`, checks success/failure and actual plugin calls; no
 protocol waiver is required. Existing `BcsManagersPlugin` remains managers-only.
 
-## Collaboration metadata delivery Plugin API v1
+## Collaboration metadata delivery Plugin API v2 (2026-11-05)
 
 `BcsCollaborationMetadataPlugin` (in `bcs_collaboration_metadata.py`) is the
 collaboration repair feature's outbound port to BCS's Bot metadata:
 `exists(bcs_bot_id) -> bool` probes remote presence, `update_profile(snapshot)`
 sends one `ProfileSnapshot` (an explicit `""` avatar clear is a valid payload),
-`sync_caller(snapshot)` sends one `CallerSnapshot` (an established disabled
-config with `enabled=False` still sends, carrying the saved `source_revision`
-without bumping it), and `aclose()` releases delivery resources on the shared
+and `aclose()` releases delivery resources on the shared
 loop. Every method performs one bounded attempt under `timeout_seconds`; any
 unconfirmed outcome raises the kernel-owned `MetadataDeliveryError(kind, code)`
 with the NOT_SENT/UNKNOWN/REJECTED classification, and no raw response body
 escapes the transport implementation. Core owns component ordering, retries
 and interpretation; implementations register nothing and never initialize
 ownership.
+
+V2 removes caller configuration repair; the normal caller configuration APIs
+are unchanged. Empty/blank summaries retain BCS Keep semantics but a valid
+onboard acknowledgement is successful profile delivery, not an unknown result.

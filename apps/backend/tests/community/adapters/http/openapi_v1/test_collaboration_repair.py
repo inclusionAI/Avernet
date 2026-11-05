@@ -69,7 +69,7 @@ def test_manager_read_failure_returns_partial_report_after_real_writes():
     )
 
     facts = default_repair_facts(
-        key=SyncKey(_TENANT, _ENV, _BOT_PK), owner_user_id="u1", caller=None
+        key=SyncKey(_TENANT, _ENV, _BOT_PK), owner_user_id="u1"
     )
     facts = replace(facts, profile=replace(facts.profile, bot_id="b-1", bcs_bot_id="b-1:e"))
     case = make_repair_case(facts=facts)
@@ -81,7 +81,7 @@ def test_manager_read_failure_returns_partial_report_after_real_writes():
     data = response.json()["data"]
     assert data["status"] == "partial_failed"
     assert [item["status"] for item in data["items"]] == [
-        "succeeded", "succeeded", "failed", "not_applicable"
+        "succeeded", "succeeded", "failed"
     ]
     assert data["items"][2]["error_code"] == "collaboration_facts_read_error"
     case.ownership.replace_ownership.assert_awaited_once()
@@ -102,7 +102,6 @@ def _report() -> RepairReport:
                 status="unknown",
                 error_code=RepairItemErrorCode.DELIVERY_TIMEOUT,
             ),
-            RepairItem(component="caller_config", status="succeeded"),
         ),
     )
 
@@ -193,7 +192,6 @@ def test_owner_receives_the_report_without_flattening_items(caplog):
         "ownership",
         "profile",
         "managers",
-        "caller_config",
     ]
     assert data["items"][2]["status"] == "unknown"
     assert data["items"][2]["error_code"] == "delivery_timeout"

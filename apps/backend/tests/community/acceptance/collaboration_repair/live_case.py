@@ -18,10 +18,8 @@ public defaults, recording fake success, or calling domain logic directly.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import time
-from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -119,17 +117,13 @@ class RepairCase:
         *,
         register_bcs: bool = True,
         register_avatar_url: str | None = None,
-        provider_binding: bool = False,
     ):
         self._register_backend_user(self.owner)
         self._register_backend_user(self.other_user)
         _ensure_human(self.bcs, self.owner)
         if register_bcs:
-            if provider_binding:
-                self._ensure_provider_binding()
             _ensure_projection_target(self.bcs, bcs_bot_id=self.target, owner_id=self.owner)
-            if not provider_binding:
-                _initialize_fixture_ownership(self.target)
+            _initialize_fixture_ownership(self.target)
             if register_avatar_url is not None:
                 self.admin_onboard(
                     name=f"Story bot {self.bot_id}",
@@ -190,33 +184,6 @@ class RepairCase:
         _assert_status(response, 200, "Backend fixture user registration")
         assert response.json()["success"]
 
-    def _ensure_provider_binding(self) -> None:
-        """Create the caller sub-resource's required provider binding.
-
-        The repair story still repairs only committed Backend facts; this BCS
-        provider binding is part of the pre-existing remote state for a Bot
-        that has an established caller configuration. Gateway mode (not the
-        no-binding plugin mode) uses BCS's official provider registration
-        channel and its returned provider-admin credential stays unlogged.
-        Registration initializes ownership in the same BCS transaction.
-        """
-        fixture = Path(os.environ["SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE"])
-        payload = json.loads(fixture.read_text(encoding="utf-8"))
-        provider_id = payload["provider_id"]
-        token = payload["provider_admin_token"]
-        response = self.bcs.post(
-            f"/providers/{provider_id}/bots",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "provider_bot_ref": self.target,
-                "name": f"Story bot {self.bot_id}",
-                "owners": [self.owner],
-            },
-        )
-        _assert_status(response, 200, "BCS provider binding registration")
-        body = response.json()
-        assert body.get("bot_uuid") == self.target, body
-        assert body.get("provider_bot_ref") == self.target, body
 
     # ------------------------------------------------------------------
     # BCS official admin/profile channel (registration carry + drift facility)
