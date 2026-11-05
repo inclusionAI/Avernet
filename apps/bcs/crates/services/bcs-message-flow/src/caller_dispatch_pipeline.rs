@@ -26,7 +26,11 @@ use bcs_service_api::application::caller_container::{
 };
 use bcs_service_api::application::caller_handoff::{HandoffClaim, HumanCallerDeliveryHandoffService};
 
-use readiness::dispatch_handoff_scope;
+// Re-exported (was a private `use`): the result-leg identity park in
+// queued_task_terminal must derive the SAME claim key the dispatch claim
+// (dispatch_once) and the readiness probe use — scope drift between park
+// and claim is a silent permanent identity loss (readiness.rs contract).
+pub(crate) use readiness::dispatch_handoff_scope;
 use bcs_service_api::application::caller_identity::CallerExecutionToken as ProofToken;
 use bcs_service_api::port::{
     CallerContainerMinimum, CallerDispatchAck, CallerDispatchAssociation, CallerExecutionSendPort, CallerOpaqueRef, ContainerRunAssociation,

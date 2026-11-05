@@ -39,7 +39,7 @@ pub(crate) fn callback_body(cmd: &bcs_service_api::BotEventCommand, partial: boo
     failure_body(cmd.state == bcs_service_api::ChatEventState::Aborted, &callback_reason(cmd), partial)
 }
 
-fn failure_body(cancelled: bool, reason: &str, partial: bool) -> String {
+pub(crate) fn failure_body(cancelled: bool, reason: &str, partial: bool) -> String {
     let reason = if reason.trim().is_empty() || reason == "[no response]" {
         if cancelled { "本次执行已中断，原因未提供。" } else { "任务执行失败，未提供具体原因。" }
     } else { reason };
@@ -98,10 +98,34 @@ mod tests {
     }
 }
 
+/// The failure notice's (cancelled, reason). Shared by the notice builder
+/// and the protected-routing decision (managed_delivery) so the protected
+/// result text never disagrees with the canonical failure body.
+pub(crate) fn failure_reason(row: &PersistedMessageDelivery, state: bcs_domain::message_delivery::MessageDeliveryState,
+    actor: Option<&str>, resolution: Option<&serde_json::Value>,
+) -> Option<(bool, String)> {
+    if !matches!(state.status, Status::Failed | Status::Cancelled) { return None; }
+    let cancelled = state.status == Status::Cancelled;
+    let reason = match (cancelled, state.may_have_been_sent) {
+        (true, false) => "任务在开始执行前已取消。",
+        (true, true) if actor.or(row.cancel_requested_by.as_deref()).is_some() => "已按停止请求中断本次执行。",
+        (true, true) => "本次执行已中断，原因未提供。",
+        (false, false) => "任务未能发送给 Worker，尚未开始执行。",
+        (false, true) => "任务执行失败，未提供具体原因。",
+    }.to_string();
+    let reason = resolution.and_then(|v| v.get("reason").or_else(|| v.get("cancel_reason"))).and_then(|v| v.as_str())
+        .or_else(|| row.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .unwrap_or(reason);
+    Some((cancelled, reason))
+}
+
 /// Called before the same CAS that settles the Worker. The existing stable
 /// result identity and transaction prevent callback/control duplicate Sends.
+/// `protected` is the already-decided protected result text (caller-enabled
+/// Manager): None builds the ordinary failure notice.
 pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::message_delivery::MessageDeliveryState, now: i64,
-    actor: Option<&str>, resolution: Option<&serde_json::Value>,
+    actor: Option<&str>, resolution: Option<&serde_json::Value>, protected: Option<&str>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     let status = state.status;
     if matches!(status, Status::Unknown | Status::CancelUnknown) {
@@ -119,20 +143,10 @@ pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::messag
     let Some(mut task) = crate::queued_task::intent(row)? else { return Ok(None); };
     if task.leg != TaskLeg::Dispatch { return Ok(None); }
     task.leg = TaskLeg::Result;
-    let cancelled = status == Status::Cancelled;
+    let Some((cancelled, reason)) = failure_reason(row, state, actor, resolution) else { return Ok(None); };
     let timed_out = cancelled && is_task_timeout(row);
-    let reason = match (cancelled, state.may_have_been_sent) {
-        (true, false) => "任务在开始执行前已取消。",
-        (true, true) if actor.or(row.cancel_requested_by.as_deref()).is_some() => "已按停止请求中断本次执行。",
-        (true, true) => "本次执行已中断，原因未提供。",
-        (false, false) => "任务未能发送给 Worker，尚未开始执行。",
-        (false, true) => "任务执行失败，未提供具体原因。",
-    };
-    let reason = resolution.and_then(|v| v.get("reason").or_else(|| v.get("cancel_reason"))).and_then(|v| v.as_str())
-        .or_else(|| row.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()))
-        .unwrap_or(reason);
-    let text = failure_body(cancelled, reason, false);
-    let projection = crate::queued_group::QueuedGroupProjection::task_result(row, task.clone(), Vec::new())?;
+    let text = failure_body(cancelled, &reason, false);
+    let projection = crate::queued_group::QueuedGroupProjection::task_result(row, task.clone(), Vec::new(), protected)?;
     let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(
         None, &task.worker, bcs_domain::SenderType::Bot, "chat", None)?;
     Ok(Some(AdmitMessageDeliveries {
