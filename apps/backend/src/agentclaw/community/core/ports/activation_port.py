@@ -36,7 +36,12 @@ from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 @runtime_checkable
 class ActivationPort(Protocol):
-    """What the ``mcp`` and ``skills`` materialisers ask of activation."""
+    """What capability materialisation asks of activation.
+
+    Apply claim/remove commands return the service receipt dictionary. Its
+    ``changed`` boolean confirms an actual committed Bot mutation; successful
+    no-ops return false. An unknown receipt does not prove a durable change.
+    """
 
     @abstractmethod
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, actor_id: str) -> set[str]: ...
