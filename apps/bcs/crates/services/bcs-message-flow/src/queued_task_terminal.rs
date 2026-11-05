@@ -338,3 +338,6 @@ pub(crate) async fn release_result_leg_identity(
     let Some(deps) = flow.caller_admission.as_ref() else { return };
     let _ = deps.handoff.release(&parked.scope).await;
 }
+
+#[cfg(test)]
+mod result_leg_identity_tests;

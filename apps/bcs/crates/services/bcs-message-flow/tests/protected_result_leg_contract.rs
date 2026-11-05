@@ -238,6 +238,8 @@ async fn worker_final_callback_parks_identity_and_marks_the_result_leg() {
     let (task_id, row) = f.dispatch().await;
     let row = f.start(&row).await;
     f.flow.handle_bot_event(final_event(&row)).await.unwrap();
+    // A replayed terminal callback must not mint a second identity.
+    f.flow.handle_bot_event(final_event(&row)).await.unwrap();
 
     let rows = f.rows().await;
     let result = f.result_row(&rows, &task_id);
