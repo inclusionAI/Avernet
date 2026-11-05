@@ -142,10 +142,12 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
         headerClassName: 'sticky right-0 z-10 bg-muted/50',
         cell: (bot) => {
-          // 复制进行中(gated):copy_state 非空时,操作列折叠为仅重试入口,避免对未收敛
-          // 的 dst bot 触发冲突操作。重试安全:create_job 幂等,cas_retry 节流。
+          // 复制失败(gated):仅 copy_state.status === FAILED 时,操作列折叠为重试入口。
+          // 中间态(复制中)不再占用操作列 —— dst bot 未收敛,但用户仍可走正常 actions 查看进度,
+          // 不强行塞重试按钮(避免对 RUNNING/FILE_SYNCED 的 bot 误导「可重试」)。
           const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined;
-          if (copyState && onRetryCopy) return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
+          if (copyState?.status === 'FAILED' && onRetryCopy)
+            return <BotCopyRetryAction onRetry={() => onRetryCopy(bot)} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
