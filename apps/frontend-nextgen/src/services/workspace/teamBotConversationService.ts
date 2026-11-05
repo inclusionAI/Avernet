@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -79,7 +80,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
-    avatarUrl: dto.avatar_url?.trim() || undefined,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',

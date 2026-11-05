@@ -250,10 +250,6 @@ modules:
           evidence:
             path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
             symbol: BcnCollaborationMetadataAdapter.update_profile
-        - key: BcsCollaborationMetadataPlugin.sync_caller
-          evidence:
-            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
-            symbol: BcnCollaborationMetadataAdapter.sync_caller
         - key: BcsCollaborationMetadataPlugin.aclose
           evidence:
             path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
@@ -265,8 +261,10 @@ modules:
       # coverage stack provisions an ephemeral BCN provider, the stories
       # drive the route past the capability gate. The fresh focused run
       # measured core 71.11% (threshold floored to 70.0 to absorb one-line
-      # run variance) and plugin 100% (all four adapter operations execute
-      # over real HTTP, including the provider-bound caller sync).
+      # run variance) and plugin 100%. The 2026-11-05 scope change removes
+      # caller repair; the complete current Plugin API denominator is
+      # exists/update_profile/aclose. Existing thresholds remain unchanged;
+      # a fresh live run must still satisfy them.
       core_min_percent: 70.0
       router_min_percent: 100.0
       plugin_min_percent: 100.0

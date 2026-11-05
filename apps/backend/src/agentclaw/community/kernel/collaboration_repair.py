@@ -1,7 +1,7 @@
 """Collaboration repair — the fixed, transport-free type dictionary.
 
 Shared vocabulary for repairing one Bot's BCS collaboration metadata
-(profile, ownership, managers, caller config) from committed Backend
+(profile, ownership, managers) from committed Backend
 facts. Every layer exchanges these values: the api Service Protocol
 (``api/collaboration_repair_service.py`` re-exports the Core-owned
 contract), the read repository contracts, and the metadata Plugin
@@ -10,9 +10,8 @@ form the common type dictionary for these implementations.
 
 Kernel discipline holds: stdlib plus ``kernel.bot_manager_sync`` only —
 no HTTP, no Redis, no database. HTTP status mapping belongs to the
-adapter, never here. Field names are frozen end to end; ``caller`` and
-``error_code`` are the only optional values and their ``None`` meaning
-is pinned in each docstring.
+adapter, never here. Field names are frozen end to end; ``error_code``
+is the only optional value; its ``None`` meaning is pinned in its docstring.
 """
 
 from __future__ import annotations
@@ -24,9 +23,9 @@ from typing import Literal
 from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure, SyncKey
 
 
-Component = Literal["ownership", "profile", "managers", "caller_config"]
+Component = Literal["ownership", "profile", "managers"]
 ItemStatus = Literal[
-    "succeeded", "failed", "unknown", "skipped_dependency", "not_applicable"
+    "succeeded", "failed", "unknown", "skipped_dependency"
 ]
 ReportStatus = Literal["succeeded", "partial_failed", "failed"]
 
@@ -36,7 +35,6 @@ COMPONENT_ORDER: tuple[Component, ...] = (
     "ownership",
     "profile",
     "managers",
-    "caller_config",
 )
 
 
@@ -45,14 +43,12 @@ class RepairFactsErrorCode(StrEnum):
 
     No code here means "produce a payload anyway": a missing Bot, an
     unresolvable stable identity, an unreadable saved avatar projection,
-    an unknown saved call type, or a failed facts read never silently
-    becomes a default payload.
+    or a failed facts read never silently becomes a default payload.
     """
 
     COLLABORATION_BOT_NOT_FOUND = "collaboration_bot_not_found"
     COLLABORATION_BOT_IDENTITY_UNRESOLVED = "collaboration_bot_identity_unresolved"
     COLLABORATION_AVATAR_UNREADABLE = "collaboration_avatar_unreadable"
-    COLLABORATION_CALL_TYPE_INVALID = "collaboration_call_type_invalid"
     COLLABORATION_FACTS_READ_ERROR = "collaboration_facts_read_error"
 
 
@@ -95,11 +91,9 @@ class MetadataDeliveryErrorCode(StrEnum):
     COLLABORATION_BOT_NOT_FOUND = "collaboration_bot_not_found"
     COLLABORATION_SYNC_UNAVAILABLE = "collaboration_sync_unavailable"
     DELIVERY_TIMEOUT = "delivery_timeout"
-    CALLER_CONFLICT = "caller_conflict"
     COLLABORATION_REJECTED = "collaboration_rejected"
     COLLABORATION_UPSTREAM_ERROR = "collaboration_upstream_error"
     COLLABORATION_RESPONSE_MALFORMED = "collaboration_response_malformed"
-    COLLABORATION_SUMMARY_UNCONFIRMED = "collaboration_summary_unconfirmed"
     UNKNOWN = "unknown"
 
 
@@ -136,34 +130,12 @@ class ProfileSnapshot:
 
 
 @dataclass(frozen=True)
-class CallerSnapshot:
-    """Current committed caller-config facts for one established config.
-
-    ``enabled`` is the saved aggregate call type (``caller`` / not
-    ``caller``) and is not the applicability marker: an established but
-    disabled config still syncs ``enabled=False``. ``source_revision``
-    is the saved ``caller_config_revision``; reading facts never bumps
-    it.
-    """
-
-    bcs_bot_id: str
-    enabled: bool
-    source_revision: int
-
-
-@dataclass(frozen=True)
 class RepairFacts:
-    """Everything needed to repair one Bot, read in one bounded pass.
-
-    ``caller`` is ``None`` only when no caller config has been
-    established for this Bot (``caller_config_revision == 0``); every
-    established config — enabled or disabled — is present.
-    """
+    """Committed profile and owner facts read in one bounded pass."""
 
     key: SyncKey
     profile: ProfileSnapshot
     owner_user_id: str
-    caller: CallerSnapshot | None
 
 
 @dataclass(frozen=True)
@@ -173,12 +145,10 @@ class RepairItem:
     ``status`` is one of the fixed per-item states: ``succeeded``,
     ``failed`` (the attempt was definitively rejected), ``unknown``
     (the remote outcome is unconfirmed — never equal to "untouched"),
-    ``skipped_dependency`` (a prerequisite item failed) or
-    ``not_applicable`` (this Bot has no such component to repair, e.g.
-    no established caller config).
+    ``skipped_dependency`` (a prerequisite item failed).
 
     ``error_code`` is ``None`` when the item has no error of its own —
-    succeeded, not_applicable, or a skipped/dependency case with nothing
+    succeeded or a skipped/dependency case with nothing
     to attribute; failed/unknown items carry one of the finite kernel
     code families: a ``RepairItemErrorCode`` value for item-level
     conditions, a ``RepairFactsErrorCode`` for facts unavailable after
@@ -193,11 +163,11 @@ class RepairItem:
 
 @dataclass(frozen=True)
 class RepairReport:
-    """Terminal result of one repair command, exactly four items.
+    """Terminal result of one repair command, exactly three items.
 
     ``status`` aggregates the items via :func:`report_status`; the
     report is always produced by the service as one item per component
-    in the fixed order ownership, profile, managers, caller_config.
+    in the fixed order ownership, profile, managers.
     """
 
     bot_id: str
@@ -278,7 +248,7 @@ def report_status(items: tuple[RepairItem, ...]) -> ReportStatus:
     Any bad item plus at least one succeeded item is
     ``partial_failed``; bad items with no succeeded item is ``failed``;
     everything else is ``succeeded``. An empty report is a programming
-    error (the service always produces the fixed four items), not a
+    error (the service always produces the fixed three items), not a
     domain outcome.
     """
     if not items:

@@ -72,10 +72,6 @@ FACTS_STATUS: dict[str, tuple[int, str]] = {
         409,
         "Bot profile facts could not be read",
     ),
-    RepairFactsErrorCode.COLLABORATION_CALL_TYPE_INVALID: (
-        409,
-        "Bot caller configuration is invalid",
-    ),
     RepairFactsErrorCode.COLLABORATION_FACTS_READ_ERROR: (
         409,
         "Bot collaboration facts could not be read",

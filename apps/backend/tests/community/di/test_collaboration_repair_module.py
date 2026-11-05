@@ -231,7 +231,7 @@ class Settings(Module):
         binder.bind(BcnService, to=bcn, scope=singleton)
         binder.bind(
             CollaborationRepairReadRepository,
-            to=_reader(default_repair_facts(caller=None)),
+            to=_reader(default_repair_facts()),
             scope=singleton,
         )
         binder.bind(

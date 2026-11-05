@@ -41,7 +41,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
   const isTemplate = mode === 'template';
 
   return (
-    <div className="mb-2 flex items-center gap-2">
+    <div className="mb-4 flex flex-wrap items-center gap-2">
       <Segmented<TemplateMode> value={mode} options={MODE_OPTIONS} onChange={onModeChange} className="shrink-0" />
       {isTemplate && (
         <Popover open={open} onOpenChange={setOpen}>
@@ -50,7 +50,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
               type="button"
               variant="secondary"
               aria-label="选择协作模板"
-              className="h-8 min-w-[180px] flex-1 justify-between rounded-lg border-border bg-background px-2.5"
+              className="order-3 h-10 min-w-0 basis-full justify-between rounded-lg border-input bg-background px-3 sm:order-none sm:h-9 sm:basis-auto sm:flex-1"
             >
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 {selectedTemplate ? (

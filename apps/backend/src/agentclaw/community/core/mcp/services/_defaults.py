@@ -35,7 +35,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
         {"server_code": "mcp.ant.brwithub.worksummaryserver"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
-        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
         {"server_code": "hitl"},
     ],
     "moltis": [],
@@ -52,7 +52,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.arkai.dimamcpserver"},
         {"server_code": "mcp.ant.homistudio.recordmcp"},
         {"server_code": "mcp.ant.rpc.dcanttouch.adminservice"},
-        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
         # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
         # last to match the other engines' lists, and the only entry here that
         # still carries a ``name``: the codes above are catalogued upstream, so
@@ -96,7 +96,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
         {"server_code": "mcp.ant.brwithub.worksummaryserver"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
-        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE},
+        {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
         {"server_code": "hitl"},
     ],
     "aicoding": [

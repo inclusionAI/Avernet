@@ -212,17 +212,17 @@ export function CreateGroupModal({
         size="lg"
         closeLabel="关闭发起协作弹窗"
         className={cn(
-          'h-[min(860px,calc(100vh-2rem))] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0',
-          showFlowAside && 'xl:left-[calc(50%-208px)] xl:overflow-visible',
+          'h-dvh max-h-dvh w-full max-w-[720px] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[min(900px,calc(100dvh-3rem))] sm:w-[calc(100vw-3rem)] sm:rounded-2xl sm:border',
+          showFlowAside && 'xl:max-w-[1320px] xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]',
         )}
       >
         <CreateGroupHeader />
-        <div className="flex min-h-0 min-w-0 max-w-full overflow-x-hidden">
+        <div className="col-start-1 row-start-2 flex min-h-0 min-w-0 max-w-full overflow-hidden">
           <div
             data-testid="create-group-modal-body"
+            onScroll={({ currentTarget: el }) => { if (el.scrollHeight - el.scrollTop - el.clientHeight < 80 && (kind !== 'task_dag' || showFlowAside)) picker.loadMore(); }}
             className={cn(
-              'app-scrollbar flex h-full min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-6 py-6',
-              showFlowAside ? 'lg:overflow-y-auto' : 'lg:overflow-y-hidden',
+              'app-scrollbar flex h-full min-h-0 min-w-0 max-w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-6 [&>*]:shrink-0',
             )}
           >
             <GroupConfigFields
@@ -272,8 +272,8 @@ export function CreateGroupModal({
                     ? { id: activeIdentity.id, name: activeIdentity.displayName }
                     : null
                 }
-                listViewportClassName={showFlowAside ? 'max-h-[420px]' : undefined}
-                fillAvailableHeight={!showFlowAside}
+                activeRoleName={kind === 'task_dag' ? binding.yamlValidation.participantDefinitions.find((role) => role.key === binding.activeParticipantKey)?.displayName || binding.activeParticipantKey : undefined}
+                listViewportClassName="max-h-none overflow-visible"
                 routing={routing}
                 additionalRoutingOptions={kind === 'task_dag' ? boundBotOptions : undefined}
               />

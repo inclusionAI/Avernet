@@ -51,6 +51,10 @@ export interface RoutineAddress extends RoutineTarget {
   key: string;
 }
 export interface RoutineForm extends BotEditorRoutineInput, RoutineTarget {}
+export interface RoutineRunMessage {
+  role: string;
+  content: string;
+}
 export interface RoutineRun extends RoutineTarget {
   id: string;
   routineId: string;
@@ -58,6 +62,10 @@ export interface RoutineRun extends RoutineTarget {
   startedAt?: string;
   finishedAt?: string;
   duration?: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  messages?: RoutineRunMessage[];
 }
 export interface FailedTarget extends RoutineTarget {
   bot_id?: string | null;
@@ -90,6 +98,10 @@ export interface RoutineRunDto extends RoutineTarget {
   status: string;
   started_at: string | null;
   finished_at: string | null;
+  input?: string | null;
+  output?: string | null;
+  error?: string | null;
+  messages?: RoutineRunMessage[] | null;
 }
 export interface RoutineOperationBatch {
   results: Array<

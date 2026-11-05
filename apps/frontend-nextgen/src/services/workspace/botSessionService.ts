@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
@@ -150,7 +151,7 @@ export function listChatBots(identityViews: IdentityView[]): ChatBotView[] {
         realBotId,
         ownerId,
         displayName: i.displayName,
-        avatarUrl: i.avatarUrl,
+        avatarUrl: resolveBotAvatarUrl(i.avatarUrl, realBotId),
         online: i.online,
         reachability: i.reachability,
         chatable: COMPOUND_ID_RE.test(i.id),
@@ -260,7 +261,7 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     ownerId,
     engineOwnerId: dto.owner_entity_id,
     displayName: dto.bot_name || dto.bot_id,
-    avatarUrl: dto.avatar_url?.trim() || undefined,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: dto.status,
     reachability: 'reachable',

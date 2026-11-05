@@ -3,6 +3,7 @@
 Tests cover admin, config, and BCN downlink routers not already tested:
 - Admin API Key management: list/create/revoke/get (via /api/v1/admin/api-keys)
 - Admin Publish management: force-success, device status update (/api/v1/admin/*)
+  (device-repair contract details: tests/e2e/asgi/baseline/test_admin_device_repair.py)
 - Admin Bot restore: POST /api/v1/admin/bots/restore (atomic record restore, bot_id or bot_uuid in body)
 - System Config management: list/create/update/delete (/api/v1/system-configs)
 - QPM Config management: set/get/delete per bot (/api/v1/bot-qpm)
@@ -210,9 +211,9 @@ class TestAdminPublish:
     async def test_admin_update_device_status_nonexistent(
         self, api: APITestHelper
     ) -> None:
-        """POST /api/v1/admin/devices/{uuid}/status on nonexistent device returns 404."""
+        """POST /api/v1/admin/devices/{uuid}/repair on nonexistent device returns 404."""
         response = await api.client.post(
-            "/api/v1/admin/devices/nonexistent-device-uuid/status",
+            "/api/v1/admin/devices/nonexistent-device-uuid/repair",
             params=api.params(),
             json={"status": "ACTIVE", "operator": "e2e-test"},
         )
@@ -226,9 +227,9 @@ class TestAdminPublish:
     async def test_admin_update_device_status_missing_params(
         self, api: APITestHelper
     ) -> None:
-        """POST /api/v1/admin/devices/{uuid}/status with missing params returns 422."""
+        """POST /api/v1/admin/devices/{uuid}/repair with missing params returns 422."""
         response = await api.client.post(
-            "/api/v1/admin/devices/test-device-uuid/status",
+            "/api/v1/admin/devices/test-device-uuid/repair",
             params=api.params(),
             json={},
         )

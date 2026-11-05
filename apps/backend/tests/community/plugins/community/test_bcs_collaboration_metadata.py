@@ -20,7 +20,6 @@ from unittest.mock import Mock
 
 from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.kernel.collaboration_repair import (
-    CallerSnapshot,
     MetadataDeliveryError,
     MetadataDeliveryErrorCode,
     ProfileSnapshot,
@@ -47,7 +46,6 @@ from agentclaw.community.plugins.community.bcs_collaboration_metadata import (
 )
 
 _PROFILE = ProfileSnapshot("b", "b:e", "N", "D", "")
-_CALLER = CallerSnapshot("b:e", True, 7)
 
 
 def _assert_delivery(excinfo: Any, kind: DeliveryFailure, code: str) -> None:
@@ -306,11 +304,6 @@ async def test_profile_preserves_typed_missing_bot_as_rejected_not_found():
         # ... while every other transport code is bucketed, so no
         # status-shaped token reaches the public report.
         (
-            BcnRequestError(DeliveryFailure.REJECTED, "caller_conflict", "m"),
-            DeliveryFailure.REJECTED,
-            MetadataDeliveryErrorCode.CALLER_CONFLICT,
-        ),
-        (
             BcnRequestError(DeliveryFailure.REJECTED, "http_403", "m"),
             DeliveryFailure.REJECTED,
             MetadataDeliveryErrorCode.COLLABORATION_REJECTED,
@@ -356,129 +349,6 @@ async def test_profile_buckets_typed_transport_failures(raised, kind, code):
         await port.update_profile(_PROFILE, timeout_seconds=3)
     _assert_delivery(excinfo, kind, code)
     assert bcn.onboard_bot.call_count == 1
-
-
-# ---------------------------------------------------------------------------
-# sync_caller — single CAS send of the saved revision
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_caller_sends_stable_ref_and_saved_revision_unchanged():
-    bcn = Mock(spec=BcnService)
-    bcn.sync_bot_caller_config.return_value = {
-        "skipped": False,
-        "sync_status": "applied",
-        "provider_bot_ref": "b:e",
-    }
-    port = BcnCollaborationMetadataAdapter(bcn, profile_headers={})
-    assert await port.sync_caller(_CALLER, timeout_seconds=4) is None
-    assert bcn.sync_bot_caller_config.call_args.kwargs == {
-        # repair pins the stable <bot_id>:<entity_id> reference verbatim; the
-        # legacy (teamclaw_bot_uuid, owner_workno) pair is only re-derived
-        # from it for the transport's own ref-without-owner validation.
-        "teamclaw_bot_uuid": "b",
-        "owner_workno": "e",
-        "enabled": True,
-        "source_revision": 7,
-        "provider_bot_ref": "b:e",
-        "timeout_seconds": 4,
-    }
-    _assert_single_send_only(bcn, "sync_bot_caller_config")
-
-
-@pytest.mark.asyncio
-async def test_caller_conflict_propagates_as_typed_failed_cas():
-    bcn = Mock(spec=BcnService)
-    bcn.sync_bot_caller_config.side_effect = BcnRequestError(
-        DeliveryFailure.REJECTED, "caller_conflict", "stale revision"
-    )
-    port = BcnCollaborationMetadataAdapter(bcn, profile_headers={})
-    with pytest.raises(MetadataDeliveryError) as excinfo:
-        await port.sync_caller(_CALLER, timeout_seconds=4)
-    _assert_delivery(
-        excinfo, DeliveryFailure.REJECTED, MetadataDeliveryErrorCode.CALLER_CONFLICT
-    )
-    assert bcn.sync_bot_caller_config.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_caller_skipped_environment_gate_is_precondition():
-    bcn = Mock(spec=BcnService)
-    bcn.sync_bot_caller_config.return_value = {"skipped": True, "provider_bot_ref": "b:e"}
-    port = BcnCollaborationMetadataAdapter(bcn, profile_headers={})
-    with pytest.raises(RepairPreconditionError) as excinfo:
-        await port.sync_caller(_CALLER, timeout_seconds=4)
-    _assert_precondition(
-        excinfo, RepairPreconditionErrorCode.COLLABORATION_SYNC_UNAVAILABLE
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "result",
-    [
-        ["not-a-dict"],
-        {"skipped": False, "provider_bot_ref": "b:e"},
-        {
-            "skipped": False,
-            "sync_status": "wait",
-            "provider_bot_ref": "b:e",
-        },
-        {"skipped": False, "sync_status": "applied", "provider_bot_ref": "other:e"},
-    ],
-)
-async def test_caller_rejects_malformed_confirmations(result):
-    bcn = Mock(spec=BcnService)
-    bcn.sync_bot_caller_config.return_value = result
-    port = BcnCollaborationMetadataAdapter(bcn, profile_headers={})
-    with pytest.raises(MetadataDeliveryError) as excinfo:
-        await port.sync_caller(_CALLER, timeout_seconds=4)
-    _assert_delivery(
-        excinfo,
-        DeliveryFailure.UNKNOWN,
-        MetadataDeliveryErrorCode.COLLABORATION_RESPONSE_MALFORMED,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "raised,kind,code",
-    [
-        (
-            BcnUnavailableError("BCN API: 503"),
-            DeliveryFailure.UNKNOWN,
-            MetadataDeliveryErrorCode.COLLABORATION_SYNC_UNAVAILABLE,
-        ),
-        (
-            BcnRequestError(DeliveryFailure.UNKNOWN, "timeout", "t"),
-            DeliveryFailure.UNKNOWN,
-            MetadataDeliveryErrorCode.DELIVERY_TIMEOUT,
-        ),
-        (
-            BcnBotMissingError("BCN caller: 404"),
-            DeliveryFailure.REJECTED,
-            MetadataDeliveryErrorCode.COLLABORATION_BOT_NOT_FOUND,
-        ),
-        (
-            BcnRequestError(DeliveryFailure.REJECTED, "http_403", "m"),
-            DeliveryFailure.REJECTED,
-            MetadataDeliveryErrorCode.COLLABORATION_REJECTED,
-        ),
-        (
-            BcnRequestError(DeliveryFailure.UNKNOWN, "http_500", "m"),
-            DeliveryFailure.UNKNOWN,
-            MetadataDeliveryErrorCode.COLLABORATION_UPSTREAM_ERROR,
-        ),
-    ],
-)
-async def test_caller_buckets_typed_transport_failures(raised, kind, code):
-    bcn = Mock(spec=BcnService)
-    bcn.sync_bot_caller_config.side_effect = raised
-    port = BcnCollaborationMetadataAdapter(bcn, profile_headers={})
-    with pytest.raises(MetadataDeliveryError) as excinfo:
-        await port.sync_caller(_CALLER, timeout_seconds=4)
-    _assert_delivery(excinfo, kind, code)
 
 
 # ---------------------------------------------------------------------------
@@ -619,22 +489,6 @@ async def test_fake_profile_stores_only_when_bot_existing():
 
 
 @pytest.mark.asyncio
-async def test_fake_caller_requires_existing_and_records_call():
-    plugin = RecordingBcsCollaborationMetadataPlugin(existing={"b:e"})
-    with pytest.raises(MetadataDeliveryError) as excinfo:
-        await plugin.sync_caller(
-            CallerSnapshot("gone:x", True, 3), timeout_seconds=1
-        )
-    _assert_delivery(
-        excinfo,
-        DeliveryFailure.NOT_SENT,
-        MetadataDeliveryErrorCode.COLLABORATION_BOT_NOT_FOUND,
-    )
-    await plugin.sync_caller(CallerSnapshot("b:e", False, 4), timeout_seconds=1)
-    assert plugin.calls[-1] == ("caller", CallerSnapshot("b:e", False, 4))
-
-
-@pytest.mark.asyncio
 async def test_fake_injects_scripted_failures_after_recording():
     interrupted = MetadataDeliveryError(
         DeliveryFailure.UNKNOWN, MetadataDeliveryErrorCode.DELIVERY_TIMEOUT
@@ -642,12 +496,9 @@ async def test_fake_injects_scripted_failures_after_recording():
     gated = RepairPreconditionError(
         RepairPreconditionErrorCode.COLLABORATION_SYNC_UNAVAILABLE
     )
-    conflicted = MetadataDeliveryError(
-        DeliveryFailure.REJECTED, MetadataDeliveryErrorCode.CALLER_CONFLICT
-    )
     plugin = RecordingBcsCollaborationMetadataPlugin(
         existing={"b:e"},
-        failures={"exists": gated, "profile": interrupted, "caller": conflicted},
+        failures={"exists": gated, "profile": interrupted},
     )
     with pytest.raises(RepairPreconditionError) as excinfo:
         await plugin.exists("b:e", timeout_seconds=1)
@@ -659,15 +510,9 @@ async def test_fake_injects_scripted_failures_after_recording():
     _assert_delivery(
         excinfo, DeliveryFailure.UNKNOWN, MetadataDeliveryErrorCode.DELIVERY_TIMEOUT
     )
-    with pytest.raises(MetadataDeliveryError) as excinfo:
-        await plugin.sync_caller(_CALLER, timeout_seconds=1)
-    _assert_delivery(
-        excinfo, DeliveryFailure.REJECTED, MetadataDeliveryErrorCode.CALLER_CONFLICT
-    )
     assert [operation for operation, _ in plugin.calls] == [
         "exists",
         "profile",
-        "caller",
     ]
     assert plugin.profiles == {}
 

@@ -62,7 +62,7 @@ def test_avatar_registration_daily_sync_and_v1_readback(repair_case):
 
 def test_repair_restores_saved_profile_and_confirms_authority(repair_case):
     """An owner repairs drift through HTTP and reads actual BCS state back."""
-    case = repair_case(provider_binding=True)
+    case = repair_case()
     name = f"Saved {case.suffix}"
     case.save_manager(case.other_user)
     case.save_caller(enabled=True, revision=1)
@@ -86,7 +86,6 @@ def test_repair_restores_saved_profile_and_confirms_authority(repair_case):
         ("ownership", "succeeded", None),
         ("profile", "succeeded", None),
         ("managers", "succeeded", None),
-        ("caller_config", "succeeded", None),
     ]
     assert case.read_bcs_owner() == case.owner
     assert case.read_bcs_managers() == {case.other_user}
@@ -96,10 +95,11 @@ def test_repair_restores_saved_profile_and_confirms_authority(repair_case):
     case.assert_no_repair_queue()
 
 
-def test_empty_summary_is_unconfirmed_while_other_profile_fields_are_applied(repair_case):
-    case = repair_case(provider_binding=True)
+@pytest.mark.parametrize("summary", ["", " \t\n"])
+def test_empty_summary_succeeds_while_preserving_existing_bcs_summary(repair_case, summary):
+    case = repair_case()
     name = f"Saved {case.suffix}"
-    case.save_profile(name=name, summary="", avatar_url="")
+    case.save_profile(name=name, summary=summary, avatar_url="")
     case.admin_onboard(
         name=_DRIFTED_NAME, summary="old summary", avatar_url=_DRIFTED_AVATAR,
     )
@@ -108,10 +108,10 @@ def test_empty_summary_is_unconfirmed_while_other_profile_fields_are_applied(rep
 
     assert response.status_code == 200
     report = response.json()["data"]
-    assert report["status"] == "partial_failed"
+    assert report["status"] == "succeeded"
     assert report["items"][1] == {
-        "component": "profile", "status": "unknown",
-        "error_code": "collaboration_summary_unconfirmed",
+        "component": "profile", "status": "succeeded",
+        "error_code": None,
     }
     assert report["items"][0]["status"] == "succeeded"
     assert report["items"][2]["status"] == "succeeded"

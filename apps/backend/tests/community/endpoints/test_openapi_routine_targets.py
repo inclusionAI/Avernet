@@ -168,6 +168,11 @@ class _RecordingTransport:
         self.fail_devices = set()
         self.error = None
         self.extensions = {}
+        self.run_responses = {}
+
+    def set_runs_response(self, device, data):
+        """Configure per-device history at the transport boundary, without patching services."""
+        self.run_responses[device] = data
 
     async def invoke(self, conn_info, method, path, body=None, params=None, **kwargs):
         self.calls.append((conn_info, method, path, body, params))
@@ -176,6 +181,8 @@ class _RecordingTransport:
         if conn_info["url"] in self.fail_devices:
             return {"success": False, "data": None, "message": "instance unavailable"}
         if path.endswith("/runs"):
+            if conn_info["url"] in self.run_responses:
+                return {"success": True, "data": dict(self.run_responses[conn_info["url"]])}
             return {"success": True, "data": {"runs": [{"job_id": "same", "started_at_ms": 1000}], **self.extensions}}
         if path.endswith("/run"):
             return {"success": True, "data": {"status": "dispatched", **self.extensions}}

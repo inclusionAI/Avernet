@@ -5,9 +5,15 @@ These endpoints bypass normal state machine transitions — use with caution.
 
 Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
-- POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
+- POST /api/v1/admin/devices/{device_uuid}/repair - Repair a device's status and/or
+  provider binding directly, stamping the operator as `modifier`
 - POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
 - POST /api/v1/admin/bots/restore - Restore a bot record to live ACTIVE (bot_id or bot_uuid in request body)
+
+Device repair contract: `status` (optional, must be a known `DeviceStatus`
+value — anything else is 422) and `provider_device_id` (optional, 1-128 chars;
+omitted leaves the stored binding unchanged). At least one of the two is
+required, and `operator` is stamped as the row's `modifier` in the same update.
 """
 
 from typing import Annotated
@@ -17,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field, model_validator
 
 from secbaas.community.api import ApiResponse
+from secbaas.community.api.device_manage import DeviceStatus
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
@@ -103,24 +110,45 @@ async def force_success_endpoint(
 
 
 class UpdateDeviceStatusRequest(BaseModel):
-    status: str = Field(
-        ...,
+    status: DeviceStatus | None = Field(
+        default=None,
+        description="Target device status (one of the known DeviceStatus values)",
+    )
+    provider_device_id: str | None = Field(
+        default=None,
         min_length=1,
-        max_length=32,
-        description="Target device status (e.g. ACTIVE, FAILED, PENDING, STOPPED)",
+        max_length=128,
+        description=(
+            "Provider-side device ID to bind on the record; omitted leaves "
+            "the stored binding unchanged"
+        ),
     )
     operator: str = Field(
         ...,
         min_length=1,
         max_length=128,
-        description="User performing the status update",
+        description="User performing the status update (stamped as modifier)",
     )
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> "UpdateDeviceStatusRequest":
+        if self.status is None and self.provider_device_id is None:
+            raise ValueError("provide at least one of 'status' or 'provider_device_id'")
+        return self
 
 
 class UpdateDeviceStatusResponse(BaseModel):
     device_uuid: str = Field(..., description="Device UUID that was updated")
     previous_status: str = Field(..., description="Previous status of the device")
     new_status: str = Field(..., description="New status after the update")
+    previous_provider_device_id: str | None = Field(
+        default=None,
+        description="Provider device ID before the update (null when unbound)",
+    )
+    new_provider_device_id: str | None = Field(
+        default=None,
+        description="Provider device ID after the update",
+    )
 
 
 def _to_update_status_response(
@@ -130,18 +158,20 @@ def _to_update_status_response(
         device_uuid=result.device_uuid,
         previous_status=result.previous_status,
         new_status=result.new_status,
+        previous_provider_device_id=result.previous_provider_device_id,
+        new_provider_device_id=result.new_provider_device_id,
     )
 
 
 @router.post(
-    "/devices/{device_uuid}/status",
+    "/devices/{device_uuid}/repair",
     response_model=ApiResponse[UpdateDeviceStatusResponse],
 )
 @inject
 async def update_device_status_endpoint(
     device_uuid: Annotated[
         str,
-        Path(description="Device UUID to update"),
+        Path(description="Device UUID to repair"),
     ],
     tenant: Annotated[str, Query(description="Tenant name")],
     request: UpdateDeviceStatusRequest,
@@ -149,17 +179,24 @@ async def update_device_status_endpoint(
         Provide[ApplicationContainer.services.publish_admin_service]
     ),
 ) -> ApiResponse[UpdateDeviceStatusResponse]:
-    """Update a device's status directly, bypassing normal state machine transitions.
+    """Repair a device's status and/or provider binding directly.
 
-    **WARNING**: This is a test/development tool. It intentionally bypasses
-    the normal state machine transitions and does not perform any real
-    device provisioning or deprovisioning. Use with caution.
+    Bypasses normal state machine transitions: no publish workflow and no
+    PaaS operation is triggered.
+
+    At least one of ``status`` / ``provider_device_id`` must be supplied;
+    an omitted field leaves the stored value unchanged. ``status`` must be a
+    known :class:`DeviceStatus` value (422 otherwise). ``operator`` is
+    stamped as the row's ``modifier`` in the same update.
+
+    **WARNING**: This is a test/development tool. Use with caution.
     """
     try:
         result = await admin_service.update_device_status(
             device_uuid=device_uuid,
             tenant=tenant,
             status=request.status,
+            provider_device_id=request.provider_device_id,
             operator=request.operator,
         )
     except PublishNotFoundError:

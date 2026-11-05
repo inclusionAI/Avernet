@@ -1,7 +1,7 @@
 # Collaboration repair
 
 One-shot repair of one Bot's BCS collaboration metadata (profile,
-ownership, managers, caller config) from committed Backend facts. This
+ownership, managers) from committed Backend facts. This
 package owns the read-only facts contract's Service API declaration and
 the avatar projection shared with the daily registration/edit flows. It
 is not an Owner-handoff path, not a scheduler, and not a durable
@@ -10,7 +10,7 @@ recovery system.
 ## Context Boundary
 
 ```yaml
-purpose: Read-only repair facts for one Bot's BCS collaboration metadata (profile, ownership, managers, caller config) plus the one-shot repair Service API contract.
+purpose: Read-only repair facts for one Bot's BCS collaboration metadata (profile, ownership, managers) plus the one-shot repair Service API contract.
 provides:
   - CollaborationRepairServiceProtocol
   - CollaborationRepairService
@@ -81,9 +81,8 @@ an implementation.
   it never registers a missing Bot, never initializes version-0
   ownership, and never substitutes an implicit registration for
   explicit repair.
-- Scope is exactly the four components declared by the kernel's
-  `Component` type: `ownership`, `profile`, `managers`,
-  `caller_config`. Nothing outside that set is created or extended here.
+- Scope is exactly the three components declared by the kernel's
+  `Component` type: `ownership`, `profile`, `managers`. Nothing outside that set is created or extended here.
 - One bounded send per item with an explicit `timeout_seconds` budget.
   There are no retries, no queue, and no compensation: a component that
   could not be confirmed is reported, not silently retried into success.
@@ -110,40 +109,22 @@ consumed from the row:
 | `bot_desc` | profile `summary` (missing saved value projects to `""`) |
 | `ext` | avatar projection via `avatar_from_record` and retained `bcn_provider_bot_ref` for converted service Bots |
 | `owner_id` | current committed Owner (`owner_user_id`) |
-| `call_type` | caller `enabled` for an established config |
-| `caller_config_revision` | caller applicability + `source_revision` |
 
 No other table is read, no mutator is called, the session closes before
 any value is returned, and the revision is never bumped.
 
-## Caller applicability rule
+## Caller configuration is outside repair scope
 
-A saved `caller_config_revision > 0` marks an **established** caller
-config (the writer in
-`core/repository/implementations/identity/caller_identity.py` bumps the
-column on every MCP/CLI caller-config mutation; `core/caller_identity/service.py`
-then sends the bumped value as `source_revision` through the
-`BcsCallerConfigSyncProtocol` declared in
-`core/caller_identity/protocols.py`). A
-revision of `0` means no caller config has ever been established, so
-`RepairFacts.caller` is `None` — the only `None` meaning in this
-contract.
-
-An established config is always reported, enabled or disabled:
-`CallerSnapshot.enabled` follows the saved aggregate call type
-(`call_type == "caller"`), mirroring the existing domain rule
-`enabled = bot_call_type is McpCallType.CALLER`, while
-`source_revision` carries the saved revision unchanged. `enabled=False`
-marks a valid **disabled** config that still syncs; it is never used as
-the "not applicable" marker. An unknown saved `call_type` value raises a
-facts error rather than parsing into a default payload.
+The repair command neither reads/validates caller configuration nor sends it
+or includes it in the report. Existing MCP/CLI identity-mode updates continue
+to synchronize caller configuration through their normal business path.
 
 ## Failure semantics
 
 - Initial facts failures propagate. A missing/deleted/out-of-scope Bot, an
   unresolvable stable identity (missing, blank or padded `bot_id` /
   `entity_id`), an unreadable saved avatar projection (illegal avatar
-  field type or corrupt `ext` JSON), an unknown saved `call_type`, or
+  field type or corrupt `ext` JSON), or
   an SQL failure raise `RepairFactsError` with the finite
   `RepairFactsErrorCode` vocabulary. No case produces a default or
   empty payload, and no case sends anything to BCS.
@@ -156,18 +137,16 @@ facts error rather than parsing into a default payload.
   raises `MetadataDeliveryError(kind, code)` with the stable
   NOT_SENT / REJECTED / UNKNOWN classification. HTTP status mapping
   belongs to the adapter, not to Core or kernel.
-- Empty/blank summaries cannot be confirmed through the existing onboard
-  contract: BCS preserves the previous summary and its reply does not echo it.
-  After an otherwise confirmed profile send, report `unknown` with
-  `collaboration_summary_unconfirmed`. Name/avatar may have been applied;
-  independent managers/caller items continue. No second write, retry, or
-  unverified summary-clear success is introduced. The recording Plugin models
-  the same preservation and outcome.
+- Empty/blank summaries preserve BCS's existing summary. A valid onboard
+  acknowledgement is nevertheless a successful profile repair; success does
+  not imply that the remote summary was cleared. The recording Plugin models
+  the same preservation and successful outcome. Actual delivery failures and
+  malformed acknowledgements retain their existing classifications.
 - Per-item outcomes are explicit. `RepairReport` carries one item per
   fixed component; `report_status` derives `succeeded` /
   `partial_failed` / `failed` from the items alone, and an empty report
   is rejected as a programming error because the service always emits
-  the four items. An item's `error_code` is `None` when the item has no
+  the three items. An item's `error_code` is `None` when the item has no
   error of its own, so a code-less skipped/dependency item is valid.
 
 ## Request orchestration (`CollaborationRepairService`)
@@ -176,8 +155,7 @@ The service runs the plan's fixed order against one request-scoped
 budget (`timeout_seconds` bound the whole repair; `clock` is injected
 by the composition root): initial facts read → owner precondition →
 `exists` probe → fresh ownership read + one `replace_ownership` → one
-`update_profile` → fresh managers read + one `replace_managers` → `<=1`
-`sync_caller` for an established config (disabled included). All three
+`update_profile` → fresh managers read + one `replace_managers`. All three
 reader calls run in `asyncio.to_thread`, so no network I/O observes an
 open session; each read await and each send uses the current remaining
 budget. A timed-out reader may finish on its worker thread later, but its
@@ -194,20 +172,14 @@ Interpretation and stop rules (implementing design §7.3–7.5):
   classified `BcsManagersError(REJECTED, BOT_NOT_FOUND_CODE)`); a returned change IS the
   confirmation. Roster re-verification is the background sync's drift
   diagnosis, not this contract.
-- Any ownership anomaly stops profile/managers/caller
-  (`skipped_dependency`). A profile failure continues except the
-  vanished-target not-found code or an exhausted deadline; a managers
-  delivery failure continues only while the target exists and budget remains.
+- Any ownership anomaly stops profile/managers (`skipped_dependency`). A
+  profile failure continues except for a vanished target or exhausted deadline.
   Classified managers facts failures produce `failed` with their existing
-  `RepairFactsErrorCode`, preserve completed ownership/profile outcomes,
-  and skip caller delivery because the target/owner could not be revalidated.
+  `RepairFactsErrorCode` and preserve completed ownership/profile outcomes.
   Initial facts and ownership validation failures before any write remain
   error envelopes. Unclassified exceptions and cancellation still propagate.
-  Owner drift
-  between the ownership write and the managers re-read never writes the
-  stale roster: managers is `skipped_dependency`/`owner_drift` and an
-  applicable caller follows as a plain `skipped_dependency`. An absent
-  caller config stays `not_applicable` in every stopped tail.
+  Owner drift between the ownership write and managers re-read never writes
+  the stale roster: managers is `skipped_dependency`/`owner_drift`.
 - Deadline: tripping before the first item is a precondition
   (`repair_deadline_exceeded`, no report). Mid-execution, the current
   item takes `failed`/`delivery_timeout` when its send never started
@@ -224,8 +196,7 @@ Interpretation and stop rules (implementing design §7.3–7.5):
 
 The public-local singlebox stack ships **no BCN provider credentials** (the
 `bcn` block of `application-singlebox.yaml` deliberately leaves them empty),
-and the one-shot repair needs that provider scope for its existence probe
-and caller sync. A deployment without it is an `unavailable` deployment by
+and the one-shot repair needs that provider scope for its existence probe. A deployment without it is an `unavailable` deployment by
 design: `CollaborationRepairFactory.open` refuses with
 `RepairPreconditionError(collaboration_sync_unavailable)` → HTTP **503**
 before a plugin is constructed or any write attempted.
@@ -238,10 +209,18 @@ file, outside the report artifacts and source tree.
 
 The live acceptance stories (`tests/community/acceptance/collaboration_repair/`)
 call the real owner-scoped HTTP route and verify profile restoration, manager
-convergence, ownership confirmation, the four-item success report, missing-target
+convergence, ownership confirmation, the three-item success report, missing-target
 404 with zero creation, invalid-avatar refusal, and non-owner masking. The same
 stack exercises avatar edits and explicit clears with V1 Group/Session readback.
 Readers, projectors and delivery plugins remain production implementations;
 there are no test-only calls into Core. Credentialless 503, classified failures,
-deadline handling and caller-config delivery remain covered by unit/contract
+deadline handling and metadata delivery remain covered by unit/contract
 suites. See the acceptance README for fixture provisioning and isolation.
+
+## Compatibility update — 2026-11-05
+
+Repair reports now contain exactly three components rather than four; the
+HTTP schema and Plugin API no longer expose caller repair. Blank summaries
+are successful on a valid BCS acknowledgement and retain BCS Keep semantics.
+See the canonical design and `repair-scope-update-plan.md` for this deliberate
+contract change. The existing `/openapi/v1` route and normal caller APIs remain.
