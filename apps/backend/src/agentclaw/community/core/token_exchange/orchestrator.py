@@ -9,6 +9,7 @@ from agentclaw.community.core.caller_identity.contracts import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.token_exchange.pipeline import TokenPluginPipeline
 from agentclaw.community.core.token_exchange.protocols import TokenExchangeContext
+from agentclaw.community.core.token_exchange.timing import run_token_io
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 
@@ -65,7 +66,8 @@ class TokenExchangeOrchestrator:
             )
 
         try:
-            context = self._build_context(
+            context = await run_token_io(
+                "build_context", "orchestrator", self._build_context,
                 bot_id=bot_id,
                 entity_id=entity_id,
                 stage=stage,

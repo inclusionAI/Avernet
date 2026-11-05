@@ -111,6 +111,22 @@ def test_personal_bot_resolves_its_draft_binding():
     assert resolved.source is RuntimeBindingSource.PERSONAL
 
 
+def test_resolve_with_record_returns_checked_record_without_rereading(monkeypatch):
+    binding = _Binding(11)
+    service, _ = _service({"bot_type": "personal", "binding_id": 11}, bindings={11: binding})
+    reads = []
+
+    def read(binding_id):
+        reads.append(binding_id)
+        return binding
+
+    monkeypatch.setattr(service._binding_repository, "get_by_id", read)
+    resolved, record = service.resolve_with_record(RuntimeBindingRequest(BOT, OWNER, OWNER))
+    assert resolved.binding_id == 11
+    assert record is binding
+    assert reads == [11]
+
+
 def test_service_online_resolves_the_published_binding():
     service, _ = _service(
         {"id": 2, "bot_type": "service", "call_type": "owner", "binding_id": 12},

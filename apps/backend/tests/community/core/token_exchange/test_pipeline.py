@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,12 +20,31 @@ from agentclaw.community.core.token_exchange.protocols import (
     TokenExchangeContext,
 )
 from agentclaw.community.plugin_api.auth import AuthRequestContext
+from agentclaw.community.core.token_exchange import timing
 
 
 class _Appender:
     def append_token(self, **kwargs: object) -> bool:
         self.kwargs = kwargs
         return True
+
+
+@pytest.mark.asyncio
+async def test_stage_timings_separate_queue_and_work_even_on_failure(monkeypatch):
+    clock = iter((1.0, 1.25, 1.75))
+    monkeypatch.setattr(timing, "monotonic", lambda: next(clock))
+    logger = MagicMock()
+    monkeypatch.setattr(timing, "logger", logger)
+
+    def fail(private_argument):
+        raise RuntimeError(private_argument)
+
+    with pytest.raises(RuntimeError, match="private-argument"):
+        await timing.run_token_io("test", "plugin", fail, "private-argument")
+    logger.info.assert_called_once_with(
+        "iam_token_io stage=%s plugin=%s queue_ms=%.1f execution_ms=%.1f",
+        "test", "plugin", 250.0, 500.0,
+    )
 
 
 class _Plugin:
@@ -99,8 +119,19 @@ def _context() -> TokenExchangeContext:
 async def test_pipeline_runs_four_phases_in_order() -> None:
     events: list[str] = []
     appender = _Appender()
+    loop_thread = threading.get_ident()
+
+    class RecordingPlugin(_Plugin):
+        def prepare_exchange_token_request(self, context):
+            assert threading.get_ident() != loop_thread
+            return super().prepare_exchange_token_request(context)
+
+        def append_to_outbound(self, **kwargs):
+            assert threading.get_ident() != loop_thread
+            super().append_to_outbound(**kwargs)
+
     results = await TokenPluginPipeline(
-        plugins=(_Plugin(events),), outbound_appender=appender
+        plugins=(RecordingPlugin(events),), outbound_appender=appender
     ).run(_context())
 
     assert events == ["match", "prepare", "exchange", "append"]
@@ -150,11 +181,14 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
     )
     plugin = _Plugin(events, fail=True)
     bot_repo = MagicMock()
-    bot_repo.get_by_id_and_entity.return_value = {
-        "owner_id": "owner-1",
-        "bot_type": "personal",
-        "env": "pre",
-    }
+    loop_thread = threading.get_ident()
+
+    def fetch_bot(bot_id, entity_id):
+        assert threading.get_ident() != loop_thread
+        events.append("lookup")
+        return {"owner_id": "owner-1", "bot_type": "personal", "env": "pre"}
+
+    bot_repo.get_by_id_and_entity.side_effect = fetch_bot
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
         token_pipeline=TokenPluginPipeline(
@@ -174,7 +208,7 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
     )
 
     assert result.iam_token == "original"
-    assert events[0] == "caller"
+    assert events == ["caller", "lookup", "match", "prepare"]
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from time import monotonic
+from typing import Any, TYPE_CHECKING
 
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
@@ -28,6 +29,9 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+
 _CALLER_INSTANCE_STATUS = "success"
 
 
@@ -51,10 +55,19 @@ class RuntimeBindingResolutionService:
 
     def resolve(self, request: RuntimeBindingRequest) -> ResolvedRuntimeBinding:
         """Return the current authorized binding for one trusted request."""
+        resolved, _ = self.resolve_with_record(request)
+        return resolved
+
+    def resolve_with_record(
+        self, request: RuntimeBindingRequest,
+    ) -> tuple[ResolvedRuntimeBinding, DeviceBindingRecord]:
+        """Return the same validated binding and its detached repository record."""
+        started = monotonic()
         bot = self._bot_repository.get_by_id_and_owner(
             request.bot_id,
             request.owner_id,
         )
+        bot_read_ms = (monotonic() - started) * 1000
         if not bot:
             raise RuntimeBotNotFoundError("runtime bot is unavailable")
 
@@ -72,8 +85,13 @@ class RuntimeBindingResolutionService:
                 source=source,
                 environment=request.environment or self._environment_provider(),
             )
-        self._require_active_binding(binding_id)
-        return ResolvedRuntimeBinding(binding_id=binding_id, source=source)
+        started = monotonic()
+        binding = self._require_active_binding(binding_id)
+        logger.info(
+            "runtime_binding_resolved source=%s bot_read_ms=%.1f active_binding_read_ms=%.1f",
+            source.value, bot_read_ms, (monotonic() - started) * 1000,
+        )
+        return ResolvedRuntimeBinding(binding_id=binding_id, source=source), binding
 
     def _source(
         self,

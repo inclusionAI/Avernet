@@ -1,7 +1,6 @@
 """Four-phase, failure-isolated token plugin pipeline."""
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable
 
 from agentclaw.community.core.token_exchange.protocols import (
@@ -11,6 +10,7 @@ from agentclaw.community.core.token_exchange.protocols import (
     TokenPluginResult,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.token_exchange.timing import run_token_io
 
 
 logger = get_logger()
@@ -39,7 +39,7 @@ class TokenPluginPipeline:
     ) -> TokenPluginResult:
         stage = "match"
         try:
-            if not await asyncio.to_thread(plugin.match, context):
+            if not await run_token_io(stage, plugin.code, plugin.match, context):
                 logger.info(
                     "token_plugin_match_completed plugin_code=%s status=skipped bot_id=%s stage=%s",
                     plugin.code,
@@ -49,11 +49,12 @@ class TokenPluginPipeline:
                 return TokenPluginResult.skipped(plugin.code)
 
             stage = "prepare_exchange_token_request"
-            prepared = plugin.prepare_exchange_token_request(context)
+            prepared = await run_token_io(stage, plugin.code, plugin.prepare_exchange_token_request, context)
             stage = "exchange_token"
             token = await plugin.exchange_token(context=context, prepared=prepared)
             stage = "append_to_outbound"
-            plugin.append_to_outbound(
+            await run_token_io(
+                stage, plugin.code, plugin.append_to_outbound,
                 context=context,
                 prepared=prepared,
                 token=token,
