@@ -10,9 +10,11 @@ it("selects the card route by CW environment even when the Bot is production, an
   const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template-pre", callback_route_key: "route-pre" }, prod: { template_id: "template-prod", callback_route_key: "route-prod" } } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre");
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(true);
-  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", templateId: "template-pre", callbackRouteKey: "route-pre", recipientUserId: "123", cardParamMap: expect.objectContaining({ request_id: "r1", task_id: "SR-one", session_key: "original", confirm_label: "已获取权限，继续任务", confirm_status: "normal", confirm_enabled: "true", config: '{"autoLayout":true}', instructions: "请申请原文档读取权限", control_plane: "pre" }) }));
+  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", templateId: "template-pre", callbackRouteKey: "route-pre", recipientUserId: "123", cardParamMap: expect.objectContaining({ request_id: "r1", task_id: "SR-one", session_key: "original", confirm_label: "已获取权限，继续任务", confirm_status: "normal", confirm_enabled: "true", instructions: "请申请原文档读取权限", control_plane: "pre" }) }));
   await notifier.notifyOwnerRequest({ task: { ...task, ownerRequest: { ...task.ownerRequest!, requestId: "r2", revision: 2, instructions: "仍缺文档写权限" } }, updateOnly: true });
   expect(sender.sendCard).toHaveBeenCalledOnce();
+  expect(sender.sendCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
+  expect(sender.updateCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", cardParamMap: expect.objectContaining({ request_id: "r2", instructions: "仍缺文档写权限" }) }));
 });
 it("does not claim card delivery when disabled, not configured for the control plane, or rejected by the sender", async () => {
@@ -34,9 +36,9 @@ it("updates the single permission button after Owner feedback", async () => {
   await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
   const initial = sender.sendCard.mock.calls[0][0];
   expect(initial.cardParamMap).toMatchObject({ confirm_label: "已获取权限，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
-  expect(Object.keys(initial.cardParamMap)).toHaveLength(15);
+  expect(Object.keys(initial.cardParamMap)).toHaveLength(14);
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
-  expect(JSON.parse(initial.cardParamMap.config)).toEqual({ autoLayout: true });
+  expect(initial.cardParamMap).not.toHaveProperty("config");
 
   await notifier.notifyOwnerRequest({ task: { ...pending, status: "running", ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith({
@@ -83,6 +85,7 @@ it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary h
     cardParamMap: { task_id: "SR-one", request_id: "", control_plane: "pre", bot_id: "bot", session_key: "original",
       instructions: summary, confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
   expect(sent).not.toHaveProperty("callbackRouteKey");
+  expect(sent.cardParamMap).not.toHaveProperty("config");
   expect(sent.cardParamMap.task_url).toContain("recoveryTaskId=SR-one");
   expect(sent.cardParamMap.summary).toContain(effect === "recovered" ? "原任务已恢复" : effect === "not_recovered" ? "原任务仍受阻" : "尚未确认");
   expect(sender.sendNotification).not.toHaveBeenCalled(); expect(sender.updateCard).not.toHaveBeenCalled();

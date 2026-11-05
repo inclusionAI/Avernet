@@ -86,8 +86,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
         : request.status === "pending" ? "等待 Owner 处理" : task.status === "waiting_owner" ? "已收到反馈，后续修复方案待另行确认"
         : task.status === "waiting_effect" ? "已保存进度，等待继续核验" : "已收到处理反馈，正在核验",
       confirm_visible: "true", confirm_enabled: String(canConfirm), confirm_status: canConfirm ? "normal" : "disabled",
-      confirm_label: "已获取权限，继续任务",
-      config: JSON.stringify({ autoLayout: true }) };
+      confirm_label: "已获取权限，继续任务" };
     const outTrackId = recoveryOwnerCardTrackId(task.taskId, environment);
     if (updateOnly) await this.sender.updateCard({ outTrackId, cardParamMap });
     else await this.sender.sendCard({ outTrackId, cardParamMap, recipientUserId: task.request.target.entity_id,
@@ -126,8 +125,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
             : input.effect === "not_recovered" ? "原任务仍受阻，需要您继续处理。" : "原任务的恢复情况尚未确认，需要您进一步核查。",
           instructions: cardText(input.summary), task_url: url.href,
           status: recovered ? "本次自愈已结束，后续建议可按需处理" : "本次自愈已结束，已转交 Owner",
-          confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "",
-          config: JSON.stringify({ autoLayout: true }) } });
+          confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
       return true;
     }
     await this.sender.sendNotification({ recipientUserId: input.ownerId, title,
