@@ -469,6 +469,14 @@ The reconnect may land on any gateway (GW2):
 3. GW2 sends the PA one snapshot, then live deltas from GW1 and control
    events from the owner (from `event_seq`).
 
+**If D finishes in between** (the owner records the result and GW1 drops
+the buffer after step 1), GW1 answers "D has ended". Nothing is lost: a
+buffer is dropped only after the owner recorded the step's result, and that
+result is a control event carrying the **full assembled artifact** as a
+replacement (`append: false`). Its `event_seq` is after the snapshot's, so
+GW2 receives it through step 3 and the PA ends with the exact artifact. If
+the dispatch moved to another gateway instead, GW2 re-reads the snapshot.
+
 **If GW1 died too,** the partial output survives at the supply agent: the
 dispatch's new gateway re-subscribes to the agent's task, whose snapshot
 includes the artifact so far, and the PA gets an `append: false`
