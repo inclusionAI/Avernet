@@ -474,12 +474,6 @@ below.
 
 ## Known gaps, recorded rather than discovered
 
-- **The apply-scope fetch budget is defined, not enforced** —
-  `APPLY_FETCH_TOTAL_LIMIT` / `APPLY_BUDGET_S` have no mechanism behind
-  them. Per-entry caps, per-hop timeouts and the apply-lock TTL bound one
-  apply today; the ledger lands with the wave that owns more fetch
-  consumers (W6/W7), threaded once through the entry fetcher.
-
 - **Deleting a bot does not delete its manifest.** Bot deletion is a soft update
   and no cascade reaches this table. The row cannot be inherited (the key names
   one bot for the life of the data), so nothing will read it, but a caller's
@@ -505,8 +499,12 @@ below.
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's
   numbers** now — `fetch/limits.py` is their single source — while the
-  apply-scope budget stays with apply (W4). Declaring them beside the
-  write-time enforced limits would make them read as enforced there too.
+  apply-scope total limits and execution ledger live in
+  `apply_engine/fetch_budget.py`. A compile reuses the active execution
+  budget, including all Direct and nested Set Local packages; outside a run
+  it starts one bounded standalone ledger. First public-package previews
+  later in capability resolution share the execution budget. Declaring them
+  beside the write-time enforced limits would make them read as enforced there too.
 - **`cli_tools` is validated against the flattened shape** — one entry is one
   command is one file, selected inside an archive with `subpath` (schema §3.7).
   The earlier "directory plus an `entrypoints` list" draft is gone, and with it
