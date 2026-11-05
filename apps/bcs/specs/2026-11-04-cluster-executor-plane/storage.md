@@ -46,14 +46,19 @@ majority". (MySQL therefore requires lossless semi-synchronous replication.)
 
 ## 3. OceanBase specifics
 
-- **Co-partition every per-session table** by the session key, with the same
-  partition count, in one **table group**, so a fenced transaction stays on
-  one partition. Otherwise every fenced write is a distributed (two-phase)
-  transaction.
-- Per-session tables use session-keyed primary keys (e.g. `(env, session_id)`
-  for leases), because a partition key must be part of the primary key.
-- Default isolation is READ COMMITTED; the design relies only on the row lock
-  taken by `UPDATE … WHERE fencing_token = n`, which behaves the same.
-- Avoid hot rows (any cluster-wide counter touched per request).
+- **Co-partition by bucket.** A fenced transaction touches the bucket's
+  lease row and the session's rows, so partition `bcs_task_leases` and every
+  per-session table by `bucket`, with the same partition count, in one
+  **table group**. The transaction then stays on one partition. Otherwise
+  every fenced write is a distributed (two-phase) transaction.
+- Per-session tables include `bucket` in their primary keys (e.g.
+  `(bucket, session_id)`), because a partition key must be part of the
+  primary key.
+- Default isolation is READ COMMITTED; the design relies only on row locks —
+  the shared (or exclusive) lock of the fence step and the exclusive lock of
+  a claim or transfer — which behave the same.
+- Avoid hot rows (any cluster-wide counter touched per request). A bucket
+  row is touched by every fenced write of its sessions, which is why the
+  fence step takes a shared lock where it can (design §5.5).
 - Handle unknown commit outcomes during leader switches by reading back
   ([design §5.5](design.md#55-fenced-writes)).
