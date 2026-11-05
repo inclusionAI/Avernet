@@ -10,7 +10,7 @@ use bcs_bot::application::ProviderManagement;
 use bcs_bot::core::{BotCore, BotControlPlaneCore, ProviderCore};
 use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_bot_store::provider::MemoryProviderStore;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as Value};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::port::repo::{
     BotCallerConfiguration, BotControlPlaneRepoPort, CallerConfigurationSync, ProviderRepoPort,
@@ -137,7 +137,7 @@ async fn context() -> Context {
 
     let db = sqlite_bot_db().await;
     let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> =
-        Arc::new(PersistentBotRepo::new(db.clone()));
+        Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite));
     let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_store.clone() as Arc<dyn ProviderRepoPort>,

@@ -25,7 +25,7 @@ async fn legacy_relay_cannot_downgrade_a_caller_target_to_owner() {
             handoff: Arc::new(HumanCallerDeliveryHandoff::new(16)),
             admission: managed,
             control_plane: Arc::new(BotControlPlaneCore::new(
-                Arc::new(PersistentBotRepo::new(db)), store.clone(), store,
+                Arc::new(PersistentBotRepo::with_sql_flavor(db, DbSqlFlavor::Sqlite)), store.clone(), store,
             )),
             reserve_ttl_ms: 10_000,
         }));

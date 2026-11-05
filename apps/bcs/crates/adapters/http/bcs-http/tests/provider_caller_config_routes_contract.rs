@@ -17,7 +17,7 @@ use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
 use bcs_config::resolve_env_str;
-use bcs_db_api::{DbPlugin, DbStatement, DbValue as DbParam};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as DbParam};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_http::{
     router::build_router,
@@ -154,7 +154,7 @@ async fn caller_app() -> CallerApp {
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core.clone();
     let db = sqlite_bot_db().await;
     let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> =
-        Arc::new(PersistentBotRepo::new(db.clone()));
+        Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite));
     let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_store.clone() as Arc<dyn ProviderRepoPort>,
