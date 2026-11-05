@@ -784,6 +784,7 @@ pub(super) async fn handle_web_send_with_result(
             const MAX_ADMIT_ATTEMPTS: u32 = 3;
             let mut last_error: Option<(bcs_service_api::ManagedDeliveryError, bool)> = None;
             let mut admitted_result = None;
+            let mut committed_in_previous_attempt = false;
             for attempt in 0..MAX_ADMIT_ATTEMPTS {
                 let admitted = managed.admit(command.clone()).await;
                 match admitted {
@@ -806,10 +807,17 @@ pub(super) async fn handle_web_send_with_result(
                                         | MessageDeliveryRepoError::Invalid(_)
                                 )
                         );
+                        // On retry after a successful inner commit (e.g.,
+                        // admit_after_commit failure), Conflict means the managed
+                        // run was already committed by a previous attempt.
+                        // It should survive; only direct runs need release.
+                        let effective_rejected = rejected
+                            && !committed_in_previous_attempt;
                         if rejected || attempt + 1 >= MAX_ADMIT_ATTEMPTS {
-                            last_error = Some((error, rejected));
+                            last_error = Some((error, effective_rejected));
                             break;
                         }
+                        committed_in_previous_attempt = true;
                         tokio::time::sleep(std::time::Duration::from_millis(100 * 2u64.pow(attempt))).await;
                     }
                 }

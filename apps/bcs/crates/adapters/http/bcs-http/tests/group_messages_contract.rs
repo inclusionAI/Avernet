@@ -1372,8 +1372,8 @@ async fn session_chat_keeps_internal_error_as_server_error() {
     ))
     .await;
 
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(json["error"], "Internal error: database unavailable");
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(json["error"], "database unavailable");
 }
 
 #[tokio::test]
