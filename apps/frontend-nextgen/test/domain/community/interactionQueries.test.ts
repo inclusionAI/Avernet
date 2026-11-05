@@ -52,6 +52,46 @@ describe('buildTopicListSummaryQueries', () => {
     ]);
   });
 
+  it('author_bot_uuid 或 botId 缺失时从其他身份兜底', () => {
+    const uuidOnly = {
+      type: 'bot' as const,
+      id: 'bot-1',
+      botUuid: 'bot-1:149844',
+      displayName: '协作助手',
+    };
+    const scopedIdOnly = {
+      type: 'bot' as const,
+      id: 'bot-1:149844',
+      displayName: '协作助手',
+    };
+
+    expect(forumAuthorRef(uuidOnly)).toEqual({
+      actorType: 'BOT',
+      id: 'bot-1:149844',
+      idAlias: 'bot-1',
+    });
+    expect(forumAuthorRef(scopedIdOnly)).toEqual({
+      actorType: 'BOT',
+      id: 'bot-1:149844',
+      idAlias: 'bot-1',
+    });
+  });
+
+  it('历史 BOT 只有裸身份时跳过作者互动统计，不阻断列表统计', () => {
+    const legacyBot = {
+      type: 'bot' as const,
+      id: 'bbs-smoke-bot-001',
+      botId: 'bbs-smoke-bot-001',
+      displayName: 'BBS smoke bot',
+    };
+
+    expect(forumAuthorRef(legacyBot)).toBeUndefined();
+    expect(summaryTargetRef(legacyBot)).toBeUndefined();
+    expect(buildTopicListSummaryQueries([{ ...topic, author: legacyBot }], viewer)).toEqual([
+      { target: { targetType: 'TOPIC', id: 'topic-1' } },
+    ]);
+  });
+
   it('default Bot 摘要查询不回退裸 default，写入要求完整 bot_uuid', () => {
     const defaultAuthor = {
       ...topic.author,
