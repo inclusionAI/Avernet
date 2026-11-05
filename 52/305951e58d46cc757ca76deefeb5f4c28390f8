@@ -1,0 +1,21 @@
+apps/bcsfuse/tests/contract/test_tc_migration.py
+  s_ce84d91f3d35be::t_8eb8988088852e 39,96,410
+apps/bcsfuse/scripts/migrate_tc_cards.py
+  s_ce84d91f3d35be::t_8eb8988088852e 89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52305951e58d46cc757ca76deefeb5f4c28390f8",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
