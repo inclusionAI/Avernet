@@ -514,3 +514,49 @@ def test_card_mode_needs_no_old_worker_or_vector_tables(service):
             json={"card": {"description": "missing name"}},
         )
         assert invalid.status_code == 400, invalid.text
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_legacy_recall_batches_filter_labels_without_loading_profiles(
+    service, monkeypatch, scoped
+):
+    from app.domain.models.worker_runtime_state import WorkerRuntimeState
+
+    start, _path = service
+    with start() as (client, registry):
+        old_sync(client, "visible:batch", "needle database")
+        old_sync(client, "offline:batch", "needle database")
+        catalog = registry.require("tc_catalog")
+        # Runtime state is authoritative even if Worker/vector payloads are older.
+        catalog.states.set_runtime_state("offline:batch", WorkerRuntimeState.OFFLINE)
+
+        def fail(*args, **kwargs):
+            pytest.fail("recall filtering must not enumerate full Card/Profile views")
+
+        monkeypatch.setattr(catalog, "rows", fail)
+        monkeypatch.setattr(catalog.profiles, "get", fail)
+        monkeypatch.setattr(catalog.profiles, "get_active", fail)
+        if scoped:
+            monkeypatch.setattr(catalog.workers, "list", fail)
+        scope = frozenset({"visible:batch", "offline:batch"}) if scoped else None
+        hits = registry.require("tc_search").retrieval_index.keyword_search(
+            "needle",
+            1,
+            {"runtime_state": ("online",), "availability": ("public",)},
+            scope,
+        )
+        assert [hit.payload["source_id"] for hit in hits] == ["visible:batch"]
+
+
+def test_native_search_projects_tc_name_and_description(service):
+    start, _path = service
+    with start("card") as (client, _registry):
+        old_sync(client, "display:owner", "MySQL database backup")
+        result = client.post(
+            "/api/v2/search",
+            json={"query": "MySQL", "filters": {"worker_id": ["display:owner"]}},
+        )
+        assert result.status_code == 200, result.text
+        item = result.json()["items"][0]
+        assert item["name"] == "display:owner"
+        assert item["summary"] == "MySQL database backup"

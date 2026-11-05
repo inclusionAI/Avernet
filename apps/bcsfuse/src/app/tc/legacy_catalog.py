@@ -80,6 +80,41 @@ class LegacyCatalog(TcCatalog):
                     yield row
             offset += len(workers)
 
+    def candidate_ids(self, filters, allowed_ids):
+        """Read filter labels in batches; retrieval never needs Profile/MD data."""
+        scope = sorted(allowed_ids) if allowed_ids is not None else None
+        offset = 0
+        while True:
+            if scope is None:
+                workers = self.workers.list(limit=100, offset=offset)
+                if not workers:
+                    break
+            else:
+                ids = scope[offset : offset + 100]
+                if not ids:
+                    break
+                workers = list(self.workers.get_by_ids(ids).values())
+            states = self.states.batch_get_runtime_states([w.id for w in workers])
+            for worker in workers:
+                state = states.get(worker.id, worker.state.runtime_state)
+                data = {
+                    **worker.state.model_dump(mode="json"),
+                    "runtime_state": getattr(state, "value", state),
+                    "type": worker.type,
+                    "domains": worker.domains,
+                    "lifecycle_state": worker.lifecycle_state,
+                }
+                labels = {
+                    key: [value] if isinstance(value, str) else value
+                    for key, value in data.items()
+                }
+                if all(
+                    values and set(values).intersection(labels.get(key, ()))
+                    for key, values in filters.items()
+                ):
+                    yield worker.id
+            offset += 100
+
     def worker(self, row):
         worker = self.workers.get_by_id(row.card.agent_id)
         data = row.card.source_card
