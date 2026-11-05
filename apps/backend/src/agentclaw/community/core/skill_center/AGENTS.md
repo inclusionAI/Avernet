@@ -99,7 +99,7 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 ## 3. Bot 有效态：统一 Reader / Writer
 
-修改激活、成员、默认项时，先读 `services/skill_set_management_service.py`、`services/direct_activation_service.py`、`community/core/repository/implementations/skill_center/capability_desired_state.py` 和其 `tables/` 子包。
+修改激活、成员、默认项时，先读 `services/skill_set_management_service.py`、`services/_skill_set_membership_commands.py`（成员批量变更与 Default 排除/恢复路由）、`services/direct_activation_service.py`、`community/core/repository/implementations/skill_center/capability_desired_state.py` 和其 `tables/` 子包。
 
 - `CapabilityDesiredStateRepository` 是 Set state、membership、Default exclusion 与 Skill/MCP Installation 的事务写入入口；表级 SQL owner 使用同一个事务 Session。
 - 普通 Set 新建默认 `is_active=True`。active Set 增删成员同步维护 Installation；inactive Set 编辑不要求 Runtime 投影。
