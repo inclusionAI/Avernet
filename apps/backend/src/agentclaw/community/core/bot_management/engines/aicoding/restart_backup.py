@@ -220,7 +220,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str, require_backup: bool = False,
                    sandbox_id: str | None = None, owner_id: str | None = None,
                    strict_deadline: float | None = None, block_on_failure: bool = True) -> Callable[[], None]:
-    """Wait outside the legacy restart lock; return a short receipt verifier."""
+    """Wait and validate the final receipt once; preserve the caller hook contract."""
     started = time.monotonic()
     # Ordinary durable operations share one budget across task redeliveries and
     # all physical targets. Published/Caller paths retain their existing budget.
@@ -321,40 +321,10 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                                 helper_status=observed_status)
         raise
 
-    def verify():
-        observed_status = 'unknown'
-        try:
-            if (require_backup or execution is not None) and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算")
-            # An absent helper is re-probed read-only; never start work on a
-            # replacement container while holding the legacy short-lived lock.
-            check_action = 'start' if status == 'not_mounted' else 'status'
-            current = parse_result(execute(command(check_action, operation_id)), operation_id)
-            observed_status = current['status']
-            if (require_backup or execution is not None) and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算")
-            if require_backup and current['status'] == 'failed':
-                raise RestartBackupError('backup_failed', '最终快盘备份未成功')
-            if current['status'] != status or (boot and current.get('boot_id') != boot):
-                raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化')
-            if status in {'committed', 'partial_success'}:
-                current_generation, current_partial = receipt(current)
-                if current_generation != generation:
-                    raise RestartBackupError('generation_changed', '备份凭据变化')
-                if current_partial != partial:
-                    raise RestartBackupError('receipt_stale', '备份完整性结果变化')
-            log('verify', 'partial_success' if partial else 'allowed', generation=generation,
-                reason='partial_receipt_valid' if partial else '-')
-        except Exception as error:
-            log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
-            if require_backup and block_on_failure:
-                log_restart_failure(error, bot_id=bot_id, target_id=target_id, owner_id=owner_id,
-                                    sandbox_id=sandbox_id, operation_id=operation_id, phase='verify',
-                                    elapsed_ms=int((time.monotonic() - started) * 1000),
-                                    helper_status=observed_status)
-            raise
-
-    return verify
+    # The successful terminal receipt has already been validated above. Do not
+    # query it again under the restart lock or before submission. The outer
+    # strategy verifier still checks the target/binding and fences mutation.
+    return lambda: None
 
 
 def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None,

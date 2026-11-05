@@ -39,25 +39,27 @@ def prepare(execute):
 
 
 @pytest.mark.parametrize('status', ['legacy', 'not_mounted'])
-def test_confirmed_no_backup_returns_verifier(status, caplog):
+def test_confirmed_skip_does_not_requery_helper(status, caplog):
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     execute = Mock(return_value=response(status))
     verify = prepare(execute)
     assert execute.call_count == 1
     verify()
-    assert execute.call_count == 2
+    assert execute.call_count == 1
     assert 'phase=prepared status=' + status in caplog.text
-    assert 'phase=verify status=allowed' in caplog.text
+    assert 'phase=verify status=' not in caplog.text
     assert 'bot_id=bot-1 target_id=container-1 operation_id=' + OPERATION in caplog.text
 
 
-def test_poll_and_short_verification_require_matching_receipt(caplog):
+def test_poll_validates_receipt_once_and_does_not_recheck_success(caplog):
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     committed = response('committed', backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION})
-    execute = Mock(side_effect=[response('running'), response('running'), committed, committed])
+    execute = Mock(side_effect=[response('running'), response('running'), committed])
     verify = prepare(execute)
     verify()
+    assert execute.call_count == 3
+    assert 'phase=verify status=' not in caplog.text
     assert caplog.text.count('phase=wait status=running') == 1
     assert 'generation_id=g1' in caplog.text
     assert 'elapsed_ms=' in caplog.text
@@ -80,14 +82,11 @@ def test_runtime_disappearing_during_poll_blocks(later):
         prepare(Mock(side_effect=[response('running'), response(later)]))
 
 
-def test_new_container_cannot_use_previous_receipt():
-    committed = response('committed', backup={
-        'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION})
+def test_container_change_while_backup_is_running_still_blocks():
     changed = response('committed', boot_id='replacement', backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION})
-    verify = prepare(Mock(side_effect=[committed, changed]))
     with pytest.raises(RuntimeError, match='实例'):
-        verify()
+        prepare(Mock(side_effect=[response('running'), changed]))
 
 
 def test_timeout_never_allows_replacement(caplog):
@@ -756,7 +755,7 @@ def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, stat
         operation_id=OPERATION,
     )
     verify()  # Backup failures must not block restart.
-    expected_calls = 0 if status in {'FAILED', 'STOPPED'} else 1 if failure == 'prepare' else 2
+    expected_calls = 0 if status in {'FAILED', 'STOPPED'} else 1
     assert device.exec_shell_new.call_count == expected_calls
     if expected_calls:
         assert all(call.kwargs['device_id'] == 'container-1'

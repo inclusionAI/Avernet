@@ -1,13 +1,27 @@
 # Coding-only restart backup
 
+## Validate a completed backup only once (2026-11-05)
+
+After the helper returns a validated `committed` or `partial_success` result,
+restart proceeds without querying that receipt again. `running` still polls
+until a terminal result within the existing 1500-second backup wait budget.
+Backup failures still follow `fastdisk_fail_block`; successful completion cannot
+be turned into a backup failure by a later receipt-query error or timeout.
+
+The shared prepare/verify strategy contract is unchanged: final hooks still
+check target inventory, bindings, operation ownership and the mutation fence,
+but perform no container backup command. This applies to coding BaaS, direct
+ARCA and published/Caller restart consumers of the same strategy. Other engines,
+non-fastdisk skip behavior and container scripts are unchanged.
+
 ## Runtime-preserving backup veto (2026-11-04)
 
 Runtime readiness and restart progress are independent. Ordinary coding admission
 keeps the current Bot status, binding and startup markers. QUEUED/BACKING_UP
 failures write only `ext.coding_restart`: FAILED, failure_phase and the sanitized
 error_message. They never write runtime FAILED/start_status. The mutation fence
-clears obsolete startup markers and enters PENDING only after the final receipt
-and target checks. Actual post-submission failures keep the existing lifecycle.
+clears obsolete startup markers and enters PENDING only after validated backup
+completion and the final target checks. Actual post-submission failures keep the existing lifecycle.
 BaaS binding PENDING is also delayed until that final check passes.
 
 Published restart admission and failure remain in the coding strategy. The
@@ -188,18 +202,22 @@ matching operation ID, nonempty string generation ID, `status=partial_success`,
 `completeness` must be `degraded` when present. A committed success receipt with
 `completeness=degraded` is also classified as partial rather than full success.
 
-Both preparation and the final pre-mutation verification log at WARN with
+The validated terminal partial result logs once at WARN with
 `event=aicoding_restart_backup status=partial_success reason=partial_receipt_valid
  action=continue_restart data_loss_risk=true`, plus bot ID, full ARCA ID (including
 `@` suffix), owner, environment, operation, generation and elapsed time. Raw helper
 diagnostics and file paths are not logged. A valid partial result neither emits
 `[AICODING_RESTART_FAILED]` nor writes failure fields for the frontend. Full success
-keeps its INFO `committed`/`allowed` logs; actual failures keep the existing policy.
+keeps its INFO `phase=prepared status=committed` log; actual failures keep the
+existing policy. There is no later `phase=verify status=allowed` or duplicate
+partial-success log.
 
-The same status, boot identity, generation and completeness classification are
-rechecked before mutation. Malformed or changed receipts are still unconfirmed
-failures governed by the existing switch, not partial successes. Binding changes
-and ownership fences remain mandatory. This behavior is confined to the aicoding
+Status, boot identity and receipt fields are validated while waiting for the
+terminal result. Malformed receipts and changes observed before successful
+completion remain failures governed by the existing switch, not partial successes.
+After successful completion, no helper `status`/`start` call or backup deadline
+check is made by final hooks. Binding/target checks and ownership fences remain
+mandatory. This behavior is confined to the aicoding
 strategy; no shared flow, frontend or container-script changes are needed.
 
 ## Runtime switch (2026-11-01)
@@ -219,7 +237,7 @@ blocking `false` (warn and continue). `enable="0"` disables the configuration
 record and also restores this non-blocking default. To enable blocking, use both
 `enable="1"` and `param_value=true`. Read errors log only the error type, never raw
 exception text. Only a confirmed fastdisk attempt reads the setting. Each backup
-precondition snapshots it once across all replicas and final receipt checks;
+precondition snapshots it once across all replicas;
 changes affect later attempts, not a backup already using its snapshot.
 Already-terminal failed tasks remain failed; the switch does not revive them.
 
@@ -294,8 +312,8 @@ and dispatches instance preconditions through its declared async contract; it
 contains no backup logic or concrete strategy type checks.
 
 Ordinary Bot restart calls `strategy.prepare_restart` immediately BEFORE its
-existing lock acquisition, then runs the returned verifier immediately AFTER
-acquiring that same lock. The strategy never sees, acquires, or releases the
+existing lock acquisition, then runs the returned target/binding verifier immediately
+AFTER acquiring that same lock. The verifier does not query completed backup results. The strategy never sees, acquires, or releases the
 lock: acquire/release/async hand-off ownership stays entirely in the original
 caller, backup-only failures warn and continue, while lifecycle failures
 retain the caller's existing lock-release behavior. The default strategy
@@ -407,8 +425,8 @@ exception messages. Poll logs occur on transitions or at most once per minute.
 ## Restart failure alerts (2026-10-30)
 
 The coding strategy emits WARN logs with `[AICODING_RESTART_FAILED]` and
-`event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, receipt
-verification failures, and blocking preparation errors. Ordinary task and
+`event=aicoding_restart_failed` for confirmed-fastdisk backup vetoes, invalid
+backup receipts, and blocking preparation errors. Ordinary task and
 published-restart exception handlers retain the underlying backup diagnostics
 and log before persisting failure, so a failed status write cannot hide the
 original backup error. This is diagnostic-only: no queue, retry, publication,
@@ -417,7 +435,7 @@ status or replacement decisions are changed.
 Each record includes `bot_id`, `owner_id`, `env`, `arca_id`, raw `target_id`, `operation_id`, `phase`,
 `reason`, `error_type`, chained `cause_types`, `elapsed_ms`, `helper_status`,
 `binding_id`, `publish_id`, and a safe `stack`. Stages distinguish `prepare`,
-`verify`, `verify_target`, `precondition`, `task_failed`, and `published_restart`.
+`verify_target`, `precondition`, `task_failed`, and `published_restart`.
 Stack entries contain only filename, line number and function; raw exception
 messages, source lines, locals, commands and helper stdout/stderr are excluded.
 Unknown/unavailable fields use `-` rather than an invented value.
@@ -478,9 +496,11 @@ capability markers are absent; it is not a fallback for transport errors.
 `running` requires polling; it must not transition to a skip state. `committed`
 means a durable successful generation; `partial_success` means a durable generation
 with omitted source files. Both allow restart after receipt validation, with
-distinct logs. `failed` and unconfirmed results follow the blocking switch. Before
-replacement, status, boot identity, generation and completeness are checked again.
-Changed physical inventories stop receipt probing against those targets.
+distinct logs. `failed` and unconfirmed results follow the blocking switch.
+Once a complete or partial result passes validation, it is final for that backup
+attempt and is not queried again before replacement. The existing target/binding
+checks and mutation fences still run; they do not start backup work on replacement
+targets discovered during verification.
 
 The paired script repository must implement this same v1 contract. Rollout must
 install the root-owned helper and admin sudo permission before enabling mounts.

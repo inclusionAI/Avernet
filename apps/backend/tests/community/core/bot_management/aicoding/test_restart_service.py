@@ -271,7 +271,7 @@ async def test_real_arca_async_backup_precedes_stop_start(lifecycle, engine, bac
     provider._exec_shell_new.side_effect = execute
     with patch.object(restart_backup.time, "sleep"):
         assert isinstance(s.handler.handle(task.payload), Reschedule)
-    backup_calls = {"transport_error": 1, "legacy": 1, "not_mounted": 1, "committed": 3}
+    backup_calls = {"transport_error": 1, "legacy": 1, "not_mounted": 1, "committed": 2}
     assert events == ["detect"] + ["backup"] * backup_calls[backup_outcome] + ["release", "allocate"]
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
@@ -641,7 +641,7 @@ async def test_inventory_change_after_initial_failure_does_not_veto_submission(l
 @pytest.mark.asyncio
 @pytest.mark.parametrize('phase', ['prepare', 'verify'])
 @pytest.mark.parametrize('changed', [False, True])
-async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phase, changed, caplog):
+async def test_slow_backup_poll_degrades_but_completed_backup_is_not_rechecked(lifecycle, phase, changed, caplog):
     import json
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, detection_command
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
@@ -677,11 +677,16 @@ async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phas
     with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
          patch.object(backup.time, 'sleep'):
         result = s.handler.handle(task.payload)
-    assert len(commands) == 2
+    assert len(commands) == (2 if phase == 'prepare' else 1)
     assert isinstance(result, Reschedule)
-    assert len(mutations) == 1  # Neither backup timeout nor identity change vetoes restart.
-    assert 'reason=timeout' in caplog.text
-    assert 'action=continue_restart' in caplog.text
+    assert len(mutations) == 1
+    if phase == 'prepare':
+        assert 'reason=timeout' in caplog.text
+        assert 'action=continue_restart' in caplog.text
+    else:
+        assert 'phase=verify status=' not in caplog.text
+        assert 'reason=timeout' not in caplog.text
+        assert 'action=continue_restart' not in caplog.text
     assert s.repo.bot['ext'].get('start_status') != 'FAILED'
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     assert len(mutations) == 1  # Redelivery observes; it never repeats the mutation.
