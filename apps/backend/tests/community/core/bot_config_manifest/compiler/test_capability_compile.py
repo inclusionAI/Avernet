@@ -113,12 +113,12 @@ async def test_invalid_nested_package_reports_the_set_and_member():
 async def test_direct_and_nested_local_packages_consume_one_fetch_allowance(
     monkeypatch,
 ):
-    import agentclaw.community.core.bot_config_manifest.compiler.session as session_module
+    import agentclaw.community.core.apply_engine.fetch_budget as budget_module
 
     direct = build_skill_zip("direct")
     nested = build_skill_zip("nested")
     # Pin the configured allowance, keeping the real compiler, fetcher and ledger.
-    monkeypatch.setattr(session_module, "APPLY_FETCH_TOTAL_LIMIT", len(direct))
+    monkeypatch.setattr(budget_module, "APPLY_FETCH_TOTAL_LIMIT", len(direct))
 
     def package(name, body):
         return {
