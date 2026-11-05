@@ -269,9 +269,16 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     @abstractmethod
     def unexclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> DesiredStateMutation: ...
+    ) -> DesiredStateMutation:
+        """Restore actual row/policy supply only after the ownership guard.
+
+        The caller supplies the current engine/template policy so a policy
+        restore is distinguishable from clearing a stale exclusion.
+        """
+        ...
     @abstractmethod
     def excluded_default_skill_ids(
         self, *, bot_id: str, owner_id: str, set_id: str

@@ -696,6 +696,7 @@ class SkillSetManagementService(SkillSetApplyService, SkillSetManagementServiceP
                     owner_id=stable_resource_owner_id(bot),
                     set_id=set_id,
                     server_code=server_code,
+                    platform_default_codes=self._platform_default_mcp_codes(bot, bot_id),
                     engine_type=self._engine(bot),
                     default_engine_types=self._default_engine_types(bot),
                 ),

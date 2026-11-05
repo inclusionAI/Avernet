@@ -105,6 +105,8 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - 普通 Set 新建默认 `is_active=True`。active Set 增删成员同步维护 Installation；inactive Set 编辑不要求 Runtime 投影。
 - Bot MCP 配置按稳定 entity 寻址；旧 scoped owner-key 只在当前 Bot 可唯一归属时兼容读取，canonical 整值（含空对象）优先，读不迁移。replace/clear/卸载/父级清理/删除同事务消费安全别名，防止复活；未来 owner handoff 在切换前归并，未知过去 owner 孤立行不猜恢复。
 - Bot MCP override 独立于 SkillSet 生命周期：普通集增删 MCP、启停、删除、Default exclusion、Installation 对账及能力 restore 均保留当前配置；暂时无有效供应不是孤儿清理依据。Direct MCP 显式卸载、明确配置操作与 Bot 删除仍可清配置。重新供应读取当前值；能力补偿只恢复能力事实，不回写配置快照。
+- Manifest bulk Set 替换把提交前后受影响的 MCP 同时作为 claim/release 候选，Runtime Projector 按提交后有效供应保护仍有来源的配置，并删除已退出的设备配置；它不删除 Bot override。Manifest 后续 MCP Replace 清除仅剩 override 时，updated code 同样作为 release 候选；仍由 Skill 依赖供应的 code 只刷新继承配置。
+- 普通 Default 恢复仅在实际成员或当前 policy 重新供应时检查 Direct/普通集占用；冲突保留 exclusion，过期 exclusion 清理不抢占现有供应。MCP 恢复命令必须显式接收调用方解析的当前 platform policy。
 - `services/bot_capability_state_reader.py` 在读有效态前同步 Installation，然后只从 Installation 读取有效身份。Center 资产在返回前由 `SkillVersionResolver` 解析到精确 PUBLISHED Version。
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。

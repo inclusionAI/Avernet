@@ -295,6 +295,7 @@ def test_mcp_exclusion_mirrors_the_skill_pair():
     assert unchanged_exclusion.mcp_codes == frozenset()
 
     restored = repository.unexclude_default_mcp(
+                   platform_default_codes=frozenset(),
         set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
     )
     assert restored.changed is True
@@ -337,12 +338,14 @@ def test_mcp_exclusion_mirrors_the_skill_pair():
         assert session.query(BotMCPConfig).count() == 1
     with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
         repository.unexclude_default_mcp(
+            platform_default_codes=frozenset(),
             set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
         )
     repository.remove_mcp(
         set_id=str(ordinary.id), server_code="mcp.member", **_DEFAULT_SCOPE
     )
     assert repository.unexclude_default_mcp(
+               platform_default_codes=frozenset(),
         set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
     ).changed
 
@@ -385,6 +388,7 @@ def test_exclusion_commands_refuse_an_ordinary_set_address():
         )
     with pytest.raises(SkillSetControlPlaneNotFoundError):
         repository.unexclude_default_mcp(
+            platform_default_codes=frozenset(),
             set_id=str(ordinary.id), server_code="mcp.x", **_DEFAULT_SCOPE
         )
 
@@ -599,6 +603,7 @@ def test_excluding_a_platform_default_mcp_retires_a_legacy_direct_row():
         } == {"mcp.member"}
 
     restored = repository.unexclude_default_mcp(
+                   platform_default_codes=frozenset({"mcp.platform"}),
         set_id=str(default.id), server_code="mcp.platform", **_DEFAULT_SCOPE
     )
     assert restored.changed is True
