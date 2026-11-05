@@ -1,6 +1,6 @@
 # Manifest SkillSet Replace 与稳定 Skill 引用
 
-**状态 · 原 Spec 持续修订：统一能力 Category，接口细节 grill 中**  
+**状态 · 原 Spec 持续修订：统一能力 Category，接口细节 grill 中**
 创建于 2026-11-03，更新于 2026-11-05。本文是本需求唯一的当前评审主稿；本轮原位修订执行模型，保留此前已确认的业务语义。Q41–Q43 已确认，Q41 的声明接入已按方案 B 收窄为复用 Declaration 子类，本轮业务语义与核心接口已收口，可进入主稿完整评审。内部 helper 命名、字段映射和合同测试属于实施前后的工程核验，不据此持续扩张业务问题；当前尚未开发。所有验收项均为实施后的验证目标。
 
 > 最新架构方向：根据与 totalfrank 的技术评审及随后用户确认，将 Direct Skills、普通 SkillSet/Default 和顶层 Direct MCP 合并为一个 Apply Category，在同一个 Materialiser 的 resolve/plan/write 中处理。不采用跨 Materialiser 的 PlannedSetSupply 或新增 Context 预测透传方案，也不降低 dry-run 的准确性作为最终方案。Orchestrator 继续逐 Category 三阶段循环。
