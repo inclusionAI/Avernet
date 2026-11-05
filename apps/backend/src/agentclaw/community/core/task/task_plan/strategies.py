@@ -107,14 +107,9 @@ class GapBasedPlanningStrategy:
     rule_id = "gap_based"
     priority = 99
 
-    def __init__(self, bot=None, owner_lookup=None) -> None:
-        """Initialize the planning port and optional legacy-owner reverse lookup.
-
-        ``owner_lookup`` is only used to disambiguate historical bare
-        ``owner_bot_id`` rows; canonical composite identities never call it.
-        """
+    def __init__(self, bot=None) -> None:
+        """Initialize the planning port."""
         self._bot = bot
-        self._owner_lookup = owner_lookup
 
     async def matches(self, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
@@ -129,7 +124,6 @@ class GapBasedPlanningStrategy:
         entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
             graph.extend_props.get("owner_bot_id"),
             graph.extend_props.get("owner_user_id"),
-            self._owner_lookup,
         )
         owner = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
         if not owner:

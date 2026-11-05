@@ -19,7 +19,7 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
 
 
 import logging
-from typing import Any, Callable
+from typing import Any
 from agentclaw.community.core.task.domain.models import (
     PlanResult,
     RelationType,
@@ -51,13 +51,10 @@ class TaskPlanner:
         graph,
         *,
         pool: list[PlanningStrategy] | None = None,
-        owner_lookup: Callable[[str], str | None] | None = None,
     ) -> None:
         """graph: TaskGraphService(派生查询用;策略 apply 收显式 target 经 graph 快照);
-        pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。
-        owner_lookup 仅用于历史 bare Bot id 反查真实 owner。"""
+        pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。"""
         self._graph = graph
-        self._owner_lookup = owner_lookup
         self._strategies: list[PlanningStrategy] = (
             list(pool)
             if pool is not None
@@ -516,7 +513,6 @@ class TaskPlanner:
                 _entry_bot_id, _entry_owner_id = resolve_entry_bot_identity(
                     graph.extend_props.get("owner_bot_id"),
                     graph.extend_props.get("owner_user_id"),
-                    self._owner_lookup,
                 )
                 self._report_node_patch(
                     TaskNodePatch(
@@ -603,7 +599,6 @@ class TaskPlanner:
             _entry_bot_id, _entry_owner_id = resolve_entry_bot_identity(
                 graph.extend_props.get("owner_bot_id"),
                 graph.extend_props.get("owner_user_id"),
-                self._owner_lookup,
             )
             _root_out = self._rollup_done_children_output(task_id, root.node_id)
             _root_acc = self._build_parent_acceptance_result(root, pr)

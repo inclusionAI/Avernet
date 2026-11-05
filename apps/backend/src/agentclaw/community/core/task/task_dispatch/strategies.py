@@ -195,7 +195,6 @@ class SearchBasedDispatchStrategy:
         *,
         use_search_skill: bool = False,
         task_settings=None,
-        owner_lookup=None,
     ) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
 
@@ -208,7 +207,6 @@ class SearchBasedDispatchStrategy:
         self._bcn = bcn
         self._use_search_skill = use_search_skill
         self._task_settings = task_settings
-        self._owner_lookup = owner_lookup
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
@@ -266,7 +264,6 @@ class SearchBasedDispatchStrategy:
         entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
             graph.extend_props.get("owner_bot_id"),
             graph.extend_props.get("owner_user_id"),
-            self._owner_lookup,
         )
         owner = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
         if not owner:

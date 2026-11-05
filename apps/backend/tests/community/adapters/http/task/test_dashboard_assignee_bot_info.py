@@ -161,7 +161,7 @@ def test_dashboard_attaches_assignee_owner_and_name_for_single_bot(harness):
     ep = root["run_info"]["extend_props"]
     assert ep.get("assignee_owner_id") == "o1"
     assert ep.get("assignee_name") == "BotA"
-    assert fake_bot.calls == ["b1", "bot_a"]
+    assert fake_bot.calls == ["bot_a"]
 
 
 def test_dashboard_skips_coop_group_assignee(harness):

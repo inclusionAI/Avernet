@@ -355,16 +355,16 @@ def test_execute_yaml_with_yaml_ignores_group_kind_chat():
 
 
 
-def test_normalize_owner_bot_id_reverse_resolves_legacy_bare_bot_owner():
-    """历史裸非默认 Bot id：用 BotService 反查真实 owner，并保留发起人不被覆盖。"""
+def test_normalize_owner_bot_id_uses_initiator_for_legacy_bare_bot():
+    """历史裸 Bot id：统一按发起人 owner_user_id 处理，不再反查 BotService。"""
     req = _request(
         TaskType.YAML,
         owner_bot_id="20261103_hadsuotr",
         owner_user_id="146836",
         yaml="kind: collab",
     )
-    norm = normalize_owner_bot_id(req, owner_lookup=lambda _bot_id: "35983")
-    assert norm.owner_bot_id == "20261103_hadsuotr:35983"
+    norm = normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "20261103_hadsuotr:146836"
     assert norm.owner_user_id == "146836"
 
 
