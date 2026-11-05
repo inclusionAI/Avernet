@@ -1,0 +1,96 @@
+.cargo/config.toml
+  h_fa66fe7c023b4b 1-8
+apps/bcs-internal/.aci.yml
+  h_fa66fe7c023b4b 36,64
+apps/bcs-internal/Cargo.lock
+  h_fa66fe7c023b4b 299,310,2400,2738,3141-3154,3372,3485-3521,4739,4860,4935-4955,5150-5155,5368-5377,5445,5465,5486,5499,6181,6261,6648-6818,7031,7288-7298,8010,8339-8347
+apps/bcs-internal/Cargo.toml
+  h_fa66fe7c023b4b 141-146
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/Cargo.toml
+  h_fa66fe7c023b4b 17
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/sofa_rpc_rs_poc.rs
+  h_fa66fe7c023b4b 1-231
+apps/bcs-internal/vendor/README.md
+  h_fa66fe7c023b4b 1-14
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/Cargo.toml
+  h_fa66fe7c023b4b 1-117
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/Cargo.toml.orig
+  h_fa66fe7c023b4b 1-38
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/lib.rs
+  h_fa66fe7c023b4b 1-5
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/bounded_read.rs
+  h_fa66fe7c023b4b 1-135
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/directory.rs
+  h_fa66fe7c023b4b 1-194
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mod.rs
+  h_fa66fe7c023b4b 1-244
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/context.rs
+  h_fa66fe7c023b4b 1-301
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/context_serde.rs
+  h_fa66fe7c023b4b 1-276
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/headers.rs
+  h_fa66fe7c023b4b 1-238
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/mod.rs
+  h_fa66fe7c023b4b 1-725
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/mosn/transport.rs
+  h_fa66fe7c023b4b 1-750
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/nacos/mod.rs
+  h_fa66fe7c023b4b 1-451
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/nacos/transport.rs
+  h_fa66fe7c023b4b 1-329
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/nacos/types.rs
+  h_fa66fe7c023b4b 1-301
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/pyo3_bridge.rs
+  h_fa66fe7c023b4b 1-84
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/client.rs
+  h_fa66fe7c023b4b 1-330
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/config.rs
+  h_fa66fe7c023b4b 1-216
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/mock_server.rs
+  h_fa66fe7c023b4b 1-307
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/mod.rs
+  h_fa66fe7c023b4b 1-17
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/proto.rs
+  h_fa66fe7c023b4b 1-395
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/publisher.rs
+  h_fa66fe7c023b4b 1-532
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/server_list.rs
+  h_fa66fe7c023b4b 1-421
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/subscriber.rs
+  h_fa66fe7c023b4b 1-1386
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/sofa/transport.rs
+  h_fa66fe7c023b4b 1-692
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/types.rs
+  h_fa66fe7c023b4b 1-328
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/zk/config.rs
+  h_fa66fe7c023b4b 1-92
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/zk/mod.rs
+  h_fa66fe7c023b4b 1-17
+apps/bcs-internal/vendor/sofa-rpc-registry-0.0.7/src/registry/zk/registry.rs
+  h_fa66fe7c023b4b 1-495
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/.cargo_vcs_info.json
+  h_fa66fe7c023b4b 1-6
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/Cargo.toml
+  h_fa66fe7c023b4b 1-154
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/Cargo.toml.orig
+  h_fa66fe7c023b4b 1-619
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/README.md
+  h_fa66fe7c023b4b 1-763
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/README_CN.md
+  h_fa66fe7c023b4b 1-763
+apps/bcs-internal/vendor/sofa-rpc-rs-0.0.7/src/lib.rs
+  h_fa66fe7c023b4b 1-346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8e1752f601953e0234bed398639d28105ee2a189",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
