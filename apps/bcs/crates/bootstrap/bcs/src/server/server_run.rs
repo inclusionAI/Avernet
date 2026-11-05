@@ -379,7 +379,8 @@ impl BcsServer {
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
-                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse)
+                    .on_failure(bcs_http::gateway_trace::BcnOnFailure),
             )
             .layer(
                 CorsLayer::new()
