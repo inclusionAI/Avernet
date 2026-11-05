@@ -413,10 +413,13 @@ class _McpAuth:
         return {"success": True, "process_url": None, "error": None}
 
 class _McpConfig:
+    def get_bot_override(self, **_kwargs) -> None:
+        return None
+
     def build_mcp_sync_payload(self, **_kwargs) -> tuple[None, dict[str, str], str, None]:
         return None, {}, "PROD", None
 
-class _OwnerSensitiveMcpConfig:
+class _OwnerSensitiveMcpConfig(_McpConfig):
     def __init__(self) -> None:
         self.user_ids: list[str] = []
 

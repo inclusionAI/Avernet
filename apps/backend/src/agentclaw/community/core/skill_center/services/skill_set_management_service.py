@@ -679,7 +679,9 @@ class SkillSetManagementService(SkillSetApplyService, SkillSetManagementServiceP
             require_mcp_delivery_eligibility(
                 mcp_config=self._mcp_config,
                 engine_type=self._engine(bot),
-                owner_id=stable_resource_owner_id(bot),
+                owner_id=str(bot["owner_id"]),
+                bot_id=bot_id,
+                entity_id=stable_resource_owner_id(bot),
                 server_code=server_code,
                 detail=detail,
             )
@@ -703,7 +705,9 @@ class SkillSetManagementService(SkillSetApplyService, SkillSetManagementServiceP
         require_mcp_delivery_eligibility(
             mcp_config=self._mcp_config,
             engine_type=self._engine(bot),
-            owner_id=stable_resource_owner_id(bot),
+            owner_id=str(bot["owner_id"]),
+            bot_id=bot_id,
+            entity_id=stable_resource_owner_id(bot),
             server_code=server_code,
             detail=detail,
         )

@@ -27,6 +27,11 @@ class CapabilityFacts:
             self.activation.installed_skills.update(
                 int(a.skill_id) for a in getattr(reader, "assets", ())
             )
+        if hasattr(self.activation, "skill_dependencies"):
+            self.activation.skill_dependencies.update({
+                int(a.skill_id): frozenset(mcp_dependency_codes(a.mcp_dependencies))
+                for a in getattr(reader, "assets", ())
+            })
         self.excluded = frozenset()
         self.removed = set()
 

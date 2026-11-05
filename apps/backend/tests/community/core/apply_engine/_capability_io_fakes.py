@@ -93,6 +93,7 @@ class FakeActivationService:
         self.activated: list[str] = []
         self.deactivated: list[str] = []
         self.installed_skills: set[int] = set()
+        self.skill_dependencies: dict[int, frozenset[str]] = {}
         self.skill_activations: list[int] = []
         self.skill_deactivations: list[int] = []
         # The ``project`` flag of every write (W8): the real service projects
@@ -214,7 +215,7 @@ class FakeActivationService:
         changed = int(skill_id) not in self.installed_skills
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
-        return {"id": skill_id, "changed": changed}
+        return {"id": skill_id, "changed": changed, "outcome": "created" if changed else "unchanged"}
 
     async def remove_apply_skill(
         self,
@@ -246,6 +247,10 @@ class FakeActivationService:
     ) -> dict[str, Any]:
         self.projections.append(project)
         self._refuse_if_set_supplied(server_code)
+        effective_before = server_code in self.installed or any(
+            server_code in self.skill_dependencies.get(sid, ())
+            for sid in self.installed_skills
+        )
         changed = server_code not in self.installed
         if server_code not in self.installed:
             self.activated.append(server_code)
@@ -253,13 +258,13 @@ class FakeActivationService:
         if comparable_config(self.mcp_overrides.get(server_code)) == comparable_config(
             config
         ):
-            return {"changed": changed}
+            return {"changed": changed, "outcome": "unchanged" if effective_before else "created"}
         self.configured.append((server_code, config))
         if config:
             self.mcp_overrides[server_code] = dict(config)
         else:
             self.mcp_overrides.pop(server_code, None)
-        return {"changed": True}
+        return {"changed": True, "outcome": "updated" if effective_before else "created"}
 
     async def remove_apply_mcp(
         self,

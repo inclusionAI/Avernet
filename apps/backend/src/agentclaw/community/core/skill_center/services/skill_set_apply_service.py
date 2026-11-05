@@ -85,7 +85,9 @@ class SkillSetApplyService:
             require_mcp_delivery_eligibility(
                 mcp_config=self._mcp_config,
                 engine_type=scope.engine_type,
-                owner_id=scope.owner_id,
+                owner_id=str(bot["owner_id"]),
+                bot_id=scope.bot_id,
+                entity_id=scope.owner_id,
                 server_code=code,
                 detail=detail,
             )
