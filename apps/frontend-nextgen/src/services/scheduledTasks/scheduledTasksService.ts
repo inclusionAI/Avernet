@@ -1,3 +1,5 @@
+import type { RoutineRun } from '@/services/botScheduledTasks/types';
+import { isStage } from '@/services/botScheduledTasks/types';
 import {
   getBotRoutine,
   listAllRoutines,
@@ -27,6 +29,7 @@ export interface ScheduledRoutineRecord {
 }
 
 export interface ScheduledRoutineRunRecord {
+  conversation?: RoutineRun;
   id: string;
   botId: string;
   botName?: string;
@@ -155,15 +158,32 @@ export function mapScheduledRoutineRunRecord(
     pickString(source, ['duration', 'cost_time', 'elapsed_time']) ??
     pickString(runInfo, ['duration', 'cost_time', 'elapsed_time']) ??
     formatDuration(actualTriggerAt, finishedAt);
+  const id = pickString(source, ['run_id', 'instance_id', 'id', 'execution_id']) ?? 'unknown-run';
+  const routineId = pickString(source, ['routine_id', 'routineId']) ?? routine?.id ?? 'unknown-routine';
+  const stage = source.runtime_stage;
+  const conversation: RoutineRun = {
+    id, routineId, status: pickString(source, ['status']) ?? 'unknown',
+    startedAt: actualTriggerAt, finishedAt,
+    runtime_stage: isStage(stage) ? stage : undefined,
+    device_uuid: pickString(source, ['device_uuid']),
+    operator_id: pickString(source, ['operator_id']),
+    input: typeof source.input === 'string' ? source.input : undefined,
+    output: typeof source.output === 'string' ? source.output : undefined,
+    error: typeof source.error === 'string' ? source.error : undefined,
+    messages: Array.isArray(source.messages) ? source.messages.flatMap((entry) =>
+      isRecord(entry) && typeof entry.role === 'string' && typeof entry.content === 'string'
+        ? [{ role: entry.role, content: entry.content }] : []) : [],
+  };
   return {
-    id: pickString(source, ['run_id', 'instance_id', 'id', 'execution_id']) ?? 'unknown-run',
+    id,
+    conversation,
     botId,
     botName:
       pickString(source, ['bot_name', 'owner_bot_name']) ??
       routine?.botName ??
       pickString(source, ['bot_id', 'botId']) ??
       botId,
-    routineId: pickString(source, ['routine_id', 'routineId']) ?? routine?.id ?? 'unknown-routine',
+    routineId,
     routineName: pickString(source, ['routine_name', 'name', 'title']) ?? routine?.name ?? '未命名定时任务',
     instanceNo:
       pickString(source, ['instance_no', 'instanceNo', 'run_no']) ??
