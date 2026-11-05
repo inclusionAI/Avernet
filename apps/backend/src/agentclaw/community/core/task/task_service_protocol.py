@@ -145,8 +145,8 @@ class TaskServiceProtocol(Protocol):
         extend_props_patch: dict | None = None,
     ) -> NodeOpResult: ...
 
-    def get_task_node_by_session(self, session_id: str) -> TaskNodeSessionRef | None:
-        """Return the task and node executing in a chat session, or a miss."""
+    def get_task_nodes_by_session(self, session_id: str) -> list[TaskNodeSessionRef]:
+        """Return every visible task node linked to a chat session, newest first."""
         ...
 
     async def converge_by_session(

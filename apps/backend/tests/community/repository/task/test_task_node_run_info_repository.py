@@ -48,6 +48,19 @@ def test_get_latest_is_max_retry(db):
     assert repo.get_latest("T-1", "missing") is None
 
 
+def test_list_by_session_id_returns_all_rows_newest_first(db):
+    repo = TaskNodeRunInfoRepository(db)
+    first = repo.insert(_run(task_id="T-1", node_id="N-1", retry=2, session_id="S-1"))
+    second = repo.insert(_run(task_id="T-2", node_id="N-2", retry=0, session_id="S-1"))
+    repo.insert(_run(task_id="T-3", node_id="N-3", retry=0, session_id="S-2"))
+
+    rows = repo.list_by_session_id("S-1")
+
+    assert [row.task_id for row in rows] == [second.task_id, first.task_id]
+    assert [row.retry for row in rows] == [second.retry, first.retry]
+    assert repo.list_by_session_id("missing") == []
+
+
 def test_update_applies_only_non_none_fields(db):
     repo = TaskNodeRunInfoRepository(db)
     repo.insert(_run(retry=0, run_mode="single_bot", assignee="B-1", output=None))

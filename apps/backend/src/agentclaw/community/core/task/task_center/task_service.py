@@ -785,8 +785,8 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
     def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
         return self._graph.get_node_context(task_id, node_id)
 
-    def get_task_node_by_session(self, session_id: str) -> TaskNodeSessionRef | None:
-        return task_service_queries.get_task_node_by_session(self, session_id)
+    def get_task_nodes_by_session(self, session_id: str) -> list[TaskNodeSessionRef]:
+        return task_service_queries.get_task_nodes_by_session(self, session_id)
 
     def get_task_dashboard(
         self,

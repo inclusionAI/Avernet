@@ -96,27 +96,39 @@ export interface TaskBySessionRef {
   task_id: string;
   owner_user_id: string;
   node_id: string;
+  updated_at?: string | null;
+}
+
+interface TaskBySessionData {
+  session_id: string;
+  items: TaskBySessionRef[];
+  total: number;
 }
 
 /**
- * Resolve a relay execution chat session to its task and node. This is used for
- * automatic side-panel recovery only, so a miss or transport failure resolves
- * to null without surfacing a toast or blocking the conversation.
+ * Resolve a chat session to every task node linked to it. This is used for
+ * automatic side-panel recovery, so a miss or transport failure resolves to
+ * null without surfacing a toast or blocking the conversation.
  */
 export async function getTaskBySession(
   sessionId: string,
   baseUrl: string = DEFAULT_BASE,
-): Promise<DomainResult<TaskBySessionRef | null>> {
+): Promise<DomainResult<TaskBySessionRef[] | null>> {
   const path = `${TASK_READ_API_BASE}/by_session`;
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
   try {
-    const result = await backendRequest<Envelope<TaskBySessionRef>>(url, {
+    const result = await backendRequest<Envelope<TaskBySessionData>>(url, {
       method: 'GET',
       params: { session_id: sessionId },
       injectUserId: false,
       operation: 'get-task-by-session',
     });
-    return { ok: true, data: isEnvelopeFailure(result) ? null : result.data ?? null };
+    return {
+      ok: true,
+      data: isEnvelopeFailure(result) || !Array.isArray(result.data?.items)
+        ? null
+        : result.data.items,
+    };
   } catch (error) {
     if (error instanceof BackendRequestError && error.toastKey) {
       useErrorNotifyStore.getState().cancel(error.toastKey);

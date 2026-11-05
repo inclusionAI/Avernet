@@ -25,6 +25,7 @@ import type {
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
@@ -135,6 +136,8 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     panelRef,
   });
 
+  const taskTab = useSessionTaskPanelTab(sessionId);
+
   const [openPanel, setOpenPanel] = useState<ChatHeaderPanelKind | null>(null);
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
@@ -177,10 +180,10 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     markTaskNavigationRouteHydrated(sessionId, '/workspace/chat');
   }, [sessionId]);
 
-  // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
+  // 副屏判空：无内容也不可重建 Task tab 时才禁用 Monitor；已打开的 TaskPanel 必须保持可切。
   const sidePaneDisabled = useMemo(
-    () => !sidePaneEnabled || !sessionHasSidePaneContent(messages),
-    [messages, sidePaneEnabled],
+    () => !sidePaneEnabled || (!sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab),
+    [messages, sidePaneEnabled, sidePaneOpen, taskTab],
   );
 
   const toggleSidePane = useCallback(() => {
@@ -195,9 +198,9 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       }
       // 打开：按消息标记幂等重建 tabs，不再裸 openPanel——空 tabs 会被 autoCloseWhenEmpty
       // 立即弹回（「打开一瞬又关闭」）；重建成功即面板已展开，镜像同步为 true。
-      return reopenSidePaneTabsFromMessages(messages, panel);
+      return reopenSidePaneTabsFromMessages(messages, panel, taskTab);
     });
-  }, [panelRef, messages, sidePaneEnabled]);
+  }, [panelRef, messages, sidePaneEnabled, taskTab]);
 
   const favorites = useMemo<ChatHeaderFavoritesModel>(() => {
     const favorite = session?.favorite === true;

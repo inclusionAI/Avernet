@@ -32,9 +32,10 @@ export class BotConfigService {
     return this.enableSubscription(botId, ownerUserId, note, signal);
   }
 
-  async disableSubscription(botId: string, signal?: AbortSignal) {
+  async disableSubscription(botId: string, ownerUserId: string, signal?: AbortSignal) {
     if (!botId) throw new Error('缺少 Bot');
-    await this.gateway.deleteSubscription(botId, signal);
+    if (!ownerUserId) throw new Error('缺少当前用户身份');
+    await this.gateway.deleteSubscription(botId, ownerUserId, signal);
   }
 
   private normalizeNote(note?: string | null): string | null {

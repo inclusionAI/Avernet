@@ -75,75 +75,146 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 class _StubRunInfo:
-    def __init__(self, record=None, expected_session="sess-relay"):
-        self.record = record
+    def __init__(self, records=None, expected_session="sess-relay"):
+        self.records = records or []
         self.expected_session = expected_session
 
     def get_by_session_id(self, session_id):
+        # Callback convergence intentionally keeps its retry-first contract.
+        raise AssertionError(f"unexpected get_by_session_id call: {session_id}")
+
+    def list_by_session_id(self, session_id):
         assert session_id == self.expected_session
-        return self.record
+        return list(self.records)
 
 
-def _session_run_record(task_id="task-relay", node_id="node-relay"):
+def _session_run_record(
+    task_id="task-relay",
+    node_id="node-relay",
+    *,
+    row_id=1,
+    retry=0,
+    updated_at=None,
+):
+    from datetime import datetime
+
     from agentclaw.community.core.task.repository.types import TaskNodeRunInfoRecord
 
     return TaskNodeRunInfoRecord(
-        id=1,
+        id=row_id,
         node_id=node_id,
         task_id=task_id,
         run_mode="relay",
         assignee="bot-relay",
         output=None,
         acceptance_result=None,
-        retry=0,
+        retry=retry,
         session_id="sess-relay",
         extend_props=None,
         start_time=None,
         update_time=None,
         end_time=None,
+        gmt_modified=updated_at or datetime(2026, 11, 5, 12),
     )
 
 
-def test_get_task_node_by_session_uses_env_scoped_task_owner():
-    from agentclaw.community.core.task.repository.types import (
-        TaskInfoRecord,
-        TaskNodeSessionRef,
-    )
+def _scoped_task(task_id: str, owner_user_id: str):
     from agentclaw.community.core.task.domain.models import Status as DomainStatus
-    from agentclaw.community.core.task.task_center import task_service_queries
+    from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
-    task = TaskInfoRecord(
+    return TaskInfoRecord(
         id=1,
-        task_id="task-relay",
+        task_id=task_id,
         source_type="bot",
-        owner_user_id="owner-1",
-        owner_bot_id="bot-1",
+        owner_user_id=owner_user_id,
+        owner_bot_id=f"bot-{task_id}",
         execution_config={},
         task_spec={},
         status=DomainStatus.RUNNING,
     )
+
+
+class ScopedTaskRepo:
+    def __init__(self, by_task_id):
+        self.by_task_id = by_task_id
+
+    def get(self, task_id):
+        owner_user_id = self.by_task_id.get(task_id)
+        return _scoped_task(task_id, owner_user_id) if owner_user_id else None
+
+
+def test_get_task_nodes_by_session_returns_visible_tasks_newest_first():
+    from datetime import datetime
+
+    from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
+    from agentclaw.community.core.task.task_center import task_service_queries
+
+    updated_at = datetime(2026, 11, 5, 12)
     service = object.__new__(TaskService)
-    service._run_info_repo = _StubRunInfo(_session_run_record())
+    service._run_info_repo = _StubRunInfo([
+        _session_run_record(task_id="task-new", node_id="node-new", row_id=3),
+        _session_run_record(task_id="task-old", node_id="node-old", row_id=2),
+        _session_run_record(task_id="task-old", node_id="node-old", row_id=1, retry=1),
+        _session_run_record(task_id="task-hidden", node_id="node-hidden", row_id=4),
+    ])
+    service._task_info_repo = ScopedTaskRepo({
+        "task-new": "owner-1",
+        "task-old": "owner-2",
+    })
 
-    class ScopedTaskRepo:
-        def get(self, task_id):
-            assert task_id == "task-relay"
-            return task
+    refs = task_service_queries.get_task_nodes_by_session(service, "sess-relay")
 
-    service._task_info_repo = ScopedTaskRepo()
+    assert refs == [
+        TaskNodeSessionRef(
+            task_id="task-new",
+            node_id="node-new",
+            owner_user_id="owner-1",
+            updated_at=updated_at,
+        ),
+        TaskNodeSessionRef(
+            task_id="task-old",
+            node_id="node-old",
+            owner_user_id="owner-2",
+            updated_at=updated_at,
+        ),
+    ]
 
-    ref = task_service_queries.get_task_node_by_session(service, "sess-relay")
 
-    assert ref == TaskNodeSessionRef(
-        task_id="task-relay", node_id="node-relay", owner_user_id="owner-1"
+def test_get_task_nodes_by_session_uses_create_time_for_legacy_run_rows():
+    from datetime import datetime
+
+    from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
+    from agentclaw.community.core.task.task_center import task_service_queries
+
+    created_at = datetime(2026, 11, 4, 9, 30)
+    run = replace(
+        _session_run_record(task_id="task-legacy", node_id="node-legacy", row_id=2),
+        gmt_create=created_at,
+        gmt_modified=None,
     )
+    service = object.__new__(TaskService)
+    service._run_info_repo = _StubRunInfo([run])
+    service._task_info_repo = ScopedTaskRepo({"task-legacy": "owner-legacy"})
+
+    refs = task_service_queries.get_task_nodes_by_session(service, "sess-relay")
+
+    assert refs == [
+        TaskNodeSessionRef(
+            task_id="task-legacy",
+            node_id="node-legacy",
+            owner_user_id="owner-legacy",
+            updated_at=created_at,
+        )
+    ]
 
 
-def test_get_task_node_by_session_hides_task_outside_read_scope():
+def test_get_task_nodes_by_session_hides_tasks_outside_read_scope():
     from agentclaw.community.core.task.task_center import task_service_queries
 
     service = object.__new__(TaskService)
-    service._run_info_repo = _StubRunInfo(_session_run_record())
+    service._run_info_repo = _StubRunInfo([
+        _session_run_record(task_id="task-hidden"),
+    ])
 
     class OutOfScopeTaskRepo:
         def get(self, _task_id):
@@ -151,7 +222,7 @@ def test_get_task_node_by_session_hides_task_outside_read_scope():
 
     service._task_info_repo = OutOfScopeTaskRepo()
 
-    assert task_service_queries.get_task_node_by_session(service, "sess-relay") is None
+    assert task_service_queries.get_task_nodes_by_session(service, "sess-relay") == []
 
 
 # ===== adapter:包旧 stub 成 PlanningStrategy / DispatchStrategy =====
