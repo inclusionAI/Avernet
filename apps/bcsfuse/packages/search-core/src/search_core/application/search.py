@@ -1,6 +1,8 @@
 """Default catalog search policy and request execution."""
 
+import logging
 import math
+import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -17,8 +19,22 @@ from search_core.api.models import (
 )
 from search_core.api.services import RetrievalService
 from search_core.application.emergency import EmergencyControl
-from search_core.core.observation import events, request_budget
+from search_core.core.observation import (
+    events,
+    logger,
+    request_budget,
+    search_transport,
+)
 from search_core.core.timing import request_timing, stage_timing
+
+# Keep request logs readable without copying whole prompts or common identifiers.
+_sensitive_text = re.compile(
+    r"(?i)\bbearer\s+[a-z0-9._~+/=-]+|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d)"
+)
+
+
+def _log_text(value):
+    return _sensitive_text.sub("[redacted]", value)[:256]
 
 
 @dataclass(frozen=True)
@@ -47,11 +63,32 @@ class CatalogSearchApplication:
     async def execute(
         self, command: SearchCommand, identity: VerifiedIdentity
     ) -> SearchResult:
-        with request_budget(self._budget), request_timing(command.operation) as timing:
-            if self._trace_id_provider is not None:
-                trace_id = self._trace_id_provider()
-                if trace_id:
-                    timing["trace_id"] = trace_id
+        trace_id = self._trace_id_provider() if self._trace_id_provider else ""
+        with (
+            request_budget(self._budget),
+            request_timing(command.operation, trace_id) as timing,
+        ):
+            if logger.isEnabledFor(logging.INFO):
+                events.record_progress(
+                    "received",
+                    trace_id,
+                    transport=search_transport.get(),
+                    operation=command.operation,
+                    query=_log_text(command.query),
+                    limit=command.limit,
+                    filters={
+                        field: [_log_text(value) for value in values[:20]]
+                        for field, values in command.filters.items()
+                        if field in self._filter_fields
+                    },
+                    retrieval={
+                        key: value
+                        for key, value in getattr(command, "retrieval", {}).items()
+                        if key
+                        in {"keyword_enabled", "vector_enabled", "rerank_enabled"}
+                        and isinstance(value, bool)
+                    },
+                )
             started = time.monotonic()
             with stage_timing("configuration"):
                 snapshot = (
@@ -109,6 +146,16 @@ class CatalogSearchApplication:
                     reasons=result.reasons,
                     effective_limit=command.limit,
                 )
+                if logger.isEnabledFor(logging.INFO):
+                    timing["results"] = [
+                        {
+                            "rank": rank,
+                            "item_id": item.item_id[:256],
+                            "score": item.score,
+                            "score_source": item.score_source,
+                        }
+                        for rank, item in enumerate(result.items[:20], 1)
+                    ]
                 # Attach after retrieval/cache lookup, using this request's snapshot.
                 # Enabled switches describe policy, not model execution or success.
                 return replace(
@@ -155,6 +202,8 @@ class CatalogSearchApplication:
                 if identity.allowed_ids is None or item.item_id in identity.allowed_ids
             )
             stage.update(
-                input_count=len(result.items), result_count=len(items[: command.limit])
+                restricted_to_ids=identity.allowed_ids is not None,
+                input_count=len(result.items),
+                result_count=len(items[: command.limit]),
             )
             return replace(result, items=items[: command.limit])
