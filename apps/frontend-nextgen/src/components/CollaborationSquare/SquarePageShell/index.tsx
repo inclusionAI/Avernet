@@ -98,9 +98,10 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
           mode={botViewModel.mode}
           onQueryChange={botViewModel.setQuery}
           onModeChange={botViewModel.setMode}
-          className="w-full md:w-[348px] md:shrink-0"
+          className="w-full min-w-0 md:w-[348px]"
         />
-        <div className="w-full shrink-0 md:w-[338px]">
+        {/* min-w-0 允许窄窗口收缩（内容 truncate），避免定宽把页头顶出页面。 */}
+        <div className="w-full min-w-0 md:w-[338px]">
           <SquareIdentityPicker />
         </div>
       </>
@@ -110,9 +111,9 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
           resource="group"
           query={square.groupQuery}
           onQueryChange={(query) => square.setQuery('group', query)}
-          className="w-full md:w-[348px] md:shrink-0"
+          className="w-full min-w-0 md:w-[348px]"
         />
-        <div className="w-full shrink-0 md:w-[222px]">
+        <div className="w-full min-w-0 md:w-[222px]">
           <GroupIdentityDisplay />
         </div>
       </>

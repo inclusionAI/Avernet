@@ -2,21 +2,53 @@
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import type { CollaborationBot, CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
 import * as identityModule from '@/hooks/useHumanIdentity';
+import {
+  botCollaborationRepairService,
+  type CollaborationRepairReport,
+} from '@/services/botWorkshop/botCollaborationRepairService';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { toast } from 'sonner';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 // 避免通过 useHumanIdentity 透传加载 node_modules 中的 ESM 聊天适配器。
 jest.mock('@tc-chat/adapters', () => ({}));
+jest.mock('sonner', () => ({ toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn() } }));
+// 网络边界 mock，Hook 与共享 Store 使用真实实现（AC-34 竞态集成用例）。
+jest.mock('@/services/botWorkshop/botCollaborationRepairService', () => ({
+  botCollaborationRepairService: { repair: jest.fn(), pending: jest.fn() },
+}));
 
 const mockCapabilities = jest.fn();
 jest.mock('@/capabilities', () => ({ getCapabilities: () => mockCapabilities() }));
 
 const mockedUseHumanIdentity = jest.spyOn(identityModule, 'useHumanIdentity');
+const mockRepair = jest.mocked(botCollaborationRepairService.repair);
+const mockPending = jest.mocked(botCollaborationRepairService.pending);
+
+const successReport: CollaborationRepairReport = {
+  bot_id: 'bot-1',
+  status: 'succeeded',
+  items: [
+    { component: 'ownership', status: 'succeeded', error_code: null },
+    { component: 'profile', status: 'succeeded', error_code: null },
+    { component: 'managers', status: 'succeeded', error_code: null },
+  ],
+};
+
+const partialReport: CollaborationRepairReport = {
+  ...successReport,
+  status: 'partial_failed',
+  items: [
+    { component: 'ownership', status: 'succeeded', error_code: null },
+    { component: 'profile', status: 'succeeded', error_code: null },
+    { component: 'managers', status: 'unknown', error_code: 'delivery_timeout' },
+  ],
+};
 
 const makeBot = (id: string, joinedBcn = true): CollaborationBot => ({
   id,
@@ -47,6 +79,7 @@ const rowBot = (spaceKind: 'personal' | 'team' = 'personal', overrides: Record<s
     bot_name: '通用配置助手',
     engine: 'openclaw',
     status: 'ACTIVE',
+    owner_id: '900004',
     ...overrides,
     ...(spaceKind === 'team' ? { space: { space_id: '12', kind: 'team' } } : {}),
   }).item;
@@ -77,6 +110,8 @@ beforeEach(() => {
   });
   jest.spyOn(botEditorService, 'loadApproval').mockResolvedValue(false);
   jest.spyOn(botEditorService, 'saveApproval').mockResolvedValue({ data: { should_approval: false } } as never);
+  mockPending.mockReturnValue(undefined);
+  mockRepair.mockResolvedValue(successReport);
 });
 
 afterEach(() => {
@@ -217,7 +252,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
 
     const approvalSwitch = await screen.findByRole('switch', { name: '关闭共同编辑者发布需 Owner 审批' });
     fireEvent.click(approvalSwitch);
-    await waitFor(() => expect(botEditorService.saveApproval).toHaveBeenCalledWith('bot-1', false, undefined));
+    await waitFor(() => expect(botEditorService.saveApproval).toHaveBeenCalledWith('bot-1', false, '900004'));
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
   });
 
@@ -296,5 +331,243 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
     expect(screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' })).toBeInTheDocument();
     expect(botEditorService.loadApproval).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
+  const codingBotRow = (capabilities: Record<string, unknown>) =>
+    rowBot('personal', {
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: { template_config: { capabilities } },
+    });
+
+  it('Owner 点击「修复信息」按 Backend bot.id 与认证 Human 发起一次修复，在途禁用', async () => {
+    let finish!: (report: CollaborationRepairReport) => void;
+    mockRepair.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '修复信息' }));
+
+    expect(mockRepair).toHaveBeenCalledTimes(1);
+    expect(mockRepair).toHaveBeenCalledWith('bot-1', '900004');
+    expect(screen.getByRole('button', { name: '修复中…' })).toBeDisabled();
+
+    await act(async () => {
+      finish(partialReport);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('归属：已修复')).toBeInTheDocument();
+    expect(screen.getByText('基本资料：已修复')).toBeInTheDocument();
+    expect(screen.getByText('协作者：结果未确认')).toBeInTheDocument();
+    // 修复分项固定三项（backend 移出 caller_config），不再出现「调用配置」。
+    expect(screen.queryByText(/调用配置：/)).not.toBeInTheDocument();
+    // 分项结果已由列表承载，不再额外弹出错误提示。
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('修复成功后配置静默刷新，面板不切入加载骨架', async () => {
+    let finish!: (report: CollaborationRepairReport) => void;
+    mockRepair.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    let refreshInFlight!: (value: ReturnType<typeof overviewWithBot>) => void;
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValueOnce(overviewWithBot(makeBot('bot-1:900004')))
+      .mockImplementation(() => new Promise((resolve) => { refreshInFlight = resolve; }));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '修复信息' }));
+
+    await act(async () => {
+      finish(successReport);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // 刷新在途期间：内容保持展示，不出现整面板加载骨架。
+    expect(screen.queryByLabelText('正在加载公开设置')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('修复 Bot 信息')).toBeInTheDocument();
+    expect(refreshInFlight).toBeDefined();
+  });
+
+  it('请求失败只走全局错误提示一次，行内展示错误文案', async () => {
+    mockRepair.mockRejectedValue(new Error('后端超时'));
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '修复信息' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('未能确认修复结果，请稍后重试'));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['非 Owner', rowBot('personal', { owner_id: 'someone-else' })],
+    ['锁被他人持有', rowBot('personal', { lock: { locked: true, holder_user_id: 'other-user' } })],
+  ])('%s 时修复按钮禁用且不能提交', async (_case, bot) => {
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    render(<BotGeneralConfigDialog bot={bot} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
+    const button = screen.getByRole('button', { name: '修复信息' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(mockRepair).not.toHaveBeenCalled();
+  });
+
+  it.each(['hidden', 'offline'] as const)('协作状态 %s 仍保留 Owner 修复入口', async (status) => {
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(
+        overviewWithBot({ ...makeBot('bot-1:900004'), collaborationStatus: status }),
+      );
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+  });
+
+  it('privacy 加载中仍独立展示可用修复行，不被骨架覆盖', async () => {
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockImplementation(() => new Promise(() => {}) as never);
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    expect(screen.getByLabelText('正在加载公开设置')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 4, name: '协作能力' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled();
+  });
+
+  it('privacy 读取失败仍独立展示可用修复行', async () => {
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockRejectedValue(new Error('网络异常'));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('公开设置加载失败')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { level: 4, name: '协作能力' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled();
+  });
+
+  it('privacy 空结果仍独立展示可用修复行', async () => {
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBot(makeBot('another-bot')));
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('未获取到该 Bot 的协作配置')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled();
+  });
+
+  it('未声明 BCN 的 Coding Bot 不出现修复入口', async () => {
+    jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    const bot = codingBotRow({ member_management: true });
+    expect(bot.runtime.isAgentCodingBot).toBe(true);
+    expect(bot.runtime.bcnEnabled).toBe(false);
+
+    render(<BotGeneralConfigDialog bot={bot} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('Bot 可见性')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '修复信息' })).not.toBeInTheDocument();
+  });
+
+  // AC-34：真实 repair Hook + 真实 privacy Hook/共享 Store，仅 mock 网络 service；
+  // POST 已结束、A 的自动配置刷新仍在途时切换到 B，A 的迟到结果不得改写 B。
+  function mockDeferredOverviewLoads() {
+    const deferreds: Array<{
+      resolve: (value: CollaborationPrivacyOverview) => void;
+      reject: (reason: unknown) => void;
+    }> = [];
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockImplementation(
+      () =>
+        new Promise((resolve, reject) => {
+          deferreds.push({ resolve, reject });
+        }),
+    );
+    return deferreds;
+  }
+
+  async function switchDuringAReconfiguration(
+    settleStaleRefresh: (deferreds: ReturnType<typeof mockDeferredOverviewLoads>) => Promise<void>,
+  ) {
+    const deferreds = mockDeferredOverviewLoads();
+    mockRepair.mockResolvedValue(successReport);
+    const onClose = jest.fn();
+    const view = render(<BotGeneralConfigDialog bot={rowBot()} onClose={onClose} />);
+    await waitFor(() => expect(deferreds).toHaveLength(1));
+    await act(async () => {
+      deferreds[0].resolve(overviewWithBot(makeBot('bot-1:900004')));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: '修复信息' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: '修复信息' }));
+    // POST 已完成，A 的自动配置刷新（第二次 loadOverview）仍在途。
+    await waitFor(() => expect(deferreds).toHaveLength(2));
+
+    view.rerender(
+      <BotGeneralConfigDialog
+        bot={rowBot('personal', { bot_id: 'bot-2', bot_name: 'Bot B' })}
+        onClose={onClose}
+      />,
+    );
+    await waitFor(() => expect(deferreds).toHaveLength(3));
+    await act(async () => {
+      deferreds[2].resolve(overviewWithBot(makeBot('bot-2:900004')));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByText('bot-2:900004')).toBeInTheDocument());
+    const before = useCollaborationPrivacyStore.getState();
+
+    await settleStaleRefresh(deferreds);
+
+    const after = useCollaborationPrivacyStore.getState();
+    expect(after.overview).toBe(before.overview);
+    expect(after.error).toBe(before.error);
+    expect(after.loading).toBe(before.loading);
+    expect(screen.getByText('bot-2:900004')).toBeInTheDocument();
+    expect(screen.queryByText('bot-1:900004')).not.toBeInTheDocument();
+    // 切 Bot 后不得重发修复 POST。
+    expect(mockRepair).toHaveBeenCalledTimes(1);
+    expect(mockRepair).toHaveBeenCalledWith('bot-1', '900004');
+  }
+
+  it('切 Bot 后 A 迟到的配置刷新成功不覆盖 B', async () => {
+    await switchDuringAReconfiguration(async (deferreds) => {
+      await act(async () => {
+        deferreds[1].resolve(overviewWithBot(makeBot('bot-1:900004')));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    });
+  });
+
+  it('切 Bot 后 A 迟到的配置刷新失败不覆盖 B', async () => {
+    await switchDuringAReconfiguration(async (deferreds) => {
+      await act(async () => {
+        deferreds[1].reject(new Error('A 的刷新失败'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    });
   });
 });

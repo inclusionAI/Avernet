@@ -3,6 +3,7 @@ import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
 import { ENABLE_TEST_USER, TEST_USER_IDENTITY } from './testUser';
 
 export interface DomainError {
@@ -220,7 +221,7 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
             id,
             kind: b.kind === 'human' ? 'user' : 'bot',
             displayName: readString(b.name) ?? '未命名',
-            avatarUrl: readString(b.avatar_url),
+            avatarUrl: normalizeAvatarUrl(b.avatar_url),
             online,
             status: online ? 'online' : 'hidden',
             reachability,

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { GroupView } from '@/domain/collaboration';
 
 const baseGroup = {
   groupId: 'g1',
@@ -25,7 +26,12 @@ const baseGroup = {
 };
 
 // 可变 mock 状态：测试内切换 selectedGroupId 后 rerender，模拟侧栏切群。
-const mockState: { selectedGroupId: string | null; hideGroup?: boolean; expandedGroupIds?: Record<string, true> } = { selectedGroupId: 'g1' };
+const mockState: {
+  selectedGroupId: string | null;
+  selectedGroup: GroupView;
+  hideGroup?: boolean;
+  expandedGroupIds?: Record<string, true>;
+} = { selectedGroupId: 'g1', selectedGroup: baseGroup };
 const mockSessionLoad = jest.fn();
 const mockReloadSelectedGroup = jest.fn();
 const mockOnSelectGroup = jest.fn();
@@ -56,7 +62,7 @@ jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
     groups: mockState.hideGroup ? [] : [baseGroup],
     expandedGroupIds: mockState.expandedGroupIds ?? {},
     selectedGroupId: mockState.selectedGroupId,
-    selectedGroup: baseGroup,
+    selectedGroup: mockState.selectedGroup,
     canManageGroup: { allowed: true },
     isLoadingGroups: false,
     groupSearchText: '',
@@ -188,6 +194,7 @@ function renderArea() {
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
   beforeEach(() => {
     mockState.selectedGroupId = 'g1';
+    mockState.selectedGroup = baseGroup;
     mockState.hideGroup = false;
     mockState.expandedGroupIds = {};
     mockSessionLoad.mockClear();
@@ -289,6 +296,32 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
     view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
 
     expect(mockReloadSelectedGroup).toHaveBeenCalledWith('g2');
+  });
+
+  it('面板打开时同群被新列表对象替换（详情未加载）会再次拉取，详情回填后停止', () => {
+    const view = renderArea();
+    fireEvent.click(screen.getByRole('button', { name: '打开管理面板' }));
+    expect(mockReloadSelectedGroup).toHaveBeenCalledTimes(1);
+    mockReloadSelectedGroup.mockClear();
+
+    // 列表刷新把同群替换为新的列表对象：摘要存在但完整详情未加载。
+    mockState.selectedGroup = {
+      ...baseGroup,
+      participantSummaries: [{ actorId: 'b1', kind: 'bot', name: '摘要成员' }],
+      participantDetailsLoaded: false,
+    };
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockReloadSelectedGroup).toHaveBeenCalledWith('g1');
+
+    // 完整详情回填（participantDetailsLoaded=true）后同一群不再重复请求。
+    mockReloadSelectedGroup.mockClear();
+    mockState.selectedGroup = {
+      ...baseGroup,
+      participants: [{ actorId: 'b1', kind: 'bot', name: '完整成员', role: 'owner', mode: 'auto' }],
+      participantDetailsLoaded: true,
+    };
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
+    expect(mockReloadSelectedGroup).not.toHaveBeenCalled();
   });
 
   it('面板未打开时切换选中群不拉取详情（保持按需拉取约定）', () => {

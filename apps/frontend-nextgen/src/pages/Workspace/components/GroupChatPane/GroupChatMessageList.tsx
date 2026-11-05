@@ -2,6 +2,7 @@ import { isTaskUiOnlyMessage } from '@/domain/groupTasks/projection';
 import { Button } from '@/components/ui';
 import { MessageSelectionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { getDisplayParticipants } from '@/domain/collaboration/participantPresentation';
 import { useHistoryPrependAnchor } from '@/pages/Workspace/hooks/useHistoryPrependAnchor';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
@@ -138,6 +139,7 @@ export function GroupChatMessageList({
                 isRequesting={isRequesting}
                 group={group}
                 participants={session.participants}
+                displayParticipants={getDisplayParticipants(session)}
                 sessionId={session.sessionId}
                 userAvatarUrl={userAvatarUrl}
                 userIdentityId={userIdentityId}

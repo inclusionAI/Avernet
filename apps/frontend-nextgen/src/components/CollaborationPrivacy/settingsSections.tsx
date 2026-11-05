@@ -3,15 +3,14 @@
  * 从 PermissionCard 提取，供协作权限页面卡片与 BotWorkshop「通用配置」弹窗共用。
  * 提取为 DOM 等价重构——页面侧渲染结果与提取前一致，既有测试断言不受影响。
  */
-import { Badge } from '@/components/ui/Badge';
-import { Switch } from '@/components/ui/Switch';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
-import type { DirectSetting } from '@/services/collaborationPrivacy';
-import { cn } from '@/utils/cn';
 import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
-import { ControlStateTooltip, LabelHelpTooltip } from './HelpTooltip';
+import { LabelHelpTooltip } from './HelpTooltip';
 import { RelationCard, type RelationCardProps } from './RelationCard';
 import { RequestList } from './RequestList';
+import { SettingRow } from './SettingRow';
+
+export { BotAbilitySettings } from './BotAbilitySettings';
 
 export interface VisibilitySectionCallbacks {
   onEditPublication: (bot: CollaborationBot, audience: PublicAudience) => void;
@@ -21,138 +20,6 @@ export interface VisibilitySectionCallbacks {
 export interface FriendApprovalSectionCallbacks {
   onEditFriendApproval: (bot: CollaborationBot) => void;
   onViewFriendApprovalScope: (bot: CollaborationBot) => void;
-}
-
-interface SettingRowProps {
-  label: string;
-  description: string;
-  checked: boolean;
-  disabled?: boolean;
-  busy?: boolean;
-  status?: string;
-  statusReason?: string;
-  onChange: (checked: boolean) => void;
-  /** 容器布局不同时的行内边距覆盖；缺省为 divide-y 列表语义（py-3 first:pt-0 last:pb-0）。 */
-  paddingClassName?: string;
-}
-
-function SettingRow({
-  label,
-  description,
-  checked,
-  disabled,
-  busy,
-  status,
-  statusReason,
-  onChange,
-  paddingClassName,
-}: SettingRowProps) {
-  return (
-    <div className={cn('flex items-start justify-between gap-4', paddingClassName ?? 'py-3 first:pt-0 last:pb-0')}>
-      <div className="min-w-0 flex-1">
-        <p className="m-0 text-sm font-medium text-foreground">{label}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {status && <Badge tone="neutral">{status}</Badge>}
-        {status && statusReason && <ControlStateTooltip label={label} status={status} content={statusReason} />}
-        <Switch
-          checked={checked}
-          disabled={disabled || busy}
-          aria-label={`${checked ? '关闭' : '开启'}${label}`}
-          onCheckedChange={onChange}
-        />
-      </div>
-    </div>
-  );
-}
-
-interface BotAbilitySettingsProps {
-  bot: CollaborationBot;
-  busyAction: string | null | undefined;
-  onToggleDirect: (bot: CollaborationBot, setting: DirectSetting, value: boolean | 'online' | 'hidden') => void;
-  /** 通用配置弹窗两列网格布局；缺省为页面列表布局（divide-y）。 */
-  grid?: boolean;
-  /** 仅展示指定能力项；通用配置弹窗按入口规则裁剪，协作权限页缺省展示全部。 */
-  visibleSettings?: readonly DirectSetting[];
-}
-
-/** 协作能力分区：四个开关行。 */
-export function BotAbilitySettings({
-  bot,
-  busyAction,
-  onToggleDirect,
-  grid = false,
-  visibleSettings,
-}: BotAbilitySettingsProps) {
-  const directBusy = (setting: DirectSetting) => busyAction === `${bot.id}:${setting}`;
-  const shouldShow = (setting: DirectSetting) => !visibleSettings || visibleSettings.includes(setting);
-  const rows = (
-    <>
-      {shouldShow('collaborationStatus') && (
-        <SettingRow
-          label="参与协作群聊"
-          description="控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。"
-          checked={bot.collaborationStatus === 'online'}
-          disabled={!bot.joinedBcn || bot.collaborationStatus === 'offline'}
-          busy={directBusy('collaborationStatus')}
-          onChange={(checked) => onToggleDirect(bot, 'collaborationStatus', checked ? 'online' : 'hidden')}
-          paddingClassName={grid ? 'py-3' : undefined}
-        />
-      )}
-      {shouldShow('profilePublic') && (
-        <SettingRow
-          label="公开 Bot 画像"
-          description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
-          checked={bot.profilePublic}
-          disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}
-          busy={directBusy('profilePublic')}
-          status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
-          statusReason={
-            bot.profilePublicStatus === 'unavailable'
-              ? '该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性'
-              : undefined
-          }
-          onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
-          paddingClassName={grid ? 'py-3' : undefined}
-        />
-      )}
-      {shouldShow('taskClaimingEnabled') && (
-        <SettingRow
-          label="任务认领"
-          description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。"
-          checked={bot.taskClaimingEnabled}
-          disabled={!bot.joinedBcn}
-          busy={directBusy('taskClaimingEnabled')}
-          onChange={(checked) => onToggleDirect(bot, 'taskClaimingEnabled', checked)}
-          paddingClassName={grid ? 'py-3' : undefined}
-        />
-      )}
-      {shouldShow('dreamModelEnabled') && (
-        <SettingRow
-          label="Dream Mode"
-          description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。"
-          checked={bot.dreamModelEnabled}
-          disabled={!bot.joinedBcn}
-          busy={directBusy('dreamModelEnabled')}
-          onChange={(checked) => onToggleDirect(bot, 'dreamModelEnabled', checked)}
-          paddingClassName={grid ? 'py-3' : undefined}
-        />
-      )}
-    </>
-  );
-  return (
-    <>
-      <div className="mb-3 flex items-center">
-        <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">协作能力</h4>
-      </div>
-      {grid ? (
-        <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">{rows}</div>
-      ) : (
-        <div className="divide-y divide-divider">{rows}</div>
-      )}
-    </>
-  );
 }
 
 interface BotVisibilitySettingsProps extends VisibilitySectionCallbacks {
