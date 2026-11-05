@@ -1005,3 +1005,17 @@ capabilities 端点发布的理由是**同一个字符串对象**，且有一个
 不能从 Git 传输支持推断。`skill_references` 单独列出 `package`、`repo_path`、
 `skill_uuid`、`skill_code` 的 `supported` / `reason`，PUT、创建校验与 compiler
 复用同一判断。DeepSeek Harness 当前仅支持 Local/Repo，Center 引用会明确拒绝。
+
+
+能力发现响应片段（支持与否以实际 Bot/engine 为准）：
+
+```json
+{
+  "skill_references": [
+    {"reference": "package", "supported": true, "reason": ""},
+    {"reference": "repo_path", "supported": true, "reason": ""},
+    {"reference": "skill_uuid", "supported": true, "reason": ""},
+    {"reference": "skill_code", "supported": true, "reason": ""}
+  ]
+}
+```
