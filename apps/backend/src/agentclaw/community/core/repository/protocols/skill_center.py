@@ -504,7 +504,16 @@ class SkillRepository(Protocol):
 
         Returns:
             Number of deleted records
+
+        Raises:
+            SkillAssetInUseError: when any skill still has durable reference
+                blockers; no deletion is performed in that case.
         """
+        ...
+
+    @abstractmethod
+    def cleanup_by_bot_id(self, bot_id: str, owner_id: str) -> dict:
+        """Delete unblocked Bot assets and return deleted, retained and blockers."""
         ...
 
     @abstractmethod

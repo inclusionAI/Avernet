@@ -9,6 +9,7 @@ that id never wrote, executed on every one of their starts.
 The purge is deliberately *not* one of the log-and-continue sweeps in
 ``cleanup_single_bot_data``. See ``purge_startup_script`` for why.
 """
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,16 +17,15 @@ import pytest
 from agentclaw.community.core.bot_management.services.cleanup_service import (
     BotCleanupService,
 )
+from agentclaw.community.core.skill_center.errors import SkillAssetInUseError
 
 
 def _make_service() -> BotCleanupService:
     return BotCleanupService(
-        skill_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
+        skill_repo=MagicMock(cleanup_by_bot_id=MagicMock(return_value={"deleted": 0, "retained": 0, "blocker_counts": {}})),
         skill_set_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
         desired_state_repo=MagicMock(
-            purge_bot_installations=MagicMock(
-                return_value={"skills": 0, "mcps": 0}
-            )
+            purge_bot_installations=MagicMock(return_value={"skills": 0, "mcps": 0})
         ),
         startup_script_purge=MagicMock(delete=MagicMock(return_value=True)),
     )
@@ -75,15 +75,14 @@ class TestStartupScriptPurge:
 def test_bot_cleanup_purges_installations_and_sets_before_owned_skill_assets():
     events = []
     service = _make_service()
-    service._desired_state_repo.purge_bot_installations.side_effect = (
-        lambda **kwargs: events.append(("installations", kwargs))
-        or {"skills": 2, "mcps": 1}
+    service._desired_state_repo.purge_bot_installations.side_effect = lambda **kwargs: (
+        events.append(("installations", kwargs)) or {"skills": 2, "mcps": 1}
     )
-    service._skill_set_repo.delete_by_bot_id.side_effect = (
-        lambda bot_id, owner_id: events.append(("sets", bot_id, owner_id)) or 1
+    service._skill_set_repo.delete_by_bot_id.side_effect = lambda bot_id, owner_id: (
+        events.append(("sets", bot_id, owner_id)) or 1
     )
-    service._skill_repo.delete_by_bot_id.side_effect = (
-        lambda bot_id, owner_id: events.append(("skills", bot_id, owner_id)) or 3
+    service._skill_repo.cleanup_by_bot_id.side_effect = lambda bot_id, owner_id: (
+        events.append(("skills", bot_id, owner_id)) or {"deleted": 3, "retained": 0, "blocker_counts": {}}
     )
 
     result = service.cleanup_single_bot_data("default", "owner")
@@ -112,4 +111,46 @@ def test_bot_cleanup_stops_when_installations_cannot_be_purged():
         "Cleanup installations error for bot default: db unavailable"
     ]
     service._skill_set_repo.delete_by_bot_id.assert_not_called()
-    service._skill_repo.delete_by_bot_id.assert_not_called()
+    service._skill_repo.cleanup_by_bot_id.assert_not_called()
+
+
+def test_bot_cleanup_reports_retained_skills_when_still_in_use(caplog):
+    service = _make_service()
+    service._skill_repo.cleanup_by_bot_id.side_effect = SkillAssetInUseError(
+        {"installation": 1, "membership": 2, "empty": 0}
+    )
+
+    with caplog.at_level("WARNING"):
+        result = service.cleanup_single_bot_data("bot1", "user1")
+
+    assert result["errors"] == []
+    assert result["skill_sets_deleted"] == 0
+    assert result["skills_deleted"] == 0
+    assert result["skills_retained"] is True
+    assert result["skills_retained_reason"] == "SKILL_ASSET_IN_USE"
+    assert result["skills_retained_bot_id"] == "bot1"
+    assert result["skills_retained_blocker_counts"] == {
+        "installation": 1,
+        "membership": 2,
+    }
+    assert any("Retained skill assets" in record.message for record in caplog.records)
+
+
+def test_bot_cleanup_stops_before_skills_when_skill_set_cleanup_fails():
+    service = _make_service()
+    service._skill_set_repo.delete_by_bot_id.side_effect = RuntimeError("db down")
+
+    result = service.cleanup_single_bot_data("bot1", "user1")
+
+    assert result["errors"] == ["Cleanup skill_sets error for bot bot1: db down"]
+    service._skill_repo.cleanup_by_bot_id.assert_not_called()
+
+
+def test_bot_cleanup_keeps_non_in_use_skill_failures_as_errors():
+    service = _make_service()
+    service._skill_repo.cleanup_by_bot_id.side_effect = RuntimeError("db down")
+
+    result = service.cleanup_single_bot_data("bot1", "user1")
+
+    assert result["errors"] == ["Cleanup skills error for bot bot1: db down"]
+    assert result["skills_retained"] is False
