@@ -1,0 +1,56 @@
+apps/bcs/crates/services/bcs-message-flow/src/task_failure.rs
+  s_7d9f4f65cedfaf::t_55f4d03d8da700 42
+  s_7d9f4f65cedfaf::t_74ea29f2dc2846 148-149
+  s_7d9f4f65cedfaf::t_7de2a3751b727e 101-122,125-126,128,146
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_7d9f4f65cedfaf::t_2cfbe1ac1bb8a2 29-32
+  s_7d9f4f65cedfaf::t_2bb21a7253c03d 33
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery.rs
+  s_7d9f4f65cedfaf::t_a2708805c749d4 310-312
+  s_7d9f4f65cedfaf::t_ae7f205e53721f 370-374
+  s_7d9f4f65cedfaf::t_2dd4e6ce297426 363,708,722-735,739-745,750-755
+  s_7d9f4f65cedfaf::t_136303d1ac3113 314-329,331,337-338,355-357,359,361-362
+  s_7d9f4f65cedfaf::t_a788f9eed2ace4 330
+  s_7d9f4f65cedfaf::t_dc68cc0a27b3d0 332-336,358,360
+  s_7d9f4f65cedfaf::t_70522df4a8e833 348
+  s_7d9f4f65cedfaf::t_4aef0090a3c63f 339-347,349-350
+  s_7d9f4f65cedfaf::t_391886d1e54890 756
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/tests.rs
+  s_7d9f4f65cedfaf::t_2afa7b6d61873b 195-237
+  s_7d9f4f65cedfaf::t_3a200dd2ef31a1 122,167
+  s_7d9f4f65cedfaf::t_83e0b60c8503e5 238
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/projection.rs
+  s_7d9f4f65cedfaf::t_5ab6b2338a9a06 70-71
+  s_7d9f4f65cedfaf::t_5cfc02603c68dc 30,58-69,72-73
+  s_7d9f4f65cedfaf::t_765a4bd7568057 36-37
+apps/bcs/crates/services/bcs-message-flow/src/queued_task_terminal.rs
+  s_7d9f4f65cedfaf::t_3ec3868ebefc9a 70-75,88-90,92,94-95
+  s_7d9f4f65cedfaf::t_a9e5a4872c92c9 76,93
+  s_7d9f4f65cedfaf::t_8e0711e6fdfbae 107
+  s_7d9f4f65cedfaf::t_6a83c84088eb1c 337-338
+  s_7d9f4f65cedfaf::t_fb9107ac8d8e04 298-299,303,309
+  s_7d9f4f65cedfaf::t_714cc4470be8ba 25-28,31-32
+  s_7d9f4f65cedfaf::t_b79618c2a14797 101-103
+  s_7d9f4f65cedfaf::t_61a057ece622a6 54-61
+  s_7d9f4f65cedfaf::t_596bf393036a5d 29
+  s_7d9f4f65cedfaf::t_3ed415b2202b77 30
+  s_7d9f4f65cedfaf::t_d53f3097eec829 199-297,300-302,304-308,310-336,339-340
+  s_7d9f4f65cedfaf::t_ccd98a9e110533 77,80-86
+  s_7d9f4f65cedfaf::t_c7d2eaf384017f 78-79,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c76da575aa20d43ad006713f7e904699cc31b5ae",
+  "prompts": {},
+  "sessions": {
+    "s_7d9f4f65cedfaf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3e32aee1-425a-45d9-a866-5e98ac005613",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}
