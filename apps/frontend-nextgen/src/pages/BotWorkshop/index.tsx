@@ -142,7 +142,7 @@ const BotWorkshopPage: React.FC = () => {
                       onAuthorize={workshop.openAuthorize}
                       getCollaborationMode={workshop.collaborationModeFor}
                       getGeneralConfigAvailability={(bot) =>
-                        getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
+                        getGeneralConfigAvailability(bot, workshop.canChangeSpace(bot), bot.lock?.status === 'other')
                       }
                       onGeneralConfig={setGeneralConfigBot}
                       onManagePublication={setPublicationBot}
