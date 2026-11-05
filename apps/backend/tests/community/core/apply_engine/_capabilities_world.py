@@ -11,12 +11,14 @@ from agentclaw.community.core.repository.implementations.bot.user_mcp_config imp
 )
 from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 from agentclaw.community.core.apply_engine.activation_delegates import (
+    DeviceActivation,
     PlatformActivation,
 )
 from agentclaw.community.core.apply_engine.materialisers.capabilities import (
     CapabilitiesMaterialiser,
 )
 from agentclaw.community.core.apply_engine.skill_set_apply_delegates import (
+    DeviceSkillSetApply,
     PlatformSkillSetApply,
 )
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
@@ -85,7 +87,7 @@ from ._fakes import FakeManifestContent, real_validator
 
 
 class CapabilityWorld:
-    def __init__(self, *, store=None, auth=None, http=None):
+    def __init__(self, *, store=None, auth=None, http=None, runtime=None, device=False):
         self.db = _Database(shared=True)
         self.bots = BotRepository(self.db)
         self.bots.insert(
@@ -136,9 +138,9 @@ class CapabilityWorld:
             McpRuntimeCredentialsConfig(),
             MagicMock(),
         )
-        runtime = _Runtime()
+        runtime = runtime or _Runtime()
         self.runtime = runtime
-        self.activation = PlatformActivation(
+        self.activation = (DeviceActivation if device else PlatformActivation)(
             DirectActivationService(
                 self.repo,
                 self.bots,
@@ -166,7 +168,9 @@ class CapabilityWorld:
             ext_info_provider=lambda _: {},
             recovery=MagicMock(),
         )
-        self.sets = PlatformSkillSetApply(self.management)
+        self.sets = (DeviceSkillSetApply if device else PlatformSkillSetApply)(
+            self.management
+        )
         package = _package()
         self.gateway = _PublicGateway(package, mcp_services=())
         self.materializer = SkillVersionMaterializer(
