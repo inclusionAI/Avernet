@@ -47,8 +47,12 @@ export function GroupSidebarCollapsedRail({
           return (
             <Tooltip key={group.groupId}>
               <TooltipTrigger asChild>
+                {/* icon 档的 p-0 与 Bot 泊位竖轨同因（2026-11-05）：default 档残留的 px-4
+                    会把内容盒吃到 4px，真实头像 img 会被 preflight img{max-width:100%} 钳成
+                    竖线；当前群 tile 走 span 回退未显症，群头像接 src 前先对齐。 */}
                 <Button
                   variant="ghost"
+                  size="icon"
                   aria-label={`打开协作群 ${group.name}`}
                   aria-current={selected ? 'true' : undefined}
                   className="relative h-9 w-9 rounded-full hover:bg-muted"

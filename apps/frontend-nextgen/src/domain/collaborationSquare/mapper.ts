@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type {
   BotSearchMode,
   PublicBot,
@@ -176,7 +177,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
-    ...(value.avatar_url?.trim() ? { avatarUrl: value.avatar_url.trim() } : {}),
+    avatarUrl: resolveBotAvatarUrl(value.avatar_url, value.bot_id?.trim() || id),
     ownerName: value.owner_name?.trim() || '未公开',
     description: value.description?.trim() ?? '',
     capabilities: [],
