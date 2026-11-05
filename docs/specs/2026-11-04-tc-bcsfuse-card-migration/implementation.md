@@ -17,17 +17,18 @@ TC 的公共入口和内部 TC 入口均组装 `app.tc`。历史 `app.adapters.h
 
 ## 旧接口
 
-补充 TC 专有索引源开关 `BCSFUSE_TC_INDEX_SOURCE=legacy|card`，启动时选择，默认 card。
-切换前后旧 recommend/search/Fuse 均可用；sync、online/availability、配置始终更新新 Card/Doc。
-legacy 将旧持久向量恢复到独立集合，当前状态在 top-k 前过滤；card 完全退出旧表读取。
-不修改 search-core、zbcsfuse 或支付宝组装，也没有查询准入开关。具体导入、滚动切换和对账流程见
-[迁移部署说明](../../deploy/tc-card-migration.md#tc-索引数据源开关)。
+迁移采用两个独立部署。旧实例保持旧版本并读写旧表，新实例固定读写新 Card/Doc；
+撤掉临时加入的 legacy 混合读取、旧索引适配及应用内索引源开关。
+业务原入口切流前指向旧实例，切流后指向新实例；查询和写入一起切换。
+新实例独立入口始终操作新表，可通过同格式的 sync/config/状态接口导入和核对资料。
+具体边界和停写追平步骤见[部署说明](../../deploy/tc-card-migration.md#服务入口与读写边界)。
 
-新增开关后的本地验证：TC 全套 3323 passed / 153 skipped；TC/core 验收 451 passed / 14 skipped；
-内部 TC 组装、契约及全部支付宝回归 472 passed / 15 skipped。
-新增的端到端用例用真实 SQLite 和 Qdrant Local 验证旧表恢复、旧 sync 导入新表、
-online/availability 和身份过滤在召回前生效，以及重启切到 card 后原查询继续工作。
-未执行真实 ZDAS/MySQL/Qdrant Server 部署或生产数据迁移。
+本地双实例验收启动迁移前版本 `40be509dc` 与当前新版本，保持原业务 HTTP URL 不变，
+用本地入口路由模拟整体切流。9 项流程检查验证切流前旧入口查询/更新旧表、新入口查询/更新新表，
+切流后两个入口均查询/更新新表；旧 Worker、Profile、运行状态和向量表内容在切流后保持不变。
+TC 全套 3322 passed / 153 skipped；TC/core 验收 450 passed / 14 skipped；
+内部组装、契约和全部支付宝回归 471 passed / 15 skipped。
+环境为真实 HTTP 子进程、SQLite、Qdrant Local 和离线模型；未部署预发或执行生产迁移。
 
 下列路径在 `/v1` 和 `/api/v1` 均可用，Fuse 继续使用 `/api/v1/groups/{group_id}/fuse`。
 

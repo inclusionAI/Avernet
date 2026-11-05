@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 
 from app.tc.catalog import CardProfileStore, CardWorkerStore, TcCatalog
-from app.tc.providers import embedding_identity, legacy_storage, storage
+from app.tc.providers import embedding_identity, storage
 from app.tc.search import CardProfileSource, TcSearch
 
 
@@ -24,11 +24,6 @@ class CardRuntimeStateStore:
 def create_tc_app(context, *, search_router=None):
     registry = context.registry
     startup = registry.require("startup_provider")
-    index_source = os.getenv("BCSFUSE_TC_INDEX_SOURCE") or context.config.get(
-        "tc.index_source", "card"
-    )
-    if index_source not in {"legacy", "card"}:
-        raise ValueError("TC index source must be legacy or card")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -39,7 +34,6 @@ def create_tc_app(context, *, search_router=None):
         task = None
         runtime = None
         index = None
-        legacy = None
         await startup.initialize()
         try:
             from app.bootstrap.logging_setup import (
@@ -53,19 +47,6 @@ def create_tc_app(context, *, search_router=None):
                 model_factory()
             repository, index = storage(context)
             catalog = TcCatalog(repository)
-            if index_source == "legacy":
-                from app.tc.legacy_index import LegacyTcSource
-
-                legacy = LegacyTcSource(repository, legacy_storage(context))
-                if (
-                    legacy.vectors.dimension
-                    != registry.require("embedding_provider").dimension
-                ):
-                    raise ValueError(
-                        "TC legacy index dimension does not match the embedding provider"
-                    )
-                await asyncio.to_thread(legacy.restore)
-                catalog = legacy.catalog
             registry.register("tc_catalog_repository", repository)
             registry.register("tc_index", index)
             registry.register("tc_catalog", catalog)
@@ -85,7 +66,6 @@ def create_tc_app(context, *, search_router=None):
                     context.config, registry.require("embedding_provider")
                 ),
                 instance_id=context.config.get("instance_id", "tc"),
-                legacy_source=legacy,
             )
             registry.register("tc_search", runtime)
             dependencies.reset_fusion_services()
@@ -104,8 +84,6 @@ def create_tc_app(context, *, search_router=None):
                 )
             if index is not None:
                 await asyncio.to_thread(index.close)
-            if legacy is not None:
-                await asyncio.to_thread(legacy.close)
             temporary = registry.get("tc_temporary_directory")
             if temporary is not None:
                 temporary.cleanup()
@@ -163,10 +141,7 @@ def create_tc_app(context, *, search_router=None):
         return {
             "ready": True,
             "provider_mode": context.mode,
-            "index_key": runtime.updates.index_key
-            if runtime.legacy_source is None
-            else f"legacy:{runtime.legacy_source.vectors.collection_name}",
-            "index_source": index_source,
+            "index_key": runtime.updates.index_key,
             "providers": len(registry.keys()),
         }
 
