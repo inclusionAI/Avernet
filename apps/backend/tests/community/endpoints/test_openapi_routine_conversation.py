@@ -12,23 +12,17 @@ from tests.community.endpoints.test_openapi_routine_targets import BASE, headers
     ({"runtime_stage": "online", "device_uuid": "instance-b"}, {"instance-b"}),
     ({"runtime_stage": "online", "operator_id": "u_owner", "device_uuid": "instance-a"}, {"instance-a"}),
 ])
-async def test_history_content_travels_through_real_targeted_relay(world, async_client, monkeypatch, query, expected_devices):
+async def test_history_content_travels_through_real_targeted_relay(world, async_client, query, expected_devices):
     _, transport = seed_recording_runtime(world, caller="operator_id" in query)
-    original = transport.invoke
-
-    async def invoke(conn_info, method, path, body=None, params=None, **kwargs):
-        result = await original(conn_info, method, path, body=body, params=params, **kwargs)
-        if path.endswith("/runs"):
-            device = conn_info["url"]
-            result["data"].update(input=f"prompt-{device}", runs=[{
+    for device in expected_devices:
+        transport.set_runs_response(device, {
+            "input": f"prompt-{device}", "runs": [{
                 "job_id": "same", "status": "error", "output": f"answer-{device}",
                 "error": "partial failure", "messages": [{"role": "assistant", "content": f"message-{device}",
                                                             "private": "must-not-expose"}],
                 "credentials": {"private": "must-not-expose"},
-            }])
-        return result
-
-    monkeypatch.setattr(transport, "invoke", invoke)
+            }],
+        })
     response = await async_client.get(BASE + "/job/runs", params={"user_id": "u_owner", **query}, headers=headers())
     assert response.status_code == 200, response.text
     rows = response.json()["data"]["items"]
