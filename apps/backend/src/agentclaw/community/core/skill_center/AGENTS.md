@@ -114,7 +114,7 @@ Bot 入口继续兼容 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。Direct 命令接收完整 policy codes，在事务内按实际适用 Default exclusion 判断占用；已排除的 policy MCP 可显式安装和管理。
 - `SkillSetManagementService.list_resources()` 对 Default Set 只以当前 AgentPassport 的同一次快照补全已有 MCP 投影的 `name`/`description`，并同时读取 CLI；它不得以 Passport 增删成员、绕过 exclusion，或覆盖普通 Set 写入时固化的 MCP Center 展示快照。Passport 查询失败时保留 MCP 投影并返回空 CLI。
 - 普通技能集添加 MCP 时，Service 严格解析 Engine/template 默认 codes；UoW 在事务内核对同一 owner、Bot、Default Set、MCP code 的排除记录。代码型默认项或 Default 显式成员已被排除时允许加入普通 Set，并保留排除；未排除的代码型默认项仍返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`，未排除的显式成员仍按 Set 占用拒绝。Direct 安装/停用同样按实际适用 Default exclusions 判断占用。取消排除时若普通 Set 已持有该 MCP，返回 `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`；重复排除不得清除 active 普通 Set 的 Installation 或 Bot MCP 配置。添加与取消排除按精确排除记录先锁后核对，避免并发恢复两种来源。
-- 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
+- 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；普通增添、Default 恢复和 Apply 批量命令均按重新授权的 Bot 当前 Owner 读取用户默认，按稳定 entity 读取并合并已有 Bot override，且不修改配置；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
 
 Apply 的批量集合命令由 `services/skill_set_apply_service.py` 经正式管理服务暴露，
 `repository/implementations/skill_center/apply_skill_set_commands.py` 在单个事务内按名称
@@ -125,6 +125,9 @@ Apply 的批量集合命令由 `services/skill_set_apply_service.py` 经正式�
 不执行 flush；缺失或不可解析的资产元数据保留可诊断状态。Local 清理使用所有持久
 成员引用（含 inactive、非当前 engine 和 excluded Default），实际删除仍由原守卫复核。
 本批量事务沿用已有行锁和 Apply 互斥，不增加跨普通管理入口的共同锁、CAS 或唯一索引。
+Apply Direct claim 的正常结果通过既有 mutation details 返回事务内计算的 outcome；
+聚合 writer 使用此确认值，不复制计划 action。仅归并等价 MCP 配置别名可产生
+changed=true、outcome=unchanged；Local 内容上传使用真实 operation 合并 created/updated。
 
 `services/_mutation_flow.py::MutationProjectionFlow` 先提交 DB，再尽力投影；Runtime 不可达、PENDING、DEGRADED 不补偿回滚已提交的 Installation。DB/权限/领域校验失败仍返回失败。响应中的 `runtime_projection` 由 `runtime_projection_contract.py` 定义，不能把接口成功解释成全部设备文件已收敛。
 

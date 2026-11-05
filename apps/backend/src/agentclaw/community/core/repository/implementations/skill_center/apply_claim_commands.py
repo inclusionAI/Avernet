@@ -239,6 +239,13 @@ class ApplyClaimCommands:
             )
             if server_code in supplied:
                 self._refuse_set_supplied("MCP server", server_code)
+            effective_before = server_code in old.mcp_installations or any(
+                server_code in skill_projection_mcp_dependency_codes(session, skill)
+                for skill in self._scope(session.query(Skill), Skill)
+                .filter(Skill.id.in_(sorted(old.installations)))
+                .with_for_update()
+                .all()
+            )
             installed = mcp_installations.install(
                 session,
                 bot_id=bot_id,
@@ -259,6 +266,9 @@ class ApplyClaimCommands:
                 {},
                 installed or config_written,
                 old,
+                details={
+                    "outcome": "created" if not effective_before else "updated" if override_changed else "unchanged"
+                },
                 mcp_codes=frozenset({server_code}) if installed else frozenset(),
                 updated_mcp_codes=(
                     frozenset({server_code})
@@ -394,6 +404,13 @@ class ApplyClaimCommands:
                 {},
                 removed or installed,
                 old,
+                details={
+                    "outcome": (
+                        "updated" if removed
+                        else "created" if int(target.id) not in installed_before
+                        else "unchanged"
+                    )
+                },
                 mcp_codes=frozenset(dependencies),
                 source_transitions=(
                     (("none", "direct"),) if installed and int(target.id) not in installed_before else ()

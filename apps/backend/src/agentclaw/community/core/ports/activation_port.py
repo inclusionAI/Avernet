@@ -41,6 +41,9 @@ class ActivationPort(Protocol):
     Apply claim/remove commands return the service receipt dictionary. Its
     ``changed`` boolean confirms an actual committed Bot mutation; successful
     no-ops return false. An unknown receipt does not prove a durable change.
+    Apply claims also return ``outcome`` (created/updated/unchanged), computed
+    by the repository transaction; alias-only cleanup can change persistence
+    while leaving the effective capability unchanged.
     """
 
     @abstractmethod

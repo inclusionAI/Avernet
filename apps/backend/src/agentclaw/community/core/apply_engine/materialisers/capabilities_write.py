@@ -42,6 +42,17 @@ def _confirmed_mutation(result):
     return isinstance(result, dict) and result.get("changed") is True
 
 
+def _claim_outcome(result):
+    """Only a command's transactional facts describe its normal outcome."""
+    if not isinstance(result, dict):
+        raise ValueError("Apply claim did not return a mutation receipt")
+    if "outcome" in result:
+        return EntryOutcome(result["outcome"])
+    if result.get("changed") is False:
+        return EntryOutcome.UNCHANGED
+    raise ValueError("Apply claim did not confirm its outcome")
+
+
 async def write_capabilities(owner, ctx, plan):
     resolved = plan.resolved
     snapshot = resolved.snapshot
@@ -58,6 +69,7 @@ async def write_capabilities(owner, ctx, plan):
     }
     removals = set()
     prepared = {}
+    uploaded = {}
     scope = access_scope(ctx)
     all_skills = tuple(resolved.direct) + tuple(
         s for group in resolved.sets for s in group.skills
@@ -92,6 +104,10 @@ async def write_capabilities(owner, ctx, plan):
             )
             # Upload alone can replace live contents; claim/UoW has not yet run.
             confirmed = True
+            operation = upload["operation"]
+            uploaded[skill.key] = EntryOutcome(
+                "updated" if operation == "replaced" else operation
+            )
             prepared[skill.key] = str(upload["skill"]["id"])
         if plan.set_write:
             result = await owner._sets.replace_apply_skill_sets(
@@ -151,8 +167,15 @@ async def write_capabilities(owner, ctx, plan):
             )
             confirmed = confirmed or _confirmed_mutation(result)
             note = _projection_note(result) or skill.note
+            outcome = _claim_outcome(result)
+            upload_outcome = uploaded.get(skill.key)
+            if upload_outcome is not None:
+                outcome = max(
+                    (outcome, upload_outcome),
+                    key=lambda value: ("unchanged", "created", "updated").index(value),
+                )
             results[identity] = EntryResult(
-                Category.CAPABILITIES, identity, EntryOutcome(entry.outcome), note=note
+                Category.CAPABILITIES, identity, outcome, note=note
             )
         # Names, not stale IDs, define Direct removal scope too.
         actual = await asyncio.to_thread(owner._snapshot, ctx)
@@ -194,7 +217,7 @@ async def write_capabilities(owner, ctx, plan):
                 results["mcp/" + code] = EntryResult(
                     Category.CAPABILITIES,
                     "mcp/" + code,
-                    EntryOutcome(entry.outcome),
+                    _claim_outcome(result),
                     note=_projection_note(result),
                 )
             candidates = (
@@ -207,6 +230,11 @@ async def write_capabilities(owner, ctx, plan):
                     **who, server_code=code, apply_id=ctx.apply_id
                 )
                 if not _confirmed_mutation(result):
+                    identity = "mcp/" + code
+                    if identity in results:
+                        results[identity] = EntryResult(
+                            Category.CAPABILITIES, identity, EntryOutcome.UNCHANGED
+                        )
                     continue
                 confirmed = True
                 identity = "mcp/" + code
