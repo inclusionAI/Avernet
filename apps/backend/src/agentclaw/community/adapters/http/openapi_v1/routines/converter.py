@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone as _tz
 from typing import Any
+from .converter_run_content import run_content
 
 from .schemas import (
     Routine, RoutineRun, ScheduleTrigger, _coerce_timeout_secs,
@@ -98,6 +99,7 @@ def _map_run(data: dict, routine_id: str, context: dict | None = None) -> Routin
         status=str(data.get("status", "") or ""),
         started_at=started,
         finished_at=finished,
+        **run_content(data),
     )
 
 
@@ -149,12 +151,13 @@ def map_runs(result: dict, routine_id: str) -> list[RoutineRun]:
     data = result.get("data")
     if isinstance(data, dict) and isinstance(data.get("results"), list):
         mapped = [
-            _map_run(item, routine_id, target_context(row))
+            _map_run({"input": (row.get("data") or {}).get("input"), **item}, routine_id, target_context(row))
             for row in data["results"] if row.get("success")
             for item in (row.get("data") or {}).get("runs", []) if isinstance(item, dict)
         ]
     else:
         raw = data if isinstance(data, list) else (data or {}).get("runs", result.get("runs", []))
         context = target_context(data) if isinstance(data, dict) else {}
-        mapped = [_map_run(row, routine_id, context) for row in raw if isinstance(row, dict)]
+        parent_input = data.get("input") if isinstance(data, dict) else None
+        mapped = [_map_run({"input": parent_input, **row}, routine_id, context) for row in raw if isinstance(row, dict)]
     return sorted(mapped, key=lambda run: run.started_at or "", reverse=True)
