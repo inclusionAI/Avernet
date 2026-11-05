@@ -81,6 +81,7 @@ class EventSummaries:
             return
         record = {
             "event": "search_steps",
+            "timestamp": time.time(),
             "operation": operation,
             "trace_id": summary.get("trace_id", ""),
             "request_id": _request_id.get(),

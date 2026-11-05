@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 
 from search_core.api.errors import UnsupportedSearchOption
 from search_core.api.models import (
@@ -132,8 +132,22 @@ class CatalogSearchApplication:
                         elapsed_ms=round((time.monotonic() - started) * 1000, 2),
                     )
                     raise
+                failures = tuple(
+                    reason
+                    for reason in result.reasons
+                    if reason
+                    not in {
+                        "keyword_disabled",
+                        "vector_disabled",
+                        "reranker_disabled",
+                        "default_candidates",
+                    }
+                )
+                outcome = result.status
+                if result.status == "degraded" and result.reasons and not failures:
+                    outcome = "ok"
                 if result.status == "degraded":
-                    for reason in result.reasons:
+                    for reason in failures:
                         events.record(
                             "search_degraded",
                             "request",
@@ -142,7 +156,7 @@ class CatalogSearchApplication:
                             result_count=len(result.items),
                         )
                 timing.update(
-                    outcome=result.status,
+                    outcome=outcome,
                     result_count=len(result.items),
                     reasons=result.reasons,
                     effective_limit=command.limit,
@@ -154,6 +168,11 @@ class CatalogSearchApplication:
                             "item_id": item.item_id[:256],
                             "score": item.score,
                             "score_source": item.score_source,
+                            "score_details": (
+                                asdict(item.score_details)
+                                if item.score_details is not None
+                                else None
+                            ),
                         }
                         for rank, item in enumerate(result.items[:20], 1)
                     ]
