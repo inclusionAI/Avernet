@@ -47,3 +47,9 @@ independent plugin configurations in one process.
 server, standard BCS event ingestion, durable correlation, cancellation and route
 fencing through this contract. `bcs-chat-run-store` tests custom binding round trips.
 Provider implementations additionally test their own declarations and wire mapping.
+
+Singlebox runs `custom_binding_story.py` against the instrumented test-utils host
+with an installed local example binding. All registration, refresh, streaming,
+polling, recovery and cancellation enter through live HTTP/WS APIs, and only
+the remote protocol is served by a local peer. No unit-test profiles or direct
+domain calls contribute to this E2E evidence.
