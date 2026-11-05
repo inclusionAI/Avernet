@@ -64,11 +64,16 @@ def _mocks(applies=None, bot_status="PENDING", cas_retry_ok=True):
     bot_repo = MagicMock()
     bot_repo.get_by_id.return_value = {"status": bot_status}
     manifest_seam = MagicMock()
-    return bot_copy_repo, apply_repo, bot_repo, manifest_seam
+    # retry_copy re-resolves the dst owner's space for the canonical creation
+    # spec (space_kind is a strict key the deserializer reads). Stub returns a
+    # personal space, matching submit_copy's default for a personal-cloud copy.
+    space_context = MagicMock()
+    space_context.resolve_current.return_value = SimpleNamespace(kind="personal")
+    return bot_copy_repo, apply_repo, bot_repo, manifest_seam, space_context
 
 
 def _retry(mocks, now=datetime(2026, 11, 2, 10, 0, 0), bot_id="dst_1"):
-    bot_copy_repo, apply_repo, bot_repo, manifest_seam = mocks
+    bot_copy_repo, apply_repo, bot_repo, manifest_seam, space_context = mocks
     return retry_copy(
         bot_id=bot_id,
         operator_id="u1",
@@ -76,13 +81,14 @@ def _retry(mocks, now=datetime(2026, 11, 2, 10, 0, 0), bot_id="dst_1"):
         apply_repo=apply_repo,
         bot_repo=bot_repo,
         manifest_seam=manifest_seam,
+        space_context=space_context,
         now=now,
     )
 
 
 def test_retry_first_call_re_hands_off_to_create_job():
     mocks = _mocks()
-    _, _, _, manifest_seam = mocks
+    _, _, _, manifest_seam, _ = mocks
     result = _retry(mocks)
     assert result is RetryResult.RE_ENQUEUED
     mocks[0].get_by_dst_bot_id.assert_called_once()
@@ -113,7 +119,7 @@ def test_retry_converged_returns_terminal_no_enqueue():
         ],
         bot_status="ACTIVE",
     )
-    _, _, _, manifest_seam = mocks
+    _, _, _, manifest_seam, _ = mocks
     result = _retry(mocks)
     assert result is RetryResult.TERMINAL
     manifest_seam.start_job.assert_not_called()
@@ -131,6 +137,7 @@ def test_retry_unknown_bot_raises_404():
             apply_repo=MagicMock(),
             bot_repo=MagicMock(),
             manifest_seam=MagicMock(),
+            space_context=MagicMock(),
             now=datetime(2026, 11, 2, 10, 0, 0),
         )
     assert exc_info.value.status_code == 404
@@ -143,7 +150,7 @@ def test_retry_failed_state_still_re_enqueues_not_terminal():
         applies=[_apply(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.FAILED.value)],
         bot_status="PENDING",
     )
-    _, _, _, manifest_seam = mocks
+    _, _, _, manifest_seam, _ = mocks
     result = _retry(mocks)
     assert result is RetryResult.RE_ENQUEUED
     manifest_seam.start_job.assert_called_once()
