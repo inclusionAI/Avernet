@@ -564,6 +564,57 @@ class TestBbsEscalationNoMarket:
         assert _c1.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED  # verdict 不改
 
 
+class TestLegacyIdentityCompatibility:
+    def test_dashboard_reverse_resolves_legacy_bare_bot_owner(self):
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        class BotService:
+            def get_bot_by_id(self, bot_id):
+                assert bot_id == "legacy-bot"
+                return {"owner_id": "35983"}
+
+        graph_service = TaskGraphService()
+        facade = TaskService(graph_service, bot_service=BotService())
+        info = _task_info("legacy-dashboard")
+        info.owner_bot_id = "legacy-bot"
+        info.owner_user_id = "146836"
+        info.execution_config["orchestration_mode"] = "relay"
+        graph_service.initialize_graph(info)
+        graph_service._graphs["legacy-dashboard"].tasks[0].run_info.extend_props.pop(
+            "assignee_owner_id"
+        )
+
+        dashboard = facade.get_task_dashboard("legacy-dashboard")
+        root = dashboard.tasks[0]
+        assert root.run_info.assignee == "legacy-bot"
+        assert root.run_info.extend_props["assignee_owner_id"] == "35983"
+
+    def test_task_list_reverse_resolves_legacy_bare_bot_owner(self):
+        from agentclaw.community.core.task.repository.types import TaskInfoRecord
+
+        class BotService:
+            def get_bot_by_id(self, bot_id):
+                return {"owner_id": "35983"}
+
+        facade = TaskService(None, bot_service=BotService())
+        record = TaskInfoRecord(
+            id=1,
+            task_id="legacy-list",
+            source_type="bot",
+            owner_user_id="146836",
+            owner_bot_id="legacy-bot",
+            execution_config={},
+            task_spec={},
+            status=Status.PENDING,
+        )
+
+        record = replace(record, owner_user_name=None)
+        result = facade._enrich_task_owner_display([record])[0]
+
+        assert result.owner_bot_id == "legacy-bot"
+        assert result.owner_user_id == "146836"
+
+
 class TestZeroCase:
     def test_no_node_name_literals(self):
         import agentclaw.community.core.task.task_center.task_service as m
