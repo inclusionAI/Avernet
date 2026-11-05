@@ -16,6 +16,7 @@ async fn rpc(
     Json(request): Json<Value>,
 ) -> Response {
     assert_eq!(headers["a2a-version"], "1.0");
+    assert_eq!(headers["a2a-extensions"], "test-extension");
     assert_eq!(request["jsonrpc"], "2.0");
     assert_eq!(request["params"]["tenant"], "selected-tenant");
     calls.lock().await.push(request.clone());
@@ -84,8 +85,13 @@ async fn fixture() -> (
     let task = tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
+    let mut headers = HeaderMap::new();
+    headers.insert("a2a-extensions", "test-extension".parse().unwrap());
+    let http = bcs_network_tracing::ClientWithDefaults::new(
+        reqwest::Client::builder().no_proxy().build().unwrap(), headers,
+    );
     (
-        JsonRpcClient::new(reqwest::Client::builder().no_proxy().build().unwrap(), url, Some("selected-tenant".into())),
+        JsonRpcClient::new(http, url, Some("selected-tenant".into())),
         calls,
         task,
     )

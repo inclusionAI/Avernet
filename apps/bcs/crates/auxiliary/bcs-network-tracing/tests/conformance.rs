@@ -17,7 +17,7 @@ impl NetworkTracer for Provider {
     fn start(&self, info: &RequestInfo<'_>, _: &Carrier, _: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         assert_eq!(info.kind, Kind::HttpServer);
         assert!(!info.endpoint.contains('?'));
-        StartedTrace { context: Arc::new(()), headers: vec![], record: Box::new(Completion(self.0.clone())) }
+        StartedTrace { remove_headers: vec![], context: Arc::new(()), headers: vec![], record: Box::new(Completion(self.0.clone())) }
     }
 }
 

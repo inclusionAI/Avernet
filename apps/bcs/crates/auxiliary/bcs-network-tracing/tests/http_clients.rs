@@ -38,7 +38,7 @@ impl NetworkTracer for Provider {
             existing_trace: incoming.iter().find(|(name, _)| name == "x-trace-id").map(|(_, value)| value.clone()),
         });
         StartedTrace {
-            context: Arc::new(String::from("child")),
+            remove_headers: vec![], context: Arc::new(String::from("child")),
             headers: vec![
                 ("x-trace-id".into(), "child".into()),
                 ("invalid header".into(), "ignored".into()),

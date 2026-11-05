@@ -1,5 +1,7 @@
 # Network tracing plugin contract
 
+Contract revision: 2026-11-05 (explicit propagation field removal).
+
 ## Provides
 
 An optional, trusted in-process network tracing hook. `NetworkTracer::start`
@@ -32,19 +34,42 @@ opaque network server context, and headers may have been prepared earlier.
 Ignore context belonging to another tracer's namespace. A SOFA implementation
 does not reinterpret W3C identifiers as SOFA identifiers.
 
-`capture_ambient` is an optional synchronous SDK bridge returning only valid
-propagation fields. The public adapter's opt-in `otel::OtelContextBridge` can
-wrap a provider so it consumes existing business OTel context without learning
-BCS's `tracing-opentelemetry` internals. Bridge installation is explicit at the
-composition root; the default hook returns an empty carrier.
+`capture_ambient` is an optional synchronous SDK hook returning only valid
+propagation fields. SDK integration and scope selection belong to the provider;
+the transport adapter does not choose between native and `tracing` contexts.
+For mixed OTel APIs, an embedding application can enable context activation on
+its `tracing-opentelemetry` layer and let its provider read the unified native
+current context. Independent scope stacks require an explicit selection rule
+owned by that integration. The default hook returns an empty carrier.
 
 `StartedTrace.headers` represents the newly started span, including on server
-calls. Providers own only the propagation fields they return. Adapters replace
-those fields and preserve unrelated transport headers. Providers using the
-same protocol must coordinate through the bridge rather than independently
-inject unrelated traces. `incoming` can include authentication headers; it is
+calls. `StartedTrace.remove_headers` lists exact propagation fields owned by
+the provider to delete on outgoing clients, including obsolete encoding aliases
+or optional fields absent from the new span. Providers see the complete
+`incoming` carrier before deletion. HTTP and ASCII RPC adapters remove all old
+values of each valid field name, then insert `headers`; an inserted value wins
+when a name appears in both lists. HTTP field names are case-insensitive.
+Invalid transport names/values are ignored, as with ordinary injection.
+For reqwest clients, custom default propagation fields must be supplied through
+the network adapter's `ClientWithDefaults` wrapper, so defaults are merged before
+extraction and deletion; raw reqwest stores its defaults privately and injects
+them after this hook. Empty removal lists preserve the previous insert-only behavior. Providers must
+not delete another protocol's fields, credentials, tenant or routing metadata;
+binary RPC metadata remains transport-owned. Servers do not delete or rewrite
+ingress headers. Adapters preserve all fields outside the removal/insertion
+lists. Providers using the same protocol must coordinate through their SDK
+integration rather than independently injecting unrelated traces. `incoming`
+can include authentication headers; it is
 trusted in-process input for extraction, not exportable metadata. Never log or
 export the full carrier or credentials.
+
+This revision adds the required `StartedTrace.remove_headers` field: existing
+provider struct literals must add `remove_headers: vec![]`, or declare their
+protocol's obsolete fields. All bundled providers and test fixtures migrate
+together. The draft `bcs-network-tracing/otel` feature and `OtelContextBridge`
+are removed; SDK providers implement `capture_ambient` directly instead. The
+existing gateway OTel subscriber, propagator and default no-provider behavior
+are unchanged. No internal SDK implementation belongs in this public contract.
 
 Sampling controls recording, not propagation: an unsampled valid parent must
 still produce a valid continuing context and propagation fields. Its completion
@@ -53,8 +78,9 @@ record may be a no-op. Never replace an unsampled trace with a sampled root.
 ## Lifecycle and compatibility
 
 Bootstrap may install one process-wide provider before client initialization.
-No installed provider is the default no-op implementation: no propagated
-headers or records, and existing transport behavior is unchanged. A second
+No installed provider is the default no-op implementation: this hook creates no
+records or header changes, and existing transport behavior is unchanged.
+Independent OTel instrumentation may still propagate its own context. A second
 installation fails rather than silently replacing an active provider.
 `with_provider` provides scoped composition, including an explicit no-op scope.
 

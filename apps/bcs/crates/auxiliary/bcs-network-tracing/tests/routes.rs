@@ -14,7 +14,7 @@ impl Record for Completion {
 impl NetworkTracer for Provider {
     fn start(&self, info: &RequestInfo<'_>, _: &Carrier, _: ParentContext<'_>) -> StartedTrace {
         self.0.lock().unwrap().push((info.endpoint.into(), info.route.map(str::to_owned)));
-        StartedTrace { context: Arc::new(()), headers: vec![], record: Box::new(Completion) }
+        StartedTrace { remove_headers: vec![], context: Arc::new(()), headers: vec![], record: Box::new(Completion) }
     }
 }
 

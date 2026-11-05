@@ -48,6 +48,11 @@ impl GrpcClient {
             tonic::metadata::KeyAndValueRef::Binary(_, _) => None,
         }).collect();
         let call = Call::start(&RequestInfo { kind: Kind::RpcClient, method, endpoint: service, route: None, target_app: target, request_size: None }, &incoming);
+        for name in call.remove_headers() {
+            if let Ok(name) = tonic::metadata::MetadataKey::<tonic::metadata::Ascii>::from_bytes(name.as_bytes()) {
+                request.metadata_mut().remove(name);
+            }
+        }
         for (name, value) in call.headers() {
             if let (Ok(name), Ok(value)) = (tonic::metadata::MetadataKey::<tonic::metadata::Ascii>::from_bytes(name.as_bytes()), tonic::metadata::MetadataValue::try_from(value.as_str())) {
                 request.metadata_mut().insert(name, value);

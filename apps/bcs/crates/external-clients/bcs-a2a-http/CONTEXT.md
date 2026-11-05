@@ -22,6 +22,14 @@ pending message before exposing interaction cards or issuing a continuation.
 It does not call a Core contract via an import or facade re-export. Bootstrap
 supplies the application implementation; no implementation selection occurs here.
 
+REST clients retain default headers in `ClientWithDefaults`, outside the
+underlying reqwest transport. They are merged before tracing, so stale trace
+aliases and absent baggage cannot return at send time. Card fetch stays untraced;
+DNS pinning, TLS, credentials and redirect policy are unchanged. The binding
+exposes its five explicit BCS operations; its previous unused SDK `Deref` escape
+hatch is removed so calls cannot silently bypass the controlled header path.
+`bind_rest_client` accepts the wrapper (or a default-free reqwest client).
+
 Initial stream, async continuation, Task query/cancel and subscription share
 bounded REST error parsing so ProtoJSON typed ErrorInfo survives SDK binding
 gaps. A complete initial 400/401/403/404/405/406/415/422 rejection is Failed with

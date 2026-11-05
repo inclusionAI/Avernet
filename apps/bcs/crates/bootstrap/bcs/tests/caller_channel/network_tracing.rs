@@ -35,6 +35,7 @@ impl NetworkTracer for Recorder {
             "span_id": span_id, "parent_span_id": parent.map(|context| context.span_id),
         });
         StartedTrace {
+            remove_headers: vec![],
             context: Arc::new(TraceContext { trace_id: trace_id.clone(), span_id }),
             headers: vec![("x-e2e-trace-id".into(), trace_id), ("x-e2e-span-id".into(), span_id.to_string())],
             record: Box::new(Completion { records: self.records.clone(), metadata }),

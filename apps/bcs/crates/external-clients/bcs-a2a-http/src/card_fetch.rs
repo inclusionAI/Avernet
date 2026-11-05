@@ -42,21 +42,22 @@ impl HttpA2aCardFetcher {
 
 /// Re-resolve and pin policy-approved addresses on each outbound attempt.
 /// Credentials and URLs are never interpolated into externally visible errors.
-pub async fn guarded_client(guard: &OutboundUrlGuard, url: &str) -> ServiceResult<reqwest::Client> {
+pub async fn guarded_client(guard: &OutboundUrlGuard, url: &str) -> ServiceResult<bcs_network_tracing::ClientWithDefaults<reqwest::Client>> {
     guarded_client_with_headers(guard, url, reqwest::header::HeaderMap::new()).await
 }
 
-pub(super) async fn guarded_client_with_headers(guard: &OutboundUrlGuard, url: &str, headers: reqwest::header::HeaderMap) -> ServiceResult<reqwest::Client> {
+pub(super) async fn guarded_client_with_headers(guard: &OutboundUrlGuard, url: &str, headers: reqwest::header::HeaderMap) -> ServiceResult<bcs_network_tracing::ClientWithDefaults<reqwest::Client>> {
     if !bcs_service_api::types::a2a_bot::http_interface_address_allowed(url) {
         return Err(rejected("address rejected"));
     }
     let checked = guard.resolve_request_http_url(url).await.map_err(|_| rejected("address rejected"))?;
-    let mut builder = reqwest::Client::builder().default_headers(headers).no_proxy()
+    let mut builder = reqwest::Client::builder().no_proxy()
         .redirect(reqwest::redirect::Policy::none()).connect_timeout(Duration::from_secs(5));
     if let Some((host, addresses)) = checked.dns_override() {
         builder = builder.resolve_to_addrs(host, addresses);
     }
-    builder.build().map_err(|_| rejected("HTTP client unavailable"))
+    builder.build().map(|client| bcs_network_tracing::ClientWithDefaults::new(client, headers))
+        .map_err(|_| rejected("HTTP client unavailable"))
 }
 
 #[async_trait]
@@ -65,7 +66,7 @@ impl A2aCardPort for HttpA2aCardFetcher {
         // Covers DNS resolution, response headers and the complete bounded body.
         tokio::time::timeout(Duration::from_secs(10), async {
             let client = guarded_client(&self.guard, url).await?;
-            let mut response = client.get(url).header("Accept", "application/json").send().await
+            let mut response = client.request(|http| http.get(url).header("Accept", "application/json")).send().await
                 .map_err(|_| rejected("fetch failed"))?;
             if response.status()!=reqwest::StatusCode::OK { return Err(rejected("HTTP response rejected")); }
             let media_type = response.headers().get(CONTENT_TYPE).and_then(|v|v.to_str().ok())

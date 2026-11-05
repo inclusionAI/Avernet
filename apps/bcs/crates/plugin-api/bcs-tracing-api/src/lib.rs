@@ -29,6 +29,10 @@ pub trait Record: Send {
 
 pub struct StartedTrace {
     pub context: Context,
+    /// Exact propagation fields owned by this provider to remove before injecting
+    /// `headers` on clients. Never include another protocol's fields or routing
+    /// metadata. Servers retain the original incoming carrier.
+    pub remove_headers: Vec<String>,
     pub headers: Carrier,
     pub record: Box<dyn Record>,
 }
@@ -45,8 +49,9 @@ pub struct ParentContext<'a> {
 }
 
 /// Trusted in-process plugin. Install once at bootstrap before serving requests.
-/// No provider means no tracing and no injected headers. Implementations must
-/// preserve business results and keep contexts safe across concurrent tasks.
+/// No provider means no SPI records or propagation changes; independent tracing
+/// continues normally. Implementations must preserve business results and keep
+/// contexts safe across concurrent tasks.
 pub trait NetworkTracer: Send + Sync {
     fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: ParentContext<'_>) -> StartedTrace;
 
@@ -122,6 +127,9 @@ impl Call {
     pub fn context(&self) -> Option<Context> { self.0.as_ref().map(|trace| trace.context.clone()) }
     pub fn headers(&self) -> &[(String, String)] {
         self.0.as_ref().map(|trace| trace.headers.as_slice()).unwrap_or_default()
+    }
+    pub fn remove_headers(&self) -> &[String] {
+        self.0.as_ref().map(|trace| trace.remove_headers.as_slice()).unwrap_or_default()
     }
     pub fn finish(mut self, outcome: Outcome, response_size: Option<u64>) {
         if let Some(trace) = self.0.take() { trace.record.finish(outcome, response_size); }

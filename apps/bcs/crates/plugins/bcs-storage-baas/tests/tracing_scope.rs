@@ -16,7 +16,7 @@ impl NetworkTracer for Provider {
         assert_eq!(info.kind, Kind::HttpClient);
         assert_eq!(info.method, "DELETE");
         assert_eq!(parent.local.unwrap().downcast_ref::<String>().unwrap(), "business-parent");
-        StartedTrace { context: Arc::new(()), headers: vec![("sofatraceid".into(), "business-parent".into())],
+        StartedTrace { remove_headers: vec![], context: Arc::new(()), headers: vec![("sofatraceid".into(), "business-parent".into())],
             record: Box::new(Completion(self.0.clone())) }
     }
 }

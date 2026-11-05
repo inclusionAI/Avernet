@@ -1,7 +1,26 @@
 use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo};
+use crate::{RequestWithDefaults, default_headers::merge_defaults};
 
+/// Use `ClientWithDefaults` for custom defaults, as with the async adapter.
 pub trait BlockingRequestBuilderExt {
     fn send_traced(self) -> reqwest::Result<reqwest::blocking::Response>;
+}
+
+impl RequestWithDefaults<reqwest::blocking::RequestBuilder> {
+    pub fn build(self) -> reqwest::Result<reqwest::blocking::Request> {
+        let mut request = self.builder.build()?;
+        merge_defaults(request.headers_mut(), &self.headers);
+        Ok(request)
+    }
+}
+
+impl BlockingRequestBuilderExt for RequestWithDefaults<reqwest::blocking::RequestBuilder> {
+    fn send_traced(self) -> reqwest::Result<reqwest::blocking::Response> {
+        let (client, request) = self.builder.build_split();
+        let mut request = request?;
+        merge_defaults(request.headers_mut(), &self.headers);
+        reqwest::blocking::RequestBuilder::from_parts(client, request).send_traced()
+    }
 }
 
 impl BlockingRequestBuilderExt for reqwest::blocking::RequestBuilder {
@@ -21,6 +40,11 @@ impl BlockingRequestBuilderExt for reqwest::blocking::RequestBuilder {
             kind: Kind::HttpClient, method: request.method().as_str(), endpoint: endpoint.as_str(),
             route: None, target_app: "", request_size: request.body().and_then(|body| body.as_bytes()).map(|bytes| bytes.len() as u64),
         }, &incoming);
+        for name in call.remove_headers() {
+            if let Ok(name) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) {
+                request.headers_mut().remove(name);
+            }
+        }
         for (name, value) in call.headers() {
             if let (Ok(name), Ok(value)) = (reqwest::header::HeaderName::from_bytes(name.as_bytes()), reqwest::header::HeaderValue::from_str(value)) {
                 request.headers_mut().insert(name, value);

@@ -9,9 +9,6 @@ pub use bcs_tracing_api::in_current_context_blocking;
 #[derive(Clone)]
 pub struct HttpServerContext(pub axum::http::HeaderMap);
 
-#[cfg(feature = "otel")]
-pub mod otel;
-
 /// Composition supplies exact Axum route patterns, including configured probes.
 /// Unknown routes and CORS preflights never create a business trace.
 #[derive(Clone, Default)]
@@ -65,6 +62,8 @@ pub async fn http_server(State(filter): State<HttpServerFilter>, mut request: ax
 
 mod http_client;
 pub use http_client::{ClientExt, RequestBuilderExt};
+mod default_headers;
+pub use default_headers::{ClientWithDefaults, RequestWithDefaults};
 #[cfg(feature = "blocking")]
 mod blocking;
 #[cfg(feature = "blocking")]

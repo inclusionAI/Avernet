@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 use axum::{Router, body::Body, http::{HeaderMap, Request, StatusCode}, middleware, routing::post};
 use bcs_domain::{BotDeliveryTarget, RedactedToken};
-use bcs_network_tracing::{HttpServerFilter, otel::OtelContextBridge};
+use bcs_network_tracing::HttpServerFilter;
 use bcs_protocol::{BcsFrame, BotDeliveryKind, RequestFrame};
 use bcs_service_api::{BotDeliveryCommand, BotDeliveryPort};
 use bcs_tracing_api::{Carrier, Kind, NetworkTracer, Outcome, ParentContext, Record, RequestInfo, StartedTrace, in_current_context, with_context, with_provider};
@@ -55,6 +55,14 @@ impl Record for Completion {
     }
 }
 impl NetworkTracer for W3cTracer {
+    fn capture_ambient(&self) -> Carrier {
+        // SDK integration belongs to the provider. Context activation unifies
+        // native and tracing scopes without comparing unrelated current spans.
+        let mut headers = Headers(vec![]);
+        TraceContextPropagator::new().inject_context(&Context::current(), &mut headers);
+        headers.0
+    }
+
     fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: ParentContext<'_>) -> StartedTrace {
         // The provider knows only SPI inputs and its own SDK, never BCS internals.
         let ambient = extract(parent.ambient);
@@ -75,7 +83,8 @@ impl NetworkTracer for W3cTracer {
         self.starts.lock().unwrap().push(Start { kind: info.kind, context: context.clone(), parent: base });
         let mut headers = Headers(vec![]);
         TraceContextPropagator::new().inject_context(&context, &mut headers);
-        StartedTrace { context: Arc::new(context.clone()), headers: headers.0, record: Box::new(Completion(context)) }
+        StartedTrace { remove_headers: vec!["traceparent".into(), "tracestate".into()],
+            context: Arc::new(context.clone()), headers: headers.0, record: Box::new(Completion(context)) }
     }
 }
 
@@ -93,9 +102,9 @@ impl Fixture {
         let sdk = SdkTracerProvider::builder().with_simple_exporter(exporter.clone())
             .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn))).build();
         let dispatch = tracing::Dispatch::new(tracing_subscriber::registry()
-            .with(tracing_opentelemetry::layer().with_tracer(sdk.tracer("business"))));
+            .with(tracing_opentelemetry::layer().with_tracer(sdk.tracer("business")).with_context_activation(true)));
         let starts = Arc::new(Mutex::new(vec![]));
-        let plugin = Arc::new(OtelContextBridge(W3cTracer { tracer: sdk.tracer("network"), starts: starts.clone() }));
+        let plugin = Arc::new(W3cTracer { tracer: sdk.tracer("network"), starts: starts.clone() });
         Self { sdk, exporter, dispatch, plugin, starts }
     }
 }
@@ -140,7 +149,7 @@ async fn server_gateway_business_and_provider_form_one_parent_chain() {
             let router = Router::new().route("/bots/{id}/chat", post(move |headers: HeaderMap| {
                 let url = url.clone();
                 async move {
-                    // Middleware's bridge must not replace the original ingress.
+                    // Middleware must not replace the original ingress.
                     assert_eq!(headers.get("traceparent").map(|v| v.to_str().unwrap()), incoming);
                     let work = async move {
                         if spawn { tokio::spawn(in_current_context(deliver(url))).await.unwrap(); }
@@ -213,8 +222,9 @@ async fn ambient_business_context_wins_over_opaque_ancestor_and_stale_headers() 
         let expected = business.context();
         with_context(Some(Arc::new(extract(&vec![("traceparent".into(), STALE.into())]))),
             reqwest::Client::builder().no_proxy().build().unwrap().post(&peer.url)
-                .header("traceparent", STALE).send_traced()).instrument(business).await.unwrap();
+                .header("traceparent", STALE).header("tracestate", "old=value").send_traced()).instrument(business).await.unwrap();
         assert_identity(&fixture.starts.lock().unwrap()[0].parent, &expected);
+        assert_eq!(peer.headers.lock().unwrap()[0]["tracestate"], "");
     }).with_subscriber(fixture.dispatch.clone()).await;
 }
 
@@ -298,7 +308,7 @@ async fn non_w3c_provider_preserves_ingress_w3c_despite_unrelated_native_context
     }
     impl NetworkTracer for SofaLike {
         fn start(&self, _: &RequestInfo<'_>, _: &Carrier, _: ParentContext<'_>) -> StartedTrace {
-            StartedTrace { context: Arc::new(()), headers: vec![("sofatraceid".into(), "separate-sofa-id".into())], record: Box::new(NoopRecord) }
+            StartedTrace { remove_headers: vec![], context: Arc::new(()), headers: vec![("sofatraceid".into(), "separate-sofa-id".into())], record: Box::new(NoopRecord) }
         }
     }
     let fixture = Fixture::new();
@@ -359,4 +369,77 @@ async fn current_native_context_overrides_spawn_snapshot_and_restores_after_scop
     assert_identity(&starts[0].parent, &expected);
     assert_identity(&starts[1].parent, &captured);
     assert!(!Context::current().span().span_context().is_valid());
+}
+
+#[tokio::test]
+async fn sdk_provider_follows_mixed_scope_nesting_and_restoration() {
+    use opentelemetry::trace::FutureExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let fixture = Fixture::new();
+    let peer = Peer::new().await;
+    with_provider(Some(fixture.plugin.clone()), async {
+        let gateway = tracing::info_span!("gateway");
+        let gateway_context = gateway.context();
+        let tracer = fixture.sdk.tracer("native");
+        let native = Context::new().with_span(tracer.start_with_context("native", &gateway_context));
+        let inner_context = async {
+            let inner_context = async {
+                deliver(peer.url.clone()).await;
+                let inner = tracing::info_span!("inner.tracing");
+                let expected = inner.context();
+                deliver(peer.url.clone()).instrument(inner).await;
+                deliver(peer.url.clone()).await;
+                expected
+            }.with_context(native.clone()).await;
+            deliver(peer.url.clone()).await;
+            inner_context
+        }.instrument(gateway).await;
+        native.span().end();
+        let starts = fixture.starts.lock().unwrap();
+        assert_eq!(starts.len(), 4);
+        for (start, expected) in starts.iter().zip([&native, &inner_context, &native, &gateway_context]) {
+            assert_identity(&start.parent, expected);
+        }
+    }).with_subscriber(fixture.dispatch.clone()).await;
+    fixture.sdk.force_flush().unwrap();
+    let spans = fixture.exporter.get_finished_spans().unwrap();
+    let native = spans.iter().find(|span| span.name == "native").unwrap();
+    let inner = spans.iter().find(|span| span.name == "inner.tracing").unwrap();
+    assert_eq!(inner.parent_span_id, native.span_context.span_id());
+    assert!(!Context::current().span().span_context().is_valid());
+}
+
+#[tokio::test]
+async fn default_no_provider_preserves_original_gateway_otel_and_outbound_headers() {
+    let fixture = Fixture::new();
+    let peer = Peer::new().await;
+    let url = peer.url.clone();
+    let router = Router::new().route("/bots/{id}/chat", post(move |headers: HeaderMap| {
+        let url = url.clone();
+        async move {
+            assert_eq!(headers["traceparent"], REMOTE);
+            assert!(bcs_tracing_api::current_context().is_none());
+            deliver(url).await;
+            StatusCode::OK
+        }
+    }))
+        .layer(TraceLayer::new_for_http().make_span_with(bcs_http::gateway_trace::BcnMakeSpan))
+        .layer(middleware::from_fn_with_state(HttpServerFilter::default(), bcs_network_tracing::http_server));
+    with_provider(None, router.oneshot(Request::post("/bots/one/chat")
+        .header("traceparent", REMOTE).body(Body::empty()).unwrap()))
+        .with_subscriber(fixture.dispatch.clone()).await.unwrap();
+    fixture.sdk.force_flush().unwrap();
+    assert!(fixture.starts.lock().unwrap().is_empty());
+    let spans = fixture.exporter.get_finished_spans().unwrap();
+    let gateway = spans.iter().find(|span| span.name == "bcn.gateway.dispatch").unwrap();
+    assert_eq!(gateway.span_context.trace_id().to_string(), REMOTE.split('-').nth(1).unwrap());
+    assert_eq!(gateway.parent_span_id.to_string(), REMOTE.split('-').nth(2).unwrap());
+    let headers = peer.headers.lock().unwrap();
+    // Provider transport's pre-existing OTel injection still carries gateway G,
+    // even though the optional network tracing SPI is disabled.
+    let outbound = wire_context(&headers[0]);
+    assert_eq!(outbound.span().span_context().trace_id(), gateway.span_context.trace_id());
+    assert_eq!(outbound.span().span_context().span_id(), gateway.span_context.span_id());
+    assert!(!headers[0].contains_key("sofatraceid"));
+    assert_eq!(headers[0]["authorization"], "Bearer test-fixture");
 }

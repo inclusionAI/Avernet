@@ -7,16 +7,12 @@ license.workspace = true
 [features]
 reqwest13 = ["dep:reqwest13"]
 blocking = ["reqwest/blocking"]
-otel = ["dep:opentelemetry", "dep:tracing", "dep:tracing-opentelemetry"]
 
 [dependencies]
 reqwest13 = { package = "reqwest", version = "0.13", default-features = false, optional = true }
 bcs-tracing-api = { workspace = true }
 axum = { workspace = true }
 reqwest = { workspace = true }
-opentelemetry = { workspace = true, optional = true }
-tracing = { workspace = true, optional = true }
-tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

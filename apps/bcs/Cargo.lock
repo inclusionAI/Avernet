@@ -2044,14 +2044,11 @@ dependencies = [
  "axum",
  "bcs-tracing-api",
  "futures",
- "opentelemetry",
  "reqwest 0.12.28",
  "reqwest 0.13.5",
  "tokio",
  "tower",
  "tower-http",
- "tracing",
- "tracing-opentelemetry",
 ]
 
 [[package]]

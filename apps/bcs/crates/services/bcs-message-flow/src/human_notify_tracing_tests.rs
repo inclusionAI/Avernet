@@ -31,6 +31,7 @@ impl NetworkTracer for Tracer {
         };
         self.0.lock().expect("starts").push((info.kind, context.id.clone(), context.rpc.clone()));
         StartedTrace {
+            remove_headers: vec![],
             headers: vec![("x-notify-trace".into(), context.id.clone()), ("x-notify-rpc".into(), context.rpc.clone())],
             context: Arc::new(context), record: Box::new(Completion),
         }
