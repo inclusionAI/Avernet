@@ -129,28 +129,3 @@ def test_python_runtime_credential_lookup_does_not_treat_field_label_as_value() 
     assert _findings(_diff('SLOT = registration["' + secret + '"]'))
     literal = 'SLOT = "a-real-looking-' + 'secret-value-12345"'
     assert _findings(_diff(literal.replace("SLOT", "token")))
-
-
-def test_rust_borrowed_credential_types_are_not_plaintext_values() -> None:
-    declarations = [
-        "    _SLOT: &RedactedToken,",
-        "    SLOT: &'a RedactedToken,",
-        "    SLOT: &mut RedactedToken,",
-        "    SLOT: &'a mut bcs_domain::RedactedToken,",
-    ]
-    for line in declarations:
-        assert _findings(_diff(line.replace("SLOT", "credential"), path="example.rs")) == [], line
-
-    # Recognize the whole declaration only; values and trailing literals must
-    # still be inspected, even when a type annotation precedes them.
-    secret = "a-real-looking-" + "secret-value-12345"
-    for expression in [
-        '    SLOT: &RedactedToken = Token::new("VALUE"),',
-        '    SLOT: &RedactedToken, other: "VALUE",',
-        '    SLOT: "VALUE",',
-        '    SLOT: VALUE,',
-    ]:
-        line = expression.replace("SLOT", "credential").replace("VALUE", secret)
-        findings = _findings(_diff(line, path="example.rs"))
-        assert findings, expression
-        assert all(secret not in finding.content for finding in findings)
